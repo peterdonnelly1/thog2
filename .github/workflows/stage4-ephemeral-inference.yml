@@ -40,7 +40,7 @@ jobs:
           allowed = (
               'sheet/', 'tests/', 'evidence/stage4_', 'docs/THOG2_Stage_4_',
               'train_thog2.py', 'sample_thog2.py',
-              'run_thog2_stage4_cuda_check.py',
+              'run_thog2_inference.py', 'run_thog2_stage4_cuda_check.py',
               '.github/workflows/stage4-ephemeral-inference.yml',
           )
           unexpected = [path for path in changed if not any(
@@ -55,7 +55,12 @@ jobs:
           print('\n'.join(changed))
           PY
       - name: Compile Stage 4 sources
-        run: python -m compileall -q sheet tests train_thog2.py
+        run: |
+          python -m compileall -q \
+            sheet \
+            tests \
+            train_thog2.py \
+            run_thog2_inference.py
       - name: Run Stage 1 regression
         run: python tests/run_sheet_stage1_tests.py --evidence /tmp/stage1.json
       - name: Run Stage 2 regression
