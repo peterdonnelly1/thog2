@@ -1,10 +1,10 @@
 {
   "accepted_cpu_scope": true,
   "branch": "stage4-checkpointed-ephemeral-execution",
-  "commit": "054947abf726039346b8fe4deefd5e7b655b14a4",
+  "commit": "dfb4f0450eae598fe28b710adf3303b4406d5840",
   "cuda_available": false,
   "gpu_gate": {
-    "reason": "The hosted CPU workflow exposes no CUDA device; run the Stage 4 CUDA memory gate on accepted hardware.",
+    "reason": "The hosted CPU workflow exposes no CUDA device; hardware evidence is recorded separately in evidence/stage4_gpu_memory.json.",
     "required_test": "S4-07",
     "satisfied": false
   },
@@ -19,7 +19,9 @@
     "skipped": [],
     "skipped_count": 0,
     "successful": true,
-    "tests_run": 16
+    "tests_run": 22
   },
-  "torch": "2.12.1+cpu"
+  "torch": "2.12.1+cpu",
+  "workflow_run": 28591262617,
+  "workflow_merge_commit": "67533a8c45782d4f99a968ab7b31715bc9ff885a"
 }
