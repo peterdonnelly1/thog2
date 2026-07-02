@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 from typing import Dict
 
@@ -40,10 +41,53 @@ def maximum_optimizer_state_delta(trainer: SharedTrainer) -> float:
     return float(maximum.item())
 
 
+def communication_profile(
+    trainer: SharedTrainer,
+    *,
+    iterations: int = 8,
+    element_count: int = 65536,
+) -> Dict[str, object]:
+    tensor = torch.ones(
+        element_count,
+        dtype=torch.float32,
+        device=trainer.device,
+    )
+    trainer.distributed.barrier()
+    if trainer.device.type == "cuda":
+        torch.cuda.synchronize(trainer.device)
+    started = time.perf_counter()
+    for _ in range(iterations):
+        tensor.fill_(1.0)
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    if trainer.device.type == "cuda":
+        torch.cuda.synchronize(trainer.device)
+    elapsed = time.perf_counter() - started
+    elapsed_tensor = torch.tensor(
+        elapsed,
+        dtype=torch.float64,
+        device=trainer.device,
+    )
+    maximum = elapsed_tensor.clone()
+    minimum = elapsed_tensor.clone()
+    dist.all_reduce(maximum, op=dist.ReduceOp.MAX)
+    dist.all_reduce(minimum, op=dist.ReduceOp.MIN)
+    return {
+        "backend": trainer.distributed.identity.backend,
+        "world_size": trainer.distributed.world_size,
+        "iterations": iterations,
+        "element_count": element_count,
+        "bytes_per_collective_per_rank": tensor.numel() * tensor.element_size(),
+        "minimum_elapsed_seconds": float(minimum.item()),
+        "maximum_elapsed_seconds": float(maximum.item()),
+        "maximum_seconds_per_collective": float(maximum.item()) / iterations,
+    }
+
+
 def write_evidence(trainer: SharedTrainer, path: Path, evidence: Dict[str, object]) -> None:
     gathered_reports = trainer.distributed.all_gather_object(trainer.distributed.report())
     evidence["rank_reports"] = gathered_reports
     evidence["world_size"] = trainer.distributed.world_size
+    evidence["communication_profile"] = communication_profile(trainer)
     evidence["model_state_max_delta"] = maximum_model_state_delta(trainer)
     evidence["optimizer_state_max_delta"] = maximum_optimizer_state_delta(trainer)
     trainer.distributed.barrier()
