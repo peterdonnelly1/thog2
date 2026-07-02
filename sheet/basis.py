@@ -53,11 +53,6 @@ def chebyshev_first_kind_basis(coordinates: Tensor, order: int) -> Tensor:
         raise ValueError(f"coordinates must be one-dimensional; got shape {tuple(coordinates.shape)}")
     if coordinates.numel() == 0:
         raise ValueError("coordinates must contain at least one sample")
-    if order > coordinates.numel():
-        raise ValueError(
-            f"order must not exceed sample count for a full-column-rank basis; "
-            f"got order={order}, sample_count={coordinates.numel()}"
-        )
     if not coordinates.is_floating_point():
         raise ValueError(f"coordinates must use a floating dtype; got {coordinates.dtype}")
     if not torch.isfinite(coordinates).all():
