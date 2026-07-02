@@ -19,13 +19,13 @@ def runtime_check_config(
 ) -> TrainingConfig:
     return TrainingConfig(
         model_type="thog2_sheet",
-        block_size=64,
-        vocab_size=256,
-        n_layer=12,
-        n_head=4,
-        n_embd=128,
-        depth_order=6,
-        base_row_order=32,
+        block_size=128,
+        vocab_size=512,
+        n_layer=24,
+        n_head=8,
+        n_embd=256,
+        depth_order=8,
+        base_row_order=64,
         checkpoint_segment_size=segment_size,
         batch_size=2,
         max_updates=1,
@@ -46,7 +46,7 @@ def measure_runtime_case(
     dtype: str,
 ) -> Dict[str, object]:
     config = runtime_check_config(segment_size, device, dtype)
-    values = torch.arange(4096, dtype=torch.long) % config.vocab_size
+    values = torch.arange(8192, dtype=torch.long) % config.vocab_size
     validation = torch.roll(values, shifts=17)
     telemetry = MemoryTelemetry(torch.device(device))
     telemetry.reset_peak()
@@ -88,7 +88,7 @@ def compare_runtime_memory(
         and loss_delta <= 1.0e-4
         and checkpointed_peak < reference_peak
         and bool(checkpointed["checkpointing_used"])
-        and int(checkpointed["checkpoint_segments"]) == 6
+        and int(checkpointed["checkpoint_segments"]) == 12
     )
     return {
         "test": "S4-07",
