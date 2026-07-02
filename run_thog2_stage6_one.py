@@ -9,6 +9,7 @@ from typing import Any, Dict
 
 import numpy as np
 
+from sheet.stage6_protocol import verify_protocol_manifest
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
 
@@ -42,6 +43,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     manifest = json.loads(arguments.manifest.read_text(encoding="utf-8"))
+    verify_protocol_manifest(manifest)
     if manifest.get("status") != "locked_before_training":
         raise ValueError("Stage 6 manifest is not locked_before_training")
     run = find_run(manifest, arguments.run_id)
