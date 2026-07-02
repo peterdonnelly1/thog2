@@ -1,0 +1,139 @@
+{
+  "accepted": true,
+  "basis_version": "chebyshev_first_kind_qr_v1",
+  "branch": "feature/sheet-stage-1-core",
+  "commit": "1c622d8e096752b1575fb06c19fcd03cab30187b",
+  "failures": [],
+  "planned_geometries": [
+    {
+      "order": 128,
+      "sample_count": 768
+    },
+    {
+      "order": 256,
+      "sample_count": 1536
+    },
+    {
+      "order": 512,
+      "sample_count": 3072
+    },
+    {
+      "order": 1024,
+      "sample_count": 3072
+    }
+  ],
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "results": [
+    {
+      "accepted": true,
+      "basis_float32_finite": true,
+      "basis_float32_sha256": "a65a4f518eef4ef05f9095be04adac9ea383fb1aef61fcc8286564b4a01c067e",
+      "basis_float64_finite": true,
+      "basis_float64_sha256": "7c3aed862e64fac3435ab24cb551f58fcc19274c8731809dabdd98b1d2c13892",
+      "elapsed_seconds": 0.04419416999999726,
+      "estimated_peak_tensor_bytes_float32": 2168832,
+      "estimated_peak_tensor_bytes_float64": 2627584,
+      "full_rank_qr_proxy": true,
+      "maximum_abs_r_diagonal": 27.712812921102035,
+      "minimum_abs_r_diagonal": 11.341378365048078,
+      "order": 128,
+      "orthonormality_max_error_float32": 1.5497207641601562e-06,
+      "orthonormality_max_error_float64": 5.773159728050814e-15,
+      "raw_finite": true,
+      "relative_minimum_abs_r_diagonal": 0.40924674075261913,
+      "rss_after_kib": 279520,
+      "rss_before_kib": 224148,
+      "rss_delta_kib": 55372,
+      "sample_count": 768,
+      "threads": 4
+    },
+    {
+      "accepted": true,
+      "basis_float32_finite": true,
+      "basis_float32_sha256": "311b2a724007f0f952c056798deb4785dd91d4b25e33d2d52b8581fb9776a701",
+      "basis_float64_finite": true,
+      "basis_float64_sha256": "3e0fccaaad8e22494d675e195eb9996eb57f332c53eae32429a9b3eb93f047fc",
+      "elapsed_seconds": 0.0721133690000002,
+      "estimated_peak_tensor_bytes_float32": 8663040,
+      "estimated_peak_tensor_bytes_float64": 10498048,
+      "full_rank_qr_proxy": true,
+      "maximum_abs_r_diagonal": 39.19183588453085,
+      "minimum_abs_r_diagonal": 8.833329183341691,
+      "order": 256,
+      "orthonormality_max_error_float32": 2.9802322387695312e-06,
+      "orthonormality_max_error_float64": 5.773159728050814e-15,
+      "raw_finite": true,
+      "relative_minimum_abs_r_diagonal": 0.22538697113773726,
+      "rss_after_kib": 289536,
+      "rss_before_kib": 224020,
+      "rss_delta_kib": 65516,
+      "sample_count": 1536,
+      "threads": 4
+    },
+    {
+      "accepted": true,
+      "basis_float32_finite": true,
+      "basis_float32_sha256": "36df8fcc18456d8ac768a0965a75cdef2c31d5f1ec6e964673d9e34db31fae76",
+      "basis_float64_finite": true,
+      "basis_float64_sha256": "b88da84def3f1e65ea10967333472899d781f63edfb5459aaa6cdcfaad980f23",
+      "elapsed_seconds": 0.11239705899999564,
+      "estimated_peak_tensor_bytes_float32": 34627584,
+      "estimated_peak_tensor_bytes_float64": 41967616,
+      "full_rank_qr_proxy": true,
+      "maximum_abs_r_diagonal": 55.42562584220407,
+      "minimum_abs_r_diagonal": 4.647426930186154,
+      "order": 512,
+      "orthonormality_max_error_float32": 2.9802322387695312e-06,
+      "orthonormality_max_error_float64": 5.551115123125783e-15,
+      "raw_finite": true,
+      "relative_minimum_abs_r_diagonal": 0.08384978716194039,
+      "rss_after_kib": 342464,
+      "rss_before_kib": 224004,
+      "rss_delta_kib": 118460,
+      "sample_count": 3072,
+      "threads": 4
+    },
+    {
+      "accepted": true,
+      "basis_float32_finite": true,
+      "basis_float32_sha256": "33a5a9a85422c39e0efc447a7b3c53b7dc5638013ee9f3b40832a1c43440fb0c",
+      "basis_float64_finite": true,
+      "basis_float64_sha256": "1e87a90cf8afec87892f3080edc755f4c318da366c28a016e0bdb55f68ed0d8a",
+      "elapsed_seconds": 0.2365172260000037,
+      "estimated_peak_tensor_bytes_float32": 75522048,
+      "estimated_peak_tensor_bytes_float64": 92299264,
+      "full_rank_qr_proxy": true,
+      "maximum_abs_r_diagonal": 55.42562584220407,
+      "minimum_abs_r_diagonal": 0.36553552141977164,
+      "order": 1024,
+      "orthonormality_max_error_float32": 2.9802322387695312e-06,
+      "orthonormality_max_error_float64": 5.551115123125783e-15,
+      "raw_finite": true,
+      "relative_minimum_abs_r_diagonal": 0.0065950634903148555,
+      "rss_after_kib": 401996,
+      "rss_before_kib": 224048,
+      "rss_delta_kib": 177948,
+      "sample_count": 3072,
+      "threads": 4
+    }
+  ],
+  "status": "completed",
+  "test_execution": {
+    "command": "python tests/run_sheet_stage1_tests.py --evidence evidence/stage1_math_calibration.json",
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 15
+  },
+  "thresholds": {
+    "float32_orthonormality_tolerance": 5e-05,
+    "float64_orthonormality_tolerance": 2e-11,
+    "max_estimated_peak_bytes": 2147483648,
+    "max_seconds_per_geometry": 300.0
+  }
+}
