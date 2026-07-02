@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Dict, List
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 CALIBRATION_GEOMETRIES = (
     (768, 128),
     (1536, 256),
@@ -107,7 +111,7 @@ def _run_worker(sample_count: int, order: int) -> Dict[str, object]:
             str(order),
         ],
         check=False,
-        cwd=Path(__file__).resolve().parents[1],
+        cwd=REPOSITORY_ROOT,
         env=environment,
         text=True,
         stdout=subprocess.PIPE,
