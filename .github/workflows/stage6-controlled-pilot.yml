@@ -1,0 +1,12 @@
+# vvv THOG
+name: Stage 6 controlled pilot and as-built
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stage6-controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+# ^^^ THOG
