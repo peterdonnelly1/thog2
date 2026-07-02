@@ -1,0 +1,51 @@
+# vvv THOG
+from .basis import (
+    BASIS_VERSION,
+    SINGLE_POINT_COORDINATE,
+    BasisCache,
+    BasisCacheKey,
+    BasisOwner,
+    basis_sha256,
+    build_stabilized_basis,
+    chebyshev_first_kind_basis,
+    deterministic_reduced_qr,
+    estimated_peak_tensor_bytes,
+    normalized_coordinates,
+    orthonormality_max_error,
+)
+from .geometry import (
+    MATRIX_FAMILY_NAMES,
+    FamilyGeometry,
+    SheetGeometryConfig,
+    derive_row_order,
+    family_geometry_map,
+    parameter_count_rows,
+    total_dense_equivalent_count,
+    total_sheet_parameter_count,
+    transformer_family_geometries,
+)
+
+__all__ = [
+    "BASIS_VERSION",
+    "SINGLE_POINT_COORDINATE",
+    "BasisCache",
+    "BasisCacheKey",
+    "BasisOwner",
+    "FamilyGeometry",
+    "MATRIX_FAMILY_NAMES",
+    "SheetGeometryConfig",
+    "basis_sha256",
+    "build_stabilized_basis",
+    "chebyshev_first_kind_basis",
+    "derive_row_order",
+    "deterministic_reduced_qr",
+    "estimated_peak_tensor_bytes",
+    "family_geometry_map",
+    "normalized_coordinates",
+    "orthonormality_max_error",
+    "parameter_count_rows",
+    "total_dense_equivalent_count",
+    "total_sheet_parameter_count",
+    "transformer_family_geometries",
+]
+# ^^^ THOG
