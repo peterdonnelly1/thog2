@@ -6,6 +6,8 @@ _thog2_setup_main() {
     local venv_dir="${THOG2_VENV_DIR:-$HOME/.venvs/thog2}"
     local python_version="${THOG2_PYTHON_VERSION:-3.11}"
     local torch_index_url="${THOG2_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+    local uv_http_timeout="${THOG2_UV_HTTP_TIMEOUT:-600}"
+    local uv_http_retries="${THOG2_UV_HTTP_RETRIES:-5}"
     local conda_deactivate_count=0
 
     while (($#)); do
@@ -25,6 +27,10 @@ Environment variables:
                          Default: 3.11
   THOG2_TORCH_INDEX_URL  PyTorch wheel index
                          Default: https://download.pytorch.org/whl/cu126
+  THOG2_UV_HTTP_TIMEOUT  Per-request uv HTTP timeout in seconds
+                         Default: 600
+  THOG2_UV_HTTP_RETRIES  Number of uv HTTP retries
+                         Default: 5
 EOF
                 return 0
                 ;;
@@ -35,6 +41,15 @@ EOF
         esac
         shift
     done
+
+    if ! [[ "$uv_http_timeout" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'ERROR: THOG2_UV_HTTP_TIMEOUT must be a positive integer.\n' >&2
+        return 2
+    fi
+    if ! [[ "$uv_http_retries" =~ ^[0-9]+$ ]]; then
+        printf 'ERROR: THOG2_UV_HTTP_RETRIES must be a non-negative integer.\n' >&2
+        return 2
+    fi
 
     if [[ -n "${VIRTUAL_ENV:-}" ]] && declare -F deactivate >/dev/null 2>&1; then
         printf 'Deactivating existing Python virtual environment: %s\n' "$VIRTUAL_ENV"
@@ -101,18 +116,28 @@ EOF
         printf 'Using existing THOG2 environment: %s\n' "$venv_dir"
     fi
 
+    printf 'uv download timeout: %s seconds; retries: %s\n' \
+        "$uv_http_timeout" \
+        "$uv_http_retries"
+
     printf 'Installing NumPy from PyPI...\n'
-    uv pip install \
-        --python "$venv_dir/bin/python" \
-        --upgrade \
-        numpy || return 1
+    env \
+        UV_HTTP_TIMEOUT="$uv_http_timeout" \
+        UV_HTTP_RETRIES="$uv_http_retries" \
+        uv pip install \
+            --python "$venv_dir/bin/python" \
+            --upgrade \
+            numpy || return 1
 
     printf 'Installing PyTorch from: %s\n' "$torch_index_url"
-    uv pip install \
-        --python "$venv_dir/bin/python" \
-        --upgrade \
-        --index-url "$torch_index_url" \
-        torch || return 1
+    env \
+        UV_HTTP_TIMEOUT="$uv_http_timeout" \
+        UV_HTTP_RETRIES="$uv_http_retries" \
+        uv pip install \
+            --python "$venv_dir/bin/python" \
+            --upgrade \
+            --index-url "$torch_index_url" \
+            torch || return 1
 
     unset VIRTUAL_ENV_DISABLE_PROMPT
     # shellcheck disable=SC1090
