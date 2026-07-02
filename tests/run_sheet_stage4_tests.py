@@ -28,10 +28,17 @@ def main() -> None:
     parser.add_argument("--evidence", type=Path, required=True)
     arguments = parser.parse_args()
     torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
-    suite = unittest.defaultTestLoader.discover(
-        str(REPOSITORY_ROOT / "tests"),
-        pattern="test_sheet_stage4_*.py",
-        top_level_dir=str(REPOSITORY_ROOT),
+    loader = unittest.defaultTestLoader
+    suite = unittest.TestSuite()
+    suite.addTests(
+        loader.discover(
+            str(REPOSITORY_ROOT / "tests"),
+            pattern="test_sheet_stage4_[!c]*.py",
+            top_level_dir=str(REPOSITORY_ROOT),
+        )
+    )
+    suite.addTests(
+        loader.loadTestsFromName("tests.test_sheet_stage4_checkpointing")
     )
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     evidence = {
@@ -63,7 +70,7 @@ def main() -> None:
             "satisfied": False,
             "reason": (
                 "The hosted CPU workflow exposes no CUDA device; run the "
-                "Stage 4 CUDA memory gate on accepted hardware."
+                "Stage 4 CUDA acceptance suite on accepted hardware."
             ),
         },
         "accepted_cpu_scope": result.wasSuccessful(),
