@@ -1,0 +1,389 @@
+y the
+rule in 9.4.
+
+**9.10 **The first scientific sweep should include Q_d values 64, 128,
+and 256 at P equal to 16, giving corresponding 4d row orders 256, 512,
+and 1024.
+
+**9.11 **The default values in this section shall be treated as initial
+experimental settings rather than claims of optimality.
+
+# 10. Parameter-count requirements
+
+**10.1 **For a generated matrix family with R_f rows, depth order P, and
+row order Q_f, the persistent sheet coefficient count shall be R_f times
+P times Q_f.
+
+**10.2 **For a generated vector family, the persistent sheet coefficient
+count shall be P times Q_f.
+
+**10.3 **Fixed basis matrices shall not be included in trainable
+parameter counts.
+
+**10.4 **Generated logical-layer weights shall not be included in
+persistent parameter counts.
+
+**10.5 **The implementation shall report persistent sheet parameters
+separately from conventional non-sheet parameters.
+
+**10.6 **The implementation shall report the dense-equivalent logical
+parameter count for the same L, d, and bias configuration.
+
+**10.7 **The implementation shall report parameter counts by tensor
+family.
+
+**10.8 **The implementation shall report compression ratios relative to
+both the matched dense block matrices and, where calculated, a
+depth-only THOG representation with the same P.
+
+**10.9 **For L equal to 144, d equal to 768, P equal to 16, Q_d equal to
+128, and Q_4d equal to 512, the four large matrix families shall contain
+18,874,368 persistent sheet coefficients in total.
+
+**10.10 **The corresponding dense-equivalent large matrix stack shall
+contain 1,019,215,872 scalar weights.
+
+**10.11 **The corresponding depth-only THOG representation with 16 terms
+per scalar weight would contain 113,246,208 large-matrix coefficients.
+
+**10.12 **The values in 10.9 through 10.11 exclude embeddings,
+positional embeddings, final layer normalisation, biases, block
+layer-normalisation vectors, and the tied language-model head.
+
+|                             |          |               |                        |
+|-----------------------------|----------|---------------|------------------------|
+| **Large matrix family**     | **Rows** | **Row width** | **Sheet coefficients** |
+| Attention input projection  | 2304     | 768           | 4,718,592              |
+| Attention output projection | 768      | 768           | 1,572,864              |
+| MLP expansion               | 3072     | 768           | 6,291,456              |
+| MLP contraction             | 768      | 3072          | 6,291,456              |
+| Total                       | \-       | \-            | 18,874,368             |
+
+Non-normative note: The table is an exact reference calculation for the
+principal L144/D768/P16/Q128 geometry. It is not the whole-model
+parameter count.
+
+# 11. Weight materialisation and execution
+
+**11.1 **The implementation shall provide a correctness-first reference
+execution path.
+
+**11.2 **The implementation shall generate the tensor families required
+by one logical layer from compact sheet coefficients and fixed basis
+rows.
+
+**11.3 **The implementation shall not persist the full sampled
+L-by-R_f-by-C_f logical weight collection.
+
+**11.4 **The implementation shall release generated logical-layer
+weights when they are no longer required by forward or backward
+computation.
+
+**11.5 **The implementation shall support activation-checkpointed
+ephemeral execution in which required generated weights are recreated
+during backward computation.
+
+**11.6 **Checkpointed execution shall preserve random-number-generator
+state where required for dropout equivalence.
+
+**11.7 **Evaluation and inference shall not perform unnecessary
+activation-checkpoint recomputation.
+
+**11.8 **The materialisation path shall preserve gradient flow from
+cross-entropy loss through generated weights to every used sheet
+coefficient tensor.
+
+**11.9 **Generated tensors shall use the correct device and computation
+dtype for the surrounding model operation.
+
+**11.10 **Fixed bases may be cached as non-persistent buffers when doing
+so reduces repeated work without changing model state semantics.
+
+**11.11 **The implementation may batch or fuse row-sheet evaluation
+provided that the mathematical result and gradient are equivalent to the
+reference equation.
+
+**11.12 **Custom CUDA kernels shall not be required for the first
+functionally complete implementation.
+
+# 12. Initialization
+
+**12.1 **Sheet initialization shall produce generated matrix weights
+with family-specific mean and scale compatible with nanoGPT
+initialization objectives.
+
+**12.2 **Attention output and MLP contraction projections shall retain
+the depth-dependent residual scaling intent of nanoGPT initialization.
+
+**12.3 **Generated layer-normalisation scale vectors shall initialize to
+exact ones where they are represented by sheets.
+
+**12.4 **Generated bias vectors shall initialize to exact zeros where
+bias is enabled and represented by sheets.
+
+**12.5 **Initialization shall not require temporary persistence of a
+complete dense logical block stack.
+
+**12.6 **Initialization shall be deterministic under a fixed
+model-construction seed.
+
+**12.7 **Initialization shall avoid coefficient scaling that causes
+generated weight variance to grow with P or Q_f.
+
+**12.8 **The implementation plan shall derive and test the coefficient
+variance needed to meet 12.1 and 12.7.
+
+**12.9 **A newly initialized compressed sheet model shall not be
+required to match the exact weights or outputs of a separately
+initialized dense nanoGPT model.
+
+# 13. Training and optimisation
+
+**13.1 **Chebyshev Sheet shall train end to end from scratch using
+next-token cross-entropy.
+
+**13.2 **The first implementation shall not add auxiliary weight
+reconstruction, logit matching, ranking, KL-divergence, smoothness,
+latent-MSE, or distillation losses.
+
+**13.3 **The polynomial basis constraint itself shall provide the
+initial smoothness and capacity restriction.
+
+**13.4 **The optimizer shall update the compact sheet coefficients
+directly.
+
+**13.5 **The default optimizer shall remain compatible with nanoGPT
+AdamW training.
+
+**13.6 **Weight decay treatment shall preserve the conventional
+distinction between matrix-like weights and layer-normalisation or bias
+parameters, even when all are stored as sheet coefficients.
+
+**13.7 **Gradient clipping, learning-rate warm-up, and learning-rate
+decay shall remain configurable through the training path.
+
+**13.8 **The architecture shall support single-process GPU training.
+
+**13.9 **The architecture shall support DistributedDataParallel
+training.
+
+**13.10 **The architecture shall support the mixed-precision modes
+supported by the retained nanoGPT training path.
+
+**13.11 **Completed optimizer updates shall be counted exactly and
+consistently across dense and sheet runs.
+
+**13.12 **The data-sampling random-number stream used for controlled
+comparisons shall be independent of model-construction random-number
+consumption.
+
+# 14. Checkpoint, resume, and inference
+
+**14.1 **A Chebyshev Sheet checkpoint shall identify its model type as
+thog2_sheet.
+
+**14.2 **A checkpoint shall store compact sheet coefficients and
+conventional non-sheet model parameters.
+
+**14.3 **A checkpoint shall not store a persistent full dense logical
+block stack.
+
+**14.4 **A checkpoint shall store all model arguments needed to
+reconstruct L, d, P, Q_d, width-scaling rules, bias state, and
+execution-compatible configuration.
+
+**14.5 **Fixed basis matrices should be regenerated from checkpoint
+configuration rather than stored as persistent state.
+
+**14.6 **Resume shall restore model state, optimizer state, update
+count, scheduler state, and random state required by the retained
+training workflow.
+
+**14.7 **Resume shall fail clearly when requested sheet geometry is
+incompatible with the checkpoint geometry.
+
+**14.8 **Execution-only activation-checkpoint settings may be changed on
+resume where doing so does not alter model state.
+
+**14.9 **A compact Chebyshev Sheet checkpoint shall be loadable directly
+for text generation without conversion to a dense checkpoint.
+
+**14.10 **Inference shall reconstruct the model from checkpoint metadata
+and load compact coefficient state.
+
+**14.11 **The dense nanoGPT path shall continue to load compatible dense
+nanoGPT checkpoints independently of sheet checkpoints.
+
+# 15. Configuration, naming, and user controls
+
+**15.1 **The codebase shall expose at least two architecture selections:
+dense and thog2_sheet.
+
+**15.2 **The dense architecture shall remain available without
+allocating sheet parameters.
+
+**15.3 **The sheet architecture shall expose a configurable depth basis
+term count P.
+
+**15.4 **The sheet architecture shall expose a configurable base row
+basis term count Q_d for rows of width d.
+
+**15.5 **The sheet architecture shall derive other row basis counts by
+the documented proportional width rule unless an explicit validated
+override is provided.
+
+**15.6 **Run names shall identify the architecture, L, d, P, and Q_d
+unambiguously.
+
+**15.7 **Checkpoint metadata and experiment telemetry shall record the
+derived Q_f value for every generated tensor-family width.
+
+**15.8 **Startup output shall report persistent parameters,
+dense-equivalent parameters, sheet coefficient parameters, and
+per-family sheet geometry.
+
+**15.9 **Invalid geometry shall be rejected before model training
+begins.
+
+**15.10 **The command-line and wrapper design shall be specified in the
+later implementation plan rather than assumed from the existing thog
+wrapper.
+
+# 16. Telemetry and diagnostics
+
+**16.1 **Training telemetry shall include training loss and validation
+loss using the retained next-token cross-entropy definition.
+
+**16.2 **Telemetry shall include completed optimizer updates, consumed
+training tokens, elapsed training time, and throughput.
+
+**16.3 **Telemetry shall include peak allocated and peak reserved GPU
+memory at documented phases.
+
+**16.4 **Telemetry shall include coefficient RMS and gradient norm by
+generated tensor family.
+
+**16.5 **Telemetry shall include sampled generated-weight RMS, standard
+deviation, and maximum absolute value by tensor family.
+
+**16.6 **Telemetry shall include depth-basis energy by order or a
+documented aggregate that reveals whether high depthwise terms are used.
+
+**16.7 **Telemetry shall include row-basis energy by order or a
+documented aggregate that reveals whether high rowwise terms are used.
+
+**16.8 **Telemetry shall include a high-order energy fraction for each
+axis using a documented cutoff.
+
+**16.9 **Telemetry should include sampled vertical and horizontal
+finite-difference roughness measures on generated sheets.
+
+**16.10 **Telemetry should include numerical-conditioning diagnostics
+for each distinct basis matrix used by a run.
+
+**16.11 **Expensive diagnostics shall run at a configurable logging
+cadence rather than on every micro-step.
+
+**16.12 **Telemetry computations shall be detached and shall not alter
+model gradients or optimizer state.
+
+# 17. Functional acceptance requirements
+
+**17.1 **The retained dense nanoGPT path shall pass its pre-existing
+functional tests after sheet support is added.
+
+**17.2 **For every supported matrix family, generated tensor shapes
+shall match the corresponding dense nanoGPT tensor shapes exactly.
+
+**17.3 **A reference materialisation test shall match direct evaluation
+of B_depth, A_f, and B_row_f within the documented numerical tolerance.
+
+**17.4 **A constant coefficient configuration shall generate the
+expected constant sheet exactly within floating-point tolerance.
+
+**17.5 **At P equal to L and Q_f equal to C_f for a small test geometry,
+the parameterisation shall be capable of reproducing an arbitrary
+sampled L-by-C_f row sheet within documented numerical tolerance.
+
+**17.6 **Every trainable sheet coefficient tensor used by a
+representative forward pass shall receive a finite gradient during
+backward computation.
+
+**17.7 **Reference and activation-checkpointed sheet execution shall
+agree within a documented tolerance under deterministic conditions.
+
+**17.8 **Checkpoint save and reload shall reproduce model state and
+deterministic outputs within a documented tolerance.
+
+**17.9 **Resume shall continue training without loss of optimizer-group
+or scheduler semantics.
+
+**17.10 **Single-process and DDP smoke training shall complete without
+deadlock, missing gradients, or rank-dependent model-state divergence
+attributable to sheet generation.
+
+**17.11 **Compact-checkpoint inference shall generate text without first
+materialising or saving a dense model checkpoint.
+
+**17.12 **The implementation shall demonstrate that the complete dense
+logical block stack is absent from persistent model state and checkpoint
+state.
+
+**17.13 **The complete regression suite defined by the later test plan
+shall pass before implementation acceptance.
+
+# 18. Scientific evaluation requirements
+
+**18.1 **Functional acceptance shall not be interpreted as evidence that
+the horizontal smoothness hypothesis is correct.
+
+**18.2 **The first controlled scientific comparison shall include a
+matched dense nanoGPT model and at least one thog2_sheet model with the
+same logical L, d, attention-head count, context length, dataset, and
+training-token budget.
+
+**18.3 **The principal sheet configuration shall use P equal to 16 and
+Q_d equal to 128 for d equal to 768.
+
+**18.4 **The first row-capacity sweep should include Q_d equal to 64,
+128, and 256, with proportionally scaled values for 4d-wide rows.
+
+**18.5 **Compared runs shall consume an identical or provably equivalent
+training-batch trace.
+
+**18.6 **Compared runs shall use a fixed shared validation sample and a
+materially adequate validation size.
+
+**18.7 **The primary quality comparison shall use validation
+cross-entropy at equal completed optimizer updates and equal consumed
+training tokens.
+
+**18.8 **The comparison shall also report validation loss against
+wall-clock time, throughput, peak memory, and persistent parameters.
+
+**18.9 **Existing THOGv1 results may be used as an external reference
+but shall not create a runtime or repository dependency for thog2.
+
+**18.10 **A promising result shall require stable optimization and
+reproducible quality consistent with the claimed compression advantage.
+
+**18.11 **Failure of a low-Q_d configuration shall not by itself falsify
+the sheet concept unless higher-capacity configurations show that useful
+performance requires Q_d approaching the full row width.
+
+# 19. Explicit non-goals for the first implementation
+
+**19.1 **The first implementation shall not integrate into or modify the
+existing thog repository.
+
+**19.2 **The first implementation shall not incorporate Vermeer or
+another layer-specific residual correction.
+
+**19.3 **The first implementation shall not reconstruct or imitate a
+separately trained dense model.
+
+**19.4 **The first implementation shall not use a teacher model or
+knowledge distillation.
+
+**19.5 **The first implementation shall not use learned within-row
+addresses, learned row permutations, or coordinate warping.
