@@ -10,8 +10,12 @@ from typing import Any, Dict
 import numpy as np
 
 from sheet.stage6_protocol import verify_protocol_manifest
+from sheet.stage6_source import verify_manifest_source
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent
 
 
 def load_tokens(path: Path) -> np.memmap:
@@ -44,6 +48,7 @@ def main() -> None:
 
     manifest = json.loads(arguments.manifest.read_text(encoding="utf-8"))
     verify_protocol_manifest(manifest)
+    verify_manifest_source(manifest, REPOSITORY_ROOT)
     if manifest.get("status") != "locked_before_training":
         raise ValueError("Stage 6 manifest is not locked_before_training")
     run = find_run(manifest, arguments.run_id)
