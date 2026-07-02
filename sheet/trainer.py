@@ -7,7 +7,6 @@ import torch
 from torch import Tensor
 
 from .batch_source import DeterministicBatchSource
-from .model_factory import build_model, parameter_report
 from .trainer_checkpoint_resume import TrainerCheckpointResumeMixin
 from .trainer_checkpoint_save import TrainerCheckpointSaveMixin
 from .trainer_run import TrainerRunMixin
@@ -15,6 +14,10 @@ from .trainer_schedule import TrainerScheduleMixin
 from .trainer_state import TrainerEvent, TrainerState
 from .trainer_step import TrainerStepMixin
 from .training_config import TrainingConfig
+from .training_model_factory import (
+    build_training_model,
+    training_parameter_report,
+)
 
 
 class SharedTrainer(
@@ -38,7 +41,7 @@ class SharedTrainer(
             raise RuntimeError(
                 "CUDA training requested but no CUDA device is available"
             )
-        self.model = build_model(config)
+        self.model = build_training_model(config)
         self.batch_source = DeterministicBatchSource(
             train_tokens,
             validation_tokens,
@@ -61,7 +64,7 @@ class SharedTrainer(
         )
         self.state = TrainerState()
         self.events: List[TrainerEvent] = []
-        self.parameter_report = parameter_report(
+        self.parameter_report = training_parameter_report(
             self.model,
             config.model_type,
         )
