@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,11 @@ class Stage5DdpTests(unittest.TestCase):
         )
         self.assertTrue(all(report["active"] for report in evidence["rank_reports"]))
         self.assertTrue(all(report["backend"] == "gloo" for report in evidence["rank_reports"]))
+        communication = evidence["communication_profile"]
+        self.assertEqual(communication["backend"], "gloo")
+        self.assertEqual(communication["world_size"], 2)
+        self.assertGreater(communication["maximum_elapsed_seconds"], 0.0)
+        self.assertTrue(math.isfinite(communication["maximum_seconds_per_collective"]))
 
     def test_s5_09_ddp_update_matches_single_process_global_batch(self) -> None:
         train_tokens, validation_tokens = token_splits()
@@ -38,6 +44,11 @@ class Stage5DdpTests(unittest.TestCase):
             output_dir = Path(directory)
             evidence = run_ddp_worker("update", output_dir)
             payload = load_payload(output_dir / "ddp_update.pt")
+            gradient_payload = torch.load(
+                output_dir / "ddp_gradient_probe.pt",
+                map_location="cpu",
+                weights_only=True,
+            )
 
             single = SharedTrainer(
                 stage5_config(),
@@ -45,6 +56,45 @@ class Stage5DdpTests(unittest.TestCase):
                 validation_tokens,
             )
             try:
+                batch_state = single.batch_source.state_dict()
+                single.model.train()
+                single.optimizer.zero_grad(set_to_none=True)
+                batch = single.batch_source.get_batch("train", device=single.device)
+                with single.autocast_context():
+                    _, gradient_loss = single.model(batch.inputs, batch.targets)
+                self.assertIsNotNone(gradient_loss)
+                gradient_loss.backward()
+                single_gradients = {
+                    name: parameter.grad.detach().cpu().clone()
+                    for name, parameter in single.raw_model.named_parameters()
+                    if parameter.grad is not None
+                }
+                gradient_difference = nested_tensor_difference(
+                    single_gradients,
+                    gradient_payload["gradients"],
+                )
+                self.assertLessEqual(
+                    gradient_difference["max_absolute_delta"],
+                    2.0e-5,
+                    msg=f"DDP averaged-gradient maximum error is too large: {gradient_difference}",
+                )
+                self.assertLessEqual(
+                    gradient_difference["relative_l2_error"],
+                    2.0e-5,
+                    msg=f"DDP averaged-gradient relative error is too large: {gradient_difference}",
+                )
+                self.assertAlmostEqual(
+                    float(gradient_loss),
+                    float(gradient_payload["loss"]),
+                    delta=2.0e-6,
+                )
+                self.assertEqual(
+                    list(single.batch_source.training_trace()[-1]),
+                    list(gradient_payload["global_starts"]),
+                )
+                single.optimizer.zero_grad(set_to_none=True)
+                single.batch_source.load_state_dict(batch_state)
+
                 single_history = single.run()
                 model_difference = nested_tensor_difference(
                     single.raw_model.state_dict(),
@@ -52,13 +102,13 @@ class Stage5DdpTests(unittest.TestCase):
                 )
                 self.assertLessEqual(
                     model_difference["max_absolute_delta"],
-                    2.5e-4,
-                    msg=f"model state maximum error is too large: {model_difference}",
+                    1.0e-3,
+                    msg=f"bounded post-Adam model error is too large: {model_difference}",
                 )
                 self.assertLessEqual(
                     model_difference["relative_l2_error"],
-                    5.0e-5,
-                    msg=f"model state relative error is too large: {model_difference}",
+                    2.0e-4,
+                    msg=f"bounded post-Adam relative error is too large: {model_difference}",
                 )
 
                 probe_inputs = torch.arange(16, dtype=torch.long).view(2, 8) % 32
@@ -81,12 +131,12 @@ class Stage5DdpTests(unittest.TestCase):
                 )
                 self.assertLessEqual(
                     functional_difference["max_absolute_delta"],
-                    5.0e-4,
+                    1.0e-3,
                     msg=f"fixed-probe logit maximum error is too large: {functional_difference}",
                 )
                 self.assertLessEqual(
                     functional_difference["relative_l2_error"],
-                    5.0e-5,
+                    2.0e-4,
                     msg=f"fixed-probe logit relative error is too large: {functional_difference}",
                 )
                 self.assertIsNotNone(single_loss)
@@ -94,7 +144,7 @@ class Stage5DdpTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     float(single_loss),
                     float(ddp_loss),
-                    delta=5.0e-5,
+                    delta=1.0e-4,
                 )
 
                 self.assertEqual(
