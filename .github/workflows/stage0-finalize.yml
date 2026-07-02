@@ -50,10 +50,20 @@ jobs:
           done
           ls -lh docs/THOG2_Chebyshev_Sheet_*_v0.1.*
 
-      - name: Run Stage 0 verification
+      - name: Verify runtime baseline is unchanged
+        run: python -c "import runpy; runpy.run_path('.stage0_build/finalize_stage0.py')['validate_runtime_unchanged']()"
+
+      - name: Validate ODT documents
+        run: python -c "import runpy; runpy.run_path('.stage0_build/finalize_stage0.py')['validate_documents']()"
+
+      - name: Run stock nanoGPT CPU smoke
+        run: python -c "import runpy; runpy.run_path('.stage0_build/finalize_stage0.py')['run_cpu_smoke']()"
+
+      - name: Verify ignore rules and write test result summary
         run: |
           set -euo pipefail
-          python .stage0_build/finalize_stage0.py
+          python -c "import runpy; runpy.run_path('.stage0_build/finalize_stage0.py')['run_ignore_probe']()"
+          python -c "import runpy; runpy.run_path('.stage0_build/finalize_stage0.py')['write_test_results']()"
 
       - name: Remove temporary transport and enforce Stage 0 scope
         run: |
