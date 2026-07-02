@@ -39,7 +39,8 @@ jobs:
           ).splitlines()
           allowed = (
               'sheet/', 'tests/', 'evidence/stage3_', 'docs/THOG2_Stage_3_',
-              'train_thog2.py', '.github/workflows/stage2-reference.yml',
+              'train_thog2.py', 'run_thog2_stage3_cuda_check.py',
+              '.github/workflows/stage2-reference.yml',
               '.github/workflows/stage3-lifecycle.yml',
           )
           unexpected = [path for path in changed if not any(
@@ -54,7 +55,12 @@ jobs:
           print('\n'.join(changed))
           PY
       - name: Compile all Python sources
-        run: python -m compileall -q sheet tests train_thog2.py
+        run: |
+          python -m compileall -q \
+            sheet \
+            tests \
+            train_thog2.py \
+            run_thog2_stage3_cuda_check.py
       - name: Run Stage 1 regression
         run: python tests/run_sheet_stage1_tests.py --evidence /tmp/stage1.json
       - name: Run Stage 2 regression
@@ -64,7 +70,7 @@ jobs:
           mkdir -p evidence
           python tests/run_sheet_stage3_tests.py --evidence evidence/stage3_cpu_lifecycle.json
       - name: Record CUDA availability
-        run: python tests/run_sheet_stage3_gpu_smoke.py --evidence evidence/stage3_gpu_smoke.json
+        run: python run_thog2_stage3_cuda_check.py --evidence evidence/stage3_gpu_smoke.json
       - name: Upload Stage 3 evidence
         if: always()
         uses: actions/upload-artifact@v4
