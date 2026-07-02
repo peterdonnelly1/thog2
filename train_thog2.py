@@ -21,7 +21,7 @@ def load_tokens(path: Path) -> torch.Tensor:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="THOG2 Stage 3 shared reference trainer"
+        description="THOG2 shared trainer with single-process and torchrun DDP execution"
     )
     parser.add_argument(
         "--model-type",
@@ -46,6 +46,8 @@ def main() -> None:
     parser.add_argument("--block-size", type=int, default=128)
     parser.add_argument("--depth-order", type=int, default=3)
     parser.add_argument("--base-row-order", type=int, default=32)
+    parser.add_argument("--checkpoint-segment-size", type=int, default=0)
+    parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument(
         "--gradient-accumulation-steps",
@@ -76,12 +78,12 @@ def main() -> None:
         n_layer=arguments.n_layer,
         n_head=arguments.n_head,
         n_embd=arguments.n_embd,
+        dropout=arguments.dropout,
         depth_order=arguments.depth_order,
         base_row_order=arguments.base_row_order,
+        checkpoint_segment_size=arguments.checkpoint_segment_size,
         batch_size=arguments.batch_size,
-        gradient_accumulation_steps=(
-            arguments.gradient_accumulation_steps
-        ),
+        gradient_accumulation_steps=arguments.gradient_accumulation_steps,
         max_updates=arguments.max_updates,
         learning_rate=arguments.learning_rate,
         decay_updates=arguments.max_updates,
@@ -103,6 +105,7 @@ def main() -> None:
                 "device": arguments.device,
                 "dtype": arguments.dtype,
                 "max_updates": arguments.max_updates,
+                "checkpoint_segment_size": arguments.checkpoint_segment_size,
                 "out_dir": str(arguments.out_dir),
             },
             expected_config=config,
@@ -113,9 +116,13 @@ def main() -> None:
             train_tokens,
             validation_tokens,
         )
-    print(trainer.startup_report_json())
-    trainer.run()
-    trainer.save_checkpoint(arguments.out_dir / "ckpt.pt")
+    try:
+        if trainer.distributed.is_primary:
+            print(trainer.startup_report_json())
+        trainer.run()
+        trainer.save_checkpoint(arguments.out_dir / "ckpt.pt")
+    finally:
+        trainer.close()
 
 
 if __name__ == "__main__":

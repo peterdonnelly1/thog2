@@ -1,0 +1,29 @@
+{
+  "branch": "stage5-gpu-ddp-target-geometry",
+  "cuda_available": false,
+  "distributed_gate": {
+    "backend": "gloo",
+    "satisfied": true,
+    "world_size": 2
+  },
+  "gpu_target_gate": {
+    "evidence": "evidence/stage5_gpu_acceptance.json",
+    "satisfied": true
+  },
+  "implementation_head": "d666bd527873e88b3729ae3e42bbfdc7ad44a3de",
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "stage": 5,
+  "suite": "cpu_and_two_rank_ddp",
+  "test_execution": {
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 12
+  },
+  "torch": "2.12.1+cpu"
+}

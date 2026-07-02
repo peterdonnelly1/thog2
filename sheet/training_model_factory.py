@@ -1,7 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import nn
@@ -12,22 +12,26 @@ from .training_config import TrainingConfig
 from .training_model import TrainingSheetGPT
 
 
-def build_training_model(config: TrainingConfig) -> nn.Module:
-    device = torch.device(config.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
+def build_training_model(
+    config: TrainingConfig,
+    *,
+    device: Optional[torch.device] = None,
+) -> nn.Module:
+    target_device = torch.device(config.device) if device is None else device
+    if target_device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError(
             "CUDA model requested but no CUDA device is available"
         )
     fork_devices: List[int] = []
-    if device.type == "cuda":
+    if target_device.type == "cuda":
         fork_devices = [
-            device.index
-            if device.index is not None
+            target_device.index
+            if target_device.index is not None
             else torch.cuda.current_device()
         ]
     with torch.random.fork_rng(devices=fork_devices):
         torch.manual_seed(config.model_seed)
-        if device.type == "cuda":
+        if target_device.type == "cuda":
             torch.cuda.manual_seed_all(config.model_seed)
         if config.model_type == "dense":
             model: nn.Module = GPT(
@@ -39,7 +43,7 @@ def build_training_model(config: TrainingConfig) -> nn.Module:
             )
         else:
             raise ValueError(f"unsupported model_type: {config.model_type}")
-    return model.to(device)
+    return model.to(target_device)
 
 
 def training_parameter_report(
