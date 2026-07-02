@@ -1,5 +1,5 @@
 # vvv THOG
-from run_thog2_text import main as text_inference_main
+from sheet.text_command import main as text_inference_main
 
 
 def main() -> None:
