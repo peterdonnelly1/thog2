@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,13 +10,29 @@ from sheet.stage6_protocol import (
     PilotBudget,
     adamw_fp32_minimum_training_bytes,
     dense_parameter_count,
-    logical_control_signature,
     principal_dense_feasibility,
     protocol_manifest,
+    verify_protocol_manifest,
 )
 
 
 class Stage6ProtocolTests(unittest.TestCase):
+    def make_manifest(self, *, vocab_size: int = 50304):
+        return protocol_manifest(
+            budget=PilotBudget(),
+            vocab_size=vocab_size,
+            device="cpu",
+            dtype="float32",
+            output_root=Path("/tmp/stage6-fixture"),
+            dataset={
+                "path": "/fixture",
+                "vocab_size": vocab_size,
+                "train_tokens": 10000,
+                "validation_tokens": 2000,
+            },
+            device_total_bytes=None,
+        )
+
     def test_s6_01_principal_dense_memory_is_not_credible_on_16_gib(self) -> None:
         parameter_count = dense_parameter_count(
             n_layer=144,
@@ -44,10 +61,9 @@ class Stage6ProtocolTests(unittest.TestCase):
         self.assertEqual(budget.consumed_tokens, 1_024_000)
 
     def test_s6_03_dense_and_sheet_controls_match(self) -> None:
-        budget = PilotBudget()
         with tempfile.TemporaryDirectory() as directory:
             manifest = protocol_manifest(
-                budget=budget,
+                budget=PilotBudget(),
                 vocab_size=50304,
                 device="cpu",
                 dtype="float32",
@@ -77,21 +93,7 @@ class Stage6ProtocolTests(unittest.TestCase):
         self.assertEqual(len({row["out_dir"] for row in manifest["runs"]}), 4)
 
     def test_s6_04_architecture_only_fields_are_excluded_from_control_signature(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            manifest = protocol_manifest(
-                budget=PilotBudget(),
-                vocab_size=512,
-                device="cpu",
-                dtype="float32",
-                output_root=Path(directory),
-                dataset={
-                    "path": "/fixture",
-                    "vocab_size": 512,
-                    "train_tokens": 10000,
-                    "validation_tokens": 2000,
-                },
-                device_total_bytes=None,
-            )
+        manifest = self.make_manifest(vocab_size=512)
         dense_config = manifest["runs"][0]["training_config"]
         q128_config = manifest["runs"][2]["training_config"]
         self.assertNotEqual(dense_config["model_type"], q128_config["model_type"])
@@ -100,6 +102,14 @@ class Stage6ProtocolTests(unittest.TestCase):
             manifest["runs"][0]["logical_control_signature"],
             manifest["runs"][2]["logical_control_signature"],
         )
+
+    def test_s6_05_protocol_digest_detects_post_lock_changes(self) -> None:
+        manifest = self.make_manifest()
+        verify_protocol_manifest(manifest)
+        changed = copy.deepcopy(manifest)
+        changed["budget"]["max_updates"] += 1
+        with self.assertRaisesRegex(ValueError, "protocol digest mismatch"):
+            verify_protocol_manifest(changed)
 
 
 if __name__ == "__main__":
