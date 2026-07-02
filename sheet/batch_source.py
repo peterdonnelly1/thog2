@@ -6,8 +6,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Tuple, Union
 
+import numpy as np
 import torch
 from torch import Tensor
+
+
+TokenStorage = Union[Tensor, np.ndarray]
 
 
 @dataclass(frozen=True)
@@ -23,8 +27,8 @@ class DeterministicBatchSource:
 
     def __init__(
         self,
-        train_tokens: Tensor,
-        validation_tokens: Tensor,
+        train_tokens: TokenStorage,
+        validation_tokens: TokenStorage,
         *,
         block_size: int,
         batch_size: int,
@@ -33,10 +37,12 @@ class DeterministicBatchSource:
         world_size: int = 1,
         trace_limit: int = 10000,
     ) -> None:
-        if train_tokens.ndim != 1 or validation_tokens.ndim != 1:
-            raise ValueError("token splits must be one-dimensional")
-        if train_tokens.numel() <= block_size or validation_tokens.numel() <= block_size:
-            raise ValueError("each token split must contain more than block_size tokens")
+        self.train_tokens = self._normalize_storage(train_tokens)
+        self.validation_tokens = self._normalize_storage(validation_tokens)
+        if self._storage_length(self.train_tokens) <= block_size:
+            raise ValueError("training split must contain more than block_size tokens")
+        if self._storage_length(self.validation_tokens) <= block_size:
+            raise ValueError("validation split must contain more than block_size tokens")
         if isinstance(world_size, bool) or not isinstance(world_size, int) or world_size <= 0:
             raise ValueError(f"world_size must be a positive integer; got {world_size!r}")
         if isinstance(rank, bool) or not isinstance(rank, int) or rank < 0 or rank >= world_size:
@@ -48,8 +54,6 @@ class DeterministicBatchSource:
                 "global batch_size must be divisible by world_size; "
                 f"got batch_size={batch_size}, world_size={world_size}"
             )
-        self.train_tokens = train_tokens.detach().to(dtype=torch.long, device="cpu")
-        self.validation_tokens = validation_tokens.detach().to(dtype=torch.long, device="cpu")
         self.block_size = block_size
         self.batch_size = batch_size
         self.rank = rank
@@ -60,6 +64,32 @@ class DeterministicBatchSource:
         self.validation_generator = torch.Generator(device="cpu").manual_seed(data_seed + 1)
         self.trace: List[Dict[str, Any]] = []
 
+    @staticmethod
+    def _normalize_storage(storage: TokenStorage) -> TokenStorage:
+        if isinstance(storage, Tensor):
+            if storage.ndim != 1:
+                raise ValueError("token splits must be one-dimensional")
+            return storage.detach().to(dtype=torch.long, device="cpu")
+        array = np.asarray(storage)
+        if array.ndim != 1:
+            raise ValueError("token splits must be one-dimensional")
+        if not np.issubdtype(array.dtype, np.integer):
+            raise ValueError("token splits must contain integer token ids")
+        return storage
+
+    @staticmethod
+    def _storage_length(storage: TokenStorage) -> int:
+        if isinstance(storage, Tensor):
+            return int(storage.numel())
+        return int(storage.size)
+
+    @staticmethod
+    def _slice(storage: TokenStorage, start: int, end: int) -> Tensor:
+        if isinstance(storage, Tensor):
+            return storage[start:end].clone()
+        array = np.asarray(storage[start:end], dtype=np.int64)
+        return torch.from_numpy(array.copy())
+
     def get_batch(self, split: str, *, device: Union[str, torch.device]) -> Batch:
         if split == "train":
             storage, generator = self.train_tokens, self.train_generator
@@ -68,7 +98,7 @@ class DeterministicBatchSource:
         else:
             raise ValueError(f"invalid split: {split!r}")
         starts_tensor = torch.randint(
-            storage.numel() - self.block_size,
+            self._storage_length(storage) - self.block_size,
             (self.batch_size,),
             generator=generator,
         )
@@ -76,8 +106,14 @@ class DeterministicBatchSource:
         local_start = self.rank * self.local_batch_size
         local_end = local_start + self.local_batch_size
         starts = global_starts[local_start:local_end]
-        inputs = torch.stack([storage[start:start + self.block_size].clone() for start in starts])
-        targets = torch.stack([storage[start + 1:start + self.block_size + 1].clone() for start in starts])
+        inputs = torch.stack([
+            self._slice(storage, start, start + self.block_size)
+            for start in starts
+        ])
+        targets = torch.stack([
+            self._slice(storage, start + 1, start + self.block_size + 1)
+            for start in starts
+        ])
         if len(self.trace) < self.trace_limit:
             self.trace.append({"split": split, "starts": global_starts})
         target_device = torch.device(device)
