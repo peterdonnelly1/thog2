@@ -1,5 +1,27 @@
 {
-  "satisfied": false,
-  "status": "pending_hardware_execution",
+  "checkpointed": {
+    "checkpoint_segments": 12,
+    "checkpointing_used": true,
+    "gradient_norm": 3.131089687347412,
+    "peak_allocated_bytes": 48757248,
+    "peak_reserved_bytes": 67108864,
+    "segment_size": 2,
+    "training_loss": 6.2987060546875
+  },
+  "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "dtype": "bfloat16",
+  "loss_delta": 0.0,
+  "peak_allocated_ratio": 0.3066087550066326,
+  "peak_allocated_reduction_bytes": 110263808,
+  "reference": {
+    "checkpoint_segments": 0,
+    "checkpointing_used": false,
+    "gradient_norm": 3.131089687347412,
+    "peak_allocated_bytes": 159021056,
+    "peak_reserved_bytes": 182452224,
+    "segment_size": 0,
+    "training_loss": 6.2987060546875
+  },
+  "satisfied": true,
   "test": "S4-07"
 }
