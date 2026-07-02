@@ -50,6 +50,8 @@ class Stage5DdpTests(unittest.TestCase):
                 weights_only=True,
             )
 
+            previous_thread_count = torch.get_num_threads()
+            torch.set_num_threads(1)
             single = SharedTrainer(
                 stage5_config(),
                 train_tokens,
@@ -161,6 +163,7 @@ class Stage5DdpTests(unittest.TestCase):
                         )
             finally:
                 single.close()
+                torch.set_num_threads(previous_thread_count)
 
         self.assertEqual(evidence["completed_updates"], 2)
         self.assertEqual(evidence["model_state_max_delta"], 0.0)
