@@ -1,7 +1,8 @@
 # vvv THOG
 from __future__ import annotations
 
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Union
 
 from torch import Tensor
 
@@ -20,6 +21,28 @@ class Stage4Trainer(SharedTrainer):
         super().__init__(config, train_tokens, validation_tokens)
         self.memory_telemetry = MemoryTelemetry(self.device)
         self.memory_telemetry.snapshot("model_and_optimizer_ready")
+
+    @classmethod
+    def resume_for_inference(
+        cls,
+        checkpoint_path: Union[str, Path],
+        tokens: Tensor,
+        *,
+        device: str = "cpu",
+        dtype: str = "float32",
+    ):
+        trainer = cls.from_checkpoint(
+            checkpoint_path,
+            tokens,
+            tokens,
+            overrides={
+                "device": device,
+                "dtype": dtype,
+                "checkpoint_segment_size": 0,
+            },
+        )
+        trainer.model.eval()
+        return trainer
 
     def train_one_update(self) -> Dict[str, float]:
         before = self.state.completed_updates
