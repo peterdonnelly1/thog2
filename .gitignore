@@ -10,3 +10,15 @@ __pycache__/
 input.txt
 env/
 venv/
+
+# vvv THOG2 - Ignore generated training, evaluation, and local-environment artefacts.
+out*/
+checkpoints/
+logs/
+generated_text/
+wandb/
+.env
+.env.*
+*.log
+*.ckpt
+# ^^^ THOG2
