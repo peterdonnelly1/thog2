@@ -12,6 +12,13 @@ from .trainer_state import TrainerEvent
 
 class TrainerScheduleMixin:
     def _record(self, name: str, **payload: Any) -> None:
+        distributed = getattr(self, "distributed", None)
+        if distributed is not None and distributed.active:
+            payload = {
+                "rank": distributed.rank,
+                "world_size": distributed.world_size,
+                **payload,
+            }
         self.events.append(
             TrainerEvent(name, self.state.completed_updates, dict(payload))
         )
