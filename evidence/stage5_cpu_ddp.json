@@ -1,0 +1,31 @@
+{
+  "branch": "stage5-gpu-ddp-target-geometry",
+  "commit": "c6d0ade90f8224b3e206cc8c35f5502278feed29",
+  "cuda_available": false,
+  "distributed_gate": {
+    "backend": "gloo",
+    "satisfied": true,
+    "world_size": 2
+  },
+  "gpu_target_gate": {
+    "reason": "The hosted workflow has no target CUDA device; run the Stage 5 aggregate GPU gate on the RTX 4090 Laptop GPU.",
+    "required_evidence": "evidence/stage5_gpu_acceptance.json",
+    "satisfied": false
+  },
+  "implementation_head": "e1a90b329777573209174c04379a7b3353fd692c",
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "stage": 5,
+  "suite": "cpu_and_two_rank_ddp",
+  "test_execution": {
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 11
+  },
+  "torch": "2.12.1+cpu"
+}
