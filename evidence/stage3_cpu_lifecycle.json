@@ -1,1 +1,25 @@
-{}
+{
+  "accepted_cpu_scope": true,
+  "branch": "stage3-training-lifecycle",
+  "commit": "4c6477af7ab93d1c7135ae6c05730998832f88fd",
+  "cuda_available": false,
+  "gpu_gate": {
+    "reason": "This CPU workflow exposes no CUDA device; run tests/run_sheet_stage3_gpu_smoke.py on CUDA hardware.",
+    "required_test": "S3-11",
+    "satisfied": false
+  },
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "stage": 3,
+  "test_execution": {
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 13
+  },
+  "torch": "2.12.1+cpu"
+}
