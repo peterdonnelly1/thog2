@@ -106,21 +106,30 @@ def _run_worker(sample_count: int, order: int) -> Dict[str, object]:
             "--order",
             str(order),
         ],
-        check=True,
+        check=False,
         cwd=Path(__file__).resolve().parents[1],
         env=environment,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "calibration worker failed for "
+            f"sample_count={sample_count}, order={order}, returncode={completed.returncode}\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
     return json.loads(completed.stdout)
+
+
+def _write_evidence(output_path: Path, evidence: Dict[str, object]) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def run_calibration(output_path: Path) -> Dict[str, object]:
     results: List[Dict[str, object]] = []
-    for sample_count, order in CALIBRATION_GEOMETRIES:
-        results.append(_run_worker(sample_count, order))
-
     evidence: Dict[str, object] = {
         "basis_version": "chebyshev_first_kind_qr_v1",
         "python": sys.version.replace("\n", " "),
@@ -133,11 +142,38 @@ def run_calibration(output_path: Path) -> Dict[str, object]:
             "float64_orthonormality_tolerance": FLOAT64_ORTHONORMALITY_TOLERANCE,
             "float32_orthonormality_tolerance": FLOAT32_ORTHONORMALITY_TOLERANCE,
         },
+        "planned_geometries": [
+            {"sample_count": sample_count, "order": order}
+            for sample_count, order in CALIBRATION_GEOMETRIES
+        ],
         "results": results,
-        "accepted": all(bool(result["accepted"]) for result in results),
+        "failures": [],
+        "status": "running",
+        "accepted": False,
     }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_evidence(output_path, evidence)
+
+    for sample_count, order in CALIBRATION_GEOMETRIES:
+        try:
+            result = _run_worker(sample_count, order)
+        except Exception as error:
+            evidence["failures"].append(
+                {
+                    "sample_count": sample_count,
+                    "order": order,
+                    "error": str(error),
+                }
+            )
+            evidence["status"] = "failed"
+            evidence["accepted"] = False
+            _write_evidence(output_path, evidence)
+            raise
+        results.append(result)
+        _write_evidence(output_path, evidence)
+
+    evidence["status"] = "completed"
+    evidence["accepted"] = all(bool(result["accepted"]) for result in results)
+    _write_evidence(output_path, evidence)
     return evidence
 
 
