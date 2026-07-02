@@ -1,11 +1,13 @@
 # THOG2 Stage 1 Mathematical Core Record
 
 **Stage:** 1 — Mathematical core  
-**Branch:** `feature/sheet-stage-1-core`  
+**Implementation branch:** `feature/sheet-stage-1-core`  
 **Accepted base:** `5b45f70e7682b1f1b4eb4d358f559783092ecedd`  
-**Accepted test head:** `537bf30e6b7257d87e7fb0fc45ee589053179c1c`  
-**Accepted workflow run:** `28559341422`  
-**Status:** All Stage 1 exit gates satisfied; completion pending merge of PR #2.
+**Accepted implementation test head:** `537bf30e6b7257d87e7fb0fc45ee589053179c1c`  
+**Accepted implementation workflow run:** `28559341422`  
+**Final branch-head validation:** `54124d40e70603d391fe23719c7aefe4afebc20a`, workflow run `28559479563`  
+**Stage 1 merge commit:** `cd3a7c4a593dc85727837e6f966af8d2804e8f64`  
+**Status:** Complete; PR #2 merged to `master` on 2 July 2026.
 
 ## Scope implemented
 
@@ -45,7 +47,7 @@ errors:    0
 skipped:   0
 ```
 
-All planned tests S1-01 through S1-15 passed on CPU.
+All planned tests S1-01 through S1-15 passed on CPU. The same complete test and source-guard sequence passed again on the final branch head before merge.
 
 ## High-order calibration
 
@@ -98,5 +100,6 @@ The analytical helpers agree exactly with explicit products of the planned coeff
 | Analytical counts agree with tensor-shape products | PASS |
 | No incomplete Stage 1 behavior used by model or training code | PASS |
 | No nanoGPT runtime source changed | PASS |
+| Stage 1 pull request merged | PASS |
 
-Stage 1 becomes complete when PR #2 is merged to `master`. Stage 2 has not begun.
+Stage 1 is complete. Stage 2 has not begun.
