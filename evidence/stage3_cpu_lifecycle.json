@@ -1,7 +1,7 @@
 {
   "accepted_cpu_scope": true,
   "branch": "stage3-training-lifecycle",
-  "commit": "4c6477af7ab93d1c7135ae6c05730998832f88fd",
+  "commit": "3a6de7c1d5ddbdb72535951d57fcd934338fa5b9",
   "cuda_available": false,
   "gpu_gate": {
     "reason": "This CPU workflow exposes no CUDA device; run tests/run_sheet_stage3_gpu_smoke.py on CUDA hardware.",
@@ -19,7 +19,7 @@
     "skipped": [],
     "skipped_count": 0,
     "successful": true,
-    "tests_run": 13
+    "tests_run": 14
   },
   "torch": "2.12.1+cpu"
 }
