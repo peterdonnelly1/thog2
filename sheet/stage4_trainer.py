@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 
 from .batch_source import DeterministicBatchSource
+from .distributed import DistributedContext
 from .memory import MemoryTelemetry
 from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
@@ -26,33 +27,40 @@ class Stage4Trainer(SharedTrainer):
         validation_tokens: Tensor,
     ) -> None:
         self.config = config
-        self.device = torch.device(config.device)
-        if self.device.type == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError(
-                "CUDA training requested but no CUDA device is available"
-            )
+        self.distributed = DistributedContext.from_environment(config.device)
+        self.device = self.distributed.device
         self.memory_telemetry = MemoryTelemetry(self.device)
         self.memory_telemetry.snapshot("trainer_start")
-        self.model = build_training_model(config)
-        if isinstance(self.model, TrainingSheetGPT):
-            self.model.set_checkpoint_segment_size(
+        self.state = TrainerState()
+        self.events: List[TrainerEvent] = []
+
+        self.raw_model = build_training_model(config, device=self.device)
+        if isinstance(self.raw_model, TrainingSheetGPT):
+            self.raw_model.set_checkpoint_segment_size(
                 config.checkpoint_segment_size
             )
         self.memory_telemetry.snapshot("model_construction")
-        self.batch_source = DeterministicBatchSource(
-            train_tokens,
-            validation_tokens,
-            block_size=config.block_size,
-            batch_size=config.batch_size,
-            data_seed=config.data_seed,
+        self.parameter_report = training_parameter_report(
+            self.raw_model,
+            config.model_type,
         )
-        self.optimizer = self.model.configure_optimizers(
+        self.model = self.distributed.wrap_model(self.raw_model)
+        self.optimizer = self.raw_model.configure_optimizers(
             config.weight_decay,
             config.learning_rate,
             (config.beta1, config.beta2),
             self.device.type,
         )
         self.memory_telemetry.snapshot("optimizer_allocation")
+        self.batch_source = DeterministicBatchSource(
+            train_tokens,
+            validation_tokens,
+            block_size=config.block_size,
+            batch_size=config.batch_size,
+            data_seed=config.data_seed,
+            rank=self.distributed.rank,
+            world_size=self.distributed.world_size,
+        )
         self.scaler = torch.amp.GradScaler(
             "cuda",
             enabled=(
@@ -60,15 +68,17 @@ class Stage4Trainer(SharedTrainer):
                 and config.dtype == "float16"
             ),
         )
-        self.state = TrainerState()
-        self.events: List[TrainerEvent] = []
-        self.parameter_report = training_parameter_report(
-            self.model,
-            config.model_type,
+
+        structure_signature = self.distributed_structure_signature()
+        self.distributed.assert_identical_object(
+            structure_signature,
+            "parameter registration and optimizer grouping",
         )
         self._record(
             "model_constructed",
             parameter_report=self.parameter_report,
+            distributed=self.distributed.report(),
+            structure_signature=structure_signature,
         )
 
     def train_one_update(self) -> Dict[str, float]:
