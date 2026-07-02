@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gc
+import math
 from typing import Dict
 
 import torch
@@ -67,4 +68,35 @@ def measure_runtime_case(
     if telemetry.cuda_enabled:
         torch.cuda.empty_cache()
     return result
+
+
+def compare_runtime_memory(
+    *,
+    device: str,
+    dtype: str,
+) -> Dict[str, object]:
+    reference = measure_runtime_case(0, device=device, dtype=dtype)
+    checkpointed = measure_runtime_case(2, device=device, dtype=dtype)
+    reference_peak = int(reference["peak_allocated_bytes"])
+    checkpointed_peak = int(checkpointed["peak_allocated_bytes"])
+    reference_loss = float(reference["training_loss"])
+    checkpointed_loss = float(checkpointed["training_loss"])
+    loss_delta = abs(reference_loss - checkpointed_loss)
+    satisfied = (
+        math.isfinite(reference_loss)
+        and math.isfinite(checkpointed_loss)
+        and loss_delta <= 1.0e-4
+        and checkpointed_peak < reference_peak
+        and bool(checkpointed["checkpointing_used"])
+        and int(checkpointed["checkpoint_segments"]) == 6
+    )
+    return {
+        "test": "S4-07",
+        "satisfied": satisfied,
+        "reference": reference,
+        "checkpointed": checkpointed,
+        "peak_allocated_ratio": checkpointed_peak / reference_peak,
+        "peak_allocated_reduction_bytes": reference_peak - checkpointed_peak,
+        "loss_delta": loss_delta,
+    }
 # ^^^ THOG
