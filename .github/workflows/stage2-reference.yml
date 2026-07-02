@@ -1,5 +1,5 @@
 # vvv THOG
-name: Stage 1 mathematical core
+name: Stage 2 reference model
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  stage1-core:
+  stage2-reference:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,8 +31,7 @@ jobs:
           python -m pip install numpy
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Enforce Stage 1 source scope
-        if: github.head_ref == 'feature/sheet-stage-1-core' || startsWith(github.head_ref, 'docs/stage-1')
+      - name: Enforce Stage 2 source scope
         run: |
           set -euo pipefail
           git fetch origin master
@@ -45,40 +44,47 @@ jobs:
           allowed = (
               'sheet/',
               'tests/',
-              'evidence/',
-              'docs/THOG2_Stage_1_',
+              'evidence/stage2_',
+              'docs/THOG2_Stage_2_',
               '.github/workflows/stage1-core.yml',
+              '.github/workflows/stage2-reference.yml',
           )
           unexpected = [
               path for path in changed
               if not any(path == prefix or path.startswith(prefix) for prefix in allowed)
           ]
           if unexpected:
-              raise SystemExit(f'unexpected Stage 1 paths: {unexpected}')
+              raise SystemExit(f'unexpected Stage 2 paths: {unexpected}')
           protected = {'model.py', 'train.py', 'sample.py', 'configurator.py'}
           touched_protected = sorted(protected.intersection(changed))
           if touched_protected:
-              raise SystemExit(f'Stage 1 touched protected runtime files: {touched_protected}')
+              raise SystemExit(f'Stage 2 touched protected runtime files: {touched_protected}')
           print('\n'.join(changed))
           PY
 
-      - name: Compile Stage 1 Python sources
+      - name: Compile sheet and test sources
         run: |
           set -euo pipefail
           python -m compileall -q sheet tests
 
-      - name: Run calibrated Stage 1 tests
+      - name: Run Stage 1 mathematical regression
+        run: |
+          set -euo pipefail
+          python tests/run_sheet_stage1_tests.py \
+            --evidence /tmp/stage1_math_regression.json
+
+      - name: Run Stage 2 reference-model tests
         run: |
           set -euo pipefail
           mkdir -p evidence
-          python tests/run_sheet_stage1_tests.py \
-            --evidence evidence/stage1_math_calibration.json
+          python tests/run_sheet_stage2_tests.py \
+            --evidence evidence/stage2_reference_model.json
 
-      - name: Upload Stage 1 evidence
+      - name: Upload Stage 2 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage1-math-evidence
-          path: evidence/stage1_math_calibration.json
+          name: stage2-reference-evidence
+          path: evidence/stage2_reference_model.json
           if-no-files-found: error
 # ^^^ THOG
