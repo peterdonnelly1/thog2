@@ -1,0 +1,5 @@
+{
+  "reason": "CUDA is not available in this environment",
+  "satisfied": false,
+  "test": "S3-11"
+}
