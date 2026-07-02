@@ -45,6 +45,27 @@ class Stage6Trainer(Stage4Trainer):
         self._synchronize()
         return result, time.perf_counter() - started
 
+    def _print_progress(
+        self,
+        run_id: str,
+        event: str,
+        **payload: Any,
+    ) -> None:
+        if not self.distributed.is_primary:
+            return
+        print(
+            json.dumps(
+                {
+                    "stage": 6,
+                    "run_id": run_id,
+                    "event": event,
+                    **payload,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     def _before_optimizer_step(self) -> None:
         next_update = self.state.completed_updates + 1
         capture = (
@@ -89,6 +110,12 @@ class Stage6Trainer(Stage4Trainer):
         update_rows: List[Dict[str, Any]] = []
         evaluation_rows: List[Dict[str, Any]] = []
         wall_started = time.perf_counter()
+        self._print_progress(
+            run_id,
+            "run_started",
+            max_updates=self.config.max_updates,
+            tokens_per_update=tokens_per_update,
+        )
 
         if self.config.eval_interval > 0 and self.state.completed_updates == 0:
             losses, elapsed = self._timed(self.evaluate)
@@ -102,6 +129,14 @@ class Stage6Trainer(Stage4Trainer):
                     "evaluation_seconds": elapsed,
                     **losses,
                 }
+            )
+            self._print_progress(
+                run_id,
+                "evaluation_completed",
+                completed_updates=0,
+                consumed_tokens=0,
+                validation_loss=losses["val"],
+                training_loss=losses["train"],
             )
 
         while self.state.completed_updates < self.config.max_updates:
@@ -117,6 +152,22 @@ class Stage6Trainer(Stage4Trainer):
                     "consumed_tokens": completed_updates * tokens_per_update,
                 }
             )
+            report_update = (
+                completed_updates == 1
+                or completed_updates == self.config.max_updates
+                or completed_updates % self.config.log_interval == 0
+            )
+            if report_update:
+                self._print_progress(
+                    run_id,
+                    "optimizer_progress",
+                    completed_updates=completed_updates,
+                    consumed_tokens=completed_updates * tokens_per_update,
+                    training_loss=metrics["training_loss"],
+                    learning_rate=metrics["learning_rate"],
+                    gradient_norm=metrics["gradient_norm"],
+                    cumulative_training_seconds=training_seconds,
+                )
             if (
                 self.config.eval_interval > 0
                 and completed_updates % self.config.eval_interval == 0
@@ -132,6 +183,14 @@ class Stage6Trainer(Stage4Trainer):
                         "evaluation_seconds": eval_elapsed,
                         **losses,
                     }
+                )
+                self._print_progress(
+                    run_id,
+                    "evaluation_completed",
+                    completed_updates=completed_updates,
+                    consumed_tokens=completed_updates * tokens_per_update,
+                    validation_loss=losses["val"],
+                    training_loss=losses["train"],
                 )
             if (
                 self.config.checkpoint_interval > 0
@@ -164,8 +223,21 @@ class Stage6Trainer(Stage4Trainer):
                     **losses,
                 }
             )
+            self._print_progress(
+                run_id,
+                "evaluation_completed",
+                completed_updates=self.state.completed_updates,
+                consumed_tokens=self.state.completed_updates * tokens_per_update,
+                validation_loss=losses["val"],
+                training_loss=losses["train"],
+            )
 
         checkpoint_path = Path(self.config.out_dir) / "ckpt.pt"
+        self._print_progress(
+            run_id,
+            "final_checkpoint_started",
+            completed_updates=self.state.completed_updates,
+        )
         _, final_checkpoint_seconds = self._timed(
             lambda: self.save_checkpoint(checkpoint_path)
         )
@@ -256,6 +328,15 @@ class Stage6Trainer(Stage4Trainer):
                 encoding="utf-8",
             )
         self.distributed.barrier()
+        self._print_progress(
+            run_id,
+            "run_completed",
+            completed_updates=self.state.completed_updates,
+            consumed_tokens=self.state.completed_updates * tokens_per_update,
+            final_validation_loss=evaluation_rows[-1]["val"],
+            training_seconds=training_seconds,
+            checkpoint_bytes=checkpoint_path.stat().st_size,
+        )
         return result
 
 
