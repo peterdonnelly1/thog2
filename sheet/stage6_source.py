@@ -1,9 +1,10 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 
 TELEMETRY_FINISH_TIMEOUT_SECONDS = 120.0
@@ -81,8 +82,64 @@ def verify_manifest_source(
     return actual
 
 
+def init_resilient_telemetry(
+    module: Any,
+    *,
+    project: str,
+    entity: Optional[str],
+    name: str,
+    group: str,
+    job_type: str,
+    config: Dict[str, Any],
+) -> Any:
+    settings = module.Settings(
+        finish_timeout=TELEMETRY_FINISH_TIMEOUT_SECONDS,
+        finish_timeout_raises=False,
+    )
+    arguments: Dict[str, Any] = {
+        "project": project,
+        "name": name,
+        "group": group,
+        "job_type": job_type,
+        "config": config,
+        "settings": settings,
+    }
+    if entity:
+        arguments["entity"] = entity
+    if os.environ.get("WANDB_MODE", "").strip().lower() == "offline":
+        return module.init(**arguments, mode="offline")
+    try:
+        return module.init(**arguments, mode="online")
+    except Exception as error:
+        communication_error = getattr(
+            getattr(module, "errors", None),
+            "CommError",
+            None,
+        )
+        if communication_error is None or not isinstance(error, communication_error):
+            raise
+        print(
+            "THOG2 telemetry online initialisation failed; "
+            f"continuing with offline logging: {error}",
+            flush=True,
+        )
+        teardown = getattr(module, "teardown", None)
+        if callable(teardown):
+            try:
+                teardown(exit_code=1)
+            except Exception as cleanup_error:
+                print(
+                    "THOG2 WARNING: telemetry cleanup failed; "
+                    f"attempting offline logging anyway: {cleanup_error}",
+                    flush=True,
+                )
+        os.environ["WANDB_MODE"] = "offline"
+        return module.init(**arguments, mode="offline")
+
+
 __all__ = [
     "TELEMETRY_FINISH_TIMEOUT_SECONDS",
+    "init_resilient_telemetry",
     "source_identity",
     "verify_manifest_source",
     "verify_source_identity",
