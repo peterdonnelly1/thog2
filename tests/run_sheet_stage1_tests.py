@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,18 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from tests.stage1_calibration import run_calibration
+
+
+def _serialize_problems(
+    problems: List[Tuple[unittest.case.TestCase, str]],
+) -> List[Dict[str, str]]:
+    return [
+        {
+            "test": test_case.id(),
+            "traceback": traceback_text,
+        }
+        for test_case, traceback_text in problems
+    ]
 
 
 def main() -> None:
@@ -32,9 +45,15 @@ def main() -> None:
     evidence["test_execution"] = {
         "command": f"python tests/run_sheet_stage1_tests.py --evidence {arguments.evidence}",
         "tests_run": result.testsRun,
-        "failures": len(result.failures),
-        "errors": len(result.errors),
-        "skipped": len(result.skipped),
+        "failure_count": len(result.failures),
+        "error_count": len(result.errors),
+        "skipped_count": len(result.skipped),
+        "failures": _serialize_problems(result.failures),
+        "errors": _serialize_problems(result.errors),
+        "skipped": [
+            {"test": test_case.id(), "reason": reason}
+            for test_case, reason in result.skipped
+        ],
         "successful": result.wasSuccessful(),
     }
     evidence["accepted"] = bool(calibration["accepted"] and result.wasSuccessful())
