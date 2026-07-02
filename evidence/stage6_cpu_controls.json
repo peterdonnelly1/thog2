@@ -1,1 +1,10 @@
-{}
+{
+  "stage": 6,
+  "branch": "stage6-controlled-pilot-as-built",
+  "feature_head": "dc7fe0befd6bde82bcd5d382c2d5ca3f7028062d",
+  "tests_run": 14,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "successful": true
+}
