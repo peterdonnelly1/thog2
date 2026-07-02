@@ -8,7 +8,7 @@ from tests.stage4_test_support import stage4_tokens, stage4_training_config
 
 
 class Stage4TimelineTests(unittest.TestCase):
-    def test_s4_07_update_and_evaluation_phases(self) -> None:
+    def test_s4_07_distinct_allocation_and_update_phases(self) -> None:
         train_tokens, validation_tokens = stage4_tokens()
         trainer = Stage4Trainer(
             stage4_training_config(checkpoint_segment_size=2),
@@ -25,7 +25,9 @@ class Stage4TimelineTests(unittest.TestCase):
         self.assertEqual(
             phases,
             [
-                "model_and_optimizer_ready",
+                "trainer_start",
+                "model_construction",
+                "optimizer_allocation",
                 "first_optimizer_state",
                 "steady_update",
                 "evaluation",
