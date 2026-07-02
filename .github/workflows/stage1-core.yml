@@ -32,6 +32,7 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Enforce Stage 1 source scope
+        if: github.head_ref == 'feature/sheet-stage-1-core' || startsWith(github.head_ref, 'docs/stage-1')
         run: |
           set -euo pipefail
           git fetch origin master
