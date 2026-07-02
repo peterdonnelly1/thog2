@@ -1,0 +1,7 @@
+{
+  "reason": "Expanded CUDA acceptance suite has not yet been run on accepted hardware",
+  "satisfied": false,
+  "stage": 4,
+  "suite": "cuda_acceptance",
+  "tests_run": 0
+}
