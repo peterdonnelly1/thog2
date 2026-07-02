@@ -179,6 +179,7 @@ class Stage6Trainer(Stage4Trainer):
         optimizer_trace = self.optimizer_batch_trace()
         train_stream_trace = self.batch_source.training_trace()
         validation_trace = self.batch_source.validation_trace()
+        optimizer_trace_sha256 = trace_digest(optimizer_trace)
         result: Dict[str, Any] = {
             "stage": 6,
             "suite": "controlled_pilot_run",
@@ -223,7 +224,9 @@ class Stage6Trainer(Stage4Trainer):
             "updates": update_rows,
             "evaluations": evaluation_rows,
             "trace": {
-                "optimizer_training_sha256": trace_digest(optimizer_trace),
+                "training_sha256": optimizer_trace_sha256,
+                "training_starts": optimizer_trace,
+                "optimizer_training_sha256": optimizer_trace_sha256,
                 "optimizer_training_starts": optimizer_trace,
                 "train_stream_sha256": trace_digest(train_stream_trace),
                 "train_stream_starts": train_stream_trace,
