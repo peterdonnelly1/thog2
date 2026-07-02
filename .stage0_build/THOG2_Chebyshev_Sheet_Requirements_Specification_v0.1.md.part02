@@ -1,0 +1,92 @@
+
+
+**19.6 **The first implementation shall not use a three-dimensional
+depth-by-output-by-input Chebyshev volume.
+
+**19.7 **The first implementation shall not flatten a complete matrix
+into one sheet spanning both output rows and input columns.
+
+**19.8 **The first implementation shall not claim that interweight
+samples correspond to meaningful intermediate latent coordinates.
+
+**19.9 **The first implementation shall not change model depth or width
+at inference by resampling the continuous sheet.
+
+**19.10 **The first implementation shall not require custom fused
+kernels before correctness, training, checkpoint, and inference paths
+are complete.
+
+**19.11 **The first implementation shall not claim mechanistic
+interpretability from sheet coefficients or basis orders alone.
+
+# 20. Known risks and open questions
+
+**20.1 **The fixed left-to-right within-row coordinate may impose a
+geometry that the model cannot exploit effectively.
+
+**20.2 **Training may fail to organise latent coordinates into a form
+compatible with rowwise smoothness.
+
+**20.3 **The chosen Q_d may be too small to represent useful rowwise
+profiles or unnecessarily large to deliver the intended compression.
+
+**20.4 **High rowwise Chebyshev orders may create correlated gradients
+or numerical-conditioning problems even when basis values remain
+bounded.
+
+**20.5 **Sheet materialisation may reduce parameter memory while adding
+enough computation to harm throughput materially.
+
+**20.6 **Optimizer state for sheet coefficients and conventional
+embeddings may remain a major memory cost even when logical block
+weights are highly compressed.
+
+**20.7 **A single proportional Q_f rule may not be equally suitable for
+all tensor families despite using one universal mathematical mechanism.
+
+**20.8 **Representing layer-normalisation and bias vectors as sheets may
+add complexity with negligible parameter benefit.
+
+**20.9 **A fresh nanoGPT fork may diverge from improvements already made
+in thog unless useful infrastructure is deliberately ported after
+review.
+
+**20.10 **Successful approximation of sampled weight sheets shall not
+guarantee good language modelling; end-to-end controlled training
+evidence is required.
+
+**20.11 **Any response to these risks that changes the core
+architectural hypothesis shall require a versioned specification
+amendment rather than an undocumented implementation workaround.
+
+# 21. Required follow-on documents and change control
+
+**21.1 **A separate implementation plan shall define source files,
+classes, configuration fields, initialization derivation, optimizer
+integration, checkpoint schema, wrappers, telemetry, and staged
+delivery.
+
+**21.2 **A separate test plan shall define mathematical, unit,
+integration, GPU, DDP, checkpoint, inference, regression, performance,
+and controlled-comparison tests.
+
+**21.3 **A separate staging plan shall divide implementation into the
+minimum sensible independently testable stages.
+
+**21.4 **An as-built document shall be produced after implementation and
+shall identify every material departure from this specification.
+
+**21.5 **This specification shall remain outside the existing thog
+repository until the user authorises its addition to the future thog2
+repository.
+
+**21.6 **When added to thog2, the specification shall be committed as a
+versioned project document rather than replacing its external source
+without traceability.
+
+**21.7 **Changes to the requirements shall increment the document
+version and identify the modified requirement identifiers.
+
+Non-normative note: End of normative requirements. The later
+implementation plan may make engineering choices only within the
+constraints above or through an explicit requirements revision.
