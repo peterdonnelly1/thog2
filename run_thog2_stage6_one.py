@@ -8,15 +8,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
-import torch
 
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
 
 
-def load_tokens(path: Path) -> torch.Tensor:
-    array = np.memmap(path, dtype=np.uint16, mode="r")
-    return torch.from_numpy(np.asarray(array, dtype=np.int64).copy())
+def load_tokens(path: Path) -> np.memmap:
+    return np.memmap(path, dtype=np.uint16, mode="r")
 
 
 def load_vocab_size(dataset_dir: Path) -> int:
@@ -61,9 +59,9 @@ def main() -> None:
 
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
-    if train_tokens.numel() != int(manifest["dataset"]["train_tokens"]):
+    if int(train_tokens.size) != int(manifest["dataset"]["train_tokens"]):
         raise ValueError("training-token count changed after protocol lock")
-    if validation_tokens.numel() != int(manifest["dataset"]["validation_tokens"]):
+    if int(validation_tokens.size) != int(manifest["dataset"]["validation_tokens"]):
         raise ValueError("validation-token count changed after protocol lock")
 
     trainer = Stage6Trainer(config, train_tokens, validation_tokens)
