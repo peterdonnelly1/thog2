@@ -31,8 +31,26 @@ class Stage4SummaryTests(unittest.TestCase):
                 family["coefficient_rms"],
                 *family["depth_order_rms"],
                 *family["row_order_rms"],
+                *family["depth_order_energy_fraction"],
+                *family["row_order_energy_fraction"],
+                family["high_depth_order_energy_fraction"],
+                family["high_row_order_energy_fraction"],
             ]
             self.assertTrue(all(math.isfinite(value) for value in values))
+            self.assertAlmostEqual(
+                sum(family["depth_order_energy_fraction"]),
+                1.0,
+                places=6,
+            )
+            self.assertAlmostEqual(
+                sum(family["row_order_energy_fraction"]),
+                1.0,
+                places=6,
+            )
+            self.assertGreaterEqual(family["high_depth_order_energy_fraction"], 0.0)
+            self.assertLessEqual(family["high_depth_order_energy_fraction"], 1.0)
+            self.assertGreaterEqual(family["high_row_order_energy_fraction"], 0.0)
+            self.assertLessEqual(family["high_row_order_energy_fraction"], 1.0)
         self.assertTrue(
             all(math.isfinite(value) for value in summary["derivatives"].values())
         )
