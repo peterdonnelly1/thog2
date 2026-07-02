@@ -7,9 +7,6 @@ from pathlib import Path
 
 import torch
 
-from sheet.trainer import SharedTrainer
-from sheet.training_config import TrainingConfig
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -25,11 +22,15 @@ def main() -> None:
                     "reason": "CUDA is not available in this environment",
                 },
                 indent=2,
+                sort_keys=True,
             )
             + "\n",
             encoding="utf-8",
         )
-        raise SystemExit(77)
+        return
+
+    from sheet.trainer import SharedTrainer
+    from sheet.training_config import TrainingConfig
 
     dtype = "bfloat16" if torch.cuda.is_bf16_supported() else "float16"
     tokens = torch.arange(1024, dtype=torch.long) % 64
