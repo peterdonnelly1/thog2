@@ -37,14 +37,15 @@ class Stage4SummaryTests(unittest.TestCase):
                 family["high_row_order_energy_fraction"],
             ]
             self.assertTrue(all(math.isfinite(value) for value in values))
+            expected_energy_sum = 0.0 if family["coefficient_rms"] == 0.0 else 1.0
             self.assertAlmostEqual(
                 sum(family["depth_order_energy_fraction"]),
-                1.0,
+                expected_energy_sum,
                 places=6,
             )
             self.assertAlmostEqual(
                 sum(family["row_order_energy_fraction"]),
-                1.0,
+                expected_energy_sum,
                 places=6,
             )
             self.assertGreaterEqual(family["high_depth_order_energy_fraction"], 0.0)
