@@ -1,0 +1,12 @@
+timestamp_utc=2026-07-02T00:05:14Z
+os=Debian GNU/Linux 13 (trixie)
+kernel=Linux 4.4.0 x86_64 GNU/Linux
+python=Python 3.13.5
+platform=Linux-4.4.0-x86_64-with-glibc2.41
+torch=2.10.0+cpu
+torch_cuda_version=None
+cuda_available=False
+cuda_device_count=0
+numpy=2.3.5
+nvidia_smi=not installed
+note=Evidence-generation container; not the intended THOG2 training host.
