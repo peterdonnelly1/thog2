@@ -14,6 +14,7 @@ from .trainer_schedule import TrainerScheduleMixin
 from .trainer_state import TrainerEvent, TrainerState
 from .trainer_step import TrainerStepMixin
 from .training_config import TrainingConfig
+from .training_model import TrainingSheetGPT
 from .training_model_factory import (
     build_training_model,
     training_parameter_report,
@@ -42,6 +43,10 @@ class SharedTrainer(
                 "CUDA training requested but no CUDA device is available"
             )
         self.model = build_training_model(config)
+        if isinstance(self.model, TrainingSheetGPT):
+            self.model.set_checkpoint_segment_size(
+                config.checkpoint_segment_size
+            )
         self.batch_source = DeterministicBatchSource(
             train_tokens,
             validation_tokens,
