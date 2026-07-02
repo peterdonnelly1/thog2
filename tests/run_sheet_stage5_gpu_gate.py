@@ -65,7 +65,8 @@ def main() -> None:
     )
     target_command = [
         sys.executable,
-        str(REPOSITORY_ROOT / "tests" / "run_sheet_stage5_gpu_tests.py"),
+        "-m",
+        "tests.run_sheet_stage5_gpu_tests",
         "--evidence",
         str(target_path),
         "--bounded-updates",
