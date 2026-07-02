@@ -1,3 +1,5 @@
 # vvv THOG
-# Stage 4 model bundle support.
+from .compact_state import model_from_compact_state
+
+__all__ = ["model_from_compact_state"]
 # ^^^ THOG
