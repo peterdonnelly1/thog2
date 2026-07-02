@@ -1,0 +1,140 @@
+{
+  "bfloat16_supported": true,
+  "bounded_updates": 4,
+  "case_results": [
+    {
+      "id": "S5-01",
+      "name": "principal geometry construction",
+      "status": "passed"
+    },
+    {
+      "id": "S5-02",
+      "name": "principal forward backward and first update",
+      "status": "passed"
+    },
+    {
+      "id": "S5-03",
+      "name": "bounded principal smoke with validation and checkpoint",
+      "status": "passed"
+    },
+    {
+      "id": "S5-04",
+      "name": "principal GPU memory accounting",
+      "status": "passed"
+    },
+    {
+      "id": "S5-05",
+      "name": "basis construction profiling",
+      "status": "passed"
+    },
+    {
+      "id": "S5-06",
+      "name": "materialisation and checkpoint profiling",
+      "status": "passed"
+    },
+    {
+      "id": "S5-07",
+      "name": "supported GPU dtype matrix",
+      "status": "passed"
+    },
+    {
+      "id": "S5-12",
+      "name": "uneven GPU checkpoint boundary",
+      "status": "passed"
+    },
+    {
+      "id": "S5-13",
+      "name": "longer principal stability and compact-state guard",
+      "status": "passed"
+    }
+  ],
+  "components": {
+    "stage4_cuda_regression": {
+      "error_count": 0,
+      "errors": [],
+      "failure_count": 0,
+      "failures": [],
+      "skipped": [],
+      "skipped_count": 0,
+      "successful": true,
+      "tests_run": 7
+    },
+    "stage5_target_gpu_acceptance": {
+      "error_count": 0,
+      "failure_count": 0,
+      "skipped_count": 0,
+      "successful": true,
+      "tests_run": 9
+    }
+  },
+  "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "observed": {
+    "checkpoint_bytes": 692841629,
+    "checkpoint_recomputation_loss_delta": 0.0,
+    "checkpoint_recomputation_time_ratio": 1.5197863442633386,
+    "compact_state_violations": [],
+    "construction_seconds": 0.9816120889954618,
+    "final_validation_loss": 9.0338134765625,
+    "first_update_seconds": 0.4740500170009909,
+    "initial_validation_loss": 11.001953125,
+    "peak_allocated_bytes": 1250801664,
+    "peak_reserved_bytes": 1417674752,
+    "training_losses": [
+      10.999267578125,
+      10.475830078125,
+      9.696044921875,
+      9.2430419921875
+    ]
+  },
+  "parameter_report": {
+    "conventional_non_sheet_parameters": 38831616,
+    "dense_equivalent_repeated_parameters": 1020653568,
+    "dense_equivalent_total_parameters": 1059485184,
+    "matrix_dense_equivalent_parameters": 1019215872,
+    "matrix_sheet_coefficients": 18874368,
+    "persistent_parameters": 57732608,
+    "sheet_coefficients": 18900992
+  },
+  "platform": "Linux-6.8.0-111-generic-x86_64-with-glibc2.35",
+  "principal_geometry": {
+    "base_row_order": 128,
+    "basis_version": "chebyshev_first_kind_qr_v1",
+    "bias": true,
+    "block_size": 256,
+    "depth_order": 16,
+    "dropout": 0.0,
+    "n_embd": 768,
+    "n_head": 12,
+    "n_layer": 144,
+    "vocab_size": 50304
+  },
+  "python": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+  "satisfied": true,
+  "source_artifacts": {
+    "stage5_gpu_acceptance.json": {
+      "bytes": 48667,
+      "sha256": "fec7c21b15bd91f3d56b996780184d60ba275c7f45d7570592c1e5b39c7a95b7"
+    },
+    "stage5_stage4_cuda_regression.json": {
+      "bytes": 528,
+      "sha256": "13318fc8870fbbfe11ee8749850ae132bc6cf55d018d69e75dbc001d584a20e5"
+    },
+    "stage5_target_gpu_acceptance.json": {
+      "bytes": 41333,
+      "sha256": "9f09bac1c06bf8fafe4711541111b6703870d8bce38c0a2efe0f94762ffc8c23"
+    }
+  },
+  "stage": 5,
+  "status": "accepted",
+  "suite": "aggregate_gpu_gate",
+  "test_execution": {
+    "error_count": 0,
+    "failure_count": 0,
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 16
+  },
+  "tested_feature_head": "d666bd527873e88b3729ae3e42bbfdc7ad44a3de",
+  "torch": "2.12.1+cu126",
+  "torch_cuda": "12.6"
+}
