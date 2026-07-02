@@ -31,15 +31,28 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Reconstruct documents and run Stage 0 tests
+      - name: Reconstruct Markdown source archive
         run: |
           set -euo pipefail
           mkdir -p docs evidence
-          cat .stage0_build/stage0_docs_md.tar.gz.b64.part* | base64 --decode > /tmp/stage0_docs_md.tar.gz
+          cat .stage0_build/stage0_docs_md.tar.gz.b64.part* > /tmp/stage0_docs_md.tar.gz.b64
+          echo 'b64e24476916faefd89c5dc9369679426720f4e4c2ca93f963f52d6150502f6b  /tmp/stage0_docs_md.tar.gz.b64' | sha256sum --check
+          base64 --decode /tmp/stage0_docs_md.tar.gz.b64 > /tmp/stage0_docs_md.tar.gz
+          echo '04aed21de79f0e95425fa4a4070f0747d7be89169f290387ece3ba123ce67fb2  /tmp/stage0_docs_md.tar.gz' | sha256sum --check
+          tar -tzf /tmp/stage0_docs_md.tar.gz
           tar -xzf /tmp/stage0_docs_md.tar.gz -C docs
+
+      - name: Generate ODT documents
+        run: |
+          set -euo pipefail
           for markdown_path in docs/THOG2_Chebyshev_Sheet_*_v0.1.md; do
             pandoc "$markdown_path" -o "${markdown_path%.md}.odt"
           done
+          ls -lh docs/THOG2_Chebyshev_Sheet_*_v0.1.*
+
+      - name: Run Stage 0 verification
+        run: |
+          set -euo pipefail
           python .stage0_build/finalize_stage0.py
 
       - name: Remove temporary transport and enforce Stage 0 scope
