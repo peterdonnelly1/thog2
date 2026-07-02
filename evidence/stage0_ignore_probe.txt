@@ -1,0 +1,10 @@
+ignored_paths:
+.gitignore:15:out*/	out-test/ckpt.pt
+.gitignore:16:checkpoints/	checkpoints/test.ckpt
+.gitignore:17:logs/	logs/run.log
+.gitignore:18:generated_text/	generated_text/sample.txt
+.gitignore:19:wandb/	wandb/run.json
+.gitignore:20:.env	.env
+.gitignore:22:*.log	local.log
+trackable_control:
+data/shakespeare/fixture.txt is trackable
