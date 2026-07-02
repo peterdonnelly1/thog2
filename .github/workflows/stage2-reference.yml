@@ -46,6 +46,7 @@ jobs:
               'tests/',
               'evidence/stage2_',
               'docs/THOG2_Stage_2_',
+              '.github/workflows/stage1-core.yml',
               '.github/workflows/stage2-reference.yml',
           )
           unexpected = [
