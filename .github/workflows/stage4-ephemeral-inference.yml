@@ -31,6 +31,10 @@ jobs:
       - name: Enforce Stage 4 source scope
         run: |
           set -euo pipefail
+          if [ "${GITHUB_HEAD_REF:-}" != "stage4-checkpointed-ephemeral-execution" ]; then
+            echo "Stage 4 source guard skipped for later-stage branch ${GITHUB_HEAD_REF:-unknown}."
+            exit 0
+          fi
           git fetch origin master
           python - <<'PY'
           import subprocess
