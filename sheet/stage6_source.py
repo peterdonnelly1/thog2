@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 
+TELEMETRY_FINISH_TIMEOUT_SECONDS = 120.0
+
+
 def _git_output(repository_root: Path, *arguments: str) -> str:
     completed = subprocess.run(
         ["git", *arguments],
@@ -79,6 +82,7 @@ def verify_manifest_source(
 
 
 __all__ = [
+    "TELEMETRY_FINISH_TIMEOUT_SECONDS",
     "source_identity",
     "verify_manifest_source",
     "verify_source_identity",
