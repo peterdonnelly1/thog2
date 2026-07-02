@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -14,6 +15,11 @@ from torch import Tensor
 from .stage4_trainer import Stage4Trainer
 from .stage6_diagnostics import gradient_report, stage6_sheet_diagnostics
 from .training_model import TrainingSheetGPT
+
+
+def trace_digest(trace) -> str:
+    payload = json.dumps(trace, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 class Stage6Trainer(Stage4Trainer):
@@ -53,6 +59,13 @@ class Stage6Trainer(Stage4Trainer):
                 "completed_update": next_update,
                 "families": gradient_report(self.raw_model),
             }
+        )
+
+    def optimizer_batch_trace(self):
+        return tuple(
+            tuple(int(value) for value in event.payload["starts"])
+            for event in self.events
+            if event.name == "microbatch"
         )
 
     def run_pilot(
@@ -163,6 +176,9 @@ class Stage6Trainer(Stage4Trainer):
         if isinstance(self.raw_model, TrainingSheetGPT):
             diagnostics = stage6_sheet_diagnostics(self.raw_model)
 
+        optimizer_trace = self.optimizer_batch_trace()
+        train_stream_trace = self.batch_source.training_trace()
+        validation_trace = self.batch_source.validation_trace()
         result: Dict[str, Any] = {
             "stage": 6,
             "suite": "controlled_pilot_run",
@@ -207,11 +223,13 @@ class Stage6Trainer(Stage4Trainer):
             "updates": update_rows,
             "evaluations": evaluation_rows,
             "trace": {
-                "training_sha256": self.batch_source.trace_digest("train"),
-                "validation_sha256": self.batch_source.trace_digest("val"),
+                "optimizer_training_sha256": trace_digest(optimizer_trace),
+                "optimizer_training_starts": optimizer_trace,
+                "train_stream_sha256": trace_digest(train_stream_trace),
+                "train_stream_starts": train_stream_trace,
+                "validation_sha256": trace_digest(validation_trace),
+                "validation_starts": validation_trace,
                 "all_sha256": self.batch_source.trace_digest("all"),
-                "training_starts": self.batch_source.training_trace(),
-                "validation_starts": self.batch_source.validation_trace(),
             },
             "memory": self.memory_telemetry.report(),
             "gradient_diagnostics": self.gradient_diagnostics,
@@ -238,5 +256,5 @@ class Stage6Trainer(Stage4Trainer):
         return result
 
 
-__all__ = ["Stage6Trainer"]
+__all__ = ["Stage6Trainer", "trace_digest"]
 # ^^^ THOG
