@@ -5,7 +5,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from .training_config import TrainingConfig
 
@@ -74,9 +74,24 @@ def stage6_run_specs(budget: PilotBudget) -> Tuple[PilotRunSpec, ...]:
     common = f"l{budget.n_layer}_h{budget.n_head}_d{budget.n_embd}_c{budget.block_size}"
     return (
         PilotRunSpec(f"dense_{common}", "dense", 1, 0),
-        PilotRunSpec(f"sheet_q64_{common}", "thog2_sheet", 64, budget.checkpoint_segment_size),
-        PilotRunSpec(f"sheet_q128_{common}", "thog2_sheet", 128, budget.checkpoint_segment_size),
-        PilotRunSpec(f"sheet_q256_{common}", "thog2_sheet", 256, budget.checkpoint_segment_size),
+        PilotRunSpec(
+            f"sheet_q64_{common}",
+            "thog2_sheet",
+            64,
+            budget.checkpoint_segment_size,
+        ),
+        PilotRunSpec(
+            f"sheet_q128_{common}",
+            "thog2_sheet",
+            128,
+            budget.checkpoint_segment_size,
+        ),
+        PilotRunSpec(
+            f"sheet_q256_{common}",
+            "thog2_sheet",
+            256,
+            budget.checkpoint_segment_size,
+        ),
     )
 
 
@@ -224,6 +239,29 @@ def logical_control_signature(config: TrainingConfig) -> Dict[str, Any]:
     }
 
 
+def protocol_digest(manifest: Mapping[str, Any]) -> str:
+    values = dict(manifest)
+    values.pop("protocol_sha256", None)
+    canonical = json.dumps(
+        values,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def verify_protocol_manifest(manifest: Mapping[str, Any]) -> None:
+    expected = manifest.get("protocol_sha256")
+    if not isinstance(expected, str) or not expected:
+        raise ValueError("Stage 6 protocol digest is missing")
+    actual = protocol_digest(manifest)
+    if expected != actual:
+        raise ValueError(
+            "Stage 6 protocol digest mismatch; "
+            f"stored={expected}, calculated={actual}"
+        )
+
+
 def protocol_manifest(
     *,
     budget: PilotBudget,
@@ -254,14 +292,21 @@ def protocol_manifest(
                 "run_id": spec.run_id,
                 "model_type": spec.model_type,
                 "base_row_order": spec.base_row_order,
-                "row_order_4d": 4 * spec.base_row_order if spec.model_type == "thog2_sheet" else None,
+                "row_order_4d": (
+                    4 * spec.base_row_order
+                    if spec.model_type == "thog2_sheet"
+                    else None
+                ),
                 "checkpoint_segment_size": spec.checkpoint_segment_size,
                 "out_dir": str(run_dir),
                 "training_config": asdict(config),
                 "logical_control_signature": signature,
             }
         )
-    if any(signature != control_signatures[0] for signature in control_signatures[1:]):
+    if any(
+        signature != control_signatures[0]
+        for signature in control_signatures[1:]
+    ):
         raise RuntimeError("stage6 run controls are not matched")
     manifest = {
         "protocol_version": STAGE6_PROTOCOL_VERSION,
@@ -279,14 +324,19 @@ def protocol_manifest(
             device_total_bytes=device_total_bytes,
         ),
         "scientific_scope": {
-            "matched_geometry": f"L{budget.n_layer}/H{budget.n_head}/D{budget.n_embd}/C{budget.block_size}",
-            "principal_l144_matched_comparison": "not claimed unless separately executed",
+            "matched_geometry": (
+                f"L{budget.n_layer}/H{budget.n_head}/"
+                f"D{budget.n_embd}/C{budget.block_size}"
+            ),
+            "principal_l144_matched_comparison": (
+                "not claimed unless separately executed"
+            ),
             "row_capacity_bracket": [64, 128, 256],
             "classification_options": list(STAGE6_CLASSIFICATIONS),
         },
     }
-    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    manifest["protocol_sha256"] = hashlib.sha256(canonical).hexdigest()
+    manifest["protocol_sha256"] = protocol_digest(manifest)
+    verify_protocol_manifest(manifest)
     return manifest
 
 
@@ -318,8 +368,10 @@ __all__ = [
     "dense_parameter_count",
     "logical_control_signature",
     "principal_dense_feasibility",
+    "protocol_digest",
     "protocol_manifest",
     "selected_run_rows",
     "stage6_run_specs",
+    "verify_protocol_manifest",
 ]
 # ^^^ THOG
