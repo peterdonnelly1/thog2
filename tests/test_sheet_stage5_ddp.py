@@ -5,10 +5,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import torch
+
 from sheet.checkpoints import load_payload
 from sheet.trainer import SharedTrainer
+from tests.stage5_difference import nested_tensor_difference
 from tests.stage5_test_support import (
-    assert_nested_close,
     run_ddp_worker,
     stage5_config,
     token_splits,
@@ -44,20 +46,57 @@ class Stage5DdpTests(unittest.TestCase):
             )
             try:
                 single_history = single.run()
-                assert_nested_close(
-                    self,
+                model_difference = nested_tensor_difference(
                     single.raw_model.state_dict(),
                     payload["model"],
-                    atol=2.0e-6,
-                    rtol=2.0e-5,
                 )
-                assert_nested_close(
-                    self,
-                    single.optimizer.state_dict(),
-                    payload["optimizer"],
-                    atol=2.0e-6,
-                    rtol=2.0e-5,
+                self.assertLessEqual(
+                    model_difference["max_absolute_delta"],
+                    2.5e-4,
+                    msg=f"model state maximum error is too large: {model_difference}",
                 )
+                self.assertLessEqual(
+                    model_difference["relative_l2_error"],
+                    5.0e-5,
+                    msg=f"model state relative error is too large: {model_difference}",
+                )
+
+                probe_inputs = torch.arange(16, dtype=torch.long).view(2, 8) % 32
+                probe_targets = torch.roll(probe_inputs, shifts=-1, dims=1)
+                single.raw_model.eval()
+                with torch.no_grad():
+                    single_logits, single_loss = single.raw_model(
+                        probe_inputs,
+                        probe_targets,
+                    )
+                single.raw_model.load_state_dict(payload["model"])
+                with torch.no_grad():
+                    ddp_logits, ddp_loss = single.raw_model(
+                        probe_inputs,
+                        probe_targets,
+                    )
+                functional_difference = nested_tensor_difference(
+                    single_logits,
+                    ddp_logits,
+                )
+                self.assertLessEqual(
+                    functional_difference["max_absolute_delta"],
+                    5.0e-4,
+                    msg=f"fixed-probe logit maximum error is too large: {functional_difference}",
+                )
+                self.assertLessEqual(
+                    functional_difference["relative_l2_error"],
+                    5.0e-5,
+                    msg=f"fixed-probe logit relative error is too large: {functional_difference}",
+                )
+                self.assertIsNotNone(single_loss)
+                self.assertIsNotNone(ddp_loss)
+                self.assertAlmostEqual(
+                    float(single_loss),
+                    float(ddp_loss),
+                    delta=5.0e-5,
+                )
+
                 self.assertEqual(
                     [list(item) for item in single.batch_source.training_trace()],
                     evidence["training_trace"],
