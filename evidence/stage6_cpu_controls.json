@@ -1,10 +1,17 @@
 {
   "stage": 6,
+  "suite": "pilot_controls_and_evidence",
   "branch": "stage6-controlled-pilot-as-built",
-  "feature_head": "dc7fe0befd6bde82bcd5d382c2d5ca3f7028062d",
-  "tests_run": 14,
+  "tested_feature_head": "d5915c4cf6004f6587831fdb5a4c00a2eadb49a6",
+  "tests_run": 17,
   "failures": 0,
   "errors": 0,
   "skips": 0,
-  "successful": true
+  "successful": true,
+  "scientific_pilot_gate": {
+    "satisfied": false,
+    "required_manifest": "external Stage 6 protocol.json",
+    "required_analysis": "external Stage 6 analysis/analysis.json",
+    "reason": "The controlled GPU pilot and final scientific classification remain pending."
+  }
 }
