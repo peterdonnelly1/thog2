@@ -1,0 +1,4 @@
+PASS THOG2_Chebyshev_Sheet_Requirements_Specification_v0.1.odt: 18699 bytes; 544 non-empty text nodes
+PASS THOG2_Chebyshev_Sheet_Implementation_Plan_v0.1.odt: 19347 bytes; 529 non-empty text nodes
+PASS THOG2_Chebyshev_Sheet_Staging_Plan_v0.1.odt: 19598 bytes; 609 non-empty text nodes
+PASS THOG2_Chebyshev_Sheet_Test_Plan_v0.1.odt: 24931 bytes; 790 non-empty text nodes

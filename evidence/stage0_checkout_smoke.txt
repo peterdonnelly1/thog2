@@ -1,0 +1,33 @@
+{
+  "all_gradients_finite": true,
+  "all_outputs_finite": true,
+  "baseline_sha": "3adf61e154c3fe3fca428ad6bc3818b27a3b8291",
+  "branch_head_before_finalization": "987ce136ea03927d8f710f661a86853ec3650926",
+  "config": {
+    "bias": true,
+    "block_size": 16,
+    "dropout": 0.0,
+    "n_embd": 32,
+    "n_head": 2,
+    "n_layer": 2,
+    "vocab_size": 128
+  },
+  "cuda_available": false,
+  "cuda_device_count": 0,
+  "gradient_tensor_count": 28,
+  "logits_shape": [
+    2,
+    16,
+    128
+  ],
+  "loss_after": 4.722202777862549,
+  "loss_before": 4.860756874084473,
+  "parameter_count_non_embedding": 29568,
+  "parameter_tensors_changed": 28,
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "seed": 1337,
+  "torch": "2.12.1+cpu",
+  "torch_cuda_version": null,
+  "workflow_event_sha": "965d1e018114130149b06ecdc25ea1ff2b58c461"
+}
