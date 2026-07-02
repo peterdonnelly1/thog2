@@ -4,7 +4,9 @@
 **Branch:** `stage4-checkpointed-ephemeral-execution`  
 **Pull request:** #7  
 **CPU workflow:** `28621636854`  
-**CPU-tested head:** `8d5614462afa7ec2bbf613a8bf459d01425919d9`
+**CPU-tested head:** `8d5614462afa7ec2bbf613a8bf459d01425919d9`  
+**CUDA host:** `scruffy` — NVIDIA GeForce RTX 4090 Laptop GPU  
+**Status:** accepted; ready to merge after final-head CI.
 
 ## Implemented scope
 
@@ -33,7 +35,7 @@ Stage 1 additionally runs its four planned large-basis calibration geometries.
 
 Machine-readable CPU evidence is stored in `evidence/stage4_cpu_ephemeral.json`.
 
-## Initial S4-07 hardware result
+## S4-07 hardware result
 
 The RTX 4090 Laptop GPU comparison passed:
 
@@ -50,7 +52,21 @@ The measured peak allocated-memory reduction was approximately 69.3%. The record
 
 ## Expanded CUDA acceptance
 
-The initial memory comparison is necessary but not sufficient. Stage 4 now has a separate seven-test CUDA suite covering:
+The seven-test CUDA suite passed in full:
+
+```text
+tests run: 7
+failures: 0
+errors: 0
+skips: 0
+satisfied: true
+device: NVIDIA GeForce RTX 4090 Laptop GPU
+dtype coverage: bfloat16 and float16
+PyTorch: 2.12.1+cu126
+CUDA runtime: 12.6
+```
+
+The suite covers:
 
 1. forward, loss, and coefficient-gradient equivalence for segment sizes 1, 2, 3, and 7;
 2. dropout RNG equivalence under checkpoint recomputation;
@@ -60,13 +76,8 @@ The initial memory comparison is necessary but not sufficient. Stage 4 now has a
 6. model-only compact-checkpoint inference on CUDA;
 7. the peak allocated-memory reduction gate.
 
-Run:
+Machine-readable CUDA evidence is stored in `evidence/stage4_gpu_acceptance.json`.
 
-```text
-python tests/run_sheet_stage4_gpu_tests.py \
-  --evidence evidence/stage4_gpu_acceptance.json
+## Acceptance decision
 
-cat evidence/stage4_gpu_acceptance.json
-```
-
-Stage 4 is accepted only when the expanded evidence reports seven tests run, zero failures, zero errors, zero skips, and `"satisfied": true`. PR #7 remains draft until then.
+Stage 4 satisfies its CPU and CUDA acceptance gates. PR #7 may be marked ready for review and merged after all final-head workflows pass. Stage 5 must begin only from the accepted Stage 4 merge on `master`.
