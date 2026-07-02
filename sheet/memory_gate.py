@@ -1,3 +1,5 @@
 # vvv THOG
-# Stage 4 reference-versus-checkpointed memory comparison.
+from .stage4_runtime_check import compare_runtime_memory
+
+__all__ = ["compare_runtime_memory"]
 # ^^^ THOG
