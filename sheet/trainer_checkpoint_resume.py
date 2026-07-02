@@ -60,7 +60,7 @@ class TrainerCheckpointResumeMixin:
         validate_compatibility(payload, resumed_config)
 
         trainer = cls(resumed_config, train_tokens, validation_tokens)
-        trainer.model.load_state_dict(
+        trainer.raw_model.load_state_dict(
             strip_compiled_prefix(payload["model"])
         )
         expected_groups = tuple(
@@ -82,6 +82,7 @@ class TrainerCheckpointResumeMixin:
             )
         trainer.batch_source.load_state_dict(payload["batch_source"])
         restore_rng_state(payload["rng_state"])
+        trainer.distributed.barrier()
         trainer._record("checkpoint_resumed", path=str(path))
         return trainer
 
@@ -122,7 +123,7 @@ class TrainerCheckpointResumeMixin:
                 + "; ".join(mismatches)
             )
         trainer = cls(expected_config, train_tokens, validation_tokens)
-        trainer.model.load_state_dict(
+        trainer.raw_model.load_state_dict(
             strip_compiled_prefix(payload["model"])
         )
         if "optimizer" in payload:
@@ -133,6 +134,7 @@ class TrainerCheckpointResumeMixin:
         trainer.state.best_validation_loss = float(
             payload.get("best_val_loss", float("inf"))
         )
+        trainer.distributed.barrier()
         trainer._record("legacy_checkpoint_loaded", path=str(path))
         return trainer
 # ^^^ THOG
