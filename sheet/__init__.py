@@ -1,4 +1,12 @@
 # vvv THOG
+from .approximation import (
+    ProjectionError,
+    fit_sampled_sheets,
+    is_within_epsilon,
+    project_sampled_sheets,
+    projection_error,
+    reconstruct_sampled_sheets,
+)
 from .basis import (
     BASIS_VERSION,
     SINGLE_POINT_COORDINATE,
@@ -24,6 +32,12 @@ from .geometry import (
     total_sheet_parameter_count,
     transformer_family_geometries,
 )
+from .model import ConventionalLayerNorm, SheetGPT, SheetGPTConfig
+from .trajectory import (
+    FamilyMetadata,
+    SheetTrajectory,
+    build_family_metadata,
+)
 
 __all__ = [
     "BASIS_VERSION",
@@ -31,19 +45,31 @@ __all__ = [
     "BasisCache",
     "BasisCacheKey",
     "BasisOwner",
+    "ConventionalLayerNorm",
     "FamilyGeometry",
+    "FamilyMetadata",
     "MATRIX_FAMILY_NAMES",
+    "ProjectionError",
+    "SheetGPT",
+    "SheetGPTConfig",
     "SheetGeometryConfig",
+    "SheetTrajectory",
     "basis_sha256",
+    "build_family_metadata",
     "build_stabilized_basis",
     "chebyshev_first_kind_basis",
     "derive_row_order",
     "deterministic_reduced_qr",
     "estimated_peak_tensor_bytes",
     "family_geometry_map",
+    "fit_sampled_sheets",
+    "is_within_epsilon",
     "normalized_coordinates",
     "orthonormality_max_error",
     "parameter_count_rows",
+    "project_sampled_sheets",
+    "projection_error",
+    "reconstruct_sampled_sheets",
     "total_dense_equivalent_count",
     "total_sheet_parameter_count",
     "transformer_family_geometries",
