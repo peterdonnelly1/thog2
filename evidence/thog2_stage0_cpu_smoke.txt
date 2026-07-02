@@ -1,0 +1,20 @@
+number of parameters: 0.03M
+{
+  "all_gradients_finite": true,
+  "all_outputs_finite": true,
+  "config": {
+    "bias": true,
+    "block_size": 16,
+    "dropout": 0.0,
+    "n_embd": 32,
+    "n_head": 2,
+    "n_layer": 2,
+    "vocab_size": 128
+  },
+  "logits_shape": [2, 16, 128],
+  "loss_after": 4.722203254699707,
+  "loss_before": 4.860756874084473,
+  "parameter_count_non_embedding": 29568,
+  "parameter_tensors_changed": 28,
+  "seed": 1337
+}

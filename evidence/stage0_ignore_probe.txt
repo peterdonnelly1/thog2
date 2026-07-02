@@ -1,0 +1,8 @@
+.gitignore:15:out*/	out-stage0/ckpt.pt
+.gitignore:16:checkpoints/	checkpoints/stage0.ckpt
+.gitignore:17:logs/	logs/stage0.log
+.gitignore:18:generated_text/	generated_text/stage0.txt
+.gitignore:19:wandb/	wandb/stage0.json
+.gitignore:20:.env	.env
+.gitignore:22:*.log	stage0-local.log
+PASS trackable control: data/shakespeare/stage0_fixture.txt
