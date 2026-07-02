@@ -1,0 +1,89 @@
+# vvv THOG
+name: Stage 2 reference model
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage2-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install numpy
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Enforce Stage 2 source scope
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          python - <<'PY'
+          import subprocess
+
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', 'origin/master...HEAD'], text=True
+          ).splitlines()
+          allowed = (
+              'sheet/',
+              'tests/',
+              'evidence/stage2_',
+              'docs/THOG2_Stage_2_',
+              '.github/workflows/stage2-reference.yml',
+          )
+          unexpected = [
+              path for path in changed
+              if not any(path == prefix or path.startswith(prefix) for prefix in allowed)
+          ]
+          if unexpected:
+              raise SystemExit(f'unexpected Stage 2 paths: {unexpected}')
+          protected = {'model.py', 'train.py', 'sample.py', 'configurator.py'}
+          touched_protected = sorted(protected.intersection(changed))
+          if touched_protected:
+              raise SystemExit(f'Stage 2 touched protected runtime files: {touched_protected}')
+          print('\n'.join(changed))
+          PY
+
+      - name: Compile sheet and test sources
+        run: |
+          set -euo pipefail
+          python -m compileall -q sheet tests
+
+      - name: Run Stage 1 mathematical regression
+        run: |
+          set -euo pipefail
+          python tests/run_sheet_stage1_tests.py \
+            --evidence /tmp/stage1_math_regression.json
+
+      - name: Run Stage 2 reference-model tests
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          python tests/run_sheet_stage2_tests.py \
+            --evidence evidence/stage2_reference_model.json
+
+      - name: Upload Stage 2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2-reference-evidence
+          path: evidence/stage2_reference_model.json
+          if-no-files-found: error
+# ^^^ THOG
