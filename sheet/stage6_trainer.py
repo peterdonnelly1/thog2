@@ -1,0 +1,242 @@
+# vvv THOG
+from __future__ import annotations
+
+import json
+import math
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+import torch
+from torch import Tensor
+
+from .stage4_trainer import Stage4Trainer
+from .stage6_diagnostics import gradient_report, stage6_sheet_diagnostics
+from .training_model import TrainingSheetGPT
+
+
+class Stage6Trainer(Stage4Trainer):
+    """Stage 4 trainer with controlled-pilot timing and detached diagnostics."""
+
+    def __init__(
+        self,
+        config,
+        train_tokens: Tensor,
+        validation_tokens: Tensor,
+    ) -> None:
+        super().__init__(config, train_tokens, validation_tokens)
+        self.gradient_diagnostics: List[Dict[str, Any]] = []
+
+    def _synchronize(self) -> None:
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+
+    def _timed(self, function):
+        self._synchronize()
+        started = time.perf_counter()
+        result = function()
+        self._synchronize()
+        return result, time.perf_counter() - started
+
+    def _before_optimizer_step(self) -> None:
+        next_update = self.state.completed_updates + 1
+        capture = (
+            next_update == 1
+            or next_update == self.config.max_updates
+            or next_update % self.config.log_interval == 0
+        )
+        if not capture or not isinstance(self.raw_model, TrainingSheetGPT):
+            return
+        self.gradient_diagnostics.append(
+            {
+                "completed_update": next_update,
+                "families": gradient_report(self.raw_model),
+            }
+        )
+
+    def run_pilot(
+        self,
+        *,
+        run_id: str,
+        protocol_sha256: str,
+        dataset: Dict[str, Any],
+        result_path: Union[str, Path],
+    ) -> Dict[str, Any]:
+        target = Path(result_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tokens_per_update = (
+            self.config.batch_size
+            * self.config.gradient_accumulation_steps
+            * self.config.block_size
+        )
+        training_seconds = 0.0
+        evaluation_seconds = 0.0
+        checkpoint_seconds = 0.0
+        update_rows: List[Dict[str, Any]] = []
+        evaluation_rows: List[Dict[str, Any]] = []
+        wall_started = time.perf_counter()
+
+        if self.config.eval_interval > 0 and self.state.completed_updates == 0:
+            losses, elapsed = self._timed(self.evaluate)
+            evaluation_seconds += elapsed
+            evaluation_rows.append(
+                {
+                    "completed_updates": 0,
+                    "consumed_tokens": 0,
+                    "training_seconds": 0.0,
+                    "wall_seconds": time.perf_counter() - wall_started,
+                    "evaluation_seconds": elapsed,
+                    **losses,
+                }
+            )
+
+        while self.state.completed_updates < self.config.max_updates:
+            metrics, elapsed = self._timed(self.train_one_update)
+            training_seconds += elapsed
+            completed_updates = self.state.completed_updates
+            update_rows.append(
+                {
+                    **metrics,
+                    "update_seconds": elapsed,
+                    "cumulative_training_seconds": training_seconds,
+                    "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                }
+            )
+            if (
+                self.config.eval_interval > 0
+                and completed_updates % self.config.eval_interval == 0
+            ):
+                losses, eval_elapsed = self._timed(self.evaluate)
+                evaluation_seconds += eval_elapsed
+                evaluation_rows.append(
+                    {
+                        "completed_updates": completed_updates,
+                        "consumed_tokens": completed_updates * tokens_per_update,
+                        "training_seconds": training_seconds,
+                        "wall_seconds": time.perf_counter() - wall_started,
+                        "evaluation_seconds": eval_elapsed,
+                        **losses,
+                    }
+                )
+            if (
+                self.config.checkpoint_interval > 0
+                and completed_updates % self.config.checkpoint_interval == 0
+            ):
+                _, save_elapsed = self._timed(
+                    lambda: self.save_checkpoint(
+                        Path(self.config.out_dir) / "ckpt.pt"
+                    )
+                )
+                checkpoint_seconds += save_elapsed
+
+        if (
+            self.config.eval_interval > 0
+            and (
+                not evaluation_rows
+                or evaluation_rows[-1]["completed_updates"]
+                != self.state.completed_updates
+            )
+        ):
+            losses, eval_elapsed = self._timed(self.evaluate)
+            evaluation_seconds += eval_elapsed
+            evaluation_rows.append(
+                {
+                    "completed_updates": self.state.completed_updates,
+                    "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                    "training_seconds": training_seconds,
+                    "wall_seconds": time.perf_counter() - wall_started,
+                    "evaluation_seconds": eval_elapsed,
+                    **losses,
+                }
+            )
+
+        checkpoint_path = Path(self.config.out_dir) / "ckpt.pt"
+        _, final_checkpoint_seconds = self._timed(
+            lambda: self.save_checkpoint(checkpoint_path)
+        )
+        checkpoint_seconds += final_checkpoint_seconds
+        wall_seconds = time.perf_counter() - wall_started
+
+        diagnostics: Optional[Dict[str, Any]] = None
+        if isinstance(self.raw_model, TrainingSheetGPT):
+            diagnostics = stage6_sheet_diagnostics(self.raw_model)
+
+        result: Dict[str, Any] = {
+            "stage": 6,
+            "suite": "controlled_pilot_run",
+            "status": "completed",
+            "run_id": run_id,
+            "protocol_sha256": protocol_sha256,
+            "dataset": dataset,
+            "training_config": asdict(self.config),
+            "parameter_report": self.parameter_report,
+            "distributed": self.distributed.report(),
+            "hardware": {
+                "device": str(self.device),
+                "torch": torch.__version__,
+                "torch_cuda": torch.version.cuda,
+                "cuda_device_name": (
+                    torch.cuda.get_device_name(self.device)
+                    if self.device.type == "cuda"
+                    else None
+                ),
+                "cuda_total_memory_bytes": (
+                    int(torch.cuda.get_device_properties(self.device).total_memory)
+                    if self.device.type == "cuda"
+                    else None
+                ),
+            },
+            "budget": {
+                "completed_updates": self.state.completed_updates,
+                "tokens_per_update": tokens_per_update,
+                "consumed_tokens": self.state.completed_updates * tokens_per_update,
+            },
+            "timing": {
+                "training_seconds": training_seconds,
+                "evaluation_seconds": evaluation_seconds,
+                "checkpoint_seconds": checkpoint_seconds,
+                "wall_seconds": wall_seconds,
+                "tokens_per_training_second": (
+                    self.state.completed_updates * tokens_per_update / training_seconds
+                    if training_seconds > 0.0
+                    else 0.0
+                ),
+            },
+            "updates": update_rows,
+            "evaluations": evaluation_rows,
+            "trace": {
+                "training_sha256": self.batch_source.trace_digest("train"),
+                "validation_sha256": self.batch_source.trace_digest("val"),
+                "all_sha256": self.batch_source.trace_digest("all"),
+                "training_starts": self.batch_source.training_trace(),
+                "validation_starts": self.batch_source.validation_trace(),
+            },
+            "memory": self.memory_telemetry.report(),
+            "gradient_diagnostics": self.gradient_diagnostics,
+            "sheet_diagnostics": diagnostics,
+            "checkpoint": {
+                "path": str(checkpoint_path),
+                "bytes": checkpoint_path.stat().st_size,
+            },
+        }
+        finite_values = [
+            training_seconds,
+            evaluation_seconds,
+            checkpoint_seconds,
+            wall_seconds,
+        ]
+        if not all(math.isfinite(value) and value >= 0.0 for value in finite_values):
+            raise FloatingPointError("non-finite Stage 6 timing evidence")
+        if self.distributed.is_primary:
+            target.write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        self.distributed.barrier()
+        return result
+
+
+__all__ = ["Stage6Trainer"]
+# ^^^ THOG
