@@ -1,11 +1,12 @@
 # THOG2 Stage 2 Reference Model Record
 
 **Stage:** 2 — Compact state and reference model  
-**Branch:** `feature/sheet-stage-2-reference-model`  
-**Accepted implementation head:** `67cab5b32eab2ce8ddadb1980f10ef345ffb7d68`  
-**Accepted Stage 2 workflow run:** `28563464826`  
-**Accepted Stage 1 regression run:** `28563464822`  
-**Status:** All Stage 2 exit gates satisfied; completion pending merge of PR #4.
+**Implementation branch:** `feature/sheet-stage-2-reference-model`  
+**Accepted implementation head:** `b6e6844deb8d194d52af7dcc76953a93b57564b5`  
+**Final Stage 2 workflow run:** `28563729030`  
+**Final Stage 1 regression run:** `28563729039`  
+**Stage 2 merge commit:** `62f9f89a063b449107e28484dd8ea7b36cc49329`  
+**Status:** Complete; PR #4 merged to `master` on 2 July 2026.
 
 ## Scope implemented
 
@@ -41,7 +42,7 @@ Stage 2 errors:            0
 Stage 2 skipped:           0
 ```
 
-The Stage 2 suite covers compact coefficient shapes, direct materialisation, direct point evaluation, saturated completeness, conventional generated shapes, family isolation, coefficient-gradient reference checks, initialization structure and statistics, optimizer coverage and semantic decay, persistent-state guards, forward/backward/update behavior, a repeated CPU learning smoke, dense nanoGPT regression, and the epsilon approximation contract.
+The same complete source-guard, compilation, Stage 1 regression, and Stage 2 reference-model sequence passed on the final merge-candidate head.
 
 ## Reference-model evidence
 
@@ -76,7 +77,7 @@ The full machine-readable evidence is committed at `evidence/stage2_reference_mo
 
 ## Epsilon approximation contract
 
-For a sampled sheet `S`, discrete orthonormal depth basis `B_d`, and row basis `B_r`, the fitted coefficients are the orthogonal projection coefficients:
+For a sampled sheet `S`, discrete orthonormal depth basis `B_d`, and row basis `B_r`, the fitted coefficients are:
 
 ```text
 A = transpose(B_d) @ S @ B_r
@@ -88,13 +89,13 @@ and the reconstructed sheet is:
 S_hat = B_d @ A @ transpose(B_r)
 ```
 
-This supports three materially different claims.
+This supports three different claims.
 
 1. **Saturated sampled completeness.** When `P=L` and `Q=C`, every finite sampled sheet can be reconstructed to floating-point epsilon. Stage 2 demonstrates this for arbitrary random sampled weights.
 2. **Exact lower-order reconstruction within the span.** A sheet already belonging to the selected lower-order tensor-product span is reconstructed to floating-point epsilon, even when `P<L` and `Q<C`.
 3. **Best lower-order approximation without a universal guarantee.** For arbitrary genuine dense weights with `P<L` or `Q<C`, the reconstruction is the orthogonal best approximation in sampled Frobenius norm, but there is no universal guarantee that the residual is below a chosen epsilon.
 
-A genuine continuous sheet can receive stronger approximation bounds only after assumptions are made about its regularity. For example, sufficiently smooth sheets admit improving polynomial approximation, while analytic sheets can have rapidly decreasing Chebyshev truncation error. Those are conditional mathematical statements; they do not prove that an independently trained transformer weight stack has the required regularity.
+A genuine continuous sheet can receive stronger approximation bounds only after assumptions are made about its regularity. Smoothness can imply improving polynomial approximation, and analyticity can imply rapidly decreasing Chebyshev truncation error. Those statements are conditional; they do not prove that an independently trained transformer weight stack has the required regularity.
 
 The appropriate empirical test for genuine trained weights is therefore:
 
@@ -153,5 +154,6 @@ Stage 2 does not integrate the shared trainer, checkpoint save/resume, activatio
 | Parameter reporting agrees with explicit state | PASS |
 | Added epsilon approximation contract test | PASS |
 | Stage 1 mathematical regression | PASS |
+| Stage 2 pull request merged | PASS |
 
-Stage 2 becomes complete when PR #4 is merged to `master`. Stage 3 has not begun.
+Stage 2 is complete. Stage 3 has not begun.
