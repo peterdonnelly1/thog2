@@ -1,0 +1,83 @@
+# vvv THOG
+name: Stage 4 ephemeral execution and inference
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage4-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install numpy
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Enforce Stage 4 source scope
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          python - <<'PY'
+          import subprocess
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', 'origin/master...HEAD'], text=True
+          ).splitlines()
+          allowed = (
+              'sheet/', 'tests/', 'evidence/stage4_', 'docs/THOG2_Stage_4_',
+              'train_thog2.py', 'sample_thog2.py',
+              'run_thog2_inference.py', 'run_thog2_text.py',
+              'run_thog2_stage4_cuda_check.py',
+              '.github/workflows/stage4-ephemeral-inference.yml',
+          )
+          unexpected = [path for path in changed if not any(
+              path == prefix or path.startswith(prefix) for prefix in allowed
+          )]
+          if unexpected:
+              raise SystemExit(f'unexpected Stage 4 paths: {unexpected}')
+          protected = {'model.py', 'train.py', 'sample.py', 'configurator.py'}
+          touched = sorted(protected.intersection(changed))
+          if touched:
+              raise SystemExit(f'Stage 4 touched protected runtime files: {touched}')
+          print('\n'.join(changed))
+          PY
+      - name: Compile Stage 4 sources
+        run: |
+          python -m compileall -q \
+            sheet \
+            tests \
+            train_thog2.py \
+            run_thog2_inference.py \
+            run_thog2_text.py
+      - name: Run Stage 1 regression
+        run: python tests/run_sheet_stage1_tests.py --evidence /tmp/stage1.json
+      - name: Run Stage 2 regression
+        run: python tests/run_sheet_stage2_tests.py --evidence /tmp/stage2.json
+      - name: Run Stage 3 regression
+        run: python tests/run_sheet_stage3_tests.py --evidence /tmp/stage3.json
+      - name: Run Stage 4 CPU tests
+        run: |
+          mkdir -p evidence
+          python tests/run_sheet_stage4_tests.py --evidence evidence/stage4_cpu_ephemeral.json
+      - name: Upload Stage 4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage4-ephemeral-evidence
+          path: evidence/stage4_cpu_ephemeral.json
+          if-no-files-found: error
+# ^^^ THOG

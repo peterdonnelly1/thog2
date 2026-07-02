@@ -1,18 +1,15 @@
 # vvv THOG
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List
 
 import torch
 from torch import Tensor
 
 from .batch_source import DeterministicBatchSource
-from .trainer_checkpoint_resume import TrainerCheckpointResumeMixin
-from .trainer_checkpoint_save import TrainerCheckpointSaveMixin
-from .trainer_run import TrainerRunMixin
-from .trainer_schedule import TrainerScheduleMixin
+from .memory import MemoryTelemetry
+from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
-from .trainer_step import TrainerStepMixin
 from .training_config import TrainingConfig
 from .training_model import TrainingSheetGPT
 from .training_model_factory import (
@@ -21,15 +18,7 @@ from .training_model_factory import (
 )
 
 
-class SharedTrainer(
-    TrainerCheckpointResumeMixin,
-    TrainerCheckpointSaveMixin,
-    TrainerRunMixin,
-    TrainerStepMixin,
-    TrainerScheduleMixin,
-):
-    """One reference lifecycle for dense and SheetGPT training."""
-
+class Stage4Trainer(SharedTrainer):
     def __init__(
         self,
         config: TrainingConfig,
@@ -42,11 +31,14 @@ class SharedTrainer(
             raise RuntimeError(
                 "CUDA training requested but no CUDA device is available"
             )
+        self.memory_telemetry = MemoryTelemetry(self.device)
+        self.memory_telemetry.snapshot("trainer_start")
         self.model = build_training_model(config)
         if isinstance(self.model, TrainingSheetGPT):
             self.model.set_checkpoint_segment_size(
                 config.checkpoint_segment_size
             )
+        self.memory_telemetry.snapshot("model_construction")
         self.batch_source = DeterministicBatchSource(
             train_tokens,
             validation_tokens,
@@ -60,6 +52,7 @@ class SharedTrainer(
             (config.beta1, config.beta2),
             self.device.type,
         )
+        self.memory_telemetry.snapshot("optimizer_allocation")
         self.scaler = torch.amp.GradScaler(
             "cuda",
             enabled=(
@@ -78,10 +71,20 @@ class SharedTrainer(
             parameter_report=self.parameter_report,
         )
 
+    def train_one_update(self) -> Dict[str, float]:
+        before = self.state.completed_updates
+        metrics = super().train_one_update()
+        phase = "first_optimizer_state" if before == 0 else "steady_update"
+        self.memory_telemetry.snapshot(phase)
+        return metrics
 
-__all__ = [
-    "SharedTrainer",
-    "TrainerEvent",
-    "TrainerState",
-]
+    def evaluate(self) -> Dict[str, float]:
+        metrics = super().evaluate()
+        self.memory_telemetry.snapshot("evaluation")
+        return metrics
+
+    def save_checkpoint(self, path):
+        target = super().save_checkpoint(path)
+        self.memory_telemetry.snapshot("checkpoint")
+        return target
 # ^^^ THOG

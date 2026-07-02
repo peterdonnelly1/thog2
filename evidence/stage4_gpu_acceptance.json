@@ -1,0 +1,21 @@
+{
+  "bfloat16_supported": true,
+  "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "platform": "Linux-6.8.0-111-generic-x86_64-with-glibc2.35",
+  "python": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+  "satisfied": true,
+  "stage": 4,
+  "suite": "cuda_acceptance",
+  "test_execution": {
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 7
+  },
+  "torch": "2.12.1+cu126",
+  "torch_cuda": "12.6"
+}

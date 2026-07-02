@@ -1,0 +1,26 @@
+{
+  "accepted_cpu_scope": true,
+  "branch": "stage4-checkpointed-ephemeral-execution",
+  "commit": "8d5614462afa7ec2bbf613a8bf459d01425919d9",
+  "cuda_available": false,
+  "gpu_gate": {
+    "evidence_path": "evidence/stage4_gpu_acceptance.json",
+    "required_test": "expanded_cuda_acceptance",
+    "satisfied": true
+  },
+  "platform": "Linux-6.17.0-1018-azure-x86_64-with-glibc2.39",
+  "python": "3.11.15 (main, Jun 16 2026, 21:41:52) [GCC 13.3.0]",
+  "stage": 4,
+  "test_execution": {
+    "error_count": 0,
+    "errors": [],
+    "failure_count": 0,
+    "failures": [],
+    "skipped": [],
+    "skipped_count": 0,
+    "successful": true,
+    "tests_run": 22
+  },
+  "torch": "2.12.1+cpu",
+  "workflow_run": 28621636854
+}

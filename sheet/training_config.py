@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
 from .basis import BASIS_VERSION
+from .checkpointing import validate_checkpoint_segment_size
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -17,6 +18,7 @@ EXECUTION_OVERRIDE_FIELDS = {
     "eval_interval",
     "eval_batches",
     "checkpoint_interval",
+    "checkpoint_segment_size",
     "out_dir",
     "log_interval",
 }
@@ -50,6 +52,7 @@ class TrainingConfig:
     base_row_order: int = 32
     basis_version: str = BASIS_VERSION
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
+    checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
     max_updates: int = 10
@@ -105,6 +108,7 @@ class TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
+        validate_checkpoint_segment_size(self.checkpoint_segment_size)
         if self.n_embd % self.n_head != 0:
             raise ValueError(
                 f"n_embd must be divisible by n_head; got {self.n_embd} and {self.n_head}"
