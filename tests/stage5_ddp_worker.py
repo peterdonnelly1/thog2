@@ -83,6 +83,55 @@ def communication_profile(
     }
 
 
+def save_gradient_probe(trainer: SharedTrainer, path: Path) -> Dict[str, object]:
+    batch_state = trainer.batch_source.state_dict()
+    trainer.model.train()
+    trainer.optimizer.zero_grad(set_to_none=True)
+    batch = trainer.batch_source.get_batch("train", device=trainer.device)
+    with trainer.autocast_context():
+        _, loss = trainer.model(batch.inputs, batch.targets)
+    local_finite = loss is not None and bool(torch.isfinite(loss).item())
+    trainer.distributed.require_all_true(
+        local_finite,
+        "non-finite gradient-probe loss on at least one rank",
+    )
+    if loss is None:
+        raise RuntimeError("gradient probe did not produce a loss")
+    loss.backward()
+    trainer.distributed.require_all_true(
+        trainer._local_gradients_are_finite(),
+        "non-finite gradient probe on at least one rank",
+    )
+    gradients = {
+        name: parameter.grad.detach().cpu().clone()
+        for name, parameter in trainer.raw_model.named_parameters()
+        if parameter.grad is not None
+    }
+    trainer.distributed.assert_identical_object(
+        tuple(gradients),
+        "gradient registration",
+    )
+    global_loss = trainer.distributed.mean_float(loss.detach())
+    if trainer.distributed.is_primary:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "loss": global_loss,
+                "gradients": gradients,
+                "global_starts": trainer.batch_source.training_trace()[-1],
+            },
+            path,
+        )
+    trainer.distributed.barrier()
+    trainer.optimizer.zero_grad(set_to_none=True)
+    trainer.batch_source.load_state_dict(batch_state)
+    return {
+        "path": str(path),
+        "loss": global_loss,
+        "gradient_tensors": len(gradients),
+    }
+
+
 def write_evidence(trainer: SharedTrainer, path: Path, evidence: Dict[str, object]) -> None:
     gathered_reports = trainer.distributed.all_gather_object(trainer.distributed.report())
     evidence["rank_reports"] = gathered_reports
@@ -136,11 +185,14 @@ def main() -> None:
     if arguments.mode == "construction":
         evidence["history"] = []
     elif arguments.mode == "update":
+        gradient_path = arguments.output_dir / "ddp_gradient_probe.pt"
+        gradient_probe = save_gradient_probe(trainer, gradient_path)
         history = trainer.run()
         checkpoint = arguments.output_dir / "ddp_update.pt"
         trainer.save_checkpoint(checkpoint)
         evidence.update(
             {
+                "gradient_probe": gradient_probe,
                 "history": history,
                 "checkpoint": str(checkpoint),
                 "completed_updates": trainer.state.completed_updates,
