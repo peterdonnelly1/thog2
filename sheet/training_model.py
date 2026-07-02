@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import torch
 from torch import Tensor
 from torch.nn import functional as F
 
@@ -17,7 +18,7 @@ class TrainingSheetGPT(SheetGPT):
         bias_name: str,
         layer_index: int,
     ) -> Tensor:
-        with __import__("torch").autocast(
+        with torch.autocast(
             device_type=inputs.device.type,
             enabled=False,
         ):
