@@ -1,6 +1,8 @@
 # vvv THOG
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Tuple, Union
 
@@ -111,6 +113,35 @@ class DeterministicBatchSource:
         self.validation_generator.set_state(state["validation_generator_state"])
         self.trace = list(state.get("trace", []))
 
+    def full_trace(self) -> Tuple[Tuple[str, Tuple[int, ...]], ...]:
+        return tuple(
+            (str(item["split"]), tuple(int(value) for value in item["starts"]))
+            for item in self.trace
+        )
+
     def training_trace(self) -> Tuple[Tuple[int, ...], ...]:
-        return tuple(tuple(item["starts"]) for item in self.trace if item["split"] == "train")
+        return tuple(
+            starts
+            for split, starts in self.full_trace()
+            if split == "train"
+        )
+
+    def validation_trace(self) -> Tuple[Tuple[int, ...], ...]:
+        return tuple(
+            starts
+            for split, starts in self.full_trace()
+            if split == "val"
+        )
+
+    def trace_digest(self, split: str) -> str:
+        if split == "train":
+            trace = self.training_trace()
+        elif split == "val":
+            trace = self.validation_trace()
+        elif split == "all":
+            trace = self.full_trace()
+        else:
+            raise ValueError(f"invalid trace split: {split!r}")
+        payload = json.dumps(trace, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 # ^^^ THOG
