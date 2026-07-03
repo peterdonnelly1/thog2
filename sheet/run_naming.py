@@ -173,6 +173,26 @@ def artifact_paths(
     }
 
 
+def architecture_run_name(config) -> str:
+    """Return the frozen Stage 4-6 selector name for legacy evidence paths."""
+
+    if config.model_type == "thog2_sheet":
+        return (
+            f"THOG2_SHEET_L{config.n_layer}_H{config.n_head}_D{config.n_embd}"
+            f"_C{config.block_size}_P{config.depth_order}_Q{config.base_row_order}"
+        )
+    return (
+        f"DENSE_L{config.n_layer}_H{config.n_head}_D{config.n_embd}"
+        f"_C{config.block_size}"
+    )
+
+
+def architecture_output_directory(config, root: str | Path) -> Path:
+    """Retain the frozen Stage 4-6 output-directory contract."""
+
+    return Path(root) / architecture_run_name(config)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build a canonical THOG2 artifact name")
     parser.add_argument("--model-type", choices=("dense", "thog2_sheet"), required=True)
