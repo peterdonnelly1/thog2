@@ -164,12 +164,44 @@ def evaluation_metric_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def telemetry_configuration(
+    manifest: Mapping[str, Any],
+    run: Mapping[str, Any],
+    parameter_report: Mapping[str, Any],
+) -> Dict[str, Any]:
+    dataset = manifest["dataset"]
+    return {
+        "metric_schema_version": manifest["wandb"]["metric_schema_version"],
+        "protocol_sha256": manifest["protocol_sha256"],
+        "source_commit": manifest["source"]["commit"],
+        "source_branch": manifest["source"]["branch"],
+        "dataset_format": dataset["format"],
+        "vocab_size": dataset["vocab_size"],
+        "train_tokens": dataset["train_tokens"],
+        "validation_tokens": dataset["validation_tokens"],
+        "train_sampled_sha256": dataset["train_file"]["sampled_sha256"],
+        "validation_sampled_sha256": dataset["validation_file"]["sampled_sha256"],
+        "budget": manifest["budget"],
+        "scientific_scope": manifest["scientific_scope"],
+        "artifact_prefix": run["artifact_prefix"],
+        "artifact_name": run["artifact_name"],
+        "comparison_group": run["wandb"]["group"],
+        "job_type": run["wandb"]["job_type"],
+        "model_type": run["model_type"],
+        "base_row_order": run["base_row_order"],
+        "row_order_4d": run["row_order_4d"],
+        "checkpoint_segment_size": run["checkpoint_segment_size"],
+        "parameter_report": dict(parameter_report),
+    }
+
+
 __all__ = [
     "TELEMETRY_FINISH_TIMEOUT_SECONDS",
     "evaluation_metric_payload",
     "init_resilient_telemetry",
     "metric_common",
     "source_identity",
+    "telemetry_configuration",
     "training_metric_payload",
     "verify_manifest_source",
     "verify_source_identity",
