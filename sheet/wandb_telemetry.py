@@ -192,7 +192,13 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
     def progress(run_id: str, event: str, **payload: Any) -> None:
         original_progress(run_id, event, **payload)
         if trainer.distributed.is_primary:
-            telemetry.log_event(event, payload)
+            telemetry_payload = dict(payload)
+            multiplier = int(getattr(trainer, "telemetry_token_multiplier", 1))
+            if "consumed_tokens" in telemetry_payload:
+                telemetry_payload["consumed_tokens"] = (
+                    int(telemetry_payload["consumed_tokens"]) * multiplier
+                )
+            telemetry.log_event(event, telemetry_payload)
 
     trainer._print_progress = progress
 
