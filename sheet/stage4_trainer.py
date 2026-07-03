@@ -12,7 +12,6 @@ from .memory import MemoryTelemetry
 from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
 from .training_config import TrainingConfig
-from .training_model import TrainingSheetGPT
 from .training_model_factory import (
     build_training_model,
     training_parameter_report,
@@ -35,10 +34,13 @@ class Stage4Trainer(SharedTrainer):
         self.events: List[TrainerEvent] = []
 
         self.raw_model = build_training_model(config, device=self.device)
-        if isinstance(self.raw_model, TrainingSheetGPT):
-            self.raw_model.set_checkpoint_segment_size(
-                config.checkpoint_segment_size
-            )
+        checkpoint_setter = getattr(
+            self.raw_model,
+            "set_checkpoint_segment_size",
+            None,
+        )
+        if callable(checkpoint_setter):
+            checkpoint_setter(config.checkpoint_segment_size)
         self.memory_telemetry.snapshot("model_construction")
         self.parameter_report = training_parameter_report(
             self.raw_model,
