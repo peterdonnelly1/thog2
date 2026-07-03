@@ -42,6 +42,43 @@ def find_run(manifest: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     return matches[0]
 
 
+def telemetry_configuration(
+    manifest: Dict[str, Any],
+    run: Dict[str, Any],
+    parameter_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    dataset = manifest["dataset"]
+    return {
+        "metric_schema_version": manifest["wandb"]["metric_schema_version"],
+        "protocol_sha256": manifest["protocol_sha256"],
+        "source_commit": manifest["source"]["commit"],
+        "source_branch": manifest["source"]["branch"],
+        "dataset": {
+            "format": dataset["format"],
+            "vocab_size": dataset["vocab_size"],
+            "train_tokens": dataset["train_tokens"],
+            "validation_tokens": dataset["validation_tokens"],
+            "train_sampled_sha256": dataset["train_file"]["sampled_sha256"],
+            "validation_sampled_sha256": dataset["validation_file"]["sampled_sha256"],
+        },
+        "budget": manifest["budget"],
+        "scientific_scope": manifest["scientific_scope"],
+        "artifact": {
+            "prefix": run["artifact_prefix"],
+            "name": run["artifact_name"],
+            "comparison_group": run["wandb"]["group"],
+            "job_type": run["wandb"]["job_type"],
+        },
+        "model": {
+            "model_type": run["model_type"],
+            "base_row_order": run["base_row_order"],
+            "row_order_4d": run["row_order_4d"],
+            "checkpoint_segment_size": run["checkpoint_segment_size"],
+        },
+        "parameter_report": parameter_report,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Execute one isolated THOG2 Stage 6 controlled pilot run"
