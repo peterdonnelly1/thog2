@@ -1,186 +1,145 @@
-# THOG2 Stage 6 W&B and Artifact Naming Record
+# THOG2 W&B, Configuration, Runner, and Artifact Naming Record
 
 ## Status
 
-This record describes the instrumentation and artifact layout for the final THOG2 Chebyshev Sheet Stage 6 controlled comparison.
+This record describes the permanent post-Stage-6 THOG2 training interface for DENSE2 and SHEET.
 
-The scientific pilot completed successfully under protocol SHA-256 `1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490` and was classified `viable_for_further_study`.
-
-The accepted scientific run used the direct Stage 6 orchestrator at pilot source commit `2071746ab18f4182010797241d2b29adb5a7a305`. It therefore produced selector-based checkpoint directories and `.combined.log` files rather than the later THOG-style architecture-name mirrors. This is an operational naming difference only: the later commits did not alter the model, trainer, protocol, batch traces, optimizer schedule, or analyzer. Exact pilot summaries and raw-artifact hashes are recorded in `evidence/stage6_pilot_acceptance.json`.
-
-The THOG-style naming and W&B adapter remain the supported convention for successor runs.
+The accepted Stage 6 pilot remains immutable historical evidence. Its original protocol manifests, hashes, and selector-compatible result handling remain supported. New ordinary training runs use the canonical interface described here.
 
 ## Architecture prefixes
 
-THOG-family architecture prefixes are:
+THOG2 uses exactly:
 
-- `DENSE` — dense control in the original THOG repository;
-- `THOG` — one-dimensional THOG basis model;
-- `VERMEER` — THOG Vermeer correction model;
-- `SHEET` — two-dimensional Chebyshev Sheet model.
+- `DENSE2_` for the THOG2 dense control;
+- `SHEET_` for the two-dimensional Chebyshev Sheet model.
 
-THOG2 supports only:
+`DENSE2` is intentionally distinct from THOG's `DENSE`, because DENSE, VERMEER, DENSE2, and SHEET runs may appear in the same W&B project and panels.
 
-- `DENSE2` — THOG2 dense control;
-- `SHEET` — THOG2 two-dimensional Chebyshev Sheet.
+No padding underscore is added after `SHEET`.
 
-`DENSE2` is intentionally distinct from THOG's `DENSE` mode. `SHEET__` uses two underscores after its five-character prefix so the following host field aligns with the six-character `DENSE2` prefix.
+## Canonical artifact grammar
 
-## Artifact naming
-
-Each newly prepared Stage 6 run receives one architecture-first name derived before training and locked inside `protocol.json`.
-
-Representative forms are:
+Representative names are:
 
 ```text
-DENSE2_scruffy_STAGE6__OWT__L72_H12_D768_C256__...
-SHEET__scruffy_STAGE6__OWT__L72_H12_D768_C256_P16_Q128_Q4D512__...
+DENSE2_scruffy__AKAROA__owt__l_72_h_12_d_768_ctx_256__b_12_ga_160__steps_100
+SHEET_scruffy__AKAROA__owt__l_72_h_12_d_768_ctx_256_p_16_q_64__b_12_ga_160__steps_100
 ```
 
-The full name records:
+The grammar follows THOG's architecture-first convention:
 
-- architecture prefix;
-- host label;
-- comparison run name;
-- dataset;
-- L/H/D/C logical geometry;
-- P/Q/Q4D orders for Sheet;
-- global batch, gradient accumulation, and world size;
-- update, evaluation, logging, and warmup controls;
-- learning-rate schedule, weight decay, Adam betas, and gradient clipping;
-- model and data seeds;
-- dtype and activation-checkpoint segment size;
-- source commit prefix;
-- experiment suffix.
+1. architecture prefix and host;
+2. named run;
+3. dataset;
+4. logical geometry;
+5. architecture-specific orders;
+6. local mini-batch and global gradient accumulation;
+7. completed optimizer updates.
 
-Names are limited to 240 characters.
+For SHEET, `p` is the depth order and `q` is the base row order. Wider tensor-family row orders remain deterministic consequences of `q` and are not duplicated in the filename.
 
-## Derived files
+Optimizer details, seeds, source identity, dtype, checkpointing controls, and complete configuration remain in checkpoints, result JSON, and W&B config rather than making every filesystem component unnecessarily long.
 
-For newly prepared runs, the manifest records:
+## Deterministic truncation
+
+Artifact components are bounded before filesystem use. When a generated name exceeds the configured limit, THOG2 retains the beginning, the end, and a twelve-hex SHA-256 digest between them.
+
+The marker is:
+
+```text
+__TRUNC_<digest>__
+```
+
+This follows BRAINIAC's principle of deterministic, identity-preserving truncation rather than silently clipping the tail. Log filenames are independently bounded to the normal 255-character filesystem-component limit while preserving their timestamp and `.log` suffix.
+
+## Artifact layout
+
+New runs use:
 
 ```text
 checkpoints/<artifact_name>/ckpt.pt
-checkpoints/<artifact_name>/result.json
-results/<artifact_name>.json
-logs/<artifact_name>.log
+logs/<artifact_name>/<bounded_artifact_name>_train_<timestamp>.log
+results/<artifact_name>/result.json
+wandb/...
 ```
 
-The worker-local result remains beside the checkpoint. The orchestrator atomically mirrors it to the canonical architecture-named result file. Restart and analysis validate the protocol digest before accepting either copy.
+The W&B run name equals the canonical artifact name.
 
-The accepted pilot predates this final naming wrapper and used:
+## Public configuration vocabulary
+
+DENSE2 and SHEET expose the same names for the same controls. Shared names also match THOG:
+
+- `max_iters`;
+- `warmup_iters`;
+- `eval_iters`;
+- `eval_interval`;
+- `log_interval`;
+- `batch_size`;
+- `gradient_accumulation_steps`;
+- `block_size`;
+- `n_layer`;
+- `n_head`;
+- `n_embd`;
+- `activation_checkpointing`;
+- `checkpoint_segment_size`;
+- `learning_rate`;
+- `min_lr`;
+- `weight_decay`;
+- `beta1`;
+- `beta2`;
+- `grad_clip`;
+- `model_seed`;
+- `data_seed`;
+- `dtype`;
+- `device`.
+
+SHEET additionally exposes `depth_order` and `base_row_order`.
+
+The internal historical trainer still stores its original Stage 1-6 field names where required for checkpoint compatibility. The permanent runner converts the canonical public schema at one explicit boundary. New result JSON and W&B configurations carry the canonical names.
+
+## Gradient accumulation semantics
+
+`gradient_accumulation_steps` is global across all participating GPUs, matching THOG. For world size `G`, each rank executes:
 
 ```text
-<output_root>/<run_id>/ckpt.pt
-<output_root>/<run_id>/result.json
-<output_root>/logs/<run_id>.combined.log
+local_gradient_accumulation_steps = gradient_accumulation_steps / G
 ```
+
+The global value must divide evenly by `G`. Tokens per optimizer update are:
+
+```text
+batch_size * gradient_accumulation_steps * block_size
+```
+
+## Activation checkpointing
+
+DENSE2 and SHEET share the same segmented activation-checkpointing interface. The scruffy runners default to local mini-batch size 12, checkpointing enabled, and checkpoint segment size 12.
+
+DENSE2 uses a training-only subclass of the unchanged nanoGPT model. It preserves parameter names and checkpoint state while routing the transformer block list through the same non-reentrant segmented checkpoint executor used by SHEET.
+
+## User-facing runners
+
+The top-level scripts are:
+
+```text
+current_scruffy_train_DENSE_OWT.sh
+current_scruffy_train_SHEET_OWT.sh
+```
+
+They provide matching `getopts` letters for shared controls, resolved-setting output, fresh/resume protection, deterministic artifact identity, dry-run support, one- or multi-GPU launch, timestamped log capture, and direct dispatch to `python -m run_thog2_owt`.
+
+There is no nearly empty intermediate shell wrapper.
 
 ## W&B ownership
 
-The scientific THOG2 worker remains the authoritative producer of local evidence. W&B is owned by the existing THOG controlled-comparison adapter, extended for THOG2 Stage 6 and merged into THOG `master` at:
+THOG2 owns its ordinary W&B instrumentation directly. It does not require a runtime import or monkeypatch from the THOG repository.
 
-```text
-213f144162d2cf76d51e7338ba8434c4e8dcb64c
-```
+One W&B run is created per architecture run under project `thog` by default. Job types are `dense2` and `sheet`.
 
-The single-owner launcher is:
+The principal axes are `optimizer_update`, `iter`, `tokens_seen`, and `clean_training_seconds`. Training, evaluation, resource, and SHEET diagnostic metrics use the same vocabulary for DENSE2 and SHEET. Telemetry is emitted outside the synchronized clean training and evaluation timers. Online initialization falls back to offline logging on a W&B communication failure.
 
-```text
-thog/thog2_stage6_launcher.py
-```
+Local checkpoints and result JSON remain authoritative. W&B is visualization and operational telemetry only.
 
-It:
+## Compatibility
 
-1. imports the THOG2 worker in a fresh process;
-2. neutralizes the worker's provisional telemetry hook;
-3. observes the existing Stage 6 progress seam outside synchronized training and evaluation timers;
-4. creates exactly one W&B run per architecture;
-5. restores all monkeypatched process state;
-6. reads final resource and Sheet diagnostics only after the authoritative local result exists;
-7. uses THOG's resilient online-to-offline W&B initialization and bounded finish behavior.
-
-The THOG2 convenience launcher is:
-
-```text
-run_thog2_stage6_instrumented.sh
-```
-
-It locks the required THOG adapter commit, preserves restart-at-run-boundary behavior, writes architecture-named logs, validates each result, and finally invokes ordinary THOG2 analysis.
-
-## W&B organization
-
-One W&B run is created per architecture under one locked comparison group.
-
-Run names equal the full artifact names. Job types are:
-
-- `dense2`;
-- `sheet_q64`;
-- `sheet_q128`;
-- `sheet_q256`.
-
-The primary axes are:
-
-- `optimizer_update`;
-- `iter` as a compatibility alias;
-- `tokens_seen`;
-- `clean_training_seconds`.
-
-The W&B configuration contains hashes, counts, geometry, controls, artifact identity, and parameter reports. It intentionally excludes local filesystem paths and repository remote URLs.
-
-## Logged metrics
-
-At Stage 6 reporting updates:
-
-- training loss;
-- learning rate;
-- gradient norm;
-- consumed tokens;
-- clean cumulative training seconds.
-
-At aligned evaluations:
-
-- train-split evaluation loss and perplexity;
-- validation loss and perplexity.
-
-At completion:
-
-- persistent and dense-equivalent parameter counts;
-- checkpoint size;
-- clean tokens per second;
-- peak allocated and reserved device memory;
-- Sheet coefficient RMS;
-- high depth-order and row-order energy fractions;
-- compact-state violation count.
-
-## Timing integrity
-
-W&B communication is not inside the synchronized `train_one_update()` timer or evaluation timer. Therefore `clean_training_seconds` excludes telemetry overhead.
-
-No `wandb.watch()`, graph capture, parameter histograms, automatic checkpoint upload, or microstep logging is enabled.
-
-## Source of truth
-
-W&B is visualization and operational telemetry only. Acceptance is based on the local Stage 6 artifacts:
-
-- `protocol.json`;
-- per-run worker results;
-- checkpoints;
-- logs;
-- `pilot_status.json`;
-- analysis JSON, CSV, Markdown, and SVG files;
-- committed summarized evidence and artifact hashes.
-
-A W&B communication failure must not alter model state, batch traces, update count, or scientific acceptance evidence.
-
-## Verification
-
-Before the GPU pilot:
-
-- THOG2 Stage 6 CPU/control suite: 25 tests passed locally;
-- existing THOG controlled-comparison W&B suite: 9 tests passed;
-- THOG2 adapter mapping suite: 4 tests passed;
-- two-update single-run adapter rehearsal passed;
-- four-run matched DENSE2/Q64/Q128/Q256 launcher rehearsal passed.
-
-The direct controlled GPU pilot subsequently completed all four runs and passed protocol, trace, update, token, and evaluation-position validation. Its classification and resource results are recorded in the Stage 6 scientific conclusion and acceptance evidence.
+The accepted Stage 6 protocol and evidence are not rewritten. Legacy Stage 6 manifests continue to use their locked field names and paths. The permanent runner is the supported interface for subsequent DENSE2 and SHEET experiments.
