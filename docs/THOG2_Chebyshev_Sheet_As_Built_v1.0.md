@@ -1,16 +1,16 @@
 # THOG2 Chebyshev Sheet As-Built Record
 
-Version 1.0 — candidate final pending final regression and Stage 6 merge
+Version 1.0 — final implementation record pending Stage 6 merge
 
 ## 1. Status
 
-The initial THOG2 Chebyshev Sheet implementation is functionally complete through the Stage 6 controlled GPU pilot.
+The initial THOG2 Chebyshev Sheet implementation is functionally complete through the Stage 6 controlled GPU pilot and final hosted regression.
 
 The locked pilot completed all four runs and passed its scientific control checks. The recorded classification is:
 
 **viable for further study**.
 
-The implementation stage is not yet closed. Closure still requires final full regression on the post-evidence Stage 6 branch head, acceptance of PR #10, and merge to `master`.
+All Stage 1 through Stage 6 hosted workflows passed on accepted feature head `a44fc48ba50b0aead05ee5192dd490075d44dd7e`. The only remaining closure action is acceptance and merge of PR #10 to `master`.
 
 ## 2. Repository and baseline
 
@@ -19,6 +19,7 @@ The implementation stage is not yet closed. Closure still requires final full re
 - default branch: `master`;
 - accepted Stage 5 baseline: `ed26a681d2a91ddfb47b312ed0c6ef6391fea071`;
 - Stage 6 pilot source commit: `2071746ab18f4182010797241d2b29adb5a7a305`;
+- final regression feature head: `a44fc48ba50b0aead05ee5192dd490075d44dd7e`;
 - Stage 6 pull request: #10;
 - architecture designation: THOG2 Chebyshev Sheet;
 - original nanoGPT dense path: retained and independently selectable.
@@ -131,7 +132,8 @@ The sole training objective is ordinary next-token cross-entropy. No auxiliary s
 - `run_thog2_stage6_one.py` — one isolated run process;
 - `run_thog2_stage6_pilot.py` — dataset fingerprinting, immutable manifest, four-run orchestration, logs, and analysis;
 - `docs/THOG2_Stage_6_Scientific_Conclusion.md` — reviewed scientific classification;
-- `evidence/stage6_pilot_acceptance.json` — committed summarized pilot evidence and artifact hashes.
+- `evidence/stage6_pilot_acceptance.json` — committed summarized pilot evidence and artifact hashes;
+- `evidence/stage6_final_regression.json` — accepted complete hosted regression record.
 
 ## 5. Configuration semantics
 
@@ -289,12 +291,15 @@ Stage 6 verification includes:
 - coefficient-order and generated-weight diagnostics;
 - pilot evidence schema;
 - mismatch rejection and aligned comparison tables;
-- 25/25 Stage 6 CPU/control tests before the pilot;
 - four successful controlled GPU runs;
 - validated equal-update, equal-time, resource, and coefficient-utilization analysis;
-- explicit scientific classification and committed summarized evidence.
+- explicit scientific classification and committed summarized evidence;
+- exact THOG2 artifact naming tests;
+- legacy selector-based result-path compatibility;
+- 24/24 Stage 6 control/evidence tests on the accepted final regression head;
+- successful Stage 1, Stage 2, Stage 3, Stage 4, Stage 5, and Stage 6 hosted workflows.
 
-Final full regression on the post-evidence branch head remains pending.
+The final hosted regression is recorded in `evidence/stage6_final_regression.json`.
 
 ## 13. Known limitations
 
@@ -324,12 +329,6 @@ The following are not part of this implementation:
 
 Any such work requires a successor specification or controlled amendment.
 
-## 15. Remaining closure gates
+## 15. Remaining closure action
 
-Before Stage 6 is merged and this record becomes final:
-
-- run the complete regression on the post-evidence branch head;
-- record the final regression evidence and accepted Stage 6 head;
-- mark PR #10 ready for review;
-- accept and merge PR #10;
-- record the resulting Stage 6 merge commit.
+Accept and merge PR #10, then record the resulting Stage 6 merge commit on `master`.
