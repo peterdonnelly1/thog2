@@ -6,7 +6,7 @@ import importlib
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -77,6 +77,52 @@ def telemetry_configuration(
         },
         "parameter_report": parameter_report,
     }
+
+
+def start_telemetry(
+    manifest: Dict[str, Any],
+    run: Dict[str, Any],
+    parameter_report: Dict[str, Any],
+) -> Tuple[Optional[Any], Optional[Any]]:
+    if not manifest["wandb"]["enabled"]:
+        return None, None
+    module = importlib.import_module("wandb")
+    control = manifest["wandb"]
+    handle = init_resilient_telemetry(
+        module,
+        project=str(control["project"]),
+        entity=control.get("entity"),
+        name=str(run["wandb"]["name"]),
+        group=str(run["wandb"]["group"]),
+        job_type=str(run["wandb"]["job_type"]),
+        config=telemetry_configuration(manifest, run, parameter_report),
+    )
+    define_metric = getattr(handle, "define_metric", module.define_metric)
+    define_metric("optimizer_update")
+    for metric in (
+        "iter",
+        "tokens_seen",
+        "clean_training_seconds",
+        "training_loss",
+        "validation_loss",
+        "training_evaluation_loss",
+        "learning_rate",
+        "gradient_norm",
+    ):
+        define_metric(metric, step_metric="optimizer_update")
+    handle.summary.update({
+        "artifact_name": run["artifact_name"],
+        "artifact_prefix": run["artifact_prefix"],
+        "model_type": run["model_type"],
+        "protocol_sha256": manifest["protocol_sha256"],
+        "source_commit": manifest["source"]["commit"],
+        "comparison_group": run["wandb"]["group"],
+        "persistent_parameters": parameter_report["persistent_parameters"],
+        "dense_equivalent_parameters": parameter_report[
+            "dense_equivalent_total_parameters"
+        ],
+    })
+    return module, handle
 
 
 def main() -> None:
