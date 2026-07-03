@@ -8,7 +8,7 @@ set -uo pipefail
 #  Purpose:
 #    - compare a conventional GPT-2 Small architecture against a much deeper
 #      SHEET model that uses the same width, head count, context, optimiser,
-#      data trace, token budget, and training controls
+#      data trace, token budget, and model-level training controls
 #    - use SHEET's compact persistent state to buy logical depth rather than
 #      merely comparing two models at the same layer count
 #    - run the two experiments sequentially on one GPU and preserve separate
@@ -18,14 +18,17 @@ set -uo pipefail
 #    DENSE2: L12  / H12 / D768 / context 1024
 #    SHEET:  L144 / H12 / D768 / context 1024 / P16 / Q64
 #
+#  Execution distinction:
+#    - DENSE2 uses ordinary GPT-2 execution without activation checkpointing
+#    - SHEET uses segmented activation checkpointing, segment size 12
+#
 #  Default execution:
 #    - 250 optimiser updates per model
 #    - local mini-batch 3
 #    - global gradient accumulation 160
 #    - 491,520 training tokens per optimiser update
-#    - activation checkpointing enabled, segment size 12
-#    - evaluation at update 0 and every 25 updates, 5 batches per split
-#    - periodic checkpoint every 25 updates
+#    - evaluation at update 0 and every 20 updates, 5 batches per split
+#    - periodic checkpoint every 20 updates
 #    - W&B online
 #
 #  The underlying canonical runners remain:
@@ -41,13 +44,13 @@ STEPS=250
 BATCH_SIZE=3
 GRADIENT_ACCUMULATION_STEPS=160
 EVAL_ITERS=5
-EVAL_INTERVAL=25
+EVAL_INTERVAL=20
 LOG_INTERVAL=1
 WARMUP_ITERS=10
-CHECKPOINT_INTERVAL=25
+CHECKPOINT_INTERVAL=20
 DEPTH_ORDER=16
 BASE_ROW_ORDER=64
-ACTIVATION_CHECKPOINTING=true
+SHEET_ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
 WANDB_MODE="online"
 WANDB_ENABLED=true
@@ -70,13 +73,15 @@ Usage: $0 [options]
   -k CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL}    0 disables periodic saves
   -P DEPTH_ORDER=${DEPTH_ORDER}                    SHEET only
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}              SHEET only
-  -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
-  -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
+  -p SHEET_ACTIVATION_CHECKPOINTING=${SHEET_ACTIVATION_CHECKPOINTING}
+  -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}  SHEET only
   -M WANDB_MODE=${WANDB_MODE}                 online | offline | disabled
   -W WANDB_ENABLED=${WANDB_ENABLED}
   -R RUN_SELECTION=${RUN_SELECTION}            both | dense | sheet
   -x DRY_RUN=${DRY_RUN}
   -h show this help
+
+DENSE2 activation checkpointing is deliberately fixed off.
 EOF
 }
 
@@ -94,7 +99,7 @@ while getopts ":q:g:n:b:A:u:e:l:w:k:P:Q:p:S:M:W:R:x:h" option; do
     k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     P) DEPTH_ORDER="$OPTARG" ;;
     Q) BASE_ROW_ORDER="$OPTARG" ;;
-    p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
+    p) SHEET_ACTIVATION_CHECKPOINTING="$OPTARG" ;;
     S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     M) WANDB_MODE="$OPTARG" ;;
     W) WANDB_ENABLED="$OPTARG" ;;
@@ -148,7 +153,7 @@ do
 done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
-validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
+validate_true_false "$SHEET_ACTIVATION_CHECKPOINTING" "SHEET_ACTIVATION_CHECKPOINTING"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$DRY_RUN" "DRY_RUN"
 (( WARMUP_ITERS < STEPS )) || {
@@ -196,25 +201,26 @@ TOTAL_TOKENS=$((TOKENS_PER_UPDATE * STEPS))
 
 cat <<EOF
 ===== GPT-2 SMALL vs SHEET-144 COMPARISON =====
-started:                 $(date)
-run name/group:          $RUN_NAME
-run mode:                $RUN_MODE
-selection:               $RUN_SELECTION
-updates/model:           $STEPS
-mini-batch/GPU:          $BATCH_SIZE
-global accumulation:     $GRADIENT_ACCUMULATION_STEPS
-tokens/update:           $TOKENS_PER_UPDATE
-total tokens/model:      $TOTAL_TOKENS
-DENSE2 geometry:         L12/H12/D768/C1024
-SHEET geometry:          L144/H12/D768/C1024/P${DEPTH_ORDER}/Q${BASE_ROW_ORDER}
-activation checkpoint:   $ACTIVATION_CHECKPOINTING
-checkpoint segment:      $CHECKPOINT_SEGMENT_SIZE
-checkpoint interval:     $CHECKPOINT_INTERVAL
-eval interval/batches:   $EVAL_INTERVAL / $EVAL_ITERS
-warmup updates:          $WARMUP_ITERS
-W&B:                     $WANDB_ENABLED ($WANDB_MODE)
-Python:                  $PYTHON_BIN
-orchestrator log:        $ORCHESTRATOR_LOG
+started:                    $(date)
+run name/group:             $RUN_NAME
+run mode:                   $RUN_MODE
+selection:                  $RUN_SELECTION
+updates/model:              $STEPS
+mini-batch/GPU:             $BATCH_SIZE
+global accumulation:        $GRADIENT_ACCUMULATION_STEPS
+tokens/update:              $TOKENS_PER_UPDATE
+total tokens/model:         $TOTAL_TOKENS
+DENSE2 geometry:            L12/H12/D768/C1024
+SHEET geometry:             L144/H12/D768/C1024/P${DEPTH_ORDER}/Q${BASE_ROW_ORDER}
+DENSE2 checkpointing:       false
+SHEET checkpointing:        $SHEET_ACTIVATION_CHECKPOINTING
+SHEET checkpoint segment:   $CHECKPOINT_SEGMENT_SIZE
+checkpoint interval:        $CHECKPOINT_INTERVAL
+eval interval/batches:      $EVAL_INTERVAL / $EVAL_ITERS
+warmup updates:             $WARMUP_ITERS
+W&B:                        $WANDB_ENABLED ($WANDB_MODE)
+Python:                     $PYTHON_BIN
+orchestrator log:           $ORCHESTRATOR_LOG
 ================================================
 EOF
 
@@ -228,8 +234,6 @@ COMMON_ARGS=(
   -H 12
   -D 768
   -C 1024
-  -p "$ACTIVATION_CHECKPOINTING"
-  -S "$CHECKPOINT_SEGMENT_SIZE"
   -w "$WARMUP_ITERS"
   -e "$EVAL_INTERVAL"
   -u "$EVAL_ITERS"
@@ -252,6 +256,8 @@ if [[ "$RUN_SELECTION" == both || "$RUN_SELECTION" == dense ]]; then
   ./current_scruffy_train_DENSE_OWT.sh \
     "${COMMON_ARGS[@]}" \
     -L 12 \
+    -p false \
+    -S "$CHECKPOINT_SEGMENT_SIZE" \
     "${EXTRA_ARGS[@]}"
   DENSE_EXIT=$?
   DENSE_STATUS="EXIT=$DENSE_EXIT"
@@ -266,6 +272,8 @@ if [[ "$RUN_SELECTION" == both || "$RUN_SELECTION" == sheet ]]; then
     -L 144 \
     -P "$DEPTH_ORDER" \
     -Q "$BASE_ROW_ORDER" \
+    -p "$SHEET_ACTIVATION_CHECKPOINTING" \
+    -S "$CHECKPOINT_SEGMENT_SIZE" \
     "${EXTRA_ARGS[@]}"
   SHEET_EXIT=$?
   SHEET_STATUS="EXIT=$SHEET_EXIT"
