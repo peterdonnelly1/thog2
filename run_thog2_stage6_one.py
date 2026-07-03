@@ -13,6 +13,7 @@ import numpy as np
 from sheet.stage6_protocol import verify_protocol_manifest
 from sheet.stage6_source import evaluation_metric_payload
 from sheet.stage6_source import init_resilient_telemetry
+from sheet.stage6_source import telemetry_configuration
 from sheet.stage6_source import training_metric_payload
 from sheet.stage6_source import verify_manifest_source
 from sheet.stage6_trainer import Stage6Trainer
@@ -31,8 +32,7 @@ def load_vocab_size(dataset_dir: Path) -> int:
     if not meta_path.exists():
         return 50304
     with meta_path.open("rb") as handle:
-        metadata = pickle.load(handle)
-    return int(metadata["vocab_size"])
+        return int(pickle.load(handle)["vocab_size"])
 
 
 def find_run(manifest: Dict[str, Any], run_id: str) -> Dict[str, Any]:
@@ -40,43 +40,6 @@ def find_run(manifest: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     if len(matches) != 1:
         raise ValueError(f"manifest does not contain exactly one run {run_id!r}")
     return matches[0]
-
-
-def telemetry_configuration(
-    manifest: Dict[str, Any],
-    run: Dict[str, Any],
-    parameter_report: Dict[str, Any],
-) -> Dict[str, Any]:
-    dataset = manifest["dataset"]
-    return {
-        "metric_schema_version": manifest["wandb"]["metric_schema_version"],
-        "protocol_sha256": manifest["protocol_sha256"],
-        "source_commit": manifest["source"]["commit"],
-        "source_branch": manifest["source"]["branch"],
-        "dataset": {
-            "format": dataset["format"],
-            "vocab_size": dataset["vocab_size"],
-            "train_tokens": dataset["train_tokens"],
-            "validation_tokens": dataset["validation_tokens"],
-            "train_sampled_sha256": dataset["train_file"]["sampled_sha256"],
-            "validation_sampled_sha256": dataset["validation_file"]["sampled_sha256"],
-        },
-        "budget": manifest["budget"],
-        "scientific_scope": manifest["scientific_scope"],
-        "artifact": {
-            "prefix": run["artifact_prefix"],
-            "name": run["artifact_name"],
-            "comparison_group": run["wandb"]["group"],
-            "job_type": run["wandb"]["job_type"],
-        },
-        "model": {
-            "model_type": run["model_type"],
-            "base_row_order": run["base_row_order"],
-            "row_order_4d": run["row_order_4d"],
-            "checkpoint_segment_size": run["checkpoint_segment_size"],
-        },
-        "parameter_report": parameter_report,
-    }
 
 
 def start_telemetry(
@@ -159,6 +122,8 @@ def main() -> None:
         raise ValueError("validation-token count changed after protocol lock")
 
     trainer = Stage6Trainer(config, train_tokens, validation_tokens)
+    if trainer.distributed.is_primary:
+        start_telemetry(manifest, run, trainer.parameter_report)
     try:
         result = trainer.run_pilot(
             run_id=arguments.run_id,
@@ -167,19 +132,15 @@ def main() -> None:
             result_path=result_path,
         )
         if trainer.distributed.is_primary:
-            print(json.dumps(
-                {
-                    "run_id": arguments.run_id,
-                    "completed_updates": result["budget"]["completed_updates"],
-                    "consumed_tokens": result["budget"]["consumed_tokens"],
-                    "final_validation_loss": result["evaluations"][-1]["val"],
-                    "training_seconds": result["timing"]["training_seconds"],
-                    "tokens_per_training_second": result["timing"]["tokens_per_training_second"],
-                    "result": str(result_path),
-                },
-                indent=2,
-                sort_keys=True,
-            ))
+            print(json.dumps({
+                "run_id": arguments.run_id,
+                "completed_updates": result["budget"]["completed_updates"],
+                "consumed_tokens": result["budget"]["consumed_tokens"],
+                "final_validation_loss": result["evaluations"][-1]["val"],
+                "training_seconds": result["timing"]["training_seconds"],
+                "tokens_per_training_second": result["timing"]["tokens_per_training_second"],
+                "result": str(result_path),
+            }, indent=2, sort_keys=True))
     finally:
         trainer.close()
 
