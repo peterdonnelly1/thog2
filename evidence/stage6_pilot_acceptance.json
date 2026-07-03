@@ -124,9 +124,14 @@
       }
     }
   },
+  "final_regression": {
+    "accepted_feature_head": "a44fc48ba50b0aead05ee5192dd490075d44dd7e",
+    "evidence": "evidence/stage6_final_regression.json",
+    "satisfied": true
+  },
   "gates": {
-    "as_built_finalized": false,
-    "final_regression_satisfied": false,
+    "as_built_finalized": true,
+    "final_regression_satisfied": true,
     "pull_request_accepted": false,
     "scientific_pilot_satisfied": true
   },
@@ -222,6 +227,6 @@
     "updates_per_run": 250
   },
   "stage": 6,
-  "status": "scientific_pilot_accepted_final_regression_pending",
+  "status": "scientific_pilot_and_final_regression_accepted_pr_pending",
   "suite": "controlled_pilot_acceptance"
 }
