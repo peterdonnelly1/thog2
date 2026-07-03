@@ -1,0 +1,44 @@
+{
+  "accepted_feature_head": "a44fc48ba50b0aead05ee5192dd490075d44dd7e",
+  "github_pull_request_merge_head": "868457e011552a02bf5ab050df2a8f6e0b86c977",
+  "scientific_pilot": {
+    "classification": "viable_for_further_study",
+    "evidence": "evidence/stage6_pilot_acceptance.json",
+    "protocol_sha256": "1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490",
+    "satisfied": true
+  },
+  "stage": 6,
+  "status": "final_regression_accepted",
+  "suite": "complete_stage_1_through_stage_6_regression",
+  "workflow_runs": {
+    "stage1_mathematical_core": {
+      "conclusion": "success",
+      "run_id": 28634856670
+    },
+    "stage2_reference_model": {
+      "conclusion": "success",
+      "run_id": 28634856669
+    },
+    "stage3_training_lifecycle": {
+      "conclusion": "success",
+      "run_id": 28634856644
+    },
+    "stage4_ephemeral_execution_and_inference": {
+      "conclusion": "success",
+      "run_id": 28634856671
+    },
+    "stage5_gpu_ddp_and_target_geometry": {
+      "conclusion": "success",
+      "run_id": 28634856704
+    },
+    "stage6_controlled_pilot_and_as_built": {
+      "artifact_digest": "sha256:160c92f6a39b8b28d7b956cce5348356a27e2d22eaa9eabcda1f0ca4350b0c9e",
+      "conclusion": "success",
+      "error_count": 0,
+      "failure_count": 0,
+      "run_id": 28634856664,
+      "skipped_count": 0,
+      "tests_run": 24
+    }
+  }
+}
