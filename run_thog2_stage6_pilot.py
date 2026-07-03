@@ -75,8 +75,9 @@ def build_artifact_name(
             f"_P{budget['depth_order']}_Q{run['base_row_order']}_"
             f"Q4D{run['row_order_4d']}"
         )
+    prefix_separator = "_" if model_type == "dense" else "__"
     artifact_name = (
-        f"{architecture_prefix(model_type)}_"
+        f"{architecture_prefix(model_type)}{prefix_separator}"
         f"{normalize_name_component(host_label)}_"
         f"{normalize_name_component(run_name, uppercase=True)}__OWT__{geometry}__"
         f"B{budget['batch_size']}_GA{budget['gradient_accumulation_steps']}_G{world_size}__"
@@ -133,6 +134,7 @@ def apply_artifact_naming(
             "artifact_name": artifact_name,
             "out_dir": str(checkpoint_dir),
             "checkpoint_path": str(checkpoint_dir / "ckpt.pt"),
+            "worker_result_path": str(checkpoint_dir / "result.json"),
             "result_path": str(root / "results" / f"{artifact_name}.json"),
             "log_path": str(root / "logs" / f"{artifact_name}.log"),
             "wandb": {
@@ -285,8 +287,21 @@ def prepare_manifest(
     return manifest_path
 
 
+def synchronize_named_result(run: Dict[str, Any]) -> Path:
+    named_path = Path(run["result_path"])
+    worker_path = Path(
+        run.get("worker_result_path", Path(run["out_dir"]) / "result.json")
+    )
+    if not named_path.exists() and worker_path.exists():
+        named_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = named_path.with_suffix(named_path.suffix + ".tmp")
+        temporary_path.write_bytes(worker_path.read_bytes())
+        temporary_path.replace(named_path)
+    return named_path
+
+
 def result_path_for_run(run: Dict[str, Any]) -> Path:
-    return Path(run.get("result_path", Path(run["out_dir"]) / "result.json"))
+    return synchronize_named_result(run)
 
 
 def completed_result(
