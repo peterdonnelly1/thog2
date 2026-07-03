@@ -4,9 +4,11 @@ Version 0.1
 
 ## 1. Status and authority
 
-This protocol is locked before scientific training. It implements Stage 6 of the accepted THOG2 Chebyshev Sheet Staging Plan and the S6-01 through S6-15 controls in the accepted Test Plan.
+This protocol was locked before scientific training. It implements Stage 6 of the accepted THOG2 Chebyshev Sheet Staging Plan and the S6-01 through S6-15 controls in the accepted Test Plan.
 
 Stage 6 is the final planned stage of the initial Chebyshev Sheet implementation.
+
+The controlled pilot governed by this document completed successfully under protocol SHA-256 `1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490`. The reviewed classification is `viable_for_further_study`. Detailed results are recorded in `docs/THOG2_Stage_6_Scientific_Conclusion.md` and `evidence/stage6_pilot_acceptance.json`.
 
 ## 2. Scientific question
 
@@ -152,6 +154,8 @@ The analyzer does not automatically choose the scientific conclusion. After revi
 
 A stable model with a substantial resource reduction and modest quality penalty may be called promising, not superior. A requirement for Q near full row width is evidence against useful rowwise compression. A negative or inconclusive scientific result does not invalidate a functionally complete implementation.
 
+The completed pilot was classified as `viable_for_further_study`. This is based on stable completion, validated controls, 86.05% to 91.21% persistent-parameter reduction, 83.42% to 89.47% peak allocated memory reduction, and lower final validation loss for every Sheet run at equal updates and tokens. The classification explicitly retains the observed 3.0x to 3.6x raw throughput penalty and the single-seed L72 scope limitation.
+
 ## 11. Execution sequence
 
 First prepare and inspect the immutable manifest:
@@ -183,3 +187,5 @@ Stage 6 is not complete merely because these scripts and controls pass CPU CI. C
 - completed as-built document;
 - committed summarized evidence;
 - accepted Stage 6 pull request.
+
+The GPU pilot, aligned analysis, scientific classification, and summarized evidence are complete. Final regression and PR acceptance remain pending.
