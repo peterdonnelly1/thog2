@@ -266,8 +266,10 @@ def prepare_manifest(
         suffix=artifact_suffix,
         source_commit=str(source["commit"]),
     )
+    requested = wandb_mode != "disabled"
     manifest["wandb"] = {
-        "enabled": wandb_mode != "disabled",
+        "enabled": False,
+        "external_adapter_required": requested,
         "project": normalize_name_component(wandb_project),
         "entity": wandb_entity,
         "mode": wandb_mode,
