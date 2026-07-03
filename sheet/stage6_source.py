@@ -137,9 +137,19 @@ def init_resilient_telemetry(
         return module.init(**arguments, mode="offline")
 
 
+def metric_common(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    update = int(payload["completed_updates"])
+    return {
+        "optimizer_update": update,
+        "iter": update,
+        "tokens_seen": int(payload["consumed_tokens"]),
+    }
+
+
 __all__ = [
     "TELEMETRY_FINISH_TIMEOUT_SECONDS",
     "init_resilient_telemetry",
+    "metric_common",
     "source_identity",
     "verify_manifest_source",
     "verify_source_identity",
