@@ -43,6 +43,9 @@ def build_training_model(
             )
         else:
             raise ValueError(f"unsupported model_type: {config.model_type}")
+    checkpoint_setter = getattr(model, "set_checkpoint_segment_size", None)
+    if callable(checkpoint_setter):
+        checkpoint_setter(config.checkpoint_segment_size)
     return model.to(target_device)
 
 
