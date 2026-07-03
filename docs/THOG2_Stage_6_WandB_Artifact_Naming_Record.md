@@ -2,9 +2,13 @@
 
 ## Status
 
-This record describes the pre-pilot instrumentation and artifact layout for the final THOG2 Chebyshev Sheet Stage 6 controlled comparison.
+This record describes the instrumentation and artifact layout for the final THOG2 Chebyshev Sheet Stage 6 controlled comparison.
 
-The implementation and local rehearsals are complete. The actual L72 OpenWebText GPU pilot, scientific classification, final evidence refresh, and Stage 6 merge remain pending.
+The scientific pilot completed successfully under protocol SHA-256 `1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490` and was classified `viable_for_further_study`.
+
+The accepted scientific run used the direct Stage 6 orchestrator at pilot source commit `2071746ab18f4182010797241d2b29adb5a7a305`. It therefore produced selector-based checkpoint directories and `.combined.log` files rather than the later THOG-style architecture-name mirrors. This is an operational naming difference only: the later commits did not alter the model, trainer, protocol, batch traces, optimizer schedule, or analyzer. Exact pilot summaries and raw-artifact hashes are recorded in `evidence/stage6_pilot_acceptance.json`.
+
+The THOG-style naming and W&B adapter remain the supported convention for successor runs.
 
 ## Architecture prefixes
 
@@ -24,7 +28,7 @@ THOG2 supports only:
 
 ## Artifact naming
 
-Each Stage 6 run receives one architecture-first name derived before training and locked inside `protocol.json`.
+Each newly prepared Stage 6 run receives one architecture-first name derived before training and locked inside `protocol.json`.
 
 Representative forms are:
 
@@ -53,7 +57,7 @@ Names are limited to 240 characters.
 
 ## Derived files
 
-For each run, the manifest records:
+For newly prepared runs, the manifest records:
 
 ```text
 checkpoints/<artifact_name>/ckpt.pt
@@ -63,6 +67,14 @@ logs/<artifact_name>.log
 ```
 
 The worker-local result remains beside the checkpoint. The orchestrator atomically mirrors it to the canonical architecture-named result file. Restart and analysis validate the protocol digest before accepting either copy.
+
+The accepted pilot predates this final naming wrapper and used:
+
+```text
+<output_root>/<run_id>/ckpt.pt
+<output_root>/<run_id>/result.json
+<output_root>/logs/<run_id>.combined.log
+```
 
 ## W&B ownership
 
@@ -153,21 +165,22 @@ W&B is visualization and operational telemetry only. Acceptance is based on the 
 
 - `protocol.json`;
 - per-run worker results;
-- architecture-named result mirrors;
 - checkpoints;
 - logs;
 - `pilot_status.json`;
-- analysis JSON, CSV, Markdown, and SVG files.
+- analysis JSON, CSV, Markdown, and SVG files;
+- committed summarized evidence and artifact hashes.
 
 A W&B communication failure must not alter model state, batch traces, update count, or scientific acceptance evidence.
 
-## Verification completed before the GPU pilot
+## Verification
+
+Before the GPU pilot:
 
 - THOG2 Stage 6 CPU/control suite: 25 tests passed locally;
 - existing THOG controlled-comparison W&B suite: 9 tests passed;
 - THOG2 adapter mapping suite: 4 tests passed;
 - two-update single-run adapter rehearsal passed;
-- four-run matched DENSE2/Q64/Q128/Q256 launcher rehearsal passed;
-- rehearsal verified one telemetry run per architecture, update/evaluation axes, final resource metrics, named checkpoints/results/logs, restart validation, and final analysis generation.
+- four-run matched DENSE2/Q64/Q128/Q256 launcher rehearsal passed.
 
-These rehearsals are implementation evidence only. They are not substitutes for the locked OpenWebText GPU pilot.
+The direct controlled GPU pilot subsequently completed all four runs and passed protocol, trace, update, token, and evaluation-position validation. Its classification and resource results are recorded in the Stage 6 scientific conclusion and acceptance evidence.
