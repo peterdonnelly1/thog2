@@ -156,8 +156,17 @@ def training_metric_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def evaluation_metric_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    return {
+        **metric_common(payload),
+        "validation_loss": float(payload["validation_loss"]),
+        "training_evaluation_loss": float(payload["training_loss"]),
+    }
+
+
 __all__ = [
     "TELEMETRY_FINISH_TIMEOUT_SECONDS",
+    "evaluation_metric_payload",
     "init_resilient_telemetry",
     "metric_common",
     "source_identity",
