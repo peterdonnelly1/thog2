@@ -9,7 +9,7 @@ from torch import nn
 from model import GPT, GPTConfig
 from .model import SheetGPT, SheetGPTConfig
 from .training_config import TrainingConfig
-from .training_model import TrainingSheetGPT
+from .training_model import TrainingDenseGPT, TrainingSheetGPT
 
 
 def build_training_model(
@@ -34,7 +34,7 @@ def build_training_model(
         if target_device.type == "cuda":
             torch.cuda.manual_seed_all(config.model_seed)
         if config.model_type == "dense":
-            model: nn.Module = GPT(
+            model: nn.Module = TrainingDenseGPT(
                 GPTConfig(**config.model_arguments())
             )
         elif config.model_type == "thog2_sheet":
