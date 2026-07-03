@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import pickle
 from pathlib import Path
@@ -10,6 +11,9 @@ from typing import Any, Dict
 import numpy as np
 
 from sheet.stage6_protocol import verify_protocol_manifest
+from sheet.stage6_source import evaluation_metric_payload
+from sheet.stage6_source import init_resilient_telemetry
+from sheet.stage6_source import training_metric_payload
 from sheet.stage6_source import verify_manifest_source
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
