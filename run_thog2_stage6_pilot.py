@@ -83,7 +83,7 @@ def build_artifact_name(
         f"B{budget['batch_size']}_GA{budget['gradient_accumulation_steps']}_G{world_size}__"
         f"N{budget['max_updates']}_E{budget['eval_interval']}_U{budget['eval_batches']}_"
         f"LG{budget['log_interval']}_W{budget['warmup_updates']}__"
-        f"LR{budget['learning_rate']}_MLR{budget['min_learning_rate']}__"
+        f"LR{budget['learning_rate']}_MLR{budget['min_learning_rate']}_"
         f"WD{budget['weight_decay']}_B1{budget['beta1']}_"
         f"B2{budget['beta2']}_GC{budget['grad_clip']}__"
         f"MS{budget['model_seed']}_DS{budget['data_seed']}__"
