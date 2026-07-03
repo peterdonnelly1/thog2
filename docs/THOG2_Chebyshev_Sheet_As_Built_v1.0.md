@@ -1,12 +1,16 @@
 # THOG2 Chebyshev Sheet As-Built Record
 
-Version 1.0 — provisional pending Stage 6 scientific evidence
+Version 1.0 — candidate final pending final regression and Stage 6 merge
 
 ## 1. Status
 
-The Chebyshev Sheet implementation is functionally complete through accepted Stage 5.
+The initial THOG2 Chebyshev Sheet implementation is functionally complete through the Stage 6 controlled GPU pilot.
 
-Stage 6 control, execution, and analysis paths are implemented on `stage6-controlled-pilot-as-built`, but the initial implementation is not yet complete under the staging plan. Completion still requires controlled GPU pilot evidence, final regression on the accepted Stage 6 head, explicit scientific classification, and finalization of this document.
+The locked pilot completed all four runs and passed its scientific control checks. The recorded classification is:
+
+**viable for further study**.
+
+The implementation stage is not yet closed. Closure still requires final full regression on the post-evidence Stage 6 branch head, acceptance of PR #10, and merge to `master`.
 
 ## 2. Repository and baseline
 
@@ -14,6 +18,8 @@ Stage 6 control, execution, and analysis paths are implemented on `stage6-contro
 - local convention: `~/git/thog2`;
 - default branch: `master`;
 - accepted Stage 5 baseline: `ed26a681d2a91ddfb47b312ed0c6ef6391fea071`;
+- Stage 6 pilot source commit: `2071746ab18f4182010797241d2b29adb5a7a305`;
+- Stage 6 pull request: #10;
 - architecture designation: THOG2 Chebyshev Sheet;
 - original nanoGPT dense path: retained and independently selectable.
 
@@ -98,7 +104,7 @@ The sole training objective is ordinary next-token cross-entropy. No auxiliary s
 - `sheet/trainer.py` and trainer mixins — shared dense/sheet lifecycle;
 - `sheet/batch_source.py` — deterministic global batch generation, rank sharding, and Stage 6 trace evidence;
 - `sheet/checkpoints.py` and checkpoint trainer mixins — compact save, validation, resume, RNG state;
-- `sheet/distributed.py` — rank identity, process-group setup, DDP wrapping, collectives;
+- `sheet/distributed.py` — rank identity, process-group setup, collectives;
 - `train_thog2.py` — explicit command-line training entry point.
 
 ### 4.4 Ephemeral execution and inference
@@ -123,7 +129,9 @@ The sole training objective is ordinary next-token cross-entropy. No auxiliary s
 - `sheet/stage6_trainer.py` — clean timing and run-evidence capture;
 - `sheet/stage6_analysis.py` — control validation, aligned comparisons, resource tables, CSV and SVG outputs;
 - `run_thog2_stage6_one.py` — one isolated run process;
-- `run_thog2_stage6_pilot.py` — dataset fingerprinting, immutable manifest, four-run orchestration, logs, and analysis.
+- `run_thog2_stage6_pilot.py` — dataset fingerprinting, immutable manifest, four-run orchestration, logs, and analysis;
+- `docs/THOG2_Stage_6_Scientific_Conclusion.md` — reviewed scientific classification;
+- `evidence/stage6_pilot_acceptance.json` — committed summarized pilot evidence and artifact hashes.
 
 ## 5. Configuration semantics
 
@@ -199,9 +207,65 @@ The governing implementation plan specifies L144/D768 for the first pilot where 
 
 A matched L144 dense control is not feasible on the available 16 GiB GPU under the current FP32-parameter AdamW path. Its minimum parameter, gradient, and two-moment storage is approximately 15.788 GiB before activations and runtime overhead.
 
-The locked matched pilot therefore uses L72/H12/D768/C256/P16 with dense, Q64, Q128, and Q256 runs. This is an implementation-plan hardware fallback, not an architectural change. The scientific conclusion must be limited to the tested L72 geometry and 1,024,000-token budget.
+The locked matched pilot therefore used L72/H12/D768/C256/P16 with dense, Q64, Q128, and Q256 runs. This is an implementation-plan hardware fallback, not an architectural change. The scientific conclusion is limited to the tested L72 geometry and 1,024,000-token budget.
 
-## 10. Verification record
+## 10. Stage 6 controlled pilot evidence
+
+### 10.1 Identity and controls
+
+- protocol SHA-256: `1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490`;
+- pilot source commit: `2071746ab18f4182010797241d2b29adb5a7a305`;
+- dataset train sampled SHA-256: `e1daf49a9ac3e8d7c0b070bd4bee3a784b1a648f35d955d278bf4e129d6816c7`;
+- dataset validation sampled SHA-256: `c2a5937e2418846130e3b8ae0c854a18631e8ce069ff8d339874965d5dc19458`;
+- training trace SHA-256: `66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0`;
+- validation trace SHA-256: `b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6`;
+- completed updates: 250 per run;
+- consumed tokens: 1,024,000 per run;
+- evaluation updates: 0, 25, 50, 75, 100, 125, 150, 175, 200, 225, 250.
+
+All runs matched the protocol, completed-update count, consumed-token count, training batch trace, validation sample, and evaluation schedule.
+
+### 10.2 Resource and loss summary
+
+| Run | Persistent parameters | Reduction vs dense | Peak allocated GiB | Reduction vs dense | Tokens/s | Final validation loss |
+|---|---:|---:|---:|---:|---:|---:|
+| Dense | 549,158,400 | 0.00% | 10.069 | 0.00% | 3,693.7 | 6.843831 |
+| Sheet Q64 | 48,282,112 | 91.21% | 1.060 | 89.47% | 1,232.4 | 6.470158 |
+| Sheet Q128 | 57,732,608 | 89.49% | 1.266 | 87.42% | 1,207.7 | 6.454906 |
+| Sheet Q256 | 76,633,600 | 86.05% | 1.669 | 83.42% | 1,026.6 | 6.478035 |
+
+Checkpoint sizes were:
+
+- dense: 6,591,126,257 bytes;
+- Q64: 579,588,857 bytes;
+- Q128: 692,994,873 bytes;
+- Q256: 919,806,841 bytes.
+
+### 10.3 Equal-update and equal-time interpretation
+
+At equal completed updates and consumed tokens, all three Sheet runs finished below dense validation loss. Q128 was numerically best, but only 0.015252 below Q64. Q256 was larger, slower, and worse than Q64.
+
+Raw Sheet throughput was 27.8% to 33.4% of dense. At approximately the dense endpoint clean time, dense retained a modest validation-loss advantage. The Sheet runs nevertheless first passed the dense final loss at update 150 after approximately 1.81x, 1.83x, and 2.16x the dense final training time for Q64, Q128, and Q256 respectively.
+
+The tested equal-loss penalty was therefore materially smaller than the raw 3.0x to 3.6x throughput penalty, although the validation grid is coarse and noisy.
+
+### 10.4 Capacity and diagnostic interpretation
+
+All recorded coefficient families had nonzero fraction 1.0. No compact-state stop condition occurred.
+
+The Q64/Q128/Q256 result does not show a monotonic benefit from more row coefficients. Q64 is the tested Pareto choice. Lower Q values and replicated longer runs are the appropriate next capacity study.
+
+## 11. Scientific classification
+
+The accepted classification is:
+
+**viable for further study**.
+
+The result is not classified as `viable_only_at_weak_compression` because the strongest tested compression, Q64, achieved essentially the same quality as Q128 and Q256 while retaining only 8.792% of dense persistent parameters.
+
+The result is not classified as superior. It covers one short, single-seed L72 pilot and the current implementation remains slower at equal tokens and approximately equal wall-clock time.
+
+## 12. Verification record
 
 Accepted through Stage 5:
 
@@ -216,7 +280,7 @@ Accepted through Stage 5:
 - nine Stage 5 target GPU cases;
 - complete accepted CPU regression through Stage 5.
 
-Stage 6 adds tests for:
+Stage 6 verification includes:
 
 - principal dense memory feasibility;
 - locked matched controls and token budget;
@@ -224,11 +288,15 @@ Stage 6 adds tests for:
 - deterministic training and validation trace digests;
 - coefficient-order and generated-weight diagnostics;
 - pilot evidence schema;
-- mismatch rejection and aligned comparison tables.
+- mismatch rejection and aligned comparison tables;
+- 25/25 Stage 6 CPU/control tests before the pilot;
+- four successful controlled GPU runs;
+- validated equal-update, equal-time, resource, and coefficient-utilization analysis;
+- explicit scientific classification and committed summarized evidence.
 
-Final test counts and accepted Stage 6 commit remain pending.
+Final full regression on the post-evidence branch head remains pending.
 
-## 11. Known limitations
+## 13. Known limitations
 
 - No matched L144 dense pilot on the available 16 GiB GPU.
 - No multi-GPU NCCL performance or memory-scaling evidence.
@@ -236,11 +304,11 @@ Final test counts and accepted Stage 6 commit remain pending.
 - No compile-specific optimized path.
 - Generated matrices are reconstructed independently per logical layer and family.
 - Fixed row coordinates may be a representational limitation.
-- The first pilot covers one dataset snapshot, one logical geometry, one training budget, and one model/data seed.
+- The pilot covers one dataset snapshot, one logical geometry, one training budget, and one model/data seed.
 - A single pilot cannot establish broad scaling behavior or superiority.
-- Large raw checkpoints and logs remain external artifacts.
+- Large raw checkpoints and logs remain external artifacts; committed evidence records their summaries and hashes.
 
-## 12. Explicitly deferred successor work
+## 14. Explicitly deferred successor work
 
 The following are not part of this implementation:
 
@@ -256,16 +324,12 @@ The following are not part of this implementation:
 
 Any such work requires a successor specification or controlled amendment.
 
-## 13. Pending Stage 6 closure
+## 15. Remaining closure gates
 
-Before this record becomes final, it must be updated with:
+Before Stage 6 is merged and this record becomes final:
 
-- immutable pilot protocol digest and dataset fingerprint;
-- exact run commands and environment;
-- dense/Q64/Q128/Q256 results;
-- equal-update, equal-token, and equal-time comparisons;
-- resource and coefficient-utilization findings;
-- failures and corrective actions;
-- final regression result;
-- explicit scientific classification;
-- accepted Stage 6 pull request and merge commit.
+- run the complete regression on the post-evidence branch head;
+- record the final regression evidence and accepted Stage 6 head;
+- mark PR #10 ready for review;
+- accept and merge PR #10;
+- record the resulting Stage 6 merge commit.
