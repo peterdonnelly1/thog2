@@ -6,7 +6,7 @@ set -euo pipefail
 #  DENSE2: CANONICAL SCRUFFY OPENWEBTEXT RUN
 #
 #  Script called:
-#    run_thog2_owt.py
+#    run_thog2_owt_residual.py
 #
 #  Purpose:
 #    - train or resume the THOG2 dense control through the permanent shared runner
@@ -47,6 +47,9 @@ set -euo pipefail
 #    -H N_HEAD
 #    -D N_EMBD
 #    -C BLOCK_SIZE
+#    -r RESIDUAL_INIT_POLICY
+#    -z RESIDUAL_INIT_DEPTH_SOURCE
+#    -Z RESIDUAL_INIT_DEPTH_VALUE
 #    -p ACTIVATION_CHECKPOINTING
 #    -S CHECKPOINT_SEGMENT_SIZE
 #    -M WANDB_MODE
@@ -56,6 +59,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+RUN_MODULE="run_thog2_owt_residual"
 HOST_LABEL="scruffy"
 RUN_MODE="fresh"
 RUN_NAME="GPT2_SMALL_VS_SHEET144_P32_A"
@@ -74,6 +78,9 @@ N_LAYER=12
 N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
+RESIDUAL_INIT_POLICY="depth_scaled"
+RESIDUAL_INIT_DEPTH_SOURCE="logical_depth"
+RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=false
 CHECKPOINT_SEGMENT_SIZE=12
 WANDB_MODE="online"
@@ -82,7 +89,7 @@ DRY_RUN=false
 
 usage() {
   cat <<EOF
-Usage: $0 [options] [-- additional run_thog2_owt arguments]
+Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
 
   -q RUN_MODE=${RUN_MODE}                     fresh | resume
   -g RUN_NAME=${RUN_NAME}
@@ -100,6 +107,9 @@ Usage: $0 [options] [-- additional run_thog2_owt arguments]
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
+  -r RESIDUAL_INIT_POLICY=${RESIDUAL_INIT_POLICY}              depth_scaled | unscaled
+  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}  logical_depth | constant
+  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}    used only when depth source is constant
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -M WANDB_MODE=${WANDB_MODE}                 online | offline | disabled
@@ -109,7 +119,7 @@ Usage: $0 [options] [-- additional run_thog2_owt arguments]
 EOF
 }
 
-while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:p:S:M:W:x:h" option; do
+while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:r:z:Z:p:S:M:W:x:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;;
     g) RUN_NAME="$OPTARG" ;;
@@ -127,6 +137,9 @@ while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:p:S:M:W:x:h" option; do
     H) N_HEAD="$OPTARG" ;;
     D) N_EMBD="$OPTARG" ;;
     C) BLOCK_SIZE="$OPTARG" ;;
+    r) RESIDUAL_INIT_POLICY="$OPTARG" ;;
+    z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;;
+    Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
     p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
     S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     M) WANDB_MODE="$OPTARG" ;;
@@ -164,9 +177,12 @@ validate_true_false() {
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
+case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
+case "$RESIDUAL_INIT_DEPTH_SOURCE" in logical_depth|constant) ;; basis_depth) echo "basis_depth residual init is only defined for SHEET." >&2; exit 2 ;; *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be logical_depth or constant for DENSE." >&2; exit 2 ;; esac
 for setting in "$STEPS" "$BATCH_SIZE" "$EVAL_ITERS" "$EVAL_INTERVAL" \
   "$LOG_INTERVAL" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" \
-  "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE"
+  "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" \
+  "$RESIDUAL_INIT_DEPTH_VALUE"
 do
   validate_positive_uint "$setting" "numeric setting"
 done
@@ -214,6 +230,9 @@ TRAIN_ARGS=(
   --n-head "$N_HEAD"
   --n-embd "$N_EMBD"
   --block-size "$BLOCK_SIZE"
+  --residual-init-policy "$RESIDUAL_INIT_POLICY"
+  --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE"
+  --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
   "$CHECKPOINT_FLAG"
   --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE"
   "$WANDB_FLAG"
@@ -222,16 +241,16 @@ TRAIN_ARGS=(
 )
 
 LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-RESOLVED_JSON="$("$PYTHON_BIN" -m run_thog2_owt "${TRAIN_ARGS[@]}" \
+RESOLVED_JSON="$("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" \
   --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
 ARTIFACT_NAME="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
 LOG_PATH="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
 
 if (( NUM_GPUS == 1 )); then
-  COMMAND=("$PYTHON_BIN" -m run_thog2_owt "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
+  COMMAND=("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
 else
   COMMAND=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" \
-    -m run_thog2_owt "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
+    -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
 fi
 
 cat <<EOF
@@ -239,6 +258,7 @@ THOG2 DENSE OpenWebText experiment
   artifact:                $ARTIFACT_NAME
   run mode:               $RUN_MODE
   geometry:               L$N_LAYER / H$N_HEAD / D$N_EMBD / C$BLOCK_SIZE
+  residual init:          $RESIDUAL_INIT_POLICY / $RESIDUAL_INIT_DEPTH_SOURCE / $RESIDUAL_INIT_DEPTH_VALUE
   GPUs:                   $NUM_GPUS
   mini-batch/GPU:         $BATCH_SIZE
   global accumulation:    $GRADIENT_ACCUMULATION_STEPS
@@ -251,7 +271,7 @@ THOG2 DENSE OpenWebText experiment
 EOF
 
 if [[ "$DRY_RUN" == true ]]; then
-  "$PYTHON_BIN" -m run_thog2_owt "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
+  "$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
   printf 'DRY RUN:'
   printf ' %q' "${COMMAND[@]}"
   printf '\n'
