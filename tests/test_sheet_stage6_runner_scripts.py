@@ -63,20 +63,25 @@ class RunnerScriptTests(unittest.TestCase):
 
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
-        self.assertIn("DENSE2_scruffy__TEST__owt__", output)
+        self.assertIn("DENSE2_scruffy__TEST__n_2_b_1_d_owt", output)
+        self.assertIn("_r_depth_scaled_z_logical_depth_S_1", output)
         self.assertIn("--model-type dense", output)
-        self.assertIn("activation checkpoint:  true", output)
+        self.assertIn("--residual-init-policy depth_scaled", output)
+        self.assertIn("--residual-init-depth-source logical_depth", output)
+        self.assertIn("activation checkpoint:  false", output)
         self.assertIn("checkpoint segment:     1", output)
         self.assertIn("DRY RUN:", output)
 
     def test_s6_34_sheet_runner_resolves_orders_and_same_shared_letters(self) -> None:
         output = self.run_script(
             "current_scruffy_train_SHEET_OWT.sh",
-            ["-P", "2", "-Q", "4"],
+            ["-P", "2", "-Q", "4", "-r", "depth_scaled", "-z", "basis_depth", "-Z", "12"],
         )
-        self.assertIn("SHEET_scruffy__TEST__owt__", output)
-        self.assertIn("_p_2_q_4__", output)
+        self.assertIn("SHEET_scruffy__TEST__n_2_b_1_d_owt", output)
+        self.assertIn("_P_2_Q_4_r_depth_scaled_z_basis_depth_S_1", output)
         self.assertIn("--model-type sheet", output)
+        self.assertIn("--residual-init-policy depth_scaled", output)
+        self.assertIn("--residual-init-depth-source basis_depth", output)
         self.assertIn("sheet orders:           P2 / Q4", output)
         self.assertIn("DRY RUN:", output)
 
