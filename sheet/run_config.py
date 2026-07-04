@@ -135,8 +135,9 @@ class OwtRunConfig:
             if self.base_row_order > self.n_embd:
                 raise ValueError("base_row_order must not exceed n_embd")
         residual_init = self.residual_init_config()
-        if self.model_type == "dense" and residual_init.depth_source == "basis_depth":
-            raise ValueError("basis_depth residual init is only defined for SHEET")
+        object.__setattr__(self, "residual_init_depth_source", residual_init.depth_source)
+        if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
+            raise ValueError("dof_implied_depth residual init is only defined for SHEET")
         if not self.activation_checkpointing and self.checkpoint_segment_size < 1:
             raise ValueError("checkpoint_segment_size must remain positive")
         if self.learning_rate <= 0.0 or self.min_lr < 0.0:
