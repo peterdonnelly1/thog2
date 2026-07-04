@@ -26,8 +26,8 @@ set -euo pipefail
 #
 #  Artifact layout:
 #    - checkpoints/<DENSE2_artifact>/ckpt.pt
-#    - logs/<DENSE2_artifact>/<bounded_artifact>_train_<timestamp>.log
-#    - results/<DENSE2_artifact>/result.json
+#    - logs/<YYMMDD_HHMM_DENSE2_artifact>/train.log
+#    - logs/<YYMMDD_HHMM_DENSE2_artifact>/result.json
 #    - W&B run name equals the canonical artifact name
 #
 #  Common options:
