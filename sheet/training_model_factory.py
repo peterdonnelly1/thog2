@@ -10,6 +10,29 @@ from model import GPT, GPTConfig
 from .model import SheetGPT, SheetGPTConfig
 from .training_config import TrainingConfig
 from .training_model import TrainingDenseGPT, TrainingSheetGPT
+from .trajectory import MATRIX_RESIDUAL_FAMILIES
+
+
+def _apply_sheet_residual_init_scaling(
+    model: SheetGPT,
+    config: TrainingConfig,
+) -> None:
+    residual_std = config.residual_init_config().residual_std(
+        model_type=config.model_type,
+        n_layer=config.n_layer,
+        depth_order=config.depth_order,
+    )
+    with torch.no_grad():
+        for item in model.trajectory.metadata:
+            if item.name not in MATRIX_RESIDUAL_FAMILIES:
+                continue
+            previous_std = item.target_weight_std
+            if previous_std <= 0.0:
+                raise RuntimeError(
+                    f"residual family {item.name} has non-positive init std {previous_std}"
+                )
+            model.trajectory.coefficients[item.name].mul_(residual_std / previous_std)
+            object.__setattr__(item, "target_weight_std", residual_std)
 
 
 def build_training_model(
@@ -41,6 +64,7 @@ def build_training_model(
             model = TrainingSheetGPT(
                 SheetGPTConfig(**config.model_arguments())
             )
+            _apply_sheet_residual_init_scaling(model, config)
         else:
             raise ValueError(f"unsupported model_type: {config.model_type}")
     checkpoint_setter = getattr(model, "set_checkpoint_segment_size", None)
