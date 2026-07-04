@@ -72,10 +72,10 @@ class RunnerScriptTests(unittest.TestCase):
         self.assertIn("checkpoint segment:     1", output)
         self.assertIn("DRY RUN:", output)
 
-    def test_s6_34_sheet_runner_resolves_orders_and_same_shared_letters(self) -> None:
+    def test_s6_34_sheet_runner_resolves_orders_and_default_basis_depth(self) -> None:
         output = self.run_script(
             "current_scruffy_train_SHEET_OWT.sh",
-            ["-P", "2", "-Q", "4", "-r", "depth_scaled", "-z", "basis_depth", "-Z", "12"],
+            ["-P", "2", "-Q", "4", "-r", "depth_scaled", "-Z", "12"],
         )
         self.assertIn("SHEET_scruffy__TEST__n_2_b_1_d_owt", output)
         self.assertIn("_P_2_Q_4_r_depth_scaled_z_basis_depth_S_1", output)
