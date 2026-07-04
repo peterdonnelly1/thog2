@@ -6,6 +6,12 @@ from typing import Any, Dict
 
 from .basis import BASIS_VERSION
 from .checkpointing import validate_checkpoint_segment_size
+from .residual_init import (
+    DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
+    DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
+    DEFAULT_RESIDUAL_INIT_POLICY,
+    ResidualInitConfig,
+)
 
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -33,6 +39,9 @@ MODEL_COMPATIBILITY_FIELDS = (
     "bias",
     "depth_order",
     "base_row_order",
+    "residual_init_policy",
+    "residual_init_depth_source",
+    "residual_init_depth_value",
     "basis_version",
     "row_order_scaling_rule",
 )
@@ -50,6 +59,9 @@ class TrainingConfig:
     bias: bool = True
     depth_order: int = 4
     base_row_order: int = 32
+    residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
+    residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
+    residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
     checkpoint_segment_size: int = 0
@@ -117,6 +129,9 @@ class TrainingConfig:
             raise ValueError("depth_order must not exceed n_layer")
         if self.base_row_order > self.n_embd:
             raise ValueError("base_row_order must not exceed n_embd")
+        residual_init = self.residual_init_config()
+        if self.model_type == "dense" and residual_init.depth_source == "basis_depth":
+            raise ValueError("basis_depth residual init is only defined for SHEET")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in [0, 1)")
         if self.learning_rate <= 0.0 or self.min_learning_rate < 0.0:
@@ -140,6 +155,13 @@ class TrainingConfig:
         if not isinstance(self.bias, bool) or not isinstance(self.decay_learning_rate, bool):
             raise ValueError("bias and decay_learning_rate must be bool")
 
+    def residual_init_config(self) -> ResidualInitConfig:
+        return ResidualInitConfig(
+            policy=self.residual_init_policy,
+            depth_source=self.residual_init_depth_source,
+            depth_value=self.residual_init_depth_value,
+        )
+
     def model_arguments(self) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "block_size": self.block_size,
@@ -155,6 +177,9 @@ class TrainingConfig:
                 {
                     "depth_order": self.depth_order,
                     "base_row_order": self.base_row_order,
+                    "residual_init_policy": self.residual_init_policy,
+                    "residual_init_depth_source": self.residual_init_depth_source,
+                    "residual_init_depth_value": self.residual_init_depth_value,
                     "basis_version": self.basis_version,
                 }
             )
