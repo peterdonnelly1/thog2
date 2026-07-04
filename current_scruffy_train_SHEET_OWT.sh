@@ -25,7 +25,7 @@ BLOCK_SIZE=1024
 DEPTH_ORDER=32
 BASE_ROW_ORDER=64
 RESIDUAL_INIT_POLICY="depth_scaled"
-RESIDUAL_INIT_DEPTH_SOURCE="basis_depth"
+RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
@@ -56,8 +56,8 @@ Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
   -P DEPTH_ORDER=${DEPTH_ORDER}
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
   -r RESIDUAL_INIT_POLICY=${RESIDUAL_INIT_POLICY}              depth_scaled | unscaled
-  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}  logical_depth | basis_depth | constant
-  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}    used only when depth source is constant
+  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}  true_layer_depth | dof_implied_depth | user_forced_depth
+  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}    used only when depth source is user_forced_depth
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -M WANDB_MODE=${WANDB_MODE}                 online | offline | disabled
@@ -111,7 +111,7 @@ validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; exp
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
-case "$RESIDUAL_INIT_DEPTH_SOURCE" in logical_depth|basis_depth|constant) ;; *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be logical_depth, basis_depth, or constant." >&2; exit 2 ;; esac
+case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be true_layer_depth, dof_implied_depth, or user_forced_depth." >&2; exit 2 ;; esac
 for setting in "$STEPS" "$BATCH_SIZE" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do
   validate_positive_uint "$setting" "numeric setting"
 done

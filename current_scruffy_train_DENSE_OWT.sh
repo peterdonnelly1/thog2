@@ -2,61 +2,6 @@
 
 set -euo pipefail
 
-
-#  DENSE2: CANONICAL SCRUFFY OPENWEBTEXT RUN
-#
-#  Script called:
-#    run_thog2_owt_residual.py
-#
-#  Purpose:
-#    - train or resume the THOG2 dense control through the permanent shared runner
-#    - use the DENSE2_ prefix so these runs remain distinct from THOG's DENSE_
-#    - use the same public parameter names, W&B metrics, paths, and lifecycle as SHEET
-#    - use THOG-compatible global gradient-accumulation semantics
-#    - use segmented activation checkpointing by default, matching the THOG setup
-#    - preserve a deterministic artifact identity across interruption and resume
-#
-#  Default geometry and execution:
-#    - GPT-2 Small control: L12 / H12 / D768 / context 1024
-#    - local mini-batch 3
-#    - global gradient accumulation 160
-#    - one GPU on scruffy
-#    - activation checkpointing disabled by default for canonical dense GPT-2 execution
-#    - bfloat16 autocast
-#
-#  Artifact layout:
-#    - checkpoints/<DENSE2_artifact>/ckpt.pt
-#    - logs/<YYMMDD_HHMM_DENSE2_artifact>/train.log
-#    - logs/<YYMMDD_HHMM_DENSE2_artifact>/result.json
-#    - W&B run name equals the canonical artifact name
-#
-#  Common options:
-#    -q fresh|resume
-#    -g RUN_NAME
-#    -n MAX_ITERS
-#    -b BATCH_SIZE
-#    -d DATASET
-#    -u EVAL_ITERS
-#    -e EVAL_INTERVAL
-#    -l LOG_INTERVAL
-#    -w WARMUP_ITERS
-#    -k CHECKPOINT_INTERVAL
-#    -A GLOBAL_GRADIENT_ACCUMULATION_STEPS
-#    -G NUM_GPUS
-#    -L N_LAYER
-#    -H N_HEAD
-#    -D N_EMBD
-#    -C BLOCK_SIZE
-#    -r RESIDUAL_INIT_POLICY
-#    -z RESIDUAL_INIT_DEPTH_SOURCE
-#    -Z RESIDUAL_INIT_DEPTH_VALUE
-#    -p ACTIVATION_CHECKPOINTING
-#    -S CHECKPOINT_SEGMENT_SIZE
-#    -M WANDB_MODE
-#    -W WANDB_ENABLED
-#    -x DRY_RUN
-#
-
 cd "$(dirname "$0")"
 
 RUN_MODULE="run_thog2_owt_residual"
@@ -79,7 +24,7 @@ N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
 RESIDUAL_INIT_POLICY="depth_scaled"
-RESIDUAL_INIT_DEPTH_SOURCE="logical_depth"
+RESIDUAL_INIT_DEPTH_SOURCE="true_layer_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=false
 CHECKPOINT_SEGMENT_SIZE=12
@@ -108,8 +53,8 @@ Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
   -r RESIDUAL_INIT_POLICY=${RESIDUAL_INIT_POLICY}              depth_scaled | unscaled
-  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}  logical_depth | constant
-  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}    used only when depth source is constant
+  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}  true_layer_depth | user_forced_depth
+  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}    used only when depth source is user_forced_depth
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -M WANDB_MODE=${WANDB_MODE}                 online | offline | disabled
@@ -178,11 +123,12 @@ validate_true_false() {
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
-case "$RESIDUAL_INIT_DEPTH_SOURCE" in logical_depth|constant) ;; basis_depth) echo "basis_depth residual init is only defined for SHEET." >&2; exit 2 ;; *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be logical_depth or constant for DENSE." >&2; exit 2 ;; esac
-for setting in "$STEPS" "$BATCH_SIZE" "$EVAL_ITERS" "$EVAL_INTERVAL" \
-  "$LOG_INTERVAL" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" \
-  "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" \
-  "$RESIDUAL_INIT_DEPTH_VALUE"
+case "$RESIDUAL_INIT_DEPTH_SOURCE" in
+  true_layer_depth|user_forced_depth) ;;
+  dof_implied_depth) echo "dof_implied_depth residual init is only defined for SHEET." >&2; exit 2 ;;
+  *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be true_layer_depth or user_forced_depth for DENSE." >&2; exit 2 ;;
+esac
+for setting in "$STEPS" "$BATCH_SIZE" "$EVAL_ITERS" "$EVAL_INTERVAL"   "$LOG_INTERVAL" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS"   "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE"   "$RESIDUAL_INIT_DEPTH_VALUE"
 do
   validate_positive_uint "$setting" "numeric setting"
 done
@@ -241,16 +187,14 @@ TRAIN_ARGS=(
 )
 
 LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-RESOLVED_JSON="$("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" \
-  --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
+RESOLVED_JSON="$("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}"   --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
 ARTIFACT_NAME="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
 LOG_PATH="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
 
 if (( NUM_GPUS == 1 )); then
   COMMAND=("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
 else
-  COMMAND=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" \
-    -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
+  COMMAND=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS"     -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
 fi
 
 cat <<EOF
