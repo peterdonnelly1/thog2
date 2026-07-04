@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from sheet.residual_run_config import OwtRunConfig
 from sheet.run_naming import (
     artifact_paths,
     bounded_filename,
@@ -44,16 +45,16 @@ class CanonicalNamingTests(unittest.TestCase):
         )
         self.assertEqual(
             dense,
-            "DENSE2_scruffy__AKAROA__owt__l_72_h_12_d_768_ctx_256__b_12_ga_160__steps_100",
+            "DENSE2_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_S_12",
         )
         self.assertEqual(
             sheet,
-            "SHEET_scruffy__AKAROA__owt__l_72_h_12_d_768_ctx_256_p_16_q_64__b_12_ga_160__steps_100",
+            "SHEET_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12",
         )
         self.assertNotIn("SHEET__scruffy", sheet)
 
     def test_s6_23b_paths_use_thog_style_directories_and_safe_filenames(self) -> None:
-        name = "SHEET_scruffy__AKAROA__owt__l_72_h_12_d_768_ctx_256_p_16_q_64__b_12_ga_160__steps_100"
+        name = "SHEET_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12"
         paths = artifact_paths(
             name,
             checkpoint_root=Path("checkpoints"),
@@ -61,9 +62,10 @@ class CanonicalNamingTests(unittest.TestCase):
             result_root=Path("results"),
             log_timestamp="20260703_120000",
         )
+        log_dir = Path("logs") / f"260703_1200_{name}"
         self.assertEqual(paths["checkpoint_path"], Path("checkpoints") / name / "ckpt.pt")
-        self.assertEqual(paths["result_path"], Path("results") / name / "result.json")
-        self.assertEqual(paths["log_path"].parent, Path("logs") / name)
+        self.assertEqual(paths["result_path"], log_dir / "result.json")
+        self.assertEqual(paths["log_path"], log_dir / "train.log")
         self.assertLessEqual(len(paths["log_path"].name), 255)
 
     def test_s6_23c_bounded_truncation_is_deterministic_and_collision_resistant(self) -> None:
@@ -97,6 +99,48 @@ class CanonicalNamingTests(unittest.TestCase):
                 depth_order=2,
                 base_row_order=4,
             )
+
+    def test_s6_23e_residual_init_fields_are_part_of_run_artifact_identity(self) -> None:
+        config = OwtRunConfig(
+            model_type="sheet",
+            host_label="scruffy",
+            run_name="AKAROA",
+            dataset="openwebtext",
+            n_layer=72,
+            n_head=12,
+            n_embd=768,
+            block_size=256,
+            batch_size=12,
+            gradient_accumulation_steps=160,
+            max_iters=100,
+            depth_order=16,
+            base_row_order=64,
+            residual_init_policy="depth_scaled",
+            residual_init_depth_source="basis_depth",
+            residual_init_depth_value=12,
+        )
+        self.assertIn("_P_16_Q_64_r_depth_scaled_z_basis_depth_S_12", config.artifact_name)
+
+    def test_s6_23f_constant_residual_depth_value_is_named_only_when_used(self) -> None:
+        config = OwtRunConfig(
+            model_type="sheet",
+            host_label="scruffy",
+            run_name="AKAROA",
+            dataset="openwebtext",
+            n_layer=72,
+            n_head=12,
+            n_embd=768,
+            block_size=256,
+            batch_size=12,
+            gradient_accumulation_steps=160,
+            max_iters=100,
+            depth_order=16,
+            base_row_order=64,
+            residual_init_policy="depth_scaled",
+            residual_init_depth_source="constant",
+            residual_init_depth_value=24,
+        )
+        self.assertIn("_r_depth_scaled_z_constant_Z_24_S_12", config.artifact_name)
 
 
 if __name__ == "__main__":
