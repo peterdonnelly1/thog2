@@ -130,9 +130,9 @@ def build_artifact_name(
     batch_size: int,
     gradient_accumulation_steps: int,
     max_iters: int,
-    checkpoint_interval: int,
-    warmup_iters: int,
-    checkpoint_segment_size: int,
+    checkpoint_interval: int = 0,
+    warmup_iters: int = 0,
+    checkpoint_segment_size: int = 12,
     depth_order: int | None = None,
     base_row_order: int | None = None,
     suffix: str | None = None,
@@ -251,9 +251,9 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--gradient-accumulation-steps", type=int, required=True)
     parser.add_argument("--max-iters", type=int, required=True)
-    parser.add_argument("--checkpoint-interval", type=int, required=True)
-    parser.add_argument("--warmup-iters", type=int, required=True)
-    parser.add_argument("--checkpoint-segment-size", type=int, required=True)
+    parser.add_argument("--checkpoint-interval", type=int, default=0)
+    parser.add_argument("--warmup-iters", type=int, default=0)
+    parser.add_argument("--checkpoint-segment-size", type=int, default=12)
     parser.add_argument("--depth-order", type=int)
     parser.add_argument("--base-row-order", type=int)
     parser.add_argument("--suffix")
