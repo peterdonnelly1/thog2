@@ -12,6 +12,12 @@ from torch.nn import functional as F
 
 from .basis import BASIS_VERSION
 from .geometry import SheetGeometryConfig
+from .residual_init import (
+    DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
+    DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
+    DEFAULT_RESIDUAL_INIT_POLICY,
+    ResidualInitConfig,
+)
 from .trajectory import SheetTrajectory
 
 
@@ -42,6 +48,9 @@ class SheetGPTConfig:
     bias: bool = True
     depth_order: int = 12
     base_row_order: int = 128
+    residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
+    residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
+    residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
 
     def __post_init__(self) -> None:
@@ -53,7 +62,15 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        self.residual_init_config()
         self.sheet_geometry()
+
+    def residual_init_config(self) -> ResidualInitConfig:
+        return ResidualInitConfig(
+            policy=self.residual_init_policy,
+            depth_source=self.residual_init_depth_source,
+            depth_value=self.residual_init_depth_value,
+        )
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -87,6 +104,7 @@ class SheetGPT(nn.Module):
             config.sheet_geometry(),
             runtime_dtype=torch.float32,
             basis_version=config.basis_version,
+            residual_init_config=config.residual_init_config(),
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight
@@ -264,84 +282,12 @@ class SheetGPT(nn.Module):
             loss = None
         return logits, loss
 
-    def parameter_report(self) -> Dict[str, object]:
-        total_persistent = sum(parameter.numel() for parameter in self.parameters())
-        sheet_coefficients = self.trajectory.sheet_parameter_count()
-        conventional = total_persistent - sheet_coefficients
-        dense_equivalent_repeated = self.trajectory.dense_equivalent_count()
-        dense_equivalent_total = conventional + dense_equivalent_repeated
-        return {
-            "persistent_parameters": total_persistent,
-            "sheet_coefficients": sheet_coefficients,
-            "conventional_non_sheet_parameters": conventional,
-            "dense_equivalent_repeated_parameters": dense_equivalent_repeated,
-            "dense_equivalent_total_parameters": dense_equivalent_total,
-            "matrix_sheet_coefficients": self.trajectory.matrix_sheet_parameter_count(),
-            "matrix_dense_equivalent_parameters": self.trajectory.matrix_dense_equivalent_count(),
-            "families": self.trajectory.family_report(),
-        }
-
-    def get_num_params(self, non_embedding: bool = True) -> int:
-        parameter_count = sum(parameter.numel() for parameter in self.parameters())
-        if non_embedding:
-            parameter_count -= self.transformer.wpe.weight.numel()
-        return parameter_count
-
-    def optimizer_parameter_groups(
-        self,
-        weight_decay: float,
-    ) -> Tuple[Dict[str, object], Dict[str, object]]:
-        decay: Dict[str, nn.Parameter] = {}
-        no_decay: Dict[str, nn.Parameter] = {}
-
-        for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
-            target = decay if metadata.weight_decay else no_decay
-            target[f"trajectory.coefficients.{family_name}"] = parameter
-
-        sheet_parameter_ids = {
-            id(parameter) for parameter in self.trajectory.coefficients.values()
-        }
-        for name, parameter in self.named_parameters():
-            if id(parameter) in sheet_parameter_ids:
-                continue
-            if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
-                decay[name] = parameter
-            else:
-                no_decay[name] = parameter
-
-        all_trainable = {
-            id(parameter)
-            for parameter in self.parameters()
-            if parameter.requires_grad
-        }
-        grouped_ids = [id(parameter) for parameter in decay.values()] + [
-            id(parameter) for parameter in no_decay.values()
-        ]
-        if len(grouped_ids) != len(set(grouped_ids)):
-            raise RuntimeError("a trainable parameter appears in more than one optimizer group")
-        if set(grouped_ids) != all_trainable:
-            missing = all_trainable - set(grouped_ids)
-            extra = set(grouped_ids) - all_trainable
-            raise RuntimeError(
-                f"optimizer grouping does not cover trainable parameters exactly; "
-                f"missing={len(missing)}, extra={len(extra)}"
-            )
-
-        decay_names = tuple(sorted(decay))
-        no_decay_names = tuple(sorted(no_decay))
-        return (
-            {
-                "params": [decay[name] for name in decay_names],
-                "weight_decay": weight_decay,
-                "group_name": "decay",
-                "parameter_names": decay_names,
-            },
-            {
-                "params": [no_decay[name] for name in no_decay_names],
-                "weight_decay": 0.0,
-                "group_name": "no_decay",
-                "parameter_names": no_decay_names,
-            },
+    def crop_block_size(self, block_size: int) -> None:
+        if block_size > self.config.block_size:
+            raise ValueError("cannot increase block size when cropping")
+        self.config.block_size = block_size
+        self.transformer.wpe.weight = nn.Parameter(
+            self.transformer.wpe.weight[:block_size]
         )
 
     def configure_optimizers(
@@ -351,52 +297,49 @@ class SheetGPT(nn.Module):
         betas: Tuple[float, float],
         device_type: str,
     ) -> torch.optim.Optimizer:
-        groups = list(self.optimizer_parameter_groups(weight_decay))
+        parameter_dict = {name: param for name, param in self.named_parameters()}
+        parameter_dict = {name: param for name, param in parameter_dict.items() if param.requires_grad}
+        decay_params = [param for name, param in parameter_dict.items() if param.dim() >= 2]
+        nodecay_params = [param for name, param in parameter_dict.items() if param.dim() < 2]
+        optimizer_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": nodecay_params, "weight_decay": 0.0},
+        ]
+        name_by_id = {id(param): name for name, param in parameter_dict.items()}
+        for group in optimizer_groups:
+            group["parameter_names"] = tuple(name_by_id[id(param)] for param in group["params"])
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        extra_args = {"fused": True} if use_fused else {}
         return torch.optim.AdamW(
-            groups,
+            optimizer_groups,
             lr=learning_rate,
             betas=betas,
-            **extra_args,
+            fused=use_fused,
         )
 
-    def compact_state_violations(self) -> Tuple[str, ...]:
-        violations: List[str] = []
-        for key in self.state_dict():
-            if key.startswith("trajectory.bases."):
-                violations.append(f"persistent fixed basis: {key}")
-        for name, parameter in self.named_parameters():
-            if name.startswith("trajectory.coefficients."):
-                continue
-            if parameter.ndim == 3 and parameter.shape[0] == self.config.n_layer:
-                violations.append(
-                    f"possible persistent dense logical stack: {name} {tuple(parameter.shape)}"
-                )
-        return tuple(violations)
+    def parameter_report(self) -> Dict[str, object]:
+        conventional = sum(
+            parameter.numel()
+            for name, parameter in self.named_parameters()
+            if not name.startswith("trajectory.")
+        )
+        return {
+            "persistent_parameters": sum(p.numel() for p in self.parameters()),
+            "sheet_coefficients": self.trajectory.sheet_parameter_count(),
+            "conventional_non_sheet_parameters": conventional,
+            "dense_equivalent_repeated_parameters": self.trajectory.dense_equivalent_count(),
+            "dense_equivalent_total_parameters": (
+                conventional + self.trajectory.dense_equivalent_count()
+            ),
+            "matrix_sheet_coefficients": self.trajectory.matrix_sheet_parameter_count(),
+            "matrix_dense_equivalent_parameters": self.trajectory.matrix_dense_equivalent_count(),
+            "families": self.trajectory.family_report(),
+        }
 
-    @torch.no_grad()
-    def generate(
-        self,
-        idx: Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-    ) -> Tensor:
-        for _ in range(max_new_tokens):
-            idx_cond = (
-                idx
-                if idx.size(1) <= self.config.block_size
-                else idx[:, -self.config.block_size :]
-            )
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / temperature
-            if top_k is not None:
-                values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < values[:, [-1]]] = -float("inf")
-            probabilities = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probabilities, num_samples=1)
-            idx = torch.cat((idx, next_token), dim=1)
-        return idx
+    def compact_state_violations(self) -> List[str]:
+        state = self.state_dict()
+        return sorted(key for key in state if key.startswith("trajectory.bases."))
+
+
+__all__ = ["SheetGPT", "SheetGPTConfig"]
 # ^^^ THOG
