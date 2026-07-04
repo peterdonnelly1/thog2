@@ -7,11 +7,12 @@ from .run_naming import build_artifact_name, truncate_component
 
 class OwtRunConfig(_BaseOwtRunConfig):
     def residual_init_artifact_fragment(self) -> str:
+        residual_init = self.residual_init_config()
         parts = [
             f"r_{self.residual_init_policy}",
-            f"z_{self.residual_init_depth_source}",
+            f"z_{residual_init.depth_source}",
         ]
-        if self.residual_init_depth_source == "constant":
+        if residual_init.depth_source == "user_forced_depth":
             parts.append(f"Z_{self.residual_init_depth_value}")
         return "_".join(parts)
 
