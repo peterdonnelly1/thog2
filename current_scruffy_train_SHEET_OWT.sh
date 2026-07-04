@@ -28,8 +28,8 @@ set -euo pipefail
 #
 #  Artifact layout:
 #    - checkpoints/<SHEET_artifact>/ckpt.pt
-#    - logs/<SHEET_artifact>/<bounded_artifact>_train_<timestamp>.log
-#    - results/<SHEET_artifact>/result.json
+#    - logs/<YYMMDD_HHMM_SHEET_artifact>/train.log
+#    - logs/<YYMMDD_HHMM_SHEET_artifact>/result.json
 #    - W&B run name equals the canonical artifact name
 #
 #  Common options are identical to current_scruffy_train_DENSE_OWT.sh.
