@@ -17,11 +17,11 @@ set -euo pipefail
 #    - preserve a deterministic artifact identity across interruption and resume
 #
 #  Default geometry and execution:
-#    - L72 / H12 / D768 / context 256
-#    - local mini-batch 12
+#    - GPT-2 Small control: L12 / H12 / D768 / context 1024
+#    - local mini-batch 3
 #    - global gradient accumulation 160
 #    - one GPU on scruffy
-#    - activation checkpointing enabled, segment size 12
+#    - activation checkpointing disabled by default for canonical dense GPT-2 execution
 #    - bfloat16 autocast
 #
 #  Artifact layout:
@@ -40,6 +40,7 @@ set -euo pipefail
 #    -e EVAL_INTERVAL
 #    -l LOG_INTERVAL
 #    -w WARMUP_ITERS
+#    -k CHECKPOINT_INTERVAL
 #    -A GLOBAL_GRADIENT_ACCUMULATION_STEPS
 #    -G NUM_GPUS
 #    -L N_LAYER
@@ -57,22 +58,23 @@ cd "$(dirname "$0")"
 
 HOST_LABEL="scruffy"
 RUN_MODE="fresh"
-RUN_NAME="AKAROA"
-STEPS=100
-BATCH_SIZE=12
+RUN_NAME="GPT2_SMALL_VS_SHEET144_P32_A"
+STEPS=250
+BATCH_SIZE=3
 DATASET_NAME="openwebtext"
 DATA_DIR="data/openwebtext"
 EVAL_ITERS=5
-EVAL_INTERVAL=50
-LOG_INTERVAL=10
+EVAL_INTERVAL=20
+LOG_INTERVAL=1
 WARMUP_ITERS=10
+CHECKPOINT_INTERVAL=20
 GRADIENT_ACCUMULATION_STEPS=160
 NUM_GPUS=1
-N_LAYER=72
+N_LAYER=12
 N_HEAD=12
 N_EMBD=768
-BLOCK_SIZE=256
-ACTIVATION_CHECKPOINTING=true
+BLOCK_SIZE=1024
+ACTIVATION_CHECKPOINTING=false
 CHECKPOINT_SEGMENT_SIZE=12
 WANDB_MODE="online"
 WANDB_ENABLED=true
@@ -91,6 +93,7 @@ Usage: $0 [options] [-- additional run_thog2_owt arguments]
   -e EVAL_INTERVAL=${EVAL_INTERVAL}
   -l LOG_INTERVAL=${LOG_INTERVAL}
   -w WARMUP_ITERS=${WARMUP_ITERS}
+  -k CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL}  0 disables periodic saves
   -A GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS}
   -G NUM_GPUS=${NUM_GPUS}
   -L N_LAYER=${N_LAYER}
@@ -106,7 +109,7 @@ Usage: $0 [options] [-- additional run_thog2_owt arguments]
 EOF
 }
 
-while getopts ":q:g:n:b:d:u:e:l:w:A:G:L:H:D:C:p:S:M:W:x:h" option; do
+while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:p:S:M:W:x:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;;
     g) RUN_NAME="$OPTARG" ;;
@@ -117,6 +120,7 @@ while getopts ":q:g:n:b:d:u:e:l:w:A:G:L:H:D:C:p:S:M:W:x:h" option; do
     e) EVAL_INTERVAL="$OPTARG" ;;
     l) LOG_INTERVAL="$OPTARG" ;;
     w) WARMUP_ITERS="$OPTARG" ;;
+    k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;;
     G) NUM_GPUS="$OPTARG" ;;
     L) N_LAYER="$OPTARG" ;;
@@ -167,6 +171,7 @@ do
   validate_positive_uint "$setting" "numeric setting"
 done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
+validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$DRY_RUN" "DRY_RUN"
@@ -203,6 +208,7 @@ TRAIN_ARGS=(
   --eval-iters "$EVAL_ITERS"
   --eval-interval "$EVAL_INTERVAL"
   --log-interval "$LOG_INTERVAL"
+  --checkpoint-interval "$CHECKPOINT_INTERVAL"
   --warmup-iters "$WARMUP_ITERS"
   --n-layer "$N_LAYER"
   --n-head "$N_HEAD"
@@ -239,6 +245,7 @@ THOG2 DENSE OpenWebText experiment
   tokens/update:          $((BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
   activation checkpoint:  $ACTIVATION_CHECKPOINTING
   checkpoint segment:     $CHECKPOINT_SEGMENT_SIZE
+  checkpoint interval:    $CHECKPOINT_INTERVAL
   W&B:                    $WANDB_ENABLED ($WANDB_MODE)
   log:                    $LOG_PATH
 EOF
