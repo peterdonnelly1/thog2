@@ -130,8 +130,9 @@ class TrainingConfig:
         if self.base_row_order > self.n_embd:
             raise ValueError("base_row_order must not exceed n_embd")
         residual_init = self.residual_init_config()
-        if self.model_type == "dense" and residual_init.depth_source == "basis_depth":
-            raise ValueError("basis_depth residual init is only defined for SHEET")
+        self.residual_init_depth_source = residual_init.depth_source
+        if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
+            raise ValueError("dof_implied_depth residual init is only defined for SHEET")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in [0, 1)")
         if self.learning_rate <= 0.0 or self.min_learning_rate < 0.0:
