@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .instrumentation import INSTRUMENTATION_BACKENDS
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -33,7 +34,8 @@ class OwtRunConfig:
     checkpoint_root: str = "checkpoints"
     log_root: str = "logs"
     result_root: str = "results"
-    wandb_root: str = "wandb"
+    curve_root: str = "curves"
+    wandb_root: str = "curves/wandb"
 
     max_iters: int = 100
     eval_interval: int = 50
@@ -72,6 +74,8 @@ class OwtRunConfig:
     device: str = "cuda"
     dtype: str = "bfloat16"
 
+    instrumentation: str = "tensorboard"
+    system_log_interval: int = 10
     wandb_enabled: bool = True
     wandb_project: str = "thog"
     wandb_entity: Optional[str] = None
@@ -85,9 +89,15 @@ class OwtRunConfig:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
         if self.run_mode not in ("fresh", "resume"):
             raise ValueError("run_mode must be fresh or resume")
+        if self.instrumentation not in INSTRUMENTATION_BACKENDS:
+            raise ValueError(f"instrumentation must be one of {INSTRUMENTATION_BACKENDS}")
         if self.wandb_mode not in ("online", "offline", "disabled"):
             raise ValueError("wandb_mode must be online, offline, or disabled")
-        if self.wandb_mode == "disabled" and self.wandb_enabled:
+        if self.instrumentation == "wandb" and (
+            self.wandb_mode == "disabled" or not self.wandb_enabled
+        ):
+            object.__setattr__(self, "instrumentation", "none")
+        if self.instrumentation != "wandb":
             object.__setattr__(self, "wandb_enabled", False)
         if self.dtype not in ("float32", "float16", "bfloat16"):
             raise ValueError("dtype must be float32, float16, or bfloat16")
@@ -117,6 +127,7 @@ class OwtRunConfig:
             "warmup_iters",
             "model_seed",
             "data_seed",
+            "system_log_interval",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -190,13 +201,16 @@ class OwtRunConfig:
         )
 
     def paths(self, *, log_timestamp: Optional[str] = None) -> Dict[str, Path]:
-        return artifact_paths(
+        paths = artifact_paths(
             self.artifact_name,
             checkpoint_root=Path(self.checkpoint_root),
             log_root=Path(self.log_root),
             result_root=Path(self.result_root),
             log_timestamp=log_timestamp,
         )
+        curve_backend = self.instrumentation
+        paths["curve_dir"] = Path(self.curve_root) / curve_backend / self.artifact_name
+        return paths
 
     def local_gradient_accumulation_steps(self, world_size: int) -> int:
         if isinstance(world_size, bool) or not isinstance(world_size, int) or world_size < 1:
