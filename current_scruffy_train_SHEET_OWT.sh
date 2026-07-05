@@ -175,7 +175,9 @@ validate_true_false "$DRY_RUN" "DRY_RUN"
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
 (( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
-(( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
+if [[ -z "$WIDTH_SWEEP" ]]; then
+  (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
+fi
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "Global gradient accumulation must be divisible by NUM_GPUS." >&2; exit 2; }
 build_width_specs
 
@@ -191,8 +193,8 @@ run_sheet_once() {
   local resolved_json
   local artifact_name
   local log_path
-  local train_args
-  local command
+  local -a train_args
+  local -a command
 
   train_args=(
     --model-type sheet --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
