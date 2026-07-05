@@ -1,1 +1,116 @@
-{\rtf1\ansi\deff0{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134\f0\fs23\b THOG2 CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, BLOCK, CHEBY, DCT Planning Spec\b0\par\par Purpose: planning spec for compact geometry and basis-family work in thog2. This is documentation only.\par\par\b Vocabulary\b0\par DENSE means conventional repeated transformer weights. It is not a basis family and should not be combined with CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, or BLOCK.\par CHEBY means the current Chebyshev first-kind compact basis family.\par DCT means a real orthonormal DCT basis family, initially DCT-II, exposed to users simply as DCT.\par CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK are compact geometry choices and should be selectable independently of CHEBY or DCT.\par The old ambiguous SHEET name should not be used for new experiment identities. The existing implementation corresponds to SHEET_COL.\par Valid run identities are DENSE plus CHEBY_* and DCT_* over CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par\par\b 1. Abstraction Refactor\b0\par\b Goal\b0\par Separate compact geometry, basis family, and transformer tensor-family metadata. Make CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK first-class compact geometries. Preserve current training behaviour only long enough to prove the refactor; do not preserve checkpoint compatibility.\par\par\b Target config surface\b0\par\f1 model_family = dense | compact\par compact_geometry = curve | sheet_row | sheet_col | sheet_flat | block\par basis_family = chebyshev | dct\par\f0\par User-facing run tokens should remain DENSE, CHEBY, DCT, CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par\par\b Geometry definitions\b0\par CURVE compacts transformer depth only. Matrix entries remain explicit over output row and input column.\par\f1 W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\par\f0 SHEET_COL compacts depth plus the input-column axis. Output rows remain explicit. This is the current implementation.\par\f1 W_l[o,i] = sum_pq C[o,p,q] * B_depth[l,p] * B_col[i,q]\par\f0 SHEET_ROW compacts depth plus the output-row axis. Input columns remain explicit.\par\f1 W_l[o,i] = sum_pq C[i,p,q] * B_depth[l,p] * B_row[o,q]\par\f0 SHEET_FLAT compacts depth plus one flattened matrix axis. The pair (output row, input column) is mapped to a single flat coordinate.\par\f1 flat = o * input_width + i\par W_l[o,i] = sum_pq C[p,q] * B_depth[l,p] * B_flat[flat,q]\par\f0 BLOCK compacts depth, output rows, and input columns as separate axes.\par\f1 W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_row[o,q] * B_col[i,r]\par\f0\par\b Module boundaries\b0\par basis.py should expose basis-family dispatch rather than directly building only Chebyshev bases. geometry.py should describe tensor-family axes and compact axes without assuming one SHEET-only coefficient shape. trajectory code should expose a stable materialize(name, layer_index) interface independent of compact geometry or basis family. The transformer model path should continue to call materialize by semantic family name.\par\par\b Checkpoint policy\b0\par Do not support old checkpoints across this refactor. Old CHEBY_SHEET checkpoints may fail to load. That is acceptable. After the refactor, resume only when the checkpoint was produced by the same post-refactor schema and has exactly matching model_family, compact_geometry, basis_family, basis_version, depth_order, axis orders, and model dimensions. Missing or mismatched compact metadata must hard-fail. No silent reinterpretation, no conversion path, and no special compatibility code.\par\par\b Vector parameters: layernorm and biases\b0\par LayerNorm has genuine learned affine parameters: gamma/weight and, when bias is enabled, beta/bias. They are one-dimensional feature vectors, not matrices. Attention and MLP biases are also learned one-dimensional vectors when bias is enabled. They are already tiny compared with matrix weights.\par Default policy: do not force CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, or BLOCK matrix geometry onto one-dimensional vector families. Store layernorm weights, layernorm biases, attention biases, and MLP biases as explicit per-layer vectors, or leave them on the conventional path. Report them separately as conventional non-matrix parameters. A later vector_compaction option can be added if evidence says it matters.\par\par\b Acceptance tests\b0\par CHEBY_SHEET_COL matrix-family parameter counts and materialized tensor shapes should match the current implementation. Basis buffers remain non-persistent. Optimizer groups cover trainable parameters exactly once. CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK materialization each match direct scalar evaluation. Checkpoint mismatch tests cover compact_geometry and basis_family.\par\par\b 2. SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK\b0\par\b Goal\b0\par Implement all three two-axis geometries plus the full three-axis BLOCK geometry. This gives a clean experiment grid rather than treating the current SHEET_COL case as if it represented all sheet-like compression.\par\par\b Matrix families\b0\par Compact geometry applies to repeated transformer matrix families: attention_input_weight, attention_output_weight, mlp_expansion_weight, and mlp_contraction_weight. The final lm_head/token embedding tying path should remain conventional unless a separate experiment explicitly targets it.\par\par\b Order policy\b0\par Retain depth_order. Introduce separate order fields for row, column, and flat axes. Avoid overloading row_order to mean input columns in one geometry and output rows in another.\par\f1 depth_order\par base_row_order / row_order\par base_col_order / col_order\par base_flat_order / flat_order\par\f0 Derived order rules must be explicit and recorded in the family report. For rectangular matrices, row and column orders should be derived independently from the corresponding axis widths.\par\par\b Implementation recommendation\b0\par Do not keep growing the current SheetTrajectory in-place as if it were the only geometry. Either introduce geometry-specific trajectory adapters or a generalized CompactTrajectory with small coefficient-layout adapters for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK. Use einsum or equivalent staged matrix products for clarity first; optimize after correctness and memory measurements are stable.\par\par\b Initialization and tests\b0\par Re-derive coefficient standard deviations separately for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK so materialized dense weights hit intended target standard deviation. Do not assume the current SHEET_COL coefficient scale transfers unchanged. Tests must cover shapes, direct scalar evaluation, parameter reports, residual-init scaling, CPU train/save/resume within the new schema, and GPU dtype/device movement.\par\par\b 3. DCT\b0\par\b Goal\b0\par Add DCT as a user-selectable alternative to CHEBY for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK. DENSE remains unaffected. The user-facing token should be DCT. Internally, record basis_version as dct_ii_orthonormal_v1.\par\par\b Recommended DCT variant\b0\par Use orthonormal DCT-II first. DCT-II is real, orthonormal on a finite interval, has a strong low-frequency prior, and is a sensible finite-axis alternative to Chebyshev for smooth compact structure.\par\par\b DCT-II basis\b0\par\f1 B[n,0] = sqrt(1 / N)\par B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0\par Use columns k = 0 .. order-1\par\f0 N is sample_count for the axis. The basis should be orthonormal by construction; QR should not be required for DCT-II, but Gram-error tests must verify this.\par\par\b Other basis families worth considering later\b0\par Legendre: clean orthogonal polynomial basis on a finite interval. Good candidate if we want a second polynomial baseline that is less endpoint-focused than Chebyshev.\par B-splines: local smooth basis. Useful if global basis functions are too restrictive, but introduces knot/order choices.\par Wavelets or Haar: local and multiscale. Potentially useful for abrupt structure, but likely a worse first prior for smooth layer/row/column variation.\par Learned bases or dictionary bases: more flexible but reduce the controlled-compression nature of the experiment. Use later, not before fixed-basis comparisons are understood.\par Low-rank/factorized baselines: useful as comparisons, but they answer a different question from fixed geometric bases.\par\par\b Experiment plan\b0\par First compare CHEBY_CURVE vs DCT_CURVE. Then compare CHEBY_SHEET_COL vs DCT_SHEET_COL, CHEBY_SHEET_ROW vs DCT_SHEET_ROW, and CHEBY_SHEET_FLAT vs DCT_SHEET_FLAT. Only after BLOCK correctness is stable, compare CHEBY_BLOCK vs DCT_BLOCK. Keep DENSE as the conventional control, not as part of the basis-family matrix.\par\par\b Implementation staging summary\b0\par Stage A: abstraction refactor with explicit CURVE and the three sheet geometries.\par Stage B: implement CHEBY_CURVE, CHEBY_SHEET_COL, CHEBY_SHEET_ROW, CHEBY_SHEET_FLAT, and CHEBY_BLOCK.\par Stage C: add DCT for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par Do not combine DCT and new geometry implementation in the same first-pass PR unless the geometry tests are already stable.\par}
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\f0\fs23
+\b\fs32 THOG2 CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, BLOCK, CHEBY, DCT Planning Spec\b0 \f0\fs23 \par
+\f0\fs23 \par
+\f0\fs23 Purpose: planning spec for compact geometry and basis-family work in thog2. This is documentation only.\par
+\f0\fs23 \par
+\f0\fs28 \b Vocabulary\b0 \f0\fs23 \par
+\f0\fs23 \par
+\f0\fs23 DENSE means conventional repeated transformer weights. It is not a basis family and should not be combined with CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, or BLOCK.\par
+\f0\fs23 CHEBY means the current Chebyshev first-kind compact basis family.\par
+\f0\fs23 DCT means a real orthonormal DCT basis family, initially DCT-II, exposed to users simply as DCT.\par
+\f0\fs23 CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK are compact geometry choices and should be selectable independently of CHEBY or DCT.\par
+\f0\fs23 The old ambiguous SHEET name should not be used for new experiment identities. The existing implementation corresponds to SHEET_COL.\par
+\f0\fs23 Valid run identities are DENSE plus CHEBY_* and DCT_* over CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\f0\fs23 \par
+\f0\fs28 \b 1. Abstraction Refactor\b0 \f0\fs23 \par
+\f0\fs23 \par
+\f0\fs24 \b Goal\b0 \f0\fs23 \par
+\f0\fs23 Separate compact geometry, basis family, and transformer tensor-family metadata. Make CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK first-class compact geometries. Preserve current training behaviour only long enough to prove the refactor; do not preserve checkpoint compatibility.\par
+\f0\fs23 \par
+\f0\fs24 \b Target config surface\b0 \f0\fs23 \par
+\f1\fs20 model_family = dense | compact
+compact_geometry = curve | sheet_row | sheet_col | sheet_flat | block
+basis_family = chebyshev | dct\f0\fs23 \par
+\f0\fs23 User-facing run tokens should remain DENSE, CHEBY, DCT, CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\f0\fs23 \par
+\f0\fs24 \b Geometry definitions\b0 \f0\fs23 \par
+\f0\fs23 CURVE compacts transformer depth only. Matrix entries remain explicit over output row and input column.\par
+\f1\fs20 W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\f0\fs23 \par
+\f0\fs23 SHEET_COL compacts depth plus the input-column axis. Output rows remain explicit. This is the current implementation.\par
+\f1\fs20 W_l[o,i] = sum_pq C[o,p,q] * B_depth[l,p] * B_col[i,q]\f0\fs23 \par
+\f0\fs23 SHEET_ROW compacts depth plus the output-row axis. Input columns remain explicit.\par
+\f1\fs20 W_l[o,i] = sum_pq C[i,p,q] * B_depth[l,p] * B_row[o,q]\f0\fs23 \par
+\f0\fs23 SHEET_FLAT compacts depth plus one flattened matrix axis. The pair (output row, input column) is mapped to a single flat coordinate.\par
+\f1\fs20 flat = o * input_width + i
+W_l[o,i] = sum_pq C[p,q] * B_depth[l,p] * B_flat[flat,q]\f0\fs23 \par
+\f0\fs23 BLOCK compacts depth, output rows, and input columns as separate axes.\par
+\f1\fs20 W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_row[o,q] * B_col[i,r]\f0\fs23 \par
+\f0\fs23 \par
+\f0\fs24 \b Geometry cap rule\b0 \f0\fs23 \par
+\f0\fs23 The selected compact geometry is an upper bound on compact dimensionality, not an instruction to invent axes that a weight object does not have.\par
+\f0\fs23 A tensor family exposes only its real axes. If the selected compact geometry asks for more axes than the family has, the implementation must fall back to the highest valid lower-dimensional representation for that family.\par
+\f0\fs23 Examples: a vector family has no row/column matrix structure, so SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK must not create fake matrix axes for it. A non-repeated 2D matrix has only row and column axes, so BLOCK adds nothing beyond the available 2D geometry. A repeated transformer matrix family has depth, output-row, and input-column axes, so BLOCK is meaningful there.\par
+\f0\fs23 \par
+\f0\fs24 \b Module boundaries\b0 \f0\fs23 \par
+\f0\fs23 basis.py should expose basis-family dispatch rather than directly building only Chebyshev bases. geometry.py should describe tensor-family axes and compact axes without assuming one SHEET-only coefficient shape. trajectory code should expose a stable materialize(name, layer_index) interface independent of compact geometry or basis family. The transformer model path should continue to call materialize by semantic family name.\par
+\f0\fs23 \par
+\f0\fs24 \b Checkpoint policy\b0 \f0\fs23 \par
+\f0\fs23 Do not support old checkpoints across this refactor. Old CHEBY_SHEET checkpoints may fail to load. That is acceptable.\par
+\f0\fs23 After the refactor, resume only when the checkpoint was produced by the same post-refactor schema and has exactly matching model_family, compact_geometry, basis_family, basis_version, depth_order, axis orders, and model dimensions. Missing or mismatched compact metadata must hard-fail. No silent reinterpretation, no conversion path, and no special compatibility code.\par
+\f0\fs23 \par
+\f0\fs24 \b Tiny/vector parameter policy\b0 \f0\fs23 \par
+\f0\fs23 LayerNorm has genuine learned affine parameters: gamma/weight and, when bias is enabled, beta/bias. They are one-dimensional feature vectors, not matrices. Attention and MLP biases are also learned one-dimensional vectors when bias is enabled.\par
+\f0\fs23 These vector families are tiny compared with the matrix weight families. Default policy: leave layernorm weights, layernorm biases, attention biases, and MLP biases conventional or explicit per-layer vectors. Do not spend implementation complexity compacting them in the first pass.\par
+\f0\fs23 This is a pragmatic size/complexity decision, not a claim that the parameters are not real. A later vector_compaction option can be added if evidence says these small vector families matter.\par
+\f0\fs23 \par
+\f0\fs24 \b Acceptance tests\b0 \f0\fs23 \par
+\f0\fs23 CHEBY_SHEET_COL matrix-family parameter counts and materialized tensor shapes should match the current implementation. Basis buffers remain non-persistent. Optimizer groups cover trainable parameters exactly once. CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK materialization each match direct scalar evaluation. Checkpoint mismatch tests cover compact_geometry and basis_family.\par
+\f0\fs23 \par
+\f0\fs28 \b 2. SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK\b0 \f0\fs23 \par
+\f0\fs23 \par
+\f0\fs24 \b Goal\b0 \f0\fs23 \par
+\f0\fs23 Implement all three two-axis geometries plus the full three-axis BLOCK geometry. This gives a clean experiment grid rather than treating the current SHEET_COL case as if it represented all sheet-like compression.\par
+\f0\fs23 \par
+\f0\fs24 \b Matrix families\b0 \f0\fs23 \par
+\f0\fs23 Compact geometry applies first to repeated transformer matrix families: attention_input_weight, attention_output_weight, mlp_expansion_weight, and mlp_contraction_weight. These are the expensive weight objects and the ones that actually expose depth plus matrix axes.\par
+\f0\fs23 The final lm_head/token embedding tying path should remain conventional unless a separate experiment explicitly targets it.\par
+\f0\fs23 \par
+\f0\fs24 \b Order policy\b0 \f0\fs23 \par
+\f0\fs23 Retain depth_order. Introduce separate order fields for row, column, and flat axes. Avoid overloading row_order to mean input columns in one geometry and output rows in another.\par
+\f1\fs20 depth_order
+base_row_order / row_order
+base_col_order / col_order
+base_flat_order / flat_order\f0\fs23 \par
+\f0\fs23 Derived order rules must be explicit and recorded in the family report. For rectangular matrices, row and column orders should be derived independently from the corresponding axis widths.\par
+\f0\fs23 \par
+\f0\fs24 \b Implementation recommendation\b0 \f0\fs23 \par
+\f0\fs23 Do not keep growing the current SheetTrajectory in-place as if it were the only geometry. Either introduce geometry-specific trajectory adapters or a generalized CompactTrajectory with small coefficient-layout adapters for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\f0\fs23 Use einsum or equivalent staged matrix products for clarity first; optimize after correctness and memory measurements are stable.\par
+\f0\fs23 \par
+\f0\fs24 \b Initialization and tests\b0 \f0\fs23 \par
+\f0\fs23 Re-derive coefficient standard deviations separately for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK so materialized dense weights hit intended target standard deviation. Do not assume the current SHEET_COL coefficient scale transfers unchanged.\par
+\f0\fs23 Tests must cover shapes, direct scalar evaluation, parameter reports, residual-init scaling, CPU train/save/resume within the new schema, and GPU dtype/device movement.\par
+\f0\fs23 \par
+\f0\fs28 \b 3. DCT\b0 \f0\fs23 \par
+\f0\fs23 \par
+\f0\fs24 \b Goal\b0 \f0\fs23 \par
+\f0\fs23 Add DCT as a user-selectable alternative to CHEBY for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK. DENSE remains unaffected. The user-facing token should be DCT. Internally, record basis_version as dct_ii_orthonormal_v1.\par
+\f0\fs23 \par
+\f0\fs24 \b Recommended DCT variant\b0 \f0\fs23 \par
+\f0\fs23 Use orthonormal DCT-II first. DCT-II is real, orthonormal on a finite interval, has a strong low-frequency prior, and is a sensible finite-axis alternative to Chebyshev for smooth compact structure.\par
+\f0\fs23 \par
+\f0\fs24 \b DCT-II basis\b0 \f0\fs23 \par
+\f1\fs20 B[n,0] = sqrt(1 / N)
+B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0
+Use columns k = 0 .. order-1\f0\fs23 \par
+\f0\fs23 N is sample_count for the axis. The basis should be orthonormal by construction; QR should not be required for DCT-II, but Gram-error tests must verify this.\par
+\f0\fs23 \par
+\f0\fs24 \b Other basis families worth considering later\b0 \f0\fs23 \par
+\f0\fs23 Legendre: clean orthogonal polynomial basis on a finite interval. Good candidate if we want a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
+\f0\fs23 B-splines: local smooth basis. Useful if global basis functions are too restrictive, but introduces knot/order choices.\par
+\f0\fs23 Wavelets or Haar: local and multiscale. Potentially useful for abrupt structure, but likely a worse first prior for smooth layer/row/column variation.\par
+\f0\fs23 Learned bases or dictionary bases: more flexible but reduce the controlled-compression nature of the experiment. Use later, not before fixed-basis comparisons are understood.\par
+\f0\fs23 Low-rank/factorized baselines: useful as comparisons, but they answer a different question from fixed geometric bases.\par
+\f0\fs23 \par
+\f0\fs24 \b Experiment plan\b0 \f0\fs23 \par
+\f0\fs23 First compare CHEBY_CURVE vs DCT_CURVE. Then compare CHEBY_SHEET_COL vs DCT_SHEET_COL, CHEBY_SHEET_ROW vs DCT_SHEET_ROW, and CHEBY_SHEET_FLAT vs DCT_SHEET_FLAT. Only after BLOCK correctness is stable, compare CHEBY_BLOCK vs DCT_BLOCK. Keep DENSE as the conventional control, not as part of the basis-family matrix.\par
+\f0\fs23 \par
+\f0\fs28 \b Implementation staging summary\b0 \f0\fs23 \par
+\f0\fs23 Stage A: abstraction refactor with explicit CURVE and the three sheet geometries.\par
+\f0\fs23 Stage B: implement CHEBY_CURVE, CHEBY_SHEET_COL, CHEBY_SHEET_ROW, CHEBY_SHEET_FLAT, and CHEBY_BLOCK.\par
+\f0\fs23 Stage C: add DCT for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\f0\fs23 Do not combine DCT and new geometry implementation in the same first-pass PR unless the geometry tests are already stable.\par
+}
