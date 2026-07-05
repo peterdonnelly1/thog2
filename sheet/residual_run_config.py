@@ -8,6 +8,8 @@ from .run_naming import build_artifact_name, truncate_component
 class OwtRunConfig(_BaseOwtRunConfig):
     def residual_init_artifact_fragment(self) -> str:
         residual_init = self.residual_init_config()
+        if self.residual_init_policy == "unscaled":
+            return "r_unscaled"
         parts = [
             f"r_{self.residual_init_policy}",
             f"z_{residual_init.depth_source}",
