@@ -83,6 +83,10 @@ class TrainerStepMixin:
             "non-finite gradient on at least one rank",
         )
 
+        diagnostics_hook = getattr(self, "_before_optimizer_step", None)
+        if diagnostics_hook is not None:
+            diagnostics_hook()
+
         gradient_norm: Optional[float] = None
         if self.config.grad_clip > 0.0:
             norm = torch.nn.utils.clip_grad_norm_(

@@ -1,0 +1,17 @@
+{
+  "branch": "stage6-controlled-pilot-as-built",
+  "errors": 0,
+  "failures": 0,
+  "scientific_pilot_gate": {
+    "classification": "viable_for_further_study",
+    "evidence": "evidence/stage6_pilot_acceptance.json",
+    "protocol_sha256": "1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490",
+    "satisfied": true
+  },
+  "skips": 0,
+  "stage": 6,
+  "successful": true,
+  "suite": "pilot_controls_and_evidence",
+  "tested_feature_head": "d5915c4cf6004f6587831fdb5a4c00a2eadb49a6",
+  "tests_run": 17
+}

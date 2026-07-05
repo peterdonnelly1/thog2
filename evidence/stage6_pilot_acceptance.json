@@ -1,0 +1,232 @@
+{
+  "artifact_hashes": {
+    "analysis_json_sha256": "90ba500a637a31e6b8295e4049fe936dd97822779561d320651162cc7c8651b2",
+    "analysis_md_sha256": "dd5a94708c31906ec43c70e8d3ba005b350b6a93762ff99bb93b48692bb4a392",
+    "equal_time_comparison_csv_sha256": "227132391c056b3c321d79e0449591df3955f6b07458301779977d6ca1fef770",
+    "equal_update_comparison_csv_sha256": "b41d8ae297d80a72d2332ff7255f005facaa56684e91467f3589929636110ef2",
+    "orchestrator_log_sha256": "86677fad191fb65cb07bbded51c4959006f9b865668c03fa82718cdba9c5d4cd",
+    "pilot_status_json_sha256": "3b5e5df70794aa55ffad6e35d896cfbd6e79f5e59b817fd732080ed4060cd8a2",
+    "resource_comparison_csv_sha256": "53da914c2ecfcd1cd663f6c66cf0208de92b8d7521a25455aa0803551ecf5eca"
+  },
+  "classification": "viable_for_further_study",
+  "classification_rationale": [
+    "All four runs matched protocol, update count, consumed tokens, training trace, validation trace, and evaluation updates.",
+    "All three Sheet runs completed stably and achieved lower final validation loss than dense at equal updates and tokens.",
+    "The strongest tested compression, Q64, retained only 8.792% of dense persistent parameters and 10.529% of dense peak allocated CUDA memory.",
+    "Sheet throughput was only 27.8% to 33.4% of dense throughput, and dense retained an advantage at approximately equal clean training time near the dense endpoint.",
+    "One short single-seed L72 pilot is insufficient to claim general superiority."
+  ],
+  "control_validation": {
+    "dense": {
+      "completed_updates": 250,
+      "consumed_tokens": 1024000,
+      "evaluation_updates": [
+        0,
+        25,
+        50,
+        75,
+        100,
+        125,
+        150,
+        175,
+        200,
+        225,
+        250
+      ],
+      "protocol_match": true,
+      "training_trace_sha256": "66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0",
+      "validation_trace_sha256": "b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6"
+    },
+    "q128": {
+      "completed_updates": 250,
+      "consumed_tokens": 1024000,
+      "evaluation_updates": [
+        0,
+        25,
+        50,
+        75,
+        100,
+        125,
+        150,
+        175,
+        200,
+        225,
+        250
+      ],
+      "protocol_match": true,
+      "training_trace_sha256": "66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0",
+      "validation_trace_sha256": "b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6"
+    },
+    "q256": {
+      "completed_updates": 250,
+      "consumed_tokens": 1024000,
+      "evaluation_updates": [
+        0,
+        25,
+        50,
+        75,
+        100,
+        125,
+        150,
+        175,
+        200,
+        225,
+        250
+      ],
+      "protocol_match": true,
+      "training_trace_sha256": "66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0",
+      "validation_trace_sha256": "b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6"
+    },
+    "q64": {
+      "completed_updates": 250,
+      "consumed_tokens": 1024000,
+      "evaluation_updates": [
+        0,
+        25,
+        50,
+        75,
+        100,
+        125,
+        150,
+        175,
+        200,
+        225,
+        250
+      ],
+      "protocol_match": true,
+      "training_trace_sha256": "66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0",
+      "validation_trace_sha256": "b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6"
+    }
+  },
+  "derived_findings": {
+    "capacity_trend": "No monotonic quality gain from Q64 to Q256; Q128 was best by only 0.015252 loss versus Q64, while Q256 was slower, larger, and worse than Q64.",
+    "recommended_tested_configuration": "Q64 is the tested Pareto choice; lower Q and longer replicated runs are warranted.",
+    "sheet_first_reaches_dense_final_loss": {
+      "dense_final_validation_loss": 6.843830871582031,
+      "dense_training_seconds": 277.23052703702706,
+      "q128": {
+        "completed_updates": 150,
+        "time_ratio_vs_dense": 1.834372260524671,
+        "training_seconds": 508.5391078079483,
+        "validation_loss": 6.5013001441955565
+      },
+      "q256": {
+        "completed_updates": 150,
+        "time_ratio_vs_dense": 2.158247187948943,
+        "training_seconds": 598.3265199789312,
+        "validation_loss": 6.534039115905761
+      },
+      "q64": {
+        "completed_updates": 150,
+        "time_ratio_vs_dense": 1.8103432061694822,
+        "training_seconds": 501.8816994270528,
+        "validation_loss": 6.530887603759766
+      }
+    }
+  },
+  "final_regression": {
+    "accepted_feature_head": "a44fc48ba50b0aead05ee5192dd490075d44dd7e",
+    "evidence": "evidence/stage6_final_regression.json",
+    "satisfied": true
+  },
+  "gates": {
+    "as_built_finalized": true,
+    "final_regression_satisfied": true,
+    "pull_request_accepted": false,
+    "scientific_pilot_satisfied": true
+  },
+  "hardware": {
+    "cuda_total_memory_bytes": 16718168064,
+    "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+    "torch": "2.12.1+cu126",
+    "torch_cuda": "12.6",
+    "world_size": 1
+  },
+  "protocol": {
+    "dataset_train_sampled_sha256": "e1daf49a9ac3e8d7c0b070bd4bee3a784b1a648f35d955d278bf4e129d6816c7",
+    "dataset_validation_sampled_sha256": "c2a5937e2418846130e3b8ae0c854a18631e8ce069ff8d339874965d5dc19458",
+    "pilot_source_commit": "2071746ab18f4182010797241d2b29adb5a7a305",
+    "sha256": "1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490",
+    "training_trace_sha256": "66c6663db2820cdc2648efbd8ac15ee1082b80800b5ded34694c08a30d1638b0",
+    "validation_trace_sha256": "b0973c3b94bcf1d8662770861ad0a3cc69f4f2a42b53775bf08351e38d18cef6"
+  },
+  "runs": {
+    "dense": {
+      "best_validation_loss": 6.843830871582031,
+      "checkpoint_bytes": 6591126257,
+      "checkpoint_reduction_fraction_vs_dense": 0.0,
+      "final_validation_loss": 6.843830871582031,
+      "final_validation_loss_delta_vs_dense": 0.0,
+      "initial_validation_loss": 10.95423583984375,
+      "label": "Dense",
+      "peak_allocated_bytes": 10811534848,
+      "peak_allocated_reduction_fraction_vs_dense": 0.0,
+      "persistent_parameter_reduction_fraction": 0.0,
+      "persistent_parameters": 549158400,
+      "throughput_fraction_of_dense": 1.0,
+      "tokens_per_training_second": 3693.6769227554582,
+      "training_seconds": 277.23052703702706
+    },
+    "q128": {
+      "best_validation_loss": 6.454906463623047,
+      "checkpoint_bytes": 692994873,
+      "checkpoint_reduction_fraction_vs_dense": 0.8948594108690824,
+      "final_validation_loss": 6.454906463623047,
+      "final_validation_loss_delta_vs_dense": -0.3889244079589844,
+      "initial_validation_loss": 10.99344482421875,
+      "label": "Sheet Q128",
+      "peak_allocated_bytes": 1359803904,
+      "peak_allocated_reduction_fraction_vs_dense": 0.8742265649339529,
+      "persistent_parameter_reduction_fraction": 0.8948707549588607,
+      "persistent_parameters": 57732608,
+      "throughput_fraction_of_dense": 0.32696801649310235,
+      "tokens_per_training_second": 1207.7142369679734,
+      "training_seconds": 847.8826933189121
+    },
+    "q256": {
+      "best_validation_loss": 6.478035163879395,
+      "checkpoint_bytes": 919806841,
+      "checkpoint_reduction_fraction_vs_dense": 0.8604476965010068,
+      "final_validation_loss": 6.478035163879395,
+      "final_validation_loss_delta_vs_dense": -0.36579570770263636,
+      "initial_validation_loss": 11.00213623046875,
+      "label": "Sheet Q256",
+      "peak_allocated_bytes": 1792480768,
+      "peak_allocated_reduction_fraction_vs_dense": 0.8342066302253179,
+      "persistent_parameter_reduction_fraction": 0.8604526489989045,
+      "persistent_parameters": 76633600,
+      "throughput_fraction_of_dense": 0.2779407346251137,
+      "tokens_per_training_second": 1026.6232508316689,
+      "training_seconds": 997.4447774979344
+    },
+    "q64": {
+      "best_validation_loss": 6.470158386230469,
+      "checkpoint_bytes": 579588857,
+      "checkpoint_reduction_fraction_vs_dense": 0.9120652777081221,
+      "final_validation_loss": 6.470158386230469,
+      "final_validation_loss_delta_vs_dense": -0.3736724853515625,
+      "initial_validation_loss": 11.05128173828125,
+      "label": "Sheet Q64",
+      "peak_allocated_bytes": 1138386432,
+      "peak_allocated_reduction_fraction_vs_dense": 0.8947063069208359,
+      "persistent_parameter_reduction_fraction": 0.9120798079388388,
+      "persistent_parameters": 48282112,
+      "throughput_fraction_of_dense": 0.3336493094487153,
+      "tokens_per_training_second": 1232.3927437379857,
+      "training_seconds": 830.903951036009
+    }
+  },
+  "scope": {
+    "dataset": "OpenWebText uint16 GPT-2 token stream",
+    "l144_matched_dense_tested": false,
+    "matched_geometry": "L72/H12/D768/C256",
+    "sheet_depth_order": 16,
+    "single_seed": true,
+    "tokens_per_run": 1024000,
+    "tokens_per_update": 4096,
+    "updates_per_run": 250
+  },
+  "stage": 6,
+  "status": "scientific_pilot_and_final_regression_accepted_pr_pending",
+  "suite": "controlled_pilot_acceptance"
+}

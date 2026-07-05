@@ -1,0 +1,15 @@
+{
+  "stage": 6,
+  "suite": "pre_pilot_instrumentation_and_artifact_controls",
+  "status": "superseded_by_completed_pilot_evidence",
+  "superseded_by": "evidence/stage6_pilot_acceptance.json",
+  "scientific_pilot_gate": {
+    "satisfied": true,
+    "classification": "viable_for_further_study",
+    "protocol_sha256": "1a7c66a02e5480c862f9c13d7cc3231eafa3b54c688c08093f5744bc6c16d490"
+  },
+  "final_regression_gate": {
+    "satisfied": false,
+    "reason": "Final regression on the post-evidence Stage 6 head is pending."
+  }
+}

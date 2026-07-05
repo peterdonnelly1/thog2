@@ -1,5 +1,5 @@
 # vvv THOG
-name: Stage 5 GPU, DDP, and target geometry
+name: Stage 6 controlled pilot and as-built
 
 on:
   pull_request:
@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  stage5-cpu-ddp:
+  stage6-controls:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Check out branch
         uses: actions/checkout@v4
@@ -28,13 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install numpy
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Enforce Stage 5 source scope
+      - name: Enforce Stage 6 source scope
         run: |
           set -euo pipefail
-          if [ "${GITHUB_HEAD_REF:-}" != "stage5-gpu-ddp-target-geometry" ]; then
-            echo "Stage 5 source guard skipped for later-stage branch ${GITHUB_HEAD_REF:-unknown}."
-            exit 0
-          fi
           git fetch origin master
           python - <<'PY'
           import subprocess
@@ -42,28 +38,33 @@ jobs:
               ['git', 'diff', '--name-only', 'origin/master...HEAD'], text=True
           ).splitlines()
           allowed = (
-              'sheet/', 'tests/', 'evidence/stage5_', 'docs/THOG2_Stage_5_',
-              'train_thog2.py',
-              '.github/workflows/stage4-ephemeral-inference.yml',
+              'sheet/',
+              'tests/',
+              'evidence/stage6_',
+              'docs/THOG2_Stage_6_',
+              'docs/THOG2_Chebyshev_Sheet_As_Built_',
+              'run_thog2_stage6_',
               '.github/workflows/stage5-gpu-ddp.yml',
+              '.github/workflows/stage6-controlled-pilot.yml',
           )
           unexpected = [path for path in changed if not any(
               path == prefix or path.startswith(prefix) for prefix in allowed
           )]
           if unexpected:
-              raise SystemExit(f'unexpected Stage 5 paths: {unexpected}')
+              raise SystemExit(f'unexpected Stage 6 paths: {unexpected}')
           protected = {'model.py', 'train.py', 'sample.py', 'configurator.py'}
           touched = sorted(protected.intersection(changed))
           if touched:
-              raise SystemExit(f'Stage 5 touched protected runtime files: {touched}')
+              raise SystemExit(f'Stage 6 touched protected runtime files: {touched}')
           print('\n'.join(changed))
           PY
-      - name: Compile Stage 5 sources
+      - name: Compile Stage 6 sources
         run: |
           python -m compileall -q \
             sheet \
             tests \
-            train_thog2.py
+            run_thog2_stage6_one.py \
+            run_thog2_stage6_pilot.py
       - name: Run Stage 1 regression
         run: python tests/run_sheet_stage1_tests.py --evidence /tmp/stage1.json
       - name: Run Stage 2 regression
@@ -72,16 +73,18 @@ jobs:
         run: python tests/run_sheet_stage3_tests.py --evidence /tmp/stage3.json
       - name: Run Stage 4 regression
         run: python tests/run_sheet_stage4_tests.py --evidence /tmp/stage4.json
-      - name: Run Stage 5 CPU and two-rank DDP tests
+      - name: Run Stage 5 CPU and DDP regression
+        run: python tests/run_sheet_stage5_tests.py --evidence /tmp/stage5.json
+      - name: Run Stage 6 control and evidence tests
         run: |
           mkdir -p evidence
-          python tests/run_sheet_stage5_tests.py \
-            --evidence evidence/stage5_cpu_ddp.json
-      - name: Upload Stage 5 evidence
+          python tests/run_sheet_stage6_tests.py \
+            --evidence evidence/stage6_cpu_controls.json
+      - name: Upload Stage 6 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: stage5-cpu-ddp-evidence
-          path: evidence/stage5_cpu_ddp.json
+          name: stage6-cpu-control-evidence
+          path: evidence/stage6_cpu_controls.json
           if-no-files-found: error
 # ^^^ THOG

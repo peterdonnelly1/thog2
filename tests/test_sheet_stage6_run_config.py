@@ -1,0 +1,88 @@
+# vvv THOG
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from sheet.run_config import OwtRunConfig
+
+
+class OwtRunConfigTests(unittest.TestCase):
+    def test_s6_28_shared_public_names_map_to_internal_config(self) -> None:
+        config = OwtRunConfig(
+            model_type="sheet",
+            max_iters=20,
+            warmup_iters=2,
+            eval_iters=7,
+            min_lr=1.0e-5,
+            gradient_accumulation_steps=8,
+            checkpoint_segment_size=3,
+        )
+        internal = config.to_training_config(
+            vocab_size=128,
+            world_size=2,
+            out_dir=Path("test-output"),
+        )
+        self.assertEqual(internal.max_updates, 20)
+        self.assertEqual(internal.warmup_updates, 2)
+        self.assertEqual(internal.eval_batches, 7)
+        self.assertEqual(internal.min_learning_rate, 1.0e-5)
+        self.assertEqual(internal.gradient_accumulation_steps, 4)
+        self.assertEqual(internal.checkpoint_segment_size, 3)
+        canonical = config.canonical_dict(world_size=2)
+        self.assertIn("max_iters", canonical)
+        self.assertIn("warmup_iters", canonical)
+        self.assertIn("eval_iters", canonical)
+        self.assertIn("min_lr", canonical)
+        self.assertNotIn("max_updates", canonical)
+        self.assertNotIn("warmup_updates", canonical)
+        self.assertNotIn("eval_batches", canonical)
+        self.assertNotIn("min_learning_rate", canonical)
+
+    def test_s6_29_global_accumulation_and_tokens_match_thog_semantics(self) -> None:
+        config = OwtRunConfig(
+            model_type="dense",
+            batch_size=12,
+            gradient_accumulation_steps=160,
+            block_size=256,
+        )
+        self.assertEqual(config.local_gradient_accumulation_steps(2), 80)
+        self.assertEqual(config.tokens_per_iter(), 12 * 160 * 256)
+        with self.assertRaisesRegex(ValueError, "divisible"):
+            config.local_gradient_accumulation_steps(3)
+
+    def test_s6_30_checkpointing_is_explicit_and_shared(self) -> None:
+        for model_type in ("dense", "sheet"):
+            enabled = OwtRunConfig(
+                model_type=model_type,
+                activation_checkpointing=True,
+                checkpoint_segment_size=12,
+            ).to_training_config(
+                vocab_size=128,
+                world_size=1,
+                out_dir=Path("test-output"),
+            )
+            disabled = OwtRunConfig(
+                model_type=model_type,
+                activation_checkpointing=False,
+                checkpoint_segment_size=12,
+            ).to_training_config(
+                vocab_size=128,
+                world_size=1,
+                out_dir=Path("test-output"),
+            )
+            self.assertEqual(enabled.checkpoint_segment_size, 12)
+            self.assertEqual(disabled.checkpoint_segment_size, 0)
+
+    def test_s6_31_dense_config_omits_sheet_only_orders(self) -> None:
+        dense = OwtRunConfig(model_type="dense").canonical_dict(world_size=1)
+        sheet = OwtRunConfig(model_type="sheet").canonical_dict(world_size=1)
+        self.assertNotIn("depth_order", dense)
+        self.assertNotIn("base_row_order", dense)
+        self.assertEqual(sheet["depth_order"], 16)
+        self.assertEqual(sheet["base_row_order"], 64)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+# ^^^ THOG
