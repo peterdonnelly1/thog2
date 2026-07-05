@@ -5,6 +5,10 @@ cd "$(dirname "$0")"
 
 RUN_MODULE="run_thog2_owt_residual"
 HOST_LABEL="scruffy"
+RUNTIME_PROFILE="auto"
+DTYPE="auto"
+HOST_LABEL_EXPLICIT=false
+DTYPE_EXPLICIT=false
 RUN_MODE="fresh"
 RUN_NAME="GPT2_SMALL_VS_SHEET144_P32_RBASIS_A"
 STEPS=250
@@ -39,6 +43,8 @@ usage() {
 Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
 
   -o HOST_LABEL=${HOST_LABEL}
+  -R RUNTIME_PROFILE=${RUNTIME_PROFILE}       auto | scruffy | dreedle
+  -T DTYPE=${DTYPE}                           auto | float32 | float16 | bfloat16
   -q RUN_MODE=${RUN_MODE}                     fresh | resume
   -g RUN_NAME=${RUN_NAME}
   -n STEPS=${STEPS}
@@ -71,9 +77,11 @@ Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
 EOF
 }
 
-while getopts ":o:q:g:n:b:d:t:u:e:l:w:k:A:G:L:H:D:Y:C:P:Q:r:z:Z:p:S:M:W:x:h" option; do
+while getopts ":o:R:T:q:g:n:b:d:t:u:e:l:w:k:A:G:L:H:D:Y:C:P:Q:r:z:Z:p:S:M:W:x:h" option; do
   case "$option" in
-    o) HOST_LABEL="$OPTARG" ;;
+    o) HOST_LABEL="$OPTARG"; HOST_LABEL_EXPLICIT=true ;;
+    R) RUNTIME_PROFILE="$OPTARG" ;;
+    T) DTYPE="$OPTARG"; DTYPE_EXPLICIT=true ;;
     q) RUN_MODE="$OPTARG" ;;
     g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;;
@@ -120,6 +128,21 @@ WIDTH_SPECS=()
 WIDTH_N_EMBD=""
 WIDTH_N_HEAD=""
 
+apply_runtime_profile() {
+  case "$RUNTIME_PROFILE" in
+    auto) ;;
+    scruffy)
+      [[ "$HOST_LABEL_EXPLICIT" == false ]] && HOST_LABEL="scruffy"
+      [[ "$DTYPE_EXPLICIT" == false ]] && DTYPE="bfloat16"
+      ;;
+    dreedle)
+      [[ "$HOST_LABEL_EXPLICIT" == false ]] && HOST_LABEL="dreedle"
+      [[ "$DTYPE_EXPLICIT" == false ]] && DTYPE="float16"
+      ;;
+    *) echo "RUNTIME_PROFILE must be auto, scruffy, or dreedle." >&2; exit 2 ;;
+  esac
+}
+
 build_width_specs() {
   WIDTH_SPECS=()
   if [[ -z "$WIDTH_SWEEP" ]]; then
@@ -160,8 +183,11 @@ parse_width_spec() {
 }
 # ^^^ THOG
 
+apply_runtime_profile
+
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
+case "$DTYPE" in auto|float32|float16|bfloat16) ;; *) echo "DTYPE must be auto, float32, float16, or bfloat16." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "RESIDUAL_INIT_DEPTH_SOURCE must be true_layer_depth, dof_implied_depth, or user_forced_depth." >&2; exit 2 ;; esac
 for setting in "$STEPS" "$BATCH_SIZE" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do
@@ -184,6 +210,7 @@ build_width_specs
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 WANDB_FLAG="--no-wandb"; [[ "$WANDB_ENABLED" == true ]] && WANDB_FLAG="--wandb"
+DTYPE_ARGS=(); [[ "$DTYPE" != auto ]] && DTYPE_ARGS=(--dtype "$DTYPE")
 
 # vvv THOG
 run_sheet_once() {
@@ -204,7 +231,7 @@ run_sheet_once() {
     --warmup-iters "$WARMUP_ITERS" --n-layer "$N_LAYER" --n-head "$run_n_head" --n-embd "$run_n_embd" --block-size "$BLOCK_SIZE"
     --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER"
     --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
-    "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${EXTRA_ARGS[@]}"
+    "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${DTYPE_ARGS[@]}" "${EXTRA_ARGS[@]}"
   )
 
   log_timestamp="$(date +%Y%m%d_%H%M%S)"
@@ -222,6 +249,8 @@ run_sheet_once() {
 THOG2 SHEET OpenWebText experiment
   artifact:                $artifact_name
   run mode:               $RUN_MODE
+  runtime profile:        $RUNTIME_PROFILE
+  dtype:                  $DTYPE
   geometry:               L$N_LAYER / H$run_n_head / D$run_n_embd / C$BLOCK_SIZE
   width sweep:            ${WIDTH_SWEEP:-single}
   sheet orders:           P$DEPTH_ORDER / Q$BASE_ROW_ORDER
