@@ -14,6 +14,11 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from sheet.checkpoints import load_payload
+from sheet.instrumentation import (
+    INSTRUMENTATION_BACKENDS,
+    attach_telemetry,
+    build_telemetry,
+)
 from sheet.residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -24,7 +29,6 @@ from sheet.residual_init import (
 from sheet.run_config import OwtRunConfig
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
-from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
@@ -176,7 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-root", default="checkpoints")
     parser.add_argument("--log-root", default="logs")
     parser.add_argument("--result-root", default="results")
-    parser.add_argument("--wandb-root", default="wandb")
+    parser.add_argument("--curve-root", default="curves")
+    parser.add_argument("--wandb-root", default="curves/wandb")
 
     parser.add_argument("--max-iters", type=int, default=100)
     parser.add_argument("--eval-interval", type=int, default=50)
@@ -233,7 +238,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="bfloat16",
     )
 
-    parser.add_argument("--wandb", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--instrumentation",
+        choices=INSTRUMENTATION_BACKENDS,
+        default=None,
+        help="curve backend: tensorboard, wandb, or none; default tensorboard",
+    )
+    parser.add_argument("--system-log-interval", type=int, default=10)
+    parser.add_argument("--wandb", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--wandb-project", default="thog")
     parser.add_argument("--wandb-entity")
     parser.add_argument(
@@ -250,7 +262,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def resolve_instrumentation(
+    instrumentation: Optional[str],
+    legacy_wandb: Optional[bool],
+    wandb_mode: str,
+) -> str:
+    if instrumentation is None:
+        if legacy_wandb is True:
+            selected = "wandb"
+        elif legacy_wandb is False:
+            selected = "none"
+        else:
+            selected = "tensorboard"
+    else:
+        selected = instrumentation
+    if selected == "wandb" and wandb_mode == "disabled":
+        return "none"
+    return selected
+
+
 def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
+    instrumentation = resolve_instrumentation(
+        arguments.instrumentation,
+        arguments.wandb,
+        arguments.wandb_mode,
+    )
     return OwtRunConfig(
         model_type=arguments.model_type,
         run_mode=arguments.run_mode,
@@ -261,6 +297,7 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         checkpoint_root=arguments.checkpoint_root,
         log_root=arguments.log_root,
         result_root=arguments.result_root,
+        curve_root=arguments.curve_root,
         wandb_root=arguments.wandb_root,
         max_iters=arguments.max_iters,
         eval_interval=arguments.eval_interval,
@@ -293,7 +330,9 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         data_seed=arguments.data_seed,
         device=arguments.device,
         dtype=arguments.dtype,
-        wandb_enabled=arguments.wandb,
+        instrumentation=instrumentation,
+        system_log_interval=arguments.system_log_interval,
+        wandb_enabled=(instrumentation == "wandb"),
         wandb_project=arguments.wandb_project,
         wandb_entity=arguments.wandb_entity,
         wandb_mode=arguments.wandb_mode,
@@ -384,12 +423,13 @@ def main() -> int:
 
     canonical = config.canonical_dict(world_size=world_size)
     source = source_identity()
-    telemetry = WandbTelemetry(
-        enabled=(config.wandb_enabled and trainer.distributed.is_primary),
-        project=config.wandb_project,
-        entity=config.wandb_entity,
-        mode=config.wandb_mode,
-        root=Path(config.wandb_root),
+    telemetry = build_telemetry(
+        instrumentation=config.instrumentation,
+        enabled=trainer.distributed.is_primary,
+        curve_dir=paths["curve_dir"],
+        wandb_project=config.wandb_project,
+        wandb_entity=config.wandb_entity,
+        wandb_mode=config.wandb_mode,
         name=config.artifact_name,
         group=config.run_name.upper(),
         job_type="dense2" if config.model_type == "dense" else "sheet",
@@ -400,6 +440,9 @@ def main() -> int:
             "dataset_record": dataset,
             "parameter_report": trainer.parameter_report,
         },
+        system_log_interval=config.system_log_interval,
+        device=str(trainer.device),
+        disk_root=REPOSITORY_ROOT,
     )
     try:
         if trainer.distributed.is_primary:
@@ -428,6 +471,8 @@ def main() -> int:
             print(json.dumps({
                 "artifact_name": config.artifact_name,
                 "checkpoint": str(checkpoint_path),
+                "curves": str(paths["curve_dir"]),
+                "instrumentation": config.instrumentation,
                 "result": str(result_path),
                 "completed_updates": result["budget"]["completed_updates"],
                 "consumed_tokens": result["budget"]["consumed_tokens"],
