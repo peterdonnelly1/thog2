@@ -9,7 +9,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-RUN_NAME="DANEVIRK2_SMOKE"
+# vvv THOG
+# Default to a unique smoke name so repeated fresh smoke runs do not collide with prior checkpoint artifacts.
+# ^^^ THOG
+RUN_NAME="DANEVIRK2_SMOKE_$(date +%y%m%d_%H%M%S)"
 STEPS=20
 BATCH_SIZE=12
 GRADIENT_ACCUMULATION_STEPS=4
