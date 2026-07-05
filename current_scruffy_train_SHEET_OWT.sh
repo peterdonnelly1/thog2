@@ -21,6 +21,7 @@ NUM_GPUS=1
 N_LAYER=144
 N_HEAD=12
 N_EMBD=768
+WIDTH_SWEEP=""
 BLOCK_SIZE=1024
 DEPTH_ORDER=32
 BASE_ROW_ORDER=64
@@ -37,11 +38,13 @@ usage() {
   cat <<EOF
 Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
 
+  -o HOST_LABEL=${HOST_LABEL}
   -q RUN_MODE=${RUN_MODE}                     fresh | resume
   -g RUN_NAME=${RUN_NAME}
   -n STEPS=${STEPS}
   -b BATCH_SIZE=${BATCH_SIZE}
   -d DATASET_NAME=${DATASET_NAME}
+  -t DATA_DIR=${DATA_DIR}
   -u EVAL_ITERS=${EVAL_ITERS}
   -e EVAL_INTERVAL=${EVAL_INTERVAL}
   -l LOG_INTERVAL=${LOG_INTERVAL}
@@ -52,6 +55,7 @@ Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
   -L N_LAYER=${N_LAYER}
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
+  -Y WIDTH_SWEEP=${WIDTH_SWEEP:-single}          D/H list or D_START:D_STOP:D_STEP, e.g. 768/12,1024/16 or 768:1536:256
   -C BLOCK_SIZE=${BLOCK_SIZE}
   -P DEPTH_ORDER=${DEPTH_ORDER}
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
@@ -67,13 +71,15 @@ Usage: $0 [options] [-- additional ${RUN_MODULE} arguments]
 EOF
 }
 
-while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:P:Q:r:z:Z:p:S:M:W:x:h" option; do
+while getopts ":o:q:g:n:b:d:t:u:e:l:w:k:A:G:L:H:D:Y:C:P:Q:r:z:Z:p:S:M:W:x:h" option; do
   case "$option" in
+    o) HOST_LABEL="$OPTARG" ;;
     q) RUN_MODE="$OPTARG" ;;
     g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;;
     b) BATCH_SIZE="$OPTARG" ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;;
+    t) DATA_DIR="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;;
     e) EVAL_INTERVAL="$OPTARG" ;;
     l) LOG_INTERVAL="$OPTARG" ;;
@@ -84,6 +90,7 @@ while getopts ":q:g:n:b:d:u:e:l:w:k:A:G:L:H:D:C:P:Q:r:z:Z:p:S:M:W:x:h" option; d
     L) N_LAYER="$OPTARG" ;;
     H) N_HEAD="$OPTARG" ;;
     D) N_EMBD="$OPTARG" ;;
+    Y) WIDTH_SWEEP="$OPTARG" ;;
     C) BLOCK_SIZE="$OPTARG" ;;
     P) DEPTH_ORDER="$OPTARG" ;;
     Q) BASE_ROW_ORDER="$OPTARG" ;;
@@ -108,6 +115,51 @@ validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
 validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; expected true or false." >&2; exit 2 ;; esac; }
 
+# vvv THOG
+WIDTH_SPECS=()
+WIDTH_N_EMBD=""
+WIDTH_N_HEAD=""
+
+build_width_specs() {
+  WIDTH_SPECS=()
+  if [[ -z "$WIDTH_SWEEP" ]]; then
+    WIDTH_SPECS=("$N_EMBD/$N_HEAD")
+    return
+  fi
+
+  local normalized="${WIDTH_SWEEP//[[:space:]]/}"
+  if [[ "$normalized" =~ ^([1-9][0-9]*):([1-9][0-9]*):([1-9][0-9]*)$ ]]; then
+    local start_width="${BASH_REMATCH[1]}"
+    local stop_width="${BASH_REMATCH[2]}"
+    local step_width="${BASH_REMATCH[3]}"
+    (( start_width <= stop_width )) || { echo "WIDTH_SWEEP start must be <= stop: $WIDTH_SWEEP" >&2; exit 2; }
+    for (( width = start_width; width <= stop_width; width += step_width )); do
+      (( width % 64 == 0 )) || { echo "WIDTH_SWEEP range width must be divisible by 64: $width" >&2; exit 2; }
+      WIDTH_SPECS+=("$width/$((width / 64))")
+    done
+    return
+  fi
+
+  IFS=',' read -r -a WIDTH_SPECS <<< "$normalized"
+}
+
+parse_width_spec() {
+  local raw_spec="$1"
+  local cleaned_spec="${raw_spec//[[:space:]]/}"
+  if [[ "$cleaned_spec" =~ ^D?([1-9][0-9]*)[:/]H?([1-9][0-9]*)$ ]]; then
+    WIDTH_N_EMBD="${BASH_REMATCH[1]}"
+    WIDTH_N_HEAD="${BASH_REMATCH[2]}"
+  else
+    echo "Invalid WIDTH_SWEEP element: $raw_spec; expected D/H, D:H, D768/H12, or range D_START:D_STOP:D_STEP." >&2
+    exit 2
+  fi
+  validate_positive_uint "$WIDTH_N_EMBD" "WIDTH_SWEEP n_embd"
+  validate_positive_uint "$WIDTH_N_HEAD" "WIDTH_SWEEP n_head"
+  (( WIDTH_N_EMBD % WIDTH_N_HEAD == 0 )) || { echo "WIDTH_SWEEP n_embd must be divisible by n_head: $raw_spec" >&2; exit 2; }
+  (( BASE_ROW_ORDER <= WIDTH_N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed swept N_EMBD: Q$BASE_ROW_ORDER > D$WIDTH_N_EMBD" >&2; exit 2; }
+}
+# ^^^ THOG
+
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
@@ -125,38 +177,51 @@ validate_true_false "$DRY_RUN" "DRY_RUN"
 (( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
 (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "Global gradient accumulation must be divisible by NUM_GPUS." >&2; exit 2; }
+build_width_specs
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 WANDB_FLAG="--no-wandb"; [[ "$WANDB_ENABLED" == true ]] && WANDB_FLAG="--wandb"
 
-TRAIN_ARGS=(
-  --model-type sheet --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
-  --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --max-iters "$STEPS" --batch-size "$BATCH_SIZE"
-  --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS" --eval-iters "$EVAL_ITERS"
-  --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL"
-  --warmup-iters "$WARMUP_ITERS" --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE"
-  --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER"
-  --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
-  "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${EXTRA_ARGS[@]}"
-)
+# vvv THOG
+run_sheet_once() {
+  local run_n_embd="$1"
+  local run_n_head="$2"
+  local log_timestamp
+  local resolved_json
+  local artifact_name
+  local log_path
+  local train_args
+  local command
 
-LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-RESOLVED_JSON="$("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
-ARTIFACT_NAME="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
-LOG_PATH="$(printf '%s' "$RESOLVED_JSON" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  train_args=(
+    --model-type sheet --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
+    --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --max-iters "$STEPS" --batch-size "$BATCH_SIZE"
+    --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS" --eval-iters "$EVAL_ITERS"
+    --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL"
+    --warmup-iters "$WARMUP_ITERS" --n-layer "$N_LAYER" --n-head "$run_n_head" --n-embd "$run_n_embd" --block-size "$BLOCK_SIZE"
+    --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER"
+    --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
+    "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${EXTRA_ARGS[@]}"
+  )
 
-if (( NUM_GPUS == 1 )); then
-  COMMAND=("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
-else
-  COMMAND=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
-fi
+  log_timestamp="$(date +%Y%m%d_%H%M%S)"
+  resolved_json="$("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --print-resolved-json)"
+  artifact_name="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
+  log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
 
-cat <<EOF
+  if (( NUM_GPUS == 1 )); then
+    command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp")
+  else
+    command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp")
+  fi
+
+  cat <<EOF
 THOG2 SHEET OpenWebText experiment
-  artifact:                $ARTIFACT_NAME
+  artifact:                $artifact_name
   run mode:               $RUN_MODE
-  geometry:               L$N_LAYER / H$N_HEAD / D$N_EMBD / C$BLOCK_SIZE
+  geometry:               L$N_LAYER / H$run_n_head / D$run_n_embd / C$BLOCK_SIZE
+  width sweep:            ${WIDTH_SWEEP:-single}
   sheet orders:           P$DEPTH_ORDER / Q$BASE_ROW_ORDER
   residual init:          $RESIDUAL_INIT_POLICY / $RESIDUAL_INIT_DEPTH_SOURCE / $RESIDUAL_INIT_DEPTH_VALUE
   GPUs:                   $NUM_GPUS
@@ -167,14 +232,21 @@ THOG2 SHEET OpenWebText experiment
   checkpoint segment:     $CHECKPOINT_SEGMENT_SIZE
   checkpoint interval:    $CHECKPOINT_INTERVAL
   W&B:                    $WANDB_ENABLED ($WANDB_MODE)
-  log:                    $LOG_PATH
+  log:                    $log_path
 EOF
 
-if [[ "$DRY_RUN" == true ]]; then
-  "$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
-  printf 'DRY RUN:'; printf ' %q' "${COMMAND[@]}"; printf '\n'
-  exit 0
-fi
+  if [[ "$DRY_RUN" == true ]]; then
+    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --dry-run
+    printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'
+    return 0
+  fi
 
-mkdir -p "$(dirname "$LOG_PATH")"
-"${COMMAND[@]}" 2>&1 | tee "$LOG_PATH"
+  mkdir -p "$(dirname "$log_path")"
+  "${command[@]}" 2>&1 | tee "$log_path"
+}
+
+for width_spec in "${WIDTH_SPECS[@]}"; do
+  parse_width_spec "$width_spec"
+  run_sheet_once "$WIDTH_N_EMBD" "$WIDTH_N_HEAD"
+done
+# ^^^ THOG
