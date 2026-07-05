@@ -17,6 +17,8 @@ _TRUNCATION_MARKER = "__TRUNC_"
 _RUN_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 _COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 _DATASET_PATTERN = re.compile(r"[^a-z0-9]+")
+_TIMESTAMP_PATTERN = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})_(?P<hour>\d{2})(?P<minute>\d{2})(?P<second>\d{2})$")
+_COMPACT_TIMESTAMP_PATTERN = re.compile(r"^\d{6}_\d{4}$")
 
 
 def normalize_component(value: str, *, uppercase: bool = False) -> str:
@@ -90,6 +92,31 @@ def bounded_filename(
     return bounded_stem + suffix
 
 
+def _require_positive_integer(name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _require_nonnegative_integer(name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+
+
+def compact_log_timestamp(log_timestamp: str) -> str:
+    """Return YYMMDD_HHMM for timestamped local run directories."""
+
+    normalized = normalize_component(log_timestamp)
+    if _COMPACT_TIMESTAMP_PATTERN.fullmatch(normalized):
+        return normalized
+    match = _TIMESTAMP_PATTERN.fullmatch(normalized)
+    if match is None:
+        return normalized
+    return (
+        f"{match.group('year')[-2:]}{match.group('month')}{match.group('day')}_"
+        f"{match.group('hour')}{match.group('minute')}"
+    )
+
+
 def build_artifact_name(
     *,
     model_type: str,
@@ -103,12 +130,15 @@ def build_artifact_name(
     batch_size: int,
     gradient_accumulation_steps: int,
     max_iters: int,
+    checkpoint_interval: int = 0,
+    warmup_iters: int = 0,
+    checkpoint_segment_size: int = 12,
     depth_order: int | None = None,
     base_row_order: int | None = None,
     suffix: str | None = None,
     max_length: int = DEFAULT_COMPONENT_LIMIT,
 ) -> str:
-    integer_values = {
+    for name, value in {
         "n_layer": n_layer,
         "n_head": n_head,
         "n_embd": n_embd,
@@ -116,15 +146,30 @@ def build_artifact_name(
         "batch_size": batch_size,
         "gradient_accumulation_steps": gradient_accumulation_steps,
         "max_iters": max_iters,
-    }
-    for name, value in integer_values.items():
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(f"{name} must be a positive integer")
+        "checkpoint_segment_size": checkpoint_segment_size,
+    }.items():
+        _require_positive_integer(name, value)
+    for name, value in {
+        "checkpoint_interval": checkpoint_interval,
+        "warmup_iters": warmup_iters,
+    }.items():
+        _require_nonnegative_integer(name, value)
     if n_embd % n_head != 0:
         raise ValueError("n_embd must be divisible by n_head")
 
     prefix = architecture_prefix(model_type)
-    architecture = f"l_{n_layer}_h_{n_head}_d_{n_embd}_ctx_{block_size}"
+    fields = [
+        f"n_{max_iters}",
+        f"b_{batch_size}",
+        f"d_{dataset_label(dataset_name)}",
+        f"w_{warmup_iters}",
+        f"k_{checkpoint_interval}",
+        f"A_{gradient_accumulation_steps}",
+        f"L_{n_layer}",
+        f"H_{n_head}",
+        f"D_{n_embd}",
+        f"C_{block_size}",
+    ]
     if model_type == "thog2_sheet":
         if depth_order is None or base_row_order is None:
             raise ValueError("SHEET naming requires depth_order and base_row_order")
@@ -132,15 +177,15 @@ def build_artifact_name(
             raise ValueError("depth_order must be in [1, n_layer]")
         if not 1 <= base_row_order <= n_embd:
             raise ValueError("base_row_order must be in [1, n_embd]")
-        architecture += f"_p_{depth_order}_q_{base_row_order}"
+        fields.extend([f"P_{depth_order}", f"Q_{base_row_order}"])
     elif depth_order is not None or base_row_order is not None:
         raise ValueError("DENSE2 naming must not include SHEET orders")
+    fields.append(f"S_{checkpoint_segment_size}")
 
     name = (
         f"{prefix}_{normalize_component(host_label)}__"
-        f"{validate_run_name(run_name)}__{dataset_label(dataset_name)}__"
-        f"{architecture}__b_{batch_size}_ga_{gradient_accumulation_steps}__"
-        f"steps_{max_iters}"
+        f"{validate_run_name(run_name)}__"
+        f"{'_'.join(fields)}"
     )
     if suffix:
         name += f"__{normalize_component(suffix, uppercase=True)}"
@@ -155,21 +200,21 @@ def artifact_paths(
     result_root: Path = Path("results"),
     log_timestamp: str | None = None,
 ) -> dict[str, Path]:
+    del result_root  # new runs keep inspectable result artifacts under logs/<run>/
     checkpoint_dir = checkpoint_root / artifact_name
-    log_dir = log_root / artifact_name
-    result_dir = result_root / artifact_name
-    log_suffix = (
-        f"_train_{normalize_component(log_timestamp)}.log"
+    run_dir_name = (
+        f"{compact_log_timestamp(log_timestamp)}_{artifact_name}"
         if log_timestamp
-        else "_train.log"
+        else artifact_name
     )
+    log_dir = log_root / truncate_component(run_dir_name)
     return {
         "checkpoint_dir": checkpoint_dir,
         "checkpoint_path": checkpoint_dir / "ckpt.pt",
         "log_dir": log_dir,
-        "log_path": log_dir / bounded_filename(artifact_name, log_suffix),
-        "result_dir": result_dir,
-        "result_path": result_dir / "result.json",
+        "log_path": log_dir / "train.log",
+        "result_dir": log_dir,
+        "result_path": log_dir / "result.json",
     }
 
 
@@ -206,6 +251,9 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--gradient-accumulation-steps", type=int, required=True)
     parser.add_argument("--max-iters", type=int, required=True)
+    parser.add_argument("--checkpoint-interval", type=int, default=0)
+    parser.add_argument("--warmup-iters", type=int, default=0)
+    parser.add_argument("--checkpoint-segment-size", type=int, default=12)
     parser.add_argument("--depth-order", type=int)
     parser.add_argument("--base-row-order", type=int)
     parser.add_argument("--suffix")
@@ -224,6 +272,9 @@ def main() -> int:
             batch_size=arguments.batch_size,
             gradient_accumulation_steps=arguments.gradient_accumulation_steps,
             max_iters=arguments.max_iters,
+            checkpoint_interval=arguments.checkpoint_interval,
+            warmup_iters=arguments.warmup_iters,
+            checkpoint_segment_size=arguments.checkpoint_segment_size,
             depth_order=arguments.depth_order,
             base_row_order=arguments.base_row_order,
             suffix=arguments.suffix,

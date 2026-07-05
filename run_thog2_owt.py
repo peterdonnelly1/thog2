@@ -14,6 +14,13 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from sheet.checkpoints import load_payload
+from sheet.residual_init import (
+    DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
+    DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
+    DEFAULT_RESIDUAL_INIT_POLICY,
+    RESIDUAL_INIT_DEPTH_SOURCES,
+    RESIDUAL_INIT_POLICIES,
+)
 from sheet.run_config import OwtRunConfig
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
@@ -185,6 +192,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-embd", type=int, default=768)
     parser.add_argument("--depth-order", type=int, default=16)
     parser.add_argument("--base-row-order", type=int, default=64)
+    parser.add_argument(
+        "--residual-init-policy",
+        choices=RESIDUAL_INIT_POLICIES,
+        default=DEFAULT_RESIDUAL_INIT_POLICY,
+    )
+    parser.add_argument(
+        "--residual-init-depth-source",
+        choices=RESIDUAL_INIT_DEPTH_SOURCES,
+        default=DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
+    )
+    parser.add_argument(
+        "--residual-init-depth-value",
+        type=int,
+        default=DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
+    )
 
     parser.add_argument(
         "--activation-checkpointing",
@@ -253,6 +275,9 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         n_embd=arguments.n_embd,
         depth_order=arguments.depth_order,
         base_row_order=arguments.base_row_order,
+        residual_init_policy=arguments.residual_init_policy,
+        residual_init_depth_source=arguments.residual_init_depth_source,
+        residual_init_depth_value=arguments.residual_init_depth_value,
         activation_checkpointing=arguments.activation_checkpointing,
         checkpoint_segment_size=arguments.checkpoint_segment_size,
         learning_rate=arguments.learning_rate,

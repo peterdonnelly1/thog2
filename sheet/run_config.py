@@ -5,6 +5,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .residual_init import (
+    DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
+    DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
+    DEFAULT_RESIDUAL_INIT_POLICY,
+    ResidualInitConfig,
+)
 from .run_naming import DEFAULT_COMPONENT_LIMIT, artifact_paths, build_artifact_name
 from .training_config import TrainingConfig
 
@@ -43,6 +49,10 @@ class OwtRunConfig:
     n_embd: int = 768
     depth_order: int = 16
     base_row_order: int = 64
+
+    residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
+    residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
+    residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
 
     activation_checkpointing: bool = True
     checkpoint_segment_size: int = 12
@@ -102,7 +112,12 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        for name in ("checkpoint_interval", "warmup_iters", "model_seed", "data_seed"):
+        for name in (
+            "checkpoint_interval",
+            "warmup_iters",
+            "model_seed",
+            "data_seed",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
@@ -119,6 +134,10 @@ class OwtRunConfig:
                 raise ValueError("depth_order must not exceed n_layer")
             if self.base_row_order > self.n_embd:
                 raise ValueError("base_row_order must not exceed n_embd")
+        residual_init = self.residual_init_config()
+        object.__setattr__(self, "residual_init_depth_source", residual_init.depth_source)
+        if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
+            raise ValueError("dof_implied_depth residual init is only defined for SHEET")
         if not self.activation_checkpointing and self.checkpoint_segment_size < 1:
             raise ValueError("checkpoint_segment_size must remain positive")
         if self.learning_rate <= 0.0 or self.min_lr < 0.0:
@@ -131,6 +150,13 @@ class OwtRunConfig:
             raise ValueError("AdamW betas must be in [0, 1)")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in [0, 1)")
+
+    def residual_init_config(self) -> ResidualInitConfig:
+        return ResidualInitConfig(
+            policy=self.residual_init_policy,
+            depth_source=self.residual_init_depth_source,
+            depth_value=self.residual_init_depth_value,
+        )
 
     @property
     def internal_model_type(self) -> str:
@@ -154,6 +180,9 @@ class OwtRunConfig:
             batch_size=self.batch_size,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             max_iters=self.max_iters,
+            checkpoint_interval=self.checkpoint_interval,
+            warmup_iters=self.warmup_iters,
+            checkpoint_segment_size=self.checkpoint_segment_size,
             depth_order=self.depth_order if self.model_type == "sheet" else None,
             base_row_order=self.base_row_order if self.model_type == "sheet" else None,
             suffix=self.artifact_suffix,
@@ -199,6 +228,9 @@ class OwtRunConfig:
             bias=self.bias,
             depth_order=(self.depth_order if self.model_type == "sheet" else 1),
             base_row_order=(self.base_row_order if self.model_type == "sheet" else 1),
+            residual_init_policy=self.residual_init_policy,
+            residual_init_depth_source=self.residual_init_depth_source,
+            residual_init_depth_value=self.residual_init_depth_value,
             checkpoint_segment_size=(
                 self.checkpoint_segment_size if self.activation_checkpointing else 0
             ),
