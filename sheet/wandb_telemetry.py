@@ -76,15 +76,15 @@ def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _evaluation_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     metric = evaluation_metric_payload(payload)
-    validation_loss = float(metric["validation_loss"])
-    training_loss = float(metric["training_evaluation_loss"])
+    test_loss = float(metric["validation_loss"])
+    eval_loss = float(metric["training_evaluation_loss"])
     return {
         "optimizer/update": int(metric["optimizer_update"]),
         "tokens/seen": int(metric["tokens_seen"]),
-        "val/loss": validation_loss,
-        "train/loss": training_loss,
-        "val/perplexity": _safe_exp(validation_loss),
-        "train/perplexity": _safe_exp(training_loss),
+        "test/loss": test_loss,
+        "eval/loss": eval_loss,
+        "test/perplexity": _safe_exp(test_loss),
+        "eval/perplexity": _safe_exp(eval_loss),
     }
 
 
@@ -125,10 +125,10 @@ def _final_metrics(result: Mapping[str, Any]) -> Dict[str, Any]:
 
     evaluations = result.get("evaluations", [])
     if evaluations:
-        final_validation_loss = float(evaluations[-1]["val"])
-        best_validation_loss = min(float(row["val"]) for row in evaluations)
-        metrics["val/final_loss"] = final_validation_loss
-        metrics["val/best_loss"] = best_validation_loss
+        final_test_loss = float(evaluations[-1]["val"])
+        best_test_loss = min(float(row["val"]) for row in evaluations)
+        metrics["test/final_loss"] = final_test_loss
+        metrics["test/best_loss"] = best_test_loss
 
     diagnostics = result.get("sheet_diagnostics")
     if diagnostics is not None:
@@ -251,7 +251,8 @@ class WandbTelemetry:
             "tokens/*",
             "time/*",
             "train/*",
-            "val/*",
+            "eval/*",
+            "test/*",
             "optim/*",
             "perf/*",
             "model/*",
@@ -290,7 +291,7 @@ class WandbTelemetry:
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)
         if self.run is not None:
-            self.run.log(scalars)
+            self.run.log(scalars, step=step)
         if self.writer is not None:
             for name, value in scalars.items():
                 self.writer.add_scalar(name, value, step)
@@ -329,15 +330,15 @@ class WandbTelemetry:
         self._log_scalars(metrics, step)
         if self.run is not None:
             evaluations = result.get("evaluations", [])
-            final_validation_loss = evaluations[-1]["val"] if evaluations else None
-            best_validation_loss = (
+            final_test_loss = evaluations[-1]["val"] if evaluations else None
+            best_test_loss = (
                 min(row["val"] for row in evaluations) if evaluations else None
             )
             self.run.summary.update({
                 "completed_updates": step,
                 "consumed_tokens": result["budget"]["consumed_tokens"],
-                "final_validation_loss": final_validation_loss,
-                "best_validation_loss": best_validation_loss,
+                "final_test_loss": final_test_loss,
+                "best_test_loss": best_test_loss,
                 "training_seconds": result["timing"]["training_seconds"],
                 "tokens_per_training_second": result["timing"][
                     "tokens_per_training_second"
