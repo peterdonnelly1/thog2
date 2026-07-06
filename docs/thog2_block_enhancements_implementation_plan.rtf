@@ -75,10 +75,10 @@
 \pard\li360\fi-240\sa100\f0\fs23 - attention_output_weight: output_rows = n_embd, input_cols = n_embd.\par
 \pard\li360\fi-240\sa100\f0\fs23 - mlp_expansion_weight: output_rows = 4 * n_embd, input_cols = n_embd.\par
 \pard\li360\fi-240\sa100\f0\fs23 - mlp_contraction_weight: output_rows = n_embd, input_cols = 4 * n_embd.\par
-\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V are distinct compact families even if the execution path concatenates them for nanoGPT c_attn compatibility.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V are distinct compact families by attention role only. In the initial version, each Q, K, and V family is still one full [n_embd, n_embd] matrix family and is not split by head. The execution path may concatenate them for nanoGPT c_attn compatibility.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Do not compact token embeddings or lm_head in this group unless a later explicit experiment targets them.\par
 \pard\sb160\sa120\f0\fs24\b Out-of-scope head-aware variant: BLOCK_HEAD_SPLIT\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V would split output rows by attention head.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V would further split each role-specific family by attention head, producing n_head compact blocks per role.\par
 \pard\li360\fi-240\sa100\f0\fs23 - attention_output_weight would split input columns by attention head.\par
 \pard\li360\fi-240\sa100\f0\fs23 - MLP matrix families would remain ordinary BLOCK.\par
 \pard\li360\fi-240\sa100\f0\fs23 - The rationale is to avoid smoothing across artificial head boundaries.\par
