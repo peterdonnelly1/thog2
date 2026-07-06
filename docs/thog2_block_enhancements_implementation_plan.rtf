@@ -33,12 +33,14 @@
 \pard\li360\fi-240\sa100\f0\fs23 - Use intrinsic axes to implement the geometry cap rule. A family can only compact axes it actually has.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Classify repeated transformer matrix families as depth + output_row + input_col.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Classify layernorm/bias vectors as depth + feature if represented per layer, but mark them conventional for first pass.\par
-\pard\sb160\sa120\f0\fs24\b Step A3: generalize basis construction without changing CHEBY behaviour\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - Create build_raw_basis(sample_count, order, basis_family).\par
-\pard\li360\fi-240\sa100\f0\fs23 - Move current Chebyshev recurrence into build_chebyshev_raw_basis or equivalent.\par
+\pard\sb160\sa120\f0\fs24\b Step A3: introduce basis kernels and preserve CHEBY behaviour\b0\par
+\pard\li360\fi-240\sa100\f0\fs23 - Create a basis-kernel interface or registry keyed by basis_family and basis_version.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Each basis kernel owns coordinate policy, raw basis construction, optional stabilization/normalization, cache-key fields, metadata reporting, and basis-specific tests.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Move current Chebyshev recurrence into a Chebyshev basis kernel.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep current QR-stabilized Chebyshev behaviour under basis_family=chebyshev.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Ensure BasisCache keys include basis_family and basis_version, not only version text.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep basis buffers non-persistent.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Geometry and trajectory code should consume evaluated basis matrices by semantic axis name, without knowing whether they came from CHEBY, DCT, or a later basis.\par
 \pard\sb160\sa120\f0\fs24\b Step A4: introduce a compact trajectory interface\b0\par
 \pard\li360\fi-240\sa100\f0\fs23 - Expose one materialize(family_name, layer_index) path for matrix families.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep vector/tiny families conventional in first pass; do not compact layernorm or biases.\par
@@ -67,11 +69,20 @@
 \pard\li360\fi-240\sa100\f0\fs23 - Keep geometry-specific coefficient shapes explicit and testable.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Re-derive initialization for each geometry rather than reusing SHEET_COL scaling blindly.\par
 \pard\sb160\sa120\f0\fs24\b Matrix family scope\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - attention_input_weight: output_rows = 3 * n_embd, input_cols = n_embd.\par
+\pard\li360\fi-240\sa100\f0\fs23 - attention_query_weight: output_rows = n_embd, input_cols = n_embd.\par
+\pard\li360\fi-240\sa100\f0\fs23 - attention_key_weight: output_rows = n_embd, input_cols = n_embd.\par
+\pard\li360\fi-240\sa100\f0\fs23 - attention_value_weight: output_rows = n_embd, input_cols = n_embd.\par
 \pard\li360\fi-240\sa100\f0\fs23 - attention_output_weight: output_rows = n_embd, input_cols = n_embd.\par
 \pard\li360\fi-240\sa100\f0\fs23 - mlp_expansion_weight: output_rows = 4 * n_embd, input_cols = n_embd.\par
 \pard\li360\fi-240\sa100\f0\fs23 - mlp_contraction_weight: output_rows = n_embd, input_cols = 4 * n_embd.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V are distinct compact families even if the execution path concatenates them for nanoGPT c_attn compatibility.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Do not compact token embeddings or lm_head in this group unless a later explicit experiment targets them.\par
+\pard\sb160\sa120\f0\fs24\b Out-of-scope head-aware variant: BLOCK_HEAD_SPLIT\b0\par
+\pard\li360\fi-240\sa100\f0\fs23 - Q/K/V would split output rows by attention head.\par
+\pard\li360\fi-240\sa100\f0\fs23 - attention_output_weight would split input columns by attention head.\par
+\pard\li360\fi-240\sa100\f0\fs23 - MLP matrix families would remain ordinary BLOCK.\par
+\pard\li360\fi-240\sa100\f0\fs23 - The rationale is to avoid smoothing across artificial head boundaries.\par
+\pard\li360\fi-240\sa100\f0\fs23 - It is out of scope for initial BLOCK because it changes family count, order policy, parameter accounting, and inductive bias.\par
 \pard\sb160\sa120\f0\fs24\b Step B1: coefficient layouts\b0\par
 \pard\li360\fi-240\sa100\f0\fs23 - CURVE coefficients: C[output_row, input_col, depth_order].\par
 \pard\li360\fi-240\sa100\f0\fs23 - SHEET_COL coefficients: C[output_row, depth_order, col_order].\par
@@ -96,7 +107,7 @@
 \pard\li360\fi-240\sa100\f0\fs23 - Run initialization tests over square and rectangular matrix families.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep residual-init depth scaling separate from coefficient initialization; do not mix the concepts.\par
 \pard\sb160\sa120\f0\fs24\b Step B5: integration with model forward\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - The model should still request semantic tensors such as attention_input_weight and mlp_contraction_weight.\par
+\pard\li360\fi-240\sa100\f0\fs23 - The model should still request semantic tensors such as attention_query_weight and mlp_contraction_weight.\par
 \pard\li360\fi-240\sa100\f0\fs23 - The trajectory/materializer decides whether that request is CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, or BLOCK.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Do not create geometry-specific transformer block classes unless profiling proves it is necessary.\par
 \pard\sb160\sa120\f0\fs24\b Step B6: tests\b0\par
@@ -125,16 +136,19 @@
 \pard\li360\fi-240\sa100\f0\fs23 - Expose user-facing DCT, not DCT2.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Record internal basis_version as dct_ii_orthonormal_v1.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep DENSE unaffected.\par
-\pard\sb160\sa120\f0\fs24\b Step C1: implement DCT-II raw basis\b0\par
+\pard\li360\fi-240\sa100\f0\fs23 - Implement DCT as a basis kernel through the same interface used by CHEBY.\par
+\pard\sb160\sa120\f0\fs24\b Step C1: implement DCT-II basis kernel\b0\par
 \pard\li360\sa180\f1\fs20 B[n,0] = sqrt(1 / N)\line B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0\line Use k = 0 .. order - 1\par
 \pard\li360\fi-240\sa100\f0\fs23 - Use sample index n = 0 .. N - 1 directly, not normalized Chebyshev coordinates.\par
 \pard\li360\fi-240\sa100\f0\fs23 - DCT-II should be orthonormal by construction; do not QR it unless tests prove a numerical issue.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Keep dtype/device casting and cache ownership consistent with the Chebyshev path.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Keep all DCT-specific coordinate and normalization choices inside the DCT basis kernel.\par
 \pard\sb160\sa120\f0\fs24\b Step C2: basis dispatch\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - basis_family=chebyshev uses current Chebyshev + QR behaviour.\par
-\pard\li360\fi-240\sa100\f0\fs23 - basis_family=dct uses DCT-II orthonormal construction.\par
+\pard\li360\fi-240\sa100\f0\fs23 - basis_family=chebyshev uses the Chebyshev kernel with current Chebyshev + QR behaviour.\par
+\pard\li360\fi-240\sa100\f0\fs23 - basis_family=dct uses the DCT-II orthonormal kernel.\par
 \pard\li360\fi-240\sa100\f0\fs23 - BasisCache keys must include basis_family, basis_version, sample_count, order, dtype, and device.\par
 \pard\li360\fi-240\sa100\f0\fs23 - basis_sha256 and manifest reporting should include basis_family and basis_version.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Adding a future basis should require a new basis kernel plus tests, not edits throughout geometry/materialization code.\par
 \pard\sb160\sa120\f0\fs24\b Step C3: config, wrappers, and naming\b0\par
 \pard\li360\fi-240\sa100\f0\fs23 - Expose basis_family through Python args and shell wrappers.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Generate run identities such as DCT_CURVE, DCT_SHEET_COL, and DCT_BLOCK.\par
@@ -157,13 +171,20 @@
 \pard\li360\fi-240\sa100\f0\fs23 - Artifacts and manifests identify DCT unambiguously.\par
 \pard\li360\fi-240\sa100\f0\fs23 - Resume refuses CHEBY/DCT mismatch.\par
 \pard\li360\fi-240\sa100\f0\fs23 - At least one paired CHEBY/DCT smoke experiment has matching non-basis settings and usable instrumentation output.\par
+\pard\sb260\sa180\f0\fs29\b Possible future work\b0\par
+\pard\li360\fi-240\sa100\f0\fs23 - BLOCK_HEAD_SPLIT as an attention-only follow-up if ordinary BLOCK is hurt by artificial head-boundary smoothing.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Legendre basis kernel as a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
+\pard\li360\fi-240\sa100\f0\fs23 - B-spline basis kernel for local smooth structure if global bases are too restrictive.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Wavelet or Haar basis kernel for local/multiscale structure, probably later rather than first.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Learned or dictionary bases after fixed-basis comparisons are understood.\par
+\pard\li360\fi-240\sa100\f0\fs23 - Low-rank or factorized baselines as comparisons, not as replacements for fixed geometric bases.\par
 \pard\sb260\sa180\f0\fs29\b Suggested PR sequence\b0\par
-\pard\li360\fi-240\sa100\f0\fs23 - PR A1: basis/geometry metadata refactor; CHEBY_SHEET_COL equivalence only.\par
+\pard\li360\fi-240\sa100\f0\fs23 - PR A1: basis-kernel/geometry metadata refactor; CHEBY_SHEET_COL equivalence only.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR A2: wrapper/config/naming cleanup for compact_geometry and basis_family; no new geometry yet.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR B1: CHEBY_CURVE.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR B2: CHEBY_SHEET_ROW and CHEBY_SHEET_FLAT, while keeping CHEBY_SHEET_COL stable.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR B3: CHEBY_BLOCK.\par
-\pard\li360\fi-240\sa100\f0\fs23 - PR C1: DCT basis implementation and tests.\par
+\pard\li360\fi-240\sa100\f0\fs23 - PR C1: DCT basis kernel implementation and tests.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR C2: DCT enabled across CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
 \pard\li360\fi-240\sa100\f0\fs23 - PR C3: experiment wrappers for paired CHEBY/DCT runs.\par
 \pard\sb260\sa180\f0\fs29\b Near-term commands after pulling branch\b0\par
