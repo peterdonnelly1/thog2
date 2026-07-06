@@ -60,13 +60,21 @@
 \pard\sa120\sb160\f0\fs24\b Goal\b0\par
 \pard\sa150\f0\fs23 Implement all three two-axis geometries plus the full three-axis BLOCK geometry. This gives a clean experiment grid rather than treating SHEET_COL as if it represented all sheet-like compression.\par
 \pard\sa120\sb160\f0\fs24\b Matrix families in first scope\b0\par
-\pard\sa150\f0\fs23 Compact geometry applies first to repeated transformer matrix families:\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_input_weight\par
+\pard\sa150\f0\fs23 Compact geometry applies first to repeated transformer matrix families, treated as semantic families rather than nanoGPT packing details:\par
+\pard\sa100\li360\fi-240\f0\fs23 - attention_query_weight\par
+\pard\sa100\li360\fi-240\f0\fs23 - attention_key_weight\par
+\pard\sa100\li360\fi-240\f0\fs23 - attention_value_weight\par
 \pard\sa100\li360\fi-240\f0\fs23 - attention_output_weight\par
 \pard\sa100\li360\fi-240\f0\fs23 - mlp_expansion_weight\par
 \pard\sa100\li360\fi-240\f0\fs23 - mlp_contraction_weight\par
+\pard\sa150\f0\fs23 Q, K, and V should be distinct compact parameter families. They may still be concatenated into nanoGPT's fused c_attn tensor at materialization time, but the compact geometry should not treat Q/K/V packing boundaries as ordinary adjacent rows.\par
 \pard\sa150\f0\fs23 These are the expensive weight objects and the ones that actually expose depth plus matrix axes.\par
 \pard\sa150\f0\fs23 The final lm_head/token embedding tying path should remain conventional unless a separate experiment explicitly targets it.\par
+\pard\sa120\sb160\f0\fs24\b Out-of-scope head-aware variant: BLOCK_HEAD_SPLIT\b0\par
+\pard\sa150\f0\fs23 BLOCK_HEAD_SPLIT is a possible later attention-only variant that treats attention heads as categorical groups rather than smoothing across head boundaries inside a full n_embd-wide row or column axis.\par
+\pard\sa150\f0\fs23 For Q, K, and V, BLOCK_HEAD_SPLIT would split the output-row axis by head: each head receives its own compact block over depth, head_dim output rows, and full input columns. For attention_output_weight, it would split the input-column axis by head: each head receives its own compact block over depth, full output rows, and head_dim input columns. MLP matrix families would remain ordinary BLOCK.\par
+\pard\sa150\f0\fs23 Rationale: ordinary BLOCK still treats the last channel of one head and the first channel of the next head as adjacent coordinates. That adjacency is artificial because attention head order is a packing convention, not a smooth geometric axis.\par
+\pard\sa150\f0\fs23 BLOCK_HEAD_SPLIT is out of scope for the initial version. It changes compact family count, order policy, parameter accounting, and inductive bias; it can also increase parameters if per-head orders do not scale down aggressively with head_dim. Initial BLOCK should split Q/K/V as semantic families but should not split by head.\par
 \pard\sa120\sb160\f0\fs24\b Order policy\b0\par
 \pard\sa150\f0\fs23 Retain depth_order. Introduce separate order fields for row, column, and flat axes. Avoid overloading row_order to mean input columns in one geometry and output rows in another.\par
 \pard\sa180\li360\f1\fs20 depth_order\line base_row_order / row_order\line base_col_order / col_order\line base_flat_order / flat_order\par
