@@ -28,6 +28,8 @@ DEPTH_ORDER=32
 BASE_ROW_ORDER=64
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
+INSTRUMENTATION="tensorboard"
+CURVE_ROOT="curves"
 WANDB_MODE="online"
 WANDB_ENABLED=true
 RUN_SELECTION="both"
@@ -53,6 +55,8 @@ Usage: $0 [options]
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}              SHEET only
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
+  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | none
+  -V CURVE_ROOT=${CURVE_ROOT}                       TensorBoard root directory
   -M WANDB_MODE=${WANDB_MODE}                      online | offline | disabled
   -W WANDB_ENABLED=${WANDB_ENABLED}
   -r RUN_SELECTION=${RUN_SELECTION}                dense | sheet | both
@@ -61,7 +65,7 @@ Usage: $0 [options]
 EOF
 }
 
-while getopts ":g:n:b:A:u:e:l:w:L:H:D:C:P:Q:p:S:M:W:r:x:h" option; do
+while getopts ":g:n:b:A:u:e:l:w:L:H:D:C:P:Q:p:S:I:V:M:W:r:x:h" option; do
   case "$option" in
     g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;;
@@ -79,6 +83,8 @@ while getopts ":g:n:b:A:u:e:l:w:L:H:D:C:P:Q:p:S:M:W:r:x:h" option; do
     Q) BASE_ROW_ORDER="$OPTARG" ;;
     p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
     S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    I) INSTRUMENTATION="$OPTARG" ;;
+    V) CURVE_ROOT="$OPTARG" ;;
     M) WANDB_MODE="$OPTARG" ;;
     W) WANDB_ENABLED="$OPTARG" ;;
     r) RUN_SELECTION="$OPTARG" ;;
@@ -122,6 +128,7 @@ validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$DRY_RUN" "DRY_RUN"
 
+case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION must be tensorboard, wandb, or none." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RUN_SELECTION" in dense|sheet|both) ;; *) echo "RUN_SELECTION must be dense, sheet, or both." >&2; exit 2 ;; esac
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
@@ -161,16 +168,22 @@ printf '  steps:                    %s\n' "$STEPS"
 printf '  batch / global accum:     %s / %s\n' "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS"
 printf '  tokens/update:            %s\n' "$((BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))"
 printf '  activation checkpointing: %s, segment %s\n' "$ACTIVATION_CHECKPOINTING" "$CHECKPOINT_SEGMENT_SIZE"
+printf '  instrumentation:          %s\n' "$INSTRUMENTATION"
+printf '  curve root:               %s\n' "$CURVE_ROOT"
 printf '  W&B:                      %s (%s)\n' "$WANDB_ENABLED" "$WANDB_MODE"
 printf '  selection:                %s\n\n' "$RUN_SELECTION"
 
 if [[ "$RUN_SELECTION" == dense || "$RUN_SELECTION" == both ]]; then
   echo "=== DENSE2 L144 smoke run ==="
+  THOG2_INSTRUMENTATION="$INSTRUMENTATION" \
+  THOG2_CURVE_ROOT="$CURVE_ROOT" \
   ./current_scruffy_train_DENSE_OWT.sh "${COMMON_ARGS[@]}"
 fi
 
 if [[ "$RUN_SELECTION" == sheet || "$RUN_SELECTION" == both ]]; then
   echo "=== SHEET L144 smoke run ==="
+  THOG2_INSTRUMENTATION="$INSTRUMENTATION" \
+  THOG2_CURVE_ROOT="$CURVE_ROOT" \
   ./current_scruffy_train_SHEET_OWT.sh "${COMMON_ARGS[@]}" \
     -P "$DEPTH_ORDER" \
     -Q "$BASE_ROW_ORDER"
