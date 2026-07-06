@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
 from .checkpointing import validate_checkpoint_segment_size
+from .compact_identity import (
+    compact_identity_metadata,
+    conventional_identity_metadata,
+    validate_dense_compact_fields,
+)
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -44,6 +49,10 @@ MODEL_COMPATIBILITY_FIELDS = (
     "residual_init_depth_value",
     "basis_version",
     "row_order_scaling_rule",
+    "geometry_preset",
+    "attention_geometry",
+    "mlp_geometry",
+    "basis_family",
 )
 
 
@@ -64,6 +73,10 @@ class TrainingConfig:
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
+    geometry_preset: Optional[str] = None
+    attention_geometry: Optional[str] = None
+    mlp_geometry: Optional[str] = None
+    basis_family: Optional[str] = None
     checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
@@ -153,6 +166,15 @@ class TrainingConfig:
             )
         if self.basis_version != BASIS_VERSION:
             raise ValueError(f"unsupported basis_version: {self.basis_version}")
+        if self.model_type == "dense":
+            validate_dense_compact_fields(
+                geometry_preset=self.geometry_preset,
+                attention_geometry=self.attention_geometry,
+                mlp_geometry=self.mlp_geometry,
+                basis_family=self.basis_family,
+            )
+        else:
+            self.compact_identity_metadata()
         if not isinstance(self.bias, bool) or not isinstance(self.decay_learning_rate, bool):
             raise ValueError("bias and decay_learning_rate must be bool")
 
@@ -179,9 +201,35 @@ class TrainingConfig:
                     "depth_order": self.depth_order,
                     "base_row_order": self.base_row_order,
                     "basis_version": self.basis_version,
+                    "geometry_preset": self.geometry_preset,
+                    "attention_geometry": self.attention_geometry,
+                    "mlp_geometry": self.mlp_geometry,
+                    "basis_family": self.basis_family,
+                    "row_order_scaling_rule": self.row_order_scaling_rule,
                 }
             )
         return arguments
+
+    def compact_identity_metadata(self) -> Dict[str, Any]:
+        if self.model_type == "dense":
+            return conventional_identity_metadata(
+                n_layer=self.n_layer,
+                n_embd=self.n_embd,
+                n_head=self.n_head,
+            )
+        return compact_identity_metadata(
+            n_layer=self.n_layer,
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            depth_order=self.depth_order,
+            base_row_order=self.base_row_order,
+            basis_version=self.basis_version,
+            row_order_scaling_rule=self.row_order_scaling_rule,
+            geometry_preset=self.geometry_preset,
+            attention_geometry=self.attention_geometry,
+            mlp_geometry=self.mlp_geometry,
+            basis_family=self.basis_family,
+        )
 
     def compatibility_signature(self) -> Dict[str, Any]:
         values = asdict(self)
