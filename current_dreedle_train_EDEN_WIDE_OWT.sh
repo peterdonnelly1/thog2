@@ -19,6 +19,8 @@ N_LAYER=144
 BLOCK_SIZE=256
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
+INSTRUMENTATION="tensorboard"
+CURVE_ROOT="curves"
 WANDB_MODE="online"
 WANDB_ENABLED=true
 DRY_RUN=false
@@ -48,7 +50,9 @@ Options:
   -C BLOCK_SIZE=${BLOCK_SIZE}
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
-  -M WANDB_MODE=${WANDB_MODE}                 online | offline | disabled
+  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | none
+  -V CURVE_ROOT=${CURVE_ROOT}                       TensorBoard root directory
+  -M WANDB_MODE=${WANDB_MODE}                       online | offline | disabled
   -W WANDB_ENABLED=${WANDB_ENABLED}
   -x DRY_RUN=${DRY_RUN}
   -c CUDA_VISIBLE_DEVICES default=${CUDA_DEVICE_DEFAULT}
@@ -56,7 +60,7 @@ Options:
 EOF
 }
 
-while getopts ":t:n:b:u:e:l:w:k:A:G:L:C:p:S:M:W:x:c:h" option; do
+while getopts ":t:n:b:u:e:l:w:k:A:G:L:C:p:S:I:V:M:W:x:c:h" option; do
   case "$option" in
     t) DATA_DIR="$OPTARG" ;;
     n) STEPS="$OPTARG" ;;
@@ -72,6 +76,8 @@ while getopts ":t:n:b:u:e:l:w:k:A:G:L:C:p:S:M:W:x:c:h" option; do
     C) BLOCK_SIZE="$OPTARG" ;;
     p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
     S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    I) INSTRUMENTATION="$OPTARG" ;;
+    V) CURVE_ROOT="$OPTARG" ;;
     M) WANDB_MODE="$OPTARG" ;;
     W) WANDB_ENABLED="$OPTARG" ;;
     x) DRY_RUN="$OPTARG" ;;
@@ -94,11 +100,14 @@ validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$DRY_RUN" "DRY_RUN"
+case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION must be tensorboard, wandb, or none." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 [[ -f "$SHEET_WRAPPER" ]] || { echo "Missing SHEET wrapper: $SHEET_WRAPPER" >&2; exit 2; }
 [[ -f "$DATA_DIR/train.bin" && -f "$DATA_DIR/val.bin" ]] || { echo "DATA_DIR must contain train.bin and val.bin: $DATA_DIR" >&2; exit 2; }
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$CUDA_DEVICE_DEFAULT}"
+export THOG2_INSTRUMENTATION="$INSTRUMENTATION"
+export THOG2_CURVE_ROOT="$CURVE_ROOT"
 
 mkdir -p evidence
 git rev-parse HEAD | tee evidence/EDEN_WIDE_ALL_commit_sha.txt
@@ -111,7 +120,7 @@ run_eden_group() {
   local base_row_order="$4"
 
   echo
-  echo "===== ${run_name}: widths=${width_sweep} P${depth_order}/Q${base_row_order} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} ====="
+  echo "===== ${run_name}: widths=${width_sweep} P${depth_order}/Q${base_row_order} CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} instrumentation=${THOG2_INSTRUMENTATION} curve_root=${THOG2_CURVE_ROOT} ====="
 
   "$SHEET_WRAPPER" \
     -R dreedle \
