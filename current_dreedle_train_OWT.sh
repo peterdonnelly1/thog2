@@ -5,6 +5,7 @@ set -euo pipefail
 # Long single-candidate dreedle SHEET OpenWebText run.
 # This targets high VRAM use on TITAN RTX by widening the SHEET geometry rather than increasing context length.
 # Default candidate is XL-ish width D1536/H24 with P64/Q192 at C256, intended to replace the raw env-prefixed command.
+# The child SHEET wrapper's dreedle runtime profile selects float16; do not also pass -T unless deliberately overriding it.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
@@ -147,7 +148,6 @@ EOF
 
 "$SHEET_WRAPPER" \
   -R dreedle \
-  -T float16 \
   -q fresh \
   -t "$DATA_DIR" \
   -g "$RUN_NAME" \
