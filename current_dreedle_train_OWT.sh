@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 SHEET_WRAPPER="./current_scruffy_train_SHEET_OWT.sh"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-RUN_NAME="DREEDLE_WIDE_D2304_Q320_WANDB_LONG_$(date +%y%m%d_%H%M%S)"
+RUN_NAME="KARITANE_LONG_$(date +%y%m%d_%H%M%S)"
 STEPS=99999
 BATCH_SIZE=12
 GRADIENT_ACCUMULATION_STEPS=4
