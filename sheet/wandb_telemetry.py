@@ -64,11 +64,13 @@ def _tensorboard_root(name: str) -> Path:
 def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     metric = training_metric_payload(payload)
     update = int(metric["optimizer_update"])
+    training_loss = float(metric["training_loss"])
     return {
         "optimizer/update": update,
         "tokens/seen": int(metric["tokens_seen"]),
         "time/train_seconds": float(metric["clean_training_seconds"]),
-        "train/step_loss": float(metric["training_loss"]),
+        "train/step_loss": training_loss,
+        "train/loss": training_loss,
         "optim/lr": float(metric["learning_rate"]),
         "optim/grad_norm": float(metric["gradient_norm"]),
     }
@@ -82,6 +84,7 @@ def _evaluation_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "optimizer/update": int(metric["optimizer_update"]),
         "tokens/seen": int(metric["tokens_seen"]),
         "test/loss": test_loss,
+        "eval/val_loss": test_loss,
         "eval/loss": eval_loss,
         "test/perplexity": _safe_exp(test_loss),
         "eval/perplexity": _safe_exp(eval_loss),
@@ -270,7 +273,12 @@ class WandbTelemetry:
         root = _tensorboard_root(self.name)
         root.mkdir(parents=True, exist_ok=True)
         module = importlib.import_module("torch.utils.tensorboard")
-        self.writer = module.SummaryWriter(log_dir=str(root))
+        summary_writer = getattr(module, "SummaryWriter", None)
+        if summary_writer is None:
+            self.backend = "wandb"
+            self._start_wandb()
+            return
+        self.writer = summary_writer(log_dir=str(root))
         self.writer.add_text("run/artifact_name", self.name, 0)
         self.writer.add_text("run/group", self.group, 0)
         self.writer.add_text("run/job_type", self.job_type, 0)
@@ -281,6 +289,8 @@ class WandbTelemetry:
         )
 
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        if not self.enabled or self.backend == "none":
+            return
         metrics = _event_metrics(event, payload)
         if not metrics:
             return
@@ -291,7 +301,10 @@ class WandbTelemetry:
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)
         if self.run is not None:
-            self.run.log(scalars, step=step)
+            try:
+                self.run.log(scalars, step=step)
+            except TypeError:
+                self.run.log(scalars)
         if self.writer is not None:
             for name, value in scalars.items():
                 self.writer.add_scalar(name, value, step)
