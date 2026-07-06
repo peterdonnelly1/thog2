@@ -4,7 +4,7 @@ set -euo pipefail
 # vvv THOG
 # Long single-candidate dreedle SHEET OpenWebText run.
 # This targets high VRAM use on TITAN RTX by widening the SHEET geometry rather than increasing context length.
-# Default candidate is wide SHEET-144: D2304/H36 with P96/Q320 at C256, backed off from D2560/Q384 after first-backward OOM.
+# Default candidate is wide SHEET-144: D2048/H32 with P80/Q256 at C256, backed off after larger D2304 and D2560 OOMs.
 # The child SHEET wrapper's dreedle runtime profile selects float16; do not also pass -T unless deliberately overriding it.
 # ^^^ THOG
 
@@ -22,11 +22,11 @@ LOG_INTERVAL=1
 WARMUP_ITERS=20
 CHECKPOINT_INTERVAL=500
 N_LAYER=144
-N_HEAD=36
-N_EMBD=2304
+N_HEAD=32
+N_EMBD=2048
 BLOCK_SIZE=256
-DEPTH_ORDER=96
-BASE_ROW_ORDER=320
+DEPTH_ORDER=80
+BASE_ROW_ORDER=256
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
 INSTRUMENTATION="wandb"
