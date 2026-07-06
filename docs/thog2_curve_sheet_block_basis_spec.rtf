@@ -3,150 +3,186 @@
 \paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
 \widowctrl\f0\fs23
 \pard\qc\sa240\f0\fs34\b THOG2 Principled Compact Geometry Requirements Spec\b0\par
-\pard\qc\sa320\f0\fs22 Clean-axis compacting, module-level geometry selectors, CURVE / MLP_BLOCK / BLOCK presets, CHEBY and DCT\par
-\pard\sa190\sb280\f0\fs29\b Purpose\b0\par
-\pard\sa150\f0\fs23 This document replaces the earlier SHEET_ROW / SHEET_COL / SHEET_FLAT / generic BLOCK plan. That plan was too broad: it treated packed implementation axes as if they were meaningful smooth geometry. The revised rule is stricter and cleaner: compact only structural dimensions that are genuinely ordered; leave categorical packing dimensions explicit.\par
-\pard\sa150\f0\fs23 The primary user-facing geometry presets are CURVE, MLP_BLOCK, and BLOCK. HEAD_AWARE_BLOCK is an underlying attention geometry used by BLOCK and available for ablations, but it is not normally a primary preset on its own. Existing SHEET_COL remains a legacy empirical baseline because it is training well; it is not part of the new principled geometry set.\par
-\pard\sa150\f0\fs23 This is a requirements spec, not an implementation patch. Old checkpoint compatibility is out of scope. DENSE behaviour must remain unchanged.\par
-\pard\sa190\sb280\f0\fs29\b 1. Vocabulary and top-level decisions\b0\par
-\pard\sa120\sb170\f0\fs24\b Model families and basis families\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - DENSE: conventional repeated transformer weights. DENSE is not a compact geometry and has no compact basis_family.\par
-\pard\sa100\li360\fi-240\f0\fs23 - CHEBY: current Chebyshev first-kind basis family, using the QR-stabilized finite sampled basis.\par
-\pard\sa100\li360\fi-240\f0\fs23 - DCT: real orthonormal DCT basis family, initially DCT-II, exposed to users simply as DCT.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Basis family and geometry are independent for compact models: CHEBY_CURVE, CHEBY_MLP_BLOCK, CHEBY_BLOCK, DCT_CURVE, DCT_MLP_BLOCK, and DCT_BLOCK are valid experiment identities.\par
-\pard\sa120\sb170\f0\fs24\b Geometry presets versus module geometries\b0\par
-\pard\sa150\f0\fs23 A geometry preset is a user-facing shorthand. It resolves to separate attention and MLP geometry selectors. This distinction is required because attention and MLP weights do not expose the same clean axes.\par
+\pard\qc\sa320\f0\fs22 Clean-axis compacting, geometry presets, module-level selectors, CHEBY and DCT\par
+
+\pard\sa190\sb280\f0\fs29\b Summary\b0\par
+\pard\sa160\f0\fs23 THOG2 compact geometry should compress only clean structural axes.\par
+\pard\sa160\f0\fs23 The primary geometry presets are CURVE, MLP_BLOCK, and BLOCK.\par
+\pard\sa160\f0\fs23 CURVE compresses transformer depth only.\par
+\pard\sa160\f0\fs23 MLP_BLOCK adds clean block compaction for MLP matrices.\par
+\pard\sa160\f0\fs23 BLOCK combines MLP_BLOCK with head-aware attention compaction.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK remains directly invokable as an attention geometry for ablations.\par
+\pard\sa160\f0\fs23 SHEET_COL remains available only as a legacy empirical baseline and refactor-equivalence target.\par
+
+\pard\sa190\sb280\f0\fs29\b 1. Vocabulary\b0\par
+\pard\sa120\sb170\f0\fs24\b Geometry terms\b0\par
+\pard\sa160\f0\fs23 CURVE is a geometry that compresses transformer depth only.\par
+\pard\sa160\f0\fs23 CURVE can be used as a full preset because it applies cleanly to both attention and MLP matrix families.\par
+\pard\sa160\f0\fs23 MLP_BLOCK is an MLP geometry that compresses depth, MLP output channel, and MLP input channel.\par
+\pard\sa160\f0\fs23 MLP_BLOCK can be used as a preset by applying MLP_BLOCK to MLP and CURVE to attention.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK is an attention geometry.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK uses explicit attention-head partitions and does not compact over head index.\par
+\pard\sa160\f0\fs23 BLOCK is a preset.\par
+\pard\sa160\f0\fs23 BLOCK applies HEAD_AWARE_BLOCK to attention and MLP_BLOCK to MLP.\par
+\pard\sa160\f0\fs23 SHEET_COL names the current legacy compact behaviour.\par
+\pard\sa160\f0\fs23 SHEET_COL compresses depth and input columns for matrix families.\par
+\pard\sa160\f0\fs23 SHEET_COL is not a new principled target geometry.\par
+\pard\sa120\sb170\f0\fs24\b Model and basis terms\b0\par
+\pard\sa160\f0\fs23 DENSE means conventional repeated transformer weights.\par
+\pard\sa160\f0\fs23 DENSE has no compact geometry and no compact basis family.\par
+\pard\sa160\f0\fs23 CHEBY means the current Chebyshev first-kind compact basis family.\par
+\pard\sa160\f0\fs23 CHEBY uses the QR-stabilized finite sampled basis.\par
+\pard\sa160\f0\fs23 DCT means a real orthonormal DCT basis family.\par
+\pard\sa160\f0\fs23 DCT initially means DCT-II internally, but the user-facing name should be DCT.\par
+\pard\sa160\f0\fs23 Order means the number of retained basis functions along a compact axis.\par
+\pard\sa120\sb170\f0\fs24\b Semantic matrix families\b0\par
+\pard\sa160\f0\fs23 Compact code should operate on semantic transformer families.\par
+\pard\sa160\f0\fs23 It should not treat nanoGPT packing tensors as the primary abstraction.\par
+\pard\sa160\f0\fs23 Attention matrix families are attention_query_weight, attention_key_weight, attention_value_weight, and attention_output_weight.\par
+\pard\sa160\f0\fs23 MLP matrix families are mlp_expansion_weight and mlp_contraction_weight.\par
+\pard\sa160\f0\fs23 Q, K, and V are distinct semantic families.\par
+\pard\sa160\f0\fs23 Q, K, and V may still be concatenated into nanoGPT c_attn tensors at the compatibility boundary.\par
+
+\pard\sa190\sb280\f0\fs29\b 2. Top-level decisions\b0\par
+\pard\sa120\sb170\f0\fs24\b Decision 1: use the clean-axis rule\b0\par
+\pard\sa160\f0\fs23 Compact bases may only span axes with meaningful ordered structure.\par
+\pard\sa160\f0\fs23 Transformer depth is a clean ordered axis.\par
+\pard\sa160\f0\fs23 MLP output and input channels are clean enough for the first block experiment.\par
+\pard\sa160\f0\fs23 Attention head-local channels are clean inside a head.\par
+\pard\sa160\f0\fs23 qkv_role is categorical.\par
+\pard\sa160\f0\fs23 Attention head index is categorical.\par
+\pard\sa160\f0\fs23 No compact basis should smooth across qkv_role or attention-head index.\par
+\pard\sa120\sb170\f0\fs24\b Decision 2: expose presets and module selectors\b0\par
+\pard\sa160\f0\fs23 The common user interface should use geometry presets.\par
+\pard\sa160\f0\fs23 The implementation must also expose the resolved attention and MLP geometry selectors.\par
+\pard\sa160\f0\fs23 This keeps normal runs simple.\par
+\pard\sa160\f0\fs23 It also keeps ablations easy.\par
 \pard\sa180\li360\f1\fs20 geometry_preset = curve | mlp_block | block\line attention_geometry = curve | head_aware_block\line mlp_geometry = curve | mlp_block\line basis_family = chebyshev | dct\par
-\pard\sa150\f0\fs23 Preset expansion must be deterministic and recorded in manifests and checkpoints.\par
-\pard\sa100\li360\fi-240\f0\fs23 - CURVE resolves to attention_geometry=curve and mlp_geometry=curve.\par
-\pard\sa100\li360\fi-240\f0\fs23 - MLP_BLOCK resolves to attention_geometry=curve and mlp_geometry=mlp_block.\par
-\pard\sa100\li360\fi-240\f0\fs23 - BLOCK resolves to attention_geometry=head_aware_block and mlp_geometry=mlp_block.\par
-\pard\sa150\f0\fs23 Explicit invocation of attention_geometry and mlp_geometry must remain easy. Presets are the common path, but the module selectors are required for ablations, debugging, and isolating attention versus MLP contributions.\par
-\pard\sa150\f0\fs23 HEAD_AWARE_BLOCK alone may be invokable as attention_geometry=head_aware_block with mlp_geometry=curve, but it should not be treated as a main preset. MLP matrices dominate repeated transformer matrix parameters, so an attention-only block run is a secondary ablation, not a core candidate.\par
-\pard\sa120\sb170\f0\fs24\b Legacy names and demoted geometries\b0\par
-\pard\sa150\f0\fs23 The old ambiguous SHEET name should not be used for new experiment identities. Current SHEET behaviour corresponds to legacy SHEET_COL. It may be retained as a baseline and refactor-equivalence target only.\par
-\pard\sa150\f0\fs23 SHEET_ROW, SHEET_FLAT, and generic all-matrix BLOCK are not primary targets. They compact axes that are not clean for attention, especially axes crossing qkv or attention-head packing boundaries. They should not be implemented as part of the principled geometry plan unless separately justified later.\par
-\pard\sa190\sb280\f0\fs29\b 2. Clean-axis rule\b0\par
-\pard\sa150\f0\fs23 Compact geometry must only be applied to axes that are meaningful ordered structural dimensions. A compact basis should not be run across a categorical packing boundary just because tensors happen to be laid out contiguously in memory.\par
-\pard\sa120\sb170\f0\fs24\b Clean axes\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - Transformer depth is clean: layers form an ordered repeated axis.\par
-\pard\sa100\li360\fi-240\f0\fs23 - MLP output channel and input channel are clean enough for the initial block experiment.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Attention head-local channel axes are clean inside a head.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Residual-stream input/output channel axes are acceptable where they do not cross categorical head partitions.\par
-\pard\sa120\sb170\f0\fs24\b Categorical axes that must not be smoothed\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - qkv_role is categorical: Q, K, and V must be distinct semantic families, not adjacent coordinates in one compact axis.\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention head index is categorical: no basis should be built over head number. Head order is a packing convention, not a smooth geometry.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Packed head boundaries must not be crossed by a compact basis in HEAD_AWARE_BLOCK.\par
-\pard\sa120\sb170\f0\fs24\b Parameter groups that remain conventional\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - LayerNorm weights and biases are real learned parameters but are tiny; leave them conventional or explicit per-layer vectors in the first pass.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Attention and MLP biases are tiny; leave them conventional in the first pass.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Token embeddings and lm_head are out of scope. They are large, but they are not repeated-by-depth transformer matrix families and need a separate experiment.\par
-\pard\sa190\sb280\f0\fs29\b 3. Required geometry presets\b0\par
-\pard\sa120\sb170\f0\fs24\b CURVE\b0\par
-\pard\sa150\f0\fs23 CURVE compacts transformer depth only. It applies to repeated attention and MLP matrix families. Matrix entries remain explicit over output row and input column. This is the cleanest compact baseline because it only assumes smoothness across layer depth.\par
+\pard\sa160\f0\fs23 CURVE resolves to attention_geometry=curve and mlp_geometry=curve.\par
+\pard\sa160\f0\fs23 MLP_BLOCK resolves to attention_geometry=curve and mlp_geometry=mlp_block.\par
+\pard\sa160\f0\fs23 BLOCK resolves to attention_geometry=head_aware_block and mlp_geometry=mlp_block.\par
+\pard\sa120\sb170\f0\fs24\b Decision 3: keep HEAD_AWARE_BLOCK as an underlying geometry\b0\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK should be directly invokable.\par
+\pard\sa160\f0\fs23 It should not be a primary preset.\par
+\pard\sa160\f0\fs23 An attention-only block run leaves the much larger MLP matrices on CURVE.\par
+\pard\sa160\f0\fs23 That makes it a useful ablation, not a main candidate.\par
+\pard\sa120\sb170\f0\fs24\b Decision 4: demote unprincipled matrix geometries\b0\par
+\pard\sa160\f0\fs23 SHEET_ROW is not a primary target.\par
+\pard\sa160\f0\fs23 SHEET_FLAT is not a primary target.\par
+\pard\sa160\f0\fs23 Generic all-matrix BLOCK is not a primary target.\par
+\pard\sa160\f0\fs23 These geometries can compact axes that cross attention packing boundaries.\par
+\pard\sa160\f0\fs23 They should not be implemented in this enhancement unless a later decision explicitly revives them.\par
+\pard\sa120\sb170\f0\fs24\b Decision 5: keep the implementation stages separate\b0\par
+\pard\sa160\f0\fs23 The implementation plan may still use three broad stages.\par
+\pard\sa160\f0\fs23 Those stages are abstraction refactor, principled geometry implementation, and DCT support.\par
+\pard\sa160\f0\fs23 This requirements spec is not organized around those stages.\par
+\pard\sa160\f0\fs23 The staging belongs in the implementation plan.\par
+
+\pard\sa190\sb280\f0\fs29\b 3. Geometry requirements\b0\par
+\pard\sa120\sb170\f0\fs24\b CURVE requirements\b0\par
+\pard\sa160\f0\fs23 CURVE must compact depth only.\par
+\pard\sa160\f0\fs23 CURVE must leave output row and input column explicit.\par
+\pard\sa160\f0\fs23 CURVE must apply to repeated attention and MLP matrix families.\par
 \pard\sa180\li360\f1\fs20 W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_geometry=curve\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_geometry=curve\par
-\pard\sa100\li360\fi-240\f0\fs23 - Primary use: clean depth-only compact baseline.\par
-\pard\sa120\sb170\f0\fs24\b MLP_BLOCK\b0\par
-\pard\sa150\f0\fs23 MLP_BLOCK applies block geometry only to MLP matrices. It leaves attention matrices on CURVE. This isolates the effect of compacting the largest repeated matrix families over their clean 3D structure.\par
-\pard\sa150\f0\fs23 Applicable families:\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_expansion_weight: depth x output_channel x input_channel\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_contraction_weight: depth x output_channel x input_channel\par
+\pard\sa160\f0\fs23 CURVE is the clean depth-only compact baseline.\par
+\pard\sa120\sb170\f0\fs24\b MLP_BLOCK requirements\b0\par
+\pard\sa160\f0\fs23 MLP_BLOCK must apply only to mlp_expansion_weight and mlp_contraction_weight.\par
+\pard\sa160\f0\fs23 MLP_BLOCK must compact depth, MLP output channel, and MLP input channel.\par
+\pard\sa160\f0\fs23 MLP_BLOCK must not change attention geometry.\par
 \pard\sa180\li360\f1\fs20 W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_row[o,q] * B_col[i,r]\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_geometry=curve\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_geometry=mlp_block\par
-\pard\sa100\li360\fi-240\f0\fs23 - Primary use: test the biggest clean compression opportunity. This should be a high-priority comparison against CURVE because MLP matrices dominate repeated transformer matrix parameters.\par
-\pard\sa120\sb170\f0\fs24\b HEAD_AWARE_BLOCK\b0\par
-\pard\sa150\f0\fs23 HEAD_AWARE_BLOCK is an attention-only module geometry. It treats qkv_role and head index as explicit categorical axes, while compacting clean axes inside each attention role/head block.\par
-\pard\sa150\f0\fs23 For Q, K, and V, each role is a separate semantic family. Within each role, each head receives its own compact block over depth, head-local output channel, and full residual-stream input channel.\par
+\pard\sa160\f0\fs23 MLP_BLOCK is expected to be the highest-value comparison against CURVE.\par
+\pard\sa160\f0\fs23 The reason is simple: MLP matrices dominate repeated transformer matrix parameters.\par
+\pard\sa120\sb170\f0\fs24\b HEAD_AWARE_BLOCK requirements\b0\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK must apply only to attention_query_weight, attention_key_weight, attention_value_weight, and attention_output_weight.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK must keep Q, K, and V as distinct semantic families.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK must keep attention head index explicit.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK must not build a basis over head index.\par
+\pard\sa160\f0\fs23 For Q, K, and V, each head gets its own compact block.\par
+\pard\sa160\f0\fs23 That block spans depth, head-local output channel, and full residual-stream input channel.\par
 \pard\sa180\li360\f1\fs20 W_role,l,h[o,i] = sum_pqr C_role,h[p,q,r] * B_depth[l,p] * B_head_out[o,q] * B_in[i,r]\par
-\pard\sa150\f0\fs23 For attention_output_weight, each input head receives its own compact block over depth, full output channel, and head-local input channel.\par
+\pard\sa160\f0\fs23 For attention_output_weight, each input head gets its own compact block.\par
+\pard\sa160\f0\fs23 That block spans depth, full residual-stream output channel, and head-local input channel.\par
 \pard\sa180\li360\f1\fs20 W_o,l[o,h,i] = sum_pqr C_o,h[p,q,r] * B_depth[l,p] * B_out[o,q] * B_head_in[i,r]\par
-\pard\sa100\li360\fi-240\f0\fs23 - There is no basis over h. The head index is explicit and categorical.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Q/K/V may still be concatenated into nanoGPT's fused c_attn tensor at the compatibility boundary, but compact parameters must remain role-specific and head-aware.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Primary use: part of the BLOCK preset and optional attention-only ablations.\par
-\pard\sa120\sb170\f0\fs24\b BLOCK preset\b0\par
-\pard\sa150\f0\fs23 BLOCK is the full principled compact preset. It activates HEAD_AWARE_BLOCK for attention and MLP_BLOCK for MLP. It is not generic all-matrix 3D BLOCK; it is a preset combining the clean attention and MLP module geometries.\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_geometry=head_aware_block\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_geometry=mlp_block\par
-\pard\sa100\li360\fi-240\f0\fs23 - Primary use: main full compact candidate.\par
-\pard\sa150\f0\fs23 The key comparison is MLP_BLOCK versus BLOCK. That isolates the added value of head-aware attention compaction while holding MLP treatment fixed.\par
-\pard\sa190\sb280\f0\fs29\b 4. Semantic matrix families\b0\par
-\pard\sa150\f0\fs23 The compact system must operate on semantic transformer families, not merely on nanoGPT packing tensors.\par
-\pard\sa120\sb170\f0\fs24\b Attention families\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_query_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_key_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_value_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_output_weight\par
-\pard\sa150\f0\fs23 Q, K, and V are distinct compact families by attention role. In CURVE, each role is a full [n_embd, n_embd] matrix family. In HEAD_AWARE_BLOCK, each role is further partitioned by head, but head is explicit rather than compacted.\par
-\pard\sa120\sb170\f0\fs24\b MLP families\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_expansion_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_contraction_weight\par
-\pard\sa150\f0\fs23 These are the cleanest block targets and should be reported separately from attention compact parameters.\par
-\pard\sa120\sb170\f0\fs24\b Reporting requirements\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reports must show compact attention parameters, compact MLP parameters, conventional tiny/vector parameters, and total trainable parameters separately.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reports must include requested geometry_preset and resolved attention_geometry / mlp_geometry.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reports must include per-family coefficient shapes and axis orders.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reports must indicate whether a basis crosses any attention-head boundary. HEAD_AWARE_BLOCK must report that it does not.\par
-\pard\sa190\sb280\f0\fs29\b 5. Orders and axis policy\b0\par
-\pard\sa150\f0\fs23 The term order is retained. It means the number of retained basis functions along a compact axis.\par
-\pard\sa100\li360\fi-240\f0\fs23 - depth_order applies to depth bases.\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_row_order and mlp_col_order, or resolved row_order/col_order per MLP family, apply to MLP_BLOCK.\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_head_out_order, attention_in_order, attention_out_order, and attention_head_in_order, or equivalent resolved per-family orders, apply to HEAD_AWARE_BLOCK.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Order derivation must be explicit, deterministic, and included in manifests.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Rectangular matrices must derive row and column orders from the actual axis widths, not from a single overloaded order field.\par
-\pard\sa150\f0\fs23 The current base_row_order naming is too ambiguous for the new plan. It may remain temporarily as a backwards-compatible alias, but the resolved per-axis order names must be clear in code and reports.\par
-\pard\sa190\sb280\f0\fs29\b 6. Basis kernel requirements\b0\par
-\pard\sa150\f0\fs23 CHEBY and DCT must be implemented through a basis-kernel interface. Geometry code must consume evaluated basis matrices by semantic axis name and should not know whether the source basis is CHEBY, DCT, or a future basis family.\par
-\pard\sa120\sb170\f0\fs24\b Basis kernel responsibilities\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis_family name and basis_version string\par
-\pard\sa100\li360\fi-240\f0\fs23 - coordinate policy for sampled axes\par
-\pard\sa100\li360\fi-240\f0\fs23 - raw basis construction\par
-\pard\sa100\li360\fi-240\f0\fs23 - optional stabilization or normalization policy\par
-\pard\sa100\li360\fi-240\f0\fs23 - cache-key fields\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis metadata and manifest reporting\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis-specific numerical tests\par
-\pard\sa120\sb170\f0\fs24\b CHEBY\b0\par
-\pard\sa150\f0\fs23 CHEBY should preserve the current Chebyshev first-kind behaviour. The finite sampled Chebyshev basis should remain QR-stabilized so the actual basis columns used by training are numerically orthonormal on the sampled axis.\par
-\pard\sa120\sb170\f0\fs24\b DCT\b0\par
-\pard\sa150\f0\fs23 DCT should initially mean orthonormal DCT-II. It should be exposed to users as DCT and recorded internally as basis_version=dct_ii_orthonormal_v1.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK may concatenate materialized tensors back into nanoGPT c_attn layout.\par
+\pard\sa160\f0\fs23 That concatenation is an execution compatibility detail.\par
+\pard\sa160\f0\fs23 It must not define the compact parameter layout.\par
+\pard\sa120\sb170\f0\fs24\b BLOCK requirements\b0\par
+\pard\sa160\f0\fs23 BLOCK must be implemented as a preset.\par
+\pard\sa160\f0\fs23 BLOCK must resolve to attention_geometry=head_aware_block and mlp_geometry=mlp_block.\par
+\pard\sa160\f0\fs23 BLOCK must not mean generic all-matrix 3D BLOCK.\par
+\pard\sa160\f0\fs23 The key comparison is MLP_BLOCK versus BLOCK.\par
+\pard\sa160\f0\fs23 That comparison isolates the contribution of head-aware attention compaction.\par
+
+\pard\sa190\sb280\f0\fs29\b 4. Basis requirements\b0\par
+\pard\sa120\sb170\f0\fs24\b Basis kernel interface\b0\par
+\pard\sa160\f0\fs23 CHEBY and DCT must use the same basis-kernel interface.\par
+\pard\sa160\f0\fs23 Geometry code should consume evaluated basis matrices by semantic axis name.\par
+\pard\sa160\f0\fs23 Geometry code should not know whether a basis came from CHEBY, DCT, or a future basis family.\par
+\pard\sa160\f0\fs23 A basis kernel owns its family name and version.\par
+\pard\sa160\f0\fs23 A basis kernel owns its coordinate policy.\par
+\pard\sa160\f0\fs23 A basis kernel owns raw basis construction.\par
+\pard\sa160\f0\fs23 A basis kernel owns stabilization or normalization.\par
+\pard\sa160\f0\fs23 A basis kernel owns cache-key fields and basis metadata.\par
+\pard\sa120\sb170\f0\fs24\b CHEBY requirements\b0\par
+\pard\sa160\f0\fs23 CHEBY must preserve current Chebyshev first-kind behaviour.\par
+\pard\sa160\f0\fs23 CHEBY must continue to use QR stabilization for the finite sampled basis.\par
+\pard\sa160\f0\fs23 CHEBY basis tests must verify shape, dtype, device, cache behaviour, and Gram error.\par
+\pard\sa120\sb170\f0\fs24\b DCT requirements\b0\par
+\pard\sa160\f0\fs23 DCT must initially mean orthonormal DCT-II.\par
+\pard\sa160\f0\fs23 DCT should be exposed to users as DCT.\par
+\pard\sa160\f0\fs23 DCT should be recorded internally as basis_version=dct_ii_orthonormal_v1.\par
 \pard\sa180\li360\f1\fs20 B[n,0] = sqrt(1 / N)\line B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0\line Use columns k = 0 .. order-1\par
-\pard\sa150\f0\fs23 DCT-II should be orthonormal by construction under the discrete inner product. Do not QR DCT unless tests expose a real numerical issue.\par
-\pard\sa190\sb280\f0\fs29\b 7. Checkpoint and compatibility requirements\b0\par
-\pard\sa150\f0\fs23 Old compact checkpoints are not supported across this refactor. Missing compact metadata must hard-fail rather than silently reinterpret old parameters.\par
-\pard\sa150\f0\fs23 New compact checkpoints must record at least:\par
-\pard\sa100\li360\fi-240\f0\fs23 - model_family\par
-\pard\sa100\li360\fi-240\f0\fs23 - geometry_preset\par
-\pard\sa100\li360\fi-240\f0\fs23 - resolved attention_geometry and mlp_geometry\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis_family and basis_version\par
-\pard\sa100\li360\fi-240\f0\fs23 - depth_order and all resolved per-axis orders\par
-\pard\sa100\li360\fi-240\f0\fs23 - n_layer, n_embd, n_head, head_dim, bias setting, and other model dimensions needed to validate family shapes\par
-\pard\sa100\li360\fi-240\f0\fs23 - semantic family list and coefficient shape metadata\par
-\pard\sa150\f0\fs23 Resume must hard-fail on mismatched compact metadata, basis metadata, model dimensions, or axis orders. No silent reinterpretation and no conversion path for old SHEET checkpoints.\par
-\pard\sa190\sb280\f0\fs29\b 8. Acceptance requirements\b0\par
-\pard\sa120\sb170\f0\fs24\b General\b0\par
+\pard\sa160\f0\fs23 DCT-II should be orthonormal by construction under the discrete inner product.\par
+\pard\sa160\f0\fs23 DCT should not be QR-stabilized unless tests expose a real numerical problem.\par
+
+\pard\sa190\sb280\f0\fs29\b 5. Configuration, metadata, and checkpoints\b0\par
+\pard\sa120\sb170\f0\fs24\b Configuration requirements\b0\par
+\pard\sa160\f0\fs23 Compact configuration must record the requested preset.\par
+\pard\sa160\f0\fs23 Compact configuration must record the resolved attention geometry.\par
+\pard\sa160\f0\fs23 Compact configuration must record the resolved MLP geometry.\par
+\pard\sa160\f0\fs23 Compact configuration must record the basis family and basis version.\par
+\pard\sa160\f0\fs23 Explicit attention_geometry and mlp_geometry overrides must be possible.\par
+\pard\sa160\f0\fs23 Invalid combinations must fail early.\par
+\pard\sa120\sb170\f0\fs24\b Metadata requirements\b0\par
+\pard\sa160\f0\fs23 No new standalone report format is required by this spec.\par
+\pard\sa160\f0\fs23 Existing manifests, parameter summaries, checkpoints, and run names must contain enough information to audit compact identity.\par
+\pard\sa160\f0\fs23 They must identify compact attention parameters separately from compact MLP parameters where that information is already being counted or printed.\par
+\pard\sa160\f0\fs23 They must include semantic family names, coefficient shapes, and resolved axis orders.\par
+\pard\sa160\f0\fs23 They must expose whether an attention basis crosses a head boundary.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK must expose that it does not cross a head boundary.\par
+\pard\sa120\sb170\f0\fs24\b Checkpoint requirements\b0\par
+\pard\sa160\f0\fs23 Old compact checkpoints are not supported across this refactor.\par
+\pard\sa160\f0\fs23 Missing compact metadata must hard-fail.\par
+\pard\sa160\f0\fs23 Mismatched compact metadata must hard-fail.\par
+\pard\sa160\f0\fs23 New compact checkpoints must include model_family, geometry_preset, attention_geometry, mlp_geometry, basis_family, basis_version, model dimensions, head metadata, resolved axis orders, semantic family names, and coefficient shapes.\par
+\pard\sa160\f0\fs23 No silent reinterpretation is allowed.\par
+\pard\sa160\f0\fs23 No conversion path for old SHEET checkpoints is required.\par
+
+\pard\sa190\sb280\f0\fs29\b 6. Acceptance requirements\b0\par
+\pard\sa120\sb170\f0\fs24\b General acceptance\b0\par
 \pard\sa100\li360\fi-240\f0\fs23 - DENSE smoke tests still run unchanged.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Legacy CHEBY_SHEET_COL materialization can be proven equivalent during Stage A refactor staging.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Preset expansion is deterministic, tested, and recorded.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Explicit attention_geometry and mlp_geometry overrides are tested and recorded.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Optimizer groups cover each trainable coefficient exactly once and exclude basis buffers.\par
-\pard\sa120\sb170\f0\fs24\b Geometry-specific\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Legacy CHEBY_SHEET_COL materialization can be proven equivalent during Stage A.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Preset expansion is deterministic and tested.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Explicit attention_geometry and mlp_geometry overrides are tested.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Optimizer groups cover each trainable coefficient exactly once.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Optimizer groups exclude basis buffers.\par
+\pard\sa120\sb170\f0\fs24\b Geometry acceptance\b0\par
 \pard\sa100\li360\fi-240\f0\fs23 - CURVE has shape, materialization, parameter-count, save/resume, and smoke-training tests.\par
-\pard\sa100\li360\fi-240\f0\fs23 - MLP_BLOCK has shape, scalar materialization, parameter-count, save/resume, and smoke-training tests for mlp_expansion_weight and mlp_contraction_weight.\par
-\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK tests verify Q/K/V role separation, explicit head partitioning, and no basis over head index.\par
-\pard\sa100\li360\fi-240\f0\fs23 - BLOCK preset tests verify it expands to head-aware attention plus MLP block and records both resolved geometries.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reports distinguish attention compact parameters, MLP compact parameters, conventional tiny/vector parameters, and DENSE control parameters.\par
-\pard\sa120\sb170\f0\fs24\b Basis-specific\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - CHEBY basis-kernel output matches current QR-stabilized behaviour for fixed sample_count/order/dtype/device.\par
-\pard\sa100\li360\fi-240\f0\fs23 - DCT basis tests cover shape, Gram error, cache separation from CHEBY, dtype/device movement, and metadata reporting.\par
+\pard\sa100\li360\fi-240\f0\fs23 - MLP_BLOCK has tests for mlp_expansion_weight and mlp_contraction_weight.\par
+\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK tests verify Q/K/V role separation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK tests verify explicit head partitioning.\par
+\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK tests verify that no basis is built over head index.\par
+\pard\sa100\li360\fi-240\f0\fs23 - BLOCK tests verify expansion to head-aware attention plus MLP block.\par
+\pard\sa120\sb170\f0\fs24\b Basis acceptance\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - CHEBY basis output matches current QR-stabilized behaviour for fixed sample_count, order, dtype, and device.\par
+\pard\sa100\li360\fi-240\f0\fs23 - DCT basis tests cover shape, Gram error, cache separation from CHEBY, dtype/device movement, and metadata.\par
 \pard\sa100\li360\fi-240\f0\fs23 - CHEBY/DCT checkpoint mismatch tests hard-fail.\par
-\pard\sa190\sb280\f0\fs29\b 9. Possible future work\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK-only runs as attention ablations if attention contribution needs isolated testing.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Legendre basis kernel as a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
-\pard\sa100\li360\fi-240\f0\fs23 - B-spline basis kernel for local smooth structure if global bases are too restrictive.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Wavelet or Haar basis kernel for local or multiscale structure.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Learned or dictionary bases after fixed-basis comparisons are understood.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Embedding/lm_head compaction as a separate experiment.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Reconsider legacy SHEET_COL only as an empirical baseline, not as a principled geometry.\par
+
+\pard\sa190\sb280\f0\fs29\b 7. Out of scope and future work\b0\par
+\pard\sa160\f0\fs23 LayerNorm compaction is out of scope.\par
+\pard\sa160\f0\fs23 Attention and MLP bias compaction is out of scope.\par
+\pard\sa160\f0\fs23 Token embedding and lm_head compaction are out of scope.\par
+\pard\sa160\f0\fs23 SHEET_ROW, SHEET_FLAT, and generic all-matrix BLOCK are out of scope unless revived by a later decision.\par
+\pard\sa160\f0\fs23 HEAD_AWARE_BLOCK-only runs are future ablations, not primary presets.\par
+\pard\sa160\f0\fs23 Legendre, B-spline, wavelet, Haar, learned, and dictionary bases are future basis candidates.\par
 }
