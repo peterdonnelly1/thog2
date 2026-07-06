@@ -2,118 +2,82 @@
 {\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
 \paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
 \widowctrl\f0\fs23
-\pard\qc\sa240\f0\fs34\b THOG2 BLOCK Enhancements Group Requirements Spec\b0\par
-\pard\qc\sa300\f0\fs22 CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, BLOCK, CHEBY, and DCT\par
+\pard\qc\sa240\f0\fs34\b THOG2 Principled Compact Geometry Requirements Spec\b0\par
+\pard\qc\sa300\f0\fs22 CURVE, MLP_BLOCK, BLOCK, HEAD_AWARE_BLOCK, CHEBY, and DCT\par
+
 \pard\sa180\sb260\f0\fs29\b Purpose\b0\par
-\pard\sa150\f0\fs23 This document specifies the next compact-geometry work for thog2. It supersedes the earlier ambiguous SHEET terminology. The current SHEET implementation is now treated as SHEET_COL.\par
-\pard\sa150\f0\fs23 This is a requirements and implementation-planning document only. It is not a commitment to preserve old checkpoint compatibility.\par
+\pard\sa150\f0\fs23 This document specifies the revised compact-geometry work for thog2. The guiding rule is now: compact only clean structural dimensions; leave categorical packing dimensions explicit.\par
+\pard\sa150\f0\fs23 The principled user-facing presets are CURVE, MLP_BLOCK, and BLOCK. HEAD_AWARE_BLOCK is an underlying attention geometry, not normally a top-level preset. The current SHEET_COL implementation remains an empirical legacy baseline because it is training well, but it is no longer one of the principled target geometries.\par
+\pard\sa150\f0\fs23 Old checkpoint compatibility is out of scope. Existing working dense and current compact code paths should be preserved during staging until the new abstractions are proven.\par
+
 \pard\sa180\sb260\f0\fs29\b Vocabulary and run identities\b0\par
-\pard\sa150\f0\fs23 DENSE means conventional repeated transformer weights. It is not a basis family and must not be combined with CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, or BLOCK.\par
-\pard\sa150\f0\fs23 CHEBY means the current Chebyshev first-kind compact basis family.\par
+\pard\sa150\f0\fs23 DENSE means conventional repeated transformer weights. It is not a basis family and must not be combined with compact geometry internals.\par
+\pard\sa150\f0\fs23 CHEBY means the current Chebyshev first-kind compact basis family, using the QR-stabilized finite sampled basis.\par
 \pard\sa150\f0\fs23 DCT means a real orthonormal DCT basis family, initially DCT-II, exposed to users simply as DCT.\par
-\pard\sa150\f0\fs23 CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK are compact geometry choices. They must be selectable independently of CHEBY or DCT.\par
-\pard\sa150\f0\fs23 Valid experiment identities are DENSE plus CHEBY_* and DCT_* over CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\pard\sa150\f0\fs23 A geometry preset is a shallow user-facing choice that resolves to separate attention and MLP geometry settings. The preset should be recorded, but the resolved attention_geometry and mlp_geometry must also be recorded.\par
+\pard\sa180\li360\f1\fs20 geometry_preset = curve | mlp_block | block\line attention_geometry = curve | head_aware_block\line mlp_geometry = curve | mlp_block\line basis_family = chebyshev | dct\par
+\pard\sa150\f0\fs23 Explicit invocation of the underlying attention and MLP geometry settings must remain easy. This is required for ablations and for testing attention and MLP contributions separately.\par
+\pard\sa150\f0\fs23 Recommended preset expansion:\par
+\pard\sa100\li360\fi-240\f0\fs23 - CURVE: attention_geometry=curve, mlp_geometry=curve.\par
+\pard\sa100\li360\fi-240\f0\fs23 - MLP_BLOCK: attention_geometry=curve, mlp_geometry=mlp_block.\par
+\pard\sa100\li360\fi-240\f0\fs23 - BLOCK: attention_geometry=head_aware_block, mlp_geometry=mlp_block.\par
+\pard\sa150\f0\fs23 HEAD_AWARE_BLOCK alone may be exposed as an advanced override, but it should not be treated as a main preset because it leaves the much larger MLP matrices on CURVE.\par
+
 \pard\sa180\sb260\f0\fs29\b 1. Abstraction refactor\b0\par
 \pard\sa120\sb160\f0\fs24\b Goal\b0\par
-\pard\sa150\f0\fs23 Separate compact geometry, basis family, and transformer tensor-family metadata. Make CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK first-class compact geometries.\par
-\pard\sa150\f0\fs23 The refactor should preserve current training behaviour only long enough to prove the refactor. It does not need to preserve old checkpoint compatibility.\par
-\pard\sa120\sb160\f0\fs24\b Target config surface\b0\par
-\pard\sa180\li360\f1\fs20 model_family = dense | compact\line compact_geometry = curve | sheet_row | sheet_col | sheet_flat | block\line basis_family = chebyshev | dct\par
-\pard\sa150\f0\fs23 User-facing run tokens should remain uppercase: DENSE, CHEBY, DCT, CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
-\pard\sa120\sb160\f0\fs24\b Geometry definitions\b0\par
-\pard\sa150\f0\fs23 CURVE compacts transformer depth only. Matrix entries remain explicit over output row and input column.\par
-\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\par
-\pard\sa150\f0\fs23 SHEET_COL compacts depth plus the input-column axis. Output rows remain explicit. This is the current implementation.\par
-\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_pq C[o,p,q] * B_depth[l,p] * B_col[i,q]\par
-\pard\sa150\f0\fs23 SHEET_ROW compacts depth plus the output-row axis. Input columns remain explicit.\par
-\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_pq C[i,p,q] * B_depth[l,p] * B_row[o,q]\par
-\pard\sa150\f0\fs23 SHEET_FLAT compacts depth plus one flattened matrix axis. The pair (output row, input column) is mapped to a single flat coordinate.\par
-\pard\sa180\li360\f1\fs20 flat = o * input_width + i\line W_l[o,i] = sum_pq C[p,q] * B_depth[l,p] * B_flat[flat,q]\par
-\pard\sa150\f0\fs23 BLOCK compacts depth, output rows, and input columns as separate axes.\par
-\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_row[o,q] * B_col[i,r]\par
-\pard\sa120\sb160\f0\fs24\b Geometry cap rule\b0\par
-\pard\sa150\f0\fs23 The selected compact geometry is an upper bound on compact dimensionality, not an instruction to invent axes that a weight object does not have.\par
-\pard\sa150\f0\fs23 A tensor family exposes only its real axes. If the selected compact geometry asks for more axes than the family has, the implementation must fall back to the highest valid lower-dimensional representation for that family.\par
-\pard\sa100\li360\fi-240\f0\fs23 - A vector family has no row/column matrix structure. SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK must not create fake matrix axes for it.\par
-\pard\sa100\li360\fi-240\f0\fs23 - A non-repeated 2D matrix has only row and column axes. BLOCK adds nothing unless there is a real third axis.\par
-\pard\sa100\li360\fi-240\f0\fs23 - A repeated transformer matrix family has depth, output-row, and input-column axes. BLOCK is meaningful there.\par
-\pard\sa120\sb160\f0\fs24\b Tiny/vector parameter policy\b0\par
-\pard\sa150\f0\fs23 LayerNorm has genuine learned affine parameters: gamma/weight and, when bias is enabled, beta/bias. They are one-dimensional feature vectors, not matrices. Attention and MLP biases are also learned one-dimensional vectors when bias is enabled.\par
-\pard\sa150\f0\fs23 These vector families are tiny compared with the matrix weight families. Default policy: leave layernorm weights, layernorm biases, attention biases, and MLP biases conventional or explicit per-layer vectors. Do not spend first-pass implementation complexity compacting them.\par
-\pard\sa150\f0\fs23 This is a pragmatic size/complexity decision, not a claim that the parameters are not real. A later vector_compaction option can be added if evidence says these small vector families matter.\par
+\pard\sa150\f0\fs23 Separate basis family, geometry preset, module-specific geometry, tensor-family metadata, and materialization layout. The transformer forward path should request semantic tensor families; it should not know coefficient layouts.\par
+\pard\sa120\sb160\f0\fs24\b Clean-axis rule\b0\par
+\pard\sa150\f0\fs23 Compact geometry must only be applied to axes that are meaningful ordered structural dimensions. Depth, MLP output channel, MLP input channel, attention head-local channel, and residual-stream input/output channel axes are valid candidates. Categorical packing axes such as qkv_role and head index must not be compacted as smooth coordinates.\par
+\pard\sa150\f0\fs23 The selected preset is therefore not a blind maximum-dimensionality rule. It resolves separately over attention and MLP families according to their clean axes.\par
 \pard\sa120\sb160\f0\fs24\b Basis kernel interface\b0\par
-\pard\sa150\f0\fs23 CHEBY and DCT must be implemented through the same basis-kernel interface rather than as one-off branches scattered through the trajectory code. The interface should make future basis families straightforward to add.\par
-\pard\sa150\f0\fs23 A basis kernel should own its basis_family name, basis_version, coordinate policy, raw basis construction, optional stabilization/normalization policy, cache key fields, metadata reporting, and basis-specific tests.\par
-\pard\sa150\f0\fs23 Geometry code should consume evaluated basis matrices by semantic axis name. It should not need to know whether those matrices came from Chebyshev, DCT, or a later basis family.\par
-\pard\sa120\sb160\f0\fs24\b Module boundaries\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis.py must expose basis-kernel dispatch rather than directly building only Chebyshev bases.\par
-\pard\sa100\li360\fi-240\f0\fs23 - geometry.py must describe tensor-family axes and compact axes without assuming one SHEET-only coefficient shape.\par
-\pard\sa100\li360\fi-240\f0\fs23 - trajectory code must expose a stable materialize(name, layer_index) interface independent of compact geometry or basis family.\par
-\pard\sa100\li360\fi-240\f0\fs23 - The transformer model path should continue to call materialize by semantic family name.\par
+\pard\sa150\f0\fs23 CHEBY and DCT must be implemented through the same basis-kernel interface rather than as one-off branches scattered through trajectory code. Future basis families should be addable by registering a new basis kernel plus tests.\par
+\pard\sa150\f0\fs23 A basis kernel owns its family name, basis version, coordinate policy, raw basis construction, optional stabilization/normalization, cache-key fields, metadata reporting, and basis-specific tests. Geometry code consumes evaluated basis matrices by semantic axis name.\par
+\pard\sa120\sb160\f0\fs24\b Tiny/vector parameter policy\b0\par
+\pard\sa150\f0\fs23 LayerNorm weights/biases and attention/MLP biases are real learned parameters, but they are tiny relative to the matrix families. Default policy: leave them conventional or explicit per-layer vectors. Do not spend first-pass implementation complexity compacting them.\par
 \pard\sa120\sb160\f0\fs24\b Checkpoint policy\b0\par
-\pard\sa150\f0\fs23 Do not support old checkpoints across this refactor. Old CHEBY_SHEET checkpoints may fail to load. That is acceptable.\par
-\pard\sa150\f0\fs23 After the refactor, resume only when the checkpoint was produced by the same post-refactor schema and has exactly matching model_family, compact_geometry, basis_family, basis_version, depth_order, axis orders, and model dimensions.\par
-\pard\sa150\f0\fs23 Missing or mismatched compact metadata must hard-fail. No silent reinterpretation, no conversion path, and no special compatibility code.\par
-\pard\sa120\sb160\f0\fs24\b Acceptance requirements\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - CHEBY_SHEET_COL matrix-family parameter counts and materialized tensor shapes should match the current implementation.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Basis buffers remain non-persistent.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Optimizer groups cover trainable parameters exactly once.\par
-\pard\sa100\li360\fi-240\f0\fs23 - CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK materialization each match direct scalar evaluation.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Checkpoint mismatch tests cover compact_geometry and basis_family.\par
-\pard\sa180\sb260\f0\fs29\b 2. SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK\b0\par
-\pard\sa120\sb160\f0\fs24\b Goal\b0\par
-\pard\sa150\f0\fs23 Implement all three two-axis geometries plus the full three-axis BLOCK geometry. This gives a clean experiment grid rather than treating SHEET_COL as if it represented all sheet-like compression.\par
-\pard\sa120\sb160\f0\fs24\b Matrix families in first scope\b0\par
-\pard\sa150\f0\fs23 Compact geometry applies first to repeated transformer matrix families, treated as semantic families rather than nanoGPT packing details:\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_query_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_key_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_value_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - attention_output_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_expansion_weight\par
-\pard\sa100\li360\fi-240\f0\fs23 - mlp_contraction_weight\par
-\pard\sa150\f0\fs23 Q, K, and V should be distinct compact parameter families. They may still be concatenated into nanoGPT's fused c_attn tensor at materialization time, but the compact geometry should not treat Q/K/V packing boundaries as ordinary adjacent rows.\par
-\pard\sa150\f0\fs23 These are the expensive weight objects and the ones that actually expose depth plus matrix axes.\par
-\pard\sa150\f0\fs23 The final lm_head/token embedding tying path should remain conventional unless a separate experiment explicitly targets it.\par
-\pard\sa120\sb160\f0\fs24\b Out-of-scope head-aware variant: BLOCK_HEAD_SPLIT\b0\par
-\pard\sa150\f0\fs23 BLOCK_HEAD_SPLIT is a possible later attention-only variant that treats attention heads as categorical groups rather than smoothing across head boundaries inside a full n_embd-wide row or column axis.\par
-\pard\sa150\f0\fs23 For Q, K, and V, BLOCK_HEAD_SPLIT would split the output-row axis by head: each head receives its own compact block over depth, head_dim output rows, and full input columns. For attention_output_weight, it would split the input-column axis by head: each head receives its own compact block over depth, full output rows, and head_dim input columns. MLP matrix families would remain ordinary BLOCK.\par
-\pard\sa150\f0\fs23 Rationale: ordinary BLOCK still treats the last channel of one head and the first channel of the next head as adjacent coordinates. That adjacency is artificial because attention head order is a packing convention, not a smooth geometric axis.\par
-\pard\sa150\f0\fs23 BLOCK_HEAD_SPLIT is out of scope for the initial version. It changes compact family count, order policy, parameter accounting, and inductive bias; it can also increase parameters if per-head orders do not scale down aggressively with head_dim. Initial BLOCK should split Q/K/V as semantic families but should not split by head.\par
-\pard\sa120\sb160\f0\fs24\b Order policy\b0\par
-\pard\sa150\f0\fs23 Retain depth_order. Introduce separate order fields for row, column, and flat axes. Avoid overloading row_order to mean input columns in one geometry and output rows in another.\par
-\pard\sa180\li360\f1\fs20 depth_order\line base_row_order / row_order\line base_col_order / col_order\line base_flat_order / flat_order\par
-\pard\sa150\f0\fs23 Derived order rules must be explicit and recorded in the family report. For rectangular matrices, row and column orders should be derived independently from the corresponding axis widths.\par
-\pard\sa120\sb160\f0\fs24\b Implementation recommendation\b0\par
-\pard\sa150\f0\fs23 Do not keep growing the current SheetTrajectory in-place as if it were the only geometry. Either introduce geometry-specific trajectory adapters or a generalized CompactTrajectory with small coefficient-layout adapters for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
-\pard\sa150\f0\fs23 Use einsum or equivalent staged matrix products for clarity first; optimize after correctness and memory measurements are stable.\par
-\pard\sa120\sb160\f0\fs24\b Initialization and tests\b0\par
-\pard\sa150\f0\fs23 Re-derive coefficient standard deviations separately for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK so materialized dense weights hit intended target standard deviation. Do not assume the current SHEET_COL coefficient scale transfers unchanged.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Shape tests for every matrix family and geometry.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Direct scalar-evaluation tests for sampled layer/row/column coordinates.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Parameter-report tests, including matrix compact parameters vs conventional non-matrix parameters.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Residual-init scaling tests for each geometry.\par
-\pard\sa100\li360\fi-240\f0\fs23 - CPU train/save/resume tests within the new schema.\par
-\pard\sa100\li360\fi-240\f0\fs23 - GPU dtype/device movement tests.\par
+\pard\sa150\f0\fs23 New checkpoints must record model_family, geometry_preset, resolved attention_geometry, resolved mlp_geometry, basis_family, basis_version, depth_order, axis orders, and model dimensions. Resume must hard-fail on missing or mismatched compact metadata. Do not add old-checkpoint conversion code.\par
+
+\pard\sa180\sb260\f0\fs29\b 2. Principled compact geometries\b0\par
+\pard\sa120\sb160\f0\fs24\b CURVE\b0\par
+\pard\sa150\f0\fs23 CURVE compacts transformer depth only. Matrix entries remain explicit over output row and input column. It is clean because depth is a genuine ordered repeated-layer axis.\par
+\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\par
+\pard\sa120\sb160\f0\fs24\b MLP_BLOCK\b0\par
+\pard\sa150\f0\fs23 MLP_BLOCK applies only to mlp_expansion_weight and mlp_contraction_weight. MLP matrices have two clean matrix axes, so the compact representation uses depth, output channel, and input channel.\par
+\pard\sa180\li360\f1\fs20 W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_row[o,q] * B_col[i,r]\par
+\pard\sa150\f0\fs23 MLP_BLOCK is expected to be especially important because MLP matrices contain by far the largest share of repeated transformer matrix parameters.\par
+\pard\sa120\sb160\f0\fs24\b HEAD_AWARE_BLOCK\b0\par
+\pard\sa150\f0\fs23 HEAD_AWARE_BLOCK applies only to attention matrix families. It is head-aware because attention head index is treated as categorical/explicit, not as a compacted smooth axis.\par
+\pard\sa150\f0\fs23 For Q, K, and V, each role is a distinct semantic family and each head receives its own compact block over depth, head-local output channel, and full input channel.\par
+\pard\sa180\li360\f1\fs20 W_role,l,h[o,i] = sum_pqr C_role,h[p,q,r] * B_depth[l,p] * B_head_out[o,q] * B_in[i,r]\par
+\pard\sa150\f0\fs23 For attention_output_weight, each input head receives its own compact block over depth, full output channel, and head-local input channel.\par
+\pard\sa180\li360\f1\fs20 W_o,l[o,h,i] = sum_pqr C_o,h[p,q,r] * B_depth[l,p] * B_out[o,q] * B_head_in[i,r]\par
+\pard\sa150\f0\fs23 The head index h is explicit. There is no basis over h. This avoids smoothing across artificial head packing boundaries.\par
+\pard\sa120\sb160\f0\fs24\b BLOCK preset\b0\par
+\pard\sa150\f0\fs23 BLOCK is a shallow preset that activates both clean block geometries: attention_geometry=head_aware_block and mlp_geometry=mlp_block. It should be the main full compact geometry candidate.\par
+\pard\sa120\sb160\f0\fs24\b Legacy SHEET_COL baseline\b0\par
+\pard\sa150\f0\fs23 Existing SHEET_COL is retained as a legacy empirical baseline and equivalence target during refactor staging. It is not one of the new principled presets because it compacts input columns for all matrix families and can cross attention-head packing boundaries in attention_output_weight.\par
+\pard\sa150\f0\fs23 SHEET_ROW, SHEET_FLAT, and generic matrix-level BLOCK are no longer primary implementation targets because they compact dimensions that are not clean for attention.\par
+
 \pard\sa180\sb260\f0\fs29\b 3. DCT\b0\par
 \pard\sa120\sb160\f0\fs24\b Goal\b0\par
-\pard\sa150\f0\fs23 Add DCT as a user-selectable alternative to CHEBY for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK. DENSE remains unaffected. The user-facing token should be DCT. Internally, record basis_version as dct_ii_orthonormal_v1.\par
-\pard\sa120\sb160\f0\fs24\b Recommended DCT variant\b0\par
-\pard\sa150\f0\fs23 Use orthonormal DCT-II first. DCT-II is real, orthonormal on a finite interval, has a strong low-frequency prior, and is a sensible finite-axis alternative to Chebyshev for smooth compact structure.\par
+\pard\sa150\f0\fs23 Add DCT as a user-selectable basis-family alternative to CHEBY after the geometry abstraction is stable. DENSE remains unaffected. The user-facing token should be DCT. Internally, record basis_version as dct_ii_orthonormal_v1.\par
 \pard\sa120\sb160\f0\fs24\b DCT-II basis\b0\par
 \pard\sa180\li360\f1\fs20 B[n,0] = sqrt(1 / N)\line B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0\line Use columns k = 0 .. order-1\par
 \pard\sa150\f0\fs23 N is sample_count for the axis. The basis should be orthonormal by construction; QR should not be required for DCT-II, but Gram-error tests must verify this.\par
-\pard\sa120\sb160\f0\fs24\b Experiment plan\b0\par
-\pard\sa150\f0\fs23 First compare CHEBY_CURVE vs DCT_CURVE. Then compare CHEBY_SHEET_COL vs DCT_SHEET_COL, CHEBY_SHEET_ROW vs DCT_SHEET_ROW, and CHEBY_SHEET_FLAT vs DCT_SHEET_FLAT. Only after BLOCK correctness is stable, compare CHEBY_BLOCK vs DCT_BLOCK. Keep DENSE as the conventional control, not as part of the basis-family matrix.\par
+
+\pard\sa180\sb260\f0\fs29\b Acceptance requirements\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - DENSE smoke tests still run unchanged.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Legacy CHEBY_SHEET_COL materialization can be proven equivalent during the refactor.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Preset expansion is deterministic and recorded in manifests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Explicit attention_geometry and mlp_geometry overrides are testable and recorded.\par
+\pard\sa100\li360\fi-240\f0\fs23 - CURVE, MLP_BLOCK, and BLOCK each have shape, materialization, parameter-count, optimizer-coverage, save/resume, and smoke-training tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK tests verify that no basis is built over head index and no compact basis crosses head boundaries.\par
+
 \pard\sa180\sb260\f0\fs29\b Possible future work\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - BLOCK_HEAD_SPLIT: attention-only head-aware BLOCK variant. Useful if ordinary BLOCK is hurt by artificial head-boundary smoothing. Out of scope for the initial version.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Legendre: clean orthogonal polynomial basis on a finite interval. Good candidate if we want a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
-\pard\sa100\li360\fi-240\f0\fs23 - B-splines: local smooth basis. Useful if global basis functions are too restrictive, but introduces knot/order choices.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Wavelets or Haar: local and multiscale. Potentially useful for abrupt structure, but likely a worse first prior for smooth layer/row/column variation.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Learned bases or dictionary bases: more flexible but reduce the controlled-compression nature of the experiment. Use later, not before fixed-basis comparisons are understood.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Low-rank/factorized baselines: useful as comparisons, but they answer a different question from fixed geometric bases.\par
-\pard\sa180\sb260\f0\fs29\b Implementation staging summary\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - Stage A: abstraction refactor with explicit CURVE and the three sheet geometries.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Stage B: implement CHEBY_CURVE, CHEBY_SHEET_COL, CHEBY_SHEET_ROW, CHEBY_SHEET_FLAT, and CHEBY_BLOCK.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Stage C: add DCT for CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
-\pard\sa100\li360\fi-240\f0\fs23 - Do not combine DCT and new geometry implementation in the same first-pass PR unless the geometry tests are already stable.\par
+\pard\sa100\li360\fi-240\f0\fs23 - HEAD_AWARE_BLOCK-only ablations if attention contribution needs isolated testing.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Legendre basis kernel as a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
+\pard\sa100\li360\fi-240\f0\fs23 - B-spline basis kernel for local smooth structure if global bases are too restrictive.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Wavelet or Haar basis kernel for local/multiscale structure.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Learned or dictionary bases after fixed-basis comparisons are understood.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Embedding/lm_head compaction as a separate experiment.\par
 }
