@@ -4,7 +4,7 @@ set -euo pipefail
 # vvv THOG
 # Long single-candidate dreedle SHEET OpenWebText run.
 # This targets high VRAM use on TITAN RTX by widening the SHEET geometry rather than increasing context length.
-# Default candidate is wide SHEET-144: D2560/H40 with P96/Q384 at C256, intended to use materially more VRAM than D1536/Q192.
+# Default candidate is wide SHEET-144: D2304/H36 with P96/Q320 at C256, backed off from D2560/Q384 after first-backward OOM.
 # The child SHEET wrapper's dreedle runtime profile selects float16; do not also pass -T unless deliberately overriding it.
 # ^^^ THOG
 
@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 SHEET_WRAPPER="./current_scruffy_train_SHEET_OWT.sh"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-RUN_NAME="DREEDLE_WIDE_D2560_Q384_WANDB_LONG_$(date +%y%m%d_%H%M%S)"
+RUN_NAME="DREEDLE_WIDE_D2304_Q320_WANDB_LONG_$(date +%y%m%d_%H%M%S)"
 STEPS=99999
 BATCH_SIZE=12
 GRADIENT_ACCUMULATION_STEPS=4
@@ -22,11 +22,11 @@ LOG_INTERVAL=1
 WARMUP_ITERS=20
 CHECKPOINT_INTERVAL=500
 N_LAYER=144
-N_HEAD=40
-N_EMBD=2560
+N_HEAD=36
+N_EMBD=2304
 BLOCK_SIZE=256
 DEPTH_ORDER=96
-BASE_ROW_ORDER=384
+BASE_ROW_ORDER=320
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
 INSTRUMENTATION="wandb"
@@ -125,6 +125,7 @@ case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be on
 (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$CUDA_DEVICE_DEFAULT}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export THOG2_INSTRUMENTATION="$INSTRUMENTATION"
 export THOG2_CURVE_ROOT="$CURVE_ROOT"
 
@@ -141,6 +142,7 @@ THOG2 dreedle long SHEET OpenWebText run
   checkpoint interval:      $CHECKPOINT_INTERVAL
   activation checkpointing: $ACTIVATION_CHECKPOINTING, segment $CHECKPOINT_SEGMENT_SIZE
   CUDA_VISIBLE_DEVICES:     $CUDA_VISIBLE_DEVICES
+  cuda alloc conf:          $PYTORCH_CUDA_ALLOC_CONF
   instrumentation:          $THOG2_INSTRUMENTATION
   curve root:               $THOG2_CURVE_ROOT
   wandb flags:              $WANDB_ENABLED ($WANDB_MODE)
