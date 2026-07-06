@@ -4,7 +4,7 @@ set -euo pipefail
 # vvv THOG
 # Long single-candidate dreedle SHEET OpenWebText run.
 # This targets high VRAM use on TITAN RTX by widening the SHEET geometry rather than increasing context length.
-# Default candidate is XL-ish width D1536/H24 with P64/Q192 at C256, intended to replace the raw env-prefixed command.
+# Default candidate is wide SHEET-144: D2560/H40 with P96/Q384 at C256, intended to use materially more VRAM than D1536/Q192.
 # The child SHEET wrapper's dreedle runtime profile selects float16; do not also pass -T unless deliberately overriding it.
 # ^^^ THOG
 
@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 SHEET_WRAPPER="./current_scruffy_train_SHEET_OWT.sh"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-RUN_NAME="DREEDLE_XLISH_D1536_Q192_LONG_$(date +%y%m%d_%H%M%S)"
+RUN_NAME="DREEDLE_WIDE_D2560_Q384_WANDB_LONG_$(date +%y%m%d_%H%M%S)"
 STEPS=99999
 BATCH_SIZE=12
 GRADIENT_ACCUMULATION_STEPS=4
@@ -22,14 +22,14 @@ LOG_INTERVAL=1
 WARMUP_ITERS=20
 CHECKPOINT_INTERVAL=500
 N_LAYER=144
-N_HEAD=24
-N_EMBD=1536
+N_HEAD=40
+N_EMBD=2560
 BLOCK_SIZE=256
-DEPTH_ORDER=64
-BASE_ROW_ORDER=192
+DEPTH_ORDER=96
+BASE_ROW_ORDER=384
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
-INSTRUMENTATION="tensorboard"
+INSTRUMENTATION="wandb"
 CURVE_ROOT="curves"
 WANDB_MODE="online"
 WANDB_ENABLED=true
@@ -143,7 +143,7 @@ THOG2 dreedle long SHEET OpenWebText run
   CUDA_VISIBLE_DEVICES:     $CUDA_VISIBLE_DEVICES
   instrumentation:          $THOG2_INSTRUMENTATION
   curve root:               $THOG2_CURVE_ROOT
-  W&B flags:                $WANDB_ENABLED ($WANDB_MODE)
+  wandb flags:              $WANDB_ENABLED ($WANDB_MODE)
 EOF
 
 "$SHEET_WRAPPER" \
