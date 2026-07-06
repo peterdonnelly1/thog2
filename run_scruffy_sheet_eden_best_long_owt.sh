@@ -27,6 +27,8 @@ DEPTH_ORDER=64
 BASE_ROW_ORDER=128
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
+INSTRUMENTATION="tensorboard"
+CURVE_ROOT="curves"
 WANDB_MODE="online"
 WANDB_ENABLED=true
 DRY_RUN=false
@@ -52,6 +54,8 @@ Usage: $0 [options]
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
   -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
+  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | none
+  -V CURVE_ROOT=${CURVE_ROOT}                       TensorBoard root directory
   -M WANDB_MODE=${WANDB_MODE}                       online | offline | disabled
   -W WANDB_ENABLED=${WANDB_ENABLED}
   -x DRY_RUN=${DRY_RUN}
@@ -59,7 +63,7 @@ Usage: $0 [options]
 EOF
 }
 
-while getopts ":g:n:b:A:u:e:l:w:k:L:H:D:C:P:Q:p:S:M:W:x:h" option; do
+while getopts ":g:n:b:A:u:e:l:w:k:L:H:D:C:P:Q:p:S:I:V:M:W:x:h" option; do
   case "$option" in
     g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;;
@@ -78,6 +82,8 @@ while getopts ":g:n:b:A:u:e:l:w:k:L:H:D:C:P:Q:p:S:M:W:x:h" option; do
     Q) BASE_ROW_ORDER="$OPTARG" ;;
     p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
     S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    I) INSTRUMENTATION="$OPTARG" ;;
+    V) CURVE_ROOT="$OPTARG" ;;
     M) WANDB_MODE="$OPTARG" ;;
     W) WANDB_ENABLED="$OPTARG" ;;
     x) DRY_RUN="$OPTARG" ;;
@@ -121,6 +127,7 @@ validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$DRY_RUN" "DRY_RUN"
 
+case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION must be tensorboard, wandb, or none." >&2; exit 2 ;; esac
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
@@ -138,9 +145,13 @@ THOG2 long SHEET EDEN-style OpenWebText run
   eval:                     every $EVAL_INTERVAL updates, $EVAL_ITERS batches
   checkpoint interval:      $CHECKPOINT_INTERVAL
   activation checkpointing: $ACTIVATION_CHECKPOINTING, segment $CHECKPOINT_SEGMENT_SIZE
+  instrumentation:          $INSTRUMENTATION
+  curve root:               $CURVE_ROOT
   W&B:                      $WANDB_ENABLED ($WANDB_MODE)
 EOF
 
+THOG2_INSTRUMENTATION="$INSTRUMENTATION" \
+THOG2_CURVE_ROOT="$CURVE_ROOT" \
 ./current_scruffy_train_SHEET_OWT.sh \
   -q fresh \
   -g "$RUN_NAME" \
