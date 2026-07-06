@@ -41,8 +41,12 @@
 \pard\sa150\f0\fs23 LayerNorm has genuine learned affine parameters: gamma/weight and, when bias is enabled, beta/bias. They are one-dimensional feature vectors, not matrices. Attention and MLP biases are also learned one-dimensional vectors when bias is enabled.\par
 \pard\sa150\f0\fs23 These vector families are tiny compared with the matrix weight families. Default policy: leave layernorm weights, layernorm biases, attention biases, and MLP biases conventional or explicit per-layer vectors. Do not spend first-pass implementation complexity compacting them.\par
 \pard\sa150\f0\fs23 This is a pragmatic size/complexity decision, not a claim that the parameters are not real. A later vector_compaction option can be added if evidence says these small vector families matter.\par
+\pard\sa120\sb160\f0\fs24\b Basis kernel interface\b0\par
+\pard\sa150\f0\fs23 CHEBY and DCT must be implemented through the same basis-kernel interface rather than as one-off branches scattered through the trajectory code. The interface should make future basis families straightforward to add.\par
+\pard\sa150\f0\fs23 A basis kernel should own its basis_family name, basis_version, coordinate policy, raw basis construction, optional stabilization/normalization policy, cache key fields, metadata reporting, and basis-specific tests.\par
+\pard\sa150\f0\fs23 Geometry code should consume evaluated basis matrices by semantic axis name. It should not need to know whether those matrices came from Chebyshev, DCT, or a later basis family.\par
 \pard\sa120\sb160\f0\fs24\b Module boundaries\b0\par
-\pard\sa100\li360\fi-240\f0\fs23 - basis.py must expose basis-family dispatch rather than directly building only Chebyshev bases.\par
+\pard\sa100\li360\fi-240\f0\fs23 - basis.py must expose basis-kernel dispatch rather than directly building only Chebyshev bases.\par
 \pard\sa100\li360\fi-240\f0\fs23 - geometry.py must describe tensor-family axes and compact axes without assuming one SHEET-only coefficient shape.\par
 \pard\sa100\li360\fi-240\f0\fs23 - trajectory code must expose a stable materialize(name, layer_index) interface independent of compact geometry or basis family.\par
 \pard\sa100\li360\fi-240\f0\fs23 - The transformer model path should continue to call materialize by semantic family name.\par
@@ -98,14 +102,15 @@
 \pard\sa120\sb160\f0\fs24\b DCT-II basis\b0\par
 \pard\sa180\li360\f1\fs20 B[n,0] = sqrt(1 / N)\line B[n,k] = sqrt(2 / N) * cos(pi * (n + 0.5) * k / N), for k > 0\line Use columns k = 0 .. order-1\par
 \pard\sa150\f0\fs23 N is sample_count for the axis. The basis should be orthonormal by construction; QR should not be required for DCT-II, but Gram-error tests must verify this.\par
-\pard\sa120\sb160\f0\fs24\b Other basis families worth considering later\b0\par
+\pard\sa120\sb160\f0\fs24\b Experiment plan\b0\par
+\pard\sa150\f0\fs23 First compare CHEBY_CURVE vs DCT_CURVE. Then compare CHEBY_SHEET_COL vs DCT_SHEET_COL, CHEBY_SHEET_ROW vs DCT_SHEET_ROW, and CHEBY_SHEET_FLAT vs DCT_SHEET_FLAT. Only after BLOCK correctness is stable, compare CHEBY_BLOCK vs DCT_BLOCK. Keep DENSE as the conventional control, not as part of the basis-family matrix.\par
+\pard\sa180\sb260\f0\fs29\b Possible future work\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - BLOCK_HEAD_SPLIT: attention-only head-aware BLOCK variant. Useful if ordinary BLOCK is hurt by artificial head-boundary smoothing. Out of scope for the initial version.\par
 \pard\sa100\li360\fi-240\f0\fs23 - Legendre: clean orthogonal polynomial basis on a finite interval. Good candidate if we want a second polynomial baseline that is less endpoint-focused than Chebyshev.\par
 \pard\sa100\li360\fi-240\f0\fs23 - B-splines: local smooth basis. Useful if global basis functions are too restrictive, but introduces knot/order choices.\par
 \pard\sa100\li360\fi-240\f0\fs23 - Wavelets or Haar: local and multiscale. Potentially useful for abrupt structure, but likely a worse first prior for smooth layer/row/column variation.\par
 \pard\sa100\li360\fi-240\f0\fs23 - Learned bases or dictionary bases: more flexible but reduce the controlled-compression nature of the experiment. Use later, not before fixed-basis comparisons are understood.\par
 \pard\sa100\li360\fi-240\f0\fs23 - Low-rank/factorized baselines: useful as comparisons, but they answer a different question from fixed geometric bases.\par
-\pard\sa120\sb160\f0\fs24\b Experiment plan\b0\par
-\pard\sa150\f0\fs23 First compare CHEBY_CURVE vs DCT_CURVE. Then compare CHEBY_SHEET_COL vs DCT_SHEET_COL, CHEBY_SHEET_ROW vs DCT_SHEET_ROW, and CHEBY_SHEET_FLAT vs DCT_SHEET_FLAT. Only after BLOCK correctness is stable, compare CHEBY_BLOCK vs DCT_BLOCK. Keep DENSE as the conventional control, not as part of the basis-family matrix.\par
 \pard\sa180\sb260\f0\fs29\b Implementation staging summary\b0\par
 \pard\sa100\li360\fi-240\f0\fs23 - Stage A: abstraction refactor with explicit CURVE and the three sheet geometries.\par
 \pard\sa100\li360\fi-240\f0\fs23 - Stage B: implement CHEBY_CURVE, CHEBY_SHEET_COL, CHEBY_SHEET_ROW, CHEBY_SHEET_FLAT, and CHEBY_BLOCK.\par
