@@ -1,0 +1,69 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Stage A Staging Plan\b0\par
+\pard\qc\sa300\f0\fs22 Abstract Refactor\par
+\pard\sb220\sa140\f0\fs28\b Purpose\b0\par
+\pard\sa130\f0\fs23 This short staging plan breaks the Abstract Refactor into small mergeable steps. The goal is to create the new compact-geometry and basis-kernel architecture without changing model behaviour except where explicitly gated by tests.\par
+\pard\sa130\f0\fs23 Stage A should not implement new geometry beyond proving that the current behaviour can be represented as CHEBY_SHEET_COL through the new abstractions. DENSE must remain unaffected. Old checkpoint compatibility remains out of scope.\par
+\pard\sb220\sa140\f0\fs28\b A0. Preflight audit\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Confirm the exact current materialization path in sheet/model.py, sheet/trajectory.py, sheet/geometry.py, and sheet/basis.py.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Capture current CHEBY_SHEET_COL parameter counts, family names, tensor shapes, and one deterministic materialization fixture.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add or refresh tests that lock current SHEET_COL behaviour before refactoring internals.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not rename external wrappers in this step.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 Baseline tests pass and there is a small fixture that can prove the refactor preserved SHEET_COL materialization.\par
+\pard\sb220\sa140\f0\fs28\b A1. Config and identity surface\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add validated config fields: model_family, compact_geometry, and basis_family.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep existing fields as aliases only where needed to avoid breaking current wrappers during the transition.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add constants for DENSE, CHEBY, DCT, CURVE, SHEET_ROW, SHEET_COL, SHEET_FLAT, and BLOCK.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Reject compact geometry for DENSE and reject basis_family when model_family is dense.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Update run metadata and parameter reports to print the resolved identity.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 DENSE and current compact smoke runs still start. Invalid config combinations hard-fail early with clear errors.\par
+\pard\sb220\sa140\f0\fs28\b A2. Basis-kernel interface\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Introduce a basis-kernel registry keyed by basis_family and basis_version.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Move the current Chebyshev construction and QR stabilization into the CHEBY kernel.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep the generated CHEBY basis numerically equivalent to the current basis for the same sample_count, order, dtype, and device.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Ensure cache keys include basis_family, basis_version, sample_count, order, dtype, and device.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep basis buffers out of checkpoints and optimizers.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 CHEBY basis tests pass for shape, cache separation, device/dtype movement, non-persistence, and Gram error. No DCT implementation yet.\par
+\pard\sb220\sa140\f0\fs28\b A3. Axis and family metadata\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Replace SHEET-specific family metadata with axis-aware tensor-family specs.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Represent repeated matrix families as depth, output_row, and input_col axes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Treat Q, K, V, attention output, MLP expansion, and MLP contraction as distinct semantic matrix families.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Mark LayerNorm and bias vectors as conventional/tiny for the initial version.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Implement the geometry cap rule in metadata, even though only SHEET_COL is materialized during Stage A.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 Family reports show semantic matrix families and conventional tiny/vector parameters separately. Q/K/V are no longer hidden as one compact family in the metadata.\par
+\pard\sb220\sa140\f0\fs28\b A4. Compact trajectory seam\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Introduce a CompactTrajectory or equivalent adapter layer behind materialize(family_name, layer_index).\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep model.py calling semantic family names; do not move coefficient-layout logic into the transformer forward path.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Implement only CHEBY_SHEET_COL through the new seam.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Concatenate separately materialized Q/K/V only at the nanoGPT compatibility boundary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Preserve current output tensor shapes.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 Deterministic CHEBY_SHEET_COL materialization matches the pre-refactor fixture. DENSE and compact forward/backward smoke tests pass.\par
+\pard\sb220\sa140\f0\fs28\b A5. Checkpoint and wrapper cleanup\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Write new compact metadata into checkpoints.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Hard-fail resume on missing or mismatched compact metadata.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Update wrappers to emit explicit CHEBY_SHEET_COL identity, while avoiding the old ambiguous SHEET identity for new runs.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep any legacy wrapper alias temporary and clearly marked if it is needed during transition.\par
+\pard\sb120\sa90\f0\fs24\b Exit gate\b0\par
+\pard\sa130\f0\fs23 Save/resume works only within the new schema. Mismatch tests cover compact_geometry, basis_family, basis_version, and axis orders.\par
+\pard\sb220\sa140\f0\fs28\b Recommended PR split\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A0: audit fixtures and baseline tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A1: config constants, validation, and identity reporting.\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A2: basis-kernel interface with CHEBY only.\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A3: axis/family metadata and geometry cap rule.\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A4: CompactTrajectory seam and CHEBY_SHEET_COL equivalence.\par
+\pard\sa100\li360\fi-240\f0\fs23 - PR A5: checkpoint metadata and wrapper cleanup.\par
+\pard\sb220\sa140\f0\fs28\b Do not do in Stage A\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not implement DCT.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not implement CURVE, SHEET_ROW, SHEET_FLAT, BLOCK, or BLOCK_HEAD_SPLIT.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not compact LayerNorm or bias vectors.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not add old-checkpoint conversion code.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not optimize materialization before equivalence tests are stable.\par
+}
