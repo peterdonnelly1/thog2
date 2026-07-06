@@ -201,11 +201,6 @@ class TrainingConfig:
                     "depth_order": self.depth_order,
                     "base_row_order": self.base_row_order,
                     "basis_version": self.basis_version,
-                    "geometry_preset": self.geometry_preset,
-                    "attention_geometry": self.attention_geometry,
-                    "mlp_geometry": self.mlp_geometry,
-                    "basis_family": self.basis_family,
-                    "row_order_scaling_rule": self.row_order_scaling_rule,
                 }
             )
         return arguments
