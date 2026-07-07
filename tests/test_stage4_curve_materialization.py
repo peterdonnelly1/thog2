@@ -5,6 +5,7 @@ import unittest
 
 import torch
 
+from sheet.basis_kernel import DCT_BASIS_VERSION
 from sheet.compact_identity import (
     ATTENTION_GEOMETRY_CURVE,
     BASIS_FAMILY_CHEBYSHEV,
@@ -33,7 +34,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
     def curve_config(self) -> SheetGPTConfig:
         return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_CURVE)
 
-    def test_01_curve_config_identity_is_accepted_and_dct_modes_still_fail_after_full_block_support(self) -> None:
+    def test_01_curve_config_identity_is_accepted_for_chebyshev_and_dct_after_stage7_basis_kernel_support(self) -> None:
         curve = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE)
         identity = curve.compact_identity_metadata()
         self.assertEqual(identity["geometry_preset"], GEOMETRY_PRESET_CURVE)
@@ -44,8 +45,8 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_CURVE)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_CURVE)
         self.assertEqual(stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK).compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_BLOCK)
-        with self.assertRaisesRegex(ValueError, "supports only"):
-            stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, basis_family=BASIS_FAMILY_DCT)
+        dct_curve = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, basis_family=BASIS_FAMILY_DCT)
+        self.assertEqual(dct_curve.compact_identity_metadata()["basis_version"], DCT_BASIS_VERSION)
 
     def test_02_curve_trajectory_has_depth_only_matrix_coefficients_and_no_packed_qkv_parameter(self) -> None:
         config = self.curve_config()
