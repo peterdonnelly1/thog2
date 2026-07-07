@@ -12,6 +12,7 @@ from sheet.compact_identity import (
     GEOMETRY_PRESET_BLOCK,
     GEOMETRY_PRESET_CONVENTIONAL,
     GEOMETRY_PRESET_CURVE,
+    GEOMETRY_PRESET_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_MLP_BLOCK,
     MLP_GEOMETRY_CURVE,
@@ -29,6 +30,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
             ({}, GEOMETRY_PRESET_LEGACY_SHEET_COL, ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL, BASIS_FAMILY_CHEBYSHEV),
             ({"geometry_preset": "curve"}, GEOMETRY_PRESET_CURVE, ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_CURVE, BASIS_FAMILY_CHEBYSHEV),
             ({"geometry_preset": "mlp_block"}, GEOMETRY_PRESET_MLP_BLOCK, ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
+            ({"attention_geometry": "head_aware_block", "mlp_geometry": "curve"}, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_CURVE, BASIS_FAMILY_CHEBYSHEV),
             ({"geometry_preset": "block"}, GEOMETRY_PRESET_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
         )
         for request, preset, attention, mlp, basis in cases:
@@ -50,6 +52,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
         stage4_training_config(attention_geometry="curve", mlp_geometry="curve")
         stage4_training_config(geometry_preset="mlp_block")
         stage4_training_config(attention_geometry="curve", mlp_geometry="mlp_block")
+        stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="curve")
         stage4_training_config(geometry_preset="block")
         stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="mlp_block")
         for overrides in (
@@ -60,7 +63,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
             {"geometry_preset": "block", "attention_geometry": "curve"},
         ):
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
+                with self.assertRaisesRegex(ValueError, "supports only"):
                     stage4_training_config(**overrides)
 
     def test_dense_rejects_compact_fields_except_conventional(self) -> None:
