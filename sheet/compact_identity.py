@@ -170,7 +170,7 @@ def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
     if legacy or curve or mlp_block or block:
         return
     raise ValueError(
-        "Stage 5b supports only legacy_sheet_col, curve, mlp_block, or block materialization with chebyshev basis; "
+        "Stage 5 supports only legacy_sheet_col, curve, mlp_block, or block materialization with chebyshev basis; "
         f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
     )
 
