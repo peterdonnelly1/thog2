@@ -10,7 +10,7 @@ from torch import Tensor, nn
 
 from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisOwner
 from .curve_trajectory import CurveTrajectory
-from .geometry import SheetGeometryConfig, derive_row_order
+from .geometry import SheetGeometryConfig, derive_mlp_hidden_order, derive_row_order
 from .semantic_materializer import MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 
 MLP_BLOCK_MATERIALIZATION_VERSION = "mlp_block_v1"
@@ -43,9 +43,11 @@ class MlpBlockTrajectory(nn.Module):
         del self.curve.coefficients[MLP_EXPANSION_WEIGHT]
         del self.curve.coefficients[MLP_CONTRACTION_WEIGHT]
         width = config.n_embd
+        model_order = derive_row_order(width, width, config.base_row_order)
+        mlp_order = derive_mlp_hidden_order(4 * width, config.resolved_mlp_channel_order)
         self.mlp_metadata = (
-            MlpBlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "mlp_block_matrix_normal", 0.02, True, 4 * width, width, width, derive_row_order(4 * width, width, config.base_row_order), derive_row_order(width, width, config.base_row_order)),
-            MlpBlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "mlp_block_matrix_normal", 0.02 / math.sqrt(2.0 * config.n_layer), True, width, 4 * width, 4 * width, derive_row_order(width, width, config.base_row_order), derive_row_order(4 * width, width, config.base_row_order)),
+            MlpBlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "mlp_block_matrix_normal", 0.02, True, 4 * width, width, width, mlp_order, model_order),
+            MlpBlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "mlp_block_matrix_normal", 0.02 / math.sqrt(2.0 * config.n_layer), True, width, 4 * width, 4 * width, model_order, mlp_order),
         )
         self._mlp_metadata_by_name = {item.name: item for item in self.mlp_metadata}
         self.bases = BasisOwner()

@@ -25,6 +25,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "bias",
     "depth_order",
     "base_row_order",
+    "mlp_channel_order",
     "residual_init_policy",
     "residual_init_depth_source",
     "residual_init_depth_value",
@@ -49,6 +50,7 @@ class TrainingConfig:
     bias: bool = True
     depth_order: int = 4
     base_row_order: int = 32
+    mlp_channel_order: Optional[int] = None
     residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
@@ -88,6 +90,9 @@ class TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        if self.mlp_channel_order is not None:
+            if isinstance(self.mlp_channel_order, bool) or not isinstance(self.mlp_channel_order, int) or self.mlp_channel_order <= 0:
+                raise ValueError(f"mlp_channel_order must be a positive integer or None; got {self.mlp_channel_order!r}")
         for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -99,6 +104,8 @@ class TrainingConfig:
             raise ValueError("depth_order must not exceed n_layer")
         if self.base_row_order > self.n_embd:
             raise ValueError("base_row_order must not exceed n_embd")
+        if self.mlp_channel_order is not None and self.mlp_channel_order > 4 * self.n_embd:
+            raise ValueError("mlp_channel_order must not exceed 4*n_embd")
         residual_init = self.residual_init_config()
         self.residual_init_depth_source = residual_init.depth_source
         if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":

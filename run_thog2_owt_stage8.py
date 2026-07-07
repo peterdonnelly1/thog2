@@ -18,6 +18,7 @@ from sheet.training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 _BASE_BUILD_PARSER = base_runner.build_parser
 _BASE_CONFIG_FROM_ARGUMENTS = base_runner.config_from_arguments
 BASIS_LABELS = {"chebyshev": "CHEBY", "dct": "DCT"}
+DEFAULT_MLP_CHANNEL_ORDER = 256
 
 
 @dataclass(frozen=True)
@@ -28,11 +29,16 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
     attention_backend: str = "auto"
+    mlp_channel_order: int = DEFAULT_MLP_CHANNEL_ORDER
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
             raise ValueError("attention_backend must be auto, flash2, sdpa, or math")
+        if isinstance(self.mlp_channel_order, bool) or not isinstance(self.mlp_channel_order, int) or self.mlp_channel_order <= 0:
+            raise ValueError("mlp_channel_order must be a positive integer")
+        if self.model_type == "sheet" and self.mlp_channel_order > 4 * self.n_embd:
+            raise ValueError("mlp_channel_order must not exceed 4*n_embd")
         if self.model_type == "sheet":
             object.__setattr__(self, "basis_version", str(self.compact_identity()["basis_version"]))
 
@@ -56,7 +62,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
             return None
         identity = self.compact_identity()
         basis_label = BASIS_LABELS.get(str(identity["basis_family"]), str(identity["basis_family"]).upper())
-        return "__".join((f"{basis_label}_{str(identity['geometry_preset']).upper()}", f"A_{str(identity['attention_geometry']).upper()}", f"M_{str(identity['mlp_geometry']).upper()}", f"V_{str(identity['basis_version']).upper()}"))
+        return "__".join((f"{basis_label}_{str(identity['geometry_preset']).upper()}", f"A_{str(identity['attention_geometry']).upper()}", f"M_{str(identity['mlp_geometry']).upper()}", f"R_{self.mlp_channel_order}", f"V_{str(identity['basis_version']).upper()}"))
 
     def compact_suffix(self) -> Optional[str]:
         parts = []
@@ -102,7 +108,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
         if self.model_type != "sheet":
             return config
         values = asdict(config)
-        values.update({"basis_version": self.basis_version, "geometry_preset": self.geometry_preset, "attention_geometry": self.attention_geometry, "mlp_geometry": self.mlp_geometry, "basis_family": self.basis_family})
+        values.update({"basis_version": self.basis_version, "geometry_preset": self.geometry_preset, "attention_geometry": self.attention_geometry, "mlp_geometry": self.mlp_geometry, "basis_family": self.basis_family, "mlp_channel_order": self.mlp_channel_order})
         return TrainingConfig(**values)
 
     def canonical_dict(self, *, world_size: int) -> Dict[str, Any]:
@@ -114,6 +120,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
             values["mlp_geometry"] = self.mlp_geometry
             values["basis_family"] = self.basis_family
             values["basis_version"] = self.basis_version
+            values["mlp_channel_order"] = self.mlp_channel_order
             values["compact_identity"] = self.compact_identity()
             values["compact_artifact_fragment"] = self.compact_artifact_fragment()
         return values
@@ -127,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--basis-family", default=BASIS_FAMILY_CHEBYSHEV)
     parser.add_argument("--basis-version", default="auto")
     parser.add_argument("--attention-backend", choices=("auto", "flash2", "sdpa", "math"), default="auto")
+    parser.add_argument("--mlp-channel-order", type=int, default=DEFAULT_MLP_CHANNEL_ORDER)
     return parser
 
 
@@ -156,7 +164,7 @@ def config_from_arguments(arguments: argparse.Namespace) -> Stage8OwtRunConfig:
     base_config = _BASE_CONFIG_FROM_ARGUMENTS(arguments)
     values = asdict(base_config)
     basis_version = BASIS_VERSION if arguments.basis_version == "auto" else arguments.basis_version
-    values.update({"geometry_preset": arguments.geometry_preset, "attention_geometry": arguments.attention_geometry, "mlp_geometry": arguments.mlp_geometry, "basis_family": arguments.basis_family, "basis_version": basis_version, "attention_backend": arguments.attention_backend})
+    values.update({"geometry_preset": arguments.geometry_preset, "attention_geometry": arguments.attention_geometry, "mlp_geometry": arguments.mlp_geometry, "basis_family": arguments.basis_family, "basis_version": basis_version, "attention_backend": arguments.attention_backend, "mlp_channel_order": arguments.mlp_channel_order})
     config = Stage8OwtRunConfig(**values)
     configure_attention_backend(config.attention_backend)
     return config

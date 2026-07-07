@@ -21,13 +21,11 @@ CHECKPOINT_ROOT="checkpoints"
 LOG_ROOT="logs"
 RESULT_ROOT="results"
 WANDB_ROOT="wandb"
-
 GEOMETRY_PRESET="curve"
 BASIS_FAMILY="chebyshev"
 BASIS_VERSION="auto"
 ATTENTION_GEOMETRY=""
 MLP_GEOMETRY=""
-
 STEPS=250
 BATCH_SIZE=3
 GRADIENT_ACCUMULATION_STEPS=160
@@ -43,20 +41,18 @@ N_EMBD=768
 BLOCK_SIZE=1024
 DEPTH_ORDER=32
 BASE_ROW_ORDER=64
-
+MLP_CHANNEL_ORDER=256
 RESIDUAL_INIT_POLICY="depth_scaled"
 RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
-
 DTYPE="float16"
 ATTENTION_BACKEND="sdpa"
 INSTRUMENTATION="tensorboard"
 WANDB_MODE="online"
 WANDB_ENABLED=true
 DRY_RUN=false
-
 N_LAYER_EXPLICIT=false
 N_HEAD_EXPLICIT=false
 N_EMBD_EXPLICIT=false
@@ -98,6 +94,7 @@ Shape/runtime:
   -C BLOCK_SIZE=${BLOCK_SIZE}
   -P DEPTH_ORDER=${DEPTH_ORDER}
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
+  -Y MLP_CHANNEL_ORDER=${MLP_CHANNEL_ORDER}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -T DTYPE=${DTYPE}                                 float32 | float16 | bfloat16
   -K ATTENTION_BACKEND=${ATTENTION_BACKEND}         auto | flash2 | sdpa | math
@@ -118,49 +115,18 @@ Paths:
 EOF
 }
 
-while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:p:B:v:a:m:L:H:D:C:P:Q:S:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:p:B:v:a:m:L:H:D:C:P:Q:Y:S:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
-    O) MODEL_TYPE="$OPTARG" ;;
-    q) RUN_MODE="$OPTARG" ;;
-    g) RUN_NAME="$OPTARG" ;;
-    n) STEPS="$OPTARG" ;;
-    b) BATCH_SIZE="$OPTARG" ;;
-    A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;;
-    G) NUM_GPUS="$OPTARG" ;;
-    u) EVAL_ITERS="$OPTARG" ;;
-    e) EVAL_INTERVAL="$OPTARG" ;;
-    l) LOG_INTERVAL="$OPTARG" ;;
-    w) WARMUP_ITERS="$OPTARG" ;;
-    k) CHECKPOINT_INTERVAL="$OPTARG" ;;
-    I) INSTRUMENTATION="$OPTARG" ;;
-    M) WANDB_MODE="$OPTARG" ;;
-    W) WANDB_ENABLED="$OPTARG" ;;
-    p) GEOMETRY_PRESET="$OPTARG" ;;
-    B) BASIS_FAMILY="$OPTARG" ;;
-    v) BASIS_VERSION="$OPTARG" ;;
-    a) ATTENTION_GEOMETRY="$OPTARG" ;;
-    m) MLP_GEOMETRY="$OPTARG" ;;
-    L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;;
-    H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;;
-    D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
-    C) BLOCK_SIZE="$OPTARG" ;;
-    P) DEPTH_ORDER="$OPTARG" ;;
-    Q) BASE_ROW_ORDER="$OPTARG" ;;
-    S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
-    T) DTYPE="$OPTARG" ;;
-    K) ATTENTION_BACKEND="$OPTARG" ;;
-    r) RESIDUAL_INIT_POLICY="$OPTARG" ;;
-    z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;;
-    Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
-    d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;;
-    t) DATA_DIR="$OPTARG" ;;
-    o) CHECKPOINT_ROOT="$OPTARG" ;;
-    j) LOG_ROOT="$OPTARG" ;;
-    R) RESULT_ROOT="$OPTARG" ;;
-    x) DRY_RUN="$OPTARG" ;;
-    h) usage; exit 0 ;;
-    :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;;
-    \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
+    O) MODEL_TYPE="$OPTARG" ;; q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
+    n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
+    u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
+    I) INSTRUMENTATION="$OPTARG" ;; M) WANDB_MODE="$OPTARG" ;; W) WANDB_ENABLED="$OPTARG" ;;
+    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
+    C) BLOCK_SIZE="$OPTARG" ;; P) DEPTH_ORDER="$OPTARG" ;; Q) BASE_ROW_ORDER="$OPTARG" ;; Y) MLP_CHANNEL_ORDER="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
+    d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
+    h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -180,23 +146,28 @@ case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION m
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
-for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do validate_positive_uint "$setting" "numeric setting"; done
+for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$MLP_CHANNEL_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do validate_positive_uint "$setting" "numeric setting"; done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$DRY_RUN" "DRY_RUN"
-(( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
-(( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
-(( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
-(( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
-(( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
 if [[ "$MODEL_TYPE" == dense ]]; then
   [[ "$N_LAYER_EXPLICIT" == false ]] && N_LAYER=12
   [[ "$N_HEAD_EXPLICIT" == false ]] && N_HEAD=12
   [[ "$N_EMBD_EXPLICIT" == false ]] && N_EMBD=768
+  [[ "$RESIDUAL_INIT_DEPTH_SOURCE" == dof_implied_depth ]] && RESIDUAL_INIT_DEPTH_SOURCE="true_layer_depth"
 fi
+
+(( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
+(( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
+if [[ "$MODEL_TYPE" == sheet ]]; then
+  (( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
+  (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
+  (( MLP_CHANNEL_ORDER <= 4 * N_EMBD )) || { echo "MLP_CHANNEL_ORDER must not exceed 4*N_EMBD." >&2; exit 2; }
+fi
+(( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 BASIS_TAG="CHEBY"; [[ "$BASIS_FAMILY" == dct ]] && BASIS_TAG="DCT"
@@ -212,6 +183,7 @@ WANDB_FLAG="--no-wandb"; [[ "$WANDB_ENABLED" == true ]] && WANDB_FLAG="--wandb"
 
 export THOG2_INSTRUMENTATION="$INSTRUMENTATION"
 export THOG2_CURVE_ROOT="${THOG2_CURVE_ROOT:-curves}"
+export THOG2_MLP_CHANNEL_ORDER="$MLP_CHANNEL_ORDER"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 TRAIN_ARGS=(
@@ -219,7 +191,7 @@ TRAIN_ARGS=(
   --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
   --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
   --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
-  --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER"
+  --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
   --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --dtype "$DTYPE"
   --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
   "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
@@ -239,7 +211,7 @@ dreedle OWT train
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
-  shape:              L$N_LAYER H$N_HEAD D$N_EMBD C$BLOCK_SIZE P$DEPTH_ORDER Q$BASE_ROW_ORDER
+  shape:              L$N_LAYER H$N_HEAD D$N_EMBD C$BLOCK_SIZE P$DEPTH_ORDER Q$BASE_ROW_ORDER Y$MLP_CHANNEL_ORDER
   batch/accum/gpus:   $BATCH_SIZE / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
   log:                $LOG_PATH
 EOF

@@ -29,3 +29,27 @@ def test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_exp
         assert "--log-interval" in text
         assert "--checkpoint-interval" in text
         assert "--warmup-iters" in text
+
+
+def test_stage8_training_wrappers_expose_mlp_channel_order_control() -> None:
+    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        text = Path(wrapper).read_text(encoding="utf-8")
+        assert "MLP_CHANNEL_ORDER=256" in text
+        assert "-Y MLP_CHANNEL_ORDER" in text
+        assert "--mlp-channel-order" in text
+        assert "THOG2_MLP_CHANNEL_ORDER" in text
+        assert "Y$MLP_CHANNEL_ORDER" in text
+
+
+def test_stage8_training_wrappers_auto_correct_dense_residual_source() -> None:
+    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        text = Path(wrapper).read_text(encoding="utf-8")
+        assert "RESIDUAL_INIT_DEPTH_SOURCE=\"true_layer_depth\"" in text
+        assert "dof_implied_depth" in text
+
+
+def test_stage8_training_wrappers_keep_thog_marker_blocks() -> None:
+    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        text = Path(wrapper).read_text(encoding="utf-8")
+        assert "# vvv THOG" in text
+        assert "# ^^^ THOG" in text

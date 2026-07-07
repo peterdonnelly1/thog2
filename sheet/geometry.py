@@ -1,8 +1,9 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 
 MATRIX_FAMILY_NAMES = (
@@ -12,10 +13,30 @@ MATRIX_FAMILY_NAMES = (
     "mlp_contraction_weight",
 )
 
+MLP_HIDDEN_AXIS_FAMILIES = {
+    "mlp_contraction_weight",
+    "mlp_expansion_bias",
+}
+
+DEFAULT_MLP_CHANNEL_ORDER = 256                                                                                                                        # <<< THOG default separate MLP hidden-axis basis order
+MLP_CHANNEL_ORDER_ENV = "THOG2_MLP_CHANNEL_ORDER"                                                                                                      # <<< THOG host wrapper override for MLP hidden-axis basis order
+
 
 def _require_positive_integer(name: str, value: int) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer; got {value!r}")
+
+
+def _env_mlp_channel_order() -> int:
+    raw_value = os.environ.get(MLP_CHANNEL_ORDER_ENV)
+    if raw_value is None or raw_value.strip() == "":
+        return DEFAULT_MLP_CHANNEL_ORDER
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"{MLP_CHANNEL_ORDER_ENV} must be a positive integer; got {raw_value!r}") from error
+    _require_positive_integer(MLP_CHANNEL_ORDER_ENV, value)
+    return value
 
 
 def derive_row_order(row_width: int, model_width: int, base_row_order: int) -> int:
@@ -38,6 +59,12 @@ def derive_row_order(row_width: int, model_width: int, base_row_order: int) -> i
     return derived_order
 
 
+def derive_mlp_hidden_order(row_width: int, mlp_channel_order: int) -> int:
+    _require_positive_integer("row_width", row_width)
+    _require_positive_integer("mlp_channel_order", mlp_channel_order)
+    return min(row_width, mlp_channel_order)
+
+
 @dataclass(frozen=True)
 class SheetGeometryConfig:
     n_layer: int
@@ -45,6 +72,7 @@ class SheetGeometryConfig:
     n_head: int
     depth_order: int
     base_row_order: int
+    mlp_channel_order: Optional[int] = None                                                                                                            # <<< THOG independent order for MLP hidden-axis bases
     bias: bool = True
 
     def __post_init__(self) -> None:
@@ -53,6 +81,13 @@ class SheetGeometryConfig:
         _require_positive_integer("n_head", self.n_head)
         _require_positive_integer("depth_order", self.depth_order)
         _require_positive_integer("base_row_order", self.base_row_order)
+        if self.mlp_channel_order is not None:
+            _require_positive_integer("mlp_channel_order", self.mlp_channel_order)
+            if self.mlp_channel_order > 4 * self.n_embd:
+                raise ValueError(
+                    f"mlp_channel_order must not exceed 4*n_embd; "
+                    f"got mlp_channel_order={self.mlp_channel_order}, n_embd={self.n_embd}"
+                )
         if self.depth_order > self.n_layer:
             raise ValueError(
                 f"depth_order must not exceed n_layer; "
@@ -70,6 +105,13 @@ class SheetGeometryConfig:
             )
         if not isinstance(self.bias, bool):
             raise ValueError(f"bias must be bool; got {self.bias!r}")
+
+    @property
+    def resolved_mlp_channel_order(self) -> int:
+        value = _env_mlp_channel_order() if self.mlp_channel_order is None else self.mlp_channel_order
+        if value > 4 * self.n_embd:
+            raise ValueError("resolved mlp_channel_order must not exceed 4*n_embd")
+        return value
 
 
 @dataclass(frozen=True)
@@ -114,6 +156,16 @@ class FamilyGeometry:
         return n_layer * self.output_rows * self.row_width
 
 
+def family_row_order(
+    name: str,
+    row_width: int,
+    config: SheetGeometryConfig,
+) -> int:
+    if name in MLP_HIDDEN_AXIS_FAMILIES:
+        return derive_mlp_hidden_order(row_width, config.resolved_mlp_channel_order)
+    return derive_row_order(row_width, config.n_embd, config.base_row_order)
+
+
 def _family(
     name: str,
     output_rows: int,
@@ -125,7 +177,7 @@ def _family(
         name=name,
         output_rows=output_rows,
         row_width=row_width,
-        row_order=derive_row_order(row_width, config.n_embd, config.base_row_order),
+        row_order=family_row_order(name, row_width, config),
         family_kind=family_kind,
     )
 

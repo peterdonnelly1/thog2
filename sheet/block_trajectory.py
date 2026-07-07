@@ -10,7 +10,7 @@ from torch import Tensor, nn
 
 from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisOwner
 from .curve_trajectory import CurveTrajectory
-from .geometry import SheetGeometryConfig, derive_row_order
+from .geometry import SheetGeometryConfig, derive_mlp_hidden_order, derive_row_order
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 
 
@@ -109,8 +109,7 @@ class BlockTrajectory(nn.Module):
         residual_std = 0.02 / math.sqrt(2.0 * self.config.n_layer)
         head_order = derive_row_order(head_dim, width, self.config.base_row_order)
         full_order = derive_row_order(width, width, self.config.base_row_order)
-        mlp_expansion_output_order = derive_row_order(4 * width, width, self.config.base_row_order)
-        mlp_contraction_input_order = derive_row_order(4 * width, width, self.config.base_row_order)
+        mlp_hidden_order = derive_mlp_hidden_order(4 * width, self.config.resolved_mlp_channel_order)
         rows = []
         if self.compact_attention:
             rows.extend([
@@ -121,8 +120,8 @@ class BlockTrajectory(nn.Module):
             ])
         if self.compact_mlp:
             rows.extend([
-                BlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "block_matrix_normal", 0.02, True, 4 * width, width, full_order, mlp_expansion_output_order, full_order),
-                BlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "block_matrix_normal", residual_std, True, width, 4 * width, mlp_contraction_input_order, full_order, mlp_contraction_input_order),
+                BlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "block_matrix_normal", 0.02, True, 4 * width, width, full_order, mlp_hidden_order, full_order),
+                BlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "block_matrix_normal", residual_std, True, width, 4 * width, mlp_hidden_order, full_order, mlp_hidden_order),
             ])
         return tuple(rows)
 
