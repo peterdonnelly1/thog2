@@ -67,7 +67,7 @@ class Stage5bFullBlockMaterializationTests(unittest.TestCase):
             {"geometry_preset": GEOMETRY_PRESET_BLOCK, "attention_geometry": ATTENTION_GEOMETRY_CURVE},
         ):
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 5b supports only"):
+                with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
                     stage4_training_config(**overrides)
 
     def test_02_full_block_trajectory_replaces_every_repeated_matrix_family_with_depth_output_and_input_block_coefficients(self) -> None:
