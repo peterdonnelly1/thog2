@@ -44,7 +44,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_CURVE)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_CURVE)
         self.assertEqual(stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK).compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_BLOCK)
-        with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
+        with self.assertRaisesRegex(ValueError, "supports only"):
             stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, basis_family=BASIS_FAMILY_DCT)
 
     def test_02_curve_trajectory_has_depth_only_matrix_coefficients_and_no_packed_qkv_parameter(self) -> None:
