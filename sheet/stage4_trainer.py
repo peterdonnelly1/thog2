@@ -9,13 +9,13 @@ from torch import Tensor
 from .batch_source import DeterministicBatchSource
 from .distributed import DistributedContext
 from .memory import MemoryTelemetry
-from .stage4_training_model_factory import (
-    build_training_model,
-    training_parameter_report,
-)
 from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
 from .training_config import TrainingConfig
+from .training_model_factory import (
+    build_training_model,
+    training_parameter_report,
+)
 
 
 class Stage4Trainer(SharedTrainer):
