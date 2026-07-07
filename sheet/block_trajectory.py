@@ -11,29 +11,13 @@ from torch import Tensor, nn
 from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisOwner
 from .curve_trajectory import CurveTrajectory
 from .geometry import SheetGeometryConfig, derive_row_order
-from .semantic_materializer import (
-    ATTENTION_KEY_WEIGHT,
-    ATTENTION_OUTPUT_WEIGHT,
-    ATTENTION_QUERY_WEIGHT,
-    ATTENTION_VALUE_WEIGHT,
-    LEGACY_ATTENTION_INPUT_WEIGHT,
-    MLP_CONTRACTION_WEIGHT,
-    MLP_EXPANSION_WEIGHT,
-)
+from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 
 
 HEAD_AWARE_BLOCK_MATERIALIZATION_VERSION = "head_aware_block_v1"
 BLOCK_MATERIALIZATION_VERSION = "block_v1"
-HEAD_AWARE_BLOCK_MATRIX_FAMILIES = (
-    ATTENTION_QUERY_WEIGHT,
-    ATTENTION_KEY_WEIGHT,
-    ATTENTION_VALUE_WEIGHT,
-    ATTENTION_OUTPUT_WEIGHT,
-)
-MLP_BLOCK_MATRIX_FAMILIES = (
-    MLP_EXPANSION_WEIGHT,
-    MLP_CONTRACTION_WEIGHT,
-)
+HEAD_AWARE_BLOCK_MATRIX_FAMILIES = (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT, ATTENTION_OUTPUT_WEIGHT)
+MLP_BLOCK_MATRIX_FAMILIES = (MLP_EXPANSION_WEIGHT, MLP_CONTRACTION_WEIGHT)
 BLOCK_MATRIX_FAMILIES = HEAD_AWARE_BLOCK_MATRIX_FAMILIES + MLP_BLOCK_MATRIX_FAMILIES
 
 
@@ -73,21 +57,10 @@ class BlockMetadata:
 
 
 class BlockTrajectory(nn.Module):
-    """CHEBY head-aware attention blocks plus optional MLP blocks over curve fallback families."""
+    """Head-aware attention blocks plus optional MLP blocks over curve fallback families."""
 
-    def __init__(
-        self,
-        config: SheetGeometryConfig,
-        *,
-        runtime_dtype: torch.dtype = torch.float32,
-        basis_version: str = BASIS_VERSION,
-        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-        compact_attention: bool = True,
-        compact_mlp: bool = True,
-    ) -> None:
+    def __init__(self, config: SheetGeometryConfig, *, runtime_dtype: torch.dtype = torch.float32, basis_version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV, compact_attention: bool = True, compact_mlp: bool = True) -> None:
         super().__init__()
-        if basis_family != BASIS_FAMILY_CHEBYSHEV:
-            raise ValueError(f"BlockTrajectory supports only chebyshev basis; got {basis_family!r}")
         if not compact_attention and not compact_mlp:
             raise ValueError("BlockTrajectory requires at least one compact subsystem")
         self.config = config
@@ -140,21 +113,17 @@ class BlockTrajectory(nn.Module):
         mlp_contraction_input_order = derive_row_order(4 * width, width, self.config.base_row_order)
         rows = []
         if self.compact_attention:
-            rows.extend(
-                [
-                    BlockMetadata(ATTENTION_QUERY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
-                    BlockMetadata(ATTENTION_KEY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
-                    BlockMetadata(ATTENTION_VALUE_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
-                    BlockMetadata(ATTENTION_OUTPUT_WEIGHT, "matrix", "head_aware_block_matrix_normal", residual_std, True, width, width, head_order, full_order, head_order, "input", head_count, head_dim),
-                ]
-            )
+            rows.extend([
+                BlockMetadata(ATTENTION_QUERY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+                BlockMetadata(ATTENTION_KEY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+                BlockMetadata(ATTENTION_VALUE_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+                BlockMetadata(ATTENTION_OUTPUT_WEIGHT, "matrix", "head_aware_block_matrix_normal", residual_std, True, width, width, head_order, full_order, head_order, "input", head_count, head_dim),
+            ])
         if self.compact_mlp:
-            rows.extend(
-                [
-                    BlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "block_matrix_normal", 0.02, True, 4 * width, width, full_order, mlp_expansion_output_order, full_order),
-                    BlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "block_matrix_normal", residual_std, True, width, 4 * width, mlp_contraction_input_order, full_order, mlp_contraction_input_order),
-                ]
-            )
+            rows.extend([
+                BlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "block_matrix_normal", 0.02, True, 4 * width, width, full_order, mlp_expansion_output_order, full_order),
+                BlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "block_matrix_normal", residual_std, True, width, 4 * width, mlp_contraction_input_order, full_order, mlp_contraction_input_order),
+            ])
         return tuple(rows)
 
     @staticmethod
@@ -318,19 +287,7 @@ class BlockTrajectory(nn.Module):
     def family_report(self) -> Tuple[Dict[str, object], ...]:
         rows = []
         for item in self.metadata:
-            row = {
-                "name": item.name,
-                "semantic_type": item.semantic_type,
-                "initialization": item.initialization,
-                "target_weight_std": item.target_weight_std,
-                "weight_decay": item.weight_decay,
-                "output_rows": item.output_rows,
-                "row_width": item.row_width,
-                "row_order": item.row_order,
-                "coefficient_shape": item.coefficient_shape(self.config.depth_order),
-                "sheet_parameters": item.sheet_parameter_count(self.config.depth_order),
-                "dense_equivalent_parameters": item.dense_equivalent_count(self.config.n_layer),
-            }
+            row = {"name": item.name, "semantic_type": item.semantic_type, "initialization": item.initialization, "target_weight_std": item.target_weight_std, "weight_decay": item.weight_decay, "output_rows": item.output_rows, "row_width": item.row_width, "row_order": item.row_order, "coefficient_shape": item.coefficient_shape(self.config.depth_order), "sheet_parameters": item.sheet_parameter_count(self.config.depth_order), "dense_equivalent_parameters": item.dense_equivalent_count(self.config.n_layer)}
             if isinstance(item, BlockMetadata):
                 row["output_order"] = item.output_order
                 row["input_order"] = item.input_order
