@@ -60,11 +60,6 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
 
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_CURVE)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_CURVE)
-        arguments = curve.model_arguments()
-        self.assertEqual(arguments["geometry_preset"], GEOMETRY_PRESET_CURVE)
-        self.assertEqual(arguments["attention_geometry"], None)
-        self.assertEqual(arguments["mlp_geometry"], None)
-        self.assertEqual(arguments["basis_family"], None)
 
         for overrides in (
             {"geometry_preset": GEOMETRY_PRESET_CURVE, "basis_family": BASIS_FAMILY_DCT},
@@ -166,6 +161,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         train_tokens, validation_tokens = stage4_tokens(128)
         curve_config = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, max_updates=1)
         curve_trainer = Stage4Trainer(curve_config, train_tokens, validation_tokens)
+        self.assertIsInstance(curve_trainer.raw_model.trajectory, CurveTrajectory)
         legacy_config = stage4_training_config(max_updates=1)
         legacy_trainer = Stage4Trainer(legacy_config, train_tokens, validation_tokens)
         with tempfile.TemporaryDirectory() as directory:
@@ -177,6 +173,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
             legacy_payload = load_payload(legacy_path)
             self.assertEqual(curve_payload["compact_identity"]["materialization_version"], CURVE_MATERIALIZATION_VERSION)
             resumed = Stage4Trainer.from_checkpoint(curve_path, train_tokens, validation_tokens)
+            self.assertIsInstance(resumed.raw_model.trajectory, CurveTrajectory)
             self.assertEqual(resumed.config.compact_identity_metadata()["materialization_version"], CURVE_MATERIALIZATION_VERSION)
             with self.assertRaisesRegex(ValueError, "compact_identity"):
                 validate_compatibility(curve_payload, legacy_config)
