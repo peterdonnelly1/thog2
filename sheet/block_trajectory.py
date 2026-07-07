@@ -31,6 +31,7 @@ BLOCK_MATRIX_FAMILIES = (
     MLP_EXPANSION_WEIGHT,
     MLP_CONTRACTION_WEIGHT,
 )
+_HEAD_AWARE_OUTPUT_FAMILIES = (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT)
 
 
 @dataclass(frozen=True)
@@ -45,19 +46,31 @@ class BlockMetadata:
     row_order: int
     output_order: int
     input_order: int
+    attention_head_axis: str = "none"
+    head_count: int = 1
+    head_dim: int = 0
 
-    def coefficient_shape(self, depth_order: int) -> Tuple[int, int, int]:
-        return (depth_order, self.output_order, self.input_order)
+    def coefficient_shape(self, depth_order: int) -> Tuple[int, ...]:
+        if self.attention_head_axis == "none":
+            return (depth_order, self.output_order, self.input_order)
+        return (self.head_count, depth_order, self.output_order, self.input_order)
 
     def sheet_parameter_count(self, depth_order: int) -> int:
-        return depth_order * self.output_order * self.input_order
+        count = depth_order * self.output_order * self.input_order
+        if self.attention_head_axis != "none":
+            count *= self.head_count
+        return count
 
     def dense_equivalent_count(self, n_layer: int) -> int:
         return n_layer * self.output_rows * self.row_width
 
+    @property
+    def basis_crosses_attention_head_boundary(self) -> bool:
+        return False if self.attention_head_axis != "none" else self.name not in BLOCK_MATRIX_FAMILIES
+
 
 class BlockTrajectory(nn.Module):
-    """CHEBY_BLOCK repeated matrix coefficients plus legacy sheet vectors."""
+    """CHEBY_BLOCK repeated matrices with head-aware attention blocks and MLP blocks."""
 
     def __init__(
         self,
@@ -96,12 +109,12 @@ class BlockTrajectory(nn.Module):
         self._output_basis_names: Dict[str, str] = {}
         self._input_basis_names: Dict[str, str] = {}
         for item in self.block_metadata:
-            output_name = f"block_output_basis_c{item.output_rows}_q{item.output_order}"
-            input_name = f"block_input_basis_c{item.row_width}_q{item.input_order}"
+            output_name = f"block_output_basis_c{self._basis_output_width(item)}_q{item.output_order}"
+            input_name = f"block_input_basis_c{self._basis_input_width(item)}_q{item.input_order}"
             if not hasattr(self.bases, output_name):
                 self.bases.add_basis(
                     output_name,
-                    item.output_rows,
+                    self._basis_output_width(item),
                     item.output_order,
                     runtime_dtype=runtime_dtype,
                     version=basis_version,
@@ -110,7 +123,7 @@ class BlockTrajectory(nn.Module):
             if not hasattr(self.bases, input_name):
                 self.bases.add_basis(
                     input_name,
-                    item.row_width,
+                    self._basis_input_width(item),
                     item.input_order,
                     runtime_dtype=runtime_dtype,
                     version=basis_version,
@@ -120,42 +133,40 @@ class BlockTrajectory(nn.Module):
             self._input_basis_names[item.name] = input_name
         self.coefficients = nn.ParameterDict({name: parameter for name, parameter in self.curve.coefficients.items()})
         for item in self.block_metadata:
-            self.coefficients[item.name] = nn.Parameter(
-                torch.empty(item.coefficient_shape(config.depth_order), dtype=runtime_dtype)
-            )
+            self.coefficients[item.name] = nn.Parameter(torch.empty(item.coefficient_shape(config.depth_order), dtype=runtime_dtype))
         self.metadata = tuple(item for item in self.curve.metadata if item.name not in set(BLOCK_MATRIX_FAMILIES)) + self.block_metadata
         self._reset_block_parameters()
 
     def _build_block_metadata(self) -> Tuple[BlockMetadata, ...]:
         width = self.config.n_embd
+        head_count = self.config.n_head
+        head_dim = width // head_count
         residual_std = 0.02 / math.sqrt(2.0 * self.config.n_layer)
-        specs = (
-            (ATTENTION_QUERY_WEIGHT, 0.02, width, width),
-            (ATTENTION_KEY_WEIGHT, 0.02, width, width),
-            (ATTENTION_VALUE_WEIGHT, 0.02, width, width),
-            (ATTENTION_OUTPUT_WEIGHT, residual_std, width, width),
-            (MLP_EXPANSION_WEIGHT, 0.02, 4 * width, width),
-            (MLP_CONTRACTION_WEIGHT, residual_std, width, 4 * width),
-        )
-        metadata = []
-        for name, target_std, output_rows, row_width in specs:
-            output_order = derive_row_order(output_rows, width, self.config.base_row_order)
-            input_order = derive_row_order(row_width, width, self.config.base_row_order)
-            metadata.append(
-                BlockMetadata(
-                    name=name,
-                    semantic_type="matrix",
-                    initialization="block_matrix_normal",
-                    target_weight_std=target_std,
-                    weight_decay=True,
-                    output_rows=output_rows,
-                    row_width=row_width,
-                    row_order=input_order,
-                    output_order=output_order,
-                    input_order=input_order,
-                )
-            )
-        return tuple(metadata)
+        head_order = derive_row_order(head_dim, width, self.config.base_row_order)
+        full_order = derive_row_order(width, width, self.config.base_row_order)
+        mlp_expansion_output_order = derive_row_order(4 * width, width, self.config.base_row_order)
+        mlp_contraction_input_order = derive_row_order(4 * width, width, self.config.base_row_order)
+        rows = [
+            BlockMetadata(ATTENTION_QUERY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+            BlockMetadata(ATTENTION_KEY_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+            BlockMetadata(ATTENTION_VALUE_WEIGHT, "matrix", "head_aware_block_matrix_normal", 0.02, True, width, width, full_order, head_order, full_order, "output", head_count, head_dim),
+            BlockMetadata(ATTENTION_OUTPUT_WEIGHT, "matrix", "head_aware_block_matrix_normal", residual_std, True, width, width, head_order, full_order, head_order, "input", head_count, head_dim),
+            BlockMetadata(MLP_EXPANSION_WEIGHT, "matrix", "block_matrix_normal", 0.02, True, 4 * width, width, full_order, mlp_expansion_output_order, full_order),
+            BlockMetadata(MLP_CONTRACTION_WEIGHT, "matrix", "block_matrix_normal", residual_std, True, width, 4 * width, mlp_contraction_input_order, full_order, mlp_contraction_input_order),
+        ]
+        return tuple(rows)
+
+    @staticmethod
+    def _basis_output_width(item: BlockMetadata) -> int:
+        if item.attention_head_axis == "output":
+            return item.head_dim
+        return item.output_rows
+
+    @staticmethod
+    def _basis_input_width(item: BlockMetadata) -> int:
+        if item.attention_head_axis == "input":
+            return item.head_dim
+        return item.row_width
 
     @property
     def depth_basis(self) -> Tensor:
@@ -183,24 +194,54 @@ class BlockTrajectory(nn.Module):
             for item in self.block_metadata:
                 coefficient = self.coefficients[item.name]
                 coefficient.zero_()
+                represented_rows = self._basis_output_width(item)
+                represented_columns = self._basis_input_width(item)
                 coefficient_std = item.target_weight_std * math.sqrt(
-                    self.config.n_layer
-                    * item.output_rows
-                    * item.row_width
-                    / (item.output_order * item.input_order)
+                    self.config.n_layer * represented_rows * represented_columns / (item.output_order * item.input_order)
                 )
-                torch.nn.init.normal_(coefficient[0], mean=0.0, std=coefficient_std)
+                if item.attention_head_axis == "none":
+                    torch.nn.init.normal_(coefficient[0], mean=0.0, std=coefficient_std)
+                else:
+                    torch.nn.init.normal_(coefficient[:, 0], mean=0.0, std=coefficient_std)
 
-    def _materialize_block(self, name: str, layer_index: int) -> Tensor:
+    def _materialize_generic_block(self, name: str, layer_index: int) -> Tensor:
         coefficient = self.coefficients[name]
         depth_row = self.depth_basis[layer_index].to(device=coefficient.device, dtype=coefficient.dtype)
         mixed = torch.einsum("p,pab->ab", depth_row, coefficient)
-        generated = (
-            self.output_basis(name).to(coefficient)
-            @ mixed
-            @ self.input_basis(name).to(coefficient).transpose(0, 1)
-        )
+        return self.output_basis(name).to(coefficient) @ mixed @ self.input_basis(name).to(coefficient).transpose(0, 1)
+
+    def _materialize_head_output_block(self, name: str, layer_index: int) -> Tensor:
         item = self.family_metadata(name)
+        coefficient = self.coefficients[name]
+        depth_row = self.depth_basis[layer_index].to(device=coefficient.device, dtype=coefficient.dtype)
+        output_basis = self.output_basis(name).to(coefficient)
+        input_basis = self.input_basis(name).to(coefficient)
+        pieces = []
+        for head_index in range(item.head_count):
+            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
+            pieces.append(output_basis @ mixed @ input_basis.transpose(0, 1))
+        return torch.cat(pieces, dim=0)
+
+    def _materialize_head_input_block(self, name: str, layer_index: int) -> Tensor:
+        item = self.family_metadata(name)
+        coefficient = self.coefficients[name]
+        depth_row = self.depth_basis[layer_index].to(device=coefficient.device, dtype=coefficient.dtype)
+        output_basis = self.output_basis(name).to(coefficient)
+        input_basis = self.input_basis(name).to(coefficient)
+        pieces = []
+        for head_index in range(item.head_count):
+            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
+            pieces.append(output_basis @ mixed @ input_basis.transpose(0, 1))
+        return torch.cat(pieces, dim=1)
+
+    def _materialize_block(self, name: str, layer_index: int) -> Tensor:
+        item = self.family_metadata(name)
+        if item.attention_head_axis == "output":
+            generated = self._materialize_head_output_block(name, layer_index)
+        elif item.attention_head_axis == "input":
+            generated = self._materialize_head_input_block(name, layer_index)
+        else:
+            generated = self._materialize_generic_block(name, layer_index)
         expected_shape = (item.output_rows, item.row_width)
         if tuple(generated.shape) != expected_shape:
             raise RuntimeError(f"block matrix {name} has shape {tuple(generated.shape)}; expected {expected_shape}")
@@ -212,20 +253,27 @@ class BlockTrajectory(nn.Module):
         if layer_index < 0 or layer_index >= self.config.n_layer:
             raise IndexError(f"layer_index out of range: {layer_index}; n_layer={self.config.n_layer}")
         if name == LEGACY_ATTENTION_INPUT_WEIGHT:
-            return torch.cat(
-                (
-                    self._materialize_block(ATTENTION_QUERY_WEIGHT, layer_index),
-                    self._materialize_block(ATTENTION_KEY_WEIGHT, layer_index),
-                    self._materialize_block(ATTENTION_VALUE_WEIGHT, layer_index),
-                ),
-                dim=0,
-            )
+            return torch.cat((self._materialize_block(ATTENTION_QUERY_WEIGHT, layer_index), self._materialize_block(ATTENTION_KEY_WEIGHT, layer_index), self._materialize_block(ATTENTION_VALUE_WEIGHT, layer_index)), dim=0)
         if name in self._block_metadata_by_name:
             return self._materialize_block(name, layer_index)
         return self.curve.materialize(name, layer_index)
 
     def materialize_vector(self, name: str, layer_index: int) -> Tensor:
         return self.curve.materialize_vector(name, layer_index)
+
+    def _direct_head_output_value(self, item: BlockMetadata, layer_index: int, output_row: int, row_index: int) -> Tensor:
+        coefficient = self.coefficients[item.name]
+        head_index = output_row // item.head_dim
+        local_output_row = output_row % item.head_dim
+        mixed = torch.einsum("p,pab->ab", self.depth_basis[layer_index].to(coefficient), coefficient[head_index])
+        return self.output_basis(item.name)[local_output_row].to(coefficient) @ mixed @ self.input_basis(item.name)[row_index].to(coefficient)
+
+    def _direct_head_input_value(self, item: BlockMetadata, layer_index: int, output_row: int, row_index: int) -> Tensor:
+        coefficient = self.coefficients[item.name]
+        head_index = row_index // item.head_dim
+        local_input_index = row_index % item.head_dim
+        mixed = torch.einsum("p,pab->ab", self.depth_basis[layer_index].to(coefficient), coefficient[head_index])
+        return self.output_basis(item.name)[output_row].to(coefficient) @ mixed @ self.input_basis(item.name)[local_input_index].to(coefficient)
 
     def direct_value(self, name: str, layer_index: int, output_row: int, row_index: int) -> Tensor:
         if name == LEGACY_ATTENTION_INPUT_WEIGHT:
@@ -244,6 +292,10 @@ class BlockTrajectory(nn.Module):
             raise IndexError(f"output_row out of range for {name}: {output_row}")
         if row_index < 0 or row_index >= item.row_width:
             raise IndexError(f"row_index out of range for {name}: {row_index}")
+        if item.attention_head_axis == "output":
+            return self._direct_head_output_value(item, layer_index, output_row, row_index)
+        if item.attention_head_axis == "input":
+            return self._direct_head_input_value(item, layer_index, output_row, row_index)
         coefficient = self.coefficients[name]
         mixed = torch.einsum("p,pab->ab", self.depth_basis[layer_index].to(coefficient), coefficient)
         return self.output_basis(name)[output_row].to(coefficient) @ mixed @ self.input_basis(name)[row_index].to(coefficient)
@@ -283,6 +335,10 @@ class BlockTrajectory(nn.Module):
             if isinstance(item, BlockMetadata):
                 row["output_order"] = item.output_order
                 row["input_order"] = item.input_order
+                row["attention_head_axis"] = item.attention_head_axis
+                row["head_count"] = item.head_count
+                row["head_dim"] = item.head_dim
+                row["basis_crosses_attention_head_boundary"] = item.basis_crosses_attention_head_boundary
             rows.append(row)
         return tuple(rows)
 
