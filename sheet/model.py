@@ -11,6 +11,12 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from .basis import BASIS_VERSION
+from .compact_identity import (
+    GEOMETRY_PRESET_CURVE,
+    resolve_compact_selectors,
+    validate_current_sheet_support,
+)
+from .curve_trajectory import CurveTrajectory
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
@@ -44,6 +50,10 @@ class SheetGPTConfig:
     depth_order: int = 12
     base_row_order: int = 128
     basis_version: str = BASIS_VERSION
+    geometry_preset: Optional[str] = None
+    attention_geometry: Optional[str] = None
+    mlp_geometry: Optional[str] = None
+    basis_family: Optional[str] = None
 
     def __post_init__(self) -> None:
         for name in ("block_size", "vocab_size"):
@@ -55,6 +65,7 @@ class SheetGPTConfig:
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
         self.sheet_geometry()
+        self.compact_selectors()
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -65,6 +76,16 @@ class SheetGPTConfig:
             base_row_order=self.base_row_order,
             bias=self.bias,
         )
+
+    def compact_selectors(self):
+        selectors = resolve_compact_selectors(
+            geometry_preset=self.geometry_preset,
+            attention_geometry=self.attention_geometry,
+            mlp_geometry=self.mlp_geometry,
+            basis_family=self.basis_family,
+        )
+        validate_current_sheet_support(selectors)
+        return selectors
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
@@ -84,11 +105,21 @@ class SheetGPT(nn.Module):
                 "ln_f": ConventionalLayerNorm(config.n_embd, bias=config.bias),
             }
         )
-        self.trajectory = SheetTrajectory(
-            config.sheet_geometry(),
-            runtime_dtype=torch.float32,
-            basis_version=config.basis_version,
-        )
+        selectors = config.compact_selectors()
+        if selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
+            self.trajectory = CurveTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        else:
+            self.trajectory = SheetTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
         self.semantic_materializer = LegacySheetColMaterializer(self.trajectory)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight
