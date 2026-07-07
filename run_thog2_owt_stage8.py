@@ -9,20 +9,15 @@ import torch
 
 import run_thog2_owt as base_runner
 from sheet.basis import BASIS_VERSION
-from sheet.compact_identity import (
-    BASIS_FAMILY_CHEBYSHEV,
-    GEOMETRY_PRESET_CURVE,
-    compact_identity_metadata,
-)
+from sheet.compact_identity import BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_CURVE, compact_identity_metadata
 from sheet.residual_run_config import OwtRunConfig as ResidualOwtRunConfig
 from sheet.run_naming import build_artifact_name, truncate_component
 from sheet.training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 
 
-BASIS_LABELS = {
-    "chebyshev": "CHEBY",
-    "dct": "DCT",
-}
+_BASE_BUILD_PARSER = base_runner.build_parser
+_BASE_CONFIG_FROM_ARGUMENTS = base_runner.config_from_arguments
+BASIS_LABELS = {"chebyshev": "CHEBY", "dct": "DCT"}
 
 
 @dataclass(frozen=True)
@@ -61,14 +56,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
             return None
         identity = self.compact_identity()
         basis_label = BASIS_LABELS.get(str(identity["basis_family"]), str(identity["basis_family"]).upper())
-        return "__".join(
-            (
-                f"{basis_label}_{str(identity['geometry_preset']).upper()}",
-                f"A_{str(identity['attention_geometry']).upper()}",
-                f"M_{str(identity['mlp_geometry']).upper()}",
-                f"V_{str(identity['basis_version']).upper()}",
-            )
-        )
+        return "__".join((f"{basis_label}_{str(identity['geometry_preset']).upper()}", f"A_{str(identity['attention_geometry']).upper()}", f"M_{str(identity['mlp_geometry']).upper()}", f"V_{str(identity['basis_version']).upper()}"))
 
     def compact_suffix(self) -> Optional[str]:
         parts = []
@@ -103,10 +91,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
         )
         residual_fragment = self.residual_init_artifact_fragment()
         segment_suffix = f"_S_{self.checkpoint_segment_size}"
-        if base_name.endswith(segment_suffix):
-            artifact_name = f"{base_name[:-len(segment_suffix)]}_{residual_fragment}{segment_suffix}"
-        else:
-            artifact_name = f"{base_name}_{residual_fragment}"
+        artifact_name = f"{base_name[:-len(segment_suffix)]}_{residual_fragment}{segment_suffix}" if base_name.endswith(segment_suffix) else f"{base_name}_{residual_fragment}"
         compact_suffix = self.compact_suffix()
         if compact_suffix:
             artifact_name = f"{artifact_name}__{compact_suffix}"
@@ -117,15 +102,7 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
         if self.model_type != "sheet":
             return config
         values = asdict(config)
-        values.update(
-            {
-                "basis_version": self.basis_version,
-                "geometry_preset": self.geometry_preset,
-                "attention_geometry": self.attention_geometry,
-                "mlp_geometry": self.mlp_geometry,
-                "basis_family": self.basis_family,
-            }
-        )
+        values.update({"basis_version": self.basis_version, "geometry_preset": self.geometry_preset, "attention_geometry": self.attention_geometry, "mlp_geometry": self.mlp_geometry, "basis_family": self.basis_family})
         return TrainingConfig(**values)
 
     def canonical_dict(self, *, world_size: int) -> Dict[str, Any]:
@@ -142,7 +119,8 @@ class Stage8OwtRunConfig(ResidualOwtRunConfig):
         return values
 
 
-def add_stage8_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
+    parser = _BASE_BUILD_PARSER()
     parser.add_argument("--geometry-preset", default=GEOMETRY_PRESET_CURVE)
     parser.add_argument("--attention-geometry")
     parser.add_argument("--mlp-geometry")
@@ -150,10 +128,6 @@ def add_stage8_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     parser.add_argument("--basis-version", default="auto")
     parser.add_argument("--attention-backend", choices=("auto", "flash2", "sdpa", "math"), default="auto")
     return parser
-
-
-def build_parser() -> argparse.ArgumentParser:
-    return add_stage8_arguments(base_runner.build_parser())
 
 
 def configure_attention_backend(attention_backend: str) -> None:
@@ -179,19 +153,10 @@ def configure_attention_backend(attention_backend: str) -> None:
 
 def config_from_arguments(arguments: argparse.Namespace) -> Stage8OwtRunConfig:
     base_runner.OwtRunConfig = ResidualOwtRunConfig
-    base_config = base_runner.config_from_arguments(arguments)
+    base_config = _BASE_CONFIG_FROM_ARGUMENTS(arguments)
     values = asdict(base_config)
     basis_version = BASIS_VERSION if arguments.basis_version == "auto" else arguments.basis_version
-    values.update(
-        {
-            "geometry_preset": arguments.geometry_preset,
-            "attention_geometry": arguments.attention_geometry,
-            "mlp_geometry": arguments.mlp_geometry,
-            "basis_family": arguments.basis_family,
-            "basis_version": basis_version,
-            "attention_backend": arguments.attention_backend,
-        }
-    )
+    values.update({"geometry_preset": arguments.geometry_preset, "attention_geometry": arguments.attention_geometry, "mlp_geometry": arguments.mlp_geometry, "basis_family": arguments.basis_family, "basis_version": basis_version, "attention_backend": arguments.attention_backend})
     config = Stage8OwtRunConfig(**values)
     configure_attention_backend(config.attention_backend)
     return config
