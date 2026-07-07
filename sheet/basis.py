@@ -10,9 +10,12 @@ from torch import Tensor, nn
 
 from .basis_kernel import (
     BASIS_FAMILY_CHEBYSHEV,
+    BASIS_FAMILY_DCT,
     CHEBYSHEV_BASIS_VERSION,
+    DCT_BASIS_VERSION,
     SINGLE_POINT_COORDINATE,
     basis_kernel_metadata,
+    basis_version_for_family,
     chebyshev_coordinates,
     chebyshev_raw_basis,
     deterministic_reduced_qr_positive_diagonal,
@@ -36,12 +39,7 @@ def _validate_floating_dtype(dtype: torch.dtype) -> None:
     validate_floating_dtype(dtype)
 
 
-def normalized_coordinates(
-    sample_count: int,
-    *,
-    dtype: torch.dtype = torch.float64,
-    device: Optional[DeviceLike] = None,
-) -> Tensor:
+def normalized_coordinates(sample_count: int, *, dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None) -> Tensor:
     """Return fixed monotone sample coordinates in [-1, 1].
 
     A one-point axis is placed at 0.0. This avoids arbitrarily privileging
@@ -67,25 +65,11 @@ def deterministic_reduced_qr(raw_basis: Tensor) -> Tuple[Tensor, Tensor]:
     return deterministic_reduced_qr_positive_diagonal(raw_basis)
 
 
-def build_stabilized_basis(
-    sample_count: int,
-    order: int,
-    *,
-    runtime_dtype: torch.dtype = torch.float64,
-    device: Optional[DeviceLike] = None,
-    version: str = BASIS_VERSION,
-    basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-) -> Tensor:
+def build_stabilized_basis(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> Tensor:
     """Build a stabilized basis in float64 on CPU, then cast for runtime use."""
 
     kernel = get_basis_kernel(basis_family)
-    return kernel.build(
-        sample_count,
-        order,
-        runtime_dtype=runtime_dtype,
-        device=device,
-        version=version,
-    )
+    return kernel.build(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version)
 
 
 @dataclass(frozen=True)
@@ -106,55 +90,18 @@ class BasisCache:
         self._cache: Dict[BasisCacheKey, Tensor] = {}
 
     @staticmethod
-    def make_key(
-        sample_count: int,
-        order: int,
-        *,
-        runtime_dtype: torch.dtype,
-        device: Optional[DeviceLike],
-        version: str,
-        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-    ) -> BasisCacheKey:
+    def make_key(sample_count: int, order: int, *, runtime_dtype: torch.dtype, device: Optional[DeviceLike], version: str, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> BasisCacheKey:
         target_device = torch.device("cpu" if device is None else device)
         canonical_family = normalize_basis_family(basis_family)
-        get_basis_kernel(canonical_family)
-        return BasisCacheKey(
-            sample_count=sample_count,
-            order=order,
-            basis_family=canonical_family,
-            version=version,
-            device_type=target_device.type,
-            device_index=target_device.index,
-            dtype=runtime_dtype,
-        )
+        expected_version = basis_version_for_family(canonical_family)
+        if version != expected_version:
+            raise ValueError(f"basis_version mismatch for {canonical_family}: expected {expected_version!r}, got {version!r}")
+        return BasisCacheKey(sample_count=sample_count, order=order, basis_family=canonical_family, version=version, device_type=target_device.type, device_index=target_device.index, dtype=runtime_dtype)
 
-    def get(
-        self,
-        sample_count: int,
-        order: int,
-        *,
-        runtime_dtype: torch.dtype = torch.float64,
-        device: Optional[DeviceLike] = None,
-        version: str = BASIS_VERSION,
-        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-    ) -> Tensor:
-        key = self.make_key(
-            sample_count,
-            order,
-            runtime_dtype=runtime_dtype,
-            device=device,
-            version=version,
-            basis_family=basis_family,
-        )
+    def get(self, sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> Tensor:
+        key = self.make_key(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version, basis_family=basis_family)
         if key not in self._cache:
-            self._cache[key] = build_stabilized_basis(
-                sample_count,
-                order,
-                runtime_dtype=runtime_dtype,
-                device=device,
-                version=version,
-                basis_family=basis_family,
-            )
+            self._cache[key] = build_stabilized_basis(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version, basis_family=basis_family)
         return self._cache[key]
 
     def clear(self) -> None:
@@ -171,29 +118,12 @@ class BasisOwner(nn.Module):
         super().__init__()
         self._basis_cache = BasisCache() if cache is None else cache
 
-    def add_basis(
-        self,
-        name: str,
-        sample_count: int,
-        order: int,
-        *,
-        runtime_dtype: torch.dtype = torch.float64,
-        device: Optional[DeviceLike] = None,
-        version: str = BASIS_VERSION,
-        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-    ) -> Tensor:
+    def add_basis(self, name: str, sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> Tensor:
         if not isinstance(name, str) or not name.isidentifier():
             raise ValueError(f"basis name must be a valid identifier; got {name!r}")
         if hasattr(self, name):
             raise ValueError(f"basis name already exists: {name}")
-        basis = self._basis_cache.get(
-            sample_count,
-            order,
-            runtime_dtype=runtime_dtype,
-            device=device,
-            version=version,
-            basis_family=basis_family,
-        )
+        basis = self._basis_cache.get(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version, basis_family=basis_family)
         self.register_buffer(name, basis, persistent=False)
         return basis
 
@@ -211,20 +141,13 @@ def basis_sha256(basis: Tensor) -> str:
     return hashlib.sha256(contiguous.numpy().tobytes()).hexdigest()
 
 
-def estimated_peak_tensor_bytes(
-    sample_count: int,
-    order: int,
-    *,
-    runtime_dtype: torch.dtype = torch.float64,
-) -> int:
+def estimated_peak_tensor_bytes(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64) -> int:
     """Conservative tensor-only estimate for coordinates, QR, cast, and Gram work."""
 
     _validate_positive_integer("sample_count", sample_count)
     _validate_positive_integer("order", order)
     if order > sample_count:
-        raise ValueError(
-            f"order must not exceed sample_count; got order={order}, sample_count={sample_count}"
-        )
+        raise ValueError(f"order must not exceed sample_count; got order={order}, sample_count={sample_count}")
     _validate_floating_dtype(runtime_dtype)
     float64_bytes = torch.tensor([], dtype=torch.float64).element_size()
     runtime_bytes = torch.tensor([], dtype=runtime_dtype).element_size()
