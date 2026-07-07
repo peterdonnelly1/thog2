@@ -11,7 +11,9 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from .basis import BASIS_VERSION
+from .block_trajectory import BlockTrajectory
 from .compact_identity import (
+    GEOMETRY_PRESET_BLOCK,
     GEOMETRY_PRESET_CURVE,
     GEOMETRY_PRESET_MLP_BLOCK,
     resolve_compact_selectors,
@@ -102,7 +104,14 @@ class SheetGPT(nn.Module):
             }
         )
         selectors = config.compact_selectors()
-        if selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        if selectors.geometry_preset == GEOMETRY_PRESET_BLOCK:
+            self.trajectory = BlockTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
             self.trajectory = MlpBlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
