@@ -10,9 +10,9 @@ import torch
 from sheet.block_trajectory import HEAD_AWARE_BLOCK_MATERIALIZATION_VERSION, BlockTrajectory
 from sheet.checkpoints import load_payload, validate_compatibility
 from sheet.compact_identity import (
-    ATTENTION_GEOMETRY_CURVE,
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_BLOCK,
+    GEOMETRY_PRESET_CURVE,
     GEOMETRY_PRESET_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_MLP_BLOCK,
     MLP_GEOMETRY_CURVE,
@@ -33,19 +33,7 @@ from tests.stage4_test_support import stage4_tokens, stage4_training_config
 
 class Stage6bIndependentHeadAwareBlockTests(unittest.TestCase):
     def attention_only_config(self) -> SheetGPTConfig:
-        return SheetGPTConfig(
-            block_size=8,
-            vocab_size=32,
-            n_layer=4,
-            n_head=2,
-            n_embd=16,
-            dropout=0.0,
-            bias=True,
-            depth_order=3,
-            base_row_order=8,
-            attention_geometry=ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
-            mlp_geometry=MLP_GEOMETRY_CURVE,
-        )
+        return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, attention_geometry=ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, mlp_geometry=MLP_GEOMETRY_CURVE)
 
     def test_01_explicit_head_aware_block_attention_with_curve_mlp_resolves_to_attention_only_ablation_identity_before_block_preset_is_considered(self) -> None:
         config = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, mlp_geometry=MLP_GEOMETRY_CURVE)
@@ -82,7 +70,7 @@ class Stage6bIndependentHeadAwareBlockTests(unittest.TestCase):
     def test_03_independent_head_aware_block_parameter_report_is_between_curve_and_full_block_because_only_attention_is_blocked(self) -> None:
         torch.manual_seed(4101)
         attention_only = SheetGPT(self.attention_only_config())
-        curve = SheetGPT(SheetGPTConfig(**{**self.attention_only_config().to_dict(), "geometry_preset": GEOMETRY_PRESET_HEAD_AWARE_BLOCK, "attention_geometry": ATTENTION_GEOMETRY_CURVE, "mlp_geometry": MLP_GEOMETRY_CURVE}))
+        curve = SheetGPT(SheetGPTConfig(**{**self.attention_only_config().to_dict(), "geometry_preset": GEOMETRY_PRESET_CURVE, "attention_geometry": None, "mlp_geometry": None}))
         full_block = SheetGPT(SheetGPTConfig(**{**self.attention_only_config().to_dict(), "geometry_preset": GEOMETRY_PRESET_BLOCK, "attention_geometry": None, "mlp_geometry": None}))
         attention_only_count = attention_only.parameter_report()["matrix_sheet_coefficients"]
         curve_count = curve.parameter_report()["matrix_sheet_coefficients"]
@@ -125,7 +113,7 @@ class Stage6bIndependentHeadAwareBlockTests(unittest.TestCase):
         self.assertEqual(trainer.state.completed_updates, 1)
         for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, MLP_EXPANSION_WEIGHT, MLP_CONTRACTION_WEIGHT):
             with self.subTest(name=name):
-                gradient = trainer.raw_model.model.trajectory.coefficients[name].grad
+                gradient = trainer.raw_model.trajectory.coefficients[name].grad
                 self.assertIsNotNone(gradient)
 
 
