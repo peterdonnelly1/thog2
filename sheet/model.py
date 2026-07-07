@@ -13,11 +13,13 @@ from torch.nn import functional as F
 from .basis import BASIS_VERSION
 from .compact_identity import (
     GEOMETRY_PRESET_CURVE,
+    GEOMETRY_PRESET_MLP_BLOCK,
     resolve_compact_selectors,
     validate_current_sheet_support,
 )
 from .curve_trajectory import CurveTrajectory
 from .geometry import SheetGeometryConfig
+from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
 
@@ -29,13 +31,7 @@ class ConventionalLayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(width)) if bias else None
 
     def forward(self, inputs: Tensor) -> Tensor:
-        return F.layer_norm(
-            inputs,
-            self.weight.shape,
-            self.weight,
-            self.bias,
-            1.0e-5,
-        )
+        return F.layer_norm(inputs, self.weight.shape, self.weight, self.bias, 1.0e-5)
 
 
 @dataclass
@@ -106,7 +102,14 @@ class SheetGPT(nn.Module):
             }
         )
         selectors = config.compact_selectors()
-        if selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
+        if selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+            self.trajectory = MlpBlockTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        elif selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
             self.trajectory = CurveTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -140,13 +143,7 @@ class SheetGPT(nn.Module):
             return None
         return self.trajectory.materialize_vector(name, layer_index)
 
-    def _sheet_layer_norm(
-        self,
-        inputs: Tensor,
-        weight_name: str,
-        bias_name: str,
-        layer_index: int,
-    ) -> Tensor:
+    def _sheet_layer_norm(self, inputs: Tensor, weight_name: str, bias_name: str, layer_index: int) -> Tensor:
         weight = self.trajectory.materialize_vector(weight_name, layer_index)
         bias = self._optional_bias(bias_name, layer_index)
         return F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
@@ -157,141 +154,58 @@ class SheetGPT(nn.Module):
         attention_bias = None
         if self.config.bias:
             attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
-        query, key, value = F.linear(
-            inputs,
-            attention_weight,
-            attention_bias,
-        ).split(self.config.n_embd, dim=2)
-
+        query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
         head_width = embedding_width // self.config.n_head
-        key = key.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-        query = query.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-        value = value.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-
+        key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+        query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+        value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
         if hasattr(F, "scaled_dot_product_attention"):
-            attended = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=None,
-                dropout_p=self.config.dropout if self.training else 0.0,
-                is_causal=True,
-            )
+            attended = F.scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=self.config.dropout if self.training else 0.0, is_causal=True)
         else:
             scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
-            causal_mask = torch.tril(
-                torch.ones(
-                    sequence_length,
-                    sequence_length,
-                    dtype=torch.bool,
-                    device=inputs.device,
-                )
-            )
-            scores = scores.masked_fill(
-                ~causal_mask.view(1, 1, sequence_length, sequence_length),
-                float("-inf"),
-            )
+            causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
+            scores = scores.masked_fill(~causal_mask.view(1, 1, sequence_length, sequence_length), float("-inf"))
             probabilities = F.softmax(scores, dim=-1)
-            probabilities = F.dropout(
-                probabilities,
-                p=self.config.dropout,
-                training=self.training,
-            )
+            probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
             attended = probabilities @ value
-
-        attended = attended.transpose(1, 2).contiguous().view(
-            batch_size,
-            sequence_length,
-            embedding_width,
-        )
-        output_weight = self.trajectory.materialize(
-            "attention_output_weight", layer_index
-        )
+        attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
+        output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
-        return F.dropout(
-            projected,
-            p=self.config.dropout,
-            training=self.training,
-        )
+        return F.dropout(projected, p=self.config.dropout, training=self.training)
 
     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
-        expansion_weight = self.trajectory.materialize(
-            "mlp_expansion_weight", layer_index
-        )
+        expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
         hidden = F.linear(inputs, expansion_weight, expansion_bias)
         hidden = F.gelu(hidden)
-        contraction_weight = self.trajectory.materialize(
-            "mlp_contraction_weight", layer_index
-        )
+        contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
         output = F.linear(hidden, contraction_weight, contraction_bias)
         return F.dropout(output, p=self.config.dropout, training=self.training)
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
-        normalized_attention = self._sheet_layer_norm(
-            inputs,
-            "ln_1_weight",
-            "ln_1_bias",
-            layer_index,
-        )
+        normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
         inputs = inputs + self._attention(normalized_attention, layer_index)
-        normalized_mlp = self._sheet_layer_norm(
-            inputs,
-            "ln_2_weight",
-            "ln_2_bias",
-            layer_index,
-        )
+        normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
         return inputs + self._mlp(normalized_mlp, layer_index)
 
-    def forward(
-        self,
-        idx: Tensor,
-        targets: Optional[Tensor] = None,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
         _, sequence_length = idx.shape
         if sequence_length > self.config.block_size:
-            raise ValueError(
-                f"Cannot forward sequence of length {sequence_length}; "
-                f"block size is {self.config.block_size}"
-            )
-        positions = torch.arange(
-            sequence_length,
-            dtype=torch.long,
-            device=idx.device,
-        )
+            raise ValueError(f"Cannot forward sequence of length {sequence_length}; block size is {self.config.block_size}")
+        positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
         for layer_index in range(self.config.n_layer):
             hidden = self._logical_block(hidden, layer_index)
         hidden = self.transformer.ln_f(hidden)
-
         if targets is not None:
             logits = self.lm_head(hidden)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                targets.view(-1),
-                ignore_index=-1,
-            )
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             logits = self.lm_head(hidden[:, [-1], :])
             loss = None
@@ -320,20 +234,13 @@ class SheetGPT(nn.Module):
             parameter_count -= self.transformer.wpe.weight.numel()
         return parameter_count
 
-    def optimizer_parameter_groups(
-        self,
-        weight_decay: float,
-    ) -> Tuple[Dict[str, object], Dict[str, object]]:
+    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
         decay: Dict[str, nn.Parameter] = {}
         no_decay: Dict[str, nn.Parameter] = {}
-
         for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
             target = decay if metadata.weight_decay else no_decay
             target[f"trajectory.coefficients.{family_name}"] = parameter
-
-        sheet_parameter_ids = {
-            id(parameter) for parameter in self.trajectory.coefficients.values()
-        }
+        sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
         for name, parameter in self.named_parameters():
             if id(parameter) in sheet_parameter_ids:
                 continue
@@ -341,59 +248,27 @@ class SheetGPT(nn.Module):
                 decay[name] = parameter
             else:
                 no_decay[name] = parameter
-
-        all_trainable = {
-            id(parameter)
-            for parameter in self.parameters()
-            if parameter.requires_grad
-        }
-        grouped_ids = [id(parameter) for parameter in decay.values()] + [
-            id(parameter) for parameter in no_decay.values()
-        ]
+        all_trainable = {id(parameter) for parameter in self.parameters() if parameter.requires_grad}
+        grouped_ids = [id(parameter) for parameter in decay.values()] + [id(parameter) for parameter in no_decay.values()]
         if len(grouped_ids) != len(set(grouped_ids)):
             raise RuntimeError("a trainable parameter appears in more than one optimizer group")
         if set(grouped_ids) != all_trainable:
             missing = all_trainable - set(grouped_ids)
             extra = set(grouped_ids) - all_trainable
-            raise RuntimeError(
-                f"optimizer grouping does not cover trainable parameters exactly; "
-                f"missing={len(missing)}, extra={len(extra)}"
-            )
-
+            raise RuntimeError(f"optimizer grouping does not cover trainable parameters exactly; missing={len(missing)}, extra={len(extra)}")
         decay_names = tuple(sorted(decay))
         no_decay_names = tuple(sorted(no_decay))
         return (
-            {
-                "params": [decay[name] for name in decay_names],
-                "weight_decay": weight_decay,
-                "group_name": "decay",
-                "parameter_names": decay_names,
-            },
-            {
-                "params": [no_decay[name] for name in no_decay_names],
-                "weight_decay": 0.0,
-                "group_name": "no_decay",
-                "parameter_names": no_decay_names,
-            },
+            {"params": [decay[name] for name in decay_names], "weight_decay": weight_decay, "group_name": "decay", "parameter_names": decay_names},
+            {"params": [no_decay[name] for name in no_decay_names], "weight_decay": 0.0, "group_name": "no_decay", "parameter_names": no_decay_names},
         )
 
-    def configure_optimizers(
-        self,
-        weight_decay: float,
-        learning_rate: float,
-        betas: Tuple[float, float],
-        device_type: str,
-    ) -> torch.optim.Optimizer:
+    def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: Tuple[float, float], device_type: str) -> torch.optim.Optimizer:
         groups = list(self.optimizer_parameter_groups(weight_decay))
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
         extra_args = {"fused": True} if use_fused else {}
-        return torch.optim.AdamW(
-            groups,
-            lr=learning_rate,
-            betas=betas,
-            **extra_args,
-        )
+        return torch.optim.AdamW(groups, lr=learning_rate, betas=betas, **extra_args)
 
     def compact_state_violations(self) -> Tuple[str, ...]:
         violations: List[str] = []
@@ -404,25 +279,13 @@ class SheetGPT(nn.Module):
             if name.startswith("trajectory.coefficients."):
                 continue
             if parameter.ndim == 3 and parameter.shape[0] == self.config.n_layer:
-                violations.append(
-                    f"possible persistent dense logical stack: {name} {tuple(parameter.shape)}"
-                )
+                violations.append(f"possible persistent dense logical stack: {name} {tuple(parameter.shape)}")
         return tuple(violations)
 
     @torch.no_grad()
-    def generate(
-        self,
-        idx: Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-    ) -> Tensor:
+    def generate(self, idx: Tensor, max_new_tokens: int, temperature: float = 1.0, top_k: Optional[int] = None) -> Tensor:
         for _ in range(max_new_tokens):
-            idx_cond = (
-                idx
-                if idx.size(1) <= self.config.block_size
-                else idx[:, -self.config.block_size :]
-            )
+            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size :]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
             if top_k is not None:
