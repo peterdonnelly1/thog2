@@ -10,26 +10,11 @@ from torch import Tensor, nn
 
 from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisCache, BasisOwner
 from .geometry import SheetGeometryConfig
-from .semantic_materializer import (
-    ATTENTION_KEY_WEIGHT,
-    ATTENTION_OUTPUT_WEIGHT,
-    ATTENTION_QUERY_WEIGHT,
-    ATTENTION_VALUE_WEIGHT,
-    LEGACY_ATTENTION_INPUT_WEIGHT,
-    MLP_CONTRACTION_WEIGHT,
-    MLP_EXPANSION_WEIGHT,
-)
+from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
 
 
-CURVE_MATRIX_FAMILIES = (
-    ATTENTION_QUERY_WEIGHT,
-    ATTENTION_KEY_WEIGHT,
-    ATTENTION_VALUE_WEIGHT,
-    ATTENTION_OUTPUT_WEIGHT,
-    MLP_EXPANSION_WEIGHT,
-    MLP_CONTRACTION_WEIGHT,
-)
+CURVE_MATRIX_FAMILIES = (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT, ATTENTION_OUTPUT_WEIGHT, MLP_EXPANSION_WEIGHT, MLP_CONTRACTION_WEIGHT)
 
 
 @dataclass(frozen=True)
@@ -59,36 +44,18 @@ class CurveFamilyMetadata:
 
 
 class CurveTrajectory(nn.Module):
-    """CHEBY_CURVE repeated-matrix coefficients plus legacy sheet vectors."""
+    """Depth-only repeated-matrix coefficients plus legacy sheet vectors for any registered orthogonal basis."""
 
-    def __init__(
-        self,
-        config: SheetGeometryConfig,
-        *,
-        runtime_dtype: torch.dtype = torch.float32,
-        basis_version: str = BASIS_VERSION,
-        basis_cache: Optional[BasisCache] = None,
-        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
-    ) -> None:
+    def __init__(self, config: SheetGeometryConfig, *, runtime_dtype: torch.dtype = torch.float32, basis_version: str = BASIS_VERSION, basis_cache: Optional[BasisCache] = None, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> None:
         super().__init__()
-        if basis_family != BASIS_FAMILY_CHEBYSHEV:
-            raise ValueError(f"CurveTrajectory supports only chebyshev basis; got {basis_family!r}")
         self.config = config
         self.runtime_dtype = runtime_dtype
         self.basis_version = basis_version
         self.basis_family = basis_family
         self.metadata = self._build_metadata()
         self._metadata_by_name: Dict[str, CurveFamilyMetadata] = {item.name: item for item in self.metadata}
-
         self.bases = BasisOwner(basis_cache)
-        self.bases.add_basis(
-            "depth_basis",
-            config.n_layer,
-            config.depth_order,
-            runtime_dtype=runtime_dtype,
-            version=basis_version,
-            basis_family=basis_family,
-        )
+        self.bases.add_basis("depth_basis", config.n_layer, config.depth_order, runtime_dtype=runtime_dtype, version=basis_version, basis_family=basis_family)
         self._row_basis_name_by_family: Dict[str, str] = {}
         distinct_row_bases: Dict[Tuple[int, int], str] = {}
         for item in self.metadata:
@@ -98,17 +65,9 @@ class CurveTrajectory(nn.Module):
             basis_name = distinct_row_bases.get(key)
             if basis_name is None:
                 basis_name = f"row_basis_c{key[0]}_q{key[1]}"
-                self.bases.add_basis(
-                    basis_name,
-                    key[0],
-                    key[1],
-                    runtime_dtype=runtime_dtype,
-                    version=basis_version,
-                    basis_family=basis_family,
-                )
+                self.bases.add_basis(basis_name, key[0], key[1], runtime_dtype=runtime_dtype, version=basis_version, basis_family=basis_family)
                 distinct_row_bases[key] = basis_name
             self._row_basis_name_by_family[item.name] = basis_name
-
         self.coefficients = nn.ParameterDict()
         for item in self.metadata:
             self.coefficients[item.name] = nn.Parameter(torch.empty(item.coefficient_shape(config.depth_order), dtype=runtime_dtype))
@@ -129,18 +88,7 @@ class CurveTrajectory(nn.Module):
             if item.semantic_type == "matrix":
                 continue
             geometry = item.geometry
-            rows.append(
-                CurveFamilyMetadata(
-                    item.name,
-                    item.semantic_type,
-                    item.initialization,
-                    item.target_weight_std,
-                    item.weight_decay,
-                    geometry.output_rows,
-                    geometry.row_width,
-                    geometry.row_order,
-                )
-            )
+            rows.append(CurveFamilyMetadata(item.name, item.semantic_type, item.initialization, item.target_weight_std, item.weight_decay, geometry.output_rows, geometry.row_width, geometry.row_order))
         return tuple(rows)
 
     def family_metadata(self, name: str) -> CurveFamilyMetadata:
@@ -200,14 +148,7 @@ class CurveTrajectory(nn.Module):
         if layer_index < 0 or layer_index >= self.config.n_layer:
             raise IndexError(f"layer_index out of range: {layer_index}; n_layer={self.config.n_layer}")
         if name == LEGACY_ATTENTION_INPUT_WEIGHT:
-            return torch.cat(
-                (
-                    self._materialize_curve_matrix(ATTENTION_QUERY_WEIGHT, layer_index),
-                    self._materialize_curve_matrix(ATTENTION_KEY_WEIGHT, layer_index),
-                    self._materialize_curve_matrix(ATTENTION_VALUE_WEIGHT, layer_index),
-                ),
-                dim=0,
-            )
+            return torch.cat((self._materialize_curve_matrix(ATTENTION_QUERY_WEIGHT, layer_index), self._materialize_curve_matrix(ATTENTION_KEY_WEIGHT, layer_index), self._materialize_curve_matrix(ATTENTION_VALUE_WEIGHT, layer_index)), dim=0)
         item = self.family_metadata(name)
         if item.semantic_type == "matrix":
             return self._materialize_curve_matrix(name, layer_index)
@@ -260,26 +201,8 @@ class CurveTrajectory(nn.Module):
         return sum(item.dense_equivalent_count(self.config.n_layer) for item in self.metadata if item.semantic_type == "matrix")
 
     def family_report(self) -> Tuple[Dict[str, object], ...]:
-        rows = []
-        for item in self.metadata:
-            rows.append(
-                {
-                    "name": item.name,
-                    "semantic_type": item.semantic_type,
-                    "initialization": item.initialization,
-                    "target_weight_std": item.target_weight_std,
-                    "weight_decay": item.weight_decay,
-                    "output_rows": item.output_rows,
-                    "row_width": item.row_width,
-                    "row_order": item.row_order,
-                    "coefficient_shape": item.coefficient_shape(self.config.depth_order),
-                    "sheet_parameters": item.sheet_parameter_count(self.config.depth_order),
-                    "dense_equivalent_parameters": item.dense_equivalent_count(self.config.n_layer),
-                }
-            )
-        return tuple(rows)
+        return tuple({"name": item.name, "semantic_type": item.semantic_type, "initialization": item.initialization, "target_weight_std": item.target_weight_std, "weight_decay": item.weight_decay, "output_rows": item.output_rows, "row_width": item.row_width, "row_order": item.row_order, "coefficient_shape": item.coefficient_shape(self.config.depth_order), "sheet_parameters": item.sheet_parameter_count(self.config.depth_order), "dense_equivalent_parameters": item.dense_equivalent_count(self.config.n_layer)} for item in self.metadata)
 
     def persistent_basis_keys(self) -> Tuple[str, ...]:
-        state_keys = set(self.state_dict().keys())
-        return tuple(sorted(key for key in state_keys if key.startswith("bases.")))
+        return tuple(sorted(key for key in self.state_dict() if key.startswith("bases.")))
 # ^^^ THOG
