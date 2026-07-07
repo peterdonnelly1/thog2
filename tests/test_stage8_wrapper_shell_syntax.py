@@ -15,3 +15,11 @@ def test_stage8_top_level_wrappers_exist_and_are_shell_syntax_valid() -> None:
         assert Path(wrapper).exists(), wrapper
         completed = subprocess.run(["bash", "-n", wrapper], text=True, capture_output=True, check=False)
         assert completed.returncode == 0, completed.stderr
+
+
+def test_stage8_training_wrappers_make_logging_backend_explicit() -> None:
+    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        text = Path(wrapper).read_text(encoding="utf-8")
+        assert "INSTRUMENTATION=\"tensorboard\"" in text
+        assert "THOG2_INSTRUMENTATION" in text
+        assert "-I INSTRUMENTATION" in text
