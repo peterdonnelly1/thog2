@@ -152,11 +152,17 @@ class LegacySheetColMaterializer:
 
     def direct_matrix_value(self, name: str, layer_index: int, output_row: int, row_index: int) -> Tensor:
         spec = self.matrix_spec(name)
+        if output_row < 0 or output_row >= spec.output_rows:
+            raise IndexError(f"output_row out of range for {name}: {output_row}")
+        if row_index < 0 or row_index >= spec.row_width:
+            raise IndexError(f"row_index out of range for {name}: {row_index}")
         legacy_output_row = output_row if spec.legacy_row_start is None else spec.legacy_row_start + output_row
         return self.trajectory.direct_value(spec.legacy_family, layer_index, legacy_output_row, row_index)
 
     def direct_vector_value(self, name: str, layer_index: int, row_index: int) -> Tensor:
         spec = self.vector_spec(name)
+        if row_index < 0 or row_index >= spec.row_width:
+            raise IndexError(f"row_index out of range for {name}: {row_index}")
         legacy_index = row_index if spec.legacy_row_start is None else spec.legacy_row_start + row_index
         return self.trajectory.materialize_vector(spec.legacy_family, layer_index)[legacy_index]
 
