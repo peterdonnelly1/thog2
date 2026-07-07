@@ -29,6 +29,7 @@ BASIS_FAMILY_CONVENTIONAL = "conventional"
 
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
 CURVE_MATERIALIZATION_VERSION = "curve_v1"
+MLP_BLOCK_MATERIALIZATION_VERSION = "mlp_block_v1"
 COMPACT_MATERIALIZATION_VERSION = LEGACY_SHEET_COL_MATERIALIZATION_VERSION
 CONVENTIONAL_MATERIALIZATION_VERSION = "conventional_dense_v1"
 
@@ -58,26 +59,11 @@ BASIS_FAMILIES = (
 )
 
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
-    GEOMETRY_PRESET_LEGACY_SHEET_COL: (
-        ATTENTION_GEOMETRY_LEGACY_SHEET_COL,
-        MLP_GEOMETRY_LEGACY_SHEET_COL,
-    ),
-    GEOMETRY_PRESET_CURVE: (
-        ATTENTION_GEOMETRY_CURVE,
-        MLP_GEOMETRY_CURVE,
-    ),
-    GEOMETRY_PRESET_MLP_BLOCK: (
-        ATTENTION_GEOMETRY_CURVE,
-        MLP_GEOMETRY_MLP_BLOCK,
-    ),
-    GEOMETRY_PRESET_BLOCK: (
-        ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
-        MLP_GEOMETRY_MLP_BLOCK,
-    ),
-    GEOMETRY_PRESET_CONVENTIONAL: (
-        ATTENTION_GEOMETRY_CONVENTIONAL,
-        MLP_GEOMETRY_CONVENTIONAL,
-    ),
+    GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
+    GEOMETRY_PRESET_CURVE: (ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_CURVE),
+    GEOMETRY_PRESET_MLP_BLOCK: (ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_MLP_BLOCK),
+    GEOMETRY_PRESET_BLOCK: (ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK),
+    GEOMETRY_PRESET_CONVENTIONAL: (ATTENTION_GEOMETRY_CONVENTIONAL, MLP_GEOMETRY_CONVENTIONAL),
 }
 
 
@@ -129,9 +115,7 @@ def _canonical_optional_string(name: str, value: Optional[str]) -> Optional[str]
     if not isinstance(value, str):
         raise ValueError(f"{name} must be a string or None; got {value!r}")
     normalized = value.strip().lower()
-    if not normalized:
-        return None
-    return normalized
+    return normalized or None
 
 
 def _require_member(name: str, value: Optional[str], allowed: Tuple[str, ...]) -> Optional[str]:
@@ -141,42 +125,26 @@ def _require_member(name: str, value: Optional[str], allowed: Tuple[str, ...]) -
     return normalized
 
 
-def resolve_compact_selectors(
-    *,
-    geometry_preset: Optional[str] = None,
-    attention_geometry: Optional[str] = None,
-    mlp_geometry: Optional[str] = None,
-    basis_family: Optional[str] = None,
-) -> ResolvedCompactSelectors:
+def resolve_compact_selectors(*, geometry_preset: Optional[str] = None, attention_geometry: Optional[str] = None, mlp_geometry: Optional[str] = None, basis_family: Optional[str] = None) -> ResolvedCompactSelectors:
     requested_preset = _require_member("geometry_preset", geometry_preset, GEOMETRY_PRESETS)
     requested_attention = _require_member("attention_geometry", attention_geometry, ATTENTION_GEOMETRIES)
     requested_mlp = _require_member("mlp_geometry", mlp_geometry, MLP_GEOMETRIES)
     requested_basis = _require_member("basis_family", basis_family, BASIS_FAMILIES)
-
     preset = requested_preset or GEOMETRY_PRESET_LEGACY_SHEET_COL
     default_attention, default_mlp = _PRESET_DEFAULTS[preset]
     resolved_attention = requested_attention or default_attention
     resolved_mlp = requested_mlp or default_mlp
     if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_CURVE and resolved_mlp == MLP_GEOMETRY_CURVE:
         preset = GEOMETRY_PRESET_CURVE
-    resolved_basis = requested_basis or (
-        BASIS_FAMILY_CONVENTIONAL if preset == GEOMETRY_PRESET_CONVENTIONAL else BASIS_FAMILY_CHEBYSHEV
-    )
+    if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_CURVE and resolved_mlp == MLP_GEOMETRY_MLP_BLOCK:
+        preset = GEOMETRY_PRESET_MLP_BLOCK
+    resolved_basis = requested_basis or (BASIS_FAMILY_CONVENTIONAL if preset == GEOMETRY_PRESET_CONVENTIONAL else BASIS_FAMILY_CHEBYSHEV)
     if resolved_attention == ATTENTION_GEOMETRY_CONVENTIONAL or resolved_mlp == MLP_GEOMETRY_CONVENTIONAL:
         if preset != GEOMETRY_PRESET_CONVENTIONAL:
             raise ValueError("conventional module geometry requires geometry_preset='conventional'")
     if preset == GEOMETRY_PRESET_CONVENTIONAL and resolved_basis != BASIS_FAMILY_CONVENTIONAL:
         raise ValueError("conventional geometry must use basis_family='conventional' or None")
-    return ResolvedCompactSelectors(
-        requested_geometry_preset=requested_preset,
-        requested_attention_geometry=requested_attention,
-        requested_mlp_geometry=requested_mlp,
-        requested_basis_family=requested_basis,
-        geometry_preset=preset,
-        attention_geometry=resolved_attention,
-        mlp_geometry=resolved_mlp,
-        basis_family=resolved_basis,
-    )
+    return ResolvedCompactSelectors(requested_preset, requested_attention, requested_mlp, requested_basis, preset, resolved_attention, resolved_mlp, resolved_basis)
 
 
 def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
@@ -184,30 +152,20 @@ def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
         return LEGACY_SHEET_COL_MATERIALIZATION_VERSION
     if selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
         return CURVE_MATERIALIZATION_VERSION
+    if selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        return MLP_BLOCK_MATERIALIZATION_VERSION
     raise ValueError(f"unsupported compact materialization preset: {selectors.geometry_preset!r}")
 
 
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
-    legacy = (
-        selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL
-        and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL
-        and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL
-        and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    )
-    curve = (
-        selectors.geometry_preset == GEOMETRY_PRESET_CURVE
-        and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE
-        and selectors.mlp_geometry == MLP_GEOMETRY_CURVE
-        and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    )
-    if legacy or curve:
+    legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    curve = selectors.geometry_preset == GEOMETRY_PRESET_CURVE and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    if legacy or curve or mlp_block:
         return
     raise ValueError(
-        "Stage 4 supports only legacy_sheet_col or curve materialization with chebyshev basis; "
-        f"got geometry_preset={selectors.geometry_preset!r}, "
-        f"attention_geometry={selectors.attention_geometry!r}, "
-        f"mlp_geometry={selectors.mlp_geometry!r}, "
-        f"basis_family={selectors.basis_family!r}"
+        "Stage 5 supports only legacy_sheet_col, curve, or mlp_block materialization with chebyshev basis; "
+        f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
     )
 
 
@@ -215,19 +173,8 @@ def validate_stage1_sheet_support(selectors: ResolvedCompactSelectors) -> None:
     validate_current_sheet_support(selectors)
 
 
-def validate_dense_compact_fields(
-    *,
-    geometry_preset: Optional[str] = None,
-    attention_geometry: Optional[str] = None,
-    mlp_geometry: Optional[str] = None,
-    basis_family: Optional[str] = None,
-) -> None:
-    selectors = resolve_compact_selectors(
-        geometry_preset=geometry_preset or GEOMETRY_PRESET_CONVENTIONAL,
-        attention_geometry=attention_geometry,
-        mlp_geometry=mlp_geometry,
-        basis_family=basis_family,
-    )
+def validate_dense_compact_fields(*, geometry_preset: Optional[str] = None, attention_geometry: Optional[str] = None, mlp_geometry: Optional[str] = None, basis_family: Optional[str] = None) -> None:
+    selectors = resolve_compact_selectors(geometry_preset=geometry_preset or GEOMETRY_PRESET_CONVENTIONAL, attention_geometry=attention_geometry, mlp_geometry=mlp_geometry, basis_family=basis_family)
     if selectors.geometry_preset != GEOMETRY_PRESET_CONVENTIONAL:
         raise ValueError("dense model_type rejects compact geometry_preset fields")
     if selectors.attention_geometry != ATTENTION_GEOMETRY_CONVENTIONAL:
@@ -242,51 +189,14 @@ def head_metadata(n_embd: int, n_head: int) -> Dict[str, Any]:
     if n_embd % n_head != 0:
         raise ValueError(f"n_embd must be divisible by n_head; got n_embd={n_embd}, n_head={n_head}")
     head_dim = n_embd // n_head
-    role_ranges = {
-        "query": (0, n_embd),
-        "key": (n_embd, 2 * n_embd),
-        "value": (2 * n_embd, 3 * n_embd),
-    }
-    role_head_ranges = {
-        role_name: tuple(
-            (role_start + head_index * head_dim, role_start + (head_index + 1) * head_dim)
-            for head_index in range(n_head)
-        )
-        for role_name, (role_start, _) in role_ranges.items()
-    }
-    output_columns = tuple(
-        (head_index * head_dim, (head_index + 1) * head_dim)
-        for head_index in range(n_head)
-    )
-    return {
-        "head_dim": head_dim,
-        "qkv_role_ranges": role_ranges,
-        "qkv_role_head_ranges": role_head_ranges,
-        "attention_output_input_head_column_ranges": output_columns,
-    }
+    role_ranges = {"query": (0, n_embd), "key": (n_embd, 2 * n_embd), "value": (2 * n_embd, 3 * n_embd)}
+    role_head_ranges = {role_name: tuple((role_start + head_index * head_dim, role_start + (head_index + 1) * head_dim) for head_index in range(n_head)) for role_name, (role_start, _) in role_ranges.items()}
+    output_columns = tuple((head_index * head_dim, (head_index + 1) * head_dim) for head_index in range(n_head))
+    return {"head_dim": head_dim, "qkv_role_ranges": role_ranges, "qkv_role_head_ranges": role_head_ranges, "attention_output_input_head_column_ranges": output_columns}
 
 
-def compact_identity_metadata(
-    *,
-    n_layer: int,
-    n_embd: int,
-    n_head: int,
-    depth_order: int,
-    base_row_order: int,
-    basis_version: str = BASIS_VERSION,
-    row_order_scaling_rule: str,
-    geometry_preset: Optional[str] = None,
-    attention_geometry: Optional[str] = None,
-    mlp_geometry: Optional[str] = None,
-    basis_family: Optional[str] = None,
-    require_stage1_sheet_support: bool = True,
-) -> Dict[str, Any]:
-    selectors = resolve_compact_selectors(
-        geometry_preset=geometry_preset,
-        attention_geometry=attention_geometry,
-        mlp_geometry=mlp_geometry,
-        basis_family=basis_family,
-    )
+def compact_identity_metadata(*, n_layer: int, n_embd: int, n_head: int, depth_order: int, base_row_order: int, basis_version: str = BASIS_VERSION, row_order_scaling_rule: str, geometry_preset: Optional[str] = None, attention_geometry: Optional[str] = None, mlp_geometry: Optional[str] = None, basis_family: Optional[str] = None, require_stage1_sheet_support: bool = True) -> Dict[str, Any]:
+    selectors = resolve_compact_selectors(geometry_preset=geometry_preset, attention_geometry=attention_geometry, mlp_geometry=mlp_geometry, basis_family=basis_family)
     if require_stage1_sheet_support:
         validate_current_sheet_support(selectors)
     if basis_version != BASIS_VERSION:
@@ -318,15 +228,5 @@ def compact_identity_metadata(
 
 def conventional_identity_metadata(*, n_layer: int, n_embd: int, n_head: int) -> Dict[str, Any]:
     heads = head_metadata(n_embd, n_head)
-    return {
-        "geometry_preset": GEOMETRY_PRESET_CONVENTIONAL,
-        "attention_geometry": ATTENTION_GEOMETRY_CONVENTIONAL,
-        "mlp_geometry": MLP_GEOMETRY_CONVENTIONAL,
-        "basis_family": BASIS_FAMILY_CONVENTIONAL,
-        "materialization_version": CONVENTIONAL_MATERIALIZATION_VERSION,
-        "n_layer": n_layer,
-        "n_embd": n_embd,
-        "n_head": n_head,
-        "head_dim": int(heads["head_dim"]),
-    }
+    return {"geometry_preset": GEOMETRY_PRESET_CONVENTIONAL, "attention_geometry": ATTENTION_GEOMETRY_CONVENTIONAL, "mlp_geometry": MLP_GEOMETRY_CONVENTIONAL, "basis_family": BASIS_FAMILY_CONVENTIONAL, "materialization_version": CONVENTIONAL_MATERIALIZATION_VERSION, "n_layer": n_layer, "n_embd": n_embd, "n_head": n_head, "head_dim": int(heads["head_dim"])}
 # ^^^ THOG
