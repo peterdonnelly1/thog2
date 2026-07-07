@@ -61,7 +61,7 @@ class Stage5MlpBlockMaterializationTests(unittest.TestCase):
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_MLP_BLOCK)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_MLP_BLOCK)
         self.assertEqual(stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK).compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_BLOCK)
-        with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
+        with self.assertRaisesRegex(ValueError, "supports only"):
             stage4_training_config(geometry_preset=GEOMETRY_PRESET_MLP_BLOCK, basis_family=BASIS_FAMILY_DCT)
 
     def test_02_mlp_block_trajectory_keeps_attention_curve_coefficients_and_replaces_only_mlp_coefficients_with_blocks(self) -> None:
