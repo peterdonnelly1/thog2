@@ -10,7 +10,9 @@ import torch
 
 from sheet.basis import (
     BASIS_FAMILY_CHEBYSHEV,
+    BASIS_FAMILY_DCT,
     BASIS_VERSION,
+    DCT_BASIS_VERSION,
     BasisCache,
     BasisOwner,
     basis_kernel_metadata,
@@ -41,12 +43,7 @@ class Stage2BasisKernelTests(unittest.TestCase):
     def trajectory(self) -> SheetTrajectory:
         torch.manual_seed(self.fixture["seed"])
         config = self.config()
-        return SheetTrajectory(
-            config.sheet_geometry(),
-            runtime_dtype=torch.float32,
-            basis_version=config.basis_version,
-            basis_family=BASIS_FAMILY_CHEBYSHEV,
-        )
+        return SheetTrajectory(config.sheet_geometry(), runtime_dtype=torch.float32, basis_version=config.basis_version, basis_family=BASIS_FAMILY_CHEBYSHEV)
 
     def test_kernel_registry_and_metadata(self) -> None:
         kernel = get_basis_kernel("chebyshev")
@@ -59,8 +56,10 @@ class Stage2BasisKernelTests(unittest.TestCase):
         self.assertEqual(metadata["basis_version"], BASIS_VERSION)
         self.assertIn("single_point_zero", metadata["coordinate_policy"])
         self.assertIn("positive_diagonal", metadata["stabilization_policy"])
-        with self.assertRaisesRegex(ValueError, "dct"):
-            get_basis_kernel("dct")
+        dct_kernel = get_basis_kernel("dct")
+        self.assertIs(dct_kernel, get_basis_kernel(DCT_BASIS_VERSION))
+        self.assertEqual(dct_kernel.basis_family, BASIS_FAMILY_DCT)
+        self.assertEqual(dct_kernel.basis_version, DCT_BASIS_VERSION)
         with self.assertRaisesRegex(ValueError, "unknown"):
             get_basis_kernel("made_up_basis")
 
@@ -71,7 +70,6 @@ class Stage2BasisKernelTests(unittest.TestCase):
                 legacy = build_stabilized_basis(sample_count, order, runtime_dtype=torch.float32)
                 through_kernel = kernel.build(sample_count, order, runtime_dtype=torch.float32)
                 torch.testing.assert_close(through_kernel, legacy, rtol=0.0, atol=0.0)
-
         trajectory = self.trajectory()
         expected_hashes = self.fixture["basis_hashes"]
         self.assertEqual(basis_sha256(trajectory.depth_basis), expected_hashes["depth_4_order_3_float32"])
@@ -98,13 +96,16 @@ class Stage2BasisKernelTests(unittest.TestCase):
         second = cache.get(16, 8, runtime_dtype=torch.float32, basis_family="cheby")
         self.assertIs(first, second)
         dtype_variant = cache.get(16, 8, runtime_dtype=torch.float64, basis_family="chebyshev")
-        version_variant = cache.get(16, 8, runtime_dtype=torch.float32, version=BASIS_VERSION + "_test_variant", basis_family="chebyshev")
+        dct_variant = cache.get(16, 8, runtime_dtype=torch.float32, version=DCT_BASIS_VERSION, basis_family="dct")
         self.assertIsNot(first, dtype_variant)
-        self.assertIsNot(first, version_variant)
+        self.assertIsNot(first, dct_variant)
         self.assertEqual(len(cache), 3)
         key = cache.make_key(16, 8, runtime_dtype=torch.float32, device="cpu", version=BASIS_VERSION, basis_family="chebyshev")
         self.assertEqual(key.basis_family, BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(key.version, BASIS_VERSION)
+        dct_key = cache.make_key(16, 8, runtime_dtype=torch.float32, device="cpu", version=DCT_BASIS_VERSION, basis_family="dct")
+        self.assertEqual(dct_key.basis_family, BASIS_FAMILY_DCT)
+        self.assertEqual(dct_key.version, DCT_BASIS_VERSION)
         cuda_key = cache.make_key(16, 8, runtime_dtype=torch.float32, device="cuda:0", version=BASIS_VERSION, basis_family="chebyshev")
         self.assertNotEqual(key, cuda_key)
 
