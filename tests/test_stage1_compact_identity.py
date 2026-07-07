@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import unittest
 
+from sheet.basis_kernel import DCT_BASIS_VERSION
 from sheet.compact_identity import (
     ATTENTION_GEOMETRY_CURVE,
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
@@ -32,6 +33,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
             ({"geometry_preset": "mlp_block"}, GEOMETRY_PRESET_MLP_BLOCK, ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
             ({"attention_geometry": "head_aware_block", "mlp_geometry": "curve"}, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_CURVE, BASIS_FAMILY_CHEBYSHEV),
             ({"geometry_preset": "block"}, GEOMETRY_PRESET_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
+            ({"geometry_preset": "block", "basis_family": "dct"}, GEOMETRY_PRESET_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_DCT),
         )
         for request, preset, attention, mlp, basis in cases:
             with self.subTest(request=request):
@@ -47,23 +49,23 @@ class Stage1CompactIdentityTests(unittest.TestCase):
         resolved = resolve_compact_selectors(geometry_preset="mlp_block", attention_geometry="head_aware_block", basis_family="dct")
         self.assertEqual(resolved.basis_family, BASIS_FAMILY_DCT)
 
-    def test_invalid_identity_values_and_stage5_unsupported_materializations_fail(self) -> None:
+    def test_invalid_identity_values_and_stage7_unsupported_materializations_fail_while_dct_block_is_accepted(self) -> None:
         stage4_training_config(geometry_preset="curve")
         stage4_training_config(attention_geometry="curve", mlp_geometry="curve")
         stage4_training_config(geometry_preset="mlp_block")
         stage4_training_config(attention_geometry="curve", mlp_geometry="mlp_block")
         stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="curve")
         stage4_training_config(geometry_preset="block")
-        stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="mlp_block")
+        dct_block = stage4_training_config(geometry_preset="block", basis_family="dct")
+        self.assertEqual(dct_block.basis_version, DCT_BASIS_VERSION)
         for overrides in (
             {"geometry_preset": "legacy_sheet_col", "attention_geometry": "curve"},
             {"geometry_preset": "legacy_sheet_col", "mlp_geometry": "mlp_block"},
-            {"geometry_preset": "legacy_sheet_col", "basis_family": "dct"},
-            {"geometry_preset": "block", "basis_family": "dct"},
             {"geometry_preset": "block", "attention_geometry": "curve"},
+            {"geometry_preset": "block", "basis_family": "not_a_basis"},
         ):
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "supports only"):
+                with self.assertRaisesRegex(ValueError, "must be one of|supports only"):
                     stage4_training_config(**overrides)
 
     def test_dense_rejects_compact_fields_except_conventional(self) -> None:
@@ -75,6 +77,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
             {"attention_geometry": "curve"},
             {"mlp_geometry": "mlp_block"},
             {"basis_family": "chebyshev"},
+            {"basis_family": "dct"},
         ):
             with self.subTest(overrides=overrides):
                 with self.assertRaises(ValueError):
