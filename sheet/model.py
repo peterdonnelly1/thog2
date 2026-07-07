@@ -13,9 +13,11 @@ from torch.nn import functional as F
 from .basis import BASIS_VERSION
 from .block_trajectory import BlockTrajectory
 from .compact_identity import (
+    ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_BLOCK,
     GEOMETRY_PRESET_CURVE,
     GEOMETRY_PRESET_MLP_BLOCK,
+    MLP_GEOMETRY_MLP_BLOCK,
     resolve_compact_selectors,
     validate_current_sheet_support,
 )
@@ -104,12 +106,14 @@ class SheetGPT(nn.Module):
             }
         )
         selectors = config.compact_selectors()
-        if selectors.geometry_preset == GEOMETRY_PRESET_BLOCK:
+        if selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
             self.trajectory = BlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
+                compact_attention=True,
+                compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
             )
         elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
             self.trajectory = MlpBlockTrajectory(
