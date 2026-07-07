@@ -120,8 +120,6 @@ class BasisKernel:
         basis_version = self.basis_version if version is None else version
         if not isinstance(basis_version, str) or not basis_version.strip():
             raise ValueError("version must be a non-empty string")
-        if basis_version != self.basis_version:
-            raise ValueError(f"{self.basis_family} basis supports version {self.basis_version!r}; got {basis_version!r}")
         coordinates = self.coordinates(sample_count, dtype=torch.float64, device="cpu")
         raw_basis = self.raw_basis(coordinates, order)
         stabilized_basis = self.stabilize(raw_basis)
