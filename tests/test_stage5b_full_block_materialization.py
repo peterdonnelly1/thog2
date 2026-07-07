@@ -5,6 +5,7 @@ import unittest
 
 import torch
 
+from sheet.basis_kernel import DCT_BASIS_VERSION
 from sheet.block_trajectory import BLOCK_MATRIX_FAMILIES, BlockTrajectory
 from sheet.compact_identity import (
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
@@ -30,7 +31,7 @@ class Stage5bFullBlockMaterializationTests(unittest.TestCase):
     def full_block_config(self) -> SheetGPTConfig:
         return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_BLOCK)
 
-    def test_01_full_block_config_identity_resolves_to_head_aware_attention_plus_mlp_block_and_rejects_dct_until_stage7(self) -> None:
+    def test_01_full_block_config_identity_resolves_to_head_aware_attention_plus_mlp_block_and_accepts_dct_after_stage7(self) -> None:
         config = stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK)
         identity = config.compact_identity_metadata()
         self.assertEqual(identity["geometry_preset"], GEOMETRY_PRESET_BLOCK)
@@ -38,8 +39,8 @@ class Stage5bFullBlockMaterializationTests(unittest.TestCase):
         self.assertEqual(identity["mlp_geometry"], MLP_GEOMETRY_MLP_BLOCK)
         self.assertEqual(identity["basis_family"], BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(identity["materialization_version"], BLOCK_MATERIALIZATION_VERSION)
-        with self.assertRaisesRegex(ValueError, "supports only"):
-            stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK, basis_family=BASIS_FAMILY_DCT)
+        dct_config = stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK, basis_family=BASIS_FAMILY_DCT)
+        self.assertEqual(dct_config.compact_identity_metadata()["basis_version"], DCT_BASIS_VERSION)
 
     def test_02_full_block_trajectory_uses_head_aware_attention_coefficient_shapes_and_mlp_block_shapes(self) -> None:
         trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float32)
