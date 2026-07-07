@@ -12,6 +12,7 @@ from torch.nn import functional as F
 
 from .basis import BASIS_VERSION
 from .geometry import SheetGeometryConfig
+from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
 
 
@@ -88,6 +89,7 @@ class SheetGPT(nn.Module):
             runtime_dtype=torch.float32,
             basis_version=config.basis_version,
         )
+        self.semantic_materializer = LegacySheetColMaterializer(self.trajectory)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight
         self.apply(self._init_conventional_weights)
@@ -120,10 +122,10 @@ class SheetGPT(nn.Module):
 
     def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
-        attention_weight = self.trajectory.materialize(
-            "attention_input_weight", layer_index
-        )
-        attention_bias = self._optional_bias("attention_input_bias", layer_index)
+        attention_weight = self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+        attention_bias = None
+        if self.config.bias:
+            attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
         query, key, value = F.linear(
             inputs,
             attention_weight,
