@@ -9,7 +9,7 @@ import torch
 
 from sheet.basis_kernel import DCT_BASIS_VERSION
 from sheet.checkpoints import load_payload, validate_compatibility
-from sheet.compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_BLOCK, GEOMETRY_PRESET_CURVE, GEOMETRY_PRESET_MLP_BLOCK
+from sheet.compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_BLOCK, GEOMETRY_PRESET_CURVE, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, GEOMETRY_PRESET_MLP_BLOCK
 from sheet.stage4_trainer import Stage4Trainer
 from tests.stage4_test_support import stage4_tokens, stage4_training_config
 
@@ -27,8 +27,8 @@ class Stage7DctTrainingAndCheckpointTests(unittest.TestCase):
         self.assertEqual(trainer.config.compact_identity_metadata()["basis_version"], DCT_BASIS_VERSION)
         return trainer
 
-    def test_01_dct_curve_mlp_block_and_full_block_each_run_a_tiny_train_step_without_geometry_specific_code_changes(self) -> None:
-        for geometry_preset in (GEOMETRY_PRESET_CURVE, GEOMETRY_PRESET_MLP_BLOCK, GEOMETRY_PRESET_BLOCK):
+    def test_01_dct_curve_head_aware_mlp_block_and_full_block_each_run_a_tiny_train_step_without_geometry_specific_code_changes(self) -> None:
+        for geometry_preset in (GEOMETRY_PRESET_CURVE, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, GEOMETRY_PRESET_MLP_BLOCK, GEOMETRY_PRESET_BLOCK):
             with self.subTest(geometry_preset=geometry_preset):
                 trainer = self.run_one_update_for_preset(geometry_preset)
                 self.assertGreater(trainer.parameter_report["sheet_coefficients"], 0)
