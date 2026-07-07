@@ -1,3 +1,4 @@
 #!/bin/bash
 set -euo pipefail
-bash "$(dirname "$0")/scripts/current_scruffy_inference_OWT.sh" "$@"
+cd "$(dirname "$0")"
+python run_thog2_owt_inference.py --attention-backend flash2 --dtype bfloat16 "$@"
