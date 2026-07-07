@@ -68,9 +68,9 @@ class Stage7DctTrainingAndCheckpointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "compact_identity"):
                 validate_compatibility(cheby_payload, dct_config)
 
-    def test_04_dct_basis_family_is_rejected_when_paired_with_a_chebyshev_basis_version_to_avoid_silent_cache_poisoning(self) -> None:
+    def test_04_dct_basis_family_rejects_non_default_wrong_basis_version_to_avoid_silent_cache_poisoning(self) -> None:
         with self.assertRaisesRegex(ValueError, "basis_version"):
-            stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK, basis_family=BASIS_FAMILY_DCT, basis_version="chebyshev_first_kind_qr_v1")
+            stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK, basis_family=BASIS_FAMILY_DCT, basis_version="not_the_dct_version")
 
 
 if __name__ == "__main__":
