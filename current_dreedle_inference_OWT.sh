@@ -1,4 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-python run_thog2_owt_inference.py "$@"
+python run_thog2_owt_inference.py --attention-backend sdpa --dtype float16 "$@"
