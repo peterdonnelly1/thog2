@@ -27,7 +27,9 @@ BASIS_FAMILY_CHEBYSHEV = "chebyshev"
 BASIS_FAMILY_DCT = "dct"
 BASIS_FAMILY_CONVENTIONAL = "conventional"
 
-COMPACT_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
+LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
+CURVE_MATERIALIZATION_VERSION = "curve_v1"
+COMPACT_MATERIALIZATION_VERSION = LEGACY_SHEET_COL_MATERIALIZATION_VERSION
 CONVENTIONAL_MATERIALIZATION_VERSION = "conventional_dense_v1"
 
 GEOMETRY_PRESETS = (
@@ -155,6 +157,8 @@ def resolve_compact_selectors(
     default_attention, default_mlp = _PRESET_DEFAULTS[preset]
     resolved_attention = requested_attention or default_attention
     resolved_mlp = requested_mlp or default_mlp
+    if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_CURVE and resolved_mlp == MLP_GEOMETRY_CURVE:
+        preset = GEOMETRY_PRESET_CURVE
     resolved_basis = requested_basis or (
         BASIS_FAMILY_CONVENTIONAL if preset == GEOMETRY_PRESET_CONVENTIONAL else BASIS_FAMILY_CHEBYSHEV
     )
@@ -175,27 +179,40 @@ def resolve_compact_selectors(
     )
 
 
+def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
+    if selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL:
+        return LEGACY_SHEET_COL_MATERIALIZATION_VERSION
+    if selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
+        return CURVE_MATERIALIZATION_VERSION
+    raise ValueError(f"unsupported compact materialization preset: {selectors.geometry_preset!r}")
+
+
+def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
+    legacy = (
+        selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL
+        and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL
+        and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL
+        and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    )
+    curve = (
+        selectors.geometry_preset == GEOMETRY_PRESET_CURVE
+        and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE
+        and selectors.mlp_geometry == MLP_GEOMETRY_CURVE
+        and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    )
+    if legacy or curve:
+        return
+    raise ValueError(
+        "Stage 4 supports only legacy_sheet_col or curve materialization with chebyshev basis; "
+        f"got geometry_preset={selectors.geometry_preset!r}, "
+        f"attention_geometry={selectors.attention_geometry!r}, "
+        f"mlp_geometry={selectors.mlp_geometry!r}, "
+        f"basis_family={selectors.basis_family!r}"
+    )
+
+
 def validate_stage1_sheet_support(selectors: ResolvedCompactSelectors) -> None:
-    if selectors.geometry_preset != GEOMETRY_PRESET_LEGACY_SHEET_COL:
-        raise ValueError(
-            "Stage 1 supports only legacy_sheet_col materialization; "
-            f"got geometry_preset={selectors.geometry_preset!r}"
-        )
-    if selectors.attention_geometry != ATTENTION_GEOMETRY_LEGACY_SHEET_COL:
-        raise ValueError(
-            "Stage 1 supports only legacy_sheet_col attention geometry; "
-            f"got attention_geometry={selectors.attention_geometry!r}"
-        )
-    if selectors.mlp_geometry != MLP_GEOMETRY_LEGACY_SHEET_COL:
-        raise ValueError(
-            "Stage 1 supports only legacy_sheet_col MLP geometry; "
-            f"got mlp_geometry={selectors.mlp_geometry!r}"
-        )
-    if selectors.basis_family != BASIS_FAMILY_CHEBYSHEV:
-        raise ValueError(
-            "Stage 1 supports only chebyshev basis family; "
-            f"got basis_family={selectors.basis_family!r}"
-        )
+    validate_current_sheet_support(selectors)
 
 
 def validate_dense_compact_fields(
@@ -271,7 +288,7 @@ def compact_identity_metadata(
         basis_family=basis_family,
     )
     if require_stage1_sheet_support:
-        validate_stage1_sheet_support(selectors)
+        validate_current_sheet_support(selectors)
     if basis_version != BASIS_VERSION:
         raise ValueError(f"unsupported basis_version: {basis_version}")
     heads = head_metadata(n_embd, n_head)
@@ -285,7 +302,7 @@ def compact_identity_metadata(
         mlp_geometry=selectors.mlp_geometry,
         basis_family=selectors.basis_family,
         basis_version=basis_version,
-        materialization_version=COMPACT_MATERIALIZATION_VERSION,
+        materialization_version=compact_materialization_version(selectors),
         row_order_scaling_rule=row_order_scaling_rule,
         n_layer=n_layer,
         n_embd=n_embd,
