@@ -1,1 +1,3 @@
-# Stage 8 scruffy OWT training wrapper root alias
+#!/bin/bash
+set -euo pipefail
+exec "$(dirname "$0")/scripts/current_scruffy_train_OWT.sh" "$@"
