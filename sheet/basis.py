@@ -8,21 +8,32 @@ from typing import Dict, Optional, Tuple, Union
 import torch
 from torch import Tensor, nn
 
+from .basis_kernel import (
+    BASIS_FAMILY_CHEBYSHEV,
+    CHEBYSHEV_BASIS_VERSION,
+    SINGLE_POINT_COORDINATE,
+    basis_kernel_metadata,
+    chebyshev_coordinates,
+    chebyshev_raw_basis,
+    deterministic_reduced_qr_positive_diagonal,
+    get_basis_kernel,
+    normalize_basis_family,
+    validate_floating_dtype,
+    validate_positive_integer,
+)
 
-BASIS_VERSION = "chebyshev_first_kind_qr_v1"
-SINGLE_POINT_COORDINATE = 0.0
+
+BASIS_VERSION = CHEBYSHEV_BASIS_VERSION
 
 DeviceLike = Union[str, torch.device]
 
 
 def _validate_positive_integer(name: str, value: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{name} must be a positive integer; got {value!r}")
+    validate_positive_integer(name, value)
 
 
 def _validate_floating_dtype(dtype: torch.dtype) -> None:
-    if dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
-        raise ValueError(f"dtype must be floating point; got {dtype}")
+    validate_floating_dtype(dtype)
 
 
 def normalized_coordinates(
@@ -37,39 +48,13 @@ def normalized_coordinates(
     either endpoint when the geometry has no direction to express.
     """
 
-    _validate_positive_integer("sample_count", sample_count)
-    _validate_floating_dtype(dtype)
-    target_device = torch.device("cpu" if device is None else device)
-    if sample_count == 1:
-        return torch.tensor([SINGLE_POINT_COORDINATE], dtype=dtype, device=target_device)
-    return torch.linspace(-1.0, 1.0, sample_count, dtype=dtype, device=target_device)
+    return chebyshev_coordinates(sample_count, dtype=dtype, device=device)
 
 
 def chebyshev_first_kind_basis(coordinates: Tensor, order: int) -> Tensor:
     """Construct sampled first-kind Chebyshev terms by recurrence."""
 
-    _validate_positive_integer("order", order)
-    if coordinates.ndim != 1:
-        raise ValueError(f"coordinates must be one-dimensional; got shape {tuple(coordinates.shape)}")
-    if coordinates.numel() == 0:
-        raise ValueError("coordinates must contain at least one sample")
-    if not coordinates.is_floating_point():
-        raise ValueError(f"coordinates must use a floating dtype; got {coordinates.dtype}")
-    if not torch.isfinite(coordinates).all():
-        raise ValueError("coordinates must be finite")
-
-    sample_count = coordinates.numel()
-    basis = torch.empty((sample_count, order), dtype=coordinates.dtype, device=coordinates.device)
-    basis[:, 0] = 1.0
-    if order == 1:
-        return basis
-
-    basis[:, 1] = coordinates
-    for term_index in range(2, order):
-        basis[:, term_index] = (
-            2.0 * coordinates * basis[:, term_index - 1] - basis[:, term_index - 2]
-        )
-    return basis
+    return chebyshev_raw_basis(coordinates, order)
 
 
 def deterministic_reduced_qr(raw_basis: Tensor) -> Tuple[Tensor, Tensor]:
@@ -79,27 +64,7 @@ def deterministic_reduced_qr(raw_basis: Tensor) -> Tuple[Tensor, Tensor]:
     signs returned by QR and makes reconstruction stable across repeated runs.
     """
 
-    if raw_basis.ndim != 2:
-        raise ValueError(f"raw_basis must be two-dimensional; got shape {tuple(raw_basis.shape)}")
-    row_count, column_count = raw_basis.shape
-    if row_count < column_count:
-        raise ValueError(
-            f"reduced QR requires rows >= columns; got rows={row_count}, columns={column_count}"
-        )
-    if not raw_basis.is_floating_point():
-        raise ValueError(f"raw_basis must use a floating dtype; got {raw_basis.dtype}")
-    if not torch.isfinite(raw_basis).all():
-        raise ValueError("raw_basis must be finite")
-
-    q_matrix, r_matrix = torch.linalg.qr(raw_basis, mode="reduced")
-    diagonal = torch.diagonal(r_matrix)
-    signs = torch.where(diagonal < 0.0, -torch.ones_like(diagonal), torch.ones_like(diagonal))
-    q_matrix = q_matrix * signs.unsqueeze(0)
-    r_matrix = r_matrix * signs.unsqueeze(1)
-
-    if not torch.isfinite(q_matrix).all() or not torch.isfinite(r_matrix).all():
-        raise FloatingPointError("QR stabilization produced a non-finite value")
-    return q_matrix, r_matrix
+    return deterministic_reduced_qr_positive_diagonal(raw_basis)
 
 
 def build_stabilized_basis(
@@ -109,39 +74,25 @@ def build_stabilized_basis(
     runtime_dtype: torch.dtype = torch.float64,
     device: Optional[DeviceLike] = None,
     version: str = BASIS_VERSION,
+    basis_family: str = BASIS_FAMILY_CHEBYSHEV,
 ) -> Tensor:
     """Build a stabilized basis in float64 on CPU, then cast for runtime use."""
 
-    _validate_positive_integer("sample_count", sample_count)
-    _validate_positive_integer("order", order)
-    if order > sample_count:
-        raise ValueError(
-            f"order must not exceed sample_count; got order={order}, sample_count={sample_count}"
-        )
-    _validate_floating_dtype(runtime_dtype)
-    if not isinstance(version, str) or not version.strip():
-        raise ValueError("version must be a non-empty string")
-
-    coordinates = normalized_coordinates(sample_count, dtype=torch.float64, device="cpu")
-    raw_basis = chebyshev_first_kind_basis(coordinates, order)
-    stabilized_basis, _ = deterministic_reduced_qr(raw_basis)
-
-    target_device = torch.device("cpu" if device is None else device)
-    runtime_basis = stabilized_basis.to(device=target_device, dtype=runtime_dtype)
-    runtime_basis.requires_grad_(False)
-    if runtime_basis.shape != (sample_count, order):
-        raise RuntimeError(
-            f"unexpected basis shape {tuple(runtime_basis.shape)}; expected {(sample_count, order)}"
-        )
-    if not torch.isfinite(runtime_basis).all():
-        raise FloatingPointError("runtime basis contains a non-finite value")
-    return runtime_basis
+    kernel = get_basis_kernel(basis_family)
+    return kernel.build(
+        sample_count,
+        order,
+        runtime_dtype=runtime_dtype,
+        device=device,
+        version=version,
+    )
 
 
 @dataclass(frozen=True)
 class BasisCacheKey:
     sample_count: int
     order: int
+    basis_family: str
     version: str
     device_type: str
     device_index: Optional[int]
@@ -149,7 +100,7 @@ class BasisCacheKey:
 
 
 class BasisCache:
-    """In-memory cache keyed by geometry, version, device, and runtime dtype."""
+    """In-memory cache keyed by family, geometry, version, device, and runtime dtype."""
 
     def __init__(self) -> None:
         self._cache: Dict[BasisCacheKey, Tensor] = {}
@@ -162,11 +113,15 @@ class BasisCache:
         runtime_dtype: torch.dtype,
         device: Optional[DeviceLike],
         version: str,
+        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
     ) -> BasisCacheKey:
         target_device = torch.device("cpu" if device is None else device)
+        canonical_family = normalize_basis_family(basis_family)
+        get_basis_kernel(canonical_family)
         return BasisCacheKey(
             sample_count=sample_count,
             order=order,
+            basis_family=canonical_family,
             version=version,
             device_type=target_device.type,
             device_index=target_device.index,
@@ -181,6 +136,7 @@ class BasisCache:
         runtime_dtype: torch.dtype = torch.float64,
         device: Optional[DeviceLike] = None,
         version: str = BASIS_VERSION,
+        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
     ) -> Tensor:
         key = self.make_key(
             sample_count,
@@ -188,6 +144,7 @@ class BasisCache:
             runtime_dtype=runtime_dtype,
             device=device,
             version=version,
+            basis_family=basis_family,
         )
         if key not in self._cache:
             self._cache[key] = build_stabilized_basis(
@@ -196,6 +153,7 @@ class BasisCache:
                 runtime_dtype=runtime_dtype,
                 device=device,
                 version=version,
+                basis_family=basis_family,
             )
         return self._cache[key]
 
@@ -222,6 +180,7 @@ class BasisOwner(nn.Module):
         runtime_dtype: torch.dtype = torch.float64,
         device: Optional[DeviceLike] = None,
         version: str = BASIS_VERSION,
+        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
     ) -> Tensor:
         if not isinstance(name, str) or not name.isidentifier():
             raise ValueError(f"basis name must be a valid identifier; got {name!r}")
@@ -233,6 +192,7 @@ class BasisOwner(nn.Module):
             runtime_dtype=runtime_dtype,
             device=device,
             version=version,
+            basis_family=basis_family,
         )
         self.register_buffer(name, basis, persistent=False)
         return basis
