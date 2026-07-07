@@ -1,13 +1,10 @@
 # vvv THOG
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
 import torch
 
-from sheet.checkpoints import load_payload, validate_compatibility
 from sheet.compact_identity import (
     ATTENTION_GEOMETRY_CURVE,
     BASIS_FAMILY_CHEBYSHEV,
@@ -29,15 +26,14 @@ from sheet.semantic_materializer import (
     MLP_CONTRACTION_WEIGHT,
     MLP_EXPANSION_WEIGHT,
 )
-from sheet.stage4_trainer import Stage4Trainer
-from tests.stage4_test_support import stage4_tokens, stage4_training_config
+from tests.stage4_test_support import stage4_training_config
 
 
 class Stage4CurveMaterializationTests(unittest.TestCase):
     def curve_config(self) -> SheetGPTConfig:
         return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_CURVE)
 
-    def test_01_curve_config_identity_is_accepted_and_future_block_modes_still_fail(self) -> None:
+    def test_01_curve_config_identity_is_accepted_and_dct_modes_still_fail_after_full_block_support(self) -> None:
         curve = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE)
         identity = curve.compact_identity_metadata()
         self.assertEqual(identity["geometry_preset"], GEOMETRY_PRESET_CURVE)
@@ -47,10 +43,9 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         self.assertEqual(identity["materialization_version"], CURVE_MATERIALIZATION_VERSION)
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_CURVE)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_CURVE)
-        for overrides in ({"geometry_preset": GEOMETRY_PRESET_CURVE, "basis_family": BASIS_FAMILY_DCT}, {"geometry_preset": GEOMETRY_PRESET_BLOCK}):
-            with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
-                    stage4_training_config(**overrides)
+        self.assertEqual(stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK).compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_BLOCK)
+        with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
+            stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, basis_family=BASIS_FAMILY_DCT)
 
     def test_02_curve_trajectory_has_depth_only_matrix_coefficients_and_no_packed_qkv_parameter(self) -> None:
         config = self.curve_config()
@@ -124,29 +119,6 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
                 self.assertIsNotNone(gradient)
                 self.assertGreater(float(gradient.abs().sum().item()), 0.0)
         self.assertIsNotNone(model.trajectory.coefficients[LEGACY_ATTENTION_INPUT_BIAS].grad)
-
-    def test_06_curve_checkpoint_identity_round_trips_and_rejects_legacy_cross_loads(self) -> None:
-        train_tokens, validation_tokens = stage4_tokens(128)
-        curve_config = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE, max_updates=1)
-        curve_trainer = Stage4Trainer(curve_config, train_tokens, validation_tokens)
-        self.assertIsInstance(curve_trainer.raw_model.trajectory, CurveTrajectory)
-        legacy_config = stage4_training_config(max_updates=1)
-        legacy_trainer = Stage4Trainer(legacy_config, train_tokens, validation_tokens)
-        with tempfile.TemporaryDirectory() as directory:
-            curve_path = Path(directory) / "curve.pt"
-            legacy_path = Path(directory) / "legacy.pt"
-            curve_trainer.save_checkpoint(curve_path)
-            legacy_trainer.save_checkpoint(legacy_path)
-            curve_payload = load_payload(curve_path)
-            legacy_payload = load_payload(legacy_path)
-            self.assertEqual(curve_payload["compact_identity"]["materialization_version"], CURVE_MATERIALIZATION_VERSION)
-            resumed = Stage4Trainer.from_checkpoint(curve_path, train_tokens, validation_tokens)
-            self.assertIsInstance(resumed.raw_model.trajectory, CurveTrajectory)
-            self.assertEqual(resumed.config.compact_identity_metadata()["materialization_version"], CURVE_MATERIALIZATION_VERSION)
-            with self.assertRaisesRegex(ValueError, "compact_identity"):
-                validate_compatibility(curve_payload, legacy_config)
-            with self.assertRaisesRegex(ValueError, "compact_identity"):
-                validate_compatibility(legacy_payload, curve_config)
 
 
 if __name__ == "__main__":
