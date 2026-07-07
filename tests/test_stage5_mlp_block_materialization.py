@@ -50,7 +50,7 @@ class Stage5MlpBlockMaterializationTests(unittest.TestCase):
             geometry_preset=GEOMETRY_PRESET_MLP_BLOCK,
         )
 
-    def test_01_mlp_block_config_identity_is_accepted_and_future_block_or_dct_modes_still_fail(self) -> None:
+    def test_01_mlp_block_config_identity_is_accepted_and_dct_modes_still_fail_after_full_block_support(self) -> None:
         preset = stage4_training_config(geometry_preset=GEOMETRY_PRESET_MLP_BLOCK)
         identity = preset.compact_identity_metadata()
         self.assertEqual(identity["geometry_preset"], GEOMETRY_PRESET_MLP_BLOCK)
@@ -60,13 +60,9 @@ class Stage5MlpBlockMaterializationTests(unittest.TestCase):
         self.assertEqual(identity["materialization_version"], MLP_BLOCK_MATERIALIZATION_VERSION)
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_MLP_BLOCK)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_MLP_BLOCK)
-        for overrides in (
-            {"geometry_preset": GEOMETRY_PRESET_MLP_BLOCK, "basis_family": BASIS_FAMILY_DCT},
-            {"geometry_preset": GEOMETRY_PRESET_BLOCK},
-        ):
-            with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
-                    stage4_training_config(**overrides)
+        self.assertEqual(stage4_training_config(geometry_preset=GEOMETRY_PRESET_BLOCK).compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_BLOCK)
+        with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
+            stage4_training_config(geometry_preset=GEOMETRY_PRESET_MLP_BLOCK, basis_family=BASIS_FAMILY_DCT)
 
     def test_02_mlp_block_trajectory_keeps_attention_curve_coefficients_and_replaces_only_mlp_coefficients_with_blocks(self) -> None:
         config = self.mlp_block_config()
