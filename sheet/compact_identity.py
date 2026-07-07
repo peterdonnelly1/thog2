@@ -30,6 +30,7 @@ BASIS_FAMILY_CONVENTIONAL = "conventional"
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
 CURVE_MATERIALIZATION_VERSION = "curve_v1"
 MLP_BLOCK_MATERIALIZATION_VERSION = "mlp_block_v1"
+BLOCK_MATERIALIZATION_VERSION = "block_v1"
 COMPACT_MATERIALIZATION_VERSION = LEGACY_SHEET_COL_MATERIALIZATION_VERSION
 CONVENTIONAL_MATERIALIZATION_VERSION = "conventional_dense_v1"
 
@@ -138,6 +139,8 @@ def resolve_compact_selectors(*, geometry_preset: Optional[str] = None, attentio
         preset = GEOMETRY_PRESET_CURVE
     if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_CURVE and resolved_mlp == MLP_GEOMETRY_MLP_BLOCK:
         preset = GEOMETRY_PRESET_MLP_BLOCK
+    if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and resolved_mlp == MLP_GEOMETRY_MLP_BLOCK:
+        preset = GEOMETRY_PRESET_BLOCK
     resolved_basis = requested_basis or (BASIS_FAMILY_CONVENTIONAL if preset == GEOMETRY_PRESET_CONVENTIONAL else BASIS_FAMILY_CHEBYSHEV)
     if resolved_attention == ATTENTION_GEOMETRY_CONVENTIONAL or resolved_mlp == MLP_GEOMETRY_CONVENTIONAL:
         if preset != GEOMETRY_PRESET_CONVENTIONAL:
@@ -154,6 +157,8 @@ def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
         return CURVE_MATERIALIZATION_VERSION
     if selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
         return MLP_BLOCK_MATERIALIZATION_VERSION
+    if selectors.geometry_preset == GEOMETRY_PRESET_BLOCK:
+        return BLOCK_MATERIALIZATION_VERSION
     raise ValueError(f"unsupported compact materialization preset: {selectors.geometry_preset!r}")
 
 
@@ -161,10 +166,11 @@ def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
     curve = selectors.geometry_preset == GEOMETRY_PRESET_CURVE and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
     mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    if legacy or curve or mlp_block:
+    block = selectors.geometry_preset == GEOMETRY_PRESET_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    if legacy or curve or mlp_block or block:
         return
     raise ValueError(
-        "Stage 5 supports only legacy_sheet_col, curve, or mlp_block materialization with chebyshev basis; "
+        "Stage 5b supports only legacy_sheet_col, curve, mlp_block, or block materialization with chebyshev basis; "
         f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
     )
 
