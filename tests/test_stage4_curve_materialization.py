@@ -15,7 +15,6 @@ from sheet.compact_identity import (
     CURVE_MATERIALIZATION_VERSION,
     GEOMETRY_PRESET_BLOCK,
     GEOMETRY_PRESET_CURVE,
-    GEOMETRY_PRESET_MLP_BLOCK,
     MLP_GEOMETRY_CURVE,
 )
 from sheet.curve_trajectory import CURVE_MATRIX_FAMILIES, CurveTrajectory
@@ -36,18 +35,7 @@ from tests.stage4_test_support import stage4_tokens, stage4_training_config
 
 class Stage4CurveMaterializationTests(unittest.TestCase):
     def curve_config(self) -> SheetGPTConfig:
-        return SheetGPTConfig(
-            block_size=8,
-            vocab_size=32,
-            n_layer=4,
-            n_head=2,
-            n_embd=16,
-            dropout=0.0,
-            bias=True,
-            depth_order=3,
-            base_row_order=8,
-            geometry_preset=GEOMETRY_PRESET_CURVE,
-        )
+        return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_CURVE)
 
     def test_01_curve_config_identity_is_accepted_and_future_block_modes_still_fail(self) -> None:
         curve = stage4_training_config(geometry_preset=GEOMETRY_PRESET_CURVE)
@@ -57,17 +45,11 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         self.assertEqual(identity["mlp_geometry"], MLP_GEOMETRY_CURVE)
         self.assertEqual(identity["basis_family"], BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(identity["materialization_version"], CURVE_MATERIALIZATION_VERSION)
-
         explicit = stage4_training_config(attention_geometry=ATTENTION_GEOMETRY_CURVE, mlp_geometry=MLP_GEOMETRY_CURVE)
         self.assertEqual(explicit.compact_identity_metadata()["geometry_preset"], GEOMETRY_PRESET_CURVE)
-
-        for overrides in (
-            {"geometry_preset": GEOMETRY_PRESET_CURVE, "basis_family": BASIS_FAMILY_DCT},
-            {"geometry_preset": GEOMETRY_PRESET_MLP_BLOCK},
-            {"geometry_preset": GEOMETRY_PRESET_BLOCK},
-        ):
+        for overrides in ({"geometry_preset": GEOMETRY_PRESET_CURVE, "basis_family": BASIS_FAMILY_DCT}, {"geometry_preset": GEOMETRY_PRESET_BLOCK}):
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 4 supports only"):
+                with self.assertRaisesRegex(ValueError, "Stage 5 supports only"):
                     stage4_training_config(**overrides)
 
     def test_02_curve_trajectory_has_depth_only_matrix_coefficients_and_no_packed_qkv_parameter(self) -> None:
@@ -103,14 +85,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         torch.testing.assert_close(query[2, 3], manual_query, rtol=0.0, atol=0.0)
         torch.testing.assert_close(trajectory.direct_value(ATTENTION_QUERY_WEIGHT, layer_index, 2, 3), query[2, 3], rtol=0.0, atol=0.0)
         packed = trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, layer_index)
-        reconstructed = torch.cat(
-            (
-                trajectory.materialize(ATTENTION_QUERY_WEIGHT, layer_index),
-                trajectory.materialize(ATTENTION_KEY_WEIGHT, layer_index),
-                trajectory.materialize(ATTENTION_VALUE_WEIGHT, layer_index),
-            ),
-            dim=0,
-        )
+        reconstructed = torch.cat((trajectory.materialize(ATTENTION_QUERY_WEIGHT, layer_index), trajectory.materialize(ATTENTION_KEY_WEIGHT, layer_index), trajectory.materialize(ATTENTION_VALUE_WEIGHT, layer_index)), dim=0)
         torch.testing.assert_close(packed, reconstructed, rtol=0.0, atol=0.0)
         self.assertEqual(tuple(trajectory.materialize_vector(LEGACY_ATTENTION_INPUT_BIAS, layer_index).shape), (3 * config.n_embd,))
 
@@ -120,14 +95,7 @@ class Stage4CurveMaterializationTests(unittest.TestCase):
         report = model.parameter_report()
         width = model.config.n_embd
         depth_order = model.config.depth_order
-        curve_matrix_coefficients = depth_order * (
-            width * width
-            + width * width
-            + width * width
-            + width * width
-            + (4 * width) * width
-            + width * (4 * width)
-        )
+        curve_matrix_coefficients = depth_order * (width * width + width * width + width * width + width * width + (4 * width) * width + width * (4 * width))
         legacy_vector_coefficients = 312
         conventional_parameters = 672
         self.assertEqual(report["matrix_sheet_coefficients"], curve_matrix_coefficients)
