@@ -94,7 +94,7 @@ class Stage1CompactIdentityTests(unittest.TestCase):
         self.assertEqual(resolved.mlp_geometry, MLP_GEOMETRY_MLP_BLOCK)
         self.assertEqual(resolved.basis_family, BASIS_FAMILY_DCT)
 
-    def test_invalid_identity_values_and_stage1_unsupported_materializations_fail(self) -> None:
+    def test_invalid_identity_values_and_stage4_unsupported_materializations_fail(self) -> None:
         invalid_requests = (
             {"geometry_preset": "tesseract"},
             {"attention_geometry": "qkv_role_basis"},
@@ -106,15 +106,18 @@ class Stage1CompactIdentityTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     resolve_compact_selectors(**request)
 
+        stage4_training_config(geometry_preset="curve")
+        stage4_training_config(attention_geometry="curve", mlp_geometry="curve")
         unsupported_training_configs = (
-            {"geometry_preset": "curve"},
             {"geometry_preset": "legacy_sheet_col", "attention_geometry": "curve"},
             {"geometry_preset": "legacy_sheet_col", "mlp_geometry": "mlp_block"},
             {"geometry_preset": "legacy_sheet_col", "basis_family": "dct"},
+            {"geometry_preset": "mlp_block"},
+            {"geometry_preset": "block"},
         )
         for overrides in unsupported_training_configs:
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "Stage 1 supports only"):
+                with self.assertRaisesRegex(ValueError, "Stage 4 supports only"):
                     stage4_training_config(**overrides)
 
     def test_dense_rejects_compact_fields_except_conventional(self) -> None:
