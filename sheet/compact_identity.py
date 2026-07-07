@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .basis import BASIS_VERSION
+from .basis_kernel import BASIS_FAMILY_DCT as KERNEL_BASIS_FAMILY_DCT, DCT_BASIS_VERSION, basis_version_for_family
 
 
 GEOMETRY_PRESET_LEGACY_SHEET_COL = "legacy_sheet_col"
@@ -25,7 +26,7 @@ MLP_GEOMETRY_MLP_BLOCK = "mlp_block"
 MLP_GEOMETRY_CONVENTIONAL = "conventional"
 
 BASIS_FAMILY_CHEBYSHEV = "chebyshev"
-BASIS_FAMILY_DCT = "dct"
+BASIS_FAMILY_DCT = KERNEL_BASIS_FAMILY_DCT
 BASIS_FAMILY_CONVENTIONAL = "conventional"
 
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
@@ -36,31 +37,10 @@ BLOCK_MATERIALIZATION_VERSION = "block_v1"
 COMPACT_MATERIALIZATION_VERSION = LEGACY_SHEET_COL_MATERIALIZATION_VERSION
 CONVENTIONAL_MATERIALIZATION_VERSION = "conventional_dense_v1"
 
-GEOMETRY_PRESETS = (
-    GEOMETRY_PRESET_LEGACY_SHEET_COL,
-    GEOMETRY_PRESET_CURVE,
-    GEOMETRY_PRESET_MLP_BLOCK,
-    GEOMETRY_PRESET_HEAD_AWARE_BLOCK,
-    GEOMETRY_PRESET_BLOCK,
-    GEOMETRY_PRESET_CONVENTIONAL,
-)
-ATTENTION_GEOMETRIES = (
-    ATTENTION_GEOMETRY_LEGACY_SHEET_COL,
-    ATTENTION_GEOMETRY_CURVE,
-    ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
-    ATTENTION_GEOMETRY_CONVENTIONAL,
-)
-MLP_GEOMETRIES = (
-    MLP_GEOMETRY_LEGACY_SHEET_COL,
-    MLP_GEOMETRY_CURVE,
-    MLP_GEOMETRY_MLP_BLOCK,
-    MLP_GEOMETRY_CONVENTIONAL,
-)
-BASIS_FAMILIES = (
-    BASIS_FAMILY_CHEBYSHEV,
-    BASIS_FAMILY_DCT,
-    BASIS_FAMILY_CONVENTIONAL,
-)
+GEOMETRY_PRESETS = (GEOMETRY_PRESET_LEGACY_SHEET_COL, GEOMETRY_PRESET_CURVE, GEOMETRY_PRESET_MLP_BLOCK, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, GEOMETRY_PRESET_BLOCK, GEOMETRY_PRESET_CONVENTIONAL)
+ATTENTION_GEOMETRIES = (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, ATTENTION_GEOMETRY_CURVE, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, ATTENTION_GEOMETRY_CONVENTIONAL)
+MLP_GEOMETRIES = (MLP_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_CURVE, MLP_GEOMETRY_MLP_BLOCK, MLP_GEOMETRY_CONVENTIONAL)
+BASIS_FAMILIES = (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_CONVENTIONAL)
 
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
     GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
@@ -170,16 +150,28 @@ def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
     raise ValueError(f"unsupported compact materialization preset: {selectors.geometry_preset!r}")
 
 
+def normalize_compact_basis_version(selectors: ResolvedCompactSelectors, basis_version: str) -> str:
+    if selectors.basis_family == BASIS_FAMILY_CONVENTIONAL:
+        return basis_version
+    expected_version = basis_version_for_family(selectors.basis_family)
+    if selectors.basis_family == BASIS_FAMILY_DCT and basis_version == BASIS_VERSION:
+        return DCT_BASIS_VERSION
+    if basis_version != expected_version:
+        raise ValueError(f"basis_version mismatch for basis_family={selectors.basis_family!r}: expected {expected_version!r}, got {basis_version!r}")
+    return basis_version
+
+
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
-    legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    curve = selectors.geometry_preset == GEOMETRY_PRESET_CURVE and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    head_aware = selectors.geometry_preset == GEOMETRY_PRESET_HEAD_AWARE_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
-    block = selectors.geometry_preset == GEOMETRY_PRESET_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and selectors.basis_family == BASIS_FAMILY_CHEBYSHEV
+    supported_basis = selectors.basis_family in (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT)
+    legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
+    curve = selectors.geometry_preset == GEOMETRY_PRESET_CURVE and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and supported_basis
+    mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_CURVE and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
+    head_aware = selectors.geometry_preset == GEOMETRY_PRESET_HEAD_AWARE_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_CURVE and supported_basis
+    block = selectors.geometry_preset == GEOMETRY_PRESET_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
     if legacy or curve or mlp_block or head_aware or block:
         return
     raise ValueError(
-        "Stage 6 supports only legacy_sheet_col, curve, mlp_block, head_aware_block, or block materialization with chebyshev basis; "
+        "Stage 7 supports only legacy_sheet_col, curve, mlp_block, head_aware_block, or block materialization with chebyshev or dct basis; "
         f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
     )
 
@@ -214,8 +206,7 @@ def compact_identity_metadata(*, n_layer: int, n_embd: int, n_head: int, depth_o
     selectors = resolve_compact_selectors(geometry_preset=geometry_preset, attention_geometry=attention_geometry, mlp_geometry=mlp_geometry, basis_family=basis_family)
     if require_stage1_sheet_support:
         validate_current_sheet_support(selectors)
-    if basis_version != BASIS_VERSION:
-        raise ValueError(f"unsupported basis_version: {basis_version}")
+    basis_version = normalize_compact_basis_version(selectors, basis_version)
     heads = head_metadata(n_embd, n_head)
     return CompactIdentity(
         requested_geometry_preset=selectors.requested_geometry_preset,
