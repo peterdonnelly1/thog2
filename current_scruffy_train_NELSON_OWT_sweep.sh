@@ -3,16 +3,19 @@ set -euo pipefail
 
 # vvv THOG
 # Run the NELSON OpenWebText comparison sweep through the consolidated OWT wrapper.
-# Fairness target is equal training-token budget: every case uses the same steps, batch, accumulation, and block size.
-# DENSE defaults to a standard L12 baseline because DENSE L144 Adam state does not fit on scruffy's 16GB GPU.
+# Fairness target is equal training-token budget per optimizer step, not equal depth, parameter count, or wall-clock time.
+# DENSE defaults to a practical L12 baseline; compact cases use larger microbatches to work the GPU harder without changing tokens/update.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
 
 EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"
 STEPS="${NELSON_STEPS:-25}"
-BATCH_SIZE="${NELSON_BATCH_SIZE:-3}"
-GRADIENT_ACCUMULATION_STEPS="${NELSON_GRADIENT_ACCUMULATION_STEPS:-160}"
+BLOCK_SIZE="${NELSON_BLOCK_SIZE:-1024}"
+DENSE_BATCH_SIZE="${NELSON_DENSE_BATCH_SIZE:-3}"
+DENSE_GRADIENT_ACCUMULATION_STEPS="${NELSON_DENSE_GRADIENT_ACCUMULATION_STEPS:-160}"
+COMPACT_BATCH_SIZE="${NELSON_COMPACT_BATCH_SIZE:-4}"
+COMPACT_GRADIENT_ACCUMULATION_STEPS="${NELSON_COMPACT_GRADIENT_ACCUMULATION_STEPS:-120}"
 EVAL_ITERS="${NELSON_EVAL_ITERS:-5}"
 EVAL_INTERVAL="${NELSON_EVAL_INTERVAL:-5}"
 LOG_INTERVAL="${NELSON_LOG_INTERVAL:-1}"
@@ -24,7 +27,6 @@ N_EMBD="${NELSON_N_EMBD:-768}"
 DENSE_N_LAYER="${NELSON_DENSE_N_LAYER:-12}"
 DENSE_N_HEAD="${NELSON_DENSE_N_HEAD:-12}"
 DENSE_N_EMBD="${NELSON_DENSE_N_EMBD:-768}"
-BLOCK_SIZE="${NELSON_BLOCK_SIZE:-1024}"
 DEPTH_ORDER="${NELSON_DEPTH_ORDER:-32}"
 BASE_ROW_ORDER="${NELSON_BASE_ROW_ORDER:-64}"
 MLP_CHANNEL_ORDER="${NELSON_MLP_CHANNEL_ORDER:-256}"
@@ -44,9 +46,9 @@ Runs the NELSON all-cases OWT sweep on scruffy with W&B logging enabled.
 
 Options:
   -n STEPS=${STEPS}
-  -b BATCH_SIZE=${BATCH_SIZE}
-  -A GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS}
   -C BLOCK_SIZE=${BLOCK_SIZE}
+  -b COMPACT_BATCH_SIZE=${COMPACT_BATCH_SIZE}
+  -A COMPACT_GRADIENT_ACCUMULATION_STEPS=${COMPACT_GRADIENT_ACCUMULATION_STEPS}
   -L N_LAYER=${N_LAYER}                         compact case layer count
   -H N_HEAD=${N_HEAD}                           compact case head count
   -D N_EMBD=${N_EMBD}                           compact case embedding width
@@ -62,6 +64,8 @@ Options:
   -h show this help
 
 Environment overrides:
+  NELSON_DENSE_BATCH_SIZE=${DENSE_BATCH_SIZE}
+  NELSON_DENSE_GRADIENT_ACCUMULATION_STEPS=${DENSE_GRADIENT_ACCUMULATION_STEPS}
   NELSON_DENSE_N_LAYER=${DENSE_N_LAYER}
   NELSON_DENSE_N_HEAD=${DENSE_N_HEAD}
   NELSON_DENSE_N_EMBD=${DENSE_N_EMBD}
@@ -69,12 +73,12 @@ Environment overrides:
 EOF
 }
 
-while getopts ":n:b:A:C:L:H:D:P:Q:Y:u:e:w:k:x:s:h" option; do
+while getopts ":n:C:b:A:L:H:D:P:Q:Y:u:e:w:k:x:s:h" option; do
   case "$option" in
     n) STEPS="$OPTARG" ;;
-    b) BATCH_SIZE="$OPTARG" ;;
-    A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;;
     C) BLOCK_SIZE="$OPTARG" ;;
+    b) COMPACT_BATCH_SIZE="$OPTARG" ;;
+    A) COMPACT_GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;;
     L) N_LAYER="$OPTARG" ;;
     H) N_HEAD="$OPTARG" ;;
     D) N_EMBD="$OPTARG" ;;
@@ -100,7 +104,14 @@ case "$DRY_RUN" in true|false) ;; *) echo "DRY_RUN must be true or false." >&2; 
 case "$STOP_ON_FAILURE" in true|false) ;; *) echo "STOP_ON_FAILURE must be true or false." >&2; exit 2 ;; esac
 case "$RUN_DENSE" in true|false) ;; *) echo "NELSON_RUN_DENSE must be true or false." >&2; exit 2 ;; esac
 
-TOKENS_PER_UPDATE=$((BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
+DENSE_TOKENS_PER_UPDATE=$((DENSE_BATCH_SIZE * DENSE_GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
+COMPACT_TOKENS_PER_UPDATE=$((COMPACT_BATCH_SIZE * COMPACT_GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
+if (( DENSE_TOKENS_PER_UPDATE != COMPACT_TOKENS_PER_UPDATE )); then
+  echo "Dense and compact tokens/update differ: dense=${DENSE_TOKENS_PER_UPDATE}, compact=${COMPACT_TOKENS_PER_UPDATE}" >&2
+  echo "Use equal products: batch * accumulation * block_size." >&2
+  exit 2
+fi
+TOKENS_PER_UPDATE="$COMPACT_TOKENS_PER_UPDATE"
 TOTAL_TRAINING_TOKENS=$((TOKENS_PER_UPDATE * STEPS))
 SWEEP_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 SWEEP_LOG_DIR="logs/${SWEEP_TIMESTAMP}_${EXPERIMENT_PREFIX}_SCRUFFY_OWT_SWEEP"
@@ -108,29 +119,42 @@ mkdir -p "$SWEEP_LOG_DIR"
 SUMMARY_PATH="$SWEEP_LOG_DIR/summary.tsv"
 printf 'case\tstatus\tseconds\n' > "$SUMMARY_PATH"
 
-COMMON_ARGS=(
+BASE_ARGS=(
   -n "$STEPS"
-  -b "$BATCH_SIZE"
-  -A "$GRADIENT_ACCUMULATION_STEPS"
   -C "$BLOCK_SIZE"
+  -u "$EVAL_ITERS"
+  -e "$EVAL_INTERVAL"
+  -l "$LOG_INTERVAL"
+  -w "$WARMUP_ITERS"
+  -k "$CHECKPOINT_INTERVAL"
+  -I wandb
+  -M "$WANDB_MODE"
+  -W true
+  -x "$DRY_RUN"
+)
+
+COMPACT_ARGS=(
+  "${BASE_ARGS[@]}"
+  -b "$COMPACT_BATCH_SIZE"
+  -A "$COMPACT_GRADIENT_ACCUMULATION_STEPS"
   -L "$N_LAYER"
   -H "$N_HEAD"
   -D "$N_EMBD"
   -P "$DEPTH_ORDER"
   -Q "$BASE_ROW_ORDER"
   -Y "$MLP_CHANNEL_ORDER"
-  -u "$EVAL_ITERS"
-  -e "$EVAL_INTERVAL"
-  -l "$LOG_INTERVAL"
-  -w "$WARMUP_ITERS"
-  -k "$CHECKPOINT_INTERVAL"
   -r "$RESIDUAL_INIT_POLICY"
   -z "$RESIDUAL_INIT_DEPTH_SOURCE"
   -Z "$RESIDUAL_INIT_DEPTH_VALUE"
-  -I wandb
-  -M "$WANDB_MODE"
-  -W true
-  -x "$DRY_RUN"
+)
+
+DENSE_ARGS=(
+  "${BASE_ARGS[@]}"
+  -b "$DENSE_BATCH_SIZE"
+  -A "$DENSE_GRADIENT_ACCUMULATION_STEPS"
+  -L "$DENSE_N_LAYER"
+  -H "$DENSE_N_HEAD"
+  -D "$DENSE_N_EMBD"
 )
 
 run_case() {
@@ -140,7 +164,7 @@ run_case() {
   echo "===== START ${label} tokens/update=${TOKENS_PER_UPDATE} total_tokens=${TOTAL_TRAINING_TOKENS} ====="
   start_time="$(date +%s)"
   set +e
-  THOG2_EXPERIMENT_PREFIX="$EXPERIMENT_PREFIX" bash current_scruffy_train_OWT.sh "${COMMON_ARGS[@]}" "$@" "${EXTRA_ARGS[@]}" 2>&1 | tee "$SWEEP_LOG_DIR/${label}.combined.log"
+  THOG2_EXPERIMENT_PREFIX="$EXPERIMENT_PREFIX" bash current_scruffy_train_OWT.sh "$@" "${EXTRA_ARGS[@]}" 2>&1 | tee "$SWEEP_LOG_DIR/${label}.combined.log"
   status=${PIPESTATUS[0]}
   set -e
   end_time="$(date +%s)"
@@ -155,27 +179,27 @@ run_case() {
 cat <<EOF
 NELSON scruffy OWT sweep
   wandb:               enabled mode=${WANDB_MODE}
-  fairness:            equal training tokens; not equal parameter count or wall-clock time
+  fairness:            equal tokens/update; not equal depth, parameter count, or wall-clock time
   steps:               ${STEPS}
   tokens/update:       ${TOKENS_PER_UPDATE}
   total train tokens:  ${TOTAL_TRAINING_TOKENS}
-  compact shape:       L${N_LAYER} H${N_HEAD} D${N_EMBD} C${BLOCK_SIZE} P${DEPTH_ORDER} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER}
-  dense baseline:      L${DENSE_N_LAYER} H${DENSE_N_HEAD} D${DENSE_N_EMBD} C${BLOCK_SIZE} run=${RUN_DENSE}
+  dense baseline:      L${DENSE_N_LAYER} H${DENSE_N_HEAD} D${DENSE_N_EMBD} C${BLOCK_SIZE} b${DENSE_BATCH_SIZE} A${DENSE_GRADIENT_ACCUMULATION_STEPS} run=${RUN_DENSE}
+  compact shape:       L${N_LAYER} H${N_HEAD} D${N_EMBD} C${BLOCK_SIZE} P${DEPTH_ORDER} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER} b${COMPACT_BATCH_SIZE} A${COMPACT_GRADIENT_ACCUMULATION_STEPS}
   summary:             ${SUMMARY_PATH}
 EOF
 
 if [[ "$RUN_DENSE" == true ]]; then
-  run_case DENSE_L${DENSE_N_LAYER} -O dense -p curve -B chebyshev -L "$DENSE_N_LAYER" -H "$DENSE_N_HEAD" -D "$DENSE_N_EMBD"
+  run_case DENSE_L${DENSE_N_LAYER} "${DENSE_ARGS[@]}" -O dense -p curve -B chebyshev
 fi
-run_case CHEBY_SHEET_COL -O sheet -p legacy_sheet_col -B chebyshev
-run_case DCT_SHEET_COL -O sheet -p legacy_sheet_col -B dct
-run_case CHEBY_CURVE -O sheet -p curve -B chebyshev
-run_case DCT_CURVE -O sheet -p curve -B dct
-run_case CHEBY_MLP_BLOCK -O sheet -p mlp_block -B chebyshev
-run_case DCT_MLP_BLOCK -O sheet -p mlp_block -B dct
-run_case CHEBY_HEAD_BLOCK -O sheet -p head_aware_block -B chebyshev
-run_case DCT_HEAD_BLOCK -O sheet -p head_aware_block -B dct
-run_case CHEBY_BLOCK -O sheet -p block -B chebyshev
-run_case DCT_BLOCK -O sheet -p block -B dct
+run_case CHEBY_SHEET_COL "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B chebyshev
+run_case DCT_SHEET_COL "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B dct
+run_case CHEBY_CURVE "${COMPACT_ARGS[@]}" -O sheet -p curve -B chebyshev
+run_case DCT_CURVE "${COMPACT_ARGS[@]}" -O sheet -p curve -B dct
+run_case CHEBY_MLP_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B chebyshev
+run_case DCT_MLP_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B dct
+run_case CHEBY_HEAD_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B chebyshev
+run_case DCT_HEAD_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B dct
+run_case CHEBY_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p block -B chebyshev
+run_case DCT_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p block -B dct
 
 cat "$SUMMARY_PATH"
