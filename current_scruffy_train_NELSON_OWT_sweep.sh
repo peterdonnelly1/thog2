@@ -4,7 +4,7 @@ set -euo pipefail
 # vvv THOG
 # Run the NELSON OpenWebText comparison sweep through the consolidated OWT wrapper.
 # Fairness target is equal training-token budget: every case uses the same steps, batch, accumulation, and block size.
-# This is not equal compute time: DENSE pays for fully independent layers and will be much heavier per token.
+# DENSE defaults to a standard L12 baseline because DENSE L144 Adam state does not fit on scruffy's 16GB GPU.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
@@ -21,6 +21,9 @@ CHECKPOINT_INTERVAL="${NELSON_CHECKPOINT_INTERVAL:-0}"
 N_LAYER="${NELSON_N_LAYER:-144}"
 N_HEAD="${NELSON_N_HEAD:-12}"
 N_EMBD="${NELSON_N_EMBD:-768}"
+DENSE_N_LAYER="${NELSON_DENSE_N_LAYER:-12}"
+DENSE_N_HEAD="${NELSON_DENSE_N_HEAD:-12}"
+DENSE_N_EMBD="${NELSON_DENSE_N_EMBD:-768}"
 BLOCK_SIZE="${NELSON_BLOCK_SIZE:-1024}"
 DEPTH_ORDER="${NELSON_DEPTH_ORDER:-32}"
 BASE_ROW_ORDER="${NELSON_BASE_ROW_ORDER:-64}"
@@ -31,6 +34,7 @@ RESIDUAL_INIT_DEPTH_VALUE="${NELSON_RESIDUAL_INIT_DEPTH_VALUE:-12}"
 DRY_RUN="${NELSON_DRY_RUN:-false}"
 STOP_ON_FAILURE="${NELSON_STOP_ON_FAILURE:-true}"
 WANDB_MODE="${NELSON_WANDB_MODE:-online}"
+RUN_DENSE="${NELSON_RUN_DENSE:-true}"
 
 usage() {
   cat <<EOF
@@ -43,9 +47,9 @@ Options:
   -b BATCH_SIZE=${BATCH_SIZE}
   -A GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS}
   -C BLOCK_SIZE=${BLOCK_SIZE}
-  -L N_LAYER=${N_LAYER}
-  -H N_HEAD=${N_HEAD}
-  -D N_EMBD=${N_EMBD}
+  -L N_LAYER=${N_LAYER}                         compact case layer count
+  -H N_HEAD=${N_HEAD}                           compact case head count
+  -D N_EMBD=${N_EMBD}                           compact case embedding width
   -P DEPTH_ORDER=${DEPTH_ORDER}
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
   -Y MLP_CHANNEL_ORDER=${MLP_CHANNEL_ORDER}
@@ -56,6 +60,12 @@ Options:
   -x DRY_RUN=${DRY_RUN}
   -s STOP_ON_FAILURE=${STOP_ON_FAILURE}
   -h show this help
+
+Environment overrides:
+  NELSON_DENSE_N_LAYER=${DENSE_N_LAYER}
+  NELSON_DENSE_N_HEAD=${DENSE_N_HEAD}
+  NELSON_DENSE_N_EMBD=${DENSE_N_EMBD}
+  NELSON_RUN_DENSE=${RUN_DENSE}
 EOF
 }
 
@@ -88,6 +98,7 @@ EXTRA_ARGS=("$@")
 
 case "$DRY_RUN" in true|false) ;; *) echo "DRY_RUN must be true or false." >&2; exit 2 ;; esac
 case "$STOP_ON_FAILURE" in true|false) ;; *) echo "STOP_ON_FAILURE must be true or false." >&2; exit 2 ;; esac
+case "$RUN_DENSE" in true|false) ;; *) echo "NELSON_RUN_DENSE must be true or false." >&2; exit 2 ;; esac
 
 TOKENS_PER_UPDATE=$((BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
 TOTAL_TRAINING_TOKENS=$((TOKENS_PER_UPDATE * STEPS))
@@ -144,15 +155,18 @@ run_case() {
 cat <<EOF
 NELSON scruffy OWT sweep
   wandb:               enabled mode=${WANDB_MODE}
-  fairness:            equal training tokens
+  fairness:            equal training tokens; not equal parameter count or wall-clock time
   steps:               ${STEPS}
   tokens/update:       ${TOKENS_PER_UPDATE}
   total train tokens:  ${TOTAL_TRAINING_TOKENS}
-  shape:               L${N_LAYER} H${N_HEAD} D${N_EMBD} C${BLOCK_SIZE} P${DEPTH_ORDER} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER}
+  compact shape:       L${N_LAYER} H${N_HEAD} D${N_EMBD} C${BLOCK_SIZE} P${DEPTH_ORDER} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER}
+  dense baseline:      L${DENSE_N_LAYER} H${DENSE_N_HEAD} D${DENSE_N_EMBD} C${BLOCK_SIZE} run=${RUN_DENSE}
   summary:             ${SUMMARY_PATH}
 EOF
 
-run_case DENSE -O dense -p curve -B chebyshev
+if [[ "$RUN_DENSE" == true ]]; then
+  run_case DENSE_L${DENSE_N_LAYER} -O dense -p curve -B chebyshev -L "$DENSE_N_LAYER" -H "$DENSE_N_HEAD" -D "$DENSE_N_EMBD"
+fi
 run_case CHEBY_SHEET_COL -O sheet -p legacy_sheet_col -B chebyshev
 run_case DCT_SHEET_COL -O sheet -p legacy_sheet_col -B dct
 run_case CHEBY_CURVE -O sheet -p curve -B chebyshev
