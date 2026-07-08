@@ -14,7 +14,10 @@ from sheet.training_config import TrainingConfig
 class _TinyModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.bad_weight = torch.nn.Parameter(torch.tensor([1.0]))
+        # vvv THOG
+        # Match the synthetic four-value diagnostic gradient installed by the tests.
+        self.bad_weight = torch.nn.Parameter(torch.ones(4))
+        # ^^^ THOG
 
 
 class _FakeDistributed:
