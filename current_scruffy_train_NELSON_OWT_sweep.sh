@@ -3,8 +3,8 @@ set -euo pipefail
 
 # vvv THOG
 # Run the NELSON OpenWebText comparison sweep through the consolidated OWT wrapper.
-# Fairness target is equal training-token budget per optimizer step, not equal depth, parameter count, or wall-clock time.
-# DENSE defaults to a practical L12 baseline; compact cases use larger microbatches to work the GPU harder without changing tokens/update.
+# Fairness target is near-equal training-token budget per optimizer step, not equal depth, parameter count, or wall-clock time.
+# DENSE defaults to a practical L12 baseline; compact cases use larger microbatches to work the GPU harder without changing tokens/update much.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
@@ -16,6 +16,7 @@ DENSE_BATCH_SIZE="${NELSON_DENSE_BATCH_SIZE:-3}"
 DENSE_GRADIENT_ACCUMULATION_STEPS="${NELSON_DENSE_GRADIENT_ACCUMULATION_STEPS:-160}"
 COMPACT_BATCH_SIZE="${NELSON_COMPACT_BATCH_SIZE:-4}"
 COMPACT_GRADIENT_ACCUMULATION_STEPS="${NELSON_COMPACT_GRADIENT_ACCUMULATION_STEPS:-120}"
+TOKEN_TOLERANCE_PCT="${NELSON_TOKEN_TOLERANCE_PCT:-3}"
 EVAL_ITERS="${NELSON_EVAL_ITERS:-5}"
 EVAL_INTERVAL="${NELSON_EVAL_INTERVAL:-5}"
 LOG_INTERVAL="${NELSON_LOG_INTERVAL:-1}"
@@ -69,6 +70,7 @@ Environment overrides:
   NELSON_DENSE_N_LAYER=${DENSE_N_LAYER}
   NELSON_DENSE_N_HEAD=${DENSE_N_HEAD}
   NELSON_DENSE_N_EMBD=${DENSE_N_EMBD}
+  NELSON_TOKEN_TOLERANCE_PCT=${TOKEN_TOLERANCE_PCT}
   NELSON_RUN_DENSE=${RUN_DENSE}
 EOF
 }
@@ -103,21 +105,32 @@ EXTRA_ARGS=("$@")
 case "$DRY_RUN" in true|false) ;; *) echo "DRY_RUN must be true or false." >&2; exit 2 ;; esac
 case "$STOP_ON_FAILURE" in true|false) ;; *) echo "STOP_ON_FAILURE must be true or false." >&2; exit 2 ;; esac
 case "$RUN_DENSE" in true|false) ;; *) echo "NELSON_RUN_DENSE must be true or false." >&2; exit 2 ;; esac
+if [[ ! "$TOKEN_TOLERANCE_PCT" =~ ^[0-9]+$ ]]; then
+  echo "NELSON_TOKEN_TOLERANCE_PCT must be a non-negative integer percent." >&2
+  exit 2
+fi
 
 DENSE_TOKENS_PER_UPDATE=$((DENSE_BATCH_SIZE * DENSE_GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
 COMPACT_TOKENS_PER_UPDATE=$((COMPACT_BATCH_SIZE * COMPACT_GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
-if (( DENSE_TOKENS_PER_UPDATE != COMPACT_TOKENS_PER_UPDATE )); then
-  echo "Dense and compact tokens/update differ: dense=${DENSE_TOKENS_PER_UPDATE}, compact=${COMPACT_TOKENS_PER_UPDATE}" >&2
-  echo "Use equal products: batch * accumulation * block_size." >&2
+MAX_TOKENS_PER_UPDATE="$DENSE_TOKENS_PER_UPDATE"
+if (( COMPACT_TOKENS_PER_UPDATE > MAX_TOKENS_PER_UPDATE )); then
+  MAX_TOKENS_PER_UPDATE="$COMPACT_TOKENS_PER_UPDATE"
+fi
+TOKEN_DELTA=$((DENSE_TOKENS_PER_UPDATE - COMPACT_TOKENS_PER_UPDATE))
+if (( TOKEN_DELTA < 0 )); then TOKEN_DELTA=$((-TOKEN_DELTA)); fi
+TOKEN_TOLERANCE=$((MAX_TOKENS_PER_UPDATE * TOKEN_TOLERANCE_PCT / 100))
+if (( TOKEN_DELTA > TOKEN_TOLERANCE )); then
+  echo "Dense and compact tokens/update differ beyond ${TOKEN_TOLERANCE_PCT}%: dense=${DENSE_TOKENS_PER_UPDATE}, compact=${COMPACT_TOKENS_PER_UPDATE}" >&2
+  echo "Use near-equal products: batch * accumulation * block_size." >&2
   exit 2
 fi
-TOKENS_PER_UPDATE="$COMPACT_TOKENS_PER_UPDATE"
-TOTAL_TRAINING_TOKENS=$((TOKENS_PER_UPDATE * STEPS))
+TOTAL_DENSE_TRAINING_TOKENS=$((DENSE_TOKENS_PER_UPDATE * STEPS))
+TOTAL_COMPACT_TRAINING_TOKENS=$((COMPACT_TOKENS_PER_UPDATE * STEPS))
 SWEEP_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 SWEEP_LOG_DIR="logs/${SWEEP_TIMESTAMP}_${EXPERIMENT_PREFIX}_SCRUFFY_OWT_SWEEP"
 mkdir -p "$SWEEP_LOG_DIR"
 SUMMARY_PATH="$SWEEP_LOG_DIR/summary.tsv"
-printf 'case\tstatus\tseconds\n' > "$SUMMARY_PATH"
+printf 'case\tstatus\tseconds\ttokens_per_update\ttotal_tokens\n' > "$SUMMARY_PATH"
 
 BASE_ARGS=(
   -n "$STEPS"
@@ -159,9 +172,11 @@ DENSE_ARGS=(
 
 run_case() {
   local label="$1"
-  shift
+  local tokens_per_update="$2"
+  local total_tokens="$3"
+  shift 3
   local start_time end_time elapsed status
-  echo "===== START ${label} tokens/update=${TOKENS_PER_UPDATE} total_tokens=${TOTAL_TRAINING_TOKENS} ====="
+  echo "===== START ${label} tokens/update=${tokens_per_update} total_tokens=${total_tokens} ====="
   start_time="$(date +%s)"
   set +e
   THOG2_EXPERIMENT_PREFIX="$EXPERIMENT_PREFIX" bash current_scruffy_train_OWT.sh "$@" "${EXTRA_ARGS[@]}" 2>&1 | tee "$SWEEP_LOG_DIR/${label}.combined.log"
@@ -169,7 +184,7 @@ run_case() {
   set -e
   end_time="$(date +%s)"
   elapsed=$((end_time - start_time))
-  printf '%s\t%s\t%s\n' "$label" "$status" "$elapsed" >> "$SUMMARY_PATH"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$status" "$elapsed" "$tokens_per_update" "$total_tokens" >> "$SUMMARY_PATH"
   echo "===== END ${label} status=${status} seconds=${elapsed} ====="
   if [[ "$status" != 0 && "$STOP_ON_FAILURE" == true ]]; then
     exit "$status"
@@ -179,27 +194,30 @@ run_case() {
 cat <<EOF
 NELSON scruffy OWT sweep
   wandb:               enabled mode=${WANDB_MODE}
-  fairness:            equal tokens/update; not equal depth, parameter count, or wall-clock time
+  fairness:            near-equal tokens/update within ${TOKEN_TOLERANCE_PCT}%; not equal depth, parameter count, or wall-clock time
+  dense tokens/update: ${DENSE_TOKENS_PER_UPDATE}
+  compact tokens/update: ${COMPACT_TOKENS_PER_UPDATE}
+  token delta:         ${TOKEN_DELTA}
   steps:               ${STEPS}
-  tokens/update:       ${TOKENS_PER_UPDATE}
-  total train tokens:  ${TOTAL_TRAINING_TOKENS}
+  dense total tokens:  ${TOTAL_DENSE_TRAINING_TOKENS}
+  compact total tokens:${TOTAL_COMPACT_TRAINING_TOKENS}
   dense baseline:      L${DENSE_N_LAYER} H${DENSE_N_HEAD} D${DENSE_N_EMBD} C${BLOCK_SIZE} b${DENSE_BATCH_SIZE} A${DENSE_GRADIENT_ACCUMULATION_STEPS} run=${RUN_DENSE}
   compact shape:       L${N_LAYER} H${N_HEAD} D${N_EMBD} C${BLOCK_SIZE} P${DEPTH_ORDER} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER} b${COMPACT_BATCH_SIZE} A${COMPACT_GRADIENT_ACCUMULATION_STEPS}
   summary:             ${SUMMARY_PATH}
 EOF
 
 if [[ "$RUN_DENSE" == true ]]; then
-  run_case DENSE_L${DENSE_N_LAYER} "${DENSE_ARGS[@]}" -O dense -p curve -B chebyshev
+  run_case DENSE_L${DENSE_N_LAYER} "$DENSE_TOKENS_PER_UPDATE" "$TOTAL_DENSE_TRAINING_TOKENS" "${DENSE_ARGS[@]}" -O dense -p curve -B chebyshev
 fi
-run_case CHEBY_SHEET_COL "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B chebyshev
-run_case DCT_SHEET_COL "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B dct
-run_case CHEBY_CURVE "${COMPACT_ARGS[@]}" -O sheet -p curve -B chebyshev
-run_case DCT_CURVE "${COMPACT_ARGS[@]}" -O sheet -p curve -B dct
-run_case CHEBY_MLP_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B chebyshev
-run_case DCT_MLP_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B dct
-run_case CHEBY_HEAD_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B chebyshev
-run_case DCT_HEAD_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B dct
-run_case CHEBY_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p block -B chebyshev
-run_case DCT_BLOCK "${COMPACT_ARGS[@]}" -O sheet -p block -B dct
+run_case CHEBY_SHEET_COL "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B chebyshev
+run_case DCT_SHEET_COL "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p legacy_sheet_col -B dct
+run_case CHEBY_CURVE "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p curve -B chebyshev
+run_case DCT_CURVE "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p curve -B dct
+run_case CHEBY_MLP_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B chebyshev
+run_case DCT_MLP_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p mlp_block -B dct
+run_case CHEBY_HEAD_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B chebyshev
+run_case DCT_HEAD_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p head_aware_block -B dct
+run_case CHEBY_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p block -B chebyshev
+run_case DCT_BLOCK "$COMPACT_TOKENS_PER_UPDATE" "$TOTAL_COMPACT_TRAINING_TOKENS" "${COMPACT_ARGS[@]}" -O sheet -p block -B dct
 
 cat "$SUMMARY_PATH"
