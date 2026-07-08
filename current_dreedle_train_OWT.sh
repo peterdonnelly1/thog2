@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # vvv THOG
-# Current dreedle OpenWebText training wrapper.
+# Current dreedle OpenWebText training wrapper for the consolidated Stage 8-capable runner.
 # Defaults are deliberately non-tiny: SHEET L144 H12 D768 C1024, batch 3, global accumulation 160.
 # Dreedle runtime defaults: float16, sdpa. Dense baseline is available with -O dense.
 # Logging is explicit: -I tensorboard|wandb|none. TensorBoard writes under THOG2_CURVE_ROOT, default curves/.
@@ -10,11 +10,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-RUN_MODULE="run_thog2_owt_stage8"
+RUN_MODULE="run_thog2_owt"
 HOST_LABEL="dreedle"
 MODEL_TYPE="sheet"
 RUN_MODE="fresh"
 RUN_NAME=""
+EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"
 DATASET_NAME="openwebtext"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 CHECKPOINT_ROOT="checkpoints"
@@ -192,7 +193,7 @@ TRAIN_ARGS=(
   --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
   --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
   --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
-  --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --dtype "$DTYPE"
+  --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
   --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
   "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
 )
@@ -207,6 +208,7 @@ if (( NUM_GPUS > 1 )); then COMMAND=("$PYTHON_BIN" -m torch.distributed.run --st
 cat <<EOF
 dreedle OWT train
   artifact:           $ARTIFACT_NAME
+  experiment:         $EXPERIMENT_PREFIX
   model/preset/basis: $MODEL_TYPE / $GEOMETRY_PRESET / $BASIS_FAMILY
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)

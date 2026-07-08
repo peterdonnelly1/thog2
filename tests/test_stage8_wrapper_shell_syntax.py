@@ -38,7 +38,8 @@ def test_stage8_training_wrappers_expose_mlp_channel_order_control() -> None:
         assert "-Y MLP_CHANNEL_ORDER" in text
         assert "--mlp-channel-order" in text
         assert "THOG2_MLP_CHANNEL_ORDER" in text
-        assert "Y$MLP_CHANNEL_ORDER" in text
+        assert "LOG_TIMESTAMP" in text
+        assert "--log-timestamp" in text
 
 
 def test_stage8_training_wrappers_auto_correct_dense_residual_source() -> None:
