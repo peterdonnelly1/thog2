@@ -17,6 +17,10 @@ from .residual_init import (
 CHECKPOINT_SCHEMA_VERSION = 1
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
+# vvv THOG
+# User-facing non-finite update handling modes; "raise" preserves strict historical behavior.
+NONFINITE_UPDATE_POLICIES = ("raise", "skip")
+# ^^^ THOG
 EXECUTION_OVERRIDE_FIELDS = {
     "device",
     "dtype",
@@ -27,6 +31,11 @@ EXECUTION_OVERRIDE_FIELDS = {
     "checkpoint_segment_size",
     "out_dir",
     "log_interval",
+    # vvv THOG
+    # Allow resume commands to change only the non-finite handling policy, not model identity.
+    "nonfinite_update_policy",
+    "max_nonfinite_update_skips",
+    # ^^^ THOG
 }
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
@@ -77,6 +86,11 @@ class TrainingConfig:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # vvv THOG
+    # Default to fail-fast; long runs may explicitly request checkpointed skip-and-continue behavior.
+    nonfinite_update_policy: str = "raise"
+    max_nonfinite_update_skips: int = 10
+    # ^^^ THOG
     eval_interval: int = 0
     eval_batches: int = 1
     checkpoint_interval: int = 0
@@ -116,6 +130,9 @@ class TrainingConfig:
             "checkpoint_interval",
             "model_seed",
             "data_seed",
+            # vvv THOG
+            "max_nonfinite_update_skips",
+            # ^^^ THOG
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -133,6 +150,13 @@ class TrainingConfig:
         self.residual_init_depth_source = residual_init.depth_source
         if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
             raise ValueError("dof_implied_depth residual init is only defined for SHEET")
+        # vvv THOG
+        if self.nonfinite_update_policy not in NONFINITE_UPDATE_POLICIES:
+            raise ValueError(
+                "nonfinite_update_policy must be one of "
+                f"{NONFINITE_UPDATE_POLICIES}; got {self.nonfinite_update_policy!r}"
+            )
+        # ^^^ THOG
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("dropout must be in [0, 1)")
         if self.learning_rate <= 0.0 or self.min_learning_rate < 0.0:

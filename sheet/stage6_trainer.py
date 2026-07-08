@@ -143,6 +143,36 @@ class Stage6Trainer(Stage4Trainer):
             metrics, elapsed = self._timed(self.train_one_update)
             training_seconds += elapsed
             completed_updates = self.state.completed_updates
+            # vvv THOG
+            # A skipped non-finite attempt advances the data stream but not completed_updates; checkpoint immediately.
+            if metrics.get("skipped_update"):
+                update_rows.append(
+                    {
+                        **metrics,
+                        "update_seconds": elapsed,
+                        "cumulative_training_seconds": training_seconds,
+                        "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                        "consumed_tokens": completed_updates * tokens_per_update,
+                    }
+                )
+                self._print_progress(
+                    run_id,
+                    "nonfinite_update_skipped",
+                    completed_updates=completed_updates,
+                    consumed_tokens=completed_updates * tokens_per_update,
+                    skipped_nonfinite_updates=int(metrics["skipped_nonfinite_updates"]),
+                    failed_update_attempts=int(metrics["failed_update_attempts"]),
+                    nonfinite_reason=str(metrics["nonfinite_reason"]),
+                    cumulative_training_seconds=training_seconds,
+                )
+                _, save_elapsed = self._timed(
+                    lambda: self.save_checkpoint(
+                        Path(self.config.out_dir) / "ckpt.pt"
+                    )
+                )
+                checkpoint_seconds += save_elapsed
+                continue
+            # ^^^ THOG
             update_rows.append(
                 {
                     **metrics,
@@ -281,6 +311,10 @@ class Stage6Trainer(Stage4Trainer):
                 "completed_updates": self.state.completed_updates,
                 "tokens_per_update": tokens_per_update,
                 "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                # vvv THOG
+                "skipped_nonfinite_updates": self.state.skipped_nonfinite_updates,
+                "failed_update_attempts": self.state.failed_update_attempts,
+                # ^^^ THOG
             },
             "timing": {
                 "training_seconds": training_seconds,

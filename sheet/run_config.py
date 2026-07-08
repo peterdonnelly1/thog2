@@ -12,7 +12,7 @@ from .residual_init import (
     ResidualInitConfig,
 )
 from .run_naming import DEFAULT_COMPONENT_LIMIT, artifact_paths, build_artifact_name
-from .training_config import TrainingConfig
+from .training_config import NONFINITE_UPDATE_POLICIES, TrainingConfig
 
 
 PUBLIC_MODEL_TYPES = ("dense", "sheet")
@@ -64,6 +64,11 @@ class OwtRunConfig:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # vvv THOG
+    # Expose fail-fast versus checkpointed skip handling at the run-config layer.
+    nonfinite_update_policy: str = "raise"
+    max_nonfinite_update_skips: int = 10
+    # ^^^ THOG
     dropout: float = 0.0
     bias: bool = True
 
@@ -93,6 +98,13 @@ class OwtRunConfig:
             raise ValueError("dtype must be float32, float16, or bfloat16")
         if self.device.startswith("cpu") and self.dtype == "float16":
             raise ValueError("float16 training is not supported on CPU")
+        # vvv THOG
+        if self.nonfinite_update_policy not in NONFINITE_UPDATE_POLICIES:
+            raise ValueError(
+                "nonfinite_update_policy must be one of "
+                f"{NONFINITE_UPDATE_POLICIES}; got {self.nonfinite_update_policy!r}"
+            )
+        # ^^^ THOG
 
         positive = (
             "max_iters",
@@ -117,6 +129,9 @@ class OwtRunConfig:
             "warmup_iters",
             "model_seed",
             "data_seed",
+            # vvv THOG
+            "max_nonfinite_update_skips",
+            # ^^^ THOG
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -246,6 +261,10 @@ class OwtRunConfig:
             beta1=self.beta1,
             beta2=self.beta2,
             grad_clip=self.grad_clip,
+            # vvv THOG
+            nonfinite_update_policy=self.nonfinite_update_policy,
+            max_nonfinite_update_skips=self.max_nonfinite_update_skips,
+            # ^^^ THOG
             eval_interval=self.eval_interval,
             eval_batches=self.eval_iters,
             checkpoint_interval=self.checkpoint_interval,

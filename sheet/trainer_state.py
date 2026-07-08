@@ -11,6 +11,11 @@ class TrainerState:
     best_validation_loss: float = float("inf")
     latest_validation_loss: Optional[float] = None
     latest_training_loss: Optional[float] = None
+    # vvv THOG
+    # Track non-finite update skips as checkpointed state, separate from completed optimizer steps.
+    skipped_nonfinite_updates: int = 0
+    failed_update_attempts: int = 0
+    # ^^^ THOG
 
 
 @dataclass(frozen=True)

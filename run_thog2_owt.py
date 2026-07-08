@@ -23,7 +23,7 @@ from sheet.residual_init import (
 )
 from sheet.run_config import OwtRunConfig
 from sheet.stage6_trainer import Stage6Trainer
-from sheet.training_config import TrainingConfig
+from sheet.training_config import NONFINITE_UPDATE_POLICIES, TrainingConfig
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 
 
@@ -222,6 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
+    # vvv THOG
+    parser.add_argument(
+        "--nonfinite-update-policy",
+        choices=NONFINITE_UPDATE_POLICIES,
+        default="raise",
+    )
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)
+    # ^^^ THOG
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
@@ -287,6 +295,10 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         beta1=arguments.beta1,
         beta2=arguments.beta2,
         grad_clip=arguments.grad_clip,
+        # vvv THOG
+        nonfinite_update_policy=arguments.nonfinite_update_policy,
+        max_nonfinite_update_skips=arguments.max_nonfinite_update_skips,
+        # ^^^ THOG
         dropout=arguments.dropout,
         bias=arguments.bias,
         model_seed=arguments.model_seed,
@@ -377,6 +389,12 @@ def main() -> int:
                 "checkpoint_segment_size": training_config.checkpoint_segment_size,
                 "out_dir": training_config.out_dir,
                 "log_interval": training_config.log_interval,
+                # vvv THOG
+                "nonfinite_update_policy": training_config.nonfinite_update_policy,
+                "max_nonfinite_update_skips": (
+                    training_config.max_nonfinite_update_skips
+                ),
+                # ^^^ THOG
             },
         )
     else:
@@ -431,6 +449,16 @@ def main() -> int:
                 "result": str(result_path),
                 "completed_updates": result["budget"]["completed_updates"],
                 "consumed_tokens": result["budget"]["consumed_tokens"],
+                # vvv THOG
+                "skipped_nonfinite_updates": result["budget"].get(
+                    "skipped_nonfinite_updates",
+                    0,
+                ),
+                "failed_update_attempts": result["budget"].get(
+                    "failed_update_attempts",
+                    0,
+                ),
+                # ^^^ THOG
                 "final_validation_loss": (
                     result["evaluations"][-1]["val"]
                     if result["evaluations"]
