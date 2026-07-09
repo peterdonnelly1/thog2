@@ -39,6 +39,17 @@ class _FakeOptimizer:
                 parameter.grad = None
 
 
+# vvv THOG
+# Minimal GradScaler stand-in for asserting that post-unscale skips reset scaler state.
+class _FakeScaler:
+    def __init__(self) -> None:
+        self.update_calls = 0
+
+    def update(self) -> None:
+        self.update_calls += 1
+# ^^^ THOG
+
+
 class _NonfiniteHarness(TrainerStepMixin):
     def __init__(self, *, policy: str = "raise", max_skips: int = 10) -> None:
         self.config = TrainingConfig(
@@ -49,6 +60,9 @@ class _NonfiniteHarness(TrainerStepMixin):
         self.distributed = _FakeDistributed()
         self.raw_model = _TinyModel()
         self.optimizer = _FakeOptimizer(self.raw_model)
+        # vvv THOG
+        self.scaler = _FakeScaler()
+        # ^^^ THOG
         self.events = []
 
     def _record(self, name, **payload):
@@ -84,6 +98,7 @@ class NonfiniteUpdatePolicyTests(unittest.TestCase):
         self.assertEqual(harness.state.completed_updates, 0)
         self.assertEqual(harness.state.failed_update_attempts, 1)
         self.assertIsNone(harness.raw_model.bad_weight.grad)
+        self.assertEqual(harness.scaler.update_calls, 0)
 
     def test_skip_policy_zeros_gradients_counts_the_skip_and_does_not_complete_an_update(self) -> None:
         harness = _NonfiniteHarness(policy="skip")
@@ -104,9 +119,29 @@ class NonfiniteUpdatePolicyTests(unittest.TestCase):
         self.assertEqual(harness.state.failed_update_attempts, 1)
         self.assertIsNone(harness.raw_model.bad_weight.grad)
         self.assertEqual(harness.optimizer.zero_grad_calls, 1)
+        self.assertEqual(harness.scaler.update_calls, 0)
         self.assertEqual(harness.events[0][0], "nonfinite_update_skipped")
         diagnostic_json = json.dumps(metrics["nonfinite_diagnostics"], sort_keys=True)
         self.assertIn("bad_weight", diagnostic_json)
+
+    def test_skip_policy_after_unscale_updates_grad_scaler_before_the_next_attempt(self) -> None:
+        harness = _NonfiniteHarness(policy="skip")
+        self._install_bad_gradient(harness)
+
+        metrics = harness._handle_nonfinite_update(
+            reason="gradient",
+            learning_rate=1.0e-4,
+            training_loss=4.5,
+            gradient_norm=None,
+            micro_step=None,
+            microbatch_starts=[(11, 22)],
+            scaler_unscaled=True,
+        )
+
+        self.assertEqual(metrics["skipped_update"], 1.0)
+        self.assertEqual(harness.scaler.update_calls, 1)
+        self.assertEqual(harness.optimizer.zero_grad_calls, 1)
+        self.assertIsNone(harness.raw_model.bad_weight.grad)
 
     def test_skip_policy_raises_after_the_configured_maximum_skips_is_reached(self) -> None:
         harness = _NonfiniteHarness(policy="skip", max_skips=1)
