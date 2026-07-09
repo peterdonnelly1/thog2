@@ -88,6 +88,10 @@ class TrainerStepMixin:
             )
         return reports
 
+    def _update_scaler_after_unscaled_skip(self, *, scaler_unscaled: bool) -> None:
+        if scaler_unscaled:
+            self.scaler.update()
+
     def _nonfinite_update_payload(
         self,
         *,
@@ -134,6 +138,7 @@ class TrainerStepMixin:
         gradient_norm: Optional[float],
         micro_step: Optional[int],
         microbatch_starts: List[Tuple[int, ...]],
+        scaler_unscaled: bool = False,
     ) -> Dict[str, Any]:
         payload = self._nonfinite_update_payload(
             reason=reason,
@@ -146,6 +151,7 @@ class TrainerStepMixin:
         self.state.failed_update_attempts += 1
         payload["failed_update_attempts"] = int(self.state.failed_update_attempts)
         if self.config.nonfinite_update_policy == "raise":
+            self._update_scaler_after_unscaled_skip(scaler_unscaled=scaler_unscaled)
             self.optimizer.zero_grad(set_to_none=True)
             raise FloatingPointError(
                 "non-finite update detected: "
@@ -156,11 +162,13 @@ class TrainerStepMixin:
                 f"unsupported nonfinite_update_policy: {self.config.nonfinite_update_policy!r}"
             )
         if self.state.skipped_nonfinite_updates >= self.config.max_nonfinite_update_skips:
+            self._update_scaler_after_unscaled_skip(scaler_unscaled=scaler_unscaled)
             self.optimizer.zero_grad(set_to_none=True)
             raise FloatingPointError(
                 "non-finite update skip limit exceeded: "
                 + json.dumps(payload, sort_keys=True)
             )
+        self._update_scaler_after_unscaled_skip(scaler_unscaled=scaler_unscaled)
         self.optimizer.zero_grad(set_to_none=True)
         self.state.skipped_nonfinite_updates += 1
         payload["skipped_nonfinite_updates"] = int(self.state.skipped_nonfinite_updates)
@@ -244,6 +252,7 @@ class TrainerStepMixin:
                 gradient_norm=None,
                 micro_step=None,
                 microbatch_starts=microbatch_starts,
+                scaler_unscaled=True,
             )
         # ^^^ THOG
 
@@ -269,6 +278,7 @@ class TrainerStepMixin:
                     gradient_norm=gradient_norm,
                     micro_step=None,
                     microbatch_starts=microbatch_starts,
+                    scaler_unscaled=True,
                 )
                 # ^^^ THOG
 
