@@ -59,7 +59,7 @@ N_HEAD_EXPLICIT=false
 N_EMBD_EXPLICIT=false
 
 usage() {
-  cat <<EOF
+  cat <<EOF_USAGE
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
@@ -93,7 +93,7 @@ Shape/runtime:
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
-  -P DEPTH_ORDER=${DEPTH_ORDER}
+  -P DEPTH_ORDER=${DEPTH_ORDER}                     single integer, comma list, or quoted space list
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
   -Y MLP_CHANNEL_ORDER=${MLP_CHANNEL_ORDER}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
@@ -113,7 +113,7 @@ Paths:
   -R RESULT_ROOT=${RESULT_ROOT}
   -x DRY_RUN=${DRY_RUN}
   -h show this help
-EOF
+EOF_USAGE
 }
 
 while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:p:B:v:a:m:L:H:D:C:P:Q:Y:S:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
@@ -138,6 +138,21 @@ validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
 validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; expected true or false." >&2; exit 2 ;; esac; }
 
+# vvv THOG
+DEPTH_ORDER_VALUES=()
+parse_depth_order_values() {
+  local raw_depth_orders="$1"
+  local normalized_depth_orders="${raw_depth_orders//,/ }"
+  local depth_order_value
+  for depth_order_value in $normalized_depth_orders; do
+    validate_positive_uint "$depth_order_value" "DEPTH_ORDER"
+    DEPTH_ORDER_VALUES+=("$depth_order_value")
+  done
+  (( ${#DEPTH_ORDER_VALUES[@]} > 0 )) || { echo "Invalid DEPTH_ORDER: empty value list." >&2; exit 2; }
+}
+parse_depth_order_values "$DEPTH_ORDER"
+# ^^^ THOG
+
 case "$MODEL_TYPE" in dense|sheet) ;; *) echo "MODEL_TYPE must be dense or sheet." >&2; exit 2 ;; esac
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$GEOMETRY_PRESET" in legacy_sheet_col|curve|head_aware_block|mlp_block|block) ;; *) echo "Bad GEOMETRY_PRESET: $GEOMETRY_PRESET" >&2; exit 2 ;; esac
@@ -147,7 +162,7 @@ case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION m
 case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
-for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$MLP_CHANNEL_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do validate_positive_uint "$setting" "numeric setting"; done
+for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$BASE_ROW_ORDER" "$MLP_CHANNEL_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE"; do validate_positive_uint "$setting" "numeric setting"; done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
@@ -159,12 +174,15 @@ if [[ "$MODEL_TYPE" == dense ]]; then
   [[ "$N_HEAD_EXPLICIT" == false ]] && N_HEAD=12
   [[ "$N_EMBD_EXPLICIT" == false ]] && N_EMBD=768
   [[ "$RESIDUAL_INIT_DEPTH_SOURCE" == dof_implied_depth ]] && RESIDUAL_INIT_DEPTH_SOURCE="true_layer_depth"
+  (( ${#DEPTH_ORDER_VALUES[@]} == 1 )) || { echo "Multiple -P values are only useful/supported for sheet runs, not dense." >&2; exit 2; }
 fi
 
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
 if [[ "$MODEL_TYPE" == sheet ]]; then
-  (( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
+  for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
+    (( depth_order_value <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER: P=${depth_order_value}, L=${N_LAYER}." >&2; exit 2; }
+  done
   (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
   (( MLP_CHANNEL_ORDER <= 4 * N_EMBD )) || { echo "MLP_CHANNEL_ORDER must not exceed 4*N_EMBD." >&2; exit 2; }
 fi
@@ -187,42 +205,57 @@ export THOG2_CURVE_ROOT="${THOG2_CURVE_ROOT:-curves}"
 export THOG2_MLP_CHANNEL_ORDER="$MLP_CHANNEL_ORDER"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-TRAIN_ARGS=(
-  --model-type "$MODEL_TYPE" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
-  --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
-  --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
-  --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
-  --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$DEPTH_ORDER" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
-  --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
-  --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
-  "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
-)
+# vvv THOG
+run_depth_order() {
+  local depth_order_value="$1"
+  local log_timestamp resolved_json artifact_name log_path
+  local -a train_args command
 
-LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-RESOLVED_JSON="$($PYTHON_BIN -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
-ARTIFACT_NAME="$(printf '%s' "$RESOLVED_JSON" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
-LOG_PATH="$(printf '%s' "$RESOLVED_JSON" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
-COMMAND=("$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP")
-if (( NUM_GPUS > 1 )); then COMMAND=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
+  train_args=(
+    --model-type "$MODEL_TYPE" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
+    --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
+    --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
+    --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
+    --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$depth_order_value" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
+    --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
+    --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
+    "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
+  )
 
-cat <<EOF
+  log_timestamp="$(date +%Y%m%d_%H%M%S)"
+  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --print-resolved-json)"
+  artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
+  log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp")
+  if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp"); fi
+
+  cat <<EOF_RUN
 scruffy OWT train
-  artifact:           $ARTIFACT_NAME
+  artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
   model/preset/basis: $MODEL_TYPE / $GEOMETRY_PRESET / $BASIS_FAMILY
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
-  shape:              L$N_LAYER H$N_HEAD D$N_EMBD C$BLOCK_SIZE P$DEPTH_ORDER Q$BASE_ROW_ORDER Y$MLP_CHANNEL_ORDER
+  shape:              L$N_LAYER H$N_HEAD D$N_EMBD C$BLOCK_SIZE P$depth_order_value Q$BASE_ROW_ORDER Y$MLP_CHANNEL_ORDER
   batch/accum/gpus:   $BATCH_SIZE / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
-  log:                $LOG_PATH
-EOF
+  log:                $log_path
+EOF_RUN
 
-if [[ "$DRY_RUN" == true ]]; then
-  "$PYTHON_BIN" -m "$RUN_MODULE" "${TRAIN_ARGS[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
-  printf 'DRY RUN:'; printf ' %q' "${COMMAND[@]}"; printf '\n'
-  exit 0
+  if [[ "$DRY_RUN" == true ]]; then
+    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --dry-run
+    printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$log_path")"
+  "${command[@]}" 2>&1 | tee "$log_path"
+}
+
+if (( ${#DEPTH_ORDER_VALUES[@]} > 1 )); then
+  echo "scruffy OWT depth-order sweep: P=${DEPTH_ORDER_VALUES[*]}"
 fi
-
-mkdir -p "$(dirname "$LOG_PATH")"
-"${COMMAND[@]}" 2>&1 | tee "$LOG_PATH"
+for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
+  run_depth_order "$depth_order_value"
+done
+# ^^^ THOG
