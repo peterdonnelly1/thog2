@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -21,20 +22,21 @@ from sheet.semantic_materializer import (
 class DepthCurveDiagnosticsTests(unittest.TestCase):
     def curve_model(self) -> SheetGPT:
         torch.manual_seed(8921)
-        return SheetGPT(
-            SheetGPTConfig(
-                block_size=8,
-                vocab_size=16,
-                n_layer=3,
-                n_head=2,
-                n_embd=4,
-                dropout=0.0,
-                bias=True,
-                depth_order=3,
-                base_row_order=4,
-                geometry_preset=GEOMETRY_PRESET_CURVE,
+        with patch.dict("os.environ", {"THOG2_MLP_CHANNEL_ORDER": "16"}):
+            return SheetGPT(
+                SheetGPTConfig(
+                    block_size=8,
+                    vocab_size=16,
+                    n_layer=3,
+                    n_head=2,
+                    n_embd=4,
+                    dropout=0.0,
+                    bias=True,
+                    depth_order=3,
+                    base_row_order=4,
+                    geometry_preset=GEOMETRY_PRESET_CURVE,
+                )
             )
-        )
 
     def test_01_curve_depth_summaries_return_six_big_weight_families_spanning_all_logical_layers(self) -> None:
         model = self.curve_model()
