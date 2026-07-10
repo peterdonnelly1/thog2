@@ -69,14 +69,31 @@ def _sample_indices(total_elements: int, sample_elements: int, device: torch.dev
     return torch.div(offsets * total_elements, count, rounding_mode="floor")
 
 
+# vvv THOG
+def _sampled_matrix_coefficients_to_cpu(coefficient: Tensor, sample_elements: int) -> Tuple[Tensor, int, int]:
+    if coefficient.ndim != 3:
+        raise ValueError("curve matrix coefficients must have shape [rows, cols, depth]")
+    output_rows, row_width, _ = coefficient.shape
+    total_elements = int(output_rows) * int(row_width)
+    cpu_indices = _sample_indices(total_elements, sample_elements, torch.device("cpu"))
+    row_indices = torch.div(cpu_indices, int(row_width), rounding_mode="floor").to(coefficient.device)
+    col_indices = torch.remainder(cpu_indices, int(row_width)).to(coefficient.device)
+    with torch.no_grad():
+        sampled_gpu = coefficient.detach()[row_indices, col_indices, :].float()
+        sampled_cpu = sampled_gpu.cpu()
+    return sampled_cpu, int(cpu_indices.numel()), total_elements
+# ^^^ THOG
+
+
 def _sampled_layer_mean_std(trajectory: CurveTrajectory, family_name: str, sample_elements: int) -> Tuple[Tuple[float, ...], Tuple[float, ...], int, int]:
     coefficient = trajectory.coefficients[family_name]
-    if coefficient.ndim != 3:
-        raise ValueError(f"curve family {family_name!r} must have [rows, cols, depth] coefficients")
-    total_elements = int(coefficient.shape[0]) * int(coefficient.shape[1])
-    indices = _sample_indices(total_elements, sample_elements, coefficient.device)
-    sampled_coefficients = coefficient.reshape(total_elements, coefficient.shape[2]).index_select(0, indices).float()
-    depth_basis = trajectory.depth_basis.to(device=sampled_coefficients.device, dtype=sampled_coefficients.dtype)
+    # vvv THOG
+    sampled_coefficients, sampled_count, total_elements = _sampled_matrix_coefficients_to_cpu(
+        coefficient,
+        sample_elements,
+    )
+    depth_basis = trajectory.depth_basis.detach().float().cpu()
+    # ^^^ THOG
     with torch.no_grad():
         generated_samples = depth_basis @ sampled_coefficients.transpose(0, 1)
         means = generated_samples.mean(dim=1)
@@ -84,7 +101,7 @@ def _sampled_layer_mean_std(trajectory: CurveTrajectory, family_name: str, sampl
     return (
         tuple(float(value) for value in means.detach().cpu().tolist()),
         tuple(float(value) for value in stds.detach().cpu().tolist()),
-        int(indices.numel()),
+        sampled_count,
         total_elements,
     )
 
