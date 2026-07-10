@@ -1,13 +1,15 @@
 # vvv THOG
 from __future__ import annotations
 
+import importlib.util
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import torch
 
 from sheet.compact_identity import GEOMETRY_PRESET_CURVE
-from sheet.depth_curve_diagnostics import curve_depth_summaries
+from sheet.depth_curve_diagnostics import curve_depth_summaries, write_depth_curve_local_viewer
 from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.semantic_materializer import (
     ATTENTION_KEY_WEIGHT,
@@ -71,6 +73,30 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
                     materialized = model.trajectory.materialize(summary.family_name, layer_index).float()
                     self.assertAlmostEqual(summary.means[layer_index], float(materialized.mean().item()), places=6)
                     self.assertAlmostEqual(summary.stds[layer_index], float(materialized.std(unbiased=False).item()), places=6)
+
+    # vvv THOG
+    def test_03_curve_depth_summaries_include_histograms_for_each_layer_for_interactive_local_plotly_viewer(self) -> None:
+        model = self.curve_model()
+        summaries = curve_depth_summaries(model, sample_elements=7, histogram_bins=5)
+        for summary in summaries:
+            with self.subTest(family=summary.family_name):
+                self.assertEqual(len(summary.histogram_edges), 6)
+                self.assertEqual(len(summary.histogram_counts_by_layer), 3)
+                for counts in summary.histogram_counts_by_layer:
+                    self.assertEqual(len(counts), 5)
+                    self.assertEqual(sum(counts), summary.sampled_elements)
+
+    @unittest.skipUnless(importlib.util.find_spec("plotly") is not None, "plotly is not installed")
+    def test_04_plotly_local_viewer_writes_index_and_per_family_html_files_for_easy_browser_navigation(self) -> None:
+        model = self.curve_model()
+        summaries = curve_depth_summaries(model, sample_elements=7, histogram_bins=5)
+        with tempfile.TemporaryDirectory() as directory:
+            index_path = write_depth_curve_local_viewer(summaries, output_root=__import__("pathlib").Path(directory), step=10, artifact_name="TEST_ARTIFACT")
+            self.assertTrue(index_path.exists())
+            self.assertIn("TEST_ARTIFACT", index_path.read_text(encoding="utf-8"))
+            self.assertIn("step_000010_W_q.html", index_path.read_text(encoding="utf-8"))
+            self.assertTrue((index_path.parent / "step_000010_W_q.html").exists())
+    # ^^^ THOG
 
 
 if __name__ == "__main__":
