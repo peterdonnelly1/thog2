@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import torch
@@ -87,14 +88,18 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
                     self.assertEqual(sum(counts), summary.sampled_elements)
 
     @unittest.skipUnless(importlib.util.find_spec("plotly") is not None, "plotly is not installed")
-    def test_04_plotly_local_viewer_writes_index_and_per_family_html_files_for_easy_browser_navigation(self) -> None:
+    def test_04_plotly_local_viewer_writes_structured_dashboard_and_per_family_html_files_for_easy_navigation(self) -> None:
         model = self.curve_model()
         summaries = curve_depth_summaries(model, sample_elements=7, histogram_bins=5)
         with tempfile.TemporaryDirectory() as directory:
-            index_path = write_depth_curve_local_viewer(summaries, output_root=__import__("pathlib").Path(directory), step=10, artifact_name="TEST_ARTIFACT")
+            index_path = write_depth_curve_local_viewer(summaries, output_root=Path(directory), step=10, artifact_name="TEST_ARTIFACT")
+            index_html = index_path.read_text(encoding="utf-8")
             self.assertTrue(index_path.exists())
-            self.assertIn("TEST_ARTIFACT", index_path.read_text(encoding="utf-8"))
-            self.assertIn("step_000010_W_q.html", index_path.read_text(encoding="utf-8"))
+            self.assertIn("TEST_ARTIFACT", index_html)
+            self.assertIn("Weight-family dashboard", index_html)
+            self.assertIn("Open full W_q chart", index_html)
+            self.assertIn("step_000010_W_q.html", index_html)
+            self.assertIn("<iframe src=\"step_000010_W_q.html\"", index_html)
             self.assertTrue((index_path.parent / "step_000010_W_q.html").exists())
     # ^^^ THOG
 
