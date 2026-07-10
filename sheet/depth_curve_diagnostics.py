@@ -295,6 +295,20 @@ def _summary_html_name(step: int, summary: DepthCurveSummary) -> str:
     return f"step_{step:06d}_{safe_label}.html"
 
 
+def _parse_summary_html_name(path: Path) -> Tuple[int, str] | None:
+    name = path.name
+    if not name.startswith("step_") or not name.endswith(".html"):
+        return None
+    pieces = name.removesuffix(".html").split("_", 2)
+    if len(pieces) != 3:
+        return None
+    try:
+        step = int(pieces[1])
+    except ValueError:
+        return None
+    return step, pieces[2]
+
+
 def write_depth_curve_plotly_html(summary: DepthCurveSummary, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure = depth_curve_plotly_figure(summary)
@@ -302,23 +316,72 @@ def write_depth_curve_plotly_html(summary: DepthCurveSummary, output_path: Path)
     return output_path
 
 
-def _depth_curve_link_table(output_root: Path) -> str:
-    rows = []
+def _depth_curve_snapshot_index(output_root: Path) -> Dict[str, Tuple[Tuple[int, str], ...]]:
+    rows: Dict[str, list[Tuple[int, str]]] = {}
     for path in sorted(output_root.glob("step_*.html")):
-        name = path.name
-        if not name.startswith("step_") or name == "index.html":
+        parsed = _parse_summary_html_name(path)
+        if parsed is None:
             continue
-        pieces = name.removesuffix(".html").split("_", 2)
-        if len(pieces) != 3:
+        step, label = parsed
+        rows.setdefault(label, []).append((step, path.name))
+    return {label: tuple(sorted(values)) for label, values in sorted(rows.items())}
+
+
+def _latest_by_family(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> Dict[str, Tuple[int, str]]:
+    return {label: values[-1] for label, values in snapshot_index.items() if values}
+
+
+def _family_cards(latest_by_family: Dict[str, Tuple[int, str]]) -> str:
+    cards = []
+    family_order = tuple(_DEPTH_CURVE_FAMILY_LABELS.values())
+    for label in family_order:
+        latest = latest_by_family.get(label)
+        if latest is None:
+            cards.append(
+                "<section class=\"family-card missing\">"
+                f"<h2>{escape(label)}</h2>"
+                "<p>No snapshot yet.</p>"
+                "</section>"
+            )
             continue
-        _, step, label = pieces
-        rows.append(
-            "<tr>"
-            f"<td>{escape(step)}</td>"
-            f"<td>{escape(label)}</td>"
-            f"<td><a href=\"{escape(name)}\">{escape(name)}</a></td>"
-            "</tr>"
+        step, file_name = latest
+        cards.append(
+            "<section class=\"family-card\">"
+            f"<h2>{escape(label)}</h2>"
+            f"<p><b>latest step:</b> {step}</p>"
+            f"<p><a class=\"button\" href=\"{escape(file_name)}\">Open full {escape(label)} chart</a></p>"
+            f"<iframe src=\"{escape(file_name)}\" loading=\"lazy\" title=\"{escape(label)} latest depth curve\"></iframe>"
+            "</section>"
         )
+    return "\n".join(cards)
+
+
+def _step_nav(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> str:
+    steps = sorted({step for values in snapshot_index.values() for step, _ in values})
+    if not steps:
+        return "<p>No snapshots yet.</p>"
+    links = []
+    for step in steps:
+        links.append(f"<a href=\"#step-{step:06d}\">{step}</a>")
+    return "\n".join(links)
+
+
+def _snapshot_tables(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> str:
+    family_order = tuple(_DEPTH_CURVE_FAMILY_LABELS.values())
+    steps = sorted({step for values in snapshot_index.values() for step, _ in values})
+    if not steps:
+        return ""
+    rows = []
+    for step in steps:
+        rows.append(f"<h3 id=\"step-{step:06d}\">step {step}</h3>")
+        rows.append("<div class=\"step-links\">")
+        for label in family_order:
+            matches = [file_name for candidate_step, file_name in snapshot_index.get(label, ()) if candidate_step == step]
+            if matches:
+                rows.append(f"<a class=\"button secondary\" href=\"{escape(matches[0])}\">{escape(label)}</a>")
+            else:
+                rows.append(f"<span class=\"button disabled\">{escape(label)}</span>")
+        rows.append("</div>")
     return "\n".join(rows)
 
 
@@ -329,13 +392,12 @@ def write_depth_curve_local_viewer(
     artifact_name: str,
 ) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
-    latest_links = []
     for summary in summaries:
         file_name = _summary_html_name(step, summary)
         write_depth_curve_plotly_html(summary, output_root / file_name)
-        latest_links.append(f"<li><a href=\"{escape(file_name)}\">{escape(summary.label)}</a></li>")
     index_path = output_root / "index.html"
-    table_rows = _depth_curve_link_table(output_root)
+    snapshot_index = _depth_curve_snapshot_index(output_root)
+    latest_by_family = _latest_by_family(snapshot_index)
     index_path.write_text(
         "\n".join(
             (
@@ -343,23 +405,40 @@ def write_depth_curve_local_viewer(
                 "<html>",
                 "<head>",
                 "  <meta charset=\"utf-8\">",
+                "  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
                 f"  <title>THOG depth curves — {escape(artifact_name)}</title>",
-                "  <style>body{font-family:sans-serif;margin:2rem;max-width:1200px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.35rem .6rem}code{background:#f3f3f3;padding:.1rem .25rem}</style>",
+                "  <style>",
+                "    :root{color-scheme:light dark;--bg:#101114;--fg:#f4f4f5;--muted:#a1a1aa;--card:#181a20;--line:#303442;--button:#2563eb;--button2:#374151}",
+                "    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;background:var(--bg);color:var(--fg)}",
+                "    header{position:sticky;top:0;z-index:10;background:rgba(16,17,20,.96);border-bottom:1px solid var(--line);padding:1rem 1.5rem}",
+                "    main{padding:1.5rem;max-width:1800px;margin:0 auto}",
+                "    h1{margin:.1rem 0 .35rem;font-size:1.45rem}h2{margin:.1rem 0 .4rem}h3{margin:1.5rem 0 .6rem}",
+                "    .meta{color:var(--muted);font-size:.95rem}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:1rem}",
+                "    .family-card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:1rem;box-shadow:0 2px 10px rgba(0,0,0,.2)}",
+                "    .family-card.missing{opacity:.55}.family-card iframe{width:100%;height:560px;border:1px solid var(--line);border-radius:8px;background:white}",
+                "    .button{display:inline-block;border-radius:999px;background:var(--button);color:white;text-decoration:none;padding:.45rem .75rem;margin:.15rem .2rem .15rem 0;font-weight:600}",
+                "    .button.secondary{background:var(--button2)}.button.disabled{display:inline-block;border-radius:999px;border:1px solid var(--line);color:var(--muted);padding:.45rem .75rem;margin:.15rem .2rem .15rem 0}",
+                "    code{background:#27272a;padding:.12rem .28rem;border-radius:4px}.step-links{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.8rem}",
+                "    nav{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.5rem}nav a{color:#93c5fd}",
+                "  </style>",
                 "</head>",
                 "<body>",
-                "  <h1>THOG depth curves</h1>",
-                f"  <p><b>artifact:</b> {escape(artifact_name)}</p>",
-                f"  <p><b>latest step:</b> {step}</p>",
-                "  <p>Serve locally with <code>python -m http.server 8787</code> from this directory, or open this file directly in Firefox.</p>",
-                "  <h2>Latest snapshot</h2>",
-                "  <ul>",
-                *latest_links,
-                "  </ul>",
-                "  <h2>All snapshots</h2>",
-                "  <table>",
-                "    <tr><th>step</th><th>family</th><th>file</th></tr>",
-                table_rows,
-                "  </table>",
+                "  <header>",
+                "    <h1>THOG depth curves</h1>",
+                f"    <div class=\"meta\"><b>artifact:</b> {escape(artifact_name)} &nbsp; <b>latest step:</b> {step}</div>",
+                "    <div class=\"meta\">Open a card to drill into a weight family, then use the layer slider inside the Plotly chart.</div>",
+                "    <nav>",
+                _step_nav(snapshot_index),
+                "    </nav>",
+                "  </header>",
+                "  <main>",
+                "    <h2>Weight-family dashboard</h2>",
+                "    <div class=\"grid\">",
+                _family_cards(latest_by_family),
+                "    </div>",
+                "    <h2>Snapshots by eval step</h2>",
+                _snapshot_tables(snapshot_index),
+                "  </main>",
                 "</body>",
                 "</html>",
             )
