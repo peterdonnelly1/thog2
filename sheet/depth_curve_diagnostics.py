@@ -360,29 +360,30 @@ def _step_nav(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> str:
     steps = sorted({step for values in snapshot_index.values() for step, _ in values})
     if not steps:
         return "<p>No snapshots yet.</p>"
-    links = []
-    for step in steps:
-        links.append(f"<a href=\"#step-{step:06d}\">{step}</a>")
-    return "\n".join(links)
+    return "\n".join(f"<a href=\"#step-{step:06d}\">{step}</a>" for step in steps)
 
 
-def _snapshot_tables(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> str:
+def _snapshot_rows(snapshot_index: Dict[str, Tuple[Tuple[int, str], ...]]) -> str:
     family_order = tuple(_DEPTH_CURVE_FAMILY_LABELS.values())
     steps = sorted({step for values in snapshot_index.values() for step, _ in values})
     if not steps:
-        return ""
+        return "<p>No snapshots yet.</p>"
     rows = []
     for step in steps:
-        rows.append(f"<h3 id=\"step-{step:06d}\">step {step}</h3>")
-        rows.append("<div class=\"step-links\">")
+        rows.append(f"<tr id=\"step-{step:06d}\"><th class=\"snapshot-step\">{step}</th><td class=\"snapshot-links\">")
         for label in family_order:
             matches = [file_name for candidate_step, file_name in snapshot_index.get(label, ()) if candidate_step == step]
             if matches:
                 rows.append(f"<a class=\"button secondary\" href=\"{escape(matches[0])}\">{escape(label)}</a>")
             else:
                 rows.append(f"<span class=\"button disabled\">{escape(label)}</span>")
-        rows.append("</div>")
-    return "\n".join(rows)
+        rows.append("</td></tr>")
+    return (
+        "<table class=\"snapshot-table\">"
+        "<thead><tr><th>step</th><th>families</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody>"
+        "</table>"
+    )
 
 
 def write_depth_curve_local_viewer(
@@ -410,16 +411,18 @@ def write_depth_curve_local_viewer(
                 "  <style>",
                 "    :root{color-scheme:light dark;--bg:#101114;--fg:#f4f4f5;--muted:#a1a1aa;--card:#181a20;--line:#303442;--button:#2563eb;--button2:#374151}",
                 "    body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;background:var(--bg);color:var(--fg)}",
-                "    header{position:sticky;top:0;z-index:10;background:rgba(16,17,20,.96);border-bottom:1px solid var(--line);padding:1rem 1.5rem}",
-                "    main{padding:1.5rem;max-width:1800px;margin:0 auto}",
-                "    h1{margin:.1rem 0 .35rem;font-size:1.45rem}h2{margin:.1rem 0 .4rem}h3{margin:1.5rem 0 .6rem}",
-                "    .meta{color:var(--muted);font-size:.95rem}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:1rem}",
-                "    .family-card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:1rem;box-shadow:0 2px 10px rgba(0,0,0,.2)}",
-                "    .family-card.missing{opacity:.55}.family-card iframe{width:100%;height:560px;border:1px solid var(--line);border-radius:8px;background:white}",
-                "    .button{display:inline-block;border-radius:999px;background:var(--button);color:white;text-decoration:none;padding:.45rem .75rem;margin:.15rem .2rem .15rem 0;font-weight:600}",
-                "    .button.secondary{background:var(--button2)}.button.disabled{display:inline-block;border-radius:999px;border:1px solid var(--line);color:var(--muted);padding:.45rem .75rem;margin:.15rem .2rem .15rem 0}",
-                "    code{background:#27272a;padding:.12rem .28rem;border-radius:4px}.step-links{display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.8rem}",
-                "    nav{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.5rem}nav a{color:#93c5fd}",
+                "    header{position:sticky;top:0;z-index:10;background:rgba(16,17,20,.96);border-bottom:1px solid var(--line);padding:.8rem 1.25rem}",
+                "    main{padding:1rem 1.25rem 1.5rem;max-width:1800px;margin:0 auto}",
+                "    h1{margin:.05rem 0 .25rem;font-size:1.35rem}h2{margin:.2rem 0 .55rem}p{margin:.25rem 0}",
+                "    .meta{color:var(--muted);font-size:.9rem}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:1rem}",
+                "    .family-card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:.85rem;box-shadow:0 2px 10px rgba(0,0,0,.2)}",
+                "    .family-card.missing{opacity:.55}.family-card iframe{width:100%;height:520px;border:1px solid var(--line);border-radius:8px;background:white}",
+                "    .button{display:inline-block;border-radius:999px;background:var(--button);color:white;text-decoration:none;padding:.32rem .58rem;margin:.08rem .12rem;font-size:.9rem;font-weight:650;line-height:1.15}",
+                "    .button.secondary{background:var(--button2)}.button.disabled{display:inline-block;border-radius:999px;border:1px solid var(--line);color:var(--muted);padding:.32rem .58rem;margin:.08rem .12rem;font-size:.9rem;line-height:1.15}",
+                "    code{background:#27272a;padding:.12rem .28rem;border-radius:4px}nav{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.35rem}nav a{color:#93c5fd}",
+                "    .snapshot-table{width:100%;border-collapse:collapse;margin-top:.2rem}.snapshot-table th,.snapshot-table td{border-top:1px solid var(--line);padding:.28rem .35rem;vertical-align:middle}",
+                "    .snapshot-table thead th{color:var(--muted);font-weight:700;text-align:left}.snapshot-step{width:5.5rem;text-align:right;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}",
+                "    .snapshot-links{display:flex;flex-wrap:wrap;align-items:center;gap:.12rem}.snapshot-section{margin-top:1.1rem}",
                 "  </style>",
                 "</head>",
                 "<body>",
@@ -436,8 +439,10 @@ def write_depth_curve_local_viewer(
                 "    <div class=\"grid\">",
                 _family_cards(latest_by_family),
                 "    </div>",
-                "    <h2>Snapshots by eval step</h2>",
-                _snapshot_tables(snapshot_index),
+                "    <section class=\"snapshot-section\">",
+                "      <h2>Snapshots by eval step</h2>",
+                _snapshot_rows(snapshot_index),
+                "    </section>",
                 "  </main>",
                 "</body>",
                 "</html>",
