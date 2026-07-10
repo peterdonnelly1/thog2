@@ -15,6 +15,8 @@ from .depth_curve_diagnostics import (
     curve_depth_summaries,
     depth_curve_figure,
     normalize_depth_curve_plot_mode,
+    normalize_depth_curve_renderer,
+    write_depth_curve_local_viewer,
 )
 from .stage6_source import (
     evaluation_metric_payload,
@@ -70,6 +72,29 @@ def _tensorboard_root(name: str) -> Path:
 # vvv THOG
 def _selected_depth_curve_plot_mode() -> str:
     return normalize_depth_curve_plot_mode(os.environ.get("THOG2_DEPTH_CURVE_PLOTS", "none"))
+
+
+def _selected_depth_curve_renderer() -> str:
+    return normalize_depth_curve_renderer(os.environ.get("THOG2_DEPTH_CURVE_RENDERER", "plotly"))
+
+
+def _depth_curve_local_html_enabled() -> bool:
+    value = os.environ.get("THOG2_DEPTH_CURVE_LOCAL_HTML", "false").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(
+        "THOG2_DEPTH_CURVE_LOCAL_HTML must be true or false; "
+        f"got {value!r}"
+    )
+
+
+def _depth_curve_local_root(run_name: str) -> Path:
+    configured = os.environ.get("THOG2_DEPTH_CURVE_LOCAL_ROOT")
+    if configured is not None and configured.strip():
+        return Path(configured)
+    return Path("logs") / run_name / "depth_curves"
 
 
 def _depth_curve_sample_elements() -> int:
@@ -343,7 +368,7 @@ class WandbTelemetry:
 
     # vvv THOG
     def log_depth_curve_figures(self, model: Any, step: int, *, final: bool) -> None:
-        if not self.enabled or self.backend == "none":
+        if not self.enabled:
             return
         mode = _selected_depth_curve_plot_mode()
         if mode == "none" or (mode == "final" and not final):
@@ -351,6 +376,17 @@ class WandbTelemetry:
         try:
             summaries = curve_depth_summaries(model, _depth_curve_sample_elements())
             if not summaries:
+                return
+            renderer = _selected_depth_curve_renderer()
+            if _depth_curve_local_html_enabled() and renderer in ("plotly", "both"):
+                index_path = write_depth_curve_local_viewer(
+                    summaries,
+                    _depth_curve_local_root(self.name),
+                    step,
+                    self.name,
+                )
+                print(f"THOG2 depth curve local viewer: {index_path}", flush=True)
+            if renderer not in ("matplotlib", "both") or self.backend == "none":
                 return
             import matplotlib.pyplot as plt
 
