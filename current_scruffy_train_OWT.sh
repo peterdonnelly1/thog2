@@ -225,6 +225,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 run_depth_order() {
   local depth_order_value="$1"
   local log_timestamp resolved_json artifact_name log_path depth_curve_local_root
+  local log_url viewer_url serve_url run_status
   local -a train_args command
 
   train_args=(
@@ -246,6 +247,9 @@ run_depth_order() {
   export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp"); fi
+  log_url="file://$(realpath -m "$log_path")"
+  viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"
+  serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
 
   cat <<EOF_RUN
 scruffy OWT train
@@ -255,12 +259,13 @@ scruffy OWT train
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
-  depth viewer:       $depth_curve_local_root/index.html
+  depth viewer:       $viewer_url
   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
+  served URL:         $serve_url
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              L$N_LAYER H$N_HEAD D$N_EMBD C$BLOCK_SIZE P$depth_order_value Q$BASE_ROW_ORDER Y$MLP_CHANNEL_ORDER
   batch/accum/gpus:   $BATCH_SIZE / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
-  log:                $log_path
+  log:                $log_url
 EOF_RUN
 
   if [[ "$DRY_RUN" == true ]]; then
@@ -270,7 +275,21 @@ EOF_RUN
   fi
 
   mkdir -p "$(dirname "$log_path")"
+  set +e
   "${command[@]}" 2>&1 | tee "$log_path"
+  run_status=${PIPESTATUS[0]}
+  set -e
+
+  cat <<EOF_DONE
+scruffy OWT run finished
+  status:             $run_status
+  artifact:           $artifact_name
+  log URL:            $log_url
+  depth viewer URL:   $viewer_url
+  serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
+  served URL:         $serve_url
+EOF_DONE
+  return "$run_status"
 }
 
 if (( ${#DEPTH_ORDER_VALUES[@]} > 1 )); then
