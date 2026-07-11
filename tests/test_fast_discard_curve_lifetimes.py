@@ -13,20 +13,29 @@ from sheet.training_model import TrainingSheetGPT
 
 class FastDiscardCurveLifetimeTests(unittest.TestCase):
     def curve_config(self, *, fast_discard: bool, bias: bool = True) -> SheetGPTConfig:
+        return SheetGPTConfig(
+            block_size=8,
+            vocab_size=32,
+            n_layer=4,
+            n_head=2,
+            n_embd=8,
+            dropout=0.0,
+            bias=bias,
+            depth_order=3,
+            base_row_order=4,
+            geometry_preset=GEOMETRY_PRESET_CURVE,
+            fast_discard=fast_discard,
+        )
+
+    def build_curve_model(
+        self,
+        *,
+        model_cls: type[SheetGPT],
+        fast_discard: bool,
+        bias: bool,
+    ) -> SheetGPT:
         with patch.dict("os.environ", {"THOG2_MLP_CHANNEL_ORDER": "16"}):
-            return SheetGPTConfig(
-                block_size=8,
-                vocab_size=32,
-                n_layer=4,
-                n_head=2,
-                n_embd=8,
-                dropout=0.0,
-                bias=bias,
-                depth_order=3,
-                base_row_order=4,
-                geometry_preset=GEOMETRY_PRESET_CURVE,
-                fast_discard=fast_discard,
-            )
+            return model_cls(self.curve_config(fast_discard=fast_discard, bias=bias))
 
     def assert_fast_discard_matches_reference(
         self,
@@ -36,8 +45,16 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
         bias: bool,
     ) -> None:
         torch.manual_seed(7319)
-        reference = model_cls(self.curve_config(fast_discard=False, bias=bias))
-        candidate = model_cls(self.curve_config(fast_discard=True, bias=bias))
+        reference = self.build_curve_model(
+            model_cls=model_cls,
+            fast_discard=False,
+            bias=bias,
+        )
+        candidate = self.build_curve_model(
+            model_cls=model_cls,
+            fast_discard=True,
+            bias=bias,
+        )
         candidate.load_state_dict(reference.state_dict())
         if hasattr(reference, "set_checkpoint_segment_size"):
             reference.set_checkpoint_segment_size(checkpoint_segment_size)
