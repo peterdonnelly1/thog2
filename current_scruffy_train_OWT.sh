@@ -3,7 +3,7 @@ set -euo pipefail
 
 # vvv THOG
 # Current scruffy OpenWebText training wrapper for the consolidated Stage 8-capable runner.
-# Defaults are deliberately non-tiny: SHEET L144 H12 D768 C1024, batch 3, global accumulation 160.
+# Defaults are deliberately non-tiny: SPECTRAL L144 H12 D768 C1024, batch 3, global accumulation 160.
 # Scruffy runtime defaults: bfloat16, flash2. Dense baseline is available with -O dense.
 # Logging is explicit: -I tensorboard|wandb|none. TensorBoard writes under THOG2_CURVE_ROOT, default curves/.
 # ^^^ THOG
@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 RUN_MODULE="run_thog2_owt"
 HOST_LABEL="scruffy"
-MODEL_TYPE="sheet"
+MODEL_TYPE="spectral"
 RUN_MODE="fresh"
 RUN_NAME=""
 EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"
@@ -69,7 +69,7 @@ usage() {
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
-  -O MODEL_TYPE=${MODEL_TYPE}                    dense | sheet
+  -O MODEL_TYPE=${MODEL_TYPE}                    dense | spectral
   -q RUN_MODE=${RUN_MODE}                        fresh | resume
   -g RUN_NAME=${RUN_NAME:-auto}
   -n STEPS=${STEPS}
@@ -93,6 +93,7 @@ Schedule/logging:
 
 Compact options:
   -p GEOMETRY_PRESET=${GEOMETRY_PRESET}             legacy_sheet_col | curve | head_aware_block | mlp_block | block
+                                                 single value, comma list, or quoted space list
   -B BASIS_FAMILY=${BASIS_FAMILY}                   chebyshev | dct
   -v BASIS_VERSION=${BASIS_VERSION}
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
@@ -151,6 +152,7 @@ validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; exp
 
 # vvv THOG
 DEPTH_ORDER_VALUES=()
+PRESET_VALUES=()
 parse_depth_order_values() {
   local raw_depth_orders="$1"
   local normalized_depth_orders="${raw_depth_orders//,/ }"
@@ -161,12 +163,24 @@ parse_depth_order_values() {
   done
   (( ${#DEPTH_ORDER_VALUES[@]} > 0 )) || { echo "Invalid DEPTH_ORDER: empty value list." >&2; exit 2; }
 }
+parse_geometry_preset_values() {
+  local raw_presets="$1"
+  local normalized_presets="${raw_presets//,/ }"
+  local preset_value
+  for preset_value in $normalized_presets; do
+    case "$preset_value" in legacy_sheet_col|curve|head_aware_block|mlp_block|block) PRESET_VALUES+=("$preset_value") ;; *) echo "Bad GEOMETRY_PRESET: $preset_value" >&2; exit 2 ;; esac
+  done
+  (( ${#PRESET_VALUES[@]} > 0 )) || { echo "Invalid GEOMETRY_PRESET: empty value list." >&2; exit 2; }
+}
 parse_depth_order_values "$DEPTH_ORDER"
+parse_geometry_preset_values "$GEOMETRY_PRESET"
 # ^^^ THOG
 
-case "$MODEL_TYPE" in dense|sheet) ;; *) echo "MODEL_TYPE must be dense or sheet." >&2; exit 2 ;; esac
+case "$MODEL_TYPE" in dense|spectral|sheet) ;; *) echo "MODEL_TYPE must be dense or spectral." >&2; exit 2 ;; esac
+[[ "$MODEL_TYPE" == sheet ]] && MODEL_TYPE="spectral"
+RUNNER_MODEL_TYPE="$MODEL_TYPE"
+[[ "$MODEL_TYPE" == spectral ]] && RUNNER_MODEL_TYPE="sheet"
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
-case "$GEOMETRY_PRESET" in legacy_sheet_col|curve|head_aware_block|mlp_block|block) ;; *) echo "Bad GEOMETRY_PRESET: $GEOMETRY_PRESET" >&2; exit 2 ;; esac
 case "$BASIS_FAMILY" in chebyshev|dct) ;; *) echo "BASIS_FAMILY must be chebyshev or dct." >&2; exit 2 ;; esac
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
 case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION must be tensorboard, wandb, or none." >&2; exit 2 ;; esac
@@ -189,12 +203,13 @@ if [[ "$MODEL_TYPE" == dense ]]; then
   [[ "$N_HEAD_EXPLICIT" == false ]] && N_HEAD=12
   [[ "$N_EMBD_EXPLICIT" == false ]] && N_EMBD=768
   [[ "$RESIDUAL_INIT_DEPTH_SOURCE" == dof_implied_depth ]] && RESIDUAL_INIT_DEPTH_SOURCE="true_layer_depth"
-  (( ${#DEPTH_ORDER_VALUES[@]} == 1 )) || { echo "Multiple -P values are only useful/supported for sheet runs, not dense." >&2; exit 2; }
+  (( ${#DEPTH_ORDER_VALUES[@]} == 1 )) || { echo "Multiple -P values are only useful/supported for spectral runs, not dense." >&2; exit 2; }
+  (( ${#PRESET_VALUES[@]} == 1 )) || { echo "Multiple -p values are only useful/supported for spectral runs, not dense." >&2; exit 2; }
 fi
 
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
-if [[ "$MODEL_TYPE" == sheet ]]; then
+if [[ "$MODEL_TYPE" == spectral ]]; then
   for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
     (( depth_order_value <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER: P=${depth_order_value}, L=${N_LAYER}." >&2; exit 2; }
   done
@@ -205,9 +220,6 @@ fi
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 BASIS_TAG="CHEBY"; [[ "$BASIS_FAMILY" == dct ]] && BASIS_TAG="DCT"
-PRESET_TAG="${GEOMETRY_PRESET^^}"; [[ "$GEOMETRY_PRESET" == legacy_sheet_col ]] && PRESET_TAG="SHEET_COL"
-[[ "$MODEL_TYPE" == dense ]] && RUN_TAG="DENSE" || RUN_TAG="${BASIS_TAG}_${PRESET_TAG}"
-[[ -z "$RUN_NAME" ]] && RUN_NAME="${RUN_TAG}_OWT"
 
 OPTIONAL_ARGS=()
 [[ -n "$ATTENTION_GEOMETRY" ]] && OPTIONAL_ARGS+=(--attention-geometry "$ATTENTION_GEOMETRY")
@@ -226,19 +238,25 @@ export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # vvv THOG
-run_depth_order() {
-  local depth_order_value="$1"
-  local log_timestamp resolved_json artifact_name log_path depth_curve_local_root
+run_preset_depth_order() {
+  local geometry_preset_value="$1"
+  local depth_order_value="$2"
+  local preset_tag run_tag run_name_value log_timestamp resolved_json artifact_name log_path depth_curve_local_root
   local log_url viewer_url serve_url run_status
   local -a train_args command
 
+  preset_tag="${geometry_preset_value^^}"; [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
+  [[ "$MODEL_TYPE" == dense ]] && run_tag="DENSE" || run_tag="${BASIS_TAG}_${preset_tag}"
+  run_name_value="$RUN_NAME"
+  [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
+
   train_args=(
-    --model-type "$MODEL_TYPE" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$RUN_NAME"
+    --model-type "$RUNNER_MODEL_TYPE" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$run_name_value"
     --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
     --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
     --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
     --n-layer "$N_LAYER" --n-head "$N_HEAD" --n-embd "$N_EMBD" --block-size "$BLOCK_SIZE" --depth-order "$depth_order_value" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
-    --geometry-preset "$GEOMETRY_PRESET" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
+    --geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
     --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$RESIDUAL_INIT_DEPTH_SOURCE" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
   )
@@ -259,7 +277,7 @@ run_depth_order() {
 scruffy OWT train
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
-  model/preset/basis: $MODEL_TYPE / $GEOMETRY_PRESET / $BASIS_FAMILY
+  model/preset/basis: $MODEL_TYPE / $geometry_preset_value / $BASIS_FAMILY
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)
   fast discard:       $FAST_DISCARD
@@ -297,10 +315,12 @@ EOF_DONE
   return "$run_status"
 }
 
-if (( ${#DEPTH_ORDER_VALUES[@]} > 1 )); then
-  echo "scruffy OWT depth-order sweep: P=${DEPTH_ORDER_VALUES[*]}"
+if (( ${#PRESET_VALUES[@]} > 1 || ${#DEPTH_ORDER_VALUES[@]} > 1 )); then
+  echo "scruffy OWT spectral sweep: p=${PRESET_VALUES[*]} P=${DEPTH_ORDER_VALUES[*]}"
 fi
-for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
-  run_depth_order "$depth_order_value"
+for geometry_preset_value in "${PRESET_VALUES[@]}"; do
+  for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
+    run_preset_depth_order "$geometry_preset_value" "$depth_order_value"
+  done
 done
 # ^^^ THOG
