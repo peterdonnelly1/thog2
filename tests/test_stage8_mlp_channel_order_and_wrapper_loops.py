@@ -34,6 +34,46 @@ def test_stage8_training_factory_passes_mlp_channel_order_into_actual_block_geom
     assert metadata[MLP_CONTRACTION_WEIGHT].input_order == 6
 
 
+def test_stage8_mixed_trajectories_treat_nested_curve_fallback_coefficients_as_compact_state(monkeypatch) -> None:
+    monkeypatch.delenv("THOG2_MLP_CHANNEL_ORDER", raising=False)
+    configs = (
+        OwtRunConfig(
+            model_type="sheet",
+            geometry_preset="mlp_block",
+            max_iters=20,
+            warmup_iters=1,
+            n_layer=4,
+            n_head=2,
+            n_embd=16,
+            depth_order=3,
+            base_row_order=8,
+            mlp_channel_order=6,
+            device="cpu",
+            dtype="float32",
+        ),
+        OwtRunConfig(
+            model_type="sheet",
+            geometry_preset=None,
+            attention_geometry="head_aware_block",
+            mlp_geometry="curve",
+            max_iters=20,
+            warmup_iters=1,
+            n_layer=4,
+            n_head=2,
+            n_embd=16,
+            depth_order=3,
+            base_row_order=8,
+            mlp_channel_order=6,
+            device="cpu",
+            dtype="float32",
+        ),
+    )
+    for config in configs:
+        training = config.to_training_config(vocab_size=64, world_size=1, out_dir=Path("out"))
+        model = build_training_model(training)
+        assert model.compact_state_violations() == ()
+
+
 def test_stage8_sheet_geometry_keeps_legacy_mlp_hidden_order_when_no_explicit_or_env_order_is_set(monkeypatch) -> None:
     monkeypatch.delenv("THOG2_MLP_CHANNEL_ORDER", raising=False)
     config = SheetGeometryConfig(n_layer=4, n_embd=16, n_head=2, depth_order=3, base_row_order=8)
