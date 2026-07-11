@@ -142,7 +142,7 @@ class TrainingConfig:
     def model_arguments(self) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {"block_size": self.block_size, "vocab_size": self.vocab_size, "n_layer": self.n_layer, "n_head": self.n_head, "n_embd": self.n_embd, "dropout": self.dropout, "bias": self.bias}
         if self.model_type == "thog2_sheet":
-            arguments.update({"depth_order": self.depth_order, "base_row_order": self.base_row_order, "basis_version": self.basis_version})
+            arguments.update({"depth_order": self.depth_order, "base_row_order": self.base_row_order, "mlp_channel_order": self.mlp_channel_order, "basis_version": self.basis_version})
         return arguments
 
     def compact_identity_metadata(self) -> Dict[str, Any]:
