@@ -80,21 +80,26 @@ def test_stage8_sheet_geometry_keeps_legacy_mlp_hidden_order_when_no_explicit_or
     assert config.resolved_mlp_channel_order == 32
 
 
-def test_stage8_scruffy_wrapper_uses_spectral_user_model_name_and_maps_it_to_runner_sheet() -> None:
+def test_stage8_scruffy_wrapper_uses_preset_as_single_architecture_selector() -> None:
     text = Path("current_scruffy_train_OWT.sh").read_text(encoding="utf-8")
-    assert "-O MODEL_TYPE=${MODEL_TYPE}                    dense | spectral" in text
-    assert "MODEL_TYPE=\"spectral\"" in text
-    assert "RUNNER_MODEL_TYPE=\"$MODEL_TYPE\"" in text
-    assert "[[ \"$MODEL_TYPE\" == spectral ]] && RUNNER_MODEL_TYPE=\"sheet\"" in text
-    assert "--model-type \"$RUNNER_MODEL_TYPE\"" in text
+    assert "-p PRESET=${GEOMETRY_PRESET}" in text
+    assert "dense | legacy_sheet_col | curve | head_aware_block | mlp_block | block" in text
+    assert "-O MODEL_TYPE=${MODEL_TYPE}" not in text
+    assert "Deprecated compatibility:" in text
+    assert "MODEL_TYPE_ARGUMENT" in text
+    assert "run_model_type=\"dense\"" in text
+    assert "run_model_type=\"sheet\"" in text
 
 
-def test_stage8_scruffy_wrapper_loops_geometry_presets_nested_inside_depth_orders() -> None:
+def test_stage8_scruffy_wrapper_loops_dense_once_and_spectral_presets_across_depth_orders() -> None:
     text = Path("current_scruffy_train_OWT.sh").read_text(encoding="utf-8")
     assert "PRESET_VALUES=()" in text
     assert "parse_geometry_preset_values \"$GEOMETRY_PRESET\"" in text
     assert "single value, comma list, or quoted space list" in text
-    assert "for geometry_preset_value in \"${PRESET_VALUES[@]}\"; do" in text
+    assert "case \"$preset_value\" in" in text
+    assert "dense) PRESET_VALUES+=(\"$preset_value\"); HAS_DENSE_PRESET=true" in text
+    assert "legacy_sheet_col|curve|head_aware_block|mlp_block|block) PRESET_VALUES+=(\"$preset_value\"); HAS_SPECTRAL_PRESET=true" in text
+    assert "if [[ \"$geometry_preset_value\" == dense ]]; then" in text
+    assert "run_preset_depth_order \"$geometry_preset_value\" \"${DEPTH_ORDER_VALUES[0]}\"" in text
     assert "for depth_order_value in \"${DEPTH_ORDER_VALUES[@]}\"; do" in text
-    assert "run_preset_depth_order \"$geometry_preset_value\" \"$depth_order_value\"" in text
 # ^^^ THOG
