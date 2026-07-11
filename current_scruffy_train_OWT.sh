@@ -48,6 +48,7 @@ RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
+FAST_DISCARD="${THOG2_FAST_DISCARD:-false}"
 DTYPE="bfloat16"
 ATTENTION_BACKEND="flash2"
 INSTRUMENTATION="tensorboard"
@@ -106,6 +107,7 @@ Shape/runtime:
   -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
   -Y MLP_CHANNEL_ORDER=${MLP_CHANNEL_ORDER}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
+  -E FAST_DISCARD=${FAST_DISCARD}                   true | false
   -T DTYPE=${DTYPE}                                 float32 | float16 | bfloat16
   -K ATTENTION_BACKEND=${ATTENTION_BACKEND}         auto | flash2 | sdpa | math
 
@@ -125,7 +127,7 @@ Paths:
 EOF_USAGE
 }
 
-while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:Y:S:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
     O) MODEL_TYPE="$OPTARG" ;; q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
@@ -134,7 +136,7 @@ while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:Y:S:
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) DEPTH_ORDER="$OPTARG" ;; Q) BASE_ROW_ORDER="$OPTARG" ;; Y) MLP_CHANNEL_ORDER="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
-    T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
+    E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
     h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
   esac
@@ -178,6 +180,7 @@ validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
+validate_true_false "$FAST_DISCARD" "FAST_DISCARD"
 validate_true_false "$DEPTH_CURVE_LOCAL_HTML" "DEPTH_CURVE_LOCAL_HTML"
 validate_true_false "$DRY_RUN" "DRY_RUN"
 
@@ -219,6 +222,7 @@ export THOG2_DEPTH_CURVE_PLOTS="$DEPTH_CURVE_PLOTS"
 export THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS="$DEPTH_CURVE_SAMPLE_ELEMENTS"
 export THOG2_DEPTH_CURVE_RENDERER="$DEPTH_CURVE_RENDERER"
 export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
+export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # vvv THOG
@@ -258,6 +262,7 @@ scruffy OWT train
   model/preset/basis: $MODEL_TYPE / $GEOMETRY_PRESET / $BASIS_FAMILY
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION  (tensorboard root: $THOG2_CURVE_ROOT)
+  fast discard:       $FAST_DISCARD
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
   depth viewer:       $viewer_url
   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
