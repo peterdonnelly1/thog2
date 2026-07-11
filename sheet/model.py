@@ -68,6 +68,7 @@ class SheetGPTConfig:
     bias: bool = True
     depth_order: int = 12
     base_row_order: int = 128
+    mlp_channel_order: Optional[int] = None
     basis_version: str = BASIS_VERSION
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -80,6 +81,11 @@ class SheetGPTConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        if self.mlp_channel_order is not None:
+            if isinstance(self.mlp_channel_order, bool) or not isinstance(self.mlp_channel_order, int) or self.mlp_channel_order <= 0:
+                raise ValueError(f"mlp_channel_order must be a positive integer or None; got {self.mlp_channel_order!r}")
+            if self.mlp_channel_order > 4 * self.n_embd:
+                raise ValueError("mlp_channel_order must not exceed 4*n_embd")
         if not isinstance(self.dropout, (int, float)) or not 0.0 <= self.dropout < 1.0:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
@@ -96,6 +102,7 @@ class SheetGPTConfig:
             n_head=self.n_head,
             depth_order=self.depth_order,
             base_row_order=self.base_row_order,
+            mlp_channel_order=self.mlp_channel_order,
             bias=self.bias,
         )
 
