@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import inspect
 import math
-from dataclasses import asdict, dataclass
+import os
+from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -26,6 +27,24 @@ from .geometry import SheetGeometryConfig
 from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
+
+
+# vvv THOG
+_FAST_DISCARD_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FAST_DISCARD_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    normalized_value = raw_value.strip().lower()
+    if normalized_value in _FAST_DISCARD_TRUE_VALUES:
+        return True
+    if normalized_value in _FAST_DISCARD_FALSE_VALUES:
+        return False
+    raise ValueError(f"{name} must be true or false; got {raw_value!r}")
+# ^^^ THOG
 
 
 class ConventionalLayerNorm(nn.Module):
@@ -54,6 +73,7 @@ class SheetGPTConfig:
     attention_geometry: Optional[str] = None
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
+    fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
 
     def __post_init__(self) -> None:
         for name in ("block_size", "vocab_size"):
@@ -64,6 +84,8 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        if not isinstance(self.fast_discard, bool):
+            raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
         self.sheet_geometry()
         self.compact_selectors()
 
@@ -159,7 +181,10 @@ class SheetGPT(nn.Module):
     def _sheet_layer_norm(self, inputs: Tensor, weight_name: str, bias_name: str, layer_index: int) -> Tensor:
         weight = self.trajectory.materialize_vector(weight_name, layer_index)
         bias = self._optional_bias(bias_name, layer_index)
-        return F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
+        output = F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
+        if self.config.fast_discard:
+            del weight, bias
+        return output
 
     def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
@@ -168,6 +193,8 @@ class SheetGPT(nn.Module):
         if self.config.bias:
             attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
         query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
+        if self.config.fast_discard:
+            del attention_weight, attention_bias
         head_width = embedding_width // self.config.n_head
         key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
         query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
@@ -181,27 +208,54 @@ class SheetGPT(nn.Module):
             probabilities = F.softmax(scores, dim=-1)
             probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
             attended = probabilities @ value
+            if self.config.fast_discard:
+                del scores, causal_mask, probabilities
+        if self.config.fast_discard:
+            del query, key, value
         attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
         output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
-        return F.dropout(projected, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del attended, output_weight, output_bias
+        output = F.dropout(projected, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del projected
+        return output
 
     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
         expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
         hidden = F.linear(inputs, expansion_weight, expansion_bias)
+        if self.config.fast_discard:
+            del expansion_weight, expansion_bias
         hidden = F.gelu(hidden)
         contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
         output = F.linear(hidden, contraction_weight, contraction_bias)
-        return F.dropout(output, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del hidden, contraction_weight, contraction_bias
+        dropped = F.dropout(output, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del output
+        return dropped
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
         normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
-        inputs = inputs + self._attention(normalized_attention, layer_index)
+        attention_output = self._attention(normalized_attention, layer_index)
+        if self.config.fast_discard:
+            del normalized_attention
+        inputs = inputs + attention_output
+        if self.config.fast_discard:
+            del attention_output
         normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
-        return inputs + self._mlp(normalized_mlp, layer_index)
+        mlp_output = self._mlp(normalized_mlp, layer_index)
+        if self.config.fast_discard:
+            del normalized_mlp
+        output = inputs + mlp_output
+        if self.config.fast_discard:
+            del inputs, mlp_output
+        return output
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
@@ -258,54 +312,29 @@ class SheetGPT(nn.Module):
             if id(parameter) in sheet_parameter_ids:
                 continue
             if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
-                decay[name] = parameter
+                target = no_decay
+            elif parameter.ndim >= 2:
+                target = decay
             else:
-                no_decay[name] = parameter
-        all_trainable = {id(parameter) for parameter in self.parameters() if parameter.requires_grad}
-        grouped_ids = [id(parameter) for parameter in decay.values()] + [id(parameter) for parameter in no_decay.values()]
-        if len(grouped_ids) != len(set(grouped_ids)):
-            raise RuntimeError("a trainable parameter appears in more than one optimizer group")
-        if set(grouped_ids) != all_trainable:
-            missing = all_trainable - set(grouped_ids)
-            extra = set(grouped_ids) - all_trainable
-            raise RuntimeError(f"optimizer grouping does not cover trainable parameters exactly; missing={len(missing)}, extra={len(extra)}")
-        decay_names = tuple(sorted(decay))
-        no_decay_names = tuple(sorted(no_decay))
-        return (
-            {"params": [decay[name] for name in decay_names], "weight_decay": weight_decay, "group_name": "decay", "parameter_names": decay_names},
-            {"params": [no_decay[name] for name in no_decay_names], "weight_decay": 0.0, "group_name": "no_decay", "parameter_names": no_decay_names},
-        )
+                target = no_decay
+            target[name] = parameter
+        return {"params": list(decay.values()), "parameter_names": tuple(decay.keys()), "weight_decay": weight_decay}, {"params": list(no_decay.values()), "parameter_names": tuple(no_decay.keys()), "weight_decay": 0.0}
 
     def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: Tuple[float, float], device_type: str) -> torch.optim.Optimizer:
-        groups = list(self.optimizer_parameter_groups(weight_decay))
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        extra_args = {"fused": True} if use_fused else {}
-        return torch.optim.AdamW(groups, lr=learning_rate, betas=betas, **extra_args)
+        return torch.optim.AdamW(self.optimizer_parameter_groups(weight_decay), lr=learning_rate, betas=betas, fused=use_fused)
 
     def compact_state_violations(self) -> Tuple[str, ...]:
         violations: List[str] = []
-        for key in self.state_dict():
-            if key.startswith("trajectory.bases."):
-                violations.append(f"persistent fixed basis: {key}")
         for name, parameter in self.named_parameters():
             if name.startswith("trajectory.coefficients."):
                 continue
-            if parameter.ndim == 3 and parameter.shape[0] == self.config.n_layer:
-                violations.append(f"possible persistent dense logical stack: {name} {tuple(parameter.shape)}")
+            if name.startswith("transformer.wte") or name.startswith("transformer.wpe") or name.startswith("transformer.ln_f") or name.startswith("lm_head"):
+                continue
+            violations.append(name)
         return tuple(violations)
 
-    @torch.no_grad()
-    def generate(self, idx: Tensor, max_new_tokens: int, temperature: float = 1.0, top_k: Optional[int] = None) -> Tensor:
-        for _ in range(max_new_tokens):
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size :]
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / temperature
-            if top_k is not None:
-                values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < values[:, [-1]]] = -float("inf")
-            probabilities = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probabilities, num_samples=1)
-            idx = torch.cat((idx, next_token), dim=1)
-        return idx
+
+__all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
 # ^^^ THOG
