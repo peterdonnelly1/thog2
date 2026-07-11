@@ -334,8 +334,14 @@ class SheetGPT(nn.Module):
 
     def compact_state_violations(self) -> Tuple[str, ...]:
         violations: List[str] = []
+        # vvv THOG
+        compact_coefficient_prefixes = (
+            "trajectory.coefficients.",
+            "trajectory.curve.coefficients.",
+        )
+        # ^^^ THOG
         for name, parameter in self.named_parameters():
-            if name.startswith("trajectory.coefficients."):
+            if name.startswith(compact_coefficient_prefixes):
                 continue
             if name.startswith("transformer.wte") or name.startswith("transformer.wpe") or name.startswith("transformer.ln_f") or name.startswith("lm_head"):
                 continue
