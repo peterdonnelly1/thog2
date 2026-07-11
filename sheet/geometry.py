@@ -108,6 +108,9 @@ class SheetGeometryConfig:
 
     @property
     def resolved_mlp_channel_order(self) -> int:
+        raw_env_value = os.environ.get(MLP_CHANNEL_ORDER_ENV)
+        if self.mlp_channel_order is None and (raw_env_value is None or raw_env_value.strip() == ""):
+            return derive_row_order(4 * self.n_embd, self.n_embd, self.base_row_order)
         value = _env_mlp_channel_order() if self.mlp_channel_order is None else self.mlp_channel_order
         if value > 4 * self.n_embd:
             raise ValueError("resolved mlp_channel_order must not exceed 4*n_embd")
