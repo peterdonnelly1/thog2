@@ -241,7 +241,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 run_preset_depth_order() {
   local geometry_preset_value="$1"
   local depth_order_value="$2"
-  local preset_tag run_tag run_name_value log_timestamp resolved_json artifact_name log_path depth_curve_local_root
+  local preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local log_url viewer_url serve_url run_status
   local -a train_args command
 
@@ -261,14 +261,14 @@ run_preset_depth_order() {
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${OPTIONAL_ARGS[@]}" "${EXTRA_ARGS[@]}"
   )
 
-  log_timestamp="$(date +%Y%m%d_%H%M%S)"
-  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --print-resolved-json)"
+  LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
   artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
   log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
   depth_curve_local_root="$(dirname "$log_path")/depth_curves"
   export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
-  command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp")
-  if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp"); fi
+  command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
+  if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
   log_url="file://$(realpath -m "$log_path")"
   viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"
   serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
@@ -292,7 +292,7 @@ scruffy OWT train
 EOF_RUN
 
   if [[ "$DRY_RUN" == true ]]; then
-    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$log_timestamp" --dry-run
+    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
     printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'
     return 0
   fi
