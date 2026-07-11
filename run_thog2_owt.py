@@ -27,6 +27,62 @@ from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 REPOSITORY_ROOT = Path(__file__).resolve().parent
 
 
+# vvv THOG
+_CONSOLE_INTEGER_WIDTHS = {
+    "completed_updates": 6,
+    "max_updates": 6,
+    "consumed_tokens": 14,
+    "tokens_per_update": 12,
+    "checkpoint_bytes": 14,
+}
+_CONSOLE_FIXED_FLOATS = {
+    "cumulative_training_seconds": (6, 0),
+    "training_seconds": (6, 0),
+    "cumulative_wall_seconds": (6, 0),
+    "wall_seconds": (6, 0),
+    "evaluation_seconds": (6, 0),
+    "checkpoint_seconds": (6, 0),
+    "gradient_norm": (8, 3),
+    "training_loss": (9, 4),
+    "validation_loss": (9, 4),
+    "final_validation_loss": (9, 4),
+    "tok/s": (12, 0),
+}
+_CONSOLE_SCIENTIFIC_FLOATS = {
+    "learning_rate": (10, 3),
+}
+
+
+def add_console_tokens_per_second(payload: Dict[str, Any]) -> Dict[str, Any]:
+    values = dict(payload)
+    elapsed = values.get("cumulative_training_seconds", values.get("training_seconds"))
+    consumed_tokens = values.get("consumed_tokens")
+    if elapsed is None or consumed_tokens is None:
+        return values
+    elapsed_value = float(elapsed)
+    if elapsed_value <= 0.0:
+        return values
+    values["tok/s"] = float(consumed_tokens) / elapsed_value
+    return values
+
+
+def format_console_progress_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    formatted: Dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in _CONSOLE_INTEGER_WIDTHS:
+            formatted[key] = f"{int(value):{_CONSOLE_INTEGER_WIDTHS[key]}d}"
+        elif key in _CONSOLE_FIXED_FLOATS:
+            width, precision = _CONSOLE_FIXED_FLOATS[key]
+            formatted[key] = f"{float(value):{width}.{precision}f}"
+        elif key in _CONSOLE_SCIENTIFIC_FLOATS:
+            width, precision = _CONSOLE_SCIENTIFIC_FLOATS[key]
+            formatted[key] = f"{float(value):{width}.{precision}e}"
+        else:
+            formatted[key] = value
+    return formatted
+# ^^^ THOG
+
+
 class OwtTrainer(Stage6Trainer):
     """Stage 6 lifecycle with THOG-compatible global accumulation accounting."""
 
@@ -38,7 +94,8 @@ class OwtTrainer(Stage6Trainer):
         values = dict(payload)
         if "consumed_tokens" in values:
             values["consumed_tokens"] = int(values["consumed_tokens"]) * int(self.distributed.world_size)
-        super()._print_progress(run_id, event, **values)
+        # super()._print_progress(run_id, event, **values)
+        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
         result = super().run_pilot(**arguments)
