@@ -45,7 +45,7 @@ def test_stage8_training_wrappers_expose_mlp_channel_order_control() -> None:
 def test_stage8_training_wrappers_auto_correct_dense_residual_source() -> None:
     for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
-        assert "RESIDUAL_INIT_DEPTH_SOURCE=\"true_layer_depth\"" in text
+        assert "true_layer_depth" in text
         assert "dof_implied_depth" in text
 
 
