@@ -24,7 +24,11 @@ from .compact_identity import (
 from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
 from .mlp_block_trajectory import MlpBlockTrajectory
-from .semantic_materializer import LegacySheetColMaterializer
+from .semantic_materializer import (
+    LEGACY_ATTENTION_INPUT_BIAS,
+    LEGACY_ATTENTION_INPUT_WEIGHT,
+    LegacySheetColMaterializer,
+)
 from .trajectory import SheetTrajectory
 
 
@@ -204,10 +208,16 @@ class SheetGPT(nn.Module):
 
     def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
-        attention_weight = self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+        # vvv THOG bypass the legacy semantic reconstruction adapter in the attention hot path
+        # attention_weight = self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+        # attention_bias = None
+        # if self.config.bias:
+        #     attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
+        attention_weight = self.trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, layer_index)
         attention_bias = None
         if self.config.bias:
-            attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
+            attention_bias = self.trajectory.materialize_vector(LEGACY_ATTENTION_INPUT_BIAS, layer_index)
+        # ^^^ THOG
         query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
         if self.config.fast_discard:
             del attention_weight, attention_bias
