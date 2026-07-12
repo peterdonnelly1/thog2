@@ -16,9 +16,17 @@ import torch
 
 from sheet.basis import BASIS_VERSION
 from sheet.checkpoints import load_payload
-from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_CURVE, GEOMETRY_PRESETS, MLP_GEOMETRIES
+from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
-from sheet.run_config import DEFAULT_EXPERIMENT_PREFIX, DEFAULT_MLP_CHANNEL_ORDER, OwtRunConfig
+from sheet.run_config import (
+    DEFAULT_EXPERIMENT_PREFIX,
+    DEFAULT_O_ATTN_D_MODEL,
+    DEFAULT_O_ATTN_OUT_PER_CHANNEL,
+    DEFAULT_O_ATTN_QKV_PER_CHANNEL,
+    DEFAULT_O_MLP_D_MODEL,
+    DEFAULT_O_MLP_HIDDEN,
+    OwtRunConfig,
+)
 from sheet.run_naming import compact_log_timestamp
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
@@ -48,9 +56,7 @@ _CONSOLE_FIXED_FLOATS = {
     "final_validation_loss": (9, 4),
     "tok/s": (12, 0),
 }
-_CONSOLE_SCIENTIFIC_FLOATS = {
-    "learning_rate": (10, 3),
-}
+_CONSOLE_SCIENTIFIC_FLOATS = {"learning_rate": (10, 3)}
 
 
 def add_console_tokens_per_second(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -94,7 +100,6 @@ class OwtTrainer(Stage6Trainer):
         values = dict(payload)
         if "consumed_tokens" in values:
             values["consumed_tokens"] = int(values["consumed_tokens"]) * int(self.distributed.world_size)
-        # super()._print_progress(run_id, event, **values)
         super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
@@ -192,10 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-layer", type=int, default=72)
     parser.add_argument("--n-head", type=int, default=12)
     parser.add_argument("--n-embd", type=int, default=768)
-    parser.add_argument("--depth-order", type=int, default=16)
-    parser.add_argument("--base-row-order", type=int, default=64)
-    parser.add_argument("--mlp-channel-order", type=int, default=DEFAULT_MLP_CHANNEL_ORDER)
-    parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_CURVE)
+    parser.add_argument("--o-depth", type=int, default=16)
+    parser.add_argument("--o-attn-d-model", type=int, default=DEFAULT_O_ATTN_D_MODEL)
+    parser.add_argument("--o-attn-qkv-per-channel", type=int, default=DEFAULT_O_ATTN_QKV_PER_CHANNEL)
+    parser.add_argument("--o-attn-out-per-channel", type=int, default=DEFAULT_O_ATTN_OUT_PER_CHANNEL)
+    parser.add_argument("--o-mlp-d-model", type=int, default=DEFAULT_O_MLP_D_MODEL)
+    parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
+    parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
     parser.add_argument("--basis-family", choices=(BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT), default=BASIS_FAMILY_CHEBYSHEV)
@@ -287,9 +295,12 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         n_layer=arguments.n_layer,
         n_head=arguments.n_head,
         n_embd=arguments.n_embd,
-        depth_order=arguments.depth_order,
-        base_row_order=arguments.base_row_order,
-        mlp_channel_order=arguments.mlp_channel_order,
+        o_depth=arguments.o_depth,
+        o_attn_d_model=arguments.o_attn_d_model,
+        o_attn_qkv_per_channel=arguments.o_attn_qkv_per_channel,
+        o_attn_out_per_channel=arguments.o_attn_out_per_channel,
+        o_mlp_d_model=arguments.o_mlp_d_model,
+        o_mlp_hidden=arguments.o_mlp_hidden,
         geometry_preset=arguments.geometry_preset,
         attention_geometry=arguments.attention_geometry,
         mlp_geometry=arguments.mlp_geometry,
