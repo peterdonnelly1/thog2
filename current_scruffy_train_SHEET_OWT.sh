@@ -6,4 +6,4 @@ set -euo pipefail
 # ^^^ THOG
 
 cd "$(dirname "$0")"
-exec ./current_scruffy_train_OWT.sh -p depth "$@"
+exec bash ./current_scruffy_train_OWT.sh -p depth "$@"
