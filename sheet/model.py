@@ -80,6 +80,7 @@ class SheetGPTConfig:
     basis_family: Optional[str] = None
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
+    direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                                      # <<< THOG default-off exact direct application of existing THOG MLP factors
 
     def __post_init__(self) -> None:
         for name in ("block_size", "vocab_size"):
@@ -99,6 +100,8 @@ class SheetGPTConfig:
             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
             raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
+        if not isinstance(self.direct_thog_mlp_application, bool):
+            raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")                                         # <<< THOG validate selectable exact MLP application path
         self.sheet_geometry()
         self.compact_selectors()
 
@@ -257,22 +260,72 @@ class SheetGPT(nn.Module):
             del projected
         return output
 
+    # vvv THOG exact direct application of the existing THOG MLP factorisation, selectable for A/B timing
+    def _supports_direct_thog_mlp_application(self) -> bool:
+        if isinstance(self.trajectory, MlpBlockTrajectory):
+            return True
+        return isinstance(self.trajectory, BlockTrajectory) and self.trajectory.compact_mlp
+
+    def _direct_thog_mlp_linear(
+        self,
+        inputs: Tensor,
+        weight_name: str,
+        layer_index: int,
+        bias: Optional[Tensor],
+    ) -> Tensor:
+        coefficient = self.trajectory.coefficients[weight_name]
+        depth_row = self.trajectory.depth_basis[layer_index].to(coefficient)
+        mixed = torch.einsum("p,pab->ab", depth_row, coefficient)
+        input_basis = self.trajectory.input_basis(weight_name).to(coefficient)
+        output_basis = self.trajectory.output_basis(weight_name).to(coefficient)
+        projected = torch.matmul(inputs, input_basis)
+        projected = torch.matmul(projected, mixed.transpose(0, 1))
+        output = torch.matmul(projected, output_basis.transpose(0, 1))
+        if bias is not None:
+            output = output + bias
+        return output
+
     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
-        expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+        direct_application = (
+            self.config.direct_thog_mlp_application
+            and self._supports_direct_thog_mlp_application()
+        )
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
-        hidden = F.linear(inputs, expansion_weight, expansion_bias)
+        if direct_application:
+            hidden = self._direct_thog_mlp_linear(
+                inputs,
+                "mlp_expansion_weight",
+                layer_index,
+                expansion_bias,
+            )
+        else:
+            expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            hidden = F.linear(inputs, expansion_weight, expansion_bias)
+            if self.config.fast_discard:
+                del expansion_weight
         if self.config.fast_discard:
-            del expansion_weight, expansion_bias
+            del expansion_bias
         hidden = F.gelu(hidden)
-        contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
-        output = F.linear(hidden, contraction_weight, contraction_bias)
+        if direct_application:
+            output = self._direct_thog_mlp_linear(
+                hidden,
+                "mlp_contraction_weight",
+                layer_index,
+                contraction_bias,
+            )
+        else:
+            contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            output = F.linear(hidden, contraction_weight, contraction_bias)
+            if self.config.fast_discard:
+                del contraction_weight
         if self.config.fast_discard:
-            del hidden, contraction_weight, contraction_bias
+            del hidden, contraction_bias
         dropped = F.dropout(output, p=self.config.dropout, training=self.training)
         if self.config.fast_discard:
             del output
         return dropped
+    # ^^^ THOG
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
         normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
