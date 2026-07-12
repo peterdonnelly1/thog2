@@ -130,8 +130,8 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
         )
         legacy_vector_coefficients = 312
         conventional_parameters = 672
+        self.assertEqual(depth_matrix_coefficients, 4608)
         self.assertEqual(report["matrix_sheet_coefficients"], depth_matrix_coefficients)
-        self.assertGreater(depth_matrix_coefficients, 4608)
         self.assertEqual(report["sheet_coefficients"], depth_matrix_coefficients + legacy_vector_coefficients)
         self.assertEqual(report["persistent_parameters"], depth_matrix_coefficients + legacy_vector_coefficients + conventional_parameters)
         parameter_names = tuple(name for group in model.optimizer_parameter_groups(0.1) for name in group["parameter_names"])
