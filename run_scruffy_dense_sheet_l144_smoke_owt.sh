@@ -92,9 +92,9 @@ printf '\nPICTON DENSE/FULL_BLOCK L144 smoke pair\n'
 printf '  orders: P%s Q%s J%s O%s X%s Y%s\n' "$O_DEPTH" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN"
 
 if [[ "$RUN_SELECTION" == dense || "$RUN_SELECTION" == both ]]; then
-  ./current_scruffy_train_OWT.sh -p dense "${COMMON_ARGS[@]}"
+  bash ./current_scruffy_train_OWT.sh -p dense "${COMMON_ARGS[@]}"
 fi
 if [[ "$RUN_SELECTION" == full_block || "$RUN_SELECTION" == both ]]; then
-  ./current_scruffy_train_OWT.sh -p full_block "${COMMON_ARGS[@]}"
+  bash ./current_scruffy_train_OWT.sh -p full_block "${COMMON_ARGS[@]}"
 fi
 # ^^^ THOG
