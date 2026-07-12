@@ -137,18 +137,24 @@ class LegacySheetColMaterializer:
         return self.trajectory.materialize_vector(LEGACY_ATTENTION_INPUT_BIAS, layer_index)
 
     def reconstructed_attention_input_weight(self, layer_index: int) -> Tensor:
-        return torch.cat((
-            self.materialize_matrix(ATTENTION_QUERY_WEIGHT, layer_index),
-            self.materialize_matrix(ATTENTION_KEY_WEIGHT, layer_index),
-            self.materialize_matrix(ATTENTION_VALUE_WEIGHT, layer_index),
-        ), dim=0)
+        # vvv THOG avoid rematerializing the complete packed QKV tensor once per semantic role
+        # return torch.cat((
+        #     self.materialize_matrix(ATTENTION_QUERY_WEIGHT, layer_index),
+        #     self.materialize_matrix(ATTENTION_KEY_WEIGHT, layer_index),
+        #     self.materialize_matrix(ATTENTION_VALUE_WEIGHT, layer_index),
+        # ), dim=0)
+        return self.packed_attention_input_weight(layer_index)
+        # ^^^ THOG
 
     def reconstructed_attention_input_bias(self, layer_index: int) -> Tensor:
-        return torch.cat((
-            self.materialize_vector(ATTENTION_QUERY_BIAS, layer_index),
-            self.materialize_vector(ATTENTION_KEY_BIAS, layer_index),
-            self.materialize_vector(ATTENTION_VALUE_BIAS, layer_index),
-        ), dim=0)
+        # vvv THOG avoid rematerializing the complete packed QKV bias once per semantic role
+        # return torch.cat((
+        #     self.materialize_vector(ATTENTION_QUERY_BIAS, layer_index),
+        #     self.materialize_vector(ATTENTION_KEY_BIAS, layer_index),
+        #     self.materialize_vector(ATTENTION_VALUE_BIAS, layer_index),
+        # ), dim=0)
+        return self.packed_attention_input_bias(layer_index)
+        # ^^^ THOG
 
     def direct_matrix_value(self, name: str, layer_index: int, output_row: int, row_index: int) -> Tensor:
         spec = self.matrix_spec(name)
