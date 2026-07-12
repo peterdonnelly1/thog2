@@ -12,7 +12,8 @@ RUN_MODULE="run_thog2_owt"
 HOST_LABEL="scruffy"
 RUN_MODE="fresh"
 RUN_NAME=""
-EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"
+# EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"                                                                                                  # <<< THOG removed redundant environment-controlled experiment naming
+EXPERIMENT_PREFIX="NO_PREFIX"                                                                                                                            # <<< THOG -g now supplies the sole human run-name prefix
 DATASET_NAME="openwebtext"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
 CHECKPOINT_ROOT="checkpoints"
@@ -147,6 +148,7 @@ done
 shift $((OPTIND - 1))
 if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
+EXPERIMENT_PREFIX="${RUN_NAME:-NO_PREFIX}"                                                                                                               # <<< THOG make -g the sole experiment-prefix source
 
 validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1; expected a positive integer." >&2; exit 2; }; }
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
