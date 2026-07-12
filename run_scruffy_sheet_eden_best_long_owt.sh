@@ -82,7 +82,7 @@ while getopts ":g:n:b:A:u:e:l:w:k:L:H:D:C:P:Q:J:O:X:Y:S:I:M:W:x:h" option; do
 done
 
 THOG2_INSTRUMENTATION="$INSTRUMENTATION" \
-./current_scruffy_train_OWT.sh \
+bash ./current_scruffy_train_OWT.sh \
   -p legacy_sheet_col \
   -q fresh \
   -g "$RUN_NAME" \
