@@ -5,18 +5,18 @@ import unittest
 
 from sheet.basis_kernel import DCT_BASIS_VERSION
 from sheet.compact_identity import (
-    ATTENTION_GEOMETRY_CURVE,
+    ATTENTION_GEOMETRY_DEPTH,
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
     ATTENTION_GEOMETRY_LEGACY_SHEET_COL,
     BASIS_FAMILY_CHEBYSHEV,
     BASIS_FAMILY_DCT,
-    GEOMETRY_PRESET_BLOCK,
     GEOMETRY_PRESET_CONVENTIONAL,
-    GEOMETRY_PRESET_CURVE,
+    GEOMETRY_PRESET_DEPTH,
+    GEOMETRY_PRESET_FULL_BLOCK,
     GEOMETRY_PRESET_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_MLP_BLOCK,
-    MLP_GEOMETRY_CURVE,
+    MLP_GEOMETRY_DEPTH,
     MLP_GEOMETRY_LEGACY_SHEET_COL,
     MLP_GEOMETRY_MLP_BLOCK,
     resolve_compact_selectors,
@@ -29,11 +29,11 @@ class Stage1CompactIdentityTests(unittest.TestCase):
     def test_preset_expansion_is_central_and_deterministic(self) -> None:
         cases = (
             ({}, GEOMETRY_PRESET_LEGACY_SHEET_COL, ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL, BASIS_FAMILY_CHEBYSHEV),
-            ({"geometry_preset": "curve"}, GEOMETRY_PRESET_CURVE, ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_CURVE, BASIS_FAMILY_CHEBYSHEV),
-            ({"geometry_preset": "mlp_block"}, GEOMETRY_PRESET_MLP_BLOCK, ATTENTION_GEOMETRY_CURVE, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
-            ({"attention_geometry": "head_aware_block", "mlp_geometry": "curve"}, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_CURVE, BASIS_FAMILY_CHEBYSHEV),
-            ({"geometry_preset": "block"}, GEOMETRY_PRESET_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
-            ({"geometry_preset": "block", "basis_family": "dct"}, GEOMETRY_PRESET_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_DCT),
+            ({"geometry_preset": "depth"}, GEOMETRY_PRESET_DEPTH, ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_DEPTH, BASIS_FAMILY_CHEBYSHEV),
+            ({"geometry_preset": "mlp_block"}, GEOMETRY_PRESET_MLP_BLOCK, ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
+            ({"attention_geometry": "head_aware_block", "mlp_geometry": "depth"}, GEOMETRY_PRESET_HEAD_AWARE_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_DEPTH, BASIS_FAMILY_CHEBYSHEV),
+            ({"geometry_preset": "full_block"}, GEOMETRY_PRESET_FULL_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_CHEBYSHEV),
+            ({"geometry_preset": "full_block", "basis_family": "dct"}, GEOMETRY_PRESET_FULL_BLOCK, ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK, BASIS_FAMILY_DCT),
         )
         for request, preset, attention, mlp, basis in cases:
             with self.subTest(request=request):
@@ -45,27 +45,29 @@ class Stage1CompactIdentityTests(unittest.TestCase):
 
     def test_explicit_module_overrides_are_resolved_before_stage_support_validation(self) -> None:
         resolved = resolve_compact_selectors(attention_geometry="head_aware_block", mlp_geometry="mlp_block")
-        self.assertEqual(resolved.geometry_preset, GEOMETRY_PRESET_BLOCK)
+        self.assertEqual(resolved.geometry_preset, GEOMETRY_PRESET_FULL_BLOCK)
         resolved = resolve_compact_selectors(geometry_preset="mlp_block", attention_geometry="head_aware_block", basis_family="dct")
         self.assertEqual(resolved.basis_family, BASIS_FAMILY_DCT)
 
-    def test_invalid_identity_values_and_stage7_unsupported_materializations_fail_while_dct_block_is_accepted(self) -> None:
-        stage4_training_config(geometry_preset="curve")
-        stage4_training_config(attention_geometry="curve", mlp_geometry="curve")
+    def test_invalid_identity_values_and_unsupported_materializations_fail_while_dct_full_block_is_accepted(self) -> None:
+        stage4_training_config(geometry_preset="depth")
+        stage4_training_config(attention_geometry="depth", mlp_geometry="depth")
         stage4_training_config(geometry_preset="mlp_block")
-        stage4_training_config(attention_geometry="curve", mlp_geometry="mlp_block")
-        stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="curve")
-        stage4_training_config(geometry_preset="block")
-        dct_block = stage4_training_config(geometry_preset="block", basis_family="dct")
-        self.assertEqual(dct_block.basis_version, DCT_BASIS_VERSION)
+        stage4_training_config(attention_geometry="depth", mlp_geometry="mlp_block")
+        stage4_training_config(attention_geometry="head_aware_block", mlp_geometry="depth")
+        stage4_training_config(geometry_preset="full_block")
+        dct_full_block = stage4_training_config(geometry_preset="full_block", basis_family="dct")
+        self.assertEqual(dct_full_block.basis_version, DCT_BASIS_VERSION)
         for overrides in (
-            {"geometry_preset": "legacy_sheet_col", "attention_geometry": "curve"},
+            {"geometry_preset": "legacy_sheet_col", "attention_geometry": "depth"},
             {"geometry_preset": "legacy_sheet_col", "mlp_geometry": "mlp_block"},
-            {"geometry_preset": "block", "attention_geometry": "curve"},
-            {"geometry_preset": "block", "basis_family": "not_a_basis"},
+            {"geometry_preset": "full_block", "attention_geometry": "depth"},
+            {"geometry_preset": "full_block", "basis_family": "not_a_basis"},
+            {"geometry_preset": "curve"},
+            {"geometry_preset": "block"},
         ):
             with self.subTest(overrides=overrides):
-                with self.assertRaisesRegex(ValueError, "must be one of|supports only"):
+                with self.assertRaisesRegex(ValueError, "must be one of|supported compact presets"):
                     stage4_training_config(**overrides)
 
     def test_dense_rejects_compact_fields_except_conventional(self) -> None:
@@ -73,8 +75,8 @@ class Stage1CompactIdentityTests(unittest.TestCase):
         TrainingConfig(model_type="dense", geometry_preset=GEOMETRY_PRESET_CONVENTIONAL)
         for overrides in (
             {"geometry_preset": "legacy_sheet_col"},
-            {"geometry_preset": "curve"},
-            {"attention_geometry": "curve"},
+            {"geometry_preset": "depth"},
+            {"attention_geometry": "depth"},
             {"mlp_geometry": "mlp_block"},
             {"basis_family": "chebyshev"},
             {"basis_family": "dct"},
