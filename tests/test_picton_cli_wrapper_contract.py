@@ -119,8 +119,9 @@ def test_picton_artifact_identity_records_the_complete_order_vector() -> None:
         residual_init_depth_source="dof_implied_depth",
     )
     assert "PICTON" in config.artifact_name
+    parameter_fragment = config.parameter_artifact_fragment()
     for fragment in ("P_2", "Q_7", "J_3", "O_2", "X_5", "Y_11"):
-        assert fragment in config.artifact_name
+        assert fragment in parameter_fragment
     identity = config.compact_identity()
     assert identity["o_depth"] == 2
     assert identity["o_attn_d_model"] == 7
