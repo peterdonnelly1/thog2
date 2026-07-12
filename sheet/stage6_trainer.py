@@ -23,27 +23,90 @@ def trace_digest(trace) -> str:
 
 
 # vvv THOG
+# _PROGRESS_FIELD_LABELS = {
+#     "completed_updates": "updates",
+#     "consumed_tokens": "cum tokens",
+#     "cumulative_training_seconds": "cum time",
+#     "training_loss": "training loss",
+#     "validation_loss": "validation loss",
+#     "learning_rate": "learning rate",
+#     "gradient_norm": "gradient norm",
+# }
+#
+#
+# def _progress_field(label: str, value: Any) -> str:
+#     return f"{label}={value}"
+#
+#
+# def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> str:
+#     if event == "optimizer_progress":
+#         ordered_fields = (
+#             "cumulative_training_seconds",
+#             "tok/s",
+#             "completed_updates",
+#             "consumed_tokens",
+#             "training_loss",
+#             "learning_rate",
+#             "gradient_norm",
+#         )
+#         prefix = "T"
+#     elif event == "evaluation_completed":
+#         ordered_fields = (
+#             "cumulative_training_seconds",
+#             "tok/s",
+#             "completed_updates",
+#             "consumed_tokens",
+#             "training_loss",
+#             "validation_loss",
+#         )
+#         prefix = "V"
+#     else:
+#         fields = [event]
+#         fields.extend(
+#             _progress_field(key.replace("_", " "), value)
+#             for key, value in payload.items()
+#         )
+#         fields.append(_progress_field("run_id", run_id))
+#         return "  ".join(fields)
+#
+#     fields = [prefix]
+#     for key in ordered_fields:
+#         if key not in payload:
+#             continue
+#         label = _PROGRESS_FIELD_LABELS.get(key, key)
+#         fields.append(_progress_field(label, payload[key]))
+#     fields.append(_progress_field("run_id", run_id))
+#     return "  ".join(fields)
+# ^^^ THOG
+
+# vvv THOG
 _PROGRESS_FIELD_LABELS = {
-    "completed_updates": "updates",
     "consumed_tokens": "cum tokens",
-    "cumulative_training_seconds": "cum time",
     "training_loss": "training loss",
     "validation_loss": "validation loss",
     "learning_rate": "learning rate",
     "gradient_norm": "gradient norm",
 }
+_PROGRESS_LOSS_LABEL_WIDTH = len("validation loss")
+_PROGRESS_VALIDATION_PREFIX = "\033[1;33mV\033[0m"
 
 
 def _progress_field(label: str, value: Any) -> str:
+    if label in {"training loss", "validation loss"}:
+        return f"{label:<{_PROGRESS_LOSS_LABEL_WIDTH}}={value}"
     return f"{label}={value}"
+
+
+def _progress_elapsed_seconds(value: Any) -> str:
+    return f"{value}s"
 
 
 def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> str:
     if event == "optimizer_progress":
         ordered_fields = (
+            "completed_updates",
             "cumulative_training_seconds",
             "tok/s",
-            "completed_updates",
             "consumed_tokens",
             "training_loss",
             "learning_rate",
@@ -52,14 +115,14 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         prefix = "T"
     elif event == "evaluation_completed":
         ordered_fields = (
+            "completed_updates",
             "cumulative_training_seconds",
             "tok/s",
-            "completed_updates",
             "consumed_tokens",
             "training_loss",
             "validation_loss",
         )
-        prefix = "V"
+        prefix = _PROGRESS_VALIDATION_PREFIX
     else:
         fields = [event]
         fields.extend(
@@ -72,6 +135,12 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
     fields = [prefix]
     for key in ordered_fields:
         if key not in payload:
+            continue
+        if key == "completed_updates":
+            fields.append(str(payload[key]))
+            continue
+        if key == "cumulative_training_seconds":
+            fields.append(_progress_elapsed_seconds(payload[key]))
             continue
         label = _PROGRESS_FIELD_LABELS.get(key, key)
         fields.append(_progress_field(label, payload[key]))
