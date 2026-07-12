@@ -88,7 +88,8 @@ _PROGRESS_FIELD_LABELS = {
     "gradient_norm": "gradient norm",
 }
 _PROGRESS_LOSS_LABEL_WIDTH = len("validation loss")
-_PROGRESS_VALIDATION_PREFIX = "\033[1;33mV\033[0m"
+_PROGRESS_VALIDATION_STYLE_START = "\033[1;33m"
+_PROGRESS_VALIDATION_STYLE_END = "\033[0m"
 
 
 def _progress_field(label: str, value: Any) -> str:
@@ -122,7 +123,7 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
             "training_loss",
             "validation_loss",
         )
-        prefix = _PROGRESS_VALIDATION_PREFIX
+        prefix = "V"
     else:
         fields = [event]
         fields.extend(
@@ -145,7 +146,10 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         label = _PROGRESS_FIELD_LABELS.get(key, key)
         fields.append(_progress_field(label, payload[key]))
     fields.append(_progress_field("run_id", run_id))
-    return "  ".join(fields)
+    line = "  ".join(fields)
+    if event == "evaluation_completed":
+        return f"{_PROGRESS_VALIDATION_STYLE_START}{line}{_PROGRESS_VALIDATION_STYLE_END}"
+    return line
 # ^^^ THOG
 
 
@@ -193,6 +197,8 @@ class Stage6Trainer(Stage4Trainer):
         #     flush=True,
         # )
         print(format_progress_line(run_id, event, payload), flush=True)                                                                                  # <<< THOG emit brace-free T/V progress with run_id last
+        if event == "run_started":
+            print(flush=True)                                                                                                                            # <<< THOG separate startup summary from progress rows
 
     def _before_optimizer_step(self) -> None:
         next_update = self.state.completed_updates + 1
