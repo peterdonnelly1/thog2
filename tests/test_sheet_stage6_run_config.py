@@ -74,13 +74,24 @@ class OwtRunConfigTests(unittest.TestCase):
             self.assertEqual(enabled.checkpoint_segment_size, 12)
             self.assertEqual(disabled.checkpoint_segment_size, 0)
 
-    def test_s6_31_dense_config_omits_sheet_only_orders(self) -> None:
+    def test_s6_31_dense_config_omits_all_sheet_only_semantic_orders(self) -> None:
         dense = OwtRunConfig(model_type="dense").canonical_dict(world_size=1)
         sheet = OwtRunConfig(model_type="sheet").canonical_dict(world_size=1)
+        semantic_orders = {
+            "o_depth": 16,
+            "o_attn_d_model": 64,
+            "o_attn_qkv_per_channel": 6,
+            "o_attn_out_per_channel": 6,
+            "o_mlp_d_model": 64,
+            "o_mlp_hidden": 256,
+        }
+        for name, expected in semantic_orders.items():
+            self.assertNotIn(name, dense)
+            self.assertEqual(sheet[name], expected)
         self.assertNotIn("depth_order", dense)
         self.assertNotIn("base_row_order", dense)
-        self.assertEqual(sheet["depth_order"], 16)
-        self.assertEqual(sheet["base_row_order"], 64)
+        self.assertNotIn("depth_order", sheet)
+        self.assertNotIn("base_row_order", sheet)
 
 
 if __name__ == "__main__":
