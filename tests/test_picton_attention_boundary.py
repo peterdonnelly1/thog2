@@ -66,31 +66,20 @@ def test_picton_packed_qkv_is_exact_concatenation_of_the_three_materialized_role
     )
 
 
-def test_picton_packed_linear_projection_is_identical_to_three_conventional_role_projections() -> None:
+def test_picton_packed_linear_projection_matches_three_conventional_role_projections_to_float_rounding() -> None:
     model = picton_attention_model()
     layer_index = 0
     inputs = torch.randn(2, 5, model.config.n_embd)
     packed_weight = model.trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, layer_index)
     packed_query, packed_key, packed_value = F.linear(inputs, packed_weight).split(model.config.n_embd, dim=-1)
 
-    torch.testing.assert_close(
-        packed_query,
-        F.linear(inputs, model.trajectory.materialize(ATTENTION_QUERY_WEIGHT, layer_index)),
-        rtol=0.0,
-        atol=0.0,
-    )
-    torch.testing.assert_close(
-        packed_key,
-        F.linear(inputs, model.trajectory.materialize(ATTENTION_KEY_WEIGHT, layer_index)),
-        rtol=0.0,
-        atol=0.0,
-    )
-    torch.testing.assert_close(
-        packed_value,
-        F.linear(inputs, model.trajectory.materialize(ATTENTION_VALUE_WEIGHT, layer_index)),
-        rtol=0.0,
-        atol=0.0,
-    )
+    for packed, family in (
+        (packed_query, ATTENTION_QUERY_WEIGHT),
+        (packed_key, ATTENTION_KEY_WEIGHT),
+        (packed_value, ATTENTION_VALUE_WEIGHT),
+    ):
+        separate = F.linear(inputs, model.trajectory.materialize(family, layer_index))
+        torch.testing.assert_close(packed, separate, rtol=1.0e-5, atol=1.0e-7)
 
 
 def test_picton_attention_calls_unmodified_scaled_dot_product_attention_with_dense_head_tensors(monkeypatch) -> None:
