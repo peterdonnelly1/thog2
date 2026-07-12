@@ -38,15 +38,19 @@ class Stage1CompactIdentityCheckpointSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "compact_identity"):
             validate_compatibility(missing_identity, trainer.config)
         for key, value in (
-            ("geometry_preset", "curve"),
-            ("attention_geometry", "curve"),
+            ("geometry_preset", "depth"),
+            ("attention_geometry", "depth"),
             ("mlp_geometry", "mlp_block"),
             ("basis_family", "dct"),
             ("basis_version", "chebyshev_first_kind_qr_v999"),
             ("n_head", 999),
             ("n_embd", 999),
-            ("depth_order", 999),
-            ("base_row_order", 999),
+            ("o_depth", 999),
+            ("o_attn_d_model", 999),
+            ("o_attn_qkv_per_channel", 999),
+            ("o_attn_out_per_channel", 999),
+            ("o_mlp_d_model", 999),
+            ("o_mlp_hidden", 999),
         ):
             mutated = deepcopy(payload)
             mutated["compact_identity"][key] = value
