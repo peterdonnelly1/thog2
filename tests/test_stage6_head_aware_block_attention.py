@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 import torch
 from sheet.block_trajectory import BlockTrajectory
@@ -12,6 +13,7 @@ from sheet.semantic_materializer import (
     ATTENTION_OUTPUT_WEIGHT,
     ATTENTION_QUERY_WEIGHT,
     ATTENTION_VALUE_WEIGHT,
+    LEGACY_ATTENTION_INPUT_BIAS,
     LEGACY_ATTENTION_INPUT_WEIGHT,
     MLP_CONTRACTION_WEIGHT,
     MLP_EXPANSION_WEIGHT,
@@ -96,6 +98,31 @@ class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
                 gradient = model.trajectory.coefficients[name].grad
                 self.assertIsNotNone(gradient)
                 self.assertGreater(float(gradient.abs().sum().item()), 0.0)
+
+    # vvv THOG regression test for the packed-QKV rematerialization elimination
+    def test_05_attention_forward_materializes_packed_qkv_weight_and_bias_once_each(self) -> None:
+        torch.manual_seed(4102)
+        model = SheetGPT(self.full_block_config())
+        inputs = torch.randn(2, 4, model.config.n_embd)
+        original_materialize = model.trajectory.materialize
+        original_materialize_vector = model.trajectory.materialize_vector
+        with mock.patch.object(model.trajectory, "materialize", wraps=original_materialize) as materialize_spy:
+            with mock.patch.object(model.trajectory, "materialize_vector", wraps=original_materialize_vector) as vector_spy:
+                output = model._attention(inputs, layer_index=1)
+        self.assertEqual(tuple(output.shape), tuple(inputs.shape))
+        packed_weight_calls = [
+            call
+            for call in materialize_spy.call_args_list
+            if call.args == (LEGACY_ATTENTION_INPUT_WEIGHT, 1)
+        ]
+        packed_bias_calls = [
+            call
+            for call in vector_spy.call_args_list
+            if call.args == (LEGACY_ATTENTION_INPUT_BIAS, 1)
+        ]
+        self.assertEqual(len(packed_weight_calls), 1)
+        self.assertEqual(len(packed_bias_calls), 1)
+    # ^^^ THOG
 
 
 if __name__ == "__main__":
