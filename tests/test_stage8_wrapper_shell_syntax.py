@@ -31,12 +31,21 @@ def test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_exp
         assert "--warmup-iters" in text
 
 
-def test_stage8_training_wrappers_expose_mlp_channel_order_control() -> None:
+def test_stage8_training_wrappers_expose_all_six_semantic_order_controls() -> None:
+    expected = (
+        ("O_DEPTH=32", "-P O_DEPTH", "--o-depth"),
+        ("O_ATTN_D_MODEL=64", "-Q O_ATTN_D_MODEL", "--o-attn-d-model"),
+        ("O_ATTN_QKV_PER_CHANNEL=6", "-J O_ATTN_QKV_PER_CHANNEL", "--o-attn-qkv-per-channel"),
+        ("O_ATTN_OUT_PER_CHANNEL=6", "-O O_ATTN_OUT_PER_CHANNEL", "--o-attn-out-per-channel"),
+        ("O_MLP_D_MODEL=64", "-X O_MLP_D_MODEL", "--o-mlp-d-model"),
+        ("O_MLP_HIDDEN=256", "-Y O_MLP_HIDDEN", "--o-mlp-hidden"),
+    )
     for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
-        assert "MLP_CHANNEL_ORDER=256" in text
-        assert "-Y MLP_CHANNEL_ORDER" in text
-        assert "--mlp-channel-order" in text
+        for variable, short_help, long_option in expected:
+            assert variable in text
+            assert short_help in text
+            assert long_option in text
         assert "THOG2_MLP_CHANNEL_ORDER" in text
         assert "LOG_TIMESTAMP" in text
         assert "--log-timestamp" in text
