@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sheet.curve_trajectory import CurveTrajectory
+from sheet.depth_trajectory import DepthTrajectory
 from sheet.semantic_materializer import LEGACY_ATTENTION_INPUT_WEIGHT
 from sheet.stage4_trainer import Stage4Trainer
 from sheet.trajectory import SheetTrajectory
@@ -16,13 +16,13 @@ from tests.stage4_test_support import stage4_tokens, stage4_training_config
 
 
 class Stage4bTrainingFactoryCleanupTests(unittest.TestCase):
-    def test_01_main_training_model_factory_builds_curve_sheetgpt_from_curve_training_config(self) -> None:
-        config = stage4_training_config(geometry_preset="curve")
+    def test_01_main_training_model_factory_builds_depth_sheetgpt_from_depth_training_config(self) -> None:
+        config = stage4_training_config(geometry_preset="depth")
         model = build_training_model(config)
         self.assertIsInstance(model, TrainingSheetGPT)
-        self.assertIsInstance(model.trajectory, CurveTrajectory)
+        self.assertIsInstance(model.trajectory, DepthTrajectory)
         self.assertNotIn(LEGACY_ATTENTION_INPUT_WEIGHT, model.trajectory.coefficients)
-        self.assertEqual(config.compact_identity_metadata()["materialization_version"], "curve_v1")
+        self.assertEqual(config.compact_identity_metadata()["materialization_version"], "depth_v1")
 
     def test_02_main_training_model_factory_preserves_legacy_sheet_col_training_config(self) -> None:
         config = stage4_training_config()
@@ -32,18 +32,18 @@ class Stage4bTrainingFactoryCleanupTests(unittest.TestCase):
         self.assertIn(LEGACY_ATTENTION_INPUT_WEIGHT, model.trajectory.coefficients)
         self.assertEqual(config.compact_identity_metadata()["materialization_version"], "legacy_sheet_col_v1")
 
-    def test_03_stage4_trainer_uses_main_factory_for_curve_and_legacy_without_special_case_module(self) -> None:
+    def test_03_stage4_trainer_uses_main_factory_for_depth_and_legacy_without_special_case_module(self) -> None:
         train_tokens, validation_tokens = stage4_tokens(128)
-        curve_trainer = Stage4Trainer(stage4_training_config(geometry_preset="curve", max_updates=1), train_tokens, validation_tokens)
+        depth_trainer = Stage4Trainer(stage4_training_config(geometry_preset="depth", max_updates=1), train_tokens, validation_tokens)
         legacy_trainer = Stage4Trainer(stage4_training_config(max_updates=1), train_tokens, validation_tokens)
-        self.assertIsInstance(curve_trainer.raw_model.trajectory, CurveTrajectory)
+        self.assertIsInstance(depth_trainer.raw_model.trajectory, DepthTrajectory)
         self.assertIsInstance(legacy_trainer.raw_model.trajectory, SheetTrajectory)
         with tempfile.TemporaryDirectory() as directory:
-            checkpoint_path = Path(directory) / "curve_factory_cleanup.pt"
-            curve_trainer.save_checkpoint(checkpoint_path)
+            checkpoint_path = Path(directory) / "depth_factory_cleanup.pt"
+            depth_trainer.save_checkpoint(checkpoint_path)
             resumed = Stage4Trainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens)
-        self.assertIsInstance(resumed.raw_model.trajectory, CurveTrajectory)
-        self.assertEqual(resumed.config.compact_identity_metadata()["materialization_version"], "curve_v1")
+        self.assertIsInstance(resumed.raw_model.trajectory, DepthTrajectory)
+        self.assertEqual(resumed.config.compact_identity_metadata()["materialization_version"], "depth_v1")
 
     def test_04_temporary_stage4_training_model_factory_module_has_been_removed(self) -> None:
         self.assertIsNone(importlib.util.find_spec("sheet.stage4_training_model_factory"))
