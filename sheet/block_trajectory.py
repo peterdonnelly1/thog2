@@ -81,11 +81,15 @@ class BlockTrajectory(nn.Module):
         basis_family: str = BASIS_FAMILY_CHEBYSHEV,
         compact_attention: bool = True,
         compact_mlp: bool = True,
+        vectorise_per_head_materialisation: bool = True,                                                                                                # <<< THOG selectable exact head batching
     ) -> None:
         super().__init__()
+        if not isinstance(vectorise_per_head_materialisation, bool):
+            raise ValueError("vectorise_per_head_materialisation must be bool")                                                                         # <<< THOG reject malformed execution option
         if not compact_attention and not compact_mlp:
             raise ValueError("BlockTrajectory requires at least one compact subsystem")
         self.config = config
+        self.vectorise_per_head_materialisation = vectorise_per_head_materialisation                                                                    # <<< THOG preserve exact loop fallback for A/B timing
         self.runtime_dtype = runtime_dtype
         self.basis_version = basis_version
         self.basis_family = basis_family
@@ -291,6 +295,31 @@ class BlockTrajectory(nn.Module):
             @ self.input_basis(name).to(coefficient).transpose(0, 1)
         )
 
+    # vvv THOG preserve the exact pre-vectorisation loop path behind a default-on A/B switch
+    def _materialize_head_output_block_loop(self, name: str, layer_index: int) -> Tensor:
+        item = self._block_metadata_by_name[name]
+        coefficient = self.coefficients[name]
+        depth_row = self.depth_basis[layer_index].to(coefficient)
+        output_basis = self.output_basis(name).to(coefficient)
+        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
+        pieces = []
+        for head_index in range(item.head_count):
+            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
+            pieces.append(output_basis @ mixed @ input_basis_transposed)
+        return torch.cat(pieces, dim=0)
+
+    def _materialize_head_input_block_loop(self, name: str, layer_index: int) -> Tensor:
+        item = self._block_metadata_by_name[name]
+        coefficient = self.coefficients[name]
+        depth_row = self.depth_basis[layer_index].to(coefficient)
+        output_basis = self.output_basis(name).to(coefficient)
+        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
+        pieces = []
+        for head_index in range(item.head_count):
+            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
+            pieces.append(output_basis @ mixed @ input_basis_transposed)
+        return torch.cat(pieces, dim=1)
+
     # vvv THOG vectorize all head-aware block contractions to eliminate per-head Python loops and small-kernel launch storms
     def _materialize_head_output_block(self, name: str, layer_index: int) -> Tensor:
         item = self._block_metadata_by_name[name]
@@ -318,9 +347,9 @@ class BlockTrajectory(nn.Module):
     def _materialize_block(self, name: str, layer_index: int) -> Tensor:
         item = self._block_metadata_by_name[name]
         if item.attention_head_axis == "output":
-            generated = self._materialize_head_output_block(name, layer_index)
+            generated = self._materialize_head_output_block(name, layer_index) if self.vectorise_per_head_materialisation else self._materialize_head_output_block_loop(name, layer_index)  # <<< THOG exact selectable vectorised/loop execution
         elif item.attention_head_axis == "input":
-            generated = self._materialize_head_input_block(name, layer_index)
+            generated = self._materialize_head_input_block(name, layer_index) if self.vectorise_per_head_materialisation else self._materialize_head_input_block_loop(name, layer_index)    # <<< THOG exact selectable vectorised/loop execution
         else:
             generated = self._materialize_generic_block(name, layer_index)
         expected_shape = (item.output_rows, item.row_width)

@@ -80,7 +80,9 @@ class SheetGPTConfig:
     basis_family: Optional[str] = None
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
-    direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                                      # <<< THOG default-off exact direct application of existing THOG MLP factors
+    # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
+    direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
+    vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
 
     def __post_init__(self) -> None:
         for name in ("block_size", "vocab_size"):
@@ -100,8 +102,12 @@ class SheetGPTConfig:
             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
             raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
-        if not isinstance(self.direct_thog_mlp_application, bool):
-            raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")                                         # <<< THOG validate selectable exact MLP application path
+        # if not isinstance(self.direct_thog_mlp_application, bool):                                                                                      # <<< THOG retired old option validation
+        #     raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")
+        if not isinstance(self.direct_factorised_mlp, bool):
+            raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
+        if not isinstance(self.vectorise_per_head_materialisation, bool):
+            raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
         self.sheet_geometry()
         self.compact_selectors()
 
@@ -158,6 +164,7 @@ class SheetGPT(nn.Module):
                 basis_family=selectors.basis_family,
                 compact_attention=True,
                 compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
+                vectorise_per_head_materialisation=config.vectorise_per_head_materialisation,                                                            # <<< THOG pass selectable head vectorisation into block trajectory
             )
         elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
             self.trajectory = MlpBlockTrajectory(
@@ -261,12 +268,12 @@ class SheetGPT(nn.Module):
         return output
 
     # vvv THOG exact direct application of the existing THOG MLP factorisation, selectable for A/B timing
-    def _supports_direct_thog_mlp_application(self) -> bool:
+    def _supports_direct_factorised_mlp(self) -> bool:
         if isinstance(self.trajectory, MlpBlockTrajectory):
             return True
         return isinstance(self.trajectory, BlockTrajectory) and self.trajectory.compact_mlp
 
-    def _direct_thog_mlp_linear(
+    def _direct_factorised_mlp_linear(
         self,
         inputs: Tensor,
         weight_name: str,
@@ -287,12 +294,12 @@ class SheetGPT(nn.Module):
 
     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
         direct_application = (
-            self.config.direct_thog_mlp_application
-            and self._supports_direct_thog_mlp_application()
+            self.config.direct_factorised_mlp
+            and self._supports_direct_factorised_mlp()
         )
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
         if direct_application:
-            hidden = self._direct_thog_mlp_linear(
+            hidden = self._direct_factorised_mlp_linear(
                 inputs,
                 "mlp_expansion_weight",
                 layer_index,
@@ -308,7 +315,7 @@ class SheetGPT(nn.Module):
         hidden = F.gelu(hidden)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
         if direct_application:
-            output = self._direct_thog_mlp_linear(
+            output = self._direct_factorised_mlp_linear(
                 hidden,
                 "mlp_contraction_weight",
                 layer_index,

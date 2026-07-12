@@ -245,6 +245,7 @@ class OwtRunConfig:
         fields = [
             f"n_{self.max_iters}",
             f"b_{self.batch_size}",
+            f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
             f"d_{dataset_label(self.dataset)}",
             f"w_{self.warmup_iters}",
             f"k_{self.checkpoint_interval}",

@@ -343,6 +343,24 @@ def resolved_payload(config: OwtRunConfig, *, world_size: int, log_timestamp: Op
     return {"artifact_name": config.artifact_name, "artifact_prefix": config.artifact_prefix, "model_type": config.model_type, "run_mode": config.run_mode, "world_size": world_size, "tokens_per_iter": config.tokens_per_iter(), "canonical_config": config.canonical_dict(world_size=world_size), "paths": {name: str(path) for name, path in paths.items()}}
 
 
+
+# vvv THOG print resolved model parameters and execution options immediately before training
+def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer) -> None:
+    report = trainer.parameter_report
+    persistent = int(report["persistent_parameters"])
+    dense_equivalent = int(report["dense_equivalent_total_parameters"])
+    sheet_coefficients = int(report["sheet_coefficients"])
+    compression = (dense_equivalent / persistent) if persistent else 0.0
+    print("model parameters and options", flush=True)
+    print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
+    print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
+    print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
+    if config.model_type == "sheet":
+        model_config = trainer.raw_model.config
+        print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}", flush=True)
+    print(flush=True)
+# ^^^ THOG
+
 def main() -> int:
     arguments = build_parser().parse_args()
     config = config_from_arguments(arguments)
@@ -383,6 +401,8 @@ def main() -> int:
             telemetry.start()
             telemetry.add_initial_summary(trainer.parameter_report)
         attach_telemetry(trainer, telemetry)
+        if trainer.distributed.is_primary:
+            print_model_parameters_and_options(config, trainer)                                                                                         # <<< THOG show the complete effective training setup before the first update
         result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=result_path)
         result["artifact"] = {"name": config.artifact_name, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}
         result["canonical_config"] = canonical
