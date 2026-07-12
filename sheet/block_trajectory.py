@@ -291,29 +291,29 @@ class BlockTrajectory(nn.Module):
             @ self.input_basis(name).to(coefficient).transpose(0, 1)
         )
 
+    # vvv THOG vectorize all head-aware block contractions to eliminate per-head Python loops and small-kernel launch storms
     def _materialize_head_output_block(self, name: str, layer_index: int) -> Tensor:
         item = self._block_metadata_by_name[name]
         coefficient = self.coefficients[name]
         depth_row = self.depth_basis[layer_index].to(coefficient)
         output_basis = self.output_basis(name).to(coefficient)
-        input_basis = self.input_basis(name).to(coefficient)
-        pieces = []
-        for head_index in range(item.head_count):
-            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
-            pieces.append(output_basis @ mixed @ input_basis.transpose(0, 1))
-        return torch.cat(pieces, dim=0)
+        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
+        mixed = torch.einsum("p,hpab->hab", depth_row, coefficient)
+        generated_by_head = torch.matmul(output_basis.unsqueeze(0), mixed)
+        generated_by_head = torch.matmul(generated_by_head, input_basis_transposed.unsqueeze(0))
+        return generated_by_head.reshape(item.output_rows, item.row_width)
 
     def _materialize_head_input_block(self, name: str, layer_index: int) -> Tensor:
         item = self._block_metadata_by_name[name]
         coefficient = self.coefficients[name]
         depth_row = self.depth_basis[layer_index].to(coefficient)
         output_basis = self.output_basis(name).to(coefficient)
-        input_basis = self.input_basis(name).to(coefficient)
-        pieces = []
-        for head_index in range(item.head_count):
-            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
-            pieces.append(output_basis @ mixed @ input_basis.transpose(0, 1))
-        return torch.cat(pieces, dim=1)
+        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
+        mixed = torch.einsum("p,hpab->hab", depth_row, coefficient)
+        generated_by_head = torch.matmul(output_basis.unsqueeze(0), mixed)
+        generated_by_head = torch.matmul(generated_by_head, input_basis_transposed.unsqueeze(0))
+        return generated_by_head.permute(1, 0, 2).reshape(item.output_rows, item.row_width)
+    # ^^^ THOG
 
     def _materialize_block(self, name: str, layer_index: int) -> Tensor:
         item = self._block_metadata_by_name[name]
