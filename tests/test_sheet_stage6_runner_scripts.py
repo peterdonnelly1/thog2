@@ -21,10 +21,8 @@ class RunnerScriptTests(unittest.TestCase):
                 str(REPOSITORY_ROOT / script),
                 "-x",
                 "true",
-                "-W",
-                "false",
-                "-M",
-                "disabled",
+                "-I",
+                "none",
                 "-g",
                 "TEST",
                 "-n",
@@ -63,12 +61,13 @@ class RunnerScriptTests(unittest.TestCase):
 
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
-        self.assertIn("NELSON_DENSE_scruffy", output)
+        self.assertIn("TEST_DENSE_scruffy", output)
         self.assertIn("_r_depth_scaled_z_true_layer_depth_S_1", output)
         self.assertIn("--model-type dense", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source true_layer_depth", output)
         self.assertIn("model/preset/basis: dense / dense / chebyshev", output)
+        self.assertIn("instrumentation:    none", output)
         self.assertIn("DRY RUN:", output)
 
     def test_s6_34_depth_runner_resolves_all_orders_and_default_dof_implied_depth(self) -> None:
@@ -93,7 +92,7 @@ class RunnerScriptTests(unittest.TestCase):
                 "12",
             ],
         )
-        self.assertIn("NELSON_CHEBY_DEPTH_scruffy", output)
+        self.assertIn("TEST_CHEBY_DEPTH_scruffy", output)
         self.assertIn(
             "_P_2_Q_4_J_2_O_2_X_4_Y_16_r_depth_scaled_z_dof_implied_depth_S_1",
             output,
@@ -103,12 +102,15 @@ class RunnerScriptTests(unittest.TestCase):
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source dof_implied_depth", output)
         self.assertIn("P2 Q4 J2 O2 X4 Y16", output)
+        self.assertIn("instrumentation:    none", output)
         self.assertIn("DRY RUN:", output)
 
     def test_s6_35_shell_sources_pass_bash_syntax_check(self) -> None:
         for script in (
             "current_scruffy_train_DENSE_OWT.sh",
             "current_scruffy_train_SHEET_OWT.sh",
+            "current_scruffy_train_OWT.sh",
+            "current_dreedle_train_OWT.sh",
         ):
             completed = subprocess.run(
                 ["bash", "-n", str(REPOSITORY_ROOT / script)],
@@ -117,7 +119,7 @@ class RunnerScriptTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
