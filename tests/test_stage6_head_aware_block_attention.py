@@ -124,6 +124,48 @@ class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
         self.assertEqual(len(packed_bias_calls), 1)
     # ^^^ THOG
 
+    # vvv THOG exact forward and backward equivalence tests for vectorized per-head materialization
+    def _explicit_per_head_materialization(self, trajectory: BlockTrajectory, name: str, layer_index: int) -> torch.Tensor:
+        item = trajectory.family_metadata(name)
+        coefficient = trajectory.coefficients[name]
+        depth_row = trajectory.depth_basis[layer_index].to(coefficient)
+        output_basis = trajectory.output_basis(name).to(coefficient)
+        input_basis = trajectory.input_basis(name).to(coefficient)
+        pieces = []
+        for head_index in range(item.head_count):
+            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
+            pieces.append(output_basis @ mixed @ input_basis.transpose(0, 1))
+        concatenate_dimension = 0 if item.attention_head_axis == "output" else 1
+        return torch.cat(pieces, dim=concatenate_dimension)
+
+    def test_06_vectorized_head_materialization_matches_explicit_per_head_reference_for_every_attention_family_and_layer(self) -> None:
+        torch.manual_seed(4103)
+        trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float64)
+        with torch.no_grad():
+            for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT, ATTENTION_OUTPUT_WEIGHT):
+                trajectory.coefficients[name].normal_(mean=0.0, std=0.2)
+        for layer_index in range(trajectory.config.n_layer):
+            for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT, ATTENTION_OUTPUT_WEIGHT):
+                with self.subTest(layer_index=layer_index, name=name):
+                    vectorized = trajectory.materialize(name, layer_index)
+                    reference = self._explicit_per_head_materialization(trajectory, name, layer_index)
+                    torch.testing.assert_close(vectorized, reference, rtol=1.0e-12, atol=1.0e-12)
+
+    def test_07_vectorized_head_materialization_preserves_coefficient_gradients_for_output_and_input_head_axes(self) -> None:
+        torch.manual_seed(4104)
+        trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float64)
+        for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_OUTPUT_WEIGHT):
+            with self.subTest(name=name):
+                coefficient = trajectory.coefficients[name]
+                vectorized = trajectory.materialize(name, layer_index=2)
+                vectorized_objective = vectorized.square().sum() + 0.25 * vectorized.sum()
+                vectorized_gradient = torch.autograd.grad(vectorized_objective, coefficient, retain_graph=True)[0]
+                reference = self._explicit_per_head_materialization(trajectory, name, layer_index=2)
+                reference_objective = reference.square().sum() + 0.25 * reference.sum()
+                reference_gradient = torch.autograd.grad(reference_objective, coefficient)[0]
+                torch.testing.assert_close(vectorized_gradient, reference_gradient, rtol=1.0e-11, atol=1.0e-11)
+    # ^^^ THOG
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
