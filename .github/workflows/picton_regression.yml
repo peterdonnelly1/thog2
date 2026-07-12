@@ -17,6 +17,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Archive tested source snapshot
+        run: tar --exclude=.git --exclude=picton-source.tgz -czf picton-source.tgz .
+
+      - name: Upload tested source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: picton-source
+          path: picton-source.tgz
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
