@@ -15,14 +15,13 @@ from .basis import BASIS_VERSION
 from .block_trajectory import BlockTrajectory
 from .compact_identity import (
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
-    GEOMETRY_PRESET_BLOCK,
-    GEOMETRY_PRESET_CURVE,
+    GEOMETRY_PRESET_DEPTH,
     GEOMETRY_PRESET_MLP_BLOCK,
     MLP_GEOMETRY_MLP_BLOCK,
     resolve_compact_selectors,
     validate_current_sheet_support,
 )
-from .curve_trajectory import CurveTrajectory
+from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
 from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
@@ -69,6 +68,11 @@ class SheetGPTConfig:
     depth_order: int = 12
     base_row_order: int = 128
     mlp_channel_order: Optional[int] = None
+    o_attn_d_model: Optional[int] = None                                                                                                               # <<< THOG final attention model-axis order
+    o_attn_qkv_per_channel: Optional[int] = None                                                                                                       # <<< THOG final QKV per-head channel order
+    o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
+    o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
+    o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
     basis_version: str = BASIS_VERSION
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -103,6 +107,11 @@ class SheetGPTConfig:
             depth_order=self.depth_order,
             base_row_order=self.base_row_order,
             mlp_channel_order=self.mlp_channel_order,
+            o_attn_d_model=self.o_attn_d_model,
+            o_attn_qkv_per_channel=self.o_attn_qkv_per_channel,
+            o_attn_out_per_channel=self.o_attn_out_per_channel,
+            o_mlp_d_model=self.o_mlp_d_model,
+            o_mlp_hidden=self.o_mlp_hidden,
             bias=self.bias,
         )
 
@@ -121,7 +130,7 @@ class SheetGPTConfig:
 
 
 class SheetGPT(nn.Module):
-    """Sequential correctness-first GPT using compact Chebyshev Sheet weights."""
+    """Sequential correctness-first GPT using compact basis-generated weights."""
 
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__()
@@ -151,8 +160,8 @@ class SheetGPT(nn.Module):
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors.geometry_preset == GEOMETRY_PRESET_CURVE:
-            self.trajectory = CurveTrajectory(
+        elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            self.trajectory = DepthTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
                 basis_version=config.basis_version,
@@ -207,7 +216,14 @@ class SheetGPT(nn.Module):
         query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
         value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
         if hasattr(F, "scaled_dot_product_attention"):
-            attended = F.scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=self.config.dropout if self.training else 0.0, is_causal=True)
+            attended = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=None,
+                dropout_p=self.config.dropout if self.training else 0.0,
+                is_causal=True,
+            )
         else:
             scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
             causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
@@ -325,7 +341,10 @@ class SheetGPT(nn.Module):
             else:
                 target = no_decay
             target[name] = parameter
-        return {"params": list(decay.values()), "parameter_names": tuple(decay.keys()), "weight_decay": weight_decay}, {"params": list(no_decay.values()), "parameter_names": tuple(no_decay.keys()), "weight_decay": 0.0}
+        return (
+            {"params": list(decay.values()), "parameter_names": tuple(decay.keys()), "weight_decay": weight_decay},
+            {"params": list(no_decay.values()), "parameter_names": tuple(no_decay.keys()), "weight_decay": 0.0},
+        )
 
     def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: Tuple[float, float], device_type: str) -> torch.optim.Optimizer:
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
@@ -334,12 +353,10 @@ class SheetGPT(nn.Module):
 
     def compact_state_violations(self) -> Tuple[str, ...]:
         violations: List[str] = []
-        # vvv THOG
         compact_coefficient_prefixes = (
             "trajectory.coefficients.",
-            "trajectory.curve.coefficients.",
+            "trajectory.depth.coefficients.",
         )
-        # ^^^ THOG
         for name, parameter in self.named_parameters():
             if name.startswith(compact_coefficient_prefixes):
                 continue
