@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 import torch
 
-from sheet.compact_identity import GEOMETRY_PRESET_CURVE
+from sheet.compact_identity import GEOMETRY_PRESET_DEPTH
 from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.training_model import TrainingSheetGPT
 
 
-class FastDiscardCurveLifetimeTests(unittest.TestCase):
-    def curve_config(self, *, fast_discard: bool, bias: bool = True) -> SheetGPTConfig:
+class FastDiscardDepthLifetimeTests(unittest.TestCase):
+    def depth_config(self, *, fast_discard: bool, bias: bool = True) -> SheetGPTConfig:
         return SheetGPTConfig(
             block_size=8,
             vocab_size=32,
@@ -23,11 +23,11 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
             bias=bias,
             depth_order=3,
             base_row_order=4,
-            geometry_preset=GEOMETRY_PRESET_CURVE,
+            geometry_preset=GEOMETRY_PRESET_DEPTH,
             fast_discard=fast_discard,
         )
 
-    def build_curve_model(
+    def build_depth_model(
         self,
         *,
         model_cls: type[SheetGPT],
@@ -35,7 +35,7 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
         bias: bool,
     ) -> SheetGPT:
         with patch.dict("os.environ", {"THOG2_MLP_CHANNEL_ORDER": "16"}):
-            return model_cls(self.curve_config(fast_discard=fast_discard, bias=bias))
+            return model_cls(self.depth_config(fast_discard=fast_discard, bias=bias))
 
     def assert_fast_discard_matches_reference(
         self,
@@ -45,12 +45,12 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
         bias: bool,
     ) -> None:
         torch.manual_seed(7319)
-        reference = self.build_curve_model(
+        reference = self.build_depth_model(
             model_cls=model_cls,
             fast_discard=False,
             bias=bias,
         )
-        candidate = self.build_curve_model(
+        candidate = self.build_depth_model(
             model_cls=model_cls,
             fast_discard=True,
             bias=bias,
@@ -100,7 +100,7 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
                 self.assertIsNotNone(candidate_gradient)
                 torch.testing.assert_close(candidate_gradient, reference_gradient, rtol=0.0, atol=0.0)
 
-    def test_01_curve_fast_discard_can_be_enabled_by_environment_without_touching_call_sites(self) -> None:
+    def test_01_depth_fast_discard_can_be_enabled_by_environment_without_touching_call_sites(self) -> None:
         with patch.dict("os.environ", {"THOG2_FAST_DISCARD": "true", "THOG2_MLP_CHANNEL_ORDER": "16"}):
             self.assertTrue(
                 SheetGPTConfig(
@@ -113,7 +113,7 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
                     bias=True,
                     depth_order=3,
                     base_row_order=4,
-                    geometry_preset=GEOMETRY_PRESET_CURVE,
+                    geometry_preset=GEOMETRY_PRESET_DEPTH,
                 ).fast_discard
             )
         with patch.dict("os.environ", {"THOG2_FAST_DISCARD": "false", "THOG2_MLP_CHANNEL_ORDER": "16"}):
@@ -128,11 +128,11 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
                     bias=True,
                     depth_order=3,
                     base_row_order=4,
-                    geometry_preset=GEOMETRY_PRESET_CURVE,
+                    geometry_preset=GEOMETRY_PRESET_DEPTH,
                 ).fast_discard
             )
 
-    def test_02_curve_fast_discard_preserves_forward_loss_and_all_gradients_without_activation_checkpointing(self) -> None:
+    def test_02_depth_fast_discard_preserves_forward_loss_and_all_gradients_without_activation_checkpointing(self) -> None:
         for bias in (True, False):
             with self.subTest(bias=bias):
                 self.assert_fast_discard_matches_reference(
@@ -141,7 +141,7 @@ class FastDiscardCurveLifetimeTests(unittest.TestCase):
                     bias=bias,
                 )
 
-    def test_03_curve_fast_discard_preserves_forward_loss_and_all_gradients_with_activation_checkpointing(self) -> None:
+    def test_03_depth_fast_discard_preserves_forward_loss_and_all_gradients_with_activation_checkpointing(self) -> None:
         for segment_size in (1, 3):
             for bias in (True, False):
                 with self.subTest(segment_size=segment_size, bias=bias):
