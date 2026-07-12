@@ -2,17 +2,14 @@
 set -euo pipefail
 
 # vvv THOG
-# Current scruffy OpenWebText training wrapper for the consolidated Stage 8-capable runner.
-# Defaults are deliberately non-tiny: SPECTRAL L144 H12 D768 C1024, batch 3, global accumulation 160.
+# Current scruffy OpenWebText training wrapper for the PICTON compact-geometry contract.
 # Scruffy runtime defaults: bfloat16, flash2. Dense baseline is available as -p dense.
-# Logging is explicit: -I tensorboard|wandb|none. TensorBoard writes under THOG2_CURVE_ROOT, default curves/.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
 
 RUN_MODULE="run_thog2_owt"
 HOST_LABEL="scruffy"
-MODEL_TYPE_ARGUMENT=""
 RUN_MODE="fresh"
 RUN_NAME=""
 EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"
@@ -22,8 +19,7 @@ CHECKPOINT_ROOT="checkpoints"
 LOG_ROOT="logs"
 RESULT_ROOT="results"
 WANDB_ROOT="wandb"
-GEOMETRY_PRESET="curve"
-PRESET_ARGUMENT_EXPLICIT=false
+GEOMETRY_PRESET="depth"
 BASIS_FAMILY="chebyshev"
 BASIS_VERSION="auto"
 ATTENTION_GEOMETRY=""
@@ -41,9 +37,12 @@ N_LAYER=144
 N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
-DEPTH_ORDER=32
-BASE_ROW_ORDER=64
-MLP_CHANNEL_ORDER=256
+O_DEPTH=32
+O_ATTN_D_MODEL=64
+O_ATTN_QKV_PER_CHANNEL=6
+O_ATTN_OUT_PER_CHANNEL=6
+O_MLP_D_MODEL=64
+O_MLP_HIDDEN=256
 RESIDUAL_INIT_POLICY="depth_scaled"
 RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
@@ -70,8 +69,8 @@ usage() {
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
-  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | curve | head_aware_block | mlp_block | block
-                                                  single value, comma list, or quoted space list
+  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block
+                                                   single value, comma list, or quoted space list
   -q RUN_MODE=${RUN_MODE}                        fresh | resume
   -g RUN_NAME=${RUN_NAME:-auto}
   -n STEPS=${STEPS}
@@ -93,7 +92,7 @@ Schedule/logging:
   -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
-Spectral compact options:
+Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   chebyshev | dct
   -v BASIS_VERSION=${BASIS_VERSION}
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
@@ -104,9 +103,12 @@ Shape/runtime:
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
-  -P DEPTH_ORDER=${DEPTH_ORDER}                     single integer, comma list, or quoted space list; ignored by dense
-  -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
-  -Y MLP_CHANNEL_ORDER=${MLP_CHANNEL_ORDER}
+  -P O_DEPTH=${O_DEPTH}                             single integer, comma list, or quoted space list; ignored by dense
+  -Q O_ATTN_D_MODEL=${O_ATTN_D_MODEL}
+  -J O_ATTN_QKV_PER_CHANNEL=${O_ATTN_QKV_PER_CHANNEL}
+  -O O_ATTN_OUT_PER_CHANNEL=${O_ATTN_OUT_PER_CHANNEL}
+  -X O_MLP_D_MODEL=${O_MLP_D_MODEL}
+  -Y O_MLP_HIDDEN=${O_MLP_HIDDEN}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -E FAST_DISCARD=${FAST_DISCARD}                   true | false
   -T DTYPE=${DTYPE}                                 float32 | float16 | bfloat16
@@ -125,21 +127,18 @@ Paths:
   -R RESULT_ROOT=${RESULT_ROOT}
   -x DRY_RUN=${DRY_RUN}
   -h show this help
-
-Deprecated compatibility:
-  -O MODEL_TYPE                                  dense maps to -p dense; sheet/spectral leaves -p unchanged
 EOF_USAGE
 }
 
-while getopts ":O:q:g:n:b:A:G:u:e:l:w:k:I:M:W:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+while getopts ":q:g:n:b:A:G:u:e:l:w:k:I:M:W:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
-    O) MODEL_TYPE_ARGUMENT="$OPTARG" ;; q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
+    q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; M) WANDB_MODE="$OPTARG" ;; W) WANDB_ENABLED="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
-    p) GEOMETRY_PRESET="$OPTARG"; PRESET_ARGUMENT_EXPLICIT=true ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
-    C) BLOCK_SIZE="$OPTARG" ;; P) DEPTH_ORDER="$OPTARG" ;; Q) BASE_ROW_ORDER="$OPTARG" ;; Y) MLP_CHANNEL_ORDER="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
     h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
@@ -153,59 +152,33 @@ validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
 validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; expected true or false." >&2; exit 2 ;; esac; }
 
-# vvv THOG
-if [[ -n "$MODEL_TYPE_ARGUMENT" ]]; then
-  case "$MODEL_TYPE_ARGUMENT" in
-    dense)
-      if [[ "$PRESET_ARGUMENT_EXPLICIT" == false ]]; then
-        GEOMETRY_PRESET="dense"
-      fi
-      ;;
-    spectral|sheet)
-      ;;
-    *) echo "MODEL_TYPE is deprecated; if used, it must be dense, spectral, or sheet." >&2; exit 2 ;;
-  esac
-fi
-
-DEPTH_ORDER_VALUES=()
+O_DEPTH_VALUES=()
 PRESET_VALUES=()
 HAS_DENSE_PRESET=false
-HAS_SPECTRAL_PRESET=false
-parse_depth_order_values() {
-  local raw_depth_orders="$1"
-  local normalized_depth_orders="${raw_depth_orders//,/ }"
-  local depth_order_value
-  for depth_order_value in $normalized_depth_orders; do
-    validate_positive_uint "$depth_order_value" "DEPTH_ORDER"
-    DEPTH_ORDER_VALUES+=("$depth_order_value")
+HAS_COMPACT_PRESET=false
+parse_o_depth_values() {
+  local normalized="${1//,/ }"
+  local value
+  for value in $normalized; do
+    validate_positive_uint "$value" "O_DEPTH"
+    O_DEPTH_VALUES+=("$value")
   done
-  (( ${#DEPTH_ORDER_VALUES[@]} > 0 )) || { echo "Invalid DEPTH_ORDER: empty value list." >&2; exit 2; }
+  (( ${#O_DEPTH_VALUES[@]} > 0 )) || { echo "Invalid O_DEPTH: empty value list." >&2; exit 2; }
 }
 parse_geometry_preset_values() {
-  local raw_presets="$1"
-  local normalized_presets="${raw_presets//,/ }"
-  local preset_value
-  for preset_value in $normalized_presets; do
-    case "$preset_value" in
-      dense) PRESET_VALUES+=("$preset_value"); HAS_DENSE_PRESET=true ;;
-      legacy_sheet_col|curve|head_aware_block|mlp_block|block) PRESET_VALUES+=("$preset_value"); HAS_SPECTRAL_PRESET=true ;;
-      *) echo "Bad PRESET: $preset_value" >&2; exit 2 ;;
+  local normalized="${1//,/ }"
+  local value
+  for value in $normalized; do
+    case "$value" in
+      dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
+      legacy_sheet_col|depth|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      *) echo "Bad PRESET: $value" >&2; exit 2 ;;
     esac
   done
   (( ${#PRESET_VALUES[@]} > 0 )) || { echo "Invalid PRESET: empty value list." >&2; exit 2; }
 }
-parse_depth_order_values "$DEPTH_ORDER"
+parse_o_depth_values "$O_DEPTH"
 parse_geometry_preset_values "$GEOMETRY_PRESET"
-
-if [[ "$MODEL_TYPE_ARGUMENT" == dense && "$HAS_SPECTRAL_PRESET" == true ]]; then
-  echo "Deprecated -O dense conflicts with spectral -p values; use -p dense or drop -O." >&2
-  exit 2
-fi
-if [[ "$MODEL_TYPE_ARGUMENT" =~ ^(spectral|sheet)$ && "$HAS_DENSE_PRESET" == true ]]; then
-  echo "Deprecated -O $MODEL_TYPE_ARGUMENT conflicts with -p dense; use -p as the sole selector." >&2
-  exit 2
-fi
-# ^^^ THOG
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 case "$BASIS_FAMILY" in chebyshev|dct) ;; *) echo "BASIS_FAMILY must be chebyshev or dct." >&2; exit 2 ;; esac
@@ -216,7 +189,7 @@ case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must
 case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_RENDERER must be matplotlib, plotly, or both." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
-for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$BASE_ROW_ORDER" "$MLP_CHANNEL_ORDER" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS"; do validate_positive_uint "$setting" "numeric setting"; done
+for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS"; do validate_positive_uint "$setting" "numeric setting"; done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
@@ -227,24 +200,25 @@ validate_true_false "$DRY_RUN" "DRY_RUN"
 
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
-if [[ "$HAS_SPECTRAL_PRESET" == true ]]; then
-  for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
-    (( depth_order_value <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER: P=${depth_order_value}, L=${N_LAYER}." >&2; exit 2; }
-  done
-  (( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
-  (( MLP_CHANNEL_ORDER <= 4 * N_EMBD )) || { echo "MLP_CHANNEL_ORDER must not exceed 4*N_EMBD." >&2; exit 2; }
+HEAD_DIM=$((N_EMBD / N_HEAD))
+if [[ "$HAS_COMPACT_PRESET" == true ]]; then
+  for value in "${O_DEPTH_VALUES[@]}"; do (( value <= N_LAYER )) || { echo "O_DEPTH must not exceed N_LAYER: P=${value}, L=${N_LAYER}." >&2; exit 2; }; done
+  (( O_ATTN_D_MODEL <= N_EMBD )) || { echo "O_ATTN_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
+  (( O_ATTN_QKV_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_QKV_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
+  (( O_ATTN_OUT_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_OUT_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
+  (( O_MLP_D_MODEL <= N_EMBD )) || { echo "O_MLP_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
+  (( O_MLP_HIDDEN <= 4 * N_EMBD )) || { echo "O_MLP_HIDDEN must not exceed 4*N_EMBD." >&2; exit 2; }
 fi
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 BASIS_TAG="CHEBY"; [[ "$BASIS_FAMILY" == dct ]] && BASIS_TAG="DCT"
-
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 WANDB_FLAG="--no-wandb"; [[ "$WANDB_ENABLED" == true ]] && WANDB_FLAG="--wandb"
 
 export THOG2_INSTRUMENTATION="$INSTRUMENTATION"
 export THOG2_CURVE_ROOT="${THOG2_CURVE_ROOT:-curves}"
-export THOG2_MLP_CHANNEL_ORDER="$MLP_CHANNEL_ORDER"
+export THOG2_MLP_CHANNEL_ORDER="$O_MLP_HIDDEN"
 export THOG2_DEPTH_CURVE_PLOTS="$DEPTH_CURVE_PLOTS"
 export THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS="$DEPTH_CURVE_SAMPLE_ELEMENTS"
 export THOG2_DEPTH_CURVE_RENDERER="$DEPTH_CURVE_RENDERER"
@@ -252,53 +226,41 @@ export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
 export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-# vvv THOG
-run_preset_depth_order() {
+run_preset_o_depth() {
   local geometry_preset_value="$1"
-  local depth_order_value="$2"
+  local o_depth_value="$2"
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
-  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary
-  local log_url viewer_url serve_url run_status
+  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary log_url viewer_url serve_url run_status
   local -a compact_args optional_args train_args command
 
-  n_layer_value="$N_LAYER"
-  n_head_value="$N_HEAD"
-  n_embd_value="$N_EMBD"
+  n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
-  optional_args=()
-  compact_args=()
-
+  optional_args=(); compact_args=()
   if [[ "$geometry_preset_value" == dense ]]; then
-    run_model_type="dense"
-    display_model_type="dense"
-    preset_tag="DENSE"
-    run_tag="DENSE"
+    run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"
     [[ "$N_LAYER_EXPLICIT" == false ]] && n_layer_value=12
     [[ "$N_HEAD_EXPLICIT" == false ]] && n_head_value=12
     [[ "$N_EMBD_EXPLICIT" == false ]] && n_embd_value=768
     [[ "$residual_init_depth_source_value" == dof_implied_depth ]] && residual_init_depth_source_value="true_layer_depth"
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
   else
-    run_model_type="sheet"
-    display_model_type="spectral"
-    preset_tag="${geometry_preset_value^^}"
+    run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
     run_tag="${BASIS_TAG}_${preset_tag}"
     compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION")
     [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
     [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
-    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE} P${depth_order_value} Q${BASE_ROW_ORDER} Y${MLP_CHANNEL_ORDER}"
+    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE} P${o_depth_value} Q${O_ATTN_D_MODEL} J${O_ATTN_QKV_PER_CHANNEL} O${O_ATTN_OUT_PER_CHANNEL} X${O_MLP_D_MODEL} Y${O_MLP_HIDDEN}"
   fi
 
-  run_name_value="$RUN_NAME"
-  [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
-
+  run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
   train_args=(
     --model-type "$run_model_type" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$run_name_value"
     --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
     --max-iters "$STEPS" --batch-size "$BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
     --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS"
-    --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE" --depth-order "$depth_order_value" --base-row-order "$BASE_ROW_ORDER" --mlp-channel-order "$MLP_CHANNEL_ORDER"
+    --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE"
+    --o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN"
     "${compact_args[@]}" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
     --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${optional_args[@]}" "${EXTRA_ARGS[@]}"
@@ -308,13 +270,10 @@ run_preset_depth_order() {
   resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
   artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
   log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
-  depth_curve_local_root="$(dirname "$log_path")/depth_curves"
-  export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
+  depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
-  log_url="file://$(realpath -m "$log_path")"
-  viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"
-  serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
+  log_url="file://$(realpath -m "$log_path")"; viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"; serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
 
   cat <<EOF_RUN
 scruffy OWT train
@@ -336,38 +295,26 @@ EOF_RUN
 
   if [[ "$DRY_RUN" == true ]]; then
     "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
-    printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'
-    return 0
+    printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'; return 0
   fi
-
   mkdir -p "$(dirname "$log_path")"
-  set +e
-  "${command[@]}" 2>&1 | tee "$log_path"
-  run_status=${PIPESTATUS[0]}
-  set -e
-
+  set +e; "${command[@]}" 2>&1 | tee "$log_path"; run_status=${PIPESTATUS[0]}; set -e
   cat <<EOF_DONE
 scruffy OWT run finished
   status:             $run_status
   artifact:           $artifact_name
   log URL:            $log_url
   depth viewer URL:   $viewer_url
-  serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
-  served URL:         $serve_url
 EOF_DONE
   return "$run_status"
 }
 
-if (( ${#PRESET_VALUES[@]} > 1 || ${#DEPTH_ORDER_VALUES[@]} > 1 )); then
-  echo "scruffy OWT grid: p=${PRESET_VALUES[*]} P=${DEPTH_ORDER_VALUES[*]}"
-fi
+if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 )); then echo "scruffy OWT grid: p=${PRESET_VALUES[*]} P=${O_DEPTH_VALUES[*]}"; fi
 for geometry_preset_value in "${PRESET_VALUES[@]}"; do
   if [[ "$geometry_preset_value" == dense ]]; then
-    run_preset_depth_order "$geometry_preset_value" "${DEPTH_ORDER_VALUES[0]}"
+    run_preset_o_depth "$geometry_preset_value" "${O_DEPTH_VALUES[0]}"
   else
-    for depth_order_value in "${DEPTH_ORDER_VALUES[@]}"; do
-      run_preset_depth_order "$geometry_preset_value" "$depth_order_value"
-    done
+    for o_depth_value in "${O_DEPTH_VALUES[@]}"; do run_preset_o_depth "$geometry_preset_value" "$o_depth_value"; done
   fi
 done
 # ^^^ THOG
