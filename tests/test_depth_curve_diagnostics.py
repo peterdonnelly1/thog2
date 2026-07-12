@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import torch
 
-from sheet.compact_identity import GEOMETRY_PRESET_CURVE
+from sheet.compact_identity import GEOMETRY_PRESET_DEPTH
 from sheet.depth_curve_diagnostics import curve_depth_summaries, write_depth_curve_local_viewer
 from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.semantic_materializer import (
@@ -23,7 +23,7 @@ from sheet.semantic_materializer import (
 
 
 class DepthCurveDiagnosticsTests(unittest.TestCase):
-    def curve_model(self) -> SheetGPT:
+    def depth_model(self) -> SheetGPT:
         torch.manual_seed(8921)
         with patch.dict("os.environ", {"THOG2_MLP_CHANNEL_ORDER": "16"}):
             return SheetGPT(
@@ -37,12 +37,12 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
                     bias=True,
                     depth_order=3,
                     base_row_order=4,
-                    geometry_preset=GEOMETRY_PRESET_CURVE,
+                    geometry_preset=GEOMETRY_PRESET_DEPTH,
                 )
             )
 
-    def test_01_curve_depth_summaries_return_six_big_weight_families_spanning_all_logical_layers(self) -> None:
-        model = self.curve_model()
+    def test_01_depth_summaries_return_six_big_weight_families_spanning_all_logical_layers(self) -> None:
+        model = self.depth_model()
         summaries = curve_depth_summaries(model, sample_elements=7)
         self.assertEqual(
             tuple(summary.family_name for summary in summaries),
@@ -65,8 +65,8 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
                 self.assertTrue(all(torch.isfinite(torch.tensor(summary.means))))
                 self.assertTrue(all(torch.isfinite(torch.tensor(summary.stds))))
 
-    def test_02_curve_depth_summaries_match_materialized_matrix_mean_and_std_when_sampling_all_elements(self) -> None:
-        model = self.curve_model()
+    def test_02_depth_summaries_match_materialized_matrix_mean_and_std_when_sampling_all_elements(self) -> None:
+        model = self.depth_model()
         summaries = curve_depth_summaries(model, sample_elements=10_000)
         for summary in summaries:
             with self.subTest(family=summary.family_name):
@@ -76,8 +76,8 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
                     self.assertAlmostEqual(summary.stds[layer_index], float(materialized.std(unbiased=False).item()), places=6)
 
     # vvv THOG
-    def test_03_curve_depth_summaries_include_histograms_for_each_layer_for_interactive_local_plotly_viewer(self) -> None:
-        model = self.curve_model()
+    def test_03_depth_summaries_include_histograms_for_each_layer_for_interactive_local_plotly_viewer(self) -> None:
+        model = self.depth_model()
         summaries = curve_depth_summaries(model, sample_elements=7, histogram_bins=5)
         for summary in summaries:
             with self.subTest(family=summary.family_name):
@@ -89,7 +89,7 @@ class DepthCurveDiagnosticsTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("plotly") is not None, "plotly is not installed")
     def test_04_plotly_local_viewer_writes_structured_dashboard_and_per_family_html_files_for_easy_navigation(self) -> None:
-        model = self.curve_model()
+        model = self.depth_model()
         summaries = curve_depth_summaries(model, sample_elements=7, histogram_bins=5)
         with tempfile.TemporaryDirectory() as directory:
             index_path = write_depth_curve_local_viewer(summaries, output_root=Path(directory), step=10, artifact_name="TEST_ARTIFACT")
