@@ -124,6 +124,57 @@ class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
         self.assertEqual(len(packed_bias_calls), 1)
     # ^^^ THOG
 
+    # vvv THOG regression tests for removing the semantic adapter from the model attention hot path
+    def test_06_attention_hot_path_bypasses_semantic_reconstruction_adapter_and_materializes_packed_qkv_once(self) -> None:
+        torch.manual_seed(4105)
+        model = SheetGPT(self.full_block_config())
+        inputs = torch.randn(2, 4, model.config.n_embd)
+        original_materialize = model.trajectory.materialize
+        original_materialize_vector = model.trajectory.materialize_vector
+        with mock.patch.object(model.semantic_materializer, "reconstructed_attention_input_weight", side_effect=AssertionError("semantic weight adapter entered")):
+            with mock.patch.object(model.semantic_materializer, "reconstructed_attention_input_bias", side_effect=AssertionError("semantic bias adapter entered")):
+                with mock.patch.object(model.trajectory, "materialize", wraps=original_materialize) as materialize_spy:
+                    with mock.patch.object(model.trajectory, "materialize_vector", wraps=original_materialize_vector) as vector_spy:
+                        output = model._attention(inputs, layer_index=1)
+        self.assertEqual(tuple(output.shape), tuple(inputs.shape))
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_WEIGHT, 1) for call in materialize_spy.call_args_list), 1)
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_BIAS, 1) for call in vector_spy.call_args_list), 1)
+
+    def test_07_direct_trajectory_attention_hot_path_matches_legacy_adapter_outputs_and_gradients(self) -> None:
+        torch.manual_seed(4106)
+        reference = SheetGPT(self.full_block_config())
+        candidate = SheetGPT(self.full_block_config())
+        candidate.load_state_dict(reference.state_dict())
+        inputs_reference = torch.randn(2, 4, reference.config.n_embd, requires_grad=True)
+        inputs_candidate = inputs_reference.detach().clone().requires_grad_(True)
+
+        def legacy_attention_input_weight(layer_index: int) -> torch.Tensor:
+            return reference.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+
+        def legacy_attention_input_bias(layer_index: int) -> torch.Tensor:
+            return reference.semantic_materializer.reconstructed_attention_input_bias(layer_index)
+
+        reference_weight = legacy_attention_input_weight(1)
+        reference_bias = legacy_attention_input_bias(1)
+        candidate_weight = candidate.trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, 1)
+        candidate_bias = candidate.trajectory.materialize_vector(LEGACY_ATTENTION_INPUT_BIAS, 1)
+        torch.testing.assert_close(candidate_weight, reference_weight, rtol=0.0, atol=0.0)
+        torch.testing.assert_close(candidate_bias, reference_bias, rtol=0.0, atol=0.0)
+        reference_output = torch.nn.functional.linear(inputs_reference, reference_weight, reference_bias)
+        candidate_output = torch.nn.functional.linear(inputs_candidate, candidate_weight, candidate_bias)
+        torch.testing.assert_close(candidate_output, reference_output, rtol=0.0, atol=0.0)
+        reference_output.square().sum().backward()
+        candidate_output.square().sum().backward()
+        torch.testing.assert_close(inputs_candidate.grad, inputs_reference.grad, rtol=0.0, atol=0.0)
+        for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_KEY_WEIGHT, ATTENTION_VALUE_WEIGHT):
+            torch.testing.assert_close(
+                candidate.trajectory.coefficients[name].grad,
+                reference.trajectory.coefficients[name].grad,
+                rtol=0.0,
+                atol=0.0,
+            )
+    # ^^^ THOG
+
     # vvv THOG exact forward and backward equivalence tests for vectorized per-head materialization
     def _explicit_per_head_materialization(self, trajectory: BlockTrajectory, name: str, layer_index: int) -> torch.Tensor:
         item = trajectory.family_metadata(name)
@@ -138,7 +189,7 @@ class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
         concatenate_dimension = 0 if item.attention_head_axis == "output" else 1
         return torch.cat(pieces, dim=concatenate_dimension)
 
-    def test_06_vectorized_head_materialization_matches_explicit_per_head_reference_for_every_attention_family_and_layer(self) -> None:
+    def test_08_vectorized_head_materialization_matches_explicit_per_head_reference_for_every_attention_family_and_layer(self) -> None:
         torch.manual_seed(4103)
         trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float64)
         with torch.no_grad():
@@ -151,7 +202,7 @@ class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
                     reference = self._explicit_per_head_materialization(trajectory, name, layer_index)
                     torch.testing.assert_close(vectorized, reference, rtol=1.0e-12, atol=1.0e-12)
 
-    def test_07_vectorized_head_materialization_preserves_coefficient_gradients_for_output_and_input_head_axes(self) -> None:
+    def test_09_vectorized_head_materialization_preserves_coefficient_gradients_for_output_and_input_head_axes(self) -> None:
         torch.manual_seed(4104)
         trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float64)
         for name in (ATTENTION_QUERY_WEIGHT, ATTENTION_OUTPUT_WEIGHT):
