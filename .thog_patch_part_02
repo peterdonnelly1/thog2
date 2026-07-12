@@ -1,0 +1,204 @@
+MLP
++  vectorise per-head materialisation: $VECTORISE_PER_HEAD_MATERIALISATION
+   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
+   depth viewer:       $viewer_url
+   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
+   served URL:         $serve_url
+   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
++  optimiser:          lr_code=$learning_rate_code lr=$learning_rate_value min_lr_code=$MIN_LR_CODE min_lr=$min_lr_value
+   shape:              $shape_summary
+-  batch/accum/gpus:   $BATCH_SIZE / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
++  batch/accum/gpus:   $batch_size_value / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
+   log:                $log_url
+ EOF_RUN
+ 
+@@ -320,12 +361,16 @@
+   return "$run_status"
+ }
+ 
+-if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 )); then echo "dreedle OWT grid: p=${PRESET_VALUES[*]} P=${O_DEPTH_VALUES[*]}"; fi
++if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then echo "dreedle OWT grid: p=${PRESET_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"; fi
+ for geometry_preset_value in "${PRESET_VALUES[@]}"; do
+-  if [[ "$geometry_preset_value" == dense ]]; then
+-    run_preset_o_depth "$geometry_preset_value" "${O_DEPTH_VALUES[0]}"
+-  else
+-    for o_depth_value in "${O_DEPTH_VALUES[@]}"; do run_preset_o_depth "$geometry_preset_value" "$o_depth_value"; done
+-  fi
++  for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
++    for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
++      if [[ "$geometry_preset_value" == dense ]]; then
++        run_preset_o_depth_batch_lr "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code"
++      else
++        for o_depth_value in "${O_DEPTH_VALUES[@]}"; do run_preset_o_depth_batch_lr "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code"; done
++      fi
++    done
++  done
+ done
+ # ^^^ THOG
+--- thogorig/sheet/model.py	2026-07-12 20:51:23.000000000 +0000
++++ thogsrc/sheet/model.py	2026-07-12 22:07:12.080029308 +0000
+@@ -80,7 +80,9 @@
+     basis_family: Optional[str] = None
+     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
+     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
+-    direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                                      # <<< THOG default-off exact direct application of existing THOG MLP factors
++    # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
++    direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
++    vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
+ 
+     def __post_init__(self) -> None:
+         for name in ("block_size", "vocab_size"):
+@@ -100,8 +102,12 @@
+             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
+         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
+             raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
+-        if not isinstance(self.direct_thog_mlp_application, bool):
+-            raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")                                         # <<< THOG validate selectable exact MLP application path
++        # if not isinstance(self.direct_thog_mlp_application, bool):                                                                                      # <<< THOG retired old option validation
++        #     raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")
++        if not isinstance(self.direct_factorised_mlp, bool):
++            raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
++        if not isinstance(self.vectorise_per_head_materialisation, bool):
++            raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
+         self.sheet_geometry()
+         self.compact_selectors()
+ 
+@@ -158,6 +164,7 @@
+                 basis_family=selectors.basis_family,
+                 compact_attention=True,
+                 compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
++                vectorise_per_head_materialisation=config.vectorise_per_head_materialisation,                                                            # <<< THOG pass selectable head vectorisation into block trajectory
+             )
+         elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+             self.trajectory = MlpBlockTrajectory(
+@@ -261,12 +268,12 @@
+         return output
+ 
+     # vvv THOG exact direct application of the existing THOG MLP factorisation, selectable for A/B timing
+-    def _supports_direct_thog_mlp_application(self) -> bool:
++    def _supports_direct_factorised_mlp(self) -> bool:
+         if isinstance(self.trajectory, MlpBlockTrajectory):
+             return True
+         return isinstance(self.trajectory, BlockTrajectory) and self.trajectory.compact_mlp
+ 
+-    def _direct_thog_mlp_linear(
++    def _direct_factorised_mlp_linear(
+         self,
+         inputs: Tensor,
+         weight_name: str,
+@@ -287,12 +294,12 @@
+ 
+     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
+         direct_application = (
+-            self.config.direct_thog_mlp_application
+-            and self._supports_direct_thog_mlp_application()
++            self.config.direct_factorised_mlp
++            and self._supports_direct_factorised_mlp()
+         )
+         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
+         if direct_application:
+-            hidden = self._direct_thog_mlp_linear(
++            hidden = self._direct_factorised_mlp_linear(
+                 inputs,
+                 "mlp_expansion_weight",
+                 layer_index,
+@@ -308,7 +315,7 @@
+         hidden = F.gelu(hidden)
+         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
+         if direct_application:
+-            output = self._direct_thog_mlp_linear(
++            output = self._direct_factorised_mlp_linear(
+                 hidden,
+                 "mlp_contraction_weight",
+                 layer_index,
+--- thogorig/sheet/block_trajectory.py	2026-07-12 20:51:23.000000000 +0000
++++ thogsrc/sheet/block_trajectory.py	2026-07-12 22:07:12.080337536 +0000
+@@ -81,11 +81,15 @@
+         basis_family: str = BASIS_FAMILY_CHEBYSHEV,
+         compact_attention: bool = True,
+         compact_mlp: bool = True,
++        vectorise_per_head_materialisation: bool = True,                                                                                                # <<< THOG selectable exact head batching
+     ) -> None:
+         super().__init__()
++        if not isinstance(vectorise_per_head_materialisation, bool):
++            raise ValueError("vectorise_per_head_materialisation must be bool")                                                                         # <<< THOG reject malformed execution option
+         if not compact_attention and not compact_mlp:
+             raise ValueError("BlockTrajectory requires at least one compact subsystem")
+         self.config = config
++        self.vectorise_per_head_materialisation = vectorise_per_head_materialisation                                                                    # <<< THOG preserve exact loop fallback for A/B timing
+         self.runtime_dtype = runtime_dtype
+         self.basis_version = basis_version
+         self.basis_family = basis_family
+@@ -291,6 +295,31 @@
+             @ self.input_basis(name).to(coefficient).transpose(0, 1)
+         )
+ 
++    # vvv THOG preserve the exact pre-vectorisation loop path behind a default-on A/B switch
++    def _materialize_head_output_block_loop(self, name: str, layer_index: int) -> Tensor:
++        item = self._block_metadata_by_name[name]
++        coefficient = self.coefficients[name]
++        depth_row = self.depth_basis[layer_index].to(coefficient)
++        output_basis = self.output_basis(name).to(coefficient)
++        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
++        pieces = []
++        for head_index in range(item.head_count):
++            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
++            pieces.append(output_basis @ mixed @ input_basis_transposed)
++        return torch.cat(pieces, dim=0)
++
++    def _materialize_head_input_block_loop(self, name: str, layer_index: int) -> Tensor:
++        item = self._block_metadata_by_name[name]
++        coefficient = self.coefficients[name]
++        depth_row = self.depth_basis[layer_index].to(coefficient)
++        output_basis = self.output_basis(name).to(coefficient)
++        input_basis_transposed = self.input_basis(name).to(coefficient).transpose(0, 1)
++        pieces = []
++        for head_index in range(item.head_count):
++            mixed = torch.einsum("p,pab->ab", depth_row, coefficient[head_index])
++            pieces.append(output_basis @ mixed @ input_basis_transposed)
++        return torch.cat(pieces, dim=1)
++
+     # vvv THOG vectorize all head-aware block contractions to eliminate per-head Python loops and small-kernel launch storms
+     def _materialize_head_output_block(self, name: str, layer_index: int) -> Tensor:
+         item = self._block_metadata_by_name[name]
+@@ -318,9 +347,9 @@
+     def _materialize_block(self, name: str, layer_index: int) -> Tensor:
+         item = self._block_metadata_by_name[name]
+         if item.attention_head_axis == "output":
+-            generated = self._materialize_head_output_block(name, layer_index)
++            generated = self._materialize_head_output_block(name, layer_index) if self.vectorise_per_head_materialisation else self._materialize_head_output_block_loop(name, layer_index)  # <<< THOG exact selectable vectorised/loop execution
+         elif item.attention_head_axis == "input":
+-            generated = self._materialize_head_input_block(name, layer_index)
++            generated = self._materialize_head_input_block(name, layer_index) if self.vectorise_per_head_materialisation else self._materialize_head_input_block_loop(name, layer_index)    # <<< THOG exact selectable vectorised/loop execution
+         else:
+             generated = self._materialize_generic_block(name, layer_index)
+         expected_shape = (item.output_rows, item.row_width)
+--- thogorig/sheet/run_config.py	2026-07-12 20:51:23.000000000 +0000
++++ thogsrc/sheet/run_config.py	2026-07-12 22:07:12.080608118 +0000
+@@ -245,6 +245,7 @@
+         fields = [
+             f"n_{self.max_iters}",
+             f"b_{self.batch_size}",
++            f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
+             f"d_{dataset_label(self.dataset)}",
+             f"w_{self.warmup_iters}",
+             f"k_{self.checkpoint_interval}",
+--- thogorig/run_thog2_owt.py	2026-07-12 20:51:23.000000000 +0000
++++ thogsrc/run_thog2_owt.py	2026-07-12 22:07:12.080946623 +0000
+@@ -343,6 +343,24 @@
+     return {"artifact_name": config.artifact_name, "artifact_prefix": config.artifact_prefix, "model_type": config.model_type, "run_mode": config.run_mode, "world_size": world_size, "tokens_per_iter": config.tokens_per_iter(), "canonical_config": config.canonical_dict(world_size=world_size), "paths": {name: str(path) for name, path in paths.items()}}
+ 
+ 
++
++# vvv THOG print resolved model parameters and execution options immediately before training
++def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer) -> None:
++    report = trainer.parameter_report
++    persistent = int(report["persistent_parameters"])
++    dense_equivalent = int(report["dense_equivalent_total_parameters"])
++    sheet_coefficients = int(report["sheet_coefficients"])
++    compression = (dense_equivalent / persistent) if persistent else 0.0
++    print("model parameters and options", flush=True)
++    print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
++    print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
++    print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
++    if config.model_type == "shee

@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 import torch
 from torch import Tensor, nn
 
-from .basis import BASIS_VERSION, BasisCache, BasisOwner
+from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisCache, BasisOwner
 from .geometry import (
     FamilyGeometry,
     SheetGeometryConfig,
@@ -83,11 +83,13 @@ class SheetTrajectory(nn.Module):
         runtime_dtype: torch.dtype = torch.float32,
         basis_version: str = BASIS_VERSION,
         basis_cache: Optional[BasisCache] = None,
+        basis_family: str = BASIS_FAMILY_CHEBYSHEV,
     ) -> None:
         super().__init__()
         self.config = config
         self.runtime_dtype = runtime_dtype
         self.basis_version = basis_version
+        self.basis_family = basis_family
         self.metadata = build_family_metadata(config)
         self._metadata_by_name: Dict[str, FamilyMetadata] = {
             item.name: item for item in self.metadata
@@ -100,6 +102,7 @@ class SheetTrajectory(nn.Module):
             config.depth_order,
             runtime_dtype=runtime_dtype,
             version=basis_version,
+            basis_family=basis_family,
         )
 
         self._row_basis_name_by_family: Dict[str, str] = {}
@@ -115,6 +118,7 @@ class SheetTrajectory(nn.Module):
                     key[1],
                     runtime_dtype=runtime_dtype,
                     version=basis_version,
+                    basis_family=basis_family,
                 )
                 distinct_row_bases[key] = basis_name
             self._row_basis_name_by_family[item.name] = basis_name

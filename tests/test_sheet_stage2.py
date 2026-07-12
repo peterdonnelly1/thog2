@@ -290,8 +290,8 @@ class Stage2ReferenceModelTests(unittest.TestCase):
             "attention_input_bias",
         ):
             self.assertIn(f"trajectory.coefficients.{family_name}", no_decay_names)
-        self.assertIn("transformer.wte.weight", decay_names)
-        self.assertIn("transformer.wpe.weight", decay_names)
+        self.assertIn("transformer.wte.weight", no_decay_names)
+        self.assertIn("transformer.wpe.weight", no_decay_names)
         self.assertIn("transformer.ln_f.weight", no_decay_names)
 
     def test_s2_14_compact_state_guard(self) -> None:

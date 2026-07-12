@@ -5,12 +5,7 @@ import unittest
 from pathlib import Path
 
 from sheet.residual_run_config import OwtRunConfig
-from sheet.run_naming import (
-    artifact_paths,
-    bounded_filename,
-    build_artifact_name,
-    truncate_component,
-)
+from sheet.run_naming import artifact_paths, bounded_filename, build_artifact_name, truncate_component
 
 
 class CanonicalNamingTests(unittest.TestCase):
@@ -100,69 +95,62 @@ class CanonicalNamingTests(unittest.TestCase):
                 base_row_order=4,
             )
 
+    def picton_config(self, **overrides: object) -> OwtRunConfig:
+        values: dict[str, object] = {
+            "model_type": "sheet",
+            "host_label": "scruffy",
+            "run_name": "AKAROA",
+            "dataset": "openwebtext",
+            "n_layer": 72,
+            "n_head": 12,
+            "n_embd": 768,
+            "block_size": 256,
+            "batch_size": 12,
+            "gradient_accumulation_steps": 160,
+            "max_iters": 100,
+            "o_depth": 16,
+            "o_attn_d_model": 64,
+            "o_attn_qkv_per_channel": 6,
+            "o_attn_out_per_channel": 6,
+            "o_mlp_d_model": 64,
+            "o_mlp_hidden": 256,
+        }
+        values.update(overrides)
+        return OwtRunConfig(**values)
+
     def test_s6_23e_residual_init_fields_are_part_of_run_artifact_identity(self) -> None:
-        config = OwtRunConfig(
-            model_type="sheet",
-            host_label="scruffy",
-            run_name="AKAROA",
-            dataset="openwebtext",
-            n_layer=72,
-            n_head=12,
-            n_embd=768,
-            block_size=256,
-            batch_size=12,
-            gradient_accumulation_steps=160,
-            max_iters=100,
-            depth_order=16,
-            base_row_order=64,
+        config = self.picton_config(
             residual_init_policy="depth_scaled",
             residual_init_depth_source="dof_implied_depth",
             residual_init_depth_value=12,
         )
-        self.assertIn("_P_16_Q_64_r_depth_scaled_z_dof_implied_depth_S_12", config.artifact_name)
+        self.assertIn(
+            "P_16_Q_64_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12",
+            config.parameter_artifact_fragment(),
+        )
 
     def test_s6_23f_user_forced_residual_depth_value_is_named_only_when_used(self) -> None:
-        config = OwtRunConfig(
-            model_type="sheet",
-            host_label="scruffy",
-            run_name="AKAROA",
-            dataset="openwebtext",
-            n_layer=72,
-            n_head=12,
-            n_embd=768,
-            block_size=256,
-            batch_size=12,
-            gradient_accumulation_steps=160,
-            max_iters=100,
-            depth_order=16,
-            base_row_order=64,
+        config = self.picton_config(
             residual_init_policy="depth_scaled",
             residual_init_depth_source="user_forced_depth",
             residual_init_depth_value=24,
         )
-        self.assertIn("_r_depth_scaled_z_user_forced_depth_Z_24_S_12", config.artifact_name)
+        self.assertIn(
+            "_r_depth_scaled_z_user_forced_depth_Z_24_S_12",
+            config.parameter_artifact_fragment(),
+        )
 
     def test_s6_23g_legacy_residual_depth_source_aliases_canonicalize(self) -> None:
-        config = OwtRunConfig(
-            model_type="sheet",
-            host_label="scruffy",
-            run_name="AKAROA",
-            dataset="openwebtext",
-            n_layer=72,
-            n_head=12,
-            n_embd=768,
-            block_size=256,
-            batch_size=12,
-            gradient_accumulation_steps=160,
-            max_iters=100,
-            depth_order=16,
-            base_row_order=64,
+        config = self.picton_config(
             residual_init_policy="depth_scaled",
             residual_init_depth_source="basis_depth",
             residual_init_depth_value=12,
         )
         self.assertEqual(config.residual_init_depth_source, "dof_implied_depth")
-        self.assertIn("_r_depth_scaled_z_dof_implied_depth_S_12", config.artifact_name)
+        self.assertIn(
+            "_r_depth_scaled_z_dof_implied_depth_S_12",
+            config.parameter_artifact_fragment(),
+        )
 
 
 if __name__ == "__main__":
