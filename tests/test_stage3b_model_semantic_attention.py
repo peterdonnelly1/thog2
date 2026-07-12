@@ -5,6 +5,7 @@ import copy
 import json
 import math
 import unittest
+from unittest import mock
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -103,7 +104,10 @@ class Stage3bModelSemanticAttentionTests(unittest.TestCase):
             atol=0.0,
         )
 
-    def test_attention_path_uses_semantic_qkv_boundary_not_direct_legacy_qkv_calls(self) -> None:
+    # vvv THOG update the former semantic-boundary regressions for the direct trajectory hot path
+    # def test_attention_path_uses_semantic_qkv_boundary_not_direct_legacy_qkv_calls(self) -> None:
+    #     ...
+    def test_attention_path_uses_direct_packed_qkv_trajectory_calls_and_bypasses_semantic_adapter(self) -> None:
         model = self.model()
         inputs = torch.randn(2, 4, model.config.n_embd)
         weight = model.trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, 1)
@@ -112,32 +116,32 @@ class Stage3bModelSemanticAttentionTests(unittest.TestCase):
         model.semantic_materializer = spy
         original_materialize = model.trajectory.materialize
         original_materialize_vector = model.trajectory.materialize_vector
+        with mock.patch.object(model.trajectory, "materialize", wraps=original_materialize) as materialize_spy:
+            with mock.patch.object(model.trajectory, "materialize_vector", wraps=original_materialize_vector) as vector_spy:
+                model._attention(inputs, 1)
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_WEIGHT, 1) for call in materialize_spy.call_args_list), 1)
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_BIAS, 1) for call in vector_spy.call_args_list), 1)
+        self.assertEqual(spy.weight_calls, 0)
+        self.assertEqual(spy.bias_calls, 0)
 
-        def guarded_materialize(name: str, layer_index: int) -> Tensor:
-            if name == LEGACY_ATTENTION_INPUT_WEIGHT:
-                raise AssertionError("_attention used direct legacy packed QKV weight")
-            return original_materialize(name, layer_index)
-
-        def guarded_materialize_vector(name: str, layer_index: int) -> Tensor:
-            if name == LEGACY_ATTENTION_INPUT_BIAS:
-                raise AssertionError("_attention used direct legacy packed QKV bias")
-            return original_materialize_vector(name, layer_index)
-
-        model.trajectory.materialize = guarded_materialize
-        model.trajectory.materialize_vector = guarded_materialize_vector
-        model._attention(inputs, 1)
-        self.assertEqual(spy.weight_calls, 1)
-        self.assertEqual(spy.bias_calls, 1)
-
-    def test_bias_false_attention_path_does_not_request_semantic_bias(self) -> None:
+    # def test_bias_false_attention_path_does_not_request_semantic_bias(self) -> None:
+    #     ...
+    def test_bias_false_attention_path_materializes_direct_weight_once_and_no_packed_bias(self) -> None:
         model = self.model(bias=False)
         inputs = torch.randn(2, 4, model.config.n_embd)
         weight = model.trajectory.materialize(LEGACY_ATTENTION_INPUT_WEIGHT, 1)
         spy = SpySemanticMaterializer(weight, None)
         model.semantic_materializer = spy
-        model._attention(inputs, 1)
-        self.assertEqual(spy.weight_calls, 1)
+        original_materialize = model.trajectory.materialize
+        original_materialize_vector = model.trajectory.materialize_vector
+        with mock.patch.object(model.trajectory, "materialize", wraps=original_materialize) as materialize_spy:
+            with mock.patch.object(model.trajectory, "materialize_vector", wraps=original_materialize_vector) as vector_spy:
+                model._attention(inputs, 1)
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_WEIGHT, 1) for call in materialize_spy.call_args_list), 1)
+        self.assertEqual(sum(call.args == (LEGACY_ATTENTION_INPUT_BIAS, 1) for call in vector_spy.call_args_list), 0)
+        self.assertEqual(spy.weight_calls, 0)
         self.assertEqual(spy.bias_calls, 0)
+    # ^^^ THOG
 
     def test_attention_output_forward_loss_and_backward_match_legacy_reference(self) -> None:
         model = self.model()
