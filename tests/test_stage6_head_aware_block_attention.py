@@ -4,9 +4,8 @@ from __future__ import annotations
 import unittest
 
 import torch
-
 from sheet.block_trajectory import BlockTrajectory
-from sheet.compact_identity import GEOMETRY_PRESET_BLOCK
+from sheet.compact_identity import GEOMETRY_PRESET_FULL_BLOCK
 from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.semantic_materializer import (
     ATTENTION_KEY_WEIGHT,
@@ -21,7 +20,7 @@ from sheet.semantic_materializer import (
 
 class Stage6HeadAwareBlockAttentionTests(unittest.TestCase):
     def full_block_config(self) -> SheetGPTConfig:
-        return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_BLOCK)
+        return SheetGPTConfig(block_size=8, vocab_size=32, n_layer=4, n_head=2, n_embd=16, dropout=0.0, bias=True, depth_order=3, base_row_order=8, geometry_preset=GEOMETRY_PRESET_FULL_BLOCK)
 
     def test_01_head_aware_block_metadata_keeps_qkv_roles_and_attention_heads_explicit_without_smoothing_across_head_index(self) -> None:
         trajectory = BlockTrajectory(self.full_block_config().sheet_geometry(), runtime_dtype=torch.float32)
