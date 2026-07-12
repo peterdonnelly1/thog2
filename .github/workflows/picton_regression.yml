@@ -9,6 +9,9 @@ on:
       - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   regression:
     runs-on: ubuntu-latest
@@ -16,6 +19,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply pending THOG enhancement
+        if: hashFiles('.thog_apply.py') != ''
+        run: python .thog_apply.py
 
       - name: Archive tested source snapshot
         run: tar --exclude=.git -czf /tmp/picton-source.tgz .
@@ -65,6 +74,18 @@ jobs:
       - name: Print pytest output
         if: always()
         run: cat picton-pytest.log
+
+      - name: Commit completed THOG enhancement
+        if: steps.pytest.outcome == 'success' && hashFiles('.thog_apply.py') != ''
+        run: |
+          rm -f .thog_apply.py .thog_patch_part_* .thog_apply_trigger
+          rm -f .github/workflows/apply_thog_patch_now.yml
+          rm -f .github/workflows/apply_requested_optimisation_controls.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Complete optimisation controls and LR/batch grids'
+          git push origin HEAD:BLOCK_enhancements_group
 
       - name: Enforce pytest success
         if: steps.pytest.outcome != 'success'
