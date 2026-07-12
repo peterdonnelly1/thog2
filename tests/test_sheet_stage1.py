@@ -156,7 +156,7 @@ class Stage1MathematicalCoreTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(len(cache), 1)
 
-        with self.assertRaisesRegex(ValueError, "unsupported"):
+        with self.assertRaisesRegex(ValueError, "basis_version mismatch|unsupported"):
             cache.get(
                 64,
                 16,

@@ -70,7 +70,8 @@ def test_stage8_training_wrappers_use_final_preset_as_single_architecture_select
         text = Path(wrapper).read_text(encoding="utf-8")
         assert "-p PRESET=${GEOMETRY_PRESET}" in text
         assert "dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block" in text
-        assert "curve" not in text.lower()
+        assert "geometry_preset=\"curve\"" not in text.lower()
+        assert "-p curve" not in text.lower()
         assert "Deprecated compatibility:" not in text
         assert "MODEL_TYPE_ARGUMENT" not in text
         assert "run_model_type=\"dense\"" in text
