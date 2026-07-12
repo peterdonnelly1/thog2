@@ -23,8 +23,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply pending THOG enhancement
-        if: hashFiles('.thog_apply.py') != ''
-        run: python .thog_apply.py
+        run: |
+          if [[ -f .thog_apply.py ]]; then
+            python .thog_apply.py
+          fi
 
       - name: Archive tested source snapshot
         run: tar --exclude=.git -czf /tmp/picton-source.tgz .
@@ -76,16 +78,18 @@ jobs:
         run: cat picton-pytest.log
 
       - name: Commit completed THOG enhancement
-        if: steps.pytest.outcome == 'success' && hashFiles('.thog_apply.py') != ''
+        if: steps.pytest.outcome == 'success'
         run: |
-          rm -f .thog_apply.py .thog_patch_part_* .thog_apply_trigger
-          rm -f .github/workflows/apply_thog_patch_now.yml
-          rm -f .github/workflows/apply_requested_optimisation_controls.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m 'Complete optimisation controls and LR/batch grids'
-          git push origin HEAD:BLOCK_enhancements_group
+          if [[ -f .thog_apply.py ]]; then
+            rm -f .thog_apply.py .thog_patch_part_* .thog_apply_trigger
+            rm -f .github/workflows/apply_thog_patch_now.yml
+            rm -f .github/workflows/apply_requested_optimisation_controls.yml
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add -A
+            git commit -m 'Complete optimisation controls and LR/batch grids'
+            git push origin HEAD:BLOCK_enhancements_group
+          fi
 
       - name: Enforce pytest success
         if: steps.pytest.outcome != 'success'
