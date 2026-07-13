@@ -122,7 +122,6 @@ def test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getop
         assert 'DIRECT_FACTORISED_MLP="${THOG2_DIRECT_FACTORISED_MLP:-true}"' in source
         assert 'export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"' in source
         assert "direct factorised MLP:" in source
-        assert "THOG2_DIRECT_THOG_MLP_APPLICATION" in source  # retained only as commented source history
-        active_lines = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
-        assert not any("DIRECT_THOG_MLP_APPLICATION" in line for line in active_lines)
+        assert "THOG2_DIRECT_THOG_MLP_APPLICATION" not in source
+        assert "DIRECT_THOG_MLP_APPLICATION" not in source
 # ^^^ THOG
