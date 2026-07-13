@@ -14,7 +14,7 @@ from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval"}
+EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -84,6 +84,10 @@ class TrainingConfig:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # vvv THOG bounded non-finite update recovery controls
+    nonfinite_update_policy: str = "raise"
+    max_nonfinite_update_skips: int = 10
+    # ^^^ THOG
     eval_interval: int = 0
     eval_batches: int = 1
     checkpoint_interval: int = 0
@@ -113,7 +117,7 @@ class TrainingConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"{name} must be a positive integer or None; got {value!r}")
-        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed"):
+        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
@@ -147,6 +151,8 @@ class TrainingConfig:
             raise ValueError("learning rates must be non-negative and maximum must be positive")
         if self.min_learning_rate > self.learning_rate:
             raise ValueError("min_learning_rate must not exceed learning_rate")
+        if self.nonfinite_update_policy not in ("raise", "skip"):
+            raise ValueError("nonfinite_update_policy must be raise or skip")
         if self.weight_decay < 0.0 or self.grad_clip < 0.0:
             raise ValueError("weight_decay and grad_clip must be non-negative")
         if not 0.0 <= self.beta1 < 1.0 or not 0.0 <= self.beta2 < 1.0:
