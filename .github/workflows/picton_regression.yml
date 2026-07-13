@@ -60,7 +60,9 @@ jobs:
       - name: Run full regression suite
         env:
           PYTHONPATH: .
-        run: pytest -q | tee picton-pytest.log
+        run: |
+          set -o pipefail
+          pytest -q | tee picton-pytest.log
 
       - name: Upload pytest output
         if: always()
