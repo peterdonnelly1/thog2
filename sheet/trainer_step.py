@@ -1,8 +1,9 @@
 # vvv THOG
 from __future__ import annotations
 
+import json
 import math
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -38,13 +39,171 @@ class TrainerStepMixin:
         self.model.train(was_training)
         return results
 
+    # vvv THOG bounded non-finite update recovery with correct pre/post-unscale cleanup
+    @staticmethod
+    def _jsonable_float(value: Optional[float]) -> Optional[float | str]:
+        if value is None:
+            return None
+        if math.isfinite(value):
+            return float(value)
+        if math.isnan(value):
+            return "nan"
+        return "inf" if value > 0.0 else "-inf"
+
     def _local_gradients_are_finite(self) -> bool:
         for parameter in self.raw_model.parameters():
-            if parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all().item()):
+            if parameter.grad is not None and not bool(
+                torch.isfinite(parameter.grad).all().item()
+            ):
                 return False
         return True
 
-    def train_one_update(self) -> Dict[str, float]:
+    def _local_nonfinite_gradient_reports(self) -> List[Dict[str, Any]]:
+        reports: List[Dict[str, Any]] = []
+        for parameter_name, parameter in self.raw_model.named_parameters():
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            detached = gradient.detach()
+            finite_mask = torch.isfinite(detached)
+            if bool(finite_mask.all().item()):
+                continue
+            inf_mask = torch.isinf(detached)
+            finite_count = int(finite_mask.sum().item())
+            finite_abs_max = (
+                float(detached[finite_mask].abs().max().item())
+                if finite_count > 0
+                else None
+            )
+            reports.append(
+                {
+                    "parameter_name": parameter_name,
+                    "shape": tuple(int(value) for value in detached.shape),
+                    "dtype": str(detached.dtype),
+                    "nan_count": int(torch.isnan(detached).sum().item()),
+                    "posinf_count": int((inf_mask & (detached > 0)).sum().item()),
+                    "neginf_count": int((inf_mask & (detached < 0)).sum().item()),
+                    "finite_count": finite_count,
+                    "finite_abs_max": self._jsonable_float(finite_abs_max),
+                }
+            )
+        return reports
+
+    def _cleanup_failed_update(self, *, scaler_unscaled: bool) -> None:
+        if scaler_unscaled:
+            self.scaler.update()
+        self.optimizer.zero_grad(set_to_none=True)
+
+    def _nonfinite_update_payload(
+        self,
+        *,
+        reason: str,
+        learning_rate: float,
+        training_loss: Optional[float],
+        gradient_norm: Optional[float],
+        micro_step: Optional[int],
+        microbatch_starts: List[Tuple[int, ...]],
+    ) -> Dict[str, Any]:
+        local_report = {
+            "rank": int(self.distributed.rank),
+            "reason": reason,
+            "loss": self._jsonable_float(training_loss),
+            "gradient_norm": self._jsonable_float(gradient_norm),
+            "micro_step": micro_step,
+            "microbatch_starts": [
+                [int(value) for value in starts]
+                for starts in microbatch_starts
+            ],
+            "gradient_reports": self._local_nonfinite_gradient_reports(),
+        }
+        return {
+            "attempted_update": int(
+                self.state.completed_updates
+                + self.state.skipped_nonfinite_updates
+                + 1
+            ),
+            "completed_updates": int(self.state.completed_updates),
+            "skipped_nonfinite_updates": int(
+                self.state.skipped_nonfinite_updates
+            ),
+            "failed_update_attempts": int(self.state.failed_update_attempts),
+            "learning_rate": float(learning_rate),
+            "nonfinite_reason": reason,
+            "rank_reports": self.distributed.all_gather_object(local_report),
+        }
+
+    def _handle_nonfinite_update(
+        self,
+        *,
+        reason: str,
+        learning_rate: float,
+        training_loss: Optional[float],
+        gradient_norm: Optional[float],
+        micro_step: Optional[int],
+        microbatch_starts: List[Tuple[int, ...]],
+        scaler_unscaled: bool,
+    ) -> Dict[str, Any]:
+        payload = self._nonfinite_update_payload(
+            reason=reason,
+            learning_rate=learning_rate,
+            training_loss=training_loss,
+            gradient_norm=gradient_norm,
+            micro_step=micro_step,
+            microbatch_starts=microbatch_starts,
+        )
+        self.state.failed_update_attempts += 1
+        payload["failed_update_attempts"] = int(
+            self.state.failed_update_attempts
+        )
+        if self.config.nonfinite_update_policy == "raise":
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise FloatingPointError(
+                "non-finite update detected: "
+                + json.dumps(payload, sort_keys=True)
+            )
+        if self.config.nonfinite_update_policy != "skip":
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise RuntimeError(
+                "unsupported nonfinite_update_policy: "
+                f"{self.config.nonfinite_update_policy!r}"
+            )
+        if (
+            self.state.skipped_nonfinite_updates
+            >= self.config.max_nonfinite_update_skips
+        ):
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise FloatingPointError(
+                "non-finite update skip limit exceeded: "
+                + json.dumps(payload, sort_keys=True)
+            )
+        self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+        self.state.skipped_nonfinite_updates += 1
+        payload["skipped_nonfinite_updates"] = int(
+            self.state.skipped_nonfinite_updates
+        )
+        self._record("nonfinite_update_skipped", **payload)
+        return {
+            "completed_updates": float(self.state.completed_updates),
+            "training_loss": (
+                training_loss if training_loss is not None else float("nan")
+            ),
+            "learning_rate": learning_rate,
+            "gradient_norm": (
+                gradient_norm if gradient_norm is not None else float("nan")
+            ),
+            "skipped_update": 1.0,
+            "skipped_nonfinite_updates": float(
+                self.state.skipped_nonfinite_updates
+            ),
+            "failed_update_attempts": float(
+                self.state.failed_update_attempts
+            ),
+            "nonfinite_reason": reason,
+            "nonfinite_diagnostics": payload,
+        }
+    # ^^^ THOG
+
+    def train_one_update(self) -> Dict[str, Any]:
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
         self.model.train()
@@ -52,8 +211,12 @@ class TrainerStepMixin:
         self.optimizer.zero_grad(set_to_none=True)
         total_loss = 0.0
         accumulation_steps = self.config.gradient_accumulation_steps
+        microbatch_starts: List[Tuple[int, ...]] = []
         for micro_step in range(accumulation_steps):
             batch = self.batch_source.get_batch("train", device=self.device)
+            microbatch_starts.append(
+                tuple(int(value) for value in batch.starts)
+            )
             self._record(
                 "microbatch",
                 micro_step=micro_step,
@@ -66,24 +229,53 @@ class TrainerStepMixin:
             ):
                 with self.autocast_context():
                     _, loss = self.model(batch.inputs, batch.targets)
-                    local_finite = loss is not None and bool(torch.isfinite(loss).item())
-                    self.distributed.require_all_true(
-                        local_finite,
-                        "non-finite training loss on at least one rank",
+                    local_finite = loss is not None and bool(
+                        torch.isfinite(loss).item()
                     )
+                    if not self.distributed.all_true(local_finite):
+                        loss_value = (
+                            float(
+                                loss.detach()
+                                .to(dtype=torch.float64)
+                                .item()
+                            )
+                            if loss is not None
+                            else None
+                        )
+                        return self._handle_nonfinite_update(
+                            reason="loss",
+                            learning_rate=learning_rate,
+                            training_loss=loss_value,
+                            gradient_norm=None,
+                            micro_step=micro_step,
+                            microbatch_starts=microbatch_starts,
+                            scaler_unscaled=False,
+                        )
                     if loss is None:
-                        raise RuntimeError("model did not return a training loss")
+                        raise RuntimeError(
+                            "model did not return a training loss"
+                        )
                     scaled_loss = loss / accumulation_steps
                 total_loss += self.distributed.mean_float(loss.detach())
                 self.scaler.scale(scaled_loss).backward()
 
         self.scaler.unscale_(self.optimizer)
-        self.distributed.require_all_true(
-            self._local_gradients_are_finite(),
-            "non-finite gradient on at least one rank",
-        )
+        if not self.distributed.all_true(
+            self._local_gradients_are_finite()
+        ):
+            return self._handle_nonfinite_update(
+                reason="gradient",
+                learning_rate=learning_rate,
+                training_loss=total_loss / accumulation_steps,
+                gradient_norm=None,
+                micro_step=None,
+                microbatch_starts=microbatch_starts,
+                scaler_unscaled=True,
+            )
 
-        diagnostics_hook = getattr(self, "_before_optimizer_step", None)
+        diagnostics_hook = None
+        if hasattr(self, "_before_optimizer_step"):
+            diagnostics_hook = self._before_optimizer_step
         if diagnostics_hook is not None:
             diagnostics_hook()
 
@@ -95,7 +287,15 @@ class TrainerStepMixin:
             )
             gradient_norm = self.distributed.mean_float(norm.detach())
             if not math.isfinite(gradient_norm):
-                raise FloatingPointError("non-finite gradient norm")
+                return self._handle_nonfinite_update(
+                    reason="gradient_norm",
+                    learning_rate=learning_rate,
+                    training_loss=total_loss / accumulation_steps,
+                    gradient_norm=gradient_norm,
+                    micro_step=None,
+                    microbatch_starts=microbatch_starts,
+                    scaler_unscaled=True,
+                )
 
         self.scaler.step(self.optimizer)
         self.scaler.update()
@@ -108,6 +308,13 @@ class TrainerStepMixin:
             "learning_rate": learning_rate,
             "gradient_norm": (
                 gradient_norm if gradient_norm is not None else float("nan")
+            ),
+            "skipped_update": 0.0,
+            "skipped_nonfinite_updates": float(
+                self.state.skipped_nonfinite_updates
+            ),
+            "failed_update_attempts": float(
+                self.state.failed_update_attempts
             ),
         }
         self._record("optimizer_step_completed", **metrics)
