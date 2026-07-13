@@ -85,7 +85,7 @@ class OwtRunConfig:
     beta2: float = 0.95
     grad_clip: float = 1.0
     # vvv THOG public bounded non-finite recovery controls
-    nonfinite_update_policy: str = "raise"
+    nonfinite_update_policy: str = "skip"
     max_nonfinite_update_skips: int = 10
     # ^^^ THOG
     dropout: float = 0.0

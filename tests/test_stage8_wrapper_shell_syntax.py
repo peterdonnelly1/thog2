@@ -23,7 +23,8 @@ def test_stage8_training_wrappers_make_logging_backend_and_schedule_controls_exp
         assert "INSTRUMENTATION=\"tensorboard\"" in text
         assert "THOG2_INSTRUMENTATION" in text
         assert "-I INSTRUMENTATION" in text
-        assert "EVAL_INTERVAL=20" in text
+        assert "EVAL_INTERVAL=100" in text
+        assert "CHECKPOINT_INTERVAL=1000" in text
         assert "LOG_INTERVAL=1" in text
         assert "--eval-interval" in text
         assert "--log-interval" in text

@@ -223,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="raise")                                                    # <<< THOG bounded recovery policy
+    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                    # <<< THOG bounded recovery policy
     parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                                         # <<< THOG bounded recovery limit
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
