@@ -1,0 +1,121 @@
+name: Complete Stage 6 non-finite recovery
+
+on:
+  push:
+    branches: [BLOCK_enhancements_group]
+    paths: [.github/workflows/apply_stage6_nonfinite_completion.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: BLOCK_enhancements_group
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: pip install torch numpy pytest
+      - name: Complete Stage 6 skipped-attempt lifecycle
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('sheet/stage6_trainer.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''            update_rows.append(
+                {
+                    **metrics,
+                    "update_seconds": elapsed,
+                    "cumulative_training_seconds": training_seconds,
+                    "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                }
+            )
+            report_update = (
+'''
+          new = '''            update_rows.append(
+                {
+                    **metrics,
+                    "update_seconds": elapsed,
+                    "cumulative_training_seconds": training_seconds,
+                    "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                }
+            )
+            # vvv THOG skipped attempts are checkpointed immediately and remain outside completed-update cadence
+            if metrics.get("skipped_update", 0.0):
+                self._print_progress(
+                    run_id,
+                    "nonfinite_update_skipped",
+                    completed_updates=completed_updates,
+                    consumed_tokens=completed_updates * tokens_per_update,
+                    skipped_nonfinite_updates=int(metrics["skipped_nonfinite_updates"]),
+                    failed_update_attempts=int(metrics["failed_update_attempts"]),
+                    nonfinite_reason=str(metrics["nonfinite_reason"]),
+                    cumulative_training_seconds=training_seconds,
+                )
+                _, save_elapsed = self._timed(
+                    lambda: self.save_checkpoint(
+                        Path(self.config.out_dir) / "ckpt.pt"
+                    )
+                )
+                checkpoint_seconds += save_elapsed
+                continue
+            # ^^^ THOG
+            report_update = (
+'''
+          if old not in text:
+              raise SystemExit('Stage 6 update-loop anchor not found')
+          text = text.replace(old, new, 1)
+          old_budget = '''            "budget": {
+                "completed_updates": self.state.completed_updates,
+                "tokens_per_update": tokens_per_update,
+                "consumed_tokens": self.state.completed_updates * tokens_per_update,
+            },
+'''
+          new_budget = '''            "budget": {
+                "completed_updates": self.state.completed_updates,
+                "tokens_per_update": tokens_per_update,
+                "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                # vvv THOG expose persisted failed-attempt accounting in final evidence
+                "skipped_nonfinite_updates": self.state.skipped_nonfinite_updates,
+                "failed_update_attempts": self.state.failed_update_attempts,
+                # ^^^ THOG
+            },
+'''
+          if old_budget not in text:
+              raise SystemExit('Stage 6 budget anchor not found')
+          path.write_text(text.replace(old_budget, new_budget, 1), encoding='utf-8')
+
+          test_path = Path('tests/test_picton_nonfinite_update_recovery.py')
+          test_text = test_path.read_text(encoding='utf-8')
+          test_text = test_text.replace(
+              'from sheet.trainer_state import TrainerState\n',
+              'from sheet.stage6_trainer import Stage6Trainer\nfrom sheet.trainer_state import TrainerState\n',
+          )
+          insertion = '''\n    def test_stage6_source_checkpoints_skipped_attempt_before_continue(self):\n        source = Path("sheet/stage6_trainer.py").read_text(encoding="utf-8")\n        skip_index = source.index('if metrics.get("skipped_update", 0.0):')\n        checkpoint_index = source.index('lambda: self.save_checkpoint(', skip_index)\n        continue_index = source.index('continue', checkpoint_index)\n        report_index = source.index('report_update = (', continue_index)\n        self.assertLess(skip_index, checkpoint_index)\n        self.assertLess(checkpoint_index, continue_index)\n        self.assertLess(continue_index, report_index)\n\n    def test_stage6_budget_exposes_nonfinite_recovery_counters(self):\n        source = Path("sheet/stage6_trainer.py").read_text(encoding="utf-8")\n        self.assertIn('"skipped_nonfinite_updates": self.state.skipped_nonfinite_updates', source)\n        self.assertIn('"failed_update_attempts": self.state.failed_update_attempts', source)\n'''
+          test_text = test_text.replace("\n\nif __name__ == \"__main__\":", insertion + "\n\nif __name__ == \"__main__\":")
+          test_text = test_text.replace('from __future__ import annotations\n\nimport unittest\n', 'from __future__ import annotations\n\nimport unittest\nfrom pathlib import Path\n')
+          test_path.write_text(test_text, encoding='utf-8')
+          PY
+          python -m compileall -q sheet tests run_thog2_owt.py
+          pytest -q tests/test_picton_nonfinite_update_recovery.py
+          pytest -q
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sheet/stage6_trainer.py tests/test_picton_nonfinite_update_recovery.py
+          git commit -m "Complete checkpointed non-finite recovery lifecycle"
+      - name: Remove temporary workflow and push
+        shell: bash
+        run: |
+          rm .github/workflows/apply_stage6_nonfinite_completion.yml
+          git add .github/workflows/apply_stage6_nonfinite_completion.yml
+          git commit -m "Remove temporary Stage 6 recovery workflow"
+          git push origin HEAD:BLOCK_enhancements_group
