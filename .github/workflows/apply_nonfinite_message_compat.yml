@@ -55,7 +55,7 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_stage5_failure_propagation \
-            tests.test_nonfinite_update_policy
+            tests.test_picton_nonfinite_update_recovery
       - name: Commit compatibility fix
         shell: bash
         run: |
