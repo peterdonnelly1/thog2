@@ -1,0 +1,67 @@
+name: Apply non-finite diagnostic compatibility
+
+on:
+  push:
+    branches: [BLOCK_enhancements_group]
+    paths: [.github/workflows/apply_nonfinite_message_compat.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: BLOCK_enhancements_group
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU test dependencies
+        run: pip install torch numpy
+      - name: Preserve historical collective diagnostic text
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('sheet/trainer_step.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        if self.config.nonfinite_update_policy == "raise":
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise FloatingPointError(
+                "non-finite update detected: "
+                + json.dumps(payload, sort_keys=True)
+            )
+'''
+          new = '''        if self.config.nonfinite_update_policy == "raise":
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            headline = {
+                "loss": "non-finite training loss on at least one rank",
+                "gradient": "non-finite gradient on at least one rank",
+                "gradient_norm": "non-finite gradient norm",
+            }.get(reason, "non-finite update detected")
+            raise FloatingPointError(
+                headline + ": " + json.dumps(payload, sort_keys=True)
+            )
+'''
+          if old not in text:
+              raise SystemExit('expected non-finite raise block not found')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+      - name: Run focused regressions
+        run: |
+          python -m unittest -v \
+            tests.test_stage5_failure_propagation \
+            tests.test_nonfinite_update_policy
+      - name: Commit compatibility fix
+        shell: bash
+        run: |
+          git rm .github/workflows/apply_nonfinite_message_compat.yml
+          git add sheet/trainer_step.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Preserve collective non-finite diagnostics"
+          git push origin HEAD:BLOCK_enhancements_group
