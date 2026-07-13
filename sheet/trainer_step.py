@@ -157,9 +157,13 @@ class TrainerStepMixin:
         )
         if self.config.nonfinite_update_policy == "raise":
             self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            headline = {
+                "loss": "non-finite training loss on at least one rank",
+                "gradient": "non-finite gradient on at least one rank",
+                "gradient_norm": "non-finite gradient norm",
+            }.get(reason, "non-finite update detected")
             raise FloatingPointError(
-                "non-finite update detected: "
-                + json.dumps(payload, sort_keys=True)
+                headline + ": " + json.dumps(payload, sort_keys=True)
             )
         if self.config.nonfinite_update_policy != "skip":
             self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
