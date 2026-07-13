@@ -168,7 +168,7 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
     if "trainer_config" not in payload:
         return
     stored = TrainingConfig(**payload["trainer_config"])
-    control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "model_seed", "data_seed")
+    control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed")
     mismatches = [f"{name}: checkpoint={getattr(stored, name)!r}, requested={getattr(expected, name)!r}" for name in control_fields if getattr(stored, name) != getattr(expected, name)]
     if mismatches:
         raise ValueError("resume control mismatch: " + "; ".join(mismatches))
@@ -223,6 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
+    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="raise")                                                    # <<< THOG bounded recovery policy
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                                         # <<< THOG bounded recovery limit
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
@@ -321,6 +323,8 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         beta1=arguments.beta1,
         beta2=arguments.beta2,
         grad_clip=arguments.grad_clip,
+        nonfinite_update_policy=arguments.nonfinite_update_policy,
+        max_nonfinite_update_skips=arguments.max_nonfinite_update_skips,
         dropout=arguments.dropout,
         bias=arguments.bias,
         model_seed=arguments.model_seed,
@@ -343,7 +347,6 @@ def resolved_payload(config: OwtRunConfig, *, world_size: int, log_timestamp: Op
     return {"artifact_name": config.artifact_name, "artifact_prefix": config.artifact_prefix, "model_type": config.model_type, "run_mode": config.run_mode, "world_size": world_size, "tokens_per_iter": config.tokens_per_iter(), "canonical_config": config.canonical_dict(world_size=world_size), "paths": {name: str(path) for name, path in paths.items()}}
 
 
-
 # vvv THOG print resolved model parameters and execution options immediately before training
 def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer) -> None:
     report = trainer.parameter_report
@@ -354,12 +357,14 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     print("model parameters and options", flush=True)
     print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
     print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
+    print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)                                # <<< THOG show bounded recovery policy before the run
     print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
         print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}", flush=True)
     print(flush=True)
 # ^^^ THOG
+
 
 def main() -> int:
     arguments = build_parser().parse_args()
@@ -390,7 +395,7 @@ def main() -> int:
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
     if config.run_mode == "resume":
-        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval})
+        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips})
     else:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)
