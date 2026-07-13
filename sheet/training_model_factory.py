@@ -35,6 +35,15 @@ def _apply_sheet_residual_init_scaling(
             object.__setattr__(item, "target_weight_std", residual_std)
 
 
+def _sheet_model_arguments(config: TrainingConfig) -> Dict[str, Any]:
+    arguments = dict(config.model_arguments())
+    arguments["geometry_preset"] = config.geometry_preset
+    arguments["attention_geometry"] = config.attention_geometry
+    arguments["mlp_geometry"] = config.mlp_geometry
+    arguments["basis_family"] = config.basis_family
+    return arguments
+
+
 def build_training_model(
     config: TrainingConfig,
     *,
@@ -62,7 +71,7 @@ def build_training_model(
             )
         elif config.model_type == "thog2_sheet":
             model = TrainingSheetGPT(
-                SheetGPTConfig(**config.model_arguments())
+                SheetGPTConfig(**_sheet_model_arguments(config))
             )
             _apply_sheet_residual_init_scaling(model, config)
         else:

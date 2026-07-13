@@ -1,0 +1,23 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Stage 0 Test Plan\b0\par
+\pard\qc\sa320\f0\fs22 Audit and baseline fixtures before compact-geometry refactor\par
+\pard\sa190\sb280\f0\fs29\b Summary\b0\par
+\pard\sa170\f0\fs23 Stage 0 is a guard rail stage. It captures current legacy CHEBY_SHEET_COL behaviour before later stages move the implementation behind new abstractions.\par
+\pard\sa170\f0\fs23 Stage 0 must not implement CURVE, MLP_BLOCK, HEAD_AWARE_BLOCK, BLOCK, or DCT.\par
+\pard\sa190\sb280\f0\fs29\b Fixture\b0\par
+\pard\sa170\f0\fs23 The fixture lives at tests/fixtures/stage0_legacy_sheet_col_fixture.json.\par
+\pard\sa170\f0\fs23 It records a tiny deterministic config, family shapes, coefficient shapes, parameter counts, basis hashes, head packing ranges, and selected materialized tensor values.\par
+\pard\sa190\sb280\f0\fs29\b Required tests\b0\par
+\pard\sa170\f0\fs23 Family tests verify stable family order, row widths, row orders, coefficient shapes, sheet parameter counts, and dense-equivalent counts.\par
+\pard\sa170\f0\fs23 Parameter tests verify public parameter_report totals.\par
+\pard\sa170\f0\fs23 Basis tests verify CHEBY basis hashes and non-persistent basis buffers.\par
+\pard\sa170\f0\fs23 Materialization tests verify selected layer-2 tensor values from a fixed seed.\par
+\pard\sa170\f0\fs23 Attention packing tests verify Q/K/V row ranges, per-head row ranges, and attention-output input-head column ranges.\par
+\pard\sa190\sb280\f0\fs29\b Commands\b0\par
+\pard\sa180\li360\f1\fs20 python -m unittest tests.test_stage0_legacy_sheet_col_baseline\line python -m unittest discover tests\par
+\pard\sa190\sb280\f0\fs29\b Exit gate\b0\par
+\pard\sa170\f0\fs23 Stage 0 is complete when the new Stage 0 test passes and existing test discovery still passes.\par
+}

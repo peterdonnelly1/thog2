@@ -72,6 +72,12 @@ def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig)
                 f"{name}: checkpoint={checkpoint_signature.get(name)!r}, "
                 f"expected={expected_signature[name]!r}"
             )
+    checkpoint_identity = payload.get("compact_identity")
+    expected_identity = expected.compact_identity_metadata()
+    if checkpoint_identity != expected_identity:
+        mismatches.append(
+            "compact_identity: checkpoint does not match expected resolved compact metadata"
+        )
     if mismatches:
         raise ValueError("incompatible checkpoint geometry or model state: " + "; ".join(mismatches))
 

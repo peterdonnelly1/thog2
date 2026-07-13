@@ -2,173 +2,375 @@
 set -euo pipefail
 
 # vvv THOG
-# Long single-candidate dreedle SHEET OpenWebText run.
-# This targets high VRAM use on TITAN RTX by widening the SHEET geometry rather than increasing context length.
-# Default candidate is wide SHEET-144: D2048/H32 with P80/Q256 at C256, backed off after larger D2304 and D2560 OOMs.
-# The child SHEET wrapper's dreedle runtime profile selects float16; do not also pass -T unless deliberately overriding it.
+# Current dreedle OpenWebText training wrapper for the PICTON compact-geometry contract.
+# Dreedle runtime defaults: float16, sdpa. Dense baseline is available as -p dense.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
 
-SHEET_WRAPPER="./current_scruffy_train_SHEET_OWT.sh"
+RUN_MODULE="run_thog2_owt"
+HOST_LABEL="dreedle"
+RUN_MODE="fresh"
+RUN_NAME=""
+# EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"                                                                                                  # <<< THOG removed redundant environment-controlled experiment naming
+EXPERIMENT_PREFIX="NO_PREFIX"                                                                                                                            # <<< THOG -g now supplies the sole human run-name prefix
+DATASET_NAME="openwebtext"
 DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-RUN_NAME="KARITANE_LONG_$(date +%y%m%d_%H%M%S)"
-STEPS=99999
-BATCH_SIZE=12
-GRADIENT_ACCUMULATION_STEPS=4
-EVAL_ITERS=50
-EVAL_INTERVAL=100
+CHECKPOINT_ROOT="checkpoints"
+LOG_ROOT="logs"
+RESULT_ROOT="results"
+WANDB_ROOT="wandb"
+GEOMETRY_PRESET="depth"
+BASIS_FAMILY="chebyshev"
+BASIS_VERSION="auto"
+ATTENTION_GEOMETRY=""
+MLP_GEOMETRY=""
+STEPS=250
+BATCH_SIZE=3
+LEARNING_RATE_CODES="60"                                                                                                                               # <<< THOG wrapper learning-rate code list; 70 means 7.0e-04
+MIN_LR_CODE="06"                                                                                                                                         # <<< THOG wrapper minimum learning-rate code; 06 means 6.0e-05
+GRADIENT_ACCUMULATION_STEPS=160
+NUM_GPUS=1
+EVAL_ITERS=5
+EVAL_INTERVAL=20
 LOG_INTERVAL=1
-WARMUP_ITERS=20
-CHECKPOINT_INTERVAL=500
+WARMUP_ITERS=10
+CHECKPOINT_INTERVAL=20
 N_LAYER=144
-N_HEAD=32
-N_EMBD=2048
-BLOCK_SIZE=256
-DEPTH_ORDER=80
-BASE_ROW_ORDER=256
+N_HEAD=12
+N_EMBD=768
+BLOCK_SIZE=1024
+O_DEPTH=32
+O_ATTN_D_MODEL=64
+O_ATTN_QKV_PER_CHANNEL=6
+O_ATTN_OUT_PER_CHANNEL=6
+O_MLP_D_MODEL=64
+O_MLP_HIDDEN=256
+RESIDUAL_INIT_POLICY="depth_scaled"
+RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
+RESIDUAL_INIT_DEPTH_VALUE=12
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
-INSTRUMENTATION="wandb"
-CURVE_ROOT="curves"
-WANDB_MODE="online"
-WANDB_ENABLED=true
+FAST_DISCARD="${THOG2_FAST_DISCARD:-false}"
+BYPASS_SEMANTIC_QKV_ADAPTER="${THOG2_BYPASS_SEMANTIC_QKV_ADAPTER:-true}"                                                                                  # <<< THOG default-on selectable semantic-QKV adapter bypass
+# DIRECT_THOG_MLP_APPLICATION="${THOG2_DIRECT_THOG_MLP_APPLICATION:-false}"                                                                         # <<< THOG retired old option name; retained for source history
+DIRECT_FACTORISED_MLP="${THOG2_DIRECT_FACTORISED_MLP:-true}"                                                                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
+VECTORISE_PER_HEAD_MATERIALISATION="${THOG2_VECTORISE_PER_HEAD_MATERIALISATION:-true}"                                                                    # <<< THOG default-on selectable per-head batching
+DTYPE="float16"
+ATTENTION_BACKEND="sdpa"
+INSTRUMENTATION="tensorboard"
+DEPTH_CURVE_PLOTS="${THOG2_DEPTH_CURVE_PLOTS:-eval}"
+DEPTH_CURVE_SAMPLE_ELEMENTS="${THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS:-16384}"
+DEPTH_CURVE_RENDERER="${THOG2_DEPTH_CURVE_RENDERER:-plotly}"
+DEPTH_CURVE_LOCAL_HTML="${THOG2_DEPTH_CURVE_LOCAL_HTML:-true}"
+DEPTH_CURVE_HTTP_PORT="${THOG2_DEPTH_CURVE_HTTP_PORT:-8787}"
 DRY_RUN=false
-CUDA_DEVICE_DEFAULT=0
+N_LAYER_EXPLICIT=false
+N_HEAD_EXPLICIT=false
+N_EMBD_EXPLICIT=false
 
 usage() {
-  cat <<EOF
-Usage: $0 [options]
+  cat <<EOF_USAGE
+Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
-Runs one long, memory-heavy dreedle SHEET OpenWebText candidate.
-
-Options:
-  -t DATA_DIR=${DATA_DIR}
-  -g RUN_NAME=${RUN_NAME}
+Model/run:
+  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block
+                                                   single value, comma list, or quoted space list
+  -q RUN_MODE=${RUN_MODE}                        fresh | resume
+  -g RUN_NAME=${RUN_NAME:-auto}
   -n STEPS=${STEPS}
-  -b BATCH_SIZE=${BATCH_SIZE}
+  -b BATCH_SIZE=${BATCH_SIZE}                         single integer, comma list, or quoted space list
+  -c LR_CODES=${LEARNING_RATE_CODES}                    learning-rate codes; 70 means 7.0e-04; list allowed
+  -f MIN_LR_CODE=${MIN_LR_CODE}                         minimum LR code; 06 means 6.0e-05
   -A GRADIENT_ACCUMULATION_STEPS=${GRADIENT_ACCUMULATION_STEPS}
+  -G NUM_GPUS=${NUM_GPUS}
+
+Schedule/logging:
   -u EVAL_ITERS=${EVAL_ITERS}
   -e EVAL_INTERVAL=${EVAL_INTERVAL}
   -l LOG_INTERVAL=${LOG_INTERVAL}
   -w WARMUP_ITERS=${WARMUP_ITERS}
-  -k CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL}
+  -k CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL}     0 disables periodic saves
+  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | wandb_offline | none
+  -F DEPTH_CURVE_PLOTS=${DEPTH_CURVE_PLOTS}         none | final | eval
+  -N DEPTH_CURVE_SAMPLE_ELEMENTS=${DEPTH_CURVE_SAMPLE_ELEMENTS}
+  -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
+  -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
+
+Compact geometry:
+  -B BASIS_FAMILY=${BASIS_FAMILY}                   chebyshev | dct
+  -v BASIS_VERSION=${BASIS_VERSION}
+  -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
+  -m MLP_GEOMETRY=${MLP_GEOMETRY:-preset default}
+
+Shape/runtime:
   -L N_LAYER=${N_LAYER}
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
-  -P DEPTH_ORDER=${DEPTH_ORDER}
-  -Q BASE_ROW_ORDER=${BASE_ROW_ORDER}
-  -p ACTIVATION_CHECKPOINTING=${ACTIVATION_CHECKPOINTING}
+  -P O_DEPTH=${O_DEPTH}                             single integer, comma list, or quoted space list; ignored by dense
+  -Q O_ATTN_D_MODEL=${O_ATTN_D_MODEL}
+  -J O_ATTN_QKV_PER_CHANNEL=${O_ATTN_QKV_PER_CHANNEL}
+  -O O_ATTN_OUT_PER_CHANNEL=${O_ATTN_OUT_PER_CHANNEL}
+  -X O_MLP_D_MODEL=${O_MLP_D_MODEL}
+  -Y O_MLP_HIDDEN=${O_MLP_HIDDEN}
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
-  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | none
-  -V CURVE_ROOT=${CURVE_ROOT}                       TensorBoard root directory
-  -M WANDB_MODE=${WANDB_MODE}                       online | offline | disabled
-  -W WANDB_ENABLED=${WANDB_ENABLED}
+  -E FAST_DISCARD=${FAST_DISCARD}                   true | false
+  -T DTYPE=${DTYPE}                                 float32 | float16 | bfloat16
+  -K ATTENTION_BACKEND=${ATTENTION_BACKEND}         auto | flash2 | sdpa | math
+
+Residual init:
+  -r RESIDUAL_INIT_POLICY=${RESIDUAL_INIT_POLICY}                 depth_scaled | unscaled
+  -z RESIDUAL_INIT_DEPTH_SOURCE=${RESIDUAL_INIT_DEPTH_SOURCE}     true_layer_depth | dof_implied_depth | user_forced_depth
+  -Z RESIDUAL_INIT_DEPTH_VALUE=${RESIDUAL_INIT_DEPTH_VALUE}
+
+Paths:
+  -d DATASET_NAME=${DATASET_NAME}
+  -t DATA_DIR=${DATA_DIR}
+  -o CHECKPOINT_ROOT=${CHECKPOINT_ROOT}
+  -j LOG_ROOT=${LOG_ROOT}
+  -R RESULT_ROOT=${RESULT_ROOT}
   -x DRY_RUN=${DRY_RUN}
-  -c CUDA_VISIBLE_DEVICES default=${CUDA_DEVICE_DEFAULT}
   -h show this help
-EOF
+EOF_USAGE
 }
 
-while getopts ":t:g:n:b:A:u:e:l:w:k:L:H:D:C:P:Q:p:S:I:V:M:W:x:c:h" option; do
+while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
-    t) DATA_DIR="$OPTARG" ;;
-    g) RUN_NAME="$OPTARG" ;;
-    n) STEPS="$OPTARG" ;;
-    b) BATCH_SIZE="$OPTARG" ;;
-    A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;;
-    u) EVAL_ITERS="$OPTARG" ;;
-    e) EVAL_INTERVAL="$OPTARG" ;;
-    l) LOG_INTERVAL="$OPTARG" ;;
-    w) WARMUP_ITERS="$OPTARG" ;;
-    k) CHECKPOINT_INTERVAL="$OPTARG" ;;
-    L) N_LAYER="$OPTARG" ;;
-    H) N_HEAD="$OPTARG" ;;
-    D) N_EMBD="$OPTARG" ;;
-    C) BLOCK_SIZE="$OPTARG" ;;
-    P) DEPTH_ORDER="$OPTARG" ;;
-    Q) BASE_ROW_ORDER="$OPTARG" ;;
-    p) ACTIVATION_CHECKPOINTING="$OPTARG" ;;
-    S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
-    I) INSTRUMENTATION="$OPTARG" ;;
-    V) CURVE_ROOT="$OPTARG" ;;
-    M) WANDB_MODE="$OPTARG" ;;
-    W) WANDB_ENABLED="$OPTARG" ;;
-    x) DRY_RUN="$OPTARG" ;;
-    c) CUDA_DEVICE_DEFAULT="$OPTARG" ;;
-    h) usage; exit 0 ;;
-    :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;;
-    \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
+    q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
+    n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG" ;; f) MIN_LR_CODE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
+    u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
+    I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
+    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
+    C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
+    E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
+    d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
+    h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
   esac
 done
+shift $((OPTIND - 1))
+if [[ "${1:-}" == "--" ]]; then shift; fi
+EXTRA_ARGS=("$@")
+EXPERIMENT_PREFIX="${RUN_NAME:-NO_PREFIX}"                                                                                                               # <<< THOG make -g the sole experiment-prefix source
 
 validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1; expected a positive integer." >&2; exit 2; }; }
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
 validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; expected true or false." >&2; exit 2 ;; esac; }
 
-for setting in "$STEPS" "$BATCH_SIZE" "$GRADIENT_ACCUMULATION_STEPS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$DEPTH_ORDER" "$BASE_ROW_ORDER" "$CHECKPOINT_SEGMENT_SIZE"; do
-  validate_positive_uint "$setting" "numeric setting"
-done
+O_DEPTH_VALUES=()
+PRESET_VALUES=()
+BATCH_SIZE_VALUES=()                                                                                                                                       # <<< THOG batch-size grid axis
+LEARNING_RATE_CODE_VALUES=()                                                                                                                               # <<< THOG learning-rate grid axis
+HAS_DENSE_PRESET=false
+HAS_COMPACT_PRESET=false
+parse_o_depth_values() {
+  local normalized="${1//,/ }"
+  local value
+  for value in $normalized; do
+    validate_positive_uint "$value" "O_DEPTH"
+    O_DEPTH_VALUES+=("$value")
+  done
+  (( ${#O_DEPTH_VALUES[@]} > 0 )) || { echo "Invalid O_DEPTH: empty value list." >&2; exit 2; }
+}
+parse_positive_uint_values() {
+  local raw="$1" label="$2" array_name="$3"
+  local normalized="${raw//,/ }" value
+  for value in $normalized; do
+    validate_positive_uint "$value" "$label"
+    eval "$array_name+=(\"$value\")"
+  done
+  eval "(( \${#$array_name[@]} > 0 ))" || { echo "Invalid $label: empty value list." >&2; exit 2; }
+}
+validate_lr_code() {
+  [[ "$1" =~ ^[0-9]{1,2}$ ]] && (( 10#$1 > 0 )) || { echo "Invalid $2: $1; expected 01..99, where 70 means 7.0e-04." >&2; exit 2; }
+}
+parse_lr_code_values() {
+  local normalized="${1//,/ }" value
+  for value in $normalized; do
+    validate_lr_code "$value" "LEARNING_RATE_CODES"
+    LEARNING_RATE_CODE_VALUES+=("$((10#$value))")
+  done
+  (( ${#LEARNING_RATE_CODE_VALUES[@]} > 0 )) || { echo "Invalid LEARNING_RATE_CODES: empty value list." >&2; exit 2; }
+}
+
+parse_geometry_preset_values() {
+  local normalized="${1//,/ }"
+  local value
+  for value in $normalized; do
+    case "$value" in
+      dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
+      legacy_sheet_col|depth|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      *) echo "Bad PRESET: $value" >&2; exit 2 ;;
+    esac
+  done
+  (( ${#PRESET_VALUES[@]} > 0 )) || { echo "Invalid PRESET: empty value list." >&2; exit 2; }
+}
+parse_o_depth_values "$O_DEPTH"
+parse_geometry_preset_values "$GEOMETRY_PRESET"
+parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE" BATCH_SIZE_VALUES                                                                             # <<< THOG parse batch grid
+parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                            # <<< THOG parse LR grid
+validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE"                                                                                                        # <<< THOG validate minimum LR code
+
+case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
+case "$BASIS_FAMILY" in chebyshev|dct) ;; *) echo "BASIS_FAMILY must be chebyshev or dct." >&2; exit 2 ;; esac
+case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
+# vvv THOG one instrumentation selector determines both backend and W&B mode; contradictory -I/-M/-W combinations no longer exist
+case "$INSTRUMENTATION" in
+  tensorboard) INSTRUMENTATION_BACKEND="tensorboard"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
+  wandb) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="online" ;;
+  wandb_offline) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="offline" ;;
+  none) INSTRUMENTATION_BACKEND="none"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
+  *) echo "INSTRUMENTATION must be tensorboard, wandb, wandb_offline, or none." >&2; exit 2 ;;
+esac
+# ^^^ THOG
+case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must be none, final, or eval." >&2; exit 2 ;; esac
+case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_RENDERER must be matplotlib, plotly, or both." >&2; exit 2 ;; esac
+case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
+case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
+for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS"; do validate_positive_uint "$setting" "numeric setting"; done
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
-validate_true_false "$WANDB_ENABLED" "WANDB_ENABLED"
+validate_true_false "$FAST_DISCARD" "FAST_DISCARD"
+validate_true_false "$BYPASS_SEMANTIC_QKV_ADAPTER" "BYPASS_SEMANTIC_QKV_ADAPTER"                                                                        # <<< THOG validate wrapper-only optimisation switch
+# validate_true_false "$DIRECT_THOG_MLP_APPLICATION" "DIRECT_THOG_MLP_APPLICATION"                                                               # <<< THOG retired old option validation
+validate_true_false "$DIRECT_FACTORISED_MLP" "DIRECT_FACTORISED_MLP"                                                                                   # <<< THOG validate renamed exact MLP switch
+validate_true_false "$VECTORISE_PER_HEAD_MATERIALISATION" "VECTORISE_PER_HEAD_MATERIALISATION"                                                         # <<< THOG validate selectable head vectorisation
+validate_true_false "$DEPTH_CURVE_LOCAL_HTML" "DEPTH_CURVE_LOCAL_HTML"
 validate_true_false "$DRY_RUN" "DRY_RUN"
-case "$INSTRUMENTATION" in tensorboard|wandb|none) ;; *) echo "INSTRUMENTATION must be tensorboard, wandb, or none." >&2; exit 2 ;; esac
-case "$WANDB_MODE" in online|offline|disabled) ;; *) echo "WANDB_MODE must be online, offline, or disabled." >&2; exit 2 ;; esac
-[[ -f "$SHEET_WRAPPER" ]] || { echo "Missing SHEET wrapper: $SHEET_WRAPPER" >&2; exit 2; }
-[[ -f "$DATA_DIR/train.bin" && -f "$DATA_DIR/val.bin" ]] || { echo "DATA_DIR must contain train.bin and val.bin: $DATA_DIR" >&2; exit 2; }
+
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
-(( DEPTH_ORDER <= N_LAYER )) || { echo "DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
-(( BASE_ROW_ORDER <= N_EMBD )) || { echo "BASE_ROW_ORDER must not exceed N_EMBD." >&2; exit 2; }
+HEAD_DIM=$((N_EMBD / N_HEAD))
+if [[ "$HAS_COMPACT_PRESET" == true ]]; then
+  for value in "${O_DEPTH_VALUES[@]}"; do (( value <= N_LAYER )) || { echo "O_DEPTH must not exceed N_LAYER: P=${value}, L=${N_LAYER}." >&2; exit 2; }; done
+  (( O_ATTN_D_MODEL <= N_EMBD )) || { echo "O_ATTN_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
+  (( O_ATTN_QKV_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_QKV_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
+  (( O_ATTN_OUT_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_OUT_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
+  (( O_MLP_D_MODEL <= N_EMBD )) || { echo "O_MLP_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
+  (( O_MLP_HIDDEN <= 4 * N_EMBD )) || { echo "O_MLP_HIDDEN must not exceed 4*N_EMBD." >&2; exit 2; }
+fi
+(( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$CUDA_DEVICE_DEFAULT}"
+if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
+BASIS_TAG="CHEBY"; [[ "$BASIS_FAMILY" == dct ]] && BASIS_TAG="DCT"
+CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
+
+export THOG2_INSTRUMENTATION="$INSTRUMENTATION_BACKEND"
+export THOG2_CURVE_ROOT="${THOG2_CURVE_ROOT:-curves}"
+export THOG2_MLP_CHANNEL_ORDER="$O_MLP_HIDDEN"
+export THOG2_DEPTH_CURVE_PLOTS="$DEPTH_CURVE_PLOTS"
+export THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS="$DEPTH_CURVE_SAMPLE_ELEMENTS"
+export THOG2_DEPTH_CURVE_RENDERER="$DEPTH_CURVE_RENDERER"
+export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
+export THOG2_FAST_DISCARD="$FAST_DISCARD"
+export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"                                                                                  # <<< THOG pass wrapper-only optimisation switch into SheetGPTConfig
+# export THOG2_DIRECT_THOG_MLP_APPLICATION="$DIRECT_THOG_MLP_APPLICATION"                                                                          # <<< THOG retired old environment variable
+export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed exact MLP switch into SheetGPTConfig
+export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass selectable head vectorisation into SheetGPTConfig
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
-export THOG2_INSTRUMENTATION="$INSTRUMENTATION"
-export THOG2_CURVE_ROOT="$CURVE_ROOT"
 
-cat <<EOF
-THOG2 dreedle long SHEET OpenWebText run
-  run name:                 $RUN_NAME
-  data dir:                 $DATA_DIR
-  geometry:                 L$N_LAYER / H$N_HEAD / D$N_EMBD / C$BLOCK_SIZE
-  sheet orders:             P$DEPTH_ORDER / Q$BASE_ROW_ORDER
-  steps:                    $STEPS, intended for manual stop
-  batch / global accum:     $BATCH_SIZE / $GRADIENT_ACCUMULATION_STEPS
-  tokens/update:            $((BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS * BLOCK_SIZE))
-  eval:                     every $EVAL_INTERVAL updates, $EVAL_ITERS batches
-  checkpoint interval:      $CHECKPOINT_INTERVAL
-  activation checkpointing: $ACTIVATION_CHECKPOINTING, segment $CHECKPOINT_SEGMENT_SIZE
-  CUDA_VISIBLE_DEVICES:     $CUDA_VISIBLE_DEVICES
-  cuda alloc conf:          $PYTORCH_CUDA_ALLOC_CONF
-  instrumentation:          $THOG2_INSTRUMENTATION
-  curve root:               $THOG2_CURVE_ROOT
-  wandb flags:              $WANDB_ENABLED ($WANDB_MODE)
-EOF
+run_preset_o_depth_batch_lr() {
+  local geometry_preset_value="$1"
+  local o_depth_value="$2"
+  local batch_size_value="$3"                                                                                                                            # <<< THOG batch grid coordinate
+  local learning_rate_code="$4"                                                                                                                          # <<< THOG LR grid coordinate
+  local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode compact LR codes
+  local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
+  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary log_url viewer_url serve_url run_status
+  local -a compact_args optional_args train_args command
 
-"$SHEET_WRAPPER" \
-  -R dreedle \
-  -q fresh \
-  -t "$DATA_DIR" \
-  -g "$RUN_NAME" \
-  -n "$STEPS" \
-  -b "$BATCH_SIZE" \
-  -A "$GRADIENT_ACCUMULATION_STEPS" \
-  -u "$EVAL_ITERS" \
-  -e "$EVAL_INTERVAL" \
-  -l "$LOG_INTERVAL" \
-  -w "$WARMUP_ITERS" \
-  -k "$CHECKPOINT_INTERVAL" \
-  -L "$N_LAYER" \
-  -H "$N_HEAD" \
-  -D "$N_EMBD" \
-  -C "$BLOCK_SIZE" \
-  -P "$DEPTH_ORDER" \
-  -Q "$BASE_ROW_ORDER" \
-  -p "$ACTIVATION_CHECKPOINTING" \
-  -S "$CHECKPOINT_SEGMENT_SIZE" \
-  -M "$WANDB_MODE" \
-  -W "$WANDB_ENABLED" \
-  -x "$DRY_RUN"
+  n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
+  residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
+  optional_args=(); compact_args=()
+  if [[ "$geometry_preset_value" == dense ]]; then
+    run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"
+    [[ "$N_LAYER_EXPLICIT" == false ]] && n_layer_value=12
+    [[ "$N_HEAD_EXPLICIT" == false ]] && n_head_value=12
+    [[ "$N_EMBD_EXPLICIT" == false ]] && n_embd_value=768
+    [[ "$residual_init_depth_source_value" == dof_implied_depth ]] && residual_init_depth_source_value="true_layer_depth"
+    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
+  else
+    run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
+    [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
+    run_tag="${BASIS_TAG}_${preset_tag}"
+    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION")
+    [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
+    [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
+    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE} P${o_depth_value} Q${O_ATTN_D_MODEL} J${O_ATTN_QKV_PER_CHANNEL} O${O_ATTN_OUT_PER_CHANNEL} X${O_MLP_D_MODEL} Y${O_MLP_HIDDEN}"
+  fi
+
+  run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
+  train_args=(
+    --model-type "$run_model_type" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$run_name_value"
+    --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
+    --max-iters "$STEPS" --batch-size "$batch_size_value" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
+    --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS" --learning-rate "$learning_rate_value" --min-lr "$min_lr_value"
+    --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE"
+    --o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN"
+    "${compact_args[@]}" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
+    --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
+    "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${optional_args[@]}" "${EXTRA_ARGS[@]}"
+  )
+
+  LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
+  artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
+  log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
+  command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
+  if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
+  log_url="file://$(realpath -m "$log_path")"; viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"; serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
+
+  cat <<EOF_RUN
+dreedle OWT train
+  artifact:           $artifact_name
+  experiment:         $EXPERIMENT_PREFIX
+  model/preset/basis: $display_model_type / $geometry_preset_value / $BASIS_FAMILY
+  backend/dtype:      $ATTENTION_BACKEND / $DTYPE
+  instrumentation:    $INSTRUMENTATION
+  fast discard:       $FAST_DISCARD
+  semantic adapter bypass:   $BYPASS_SEMANTIC_QKV_ADAPTER
+  direct factorised MLP:       $DIRECT_FACTORISED_MLP
+  vectorise per-head materialisation: $VECTORISE_PER_HEAD_MATERIALISATION
+  depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
+  depth viewer:       $viewer_url
+  serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
+  served URL:         $serve_url
+  schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
+  optimiser:          lr_code=$learning_rate_code lr=$learning_rate_value min_lr_code=$MIN_LR_CODE min_lr=$min_lr_value
+  shape:              $shape_summary
+  batch/accum/gpus:   $batch_size_value / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
+  log:                $log_url
+EOF_RUN
+
+  if [[ "$DRY_RUN" == true ]]; then
+    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --dry-run
+    printf 'DRY RUN:'; printf ' %q' "${command[@]}"; printf '\n'; return 0
+  fi
+  mkdir -p "$(dirname "$log_path")"
+  set +e; "${command[@]}" 2>&1 | tee "$log_path"; run_status=${PIPESTATUS[0]}; set -e
+  cat <<EOF_DONE
+dreedle OWT run finished
+  status:             $run_status
+  artifact:           $artifact_name
+  log URL:            $log_url
+  depth viewer URL:   $viewer_url
+EOF_DONE
+  return "$run_status"
+}
+
+if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then echo "dreedle OWT grid: p=${PRESET_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"; fi
+for geometry_preset_value in "${PRESET_VALUES[@]}"; do
+  for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
+    for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
+      if [[ "$geometry_preset_value" == dense ]]; then
+        run_preset_o_depth_batch_lr "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code"
+      else
+        for o_depth_value in "${O_DEPTH_VALUES[@]}"; do run_preset_o_depth_batch_lr "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code"; done
+      fi
+    done
+  done
+done
+# ^^^ THOG

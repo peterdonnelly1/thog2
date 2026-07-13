@@ -48,11 +48,7 @@ class TrainingDenseGPT(GPT):
                 f"Cannot forward sequence of length {sequence_length}; "
                 f"block size is {self.config.block_size}"
             )
-        positions = torch.arange(
-            sequence_length,
-            dtype=torch.long,
-            device=idx.device,
-        )
+        positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
@@ -101,14 +97,8 @@ class TrainingSheetGPT(SheetGPT):
         bias_name: str,
         layer_index: int,
     ) -> Tensor:
-        with torch.autocast(
-            device_type=inputs.device.type,
-            enabled=False,
-        ):
-            weight = self.trajectory.materialize_vector(
-                weight_name,
-                layer_index,
-            ).float()
+        with torch.autocast(device_type=inputs.device.type, enabled=False):
+            weight = self.trajectory.materialize_vector(weight_name, layer_index).float()
             bias = self._optional_bias(bias_name, layer_index)
             if bias is not None:
                 bias = bias.float()
@@ -133,11 +123,7 @@ class TrainingSheetGPT(SheetGPT):
                 f"Cannot forward sequence of length {sequence_length}; "
                 f"block size is {self.config.block_size}"
             )
-        positions = torch.arange(
-            sequence_length,
-            dtype=torch.long,
-            device=idx.device,
-        )
+        positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
@@ -161,6 +147,29 @@ class TrainingSheetGPT(SheetGPT):
             logits = self.lm_head(hidden[:, [-1], :])
             loss = None
         return logits, loss
+
+    # vvv THOG
+    @torch.no_grad()
+    def generate(
+        self,
+        idx: Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None,
+    ) -> Tensor:
+        """Use the unchanged nanoGPT autoregressive sampling contract."""
+        for _ in range(max_new_tokens):
+            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size :]
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < values[:, [-1]]] = -float("Inf")
+            probabilities = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probabilities, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
+    # ^^^ THOG
 
 
 __all__ = ["TrainingDenseGPT", "TrainingSheetGPT"]
