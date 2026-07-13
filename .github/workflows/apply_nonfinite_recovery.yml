@@ -1,0 +1,416 @@
+name: Apply non-finite recovery
+
+on:
+  push:
+    branches: [tmp_nonfinite_recovery_apply]
+    paths: [.github/workflows/apply_nonfinite_recovery.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp_nonfinite_recovery_apply
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: pip install torch numpy pytest
+      - name: Apply source and broad regression changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          path = root / 'sheet/training_config.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval"}', 'EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}')
+          text = text.replace('    grad_clip: float = 1.0\n', '    grad_clip: float = 1.0\n    # vvv THOG bounded non-finite update recovery controls\n    nonfinite_update_policy: str = "raise"\n    max_nonfinite_update_skips: int = 10\n    # ^^^ THOG\n')
+          text = text.replace('        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed"):', '        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):')
+          text = text.replace('        if self.weight_decay < 0.0 or self.grad_clip < 0.0:\n', '        if self.nonfinite_update_policy not in ("raise", "skip"):\n            raise ValueError("nonfinite_update_policy must be raise or skip")\n        if self.weight_decay < 0.0 or self.grad_clip < 0.0:\n')
+          path.write_text(text, encoding='utf-8')
+
+          path = root / 'sheet/trainer_state.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    latest_training_loss: Optional[float] = None\n', '    latest_training_loss: Optional[float] = None\n    # vvv THOG persistent failed-attempt accounting for bounded non-finite recovery\n    skipped_nonfinite_updates: int = 0\n    failed_update_attempts: int = 0\n    # ^^^ THOG\n')
+          path.write_text(text, encoding='utf-8')
+
+          path = root / 'sheet/run_config.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    grad_clip: float = 1.0\n', '    grad_clip: float = 1.0\n    # vvv THOG public non-finite update recovery controls\n    nonfinite_update_policy: str = "raise"\n    max_nonfinite_update_skips: int = 10\n    # ^^^ THOG\n')
+          text = text.replace('        if self.weight_decay < 0.0 or self.grad_clip < 0.0:\n', '        if self.nonfinite_update_policy not in ("raise", "skip"):\n            raise ValueError("nonfinite_update_policy must be raise or skip")\n        if isinstance(self.max_nonfinite_update_skips, bool) or not isinstance(self.max_nonfinite_update_skips, int) or self.max_nonfinite_update_skips < 0:\n            raise ValueError("max_nonfinite_update_skips must be a non-negative integer")\n        if self.weight_decay < 0.0 or self.grad_clip < 0.0:\n')
+          text = text.replace('            grad_clip=self.grad_clip,\n', '            grad_clip=self.grad_clip,\n            nonfinite_update_policy=self.nonfinite_update_policy,\n            max_nonfinite_update_skips=self.max_nonfinite_update_skips,\n')
+          path.write_text(text, encoding='utf-8')
+
+          path = root / 'run_thog2_owt.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('    parser.add_argument("--grad-clip", type=float, default=1.0)\n', '    parser.add_argument("--grad-clip", type=float, default=1.0)\n    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="raise")                                         # <<< THOG bounded recovery policy\n    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                              # <<< THOG bounded recovery limit\n')
+          text = text.replace('        grad_clip=arguments.grad_clip,\n', '        grad_clip=arguments.grad_clip,\n        nonfinite_update_policy=arguments.nonfinite_update_policy,\n        max_nonfinite_update_skips=arguments.max_nonfinite_update_skips,\n')
+          text = text.replace('control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "model_seed", "data_seed")', 'control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed")')
+          path.write_text(text, encoding='utf-8')
+
+          path = root / 'sheet/trainer_step.py'
+          path.write_text('''# vvv THOG
+from __future__ import annotations
+
+import json
+import math
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+
+
+class TrainerStepMixin:
+    @torch.no_grad()
+    def evaluate(self) -> Dict[str, float]:
+        was_training = self.model.training
+        self.model.eval()
+        self._record("evaluation_started")
+        results: Dict[str, float] = {}
+        for split in ("train", "val"):
+            losses = []
+            for _ in range(self.config.eval_batches):
+                batch = self.batch_source.get_batch(split, device=self.device)
+                with self.autocast_context():
+                    _, loss = self.model(batch.inputs, batch.targets)
+                local_finite = loss is not None and bool(torch.isfinite(loss).item())
+                self.distributed.require_all_true(local_finite, f"non-finite {split} evaluation loss on at least one rank")
+                if loss is None:
+                    raise RuntimeError("model did not return an evaluation loss")
+                losses.append(self.distributed.mean_float(loss.detach()))
+            results[split] = sum(losses) / len(losses)
+        self.state.latest_validation_loss = results["val"]
+        self.state.best_validation_loss = min(self.state.best_validation_loss, results["val"])
+        self._record("evaluation_completed", losses=results)
+        self.model.train(was_training)
+        return results
+
+    # vvv THOG bounded non-finite update recovery with correct pre/post-unscale cleanup
+    @staticmethod
+    def _jsonable_float(value: Optional[float]) -> Optional[float | str]:
+        if value is None:
+            return None
+        if math.isfinite(value):
+            return float(value)
+        if math.isnan(value):
+            return "nan"
+        return "inf" if value > 0.0 else "-inf"
+
+    def _local_gradients_are_finite(self) -> bool:
+        for parameter in self.raw_model.parameters():
+            if parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all().item()):
+                return False
+        return True
+
+    def _local_nonfinite_gradient_reports(self) -> List[Dict[str, Any]]:
+        reports: List[Dict[str, Any]] = []
+        for parameter_name, parameter in self.raw_model.named_parameters():
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            detached = gradient.detach()
+            finite_mask = torch.isfinite(detached)
+            if bool(finite_mask.all().item()):
+                continue
+            inf_mask = torch.isinf(detached)
+            finite_count = int(finite_mask.sum().item())
+            finite_abs_max = float(detached[finite_mask].abs().max().item()) if finite_count else None
+            reports.append({
+                "parameter_name": parameter_name,
+                "shape": tuple(int(value) for value in detached.shape),
+                "dtype": str(detached.dtype),
+                "nan_count": int(torch.isnan(detached).sum().item()),
+                "posinf_count": int((inf_mask & (detached > 0)).sum().item()),
+                "neginf_count": int((inf_mask & (detached < 0)).sum().item()),
+                "finite_count": finite_count,
+                "finite_abs_max": self._jsonable_float(finite_abs_max),
+            })
+        return reports
+
+    def _cleanup_failed_update(self, *, scaler_unscaled: bool) -> None:
+        if scaler_unscaled:
+            self.scaler.update()
+        self.optimizer.zero_grad(set_to_none=True)
+
+    def _nonfinite_update_payload(self, *, reason: str, learning_rate: float, training_loss: Optional[float], gradient_norm: Optional[float], micro_step: Optional[int], microbatch_starts: List[Tuple[int, ...]]) -> Dict[str, Any]:
+        local_report = {
+            "rank": int(self.distributed.rank),
+            "reason": reason,
+            "loss": self._jsonable_float(training_loss),
+            "gradient_norm": self._jsonable_float(gradient_norm),
+            "micro_step": micro_step,
+            "microbatch_starts": [[int(value) for value in starts] for starts in microbatch_starts],
+            "gradient_reports": self._local_nonfinite_gradient_reports(),
+        }
+        return {
+            "attempted_update": int(self.state.completed_updates + self.state.skipped_nonfinite_updates + 1),
+            "completed_updates": int(self.state.completed_updates),
+            "skipped_nonfinite_updates": int(self.state.skipped_nonfinite_updates),
+            "failed_update_attempts": int(self.state.failed_update_attempts),
+            "learning_rate": float(learning_rate),
+            "nonfinite_reason": reason,
+            "rank_reports": self.distributed.all_gather_object(local_report),
+        }
+
+    def _handle_nonfinite_update(self, *, reason: str, learning_rate: float, training_loss: Optional[float], gradient_norm: Optional[float], micro_step: Optional[int], microbatch_starts: List[Tuple[int, ...]], scaler_unscaled: bool) -> Dict[str, Any]:
+        payload = self._nonfinite_update_payload(reason=reason, learning_rate=learning_rate, training_loss=training_loss, gradient_norm=gradient_norm, micro_step=micro_step, microbatch_starts=microbatch_starts)
+        self.state.failed_update_attempts += 1
+        payload["failed_update_attempts"] = int(self.state.failed_update_attempts)
+        if self.config.nonfinite_update_policy == "raise":
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise FloatingPointError("non-finite update detected: " + json.dumps(payload, sort_keys=True))
+        if self.state.skipped_nonfinite_updates >= self.config.max_nonfinite_update_skips:
+            self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+            raise FloatingPointError("non-finite update skip limit exceeded: " + json.dumps(payload, sort_keys=True))
+        self._cleanup_failed_update(scaler_unscaled=scaler_unscaled)
+        self.state.skipped_nonfinite_updates += 1
+        payload["skipped_nonfinite_updates"] = int(self.state.skipped_nonfinite_updates)
+        self._record("nonfinite_update_skipped", **payload)
+        return {
+            "completed_updates": float(self.state.completed_updates),
+            "training_loss": training_loss if training_loss is not None else float("nan"),
+            "learning_rate": learning_rate,
+            "gradient_norm": gradient_norm if gradient_norm is not None else float("nan"),
+            "skipped_update": 1.0,
+            "skipped_nonfinite_updates": float(self.state.skipped_nonfinite_updates),
+            "failed_update_attempts": float(self.state.failed_update_attempts),
+            "nonfinite_reason": reason,
+            "nonfinite_diagnostics": payload,
+        }
+    # ^^^ THOG
+
+    def train_one_update(self) -> Dict[str, Any]:
+        if self.state.completed_updates >= self.config.max_updates:
+            raise RuntimeError("maximum completed updates already reached")
+        self.model.train()
+        learning_rate = self._set_learning_rate()
+        self.optimizer.zero_grad(set_to_none=True)
+        total_loss = 0.0
+        accumulation_steps = self.config.gradient_accumulation_steps
+        microbatch_starts: List[Tuple[int, ...]] = []
+        for micro_step in range(accumulation_steps):
+            batch = self.batch_source.get_batch("train", device=self.device)
+            microbatch_starts.append(tuple(int(value) for value in batch.starts))
+            self._record("microbatch", micro_step=micro_step, starts=batch.starts)
+            synchronize = micro_step == accumulation_steps - 1
+            with self.distributed.no_sync_context(self.model, synchronize=synchronize):
+                with self.autocast_context():
+                    _, loss = self.model(batch.inputs, batch.targets)
+                    local_finite = loss is not None and bool(torch.isfinite(loss).item())
+                    if not self.distributed.all_true(local_finite):
+                        loss_value = float(loss.detach().to(dtype=torch.float64).item()) if loss is not None else None
+                        return self._handle_nonfinite_update(reason="loss", learning_rate=learning_rate, training_loss=loss_value, gradient_norm=None, micro_step=micro_step, microbatch_starts=microbatch_starts, scaler_unscaled=False)
+                    if loss is None:
+                        raise RuntimeError("model did not return a training loss")
+                    scaled_loss = loss / accumulation_steps
+                total_loss += self.distributed.mean_float(loss.detach())
+                self.scaler.scale(scaled_loss).backward()
+
+        self.scaler.unscale_(self.optimizer)
+        if not self.distributed.all_true(self._local_gradients_are_finite()):
+            return self._handle_nonfinite_update(reason="gradient", learning_rate=learning_rate, training_loss=total_loss / accumulation_steps, gradient_norm=None, micro_step=None, microbatch_starts=microbatch_starts, scaler_unscaled=True)
+
+        diagnostics_hook = self._before_optimizer_step if hasattr(self, "_before_optimizer_step") else None
+        if diagnostics_hook is not None:
+            diagnostics_hook()
+
+        gradient_norm: Optional[float] = None
+        if self.config.grad_clip > 0.0:
+            norm = torch.nn.utils.clip_grad_norm_(self.raw_model.parameters(), self.config.grad_clip)
+            gradient_norm = self.distributed.mean_float(norm.detach())
+            if not math.isfinite(gradient_norm):
+                return self._handle_nonfinite_update(reason="gradient_norm", learning_rate=learning_rate, training_loss=total_loss / accumulation_steps, gradient_norm=gradient_norm, micro_step=None, microbatch_starts=microbatch_starts, scaler_unscaled=True)
+
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.optimizer.zero_grad(set_to_none=True)
+        self.state.completed_updates += 1
+        self.state.latest_training_loss = total_loss / accumulation_steps
+        metrics = {
+            "completed_updates": float(self.state.completed_updates),
+            "training_loss": self.state.latest_training_loss,
+            "learning_rate": learning_rate,
+            "gradient_norm": gradient_norm if gradient_norm is not None else float("nan"),
+            "skipped_update": 0.0,
+            "skipped_nonfinite_updates": float(self.state.skipped_nonfinite_updates),
+            "failed_update_attempts": float(self.state.failed_update_attempts),
+        }
+        self._record("optimizer_step_completed", **metrics)
+        return metrics
+# ^^^ THOG
+''', encoding='utf-8')
+
+          path = root / 'sheet/trainer_run.py'
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('            history.append(self.train_one_update())\n            if (', '            metrics = self.train_one_update()\n            history.append(metrics)\n            if metrics.get("skipped_update", 0.0):\n                continue\n            if (')
+          path.write_text(text, encoding='utf-8')
+
+          path = root / 'sheet/stage6_trainer.py'
+          text = path.read_text(encoding='utf-8')
+          anchor = '''            update_rows.append(
+                {
+                    **metrics,
+                    "update_seconds": elapsed,
+                    "cumulative_training_seconds": training_seconds,
+                    "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                }
+            )
+            report_update = (
+'''
+          replacement = '''            update_rows.append(
+                {
+                    **metrics,
+                    "update_seconds": elapsed,
+                    "cumulative_training_seconds": training_seconds,
+                    "cumulative_wall_seconds": time.perf_counter() - wall_started,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                }
+            )
+            # vvv THOG skipped attempts consume wall time and batches but do not trigger completed-update logging, evaluation, or checkpoint cadence
+            if metrics.get("skipped_update", 0.0):
+                self._print_progress(
+                    run_id,
+                    "nonfinite_update_skipped",
+                    completed_updates=completed_updates,
+                    skipped_nonfinite_updates=int(metrics["skipped_nonfinite_updates"]),
+                    failed_update_attempts=int(metrics["failed_update_attempts"]),
+                    nonfinite_reason=metrics["nonfinite_reason"],
+                )
+                continue
+            # ^^^ THOG
+            report_update = (
+'''
+          if anchor not in text:
+              raise SystemExit('stage6 loop anchor not found')
+          path.write_text(text.replace(anchor, replacement), encoding='utf-8')
+
+          path = root / 'tests/test_picton_nonfinite_update_recovery.py'
+          path.write_text('''from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+import torch
+
+from sheet.trainer_state import TrainerState
+from sheet.trainer_step import TrainerStepMixin
+from sheet.training_config import TrainingConfig
+
+
+class _Distributed:
+    rank = 0
+    def all_true(self, value): return bool(value)
+    def all_gather_object(self, value): return [value]
+
+
+class _Optimizer:
+    def __init__(self, model):
+        self.model = model
+        self.zero_grad_calls = 0
+    def zero_grad(self, *, set_to_none):
+        self.zero_grad_calls += 1
+        for parameter in self.model.parameters():
+            parameter.grad = None
+
+
+class _Scaler:
+    def __init__(self): self.update_calls = 0
+    def update(self): self.update_calls += 1
+
+
+class _Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(2))
+
+
+class _Harness(TrainerStepMixin):
+    def __init__(self, policy='skip', max_skips=2):
+        self.config = TrainingConfig(nonfinite_update_policy=policy, max_nonfinite_update_skips=max_skips)
+        self.state = TrainerState()
+        self.distributed = _Distributed()
+        self.raw_model = _Model()
+        self.optimizer = _Optimizer(self.raw_model)
+        self.scaler = _Scaler()
+        self.events = []
+    def _record(self, name, **payload): self.events.append((name, payload))
+
+
+class PictonNonfiniteUpdateRecoveryTests(unittest.TestCase):
+    def test_skip_discards_attempt_without_completing_update_and_records_named_bad_gradient(self):
+        harness = _Harness()
+        harness.raw_model.weight.grad = torch.tensor([float('nan'), 2.0])
+        metrics = harness._handle_nonfinite_update(reason='gradient', learning_rate=1e-4, training_loss=4.5, gradient_norm=None, micro_step=None, microbatch_starts=[(11, 22)], scaler_unscaled=True)
+        self.assertEqual(harness.state.completed_updates, 0)
+        self.assertEqual(harness.state.skipped_nonfinite_updates, 1)
+        self.assertEqual(harness.state.failed_update_attempts, 1)
+        self.assertEqual(metrics['skipped_update'], 1.0)
+        self.assertIsNone(harness.raw_model.weight.grad)
+        self.assertEqual(harness.scaler.update_calls, 1)
+        self.assertEqual(metrics['nonfinite_diagnostics']['rank_reports'][0]['gradient_reports'][0]['parameter_name'], 'weight')
+
+    def test_raise_policy_cleans_post_unscale_state_before_raising(self):
+        harness = _Harness(policy='raise')
+        harness.raw_model.weight.grad = torch.tensor([float('inf'), 1.0])
+        with self.assertRaises(FloatingPointError):
+            harness._handle_nonfinite_update(reason='gradient', learning_rate=1e-4, training_loss=4.5, gradient_norm=None, micro_step=None, microbatch_starts=[], scaler_unscaled=True)
+        self.assertEqual(harness.scaler.update_calls, 1)
+        self.assertIsNone(harness.raw_model.weight.grad)
+        self.assertEqual(harness.state.failed_update_attempts, 1)
+
+    def test_skip_limit_exhaustion_does_not_increment_completed_or_skipped_counter(self):
+        harness = _Harness(max_skips=0)
+        harness.raw_model.weight.grad = torch.tensor([float('nan'), 1.0])
+        with self.assertRaises(FloatingPointError):
+            harness._handle_nonfinite_update(reason='gradient', learning_rate=1e-4, training_loss=4.5, gradient_norm=None, micro_step=None, microbatch_starts=[], scaler_unscaled=True)
+        self.assertEqual(harness.state.completed_updates, 0)
+        self.assertEqual(harness.state.skipped_nonfinite_updates, 0)
+        self.assertEqual(harness.state.failed_update_attempts, 1)
+
+    def test_trainer_state_round_trips_recovery_counters(self):
+        original = TrainerState(completed_updates=7, skipped_nonfinite_updates=2, failed_update_attempts=3)
+        restored = TrainerState(**original.__dict__)
+        self.assertEqual(restored, original)
+
+
+if __name__ == '__main__':
+    unittest.main()
+''', encoding='utf-8')
+          PY
+          python -m compileall -q sheet tests run_thog2_owt.py
+          pytest -q tests/test_picton_nonfinite_update_recovery.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sheet/training_config.py sheet/trainer_state.py sheet/run_config.py run_thog2_owt.py sheet/trainer_step.py sheet/trainer_run.py sheet/stage6_trainer.py tests/test_picton_nonfinite_update_recovery.py
+          git commit -m "Add bounded non-finite update recovery"
+      - name: Add focused next-attempt GradScaler regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_picton_nonfinite_update_recovery.py')
+          text = path.read_text(encoding='utf-8')
+          insertion = '''\n    def test_pre_unscale_loss_skip_does_not_advance_scaler(self):\n        harness = _Harness()\n        metrics = harness._handle_nonfinite_update(reason='loss', learning_rate=1e-4, training_loss=float('nan'), gradient_norm=None, micro_step=0, microbatch_starts=[(3, 4)], scaler_unscaled=False)\n        self.assertEqual(metrics['skipped_update'], 1.0)\n        self.assertEqual(harness.scaler.update_calls, 0)\n\n    def test_post_unscale_skip_resets_scaler_before_a_second_attempt(self):\n        harness = _Harness()\n        harness.raw_model.weight.grad = torch.tensor([float('nan'), 1.0])\n        harness._handle_nonfinite_update(reason='gradient', learning_rate=1e-4, training_loss=4.5, gradient_norm=None, micro_step=None, microbatch_starts=[], scaler_unscaled=True)\n        first_update_calls = harness.scaler.update_calls\n        harness.raw_model.weight.grad = torch.tensor([float('inf'), 1.0])\n        harness._handle_nonfinite_update(reason='gradient', learning_rate=1e-4, training_loss=4.4, gradient_norm=None, micro_step=None, microbatch_starts=[], scaler_unscaled=True)\n        self.assertEqual(first_update_calls, 1)\n        self.assertEqual(harness.scaler.update_calls, 2)\n'''
+          text = text.replace("\n\nif __name__ == '__main__':", insertion + "\n\nif __name__ == '__main__':")
+          path.write_text(text, encoding='utf-8')
+          PY
+          pytest -q tests/test_picton_nonfinite_update_recovery.py
+          pytest -q
+          git add tests/test_picton_nonfinite_update_recovery.py
+          git commit -m "Cover GradScaler cleanup around skipped updates"
+      - name: Remove temporary workflow and push
+        shell: bash
+        run: |
+          rm .github/workflows/apply_nonfinite_recovery.yml
+          git add .github/workflows/apply_nonfinite_recovery.yml
+          git commit -m "Remove temporary non-finite recovery workflow"
+          git push origin HEAD:tmp_nonfinite_recovery_apply
