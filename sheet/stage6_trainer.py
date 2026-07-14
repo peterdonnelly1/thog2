@@ -22,6 +22,19 @@ def trace_digest(trace) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# vvv THOG resumed runs retain lifetime token totals but measure throughput from this process session only
+def _session_consumed_tokens(
+    starting_completed_updates: int,
+    completed_updates: int,
+    tokens_per_update: int,
+) -> int:
+    session_completed_updates = completed_updates - starting_completed_updates
+    if session_completed_updates < 0:
+        raise ValueError("completed updates moved backwards during the training session")
+    return session_completed_updates * tokens_per_update
+# ^^^ THOG
+
+
 # vvv THOG
 # _PROGRESS_FIELD_LABELS = {
 #     "completed_updates": "updates",
@@ -238,6 +251,9 @@ class Stage6Trainer(Stage4Trainer):
             * self.config.gradient_accumulation_steps
             * self.config.block_size
         )
+        # vvv THOG anchor resumed-session timing before the first update in this process
+        starting_completed_updates = self.state.completed_updates
+        # ^^^ THOG
         training_seconds = 0.0
         evaluation_seconds = 0.0
         checkpoint_seconds = 0.0
@@ -278,6 +294,13 @@ class Stage6Trainer(Stage4Trainer):
             metrics, elapsed = self._timed(self.train_one_update)
             training_seconds += elapsed
             completed_updates = self.state.completed_updates
+            # vvv THOG separate lifetime token accounting from tokens processed since this resume/start
+            current_session_consumed_tokens = _session_consumed_tokens(
+                starting_completed_updates,
+                completed_updates,
+                tokens_per_update,
+            )
+            # ^^^ THOG
             update_rows.append(
                 {
                     **metrics,
@@ -285,6 +308,7 @@ class Stage6Trainer(Stage4Trainer):
                     "cumulative_training_seconds": training_seconds,
                     "cumulative_wall_seconds": time.perf_counter() - wall_started,
                     "consumed_tokens": completed_updates * tokens_per_update,
+                    "session_consumed_tokens": current_session_consumed_tokens,
                 }
             )
             report_update = (
@@ -298,6 +322,7 @@ class Stage6Trainer(Stage4Trainer):
                     "optimizer_progress",
                     completed_updates=completed_updates,
                     consumed_tokens=completed_updates * tokens_per_update,
+                    session_consumed_tokens=current_session_consumed_tokens,
                     training_loss=metrics["training_loss"],
                     learning_rate=metrics["learning_rate"],
                     gradient_norm=metrics["gradient_norm"],
@@ -313,6 +338,7 @@ class Stage6Trainer(Stage4Trainer):
                     {
                         "completed_updates": completed_updates,
                         "consumed_tokens": completed_updates * tokens_per_update,
+                        "session_consumed_tokens": current_session_consumed_tokens,
                         "training_seconds": training_seconds,
                         "wall_seconds": time.perf_counter() - wall_started,
                         "evaluation_seconds": eval_elapsed,
@@ -324,6 +350,7 @@ class Stage6Trainer(Stage4Trainer):
                     "evaluation_completed",
                     completed_updates=completed_updates,
                     consumed_tokens=completed_updates * tokens_per_update,
+                    session_consumed_tokens=current_session_consumed_tokens,
                     cumulative_training_seconds=training_seconds,                                                                                       # <<< THOG expose cumulative training time and tok/s on validation rows
                     validation_loss=losses["val"],
                     training_loss=losses["train"],
@@ -339,6 +366,13 @@ class Stage6Trainer(Stage4Trainer):
                 )
                 checkpoint_seconds += save_elapsed
 
+        # vvv THOG final session token count is independent of lifetime completed updates
+        final_session_consumed_tokens = _session_consumed_tokens(
+            starting_completed_updates,
+            self.state.completed_updates,
+            tokens_per_update,
+        )
+        # ^^^ THOG
         if (
             self.config.eval_interval > 0
             and (
@@ -353,6 +387,7 @@ class Stage6Trainer(Stage4Trainer):
                 {
                     "completed_updates": self.state.completed_updates,
                     "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                    "session_consumed_tokens": final_session_consumed_tokens,
                     "training_seconds": training_seconds,
                     "wall_seconds": time.perf_counter() - wall_started,
                     "evaluation_seconds": eval_elapsed,
@@ -364,6 +399,7 @@ class Stage6Trainer(Stage4Trainer):
                 "evaluation_completed",
                 completed_updates=self.state.completed_updates,
                 consumed_tokens=self.state.completed_updates * tokens_per_update,
+                session_consumed_tokens=final_session_consumed_tokens,
                 cumulative_training_seconds=training_seconds,                                                                                           # <<< THOG expose cumulative training time and tok/s on final validation row
                 validation_loss=losses["val"],
                 training_loss=losses["train"],
@@ -418,6 +454,10 @@ class Stage6Trainer(Stage4Trainer):
                 "completed_updates": self.state.completed_updates,
                 "tokens_per_update": tokens_per_update,
                 "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                # vvv THOG expose this process session separately from lifetime progress
+                "session_completed_updates": self.state.completed_updates - starting_completed_updates,
+                "session_consumed_tokens": final_session_consumed_tokens,
+                # ^^^ THOG
             },
             "timing": {
                 "training_seconds": training_seconds,
@@ -425,7 +465,7 @@ class Stage6Trainer(Stage4Trainer):
                 "checkpoint_seconds": checkpoint_seconds,
                 "wall_seconds": wall_seconds,
                 "tokens_per_training_second": (
-                    self.state.completed_updates * tokens_per_update / training_seconds
+                    final_session_consumed_tokens / training_seconds
                     if training_seconds > 0.0
                     else 0.0
                 ),
@@ -470,6 +510,7 @@ class Stage6Trainer(Stage4Trainer):
             "run_completed",
             completed_updates=self.state.completed_updates,
             consumed_tokens=self.state.completed_updates * tokens_per_update,
+            session_consumed_tokens=final_session_consumed_tokens,
             final_validation_loss=evaluation_rows[-1]["val"],
             training_seconds=training_seconds,
             checkpoint_bytes=checkpoint_path.stat().st_size,

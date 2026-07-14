@@ -249,7 +249,9 @@ class OwtRunConfig:
 
     def parameter_artifact_fragment(self) -> str:
         fields = [
-            f"n_{self.max_iters}",
+            # vvv THOG stable artifact identity must not depend on the mutable target update count
+            # f"n_{self.max_iters}",
+            # ^^^ THOG
             f"b_{self.batch_size}",
             f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
             f"d_{dataset_label(self.dataset)}",

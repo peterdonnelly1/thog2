@@ -59,17 +59,22 @@ _CONSOLE_FIXED_FLOATS = {
 _CONSOLE_SCIENTIFIC_FLOATS = {"learning_rate": (10, 3)}
 
 
+# vvv THOG resumed throughput uses only tokens processed by the current process session
+# Lifetime consumed_tokens remains available for progress and accounting.
 def add_console_tokens_per_second(payload: Dict[str, Any]) -> Dict[str, Any]:
     values = dict(payload)
     elapsed = values.get("cumulative_training_seconds", values.get("training_seconds"))
-    consumed_tokens = values.get("consumed_tokens")
-    if elapsed is None or consumed_tokens is None:
+    throughput_tokens = values.pop("session_consumed_tokens", None)
+    if throughput_tokens is None:
+        throughput_tokens = values.get("consumed_tokens")
+    if elapsed is None or throughput_tokens is None:
         return values
     elapsed_value = float(elapsed)
     if elapsed_value <= 0.0:
         return values
-    values["tok/s"] = float(consumed_tokens) / elapsed_value
+    values["tok/s"] = float(throughput_tokens) / elapsed_value
     return values
+# ^^^ THOG
 
 
 def format_console_progress_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,6 +105,10 @@ class OwtTrainer(Stage6Trainer):
         values = dict(payload)
         if "consumed_tokens" in values:
             values["consumed_tokens"] = int(values["consumed_tokens"]) * int(self.distributed.world_size)
+        # vvv THOG apply the same global-token multiplier to session throughput accounting
+        if "session_consumed_tokens" in values:
+            values["session_consumed_tokens"] = int(values["session_consumed_tokens"]) * int(self.distributed.world_size)
+        # ^^^ THOG
         super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
@@ -109,10 +118,19 @@ class OwtTrainer(Stage6Trainer):
             return result
         result["budget"]["tokens_per_update"] *= multiplier
         result["budget"]["consumed_tokens"] *= multiplier
+        # vvv THOG preserve global-token accounting for resumed-session throughput fields
+        result["budget"]["session_consumed_tokens"] *= multiplier
+        # ^^^ THOG
         for row in result["updates"]:
             row["consumed_tokens"] *= multiplier
+            # vvv THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier
+            # ^^^ THOG
         for row in result["evaluations"]:
             row["consumed_tokens"] *= multiplier
+            # vvv THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier
+            # ^^^ THOG
         result["timing"]["tokens_per_training_second"] *= multiplier
         target = Path(arguments["result_path"])
         if self.distributed.is_primary:
