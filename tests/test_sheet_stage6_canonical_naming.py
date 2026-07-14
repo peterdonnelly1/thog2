@@ -40,16 +40,16 @@ class CanonicalNamingTests(unittest.TestCase):
         )
         self.assertEqual(
             dense,
-            "DENSE2_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_S_12",
+            "DENSE2_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_S_12",
         )
         self.assertEqual(
             sheet,
-            "SHEET_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12",
+            "SHEET_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12",
         )
         self.assertNotIn("SHEET__scruffy", sheet)
 
     def test_s6_23b_paths_use_thog_style_directories_and_safe_filenames(self) -> None:
-        name = "SHEET_scruffy__AKAROA__n_100_b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12"
+        name = "SHEET_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12"
         paths = artifact_paths(
             name,
             checkpoint_root=Path("checkpoints"),
