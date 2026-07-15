@@ -11,7 +11,10 @@ else
     python_bin="python"
 fi
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+# vvv THOG expose the same two Dreedle CUDA devices recorded in the original KARITANE_LONG checkpoint RNG state
+# export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export CUDA_VISIBLE_DEVICES="0,1"
+# ^^^ THOG
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export THOG2_INSTRUMENTATION="wandb"
 export THOG2_FAST_DISCARD="${THOG2_FAST_DISCARD:-true}"
