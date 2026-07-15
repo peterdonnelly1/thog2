@@ -79,6 +79,69 @@ def _validate_override_fields(overrides: Optional[Mapping[str, Any]]) -> Dict[st
     return override_values
 
 
+def _align_legacy_optimizer_groups_to_checkpoint(
+    trainer: Any,
+    payload: Mapping[str, Any],
+) -> None:
+    """Restore the schema-1 optimizer's exact named parameter order before loading state."""
+    checkpoint_groups = tuple(
+        tuple(group)
+        for group in payload["optimizer_group_parameter_names"]
+    )
+    if len(trainer.optimizer.param_groups) != len(checkpoint_groups):
+        raise ValueError(
+            "optimizer group count is incompatible with schema-1 SHEET checkpoint"
+        )
+
+    current_parameters = dict(trainer.raw_model.named_parameters())
+    checkpoint_names = [
+        name
+        for group in checkpoint_groups
+        for name in group
+    ]
+    if len(checkpoint_names) != len(set(checkpoint_names)):
+        raise ValueError(
+            "schema-1 SHEET checkpoint repeats an optimizer parameter name"
+        )
+
+    missing_names = sorted(set(checkpoint_names) - set(current_parameters))
+    if missing_names:
+        raise ValueError(
+            "schema-1 SHEET checkpoint optimizer names are missing from the "
+            f"preserved model: {missing_names}"
+        )
+
+    checkpoint_parameter_ids = {
+        id(current_parameters[name])
+        for name in checkpoint_names
+    }
+    trainable_parameter_ids = {
+        id(parameter)
+        for parameter in trainer.raw_model.parameters()
+        if parameter.requires_grad
+    }
+    if checkpoint_parameter_ids != trainable_parameter_ids:
+        raise ValueError(
+            "schema-1 SHEET checkpoint optimizer groups do not cover the "
+            "preserved trainable parameters exactly"
+        )
+
+    for optimizer_group, checkpoint_names_for_group in zip(
+        trainer.optimizer.param_groups,
+        checkpoint_groups,
+    ):
+        optimizer_group["params"] = [
+            current_parameters[name]
+            for name in checkpoint_names_for_group
+        ]
+        optimizer_group["parameter_names"] = checkpoint_names_for_group
+
+    if optimizer_group_names(trainer.optimizer) != checkpoint_groups:
+        raise RuntimeError(
+            "failed to reconstruct schema-1 SHEET optimizer parameter order"
+        )
+
+
 def _validate_legacy_sheet_checkpoint(
     payload: Mapping[str, Any],
     expected_config: TrainingConfig,
@@ -248,6 +311,8 @@ class TrainerCheckpointResumeMixin:
             tuple(group)
             for group in payload["optimizer_group_parameter_names"]
         )
+        if optimizer_group_names(trainer.optimizer) != expected_groups:
+            _align_legacy_optimizer_groups_to_checkpoint(trainer, payload)
         if optimizer_group_names(trainer.optimizer) != expected_groups:
             raise ValueError(
                 "optimizer group parameter ordering is incompatible "
