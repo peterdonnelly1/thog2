@@ -28,6 +28,14 @@ class KaritaneRestartLauncherTests(unittest.TestCase):
         self.assertIn("-m run_karitane_long_resume", launcher)
         self.assertIn('THOG2_INSTRUMENTATION="wandb"', launcher)
         self.assertIn("THOG2_FAST_DISCARD", launcher)
+        self.assertIn(
+            'export CUDA_VISIBLE_DEVICES="0,1"',
+            launcher,
+            msg=(
+                "the original Dreedle checkpoint saved CUDA RNG states for both "
+                "visible TITAN RTX devices"
+            ),
+        )
 
     def test_runner_locks_original_karitane_geometry_schedule_and_checkpoint_path(self):
         runner = RUNNER.read_text(encoding="utf-8")
