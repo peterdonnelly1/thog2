@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - BLOCK_enhancements_group
+      - enhanced_resume_and_fork
     types:
       - opened
       - synchronize
