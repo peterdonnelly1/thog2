@@ -24,10 +24,16 @@ grep -q -- "--depth-order" <<<"$help_text" || {
     echo "This checkout does not expose the legacy KARITANE_LONG resume CLI."
     exit 2
 }
-grep -q -- "--nonfinite-update-policy" <<<"$help_text" || {
-    echo "This checkout lacks bounded non-finite update recovery."
-    exit 2
-}
+
+"$python_bin" - <<'PY'
+from sheet.training_config import TrainingConfig
+
+config = TrainingConfig()
+if config.nonfinite_update_policy != "skip":
+    raise SystemExit("Expected default non-finite policy 'skip'.")
+if config.max_nonfinite_update_skips != 10:
+    raise SystemExit("Expected default maximum non-finite skips of 10.")
+PY
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
@@ -70,8 +76,6 @@ run_args=(
     --checkpoint-segment-size 12
     --dtype float16
     --device cuda
-    --nonfinite-update-policy skip
-    --max-nonfinite-update-skips 10
     --wandb
     --wandb-project thog
     --wandb-mode online
@@ -101,6 +105,7 @@ echo "  batch/accum: 12 / 4"
 echo "  context:     256"
 echo "  LR schedule: 6e-4 cosine to 6e-5 through update 99999"
 echo "  validation:  10 batches every 100 updates"
+echo "  non-finite:  skip, maximum 10"
 echo
 
 set +e
