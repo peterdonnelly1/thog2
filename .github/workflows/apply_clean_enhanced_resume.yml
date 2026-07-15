@@ -21,46 +21,64 @@ jobs:
           ref: enhanced_resume_and_fork
 
       - name: Audit bundle chunks and reconstruction
+        id: audit
         shell: bash
         run: |
           set +e
-          expected=(
-            c86b4f05fe09e7267aab79ca1c30503388a728d9c3180a1eebcd31b3bfb64571
-            9be609b86cd4fc5487443898da50731aadf25f000b4b8e478d2e39b3ab3767fa
-            f8e308859d99738fbbe54d8f413bc81adcb0087e2d0c706239a71c2808011cf4
-            94450f66562001ac16049590f21607b9dd768bfe1dcdcf711f34c508a9147a29
-            086aa3204108893dc983f6307cc90bfad416447e7f1882bda1fcf7ff8e4b7a84
-            917fc585f179b6052a550136ea6ce84b34c992079255aa5bd88b1374e23163b7
-            bb85d6b380e95bfc35783baf6bfd6395142161ff2ca3be3994cd9247e72d8d51
-            a5badf3f9771e58e74e9861dbcf1a92c33f4abd475e6401411b294650e748379
-            5d3bc5bca29d5f107632b9cd95ce9795894b88a04275a3bab3ab307f00e3e82c
-            8b1d683d8757657986d2d2dfe20503b5f87465be50a9db812e74bcbe4ad74153
-            67476d4845b866bfb00d92306d9f2117a92342d248e413694ef5a789b009832c
-            284750fbfff1a93ce01f3da9fc7edd94ab06262bc8ebbad393d480e53800537d
-            c15b8e46e8b2ed88ab596dbe41eaeef1e70a63b23612d1c5971d2ce5517c7a1e
-          )
-          files=(
-            .resume_bundle_part_00 .resume_bundle_part_01 .resume_bundle_part_02
-            .resume_bundle_part_03 .resume_bundle_part_03b .resume_bundle_part_04
-            .resume_bundle_part_05 .resume_bundle_part_06 .resume_bundle_part_07
-            .resume_bundle_part_08 .resume_bundle_part_09 .resume_bundle_part_10
-            .resume_bundle_part_11
-          )
-          bad=0
-          for i in "${!files[@]}"; do
-            file="${files[$i]}"
-            bytes=$(wc -c < "$file")
-            actual=$(sha256sum "$file" | awk '{print $1}')
-            printf '%-28s bytes=%-5s actual=%s expected=%s\n' "$file" "$bytes" "$actual" "${expected[$i]}"
-            [[ "$actual" == "${expected[$i]}" ]] || bad=1
-          done
-          cat "${files[@]}" | tr -d '\r\n' | base64 --decode > /tmp/enhanced_resume_and_fork.tar.gz
-          decode_status=$?
-          echo "decode_status=$decode_status"
-          if [[ $decode_status -eq 0 ]]; then
-            sha256sum /tmp/enhanced_resume_and_fork.tar.gz
-            tar -tzf /tmp/enhanced_resume_and_fork.tar.gz >/dev/null
-            echo "tar_status=$?"
-          fi
-          exit $bad
+          {
+            expected=(
+              c86b4f05fe09e7267aab79ca1c30503388a728d9c3180a1eebcd31b3bfb64571
+              9be609b86cd4fc5487443898da50731aadf25f000b4b8e478d2e39b3ab3767fa
+              f8e308859d99738fbbe54d8f413bc81adcb0087e2d0c706239a71c2808011cf4
+              94450f66562001ac16049590f21607b9dd768bfe1dcdcf711f34c508a9147a29
+              086aa3204108893dc983f6307cc90bfad416447e7f1882bda1fcf7ff8e4b7a84
+              917fc585f179b6052a550136ea6ce84b34c992079255aa5bd88b1374e23163b7
+              bb85d6b380e95bfc35783baf6bfd6395142161ff2ca3be3994cd9247e72d8d51
+              a5badf3f9771e58e74e9861dbcf1a92c33f4abd475e6401411b294650e748379
+              5d3bc5bca29d5f107632b9cd95ce9795894b88a04275a3bab3ab307f00e3e82c
+              8b1d683d8757657986d2d2dfe20503b5f87465be50a9db812e74bcbe4ad74153
+              67476d4845b866bfb00d92306d9f2117a92342d248e413694ef5a789b009832c
+              284750fbfff1a93ce01f3da9fc7edd94ab06262bc8ebbad393d480e53800537d
+              c15b8e46e8b2ed88ab596dbe41eaeef1e70a63b23612d1c5971d2ce5517c7a1e
+            )
+            files=(
+              .resume_bundle_part_00 .resume_bundle_part_01 .resume_bundle_part_02
+              .resume_bundle_part_03 .resume_bundle_part_03b .resume_bundle_part_04
+              .resume_bundle_part_05 .resume_bundle_part_06 .resume_bundle_part_07
+              .resume_bundle_part_08 .resume_bundle_part_09 .resume_bundle_part_10
+              .resume_bundle_part_11
+            )
+            bad=0
+            for i in "${!files[@]}"; do
+              file="${files[$i]}"
+              bytes=$(wc -c < "$file")
+              actual=$(sha256sum "$file" | awk '{print $1}')
+              printf '%-28s bytes=%-5s actual=%s expected=%s\n' "$file" "$bytes" "$actual" "${expected[$i]}"
+              [[ "$actual" == "${expected[$i]}" ]] || bad=1
+            done
+            cat "${files[@]}" | tr -d '\r\n' | base64 --decode > /tmp/enhanced_resume_and_fork.tar.gz
+            decode_status=$?
+            echo "decode_status=$decode_status"
+            if [[ $decode_status -eq 0 ]]; then
+              sha256sum /tmp/enhanced_resume_and_fork.tar.gz
+              tar -tzf /tmp/enhanced_resume_and_fork.tar.gz >/dev/null
+              echo "tar_status=$?"
+            fi
+            echo "bad=$bad"
+          } > .resume_bundle_audit.log 2>&1
+          cat .resume_bundle_audit.log
+          echo "status=$bad" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: enhanced-resume-bundle-audit-${{ github.run_id }}
+          path: .resume_bundle_audit.log
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Fail on mismatch
+        if: steps.audit.outputs.status != '0'
+        run: exit 1
 # ^^^ THOG
