@@ -9,10 +9,14 @@ on:
     branches:
       - BLOCK_enhancements_group
 
+permissions:
+  contents: write
+
 jobs:
-  audit_bundle:
+  apply_and_verify:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Check out target branch
         uses: actions/checkout@v4
@@ -20,65 +24,100 @@ jobs:
           fetch-depth: 0
           ref: enhanced_resume_and_fork
 
-      - name: Audit bundle chunks and reconstruction
-        id: audit
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Reconstruct and extract verified implementation bundle
         shell: bash
         run: |
-          set +e
-          {
-            expected=(
-              c86b4f05fe09e7267aab79ca1c30503388a728d9c3180a1eebcd31b3bfb64571
-              9be609b86cd4fc5487443898da50731aadf25f000b4b8e478d2e39b3ab3767fa
-              f8e308859d99738fbbe54d8f413bc81adcb0087e2d0c706239a71c2808011cf4
-              94450f66562001ac16049590f21607b9dd768bfe1dcdcf711f34c508a9147a29
-              086aa3204108893dc983f6307cc90bfad416447e7f1882bda1fcf7ff8e4b7a84
-              917fc585f179b6052a550136ea6ce84b34c992079255aa5bd88b1374e23163b7
-              bb85d6b380e95bfc35783baf6bfd6395142161ff2ca3be3994cd9247e72d8d51
-              a5badf3f9771e58e74e9861dbcf1a92c33f4abd475e6401411b294650e748379
-              5d3bc5bca29d5f107632b9cd95ce9795894b88a04275a3bab3ab307f00e3e82c
-              8b1d683d8757657986d2d2dfe20503b5f87465be50a9db812e74bcbe4ad74153
-              67476d4845b866bfb00d92306d9f2117a92342d248e413694ef5a789b009832c
-              284750fbfff1a93ce01f3da9fc7edd94ab06262bc8ebbad393d480e53800537d
-              c15b8e46e8b2ed88ab596dbe41eaeef1e70a63b23612d1c5971d2ce5517c7a1e
-            )
-            files=(
-              .resume_bundle_part_00 .resume_bundle_part_01 .resume_bundle_part_02
-              .resume_bundle_part_03 .resume_bundle_part_03b .resume_bundle_part_04
-              .resume_bundle_part_05 .resume_bundle_part_06 .resume_bundle_part_07
-              .resume_bundle_part_08 .resume_bundle_part_09 .resume_bundle_part_10
-              .resume_bundle_part_11
-            )
-            bad=0
-            for i in "${!files[@]}"; do
-              file="${files[$i]}"
-              bytes=$(wc -c < "$file")
-              actual=$(sha256sum "$file" | awk '{print $1}')
-              printf '%-28s bytes=%-5s actual=%s expected=%s\n' "$file" "$bytes" "$actual" "${expected[$i]}"
-              [[ "$actual" == "${expected[$i]}" ]] || bad=1
-            done
-            cat "${files[@]}" | tr -d '\r\n' | base64 --decode > /tmp/enhanced_resume_and_fork.tar.gz
-            decode_status=$?
-            echo "decode_status=$decode_status"
-            if [[ $decode_status -eq 0 ]]; then
-              sha256sum /tmp/enhanced_resume_and_fork.tar.gz
-              tar -tzf /tmp/enhanced_resume_and_fork.tar.gz >/dev/null
-              echo "tar_status=$?"
-            fi
-            echo "bad=$bad"
-          } > .resume_bundle_audit.log 2>&1
-          cat .resume_bundle_audit.log
-          echo "status=$bad" >> "$GITHUB_OUTPUT"
-          exit 0
+          set -euo pipefail
+          cat \
+            .resume_bundle_part_00 \
+            .resume_bundle_part_01 \
+            .resume_bundle_part_02a \
+            .resume_bundle_part_02b \
+            .resume_bundle_part_03 \
+            .resume_bundle_part_03b \
+            .resume_bundle_part_04a \
+            .resume_bundle_part_04b \
+            .resume_bundle_part_05 \
+            .resume_bundle_part_06 \
+            .resume_bundle_part_07 \
+            .resume_bundle_part_08 \
+            .resume_bundle_part_09 \
+            .resume_bundle_part_10 \
+            .resume_bundle_part_11 \
+            | tr -d '\r\n' \
+            | base64 --decode > /tmp/enhanced_resume_and_fork.tar.gz
+          echo '73ccdf2978e8372be5de133db3e0e93d8cc70e6da4801c36868495731243a5e3  /tmp/enhanced_resume_and_fork.tar.gz' | sha256sum -c -
+          tar -tzf /tmp/enhanced_resume_and_fork.tar.gz
+          tar -xzf /tmp/enhanced_resume_and_fork.tar.gz -C .
+          git diff --check
 
-      - name: Upload audit
-        uses: actions/upload-artifact@v4
-        with:
-          name: enhanced-resume-bundle-audit-${{ github.run_id }}
-          path: .resume_bundle_audit.log
-          include-hidden-files: true
-          if-no-files-found: error
+      - name: Install CPU test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest tiktoken tensorboard wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Fail on mismatch
-        if: steps.audit.outputs.status != '0'
-        run: exit 1
+      - name: Compile sources and check wrappers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q sheet run_thog2_owt.py tests
+          bash -n current_dreedle_train_OWT.sh current_scruffy_train_OWT.sh
+
+      - name: Run focused lifecycle tests
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_checkpoint_resolver.py \
+            tests/test_enhanced_resume_cli.py \
+            tests/test_resume_schedule_calculation.py \
+            tests/test_resume_identity_and_throughput.py \
+            tests/test_fork_lineage.py \
+            tests/test_fork_lr_schedule.py \
+            tests/test_sheet_stage6_canonical_naming.py
+
+      - name: Run wrapper regressions in isolated processes
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_scruffy_dry_run_expands_cartesian_product_of_batch_and_learning_rate_values
+          pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_resume_wrapper_forwards_explicit_material_values_as_assertions
+          pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_resume_wrapper_rejects_grid_valued_material_assertions
+
+      - name: Run real CPU fresh resume fork integration
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_enhanced_resume_integration.py
+
+      - name: Commit clean verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .resume_bundle_part_00 .resume_bundle_part_01 .resume_bundle_part_02 \
+            .resume_bundle_part_02a .resume_bundle_part_02b \
+            .resume_bundle_part_03 .resume_bundle_part_03b .resume_bundle_part_04 \
+            .resume_bundle_part_04a .resume_bundle_part_04b \
+            .resume_bundle_part_05 .resume_bundle_part_06 .resume_bundle_part_07 \
+            .resume_bundle_part_08 .resume_bundle_part_09 .resume_bundle_part_10 \
+            .resume_bundle_part_11 .resume_bundle_audit.log \
+            .github/workflows/apply_clean_enhanced_resume.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Implement enhanced resume and fork lifecycle'
+          git push origin HEAD:enhanced_resume_and_fork
 # ^^^ THOG
