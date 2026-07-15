@@ -505,16 +505,18 @@ class Stage6Trainer(Stage4Trainer):
                 encoding="utf-8",
             )
         self.distributed.barrier()
-        self._print_progress(
-            run_id,
-            "run_completed",
-            completed_updates=self.state.completed_updates,
-            consumed_tokens=self.state.completed_updates * tokens_per_update,
-            session_consumed_tokens=final_session_consumed_tokens,
-            final_validation_loss=evaluation_rows[-1]["val"],
-            training_seconds=training_seconds,
-            checkpoint_bytes=checkpoint_path.stat().st_size,
-        )
+        # vvv THOG evaluation may be intentionally disabled; completion reporting must remain valid
+        completion_payload = {
+            "completed_updates": self.state.completed_updates,
+            "consumed_tokens": self.state.completed_updates * tokens_per_update,
+            "session_consumed_tokens": final_session_consumed_tokens,
+            "training_seconds": training_seconds,
+            "checkpoint_bytes": checkpoint_path.stat().st_size,
+        }
+        if evaluation_rows:
+            completion_payload["final_validation_loss"] = evaluation_rows[-1]["val"]
+        self._print_progress(run_id, "run_completed", **completion_payload)
+        # ^^^ THOG
         return result
 
 

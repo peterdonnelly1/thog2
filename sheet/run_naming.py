@@ -159,18 +159,15 @@ def build_artifact_name(
 
     prefix = architecture_prefix(model_type)
     fields = [
-        # vvv THOG stable artifact identity must not depend on the mutable target update count
-        # f"n_{max_iters}",
-        # ^^^ THOG
+        # vvv THOG target steps, warmup, and checkpoint cadence do not define stable artifact identity
         f"b_{batch_size}",
         f"d_{dataset_label(dataset_name)}",
-        f"w_{warmup_iters}",
-        f"k_{checkpoint_interval}",
         f"A_{gradient_accumulation_steps}",
         f"L_{n_layer}",
         f"H_{n_head}",
         f"D_{n_embd}",
         f"C_{block_size}",
+        # ^^^ THOG
     ]
     if model_type == "thog2_sheet":
         if depth_order is None or base_row_order is None:
@@ -182,7 +179,6 @@ def build_artifact_name(
         fields.extend([f"P_{depth_order}", f"Q_{base_row_order}"])
     elif depth_order is not None or base_row_order is not None:
         raise ValueError("DENSE2 naming must not include SHEET orders")
-    fields.append(f"S_{checkpoint_segment_size}")
 
     name = (
         f"{prefix}_{normalize_component(host_label)}__"
@@ -213,8 +209,10 @@ def artifact_paths(
     return {
         "checkpoint_dir": checkpoint_dir,
         "checkpoint_path": checkpoint_dir / "ckpt.pt",
+        "manifest_path": checkpoint_dir / "run_manifest.json",                                                                                       # <<< THOG stable lifecycle manifest beside the checkpoint
         "log_dir": log_dir,
         "log_path": log_dir / "train.log",
+        "tensorboard_dir": Path("curves") / artifact_name,                                                                                             # <<< THOG resume reuses one logical TensorBoard directory
         "result_dir": log_dir,
         "result_path": log_dir / "result.json",
     }

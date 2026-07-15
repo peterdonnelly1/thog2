@@ -1,0 +1,71 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Test Plan\b0\par
+\pard\qc\sa320\f0\fs22 Regression-heavy verification of identity, state, schedules, lineage, wrappers, and telemetry\par
+\pard\sa170\f0\fs23 Status: Implemented. Focused tests and CPU lifecycle integration are part of the branch; full repository regression runs in branch CI.\par
+\pard\sa190\sb280\f0\fs29\b 1. Test principles\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use descriptive names that state the requirement and failure condition.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Prefer deterministic tiny CPU fixtures for state, schedule, resolver, and lineage tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Treat ambiguity, silent fallback, hidden file movement, endpoint redefinition, and silent material mutation as failures.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fake W&B and wrapper Python processes where network or large training is unnecessary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use a real filesystem and real tiny CPU training for end-to-end lifecycle verification.\par
+\pard\sa190\sb280\f0\fs29\b 2. CLI and target validation\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Help states total optimizer steps for the run (not additional steps).\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume and fork require --resume-from and explicit -n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Omitted, smaller, and equal targets print the required diagnostics and fail before training-side effects.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fresh rejects resume/fork-only arguments; resume rejects fork-only options, new start labels, and manual suffixes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Numeric -0 through -3 options and long aliases are exposed by both wrappers.\par
+\pard\sa190\sb280\f0\fs29\b 3. Resolver tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - File, directory, exact artifact_name, and leading timestamp selectors resolve the same checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Timestamp matching ignores root timestamps inside fork suffixes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Zero and multiple matches fail without newest/first fallback.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Old schemas and artifact-directory/lifecycle mismatches hard-fail.\par
+\pard\sa190\sb280\f0\fs29\b 4. Naming tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - artifact_descriptor excludes n_, w_, k_, and S_.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Changing only target steps or operational cadence does not change artifact identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Changing batch or a model-descriptive field changes identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume reuses artifact_name; child names use descriptor_of_child and one correct fork suffix.\par
+\pard\sa190\sb280\f0\fs29\b 5. Resume configuration and state\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Minimal resume reconstructs model, optimizer, batch, orders, seeds, and schedule from checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Equal material assertions pass; mismatches fail. Wrappers forward scalar assertions and reject grid assertions.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Operational overrides apply; dtype and non-finite controls remain material.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Optimizer, scaler, RNG, batch source, trainer counters, and non-finite counters restore.\par
+\pard\sa100\li360\fi-240\f0\fs23 - World size must match.\par
+\pard\sa190\sb280\f0\fs29\b 6. Resume LR tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Before warmup end and mid-cosine, first resumed LR matches uninterrupted evaluation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - At and after decay end, the original minimum LR is used.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Larger -n does not change warmup, original decay endpoint, minimum LR, or first resumed LR.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Startup output includes completed, total, remaining, schedule, decay end, and first resumed step LR, and omits restored position.\par
+\pard\sa190\sb280\f0\fs29\b 7. Fork schedule and lineage tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - restart_cosine requires peak, minimum, rewarm, and total steps.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Phase start update and boundary LR come from the parent checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Zero, one, and multiple rewarm cases have exact discrete endpoints.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Final child update uses phase_min_lr; invalid short phases and overlong rewarm fail.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Optimizer moments remain loaded; phase history and active index are checkpointed.\par
+\pard\sa100\li360\fi-240\f0\fs23 - First fork, fork of fork, root timestamp retention, immediate parent, and suffix replacement are verified.\par
+\pard\sa190\sb280\f0\fs29\b 8. Outputs, telemetry, and accounting\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume appends the same log, reuses checkpoint and TensorBoard identity, and writes a new session result.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Saved W&B ID is reused; missing ID warns and clears stale environment values.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Lifetime tokens remain lifetime totals; tok/s uses session tokens and session training time.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Evaluation rows and DDP scaling carry session token counts.\par
+\pard\sa100\li360\fi-240\f0\fs23 - eval_interval=0 completes without indexing a missing evaluation row.\par
+\pard\sa190\sb280\f0\fs29\b 9. End-to-end CPU integration\b0\par
+\pard\sa170\f0\fs23 The integration test creates a tiny dataset, runs fresh for two updates, resumes the same artifact to three updates, and forks with restart_cosine to five updates.\par
+\pard\sa170\f0\fs23 It verifies checkpoint reuse, new session identity, child artifact and suffix, lineage, phase history, final completed updates, manifest creation, and session/lifetime accounting.\par
+\pard\sa190\sb280\f0\fs29\b 10. Regression commands\b0\par
+\pard\sa40\li360\f1\fs20 python -m compileall -q sheet run_thog2_owt.py tests\par
+\pard\sa40\li360\f1\fs20 bash -n current_dreedle_train_OWT.sh current_scruffy_train_OWT.sh\par
+\pard\sa40\li360\f1\fs20 pytest -q tests/test_checkpoint_resolver.py tests/test_enhanced_resume_cli.py tests/test_resume_schedule_calculation.py\par
+\pard\sa40\li360\f1\fs20 pytest -q tests/test_resume_identity_and_throughput.py tests/test_fork_lineage.py tests/test_fork_lr_schedule.py\par
+\pard\sa40\li360\f1\fs20 pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py tests/test_sheet_stage6_canonical_naming.py\par
+\pard\sa40\li360\f1\fs20 pytest -q tests/test_enhanced_resume_integration.py\par
+\pard\sa40\li360\f1\fs20 pytest -q\par
+\pard\sa190\sb280\f0\fs29\b 11. Release gate\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Focused lifecycle and wrapper tests pass.\par
+\pard\sa100\li360\fi-240\f0\fs23 - The real CPU fresh -> resume -> fork integration test passes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Compile and shell syntax checks pass.\par
+\pard\sa100\li360\fi-240\f0\fs23 - The full repository pytest suite passes in GitHub Actions.\par
+\pard\sa100\li360\fi-240\f0\fs23 - GPU smoke tests run when a GPU runner is available; absence of such a runner is reported honestly and is not replaced by a fake GPU claim.\par
+}

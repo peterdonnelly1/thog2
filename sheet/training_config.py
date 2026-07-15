@@ -8,13 +8,39 @@ from .basis import BASIS_VERSION
 from .checkpointing import validate_checkpoint_segment_size
 from .compact_identity import compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
 from .geometry import derive_row_order
+from .lr_schedule import COSINE_SCHEDULE, LR_SCHEDULE_KINDS, RESTART_COSINE_SCHEDULE, validate_restart_cosine_phase
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 
 
-CHECKPOINT_SCHEMA_VERSION = 2
+CHECKPOINT_SCHEMA_VERSION = 3                                                                                                                             # <<< THOG enhanced lifecycle and phase-aware LR checkpoint schema
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+# vvv THOG resume may alter only operational controls; dtype and non-finite policy remain material
+EXECUTION_OVERRIDE_FIELDS = {
+    "device",
+    "max_updates",
+    "eval_interval",
+    "eval_batches",
+    "checkpoint_interval",
+    "checkpoint_segment_size",
+    "out_dir",
+    "log_interval",
+}
+FORK_LR_OVERRIDE_FIELDS = {
+    *EXECUTION_OVERRIDE_FIELDS,
+    "learning_rate",
+    "min_learning_rate",
+    "warmup_updates",
+    "decay_updates",
+    "lr_schedule_kind",
+    "phase_start_update",
+    "phase_start_lr",
+    "phase_peak_lr",
+    "phase_rewarm_iters",
+    "phase_end_update",
+    "phase_min_lr",
+}
+# ^^^ THOG
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -80,6 +106,15 @@ class TrainingConfig:
     warmup_updates: int = 0
     decay_updates: int = 10
     decay_learning_rate: bool = True
+    # vvv THOG active LR schedule may be the original cosine or a forked restart cosine
+    lr_schedule_kind: str = COSINE_SCHEDULE
+    phase_start_update: Optional[int] = None
+    phase_start_lr: Optional[float] = None
+    phase_peak_lr: Optional[float] = None
+    phase_rewarm_iters: int = 0
+    phase_end_update: Optional[int] = None
+    phase_min_lr: Optional[float] = None
+    # ^^^ THOG
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
@@ -117,10 +152,14 @@ class TrainingConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"{name} must be a positive integer or None; got {value!r}")
-        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("warmup_updates", "phase_rewarm_iters", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
+        for name in ("phase_start_update", "phase_end_update"):
+            value = getattr(self, name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{name} must be a non-negative integer or None; got {value!r}")
         validate_checkpoint_segment_size(self.checkpoint_segment_size)
         if self.n_embd % self.n_head != 0:
             raise ValueError(f"n_embd must be divisible by n_head; got {self.n_embd} and {self.n_head}")
@@ -151,6 +190,20 @@ class TrainingConfig:
             raise ValueError("learning rates must be non-negative and maximum must be positive")
         if self.min_learning_rate > self.learning_rate:
             raise ValueError("min_learning_rate must not exceed learning_rate")
+        if self.lr_schedule_kind not in LR_SCHEDULE_KINDS:
+            raise ValueError(f"lr_schedule_kind must be one of {LR_SCHEDULE_KINDS}")
+        if self.lr_schedule_kind == COSINE_SCHEDULE:
+            phase_values = (
+                self.phase_start_update,
+                self.phase_start_lr,
+                self.phase_peak_lr,
+                self.phase_end_update,
+                self.phase_min_lr,
+            )
+            if any(value is not None for value in phase_values) or self.phase_rewarm_iters != 0:
+                raise ValueError("cosine schedule must not define restart_cosine phase fields")
+        elif self.lr_schedule_kind == RESTART_COSINE_SCHEDULE:
+            validate_restart_cosine_phase(self.restart_cosine_phase())
         if self.nonfinite_update_policy not in ("raise", "skip"):
             raise ValueError("nonfinite_update_policy must be raise or skip")
         if self.weight_decay < 0.0 or self.grad_clip < 0.0:
@@ -208,6 +261,18 @@ class TrainingConfig:
 
     def residual_init_config(self) -> ResidualInitConfig:
         return ResidualInitConfig(policy=self.residual_init_policy, depth_source=self.residual_init_depth_source, depth_value=self.residual_init_depth_value)
+
+    # vvv THOG expose the active fork schedule as checkpoint-safe scalar metadata
+    def restart_cosine_phase(self) -> Dict[str, Any]:
+        return {
+            "phase_start_update": self.phase_start_update,
+            "phase_start_lr": self.phase_start_lr,
+            "phase_peak_lr": self.phase_peak_lr,
+            "phase_rewarm_iters": self.phase_rewarm_iters,
+            "phase_end_update": self.phase_end_update,
+            "phase_min_lr": self.phase_min_lr,
+        }
+    # ^^^ THOG
 
     def model_arguments(self) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {

@@ -110,6 +110,12 @@ def init_resilient_telemetry(
     }
     if entity:
         arguments["entity"] = entity
+    # vvv THOG exact resume reuses the persisted W&B run identity when supplied by the lifecycle runner
+    run_id = os.environ.get("WANDB_RUN_ID", "").strip()
+    if run_id:
+        arguments["id"] = run_id
+        arguments["resume"] = os.environ.get("WANDB_RESUME", "allow").strip() or "allow"
+    # ^^^ THOG
     if os.environ.get("WANDB_MODE", "").strip().lower() == "offline":
         return module.init(**arguments, mode="offline")
     try:
