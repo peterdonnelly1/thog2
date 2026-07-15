@@ -113,7 +113,7 @@ jobs:
             .resume_bundle_part_05 .resume_bundle_part_06 .resume_bundle_part_07 \
             .resume_bundle_part_08 .resume_bundle_part_09 .resume_bundle_part_10 \
             .resume_bundle_part_11 .resume_bundle_audit.log \
-            .github/workflows/apply_clean_enhanced_resume.yml
+            .github/workflows/enhanced_resume_and_fork_ci.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
