@@ -64,6 +64,10 @@ class OwtRunConfig:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # vvv THOG
+    nonfinite_update_policy: str = "skip"
+    max_nonfinite_update_skips: int = 10
+    # ^^^ THOG
     dropout: float = 0.0
     bias: bool = True
 
@@ -117,6 +121,9 @@ class OwtRunConfig:
             "warmup_iters",
             "model_seed",
             "data_seed",
+            # vvv THOG
+            "max_nonfinite_update_skips",
+            # ^^^ THOG
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -144,6 +151,10 @@ class OwtRunConfig:
             raise ValueError("learning rates must be non-negative and maximum must be positive")
         if self.min_lr > self.learning_rate:
             raise ValueError("min_lr must not exceed learning_rate")
+        # vvv THOG
+        if self.nonfinite_update_policy not in ("raise", "skip"):
+            raise ValueError("nonfinite_update_policy must be raise or skip")
+        # ^^^ THOG
         if self.weight_decay < 0.0 or self.grad_clip < 0.0:
             raise ValueError("weight_decay and grad_clip must be non-negative")
         if not 0.0 <= self.beta1 < 1.0 or not 0.0 <= self.beta2 < 1.0:
@@ -246,6 +257,10 @@ class OwtRunConfig:
             beta1=self.beta1,
             beta2=self.beta2,
             grad_clip=self.grad_clip,
+            # vvv THOG
+            nonfinite_update_policy=self.nonfinite_update_policy,
+            max_nonfinite_update_skips=self.max_nonfinite_update_skips,
+            # ^^^ THOG
             eval_interval=self.eval_interval,
             eval_batches=self.eval_iters,
             checkpoint_interval=self.checkpoint_interval,
