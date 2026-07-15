@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - enhanced_resume_and_fork
+  pull_request:
+    branches:
+      - BLOCK_enhancements_group
 
 permissions:
   contents: write
