@@ -1,0 +1,106 @@
+# vvv THOG
+name: Enhanced resume and fork CI
+
+on:
+  push:
+    branches:
+      - enhanced_resume_and_fork
+  pull_request:
+    branches:
+      - BLOCK_enhancements_group
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest tiktoken tensorboard wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Compile sources
+        run: python -m compileall -q sheet run_thog2_owt.py tests
+
+      - name: Check canonical wrapper syntax
+        run: bash -n current_dreedle_train_OWT.sh current_scruffy_train_OWT.sh
+
+      - name: Run focused lifecycle regression
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q \
+            tests/test_checkpoint_resolver.py \
+            tests/test_enhanced_resume_cli.py \
+            tests/test_resume_schedule_calculation.py \
+            tests/test_resume_identity_and_throughput.py \
+            tests/test_fork_lineage.py \
+            tests/test_fork_lr_schedule.py \
+            tests/test_sheet_stage6_canonical_naming.py
+
+      - name: Run wrapper fresh-grid regression in an isolated process
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_scruffy_dry_run_expands_cartesian_product_of_batch_and_learning_rate_values
+
+      - name: Run wrapper resume-assertion regression in an isolated process
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_resume_wrapper_forwards_explicit_material_values_as_assertions
+
+      - name: Run wrapper grid-rejection regression in an isolated process
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_wrapper_learning_rate_and_batch_grids.py::test_resume_wrapper_rejects_grid_valued_material_assertions
+
+      - name: Run real CPU fresh resume fork integration
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_enhanced_resume_integration.py
+
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest tiktoken tensorboard wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run full CPU regression in a clean process
+        env:
+          PYTHONPATH: .
+        run: pytest -q --ignore=tests/test_enhanced_resume_integration.py
+
+      - name: Record GPU availability honestly
+        if: always()
+        run: python -c "import torch; print({'cuda_available': torch.cuda.is_available(), 'cuda_device_count': torch.cuda.device_count()})"
+# ^^^ THOG
