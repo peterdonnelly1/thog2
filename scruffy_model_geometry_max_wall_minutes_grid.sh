@@ -10,6 +10,7 @@ RUN_NAME="${THOG2_GEOM_GRID_NAME:-GEOM_WALL_6H}"
 GEOMETRIES="${THOG2_GEOM_GRID_GEOMETRIES:-legacy_sheet_col depth head_aware_block mlp_block full_block}"
 EVAL_ITERS="${THOG2_GEOM_GRID_EVAL_ITERS:-50}"
 EVAL_INTERVAL="${THOG2_GEOM_GRID_EVAL_INTERVAL:-1000000}"
+DRY_RUN="${THOG2_GEOM_GRID_DRY_RUN:-false}"
 # ^^^ THOG
 
 exec ./current_scruffy_train_OWT.sh \
@@ -44,5 +45,6 @@ exec ./current_scruffy_train_OWT.sh \
   -K flash2 \
   -r depth_scaled \
   -z dof_implied_depth \
+  -x "$DRY_RUN" \
   -- --max-wall-minutes "$MAX_WALL_MINUTES" "$@"
 # ^^^ THOG
