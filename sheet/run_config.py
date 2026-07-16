@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
 from .compact_identity import BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_DEPTH, compact_identity_metadata
+from .lr_schedule import COSINE_SCHEDULE, LR_SCHEDULE_KINDS
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -43,6 +44,7 @@ class OwtRunConfig:
     wandb_root: str = "wandb"
 
     max_iters: int = 100
+    decay_iters: Optional[int] = None                                                                                                                  # <<< THOG original cosine endpoint is independent of later resume STEPS
     eval_interval: int = 50
     eval_iters: int = 5
     log_interval: int = 10
@@ -80,6 +82,13 @@ class OwtRunConfig:
     learning_rate: float = 6.0e-4
     min_lr: float = 6.0e-5
     warmup_iters: int = 10
+    lr_schedule_kind: str = COSINE_SCHEDULE                                                                                                             # <<< THOG active original or forked LR schedule
+    phase_start_update: Optional[int] = None
+    phase_start_lr: Optional[float] = None
+    phase_peak_lr: Optional[float] = None
+    phase_rewarm_iters: int = 0
+    phase_end_update: Optional[int] = None
+    phase_min_lr: Optional[float] = None
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
@@ -100,6 +109,7 @@ class OwtRunConfig:
     wandb_project: str = "thog"
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"
+    instrumentation_backend: str = "tensorboard"                                                                                                       # <<< THOG lifecycle-persisted instrumentation selector
 
     artifact_suffix: Optional[str] = None
     artifact_name_limit: int = DEFAULT_COMPONENT_LIMIT
@@ -107,28 +117,36 @@ class OwtRunConfig:
     def __post_init__(self) -> None:
         if self.model_type not in PUBLIC_MODEL_TYPES:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
-        if self.run_mode not in ("fresh", "resume"):
-            raise ValueError("run_mode must be fresh or resume")
+        if self.run_mode not in ("fresh", "resume", "fork"):
+            raise ValueError("run_mode must be fresh, resume, or fork")
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
             raise ValueError("attention_backend must be auto, flash2, sdpa, or math")
+        if self.instrumentation_backend not in ("tensorboard", "wandb", "none"):
+            raise ValueError("instrumentation_backend must be tensorboard, wandb, or none")
         if self.wandb_mode not in ("online", "offline", "disabled"):
             raise ValueError("wandb_mode must be online, offline, or disabled")
         if self.wandb_mode == "disabled" and self.wandb_enabled:
+            object.__setattr__(self, "wandb_enabled", False)
+        if self.instrumentation_backend != "wandb" and self.wandb_enabled:
             object.__setattr__(self, "wandb_enabled", False)
         if self.dtype not in ("float32", "float16", "bfloat16"):
             raise ValueError("dtype must be float32, float16, or bfloat16")
         if self.device.startswith("cpu") and self.dtype == "float16":
             raise ValueError("float16 training is not supported on CPU")
+        if self.lr_schedule_kind not in LR_SCHEDULE_KINDS:
+            raise ValueError(f"lr_schedule_kind must be one of {LR_SCHEDULE_KINDS}")
 
         object.__setattr__(self, "experiment_prefix", normalize_component(self.experiment_prefix, uppercase=True))
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
         if self.basis_version == "auto":
             object.__setattr__(self, "basis_version", BASIS_VERSION)
+        if self.decay_iters is None:
+            object.__setattr__(self, "decay_iters", self.max_iters)
 
         positive = (
             "max_iters",
-            "eval_interval",
+            "decay_iters",
             "eval_iters",
             "log_interval",
             "batch_size",
@@ -144,12 +162,12 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        for name in ("checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("eval_interval", "checkpoint_interval", "warmup_iters", "phase_rewarm_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
-        if self.warmup_iters >= self.max_iters:
-            raise ValueError("warmup_iters must be less than max_iters")
+        if self.warmup_iters >= int(self.decay_iters):
+            raise ValueError("warmup_iters must be less than decay_iters")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         if self.model_type == "sheet":
@@ -244,19 +262,13 @@ class OwtRunConfig:
 
     def run_descriptor(self) -> str:
         model_fragment = self.compact_artifact_fragment() or "DENSE"
-        body = f"{self.experiment_prefix}_{model_fragment}_{normalize_component(self.host_label)}"
-        return f"{self.run_start_label}_{body}" if self.run_start_label else body
+        return f"{self.experiment_prefix}_{model_fragment}_{normalize_component(self.host_label)}"
 
     def parameter_artifact_fragment(self) -> str:
         fields = [
-            # vvv THOG stable artifact identity must not depend on the mutable target update count
-            # f"n_{self.max_iters}",
-            # ^^^ THOG
             f"b_{self.batch_size}",
             f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
             f"d_{dataset_label(self.dataset)}",
-            f"w_{self.warmup_iters}",
-            f"k_{self.checkpoint_interval}",
             f"A_{self.gradient_accumulation_steps}",
             f"L_{self.n_layer}",
             f"H_{self.n_head}",
@@ -273,12 +285,17 @@ class OwtRunConfig:
                 f"Y_{self.o_mlp_hidden}",
             ])
         fields.append(self.residual_init_artifact_fragment())
-        fields.append(f"S_{self.checkpoint_segment_size}")
         return "_".join(fields)
 
     @property
+    def artifact_descriptor(self) -> str:
+        return f"{self.run_descriptor()}__{self.parameter_artifact_fragment()}"                                                                          # <<< THOG descriptor excludes timestamp and fork lineage suffix
+
+    @property
     def artifact_name(self) -> str:
-        artifact_name = f"{self.run_descriptor()}__{self.parameter_artifact_fragment()}"
+        artifact_name = self.artifact_descriptor
+        if self.run_start_label:
+            artifact_name = f"{self.run_start_label}_{artifact_name}"
         if self.artifact_suffix:
             artifact_name = f"{artifact_name}__{normalize_component(self.artifact_suffix, uppercase=True)}"
         return truncate_component(artifact_name, max_length=self.artifact_name_limit)
@@ -357,8 +374,15 @@ class OwtRunConfig:
             learning_rate=self.learning_rate,
             min_learning_rate=self.min_lr,
             warmup_updates=self.warmup_iters,
-            decay_updates=self.max_iters,
+            decay_updates=int(self.decay_iters),
             decay_learning_rate=True,
+            lr_schedule_kind=self.lr_schedule_kind,
+            phase_start_update=self.phase_start_update,
+            phase_start_lr=self.phase_start_lr,
+            phase_peak_lr=self.phase_peak_lr,
+            phase_rewarm_iters=self.phase_rewarm_iters,
+            phase_end_update=self.phase_end_update,
+            phase_min_lr=self.phase_min_lr,
             weight_decay=self.weight_decay,
             beta1=self.beta1,
             beta2=self.beta2,
@@ -398,6 +422,7 @@ class OwtRunConfig:
             values["compact_artifact_fragment"] = self.compact_artifact_fragment()
         values.update({
             "artifact_name": self.artifact_name,
+            "artifact_descriptor": self.artifact_descriptor,
             "artifact_prefix": self.artifact_prefix,
             "run_descriptor": self.run_descriptor(),
             "world_size": world_size,

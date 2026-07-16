@@ -40,16 +40,16 @@ class CanonicalNamingTests(unittest.TestCase):
         )
         self.assertEqual(
             dense,
-            "DENSE2_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_S_12",
+            "DENSE2_scruffy__AKAROA__b_12_d_owt_A_160_L_72_H_12_D_768_C_256",
         )
         self.assertEqual(
             sheet,
-            "SHEET_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12",
+            "SHEET_scruffy__AKAROA__b_12_d_owt_A_160_L_72_H_12_D_768_C_256_P_16_Q_64",
         )
         self.assertNotIn("SHEET__scruffy", sheet)
 
     def test_s6_23b_paths_use_thog_style_directories_and_safe_filenames(self) -> None:
-        name = "SHEET_scruffy__AKAROA__b_12_d_owt_w_0_k_0_A_160_L_72_H_12_D_768_C_256_P_16_Q_64_S_12"
+        name = "SHEET_scruffy__AKAROA__b_12_d_owt_A_160_L_72_H_12_D_768_C_256_P_16_Q_64"
         paths = artifact_paths(
             name,
             checkpoint_root=Path("checkpoints"),
@@ -125,7 +125,7 @@ class CanonicalNamingTests(unittest.TestCase):
             residual_init_depth_value=12,
         )
         self.assertIn(
-            "P_16_Q_64_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12",
+            "P_16_Q_64_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth",
             config.parameter_artifact_fragment(),
         )
 
@@ -136,7 +136,7 @@ class CanonicalNamingTests(unittest.TestCase):
             residual_init_depth_value=24,
         )
         self.assertIn(
-            "_r_depth_scaled_z_user_forced_depth_Z_24_S_12",
+            "_r_depth_scaled_z_user_forced_depth_Z_24",
             config.parameter_artifact_fragment(),
         )
 
@@ -148,9 +148,19 @@ class CanonicalNamingTests(unittest.TestCase):
         )
         self.assertEqual(config.residual_init_depth_source, "dof_implied_depth")
         self.assertIn(
-            "_r_depth_scaled_z_dof_implied_depth_S_12",
+            "_r_depth_scaled_z_dof_implied_depth",
             config.parameter_artifact_fragment(),
         )
+
+    def test_s6_23h_mutable_target_and_operational_cadence_do_not_change_artifact_identity(self) -> None:
+        baseline = self.picton_config(max_iters=100, warmup_iters=10, checkpoint_interval=50, checkpoint_segment_size=12)
+        changed = self.picton_config(max_iters=500, warmup_iters=20, checkpoint_interval=1000, checkpoint_segment_size=3)
+        self.assertEqual(baseline.parameter_artifact_fragment(), changed.parameter_artifact_fragment())
+        fragment = baseline.parameter_artifact_fragment()
+        self.assertNotIn("n_100", fragment)
+        self.assertNotIn("w_10", fragment)
+        self.assertNotIn("k_50", fragment)
+        self.assertNotIn("S_12", fragment)
 
 
 if __name__ == "__main__":

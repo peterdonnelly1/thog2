@@ -8,15 +8,20 @@ import os
 import pickle
 import socket
 import subprocess
+import sys
+from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence, Set
 
 import numpy as np
 import torch
 
 from sheet.basis import BASIS_VERSION
+from sheet.checkpoint_resolver import ResolvedCheckpoint, resolve_checkpoint
 from sheet.checkpoints import load_payload
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
+from sheet.lr_schedule import COSINE_SCHEDULE, RESTART_COSINE_SCHEDULE, learning_rate_for_config
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
     DEFAULT_EXPERIMENT_PREFIX,
@@ -27,15 +32,26 @@ from sheet.run_config import (
     DEFAULT_O_MLP_HIDDEN,
     OwtRunConfig,
 )
+from sheet.run_lifecycle import (
+    current_session_result_path,
+    fork_lifecycle,
+    fork_suffix,
+    fresh_lifecycle,
+    lifecycle_from_checkpoint,
+    resume_lifecycle,
+    update_wandb_identity,
+    validate_lifecycle,
+    validate_start_label,
+)
+from sheet.run_manifest import write_run_manifest
 from sheet.run_naming import compact_log_timestamp
 from sheet.stage6_trainer import Stage6Trainer
-from sheet.training_config import TrainingConfig
+from sheet.training_config import EXECUTION_OVERRIDE_FIELDS, FORK_LR_OVERRIDE_FIELDS, TrainingConfig
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
 
 
-# vvv THOG
 _CONSOLE_INTEGER_WIDTHS = {
     "completed_updates": 6,
     "max_updates": 6,
@@ -60,7 +76,6 @@ _CONSOLE_SCIENTIFIC_FLOATS = {"learning_rate": (10, 3)}
 
 
 # vvv THOG resumed throughput uses only tokens processed by the current process session
-# Lifetime consumed_tokens remains available for progress and accounting.
 def add_console_tokens_per_second(payload: Dict[str, Any]) -> Dict[str, Any]:
     values = dict(payload)
     elapsed = values.get("cumulative_training_seconds", values.get("training_seconds"))
@@ -91,7 +106,6 @@ def format_console_progress_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         else:
             formatted[key] = value
     return formatted
-# ^^^ THOG
 
 
 class OwtTrainer(Stage6Trainer):
@@ -105,11 +119,9 @@ class OwtTrainer(Stage6Trainer):
         values = dict(payload)
         if "consumed_tokens" in values:
             values["consumed_tokens"] = int(values["consumed_tokens"]) * int(self.distributed.world_size)
-        # vvv THOG apply the same global-token multiplier to session throughput accounting
         if "session_consumed_tokens" in values:
             values["session_consumed_tokens"] = int(values["session_consumed_tokens"]) * int(self.distributed.world_size)
-        # ^^^ THOG
-        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
+        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
         result = super().run_pilot(**arguments)
@@ -118,19 +130,14 @@ class OwtTrainer(Stage6Trainer):
             return result
         result["budget"]["tokens_per_update"] *= multiplier
         result["budget"]["consumed_tokens"] *= multiplier
-        # vvv THOG preserve global-token accounting for resumed-session throughput fields
         result["budget"]["session_consumed_tokens"] *= multiplier
-        # ^^^ THOG
         for row in result["updates"]:
             row["consumed_tokens"] *= multiplier
-            # vvv THOG resumed-session token counts are global under DDP
             row["session_consumed_tokens"] *= multiplier
-            # ^^^ THOG
         for row in result["evaluations"]:
             row["consumed_tokens"] *= multiplier
-            # vvv THOG resumed-session token counts are global under DDP
-            row["session_consumed_tokens"] *= multiplier
-            # ^^^ THOG
+            if "session_consumed_tokens" in row:
+                row["session_consumed_tokens"] *= multiplier
         result["timing"]["tokens_per_training_second"] *= multiplier
         target = Path(arguments["result_path"])
         if self.distributed.is_primary:
@@ -181,21 +188,15 @@ def validate_dataset(dataset_dir: Path, block_size: int) -> Dict[str, Any]:
     return {"path": str(dataset_dir.resolve()), "format": "uint16_token_ids", "vocab_size": load_vocab_size(dataset_dir), "train_tokens": train_tokens, "validation_tokens": validation_tokens}
 
 
-def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) -> None:
-    payload = load_payload(checkpoint_path)
-    if "trainer_config" not in payload:
-        return
-    stored = TrainingConfig(**payload["trainer_config"])
-    control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed")
-    mismatches = [f"{name}: checkpoint={getattr(stored, name)!r}, requested={getattr(expected, name)!r}" for name in control_fields if getattr(stored, name) != getattr(expected, name)]
-    if mismatches:
-        raise ValueError("resume control mismatch: " + "; ".join(mismatches))
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
-    parser.add_argument("--model-type", choices=("dense", "sheet"), required=True)
-    parser.add_argument("--run-mode", choices=("fresh", "resume"), default="fresh")
+    parser = argparse.ArgumentParser(description="Train, resume, or fork one canonical THOG2 OpenWebText run")
+    parser.add_argument("--model-type", choices=("dense", "sheet"))
+    parser.add_argument("--run-mode", choices=("fresh", "resume", "fork"), default="fresh")
+    parser.add_argument("--resume-from")
+    parser.add_argument("--fork-lr-mode", choices=("continue", "restart_cosine"))
+    parser.add_argument("--fork-learning-rate", type=float)
+    parser.add_argument("--fork-min-lr", type=float)
+    parser.add_argument("--fork-rewarm-iters", type=int)
     parser.add_argument("--host-label", default=socket.gethostname().split(".")[0])
     parser.add_argument("--run-name", default="AKAROA")
     parser.add_argument("--dataset", default="openwebtext")
@@ -204,7 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-root", default="logs")
     parser.add_argument("--result-root", default="results")
     parser.add_argument("--wandb-root", default="wandb")
-    parser.add_argument("--max-iters", type=int, default=100)
+    parser.add_argument("--max-iters", type=int, help="total optimizer steps for the run (not additional steps)")
     parser.add_argument("--eval-interval", type=int, default=50)
     parser.add_argument("--eval-iters", type=int, default=5)
     parser.add_argument("--log-interval", type=int, default=10)
@@ -241,18 +242,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                    # <<< THOG bounded recovery policy
-    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                                         # <<< THOG bounded recovery limit
+    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
     parser.add_argument("--data-seed", type=int, default=7331)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
+    parser.add_argument("--instrumentation", choices=("tensorboard", "wandb", "none"))
     parser.add_argument("--wandb", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--wandb-project", default="thog")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-mode", choices=("online", "offline", "disabled"), default="online")
+    parser.add_argument("--fast-discard", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--bypass-semantic-qkv-adapter", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--direct-factorised-mlp", action=argparse.BooleanOptionalAction)
+    parser.add_argument("--vectorise-per-head-materialisation", action=argparse.BooleanOptionalAction)
     parser.add_argument("--artifact-suffix")
     parser.add_argument("--artifact-name-limit", type=int, default=240)
     parser.add_argument("--log-timestamp")
@@ -262,12 +268,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_start_label_from_arguments(arguments: argparse.Namespace) -> Optional[str]:
+def explicit_destinations(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Set[str]:
+    option_dest = {
+        option: action.dest
+        for action in parser._actions
+        for option in action.option_strings
+    }
+    result: Set[str] = set()
+    for token in argv:
+        if not token.startswith("-") or token == "-":
+            continue
+        option = token.split("=", 1)[0]
+        destination = option_dest.get(option)
+        if destination is not None:
+            result.add(destination)
+    return result
+
+
+def run_start_label_from_arguments(arguments: argparse.Namespace) -> str:
     if arguments.run_start_label:
-        return arguments.run_start_label
+        return validate_start_label(arguments.run_start_label)
     if arguments.log_timestamp:
-        return compact_log_timestamp(arguments.log_timestamp).replace("_", "-")
-    return None
+        return validate_start_label(compact_log_timestamp(arguments.log_timestamp).replace("_", "-"))
+    return datetime.now().strftime("%y%m%d-%H%M")
 
 
 def configure_attention_backend(attention_backend: str) -> None:
@@ -291,11 +314,81 @@ def configure_attention_backend(attention_backend: str) -> None:
     raise ValueError(f"unsupported attention backend: {attention_backend}")
 
 
+def _environment_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"{name} must be true or false")
+
+
+def execution_options_from_arguments(
+    arguments: argparse.Namespace,
+    explicit: Set[str],
+    parent: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    defaults = {
+        "fast_discard": _environment_bool("THOG2_FAST_DISCARD", True),
+        "bypass_semantic_qkv_adapter": _environment_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True),
+        "direct_factorised_mlp": _environment_bool("THOG2_DIRECT_FACTORISED_MLP", True),
+        "vectorise_per_head_materialisation": _environment_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True),
+    }
+    values = dict(parent or defaults)
+    for name in defaults:
+        if name in explicit:
+            values[name] = bool(getattr(arguments, name))
+        elif parent is None:
+            value = getattr(arguments, name)
+            if value is not None:
+                values[name] = bool(value)
+    return values
+
+
+def apply_execution_options(values: Mapping[str, Any]) -> None:
+    names = {
+        "fast_discard": "THOG2_FAST_DISCARD",
+        "bypass_semantic_qkv_adapter": "THOG2_BYPASS_SEMANTIC_QKV_ADAPTER",
+        "direct_factorised_mlp": "THOG2_DIRECT_FACTORISED_MLP",
+        "vectorise_per_head_materialisation": "THOG2_VECTORISE_PER_HEAD_MATERIALISATION",
+    }
+    for key, environment_name in names.items():
+        os.environ[environment_name] = "true" if bool(values[key]) else "false"
+
+
+def selected_instrumentation(arguments: argparse.Namespace, explicit: Set[str], parent: Optional[str] = None) -> str:
+    if "instrumentation" in explicit and arguments.instrumentation is not None:
+        return arguments.instrumentation
+    if parent is not None:
+        return parent
+    if arguments.instrumentation is not None:
+        return arguments.instrumentation
+    selected = os.environ.get("THOG2_INSTRUMENTATION", "tensorboard").strip().lower()
+    if selected not in ("tensorboard", "wandb", "none"):
+        raise ValueError("THOG2_INSTRUMENTATION must be tensorboard, wandb, or none")
+    return selected
+
+
 def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
+    """Retain the established fresh-run parser helper for callers and tests."""
+
+    if arguments.run_mode != "fresh":
+        raise ValueError("config_from_arguments is defined only for fresh runs")
+    return config_from_fresh_arguments(arguments, set())
+
+
+def config_from_fresh_arguments(arguments: argparse.Namespace, explicit: Set[str]) -> OwtRunConfig:
+    if arguments.model_type is None:
+        raise ValueError("fresh mode requires --model-type")
+    max_iters = 100 if arguments.max_iters is None else arguments.max_iters
+    instrumentation = selected_instrumentation(arguments, explicit)
     basis_version = BASIS_VERSION if arguments.basis_version == "auto" else arguments.basis_version
-    config = OwtRunConfig(
+    return OwtRunConfig(
         model_type=arguments.model_type,
-        run_mode=arguments.run_mode,
+        run_mode="fresh",
         host_label=arguments.host_label,
         run_name=arguments.run_name,
         dataset=arguments.dataset,
@@ -304,7 +397,8 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         log_root=arguments.log_root,
         result_root=arguments.result_root,
         wandb_root=arguments.wandb_root,
-        max_iters=arguments.max_iters,
+        max_iters=max_iters,
+        decay_iters=max_iters,
         eval_interval=arguments.eval_interval,
         eval_iters=arguments.eval_iters,
         log_interval=arguments.log_interval,
@@ -349,23 +443,295 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         data_seed=arguments.data_seed,
         device=arguments.device,
         dtype=arguments.dtype,
-        wandb_enabled=arguments.wandb,
+        wandb_enabled=(instrumentation == "wandb" and arguments.wandb),
         wandb_project=arguments.wandb_project,
         wandb_entity=arguments.wandb_entity,
         wandb_mode=arguments.wandb_mode,
+        instrumentation_backend=instrumentation,
         artifact_suffix=arguments.artifact_suffix,
         artifact_name_limit=arguments.artifact_name_limit,
     )
-    configure_attention_backend(config.attention_backend)
-    return config
 
 
-def resolved_payload(config: OwtRunConfig, *, world_size: int, log_timestamp: Optional[str]) -> Dict[str, Any]:
-    paths = config.paths(log_timestamp=log_timestamp)
-    return {"artifact_name": config.artifact_name, "artifact_prefix": config.artifact_prefix, "model_type": config.model_type, "run_mode": config.run_mode, "world_size": world_size, "tokens_per_iter": config.tokens_per_iter(), "canonical_config": config.canonical_dict(world_size=world_size), "paths": {name: str(path) for name, path in paths.items()}}
+_ARGUMENT_TO_CONFIG = {
+    "model_type": "model_type",
+    "host_label": "host_label",
+    "run_name": "run_name",
+    "dataset": "dataset",
+    "data_dir": "data_dir",
+    "log_root": "log_root",
+    "result_root": "result_root",
+    "wandb_root": "wandb_root",
+    "eval_interval": "eval_interval",
+    "eval_iters": "eval_iters",
+    "log_interval": "log_interval",
+    "checkpoint_interval": "checkpoint_interval",
+    "batch_size": "batch_size",
+    "gradient_accumulation_steps": "gradient_accumulation_steps",
+    "block_size": "block_size",
+    "n_layer": "n_layer",
+    "n_head": "n_head",
+    "n_embd": "n_embd",
+    "o_depth": "o_depth",
+    "o_attn_d_model": "o_attn_d_model",
+    "o_attn_qkv_per_channel": "o_attn_qkv_per_channel",
+    "o_attn_out_per_channel": "o_attn_out_per_channel",
+    "o_mlp_d_model": "o_mlp_d_model",
+    "o_mlp_hidden": "o_mlp_hidden",
+    "geometry_preset": "geometry_preset",
+    "attention_geometry": "attention_geometry",
+    "mlp_geometry": "mlp_geometry",
+    "basis_family": "basis_family",
+    "basis_version": "basis_version",
+    "attention_backend": "attention_backend",
+    "experiment_prefix": "experiment_prefix",
+    "residual_init_policy": "residual_init_policy",
+    "residual_init_depth_source": "residual_init_depth_source",
+    "residual_init_depth_value": "residual_init_depth_value",
+    "activation_checkpointing": "activation_checkpointing",
+    "checkpoint_segment_size": "checkpoint_segment_size",
+    "learning_rate": "learning_rate",
+    "min_lr": "min_lr",
+    "warmup_iters": "warmup_iters",
+    "weight_decay": "weight_decay",
+    "beta1": "beta1",
+    "beta2": "beta2",
+    "grad_clip": "grad_clip",
+    "nonfinite_update_policy": "nonfinite_update_policy",
+    "max_nonfinite_update_skips": "max_nonfinite_update_skips",
+    "dropout": "dropout",
+    "bias": "bias",
+    "model_seed": "model_seed",
+    "data_seed": "data_seed",
+    "device": "device",
+    "dtype": "dtype",
+    "wandb_project": "wandb_project",
+    "wandb_entity": "wandb_entity",
+    "wandb_mode": "wandb_mode",
+    "artifact_name_limit": "artifact_name_limit",
+}
+_OPERATIONAL_CONFIG_FIELDS = {
+    "eval_interval",
+    "eval_iters",
+    "log_interval",
+    "checkpoint_interval",
+    "attention_backend",
+    "activation_checkpointing",
+    "checkpoint_segment_size",
+    "device",
+    "wandb_project",
+    "wandb_entity",
+    "wandb_mode",
+}
 
 
-# vvv THOG print resolved model parameters and execution options immediately before training
+def _resolved_argument_value(arguments: argparse.Namespace, destination: str) -> Any:
+    value = getattr(arguments, destination)
+    if destination == "basis_version" and value == "auto":
+        return BASIS_VERSION
+    return value
+
+
+def inherited_config(
+    parent: OwtRunConfig,
+    arguments: argparse.Namespace,
+    explicit: Set[str],
+    *,
+    run_mode: str,
+    max_iters: int,
+    instrumentation_backend: str,
+) -> OwtRunConfig:
+    changes: Dict[str, Any] = {
+        "run_mode": run_mode,
+        "max_iters": max_iters,
+        "instrumentation_backend": instrumentation_backend,
+        "wandb_enabled": instrumentation_backend == "wandb",
+    }
+    for destination, config_name in _ARGUMENT_TO_CONFIG.items():
+        if destination not in explicit:
+            continue
+        requested = _resolved_argument_value(arguments, destination)
+        current = getattr(parent, config_name)
+        if config_name in _OPERATIONAL_CONFIG_FIELDS:
+            changes[config_name] = requested
+        elif requested != current:
+            raise ValueError(
+                f"{run_mode} material parameter mismatch: {config_name}: "
+                f"checkpoint={current!r}, requested={requested!r}"
+            )
+    return replace(parent, **changes)
+
+
+def _required_total_steps(arguments: argparse.Namespace, completed_updates: int, mode: str) -> int:
+    if arguments.max_iters is None:
+        print(f"THOG2 INFO: -n was omitted during {mode}!", file=sys.stderr)
+        print("You must specify a value for n, which must be greater than the number of steps already completed", file=sys.stderr)
+        raise SystemExit(2)
+    if arguments.max_iters < completed_updates:
+        print("THOG2 INFO: -n is less than the number of steps already completed!", file=sys.stderr)
+        print("For clarity, n is taken to be the total of all steps, not an additional amount of steps. It must therefore be greater than the number of steps completed to date", file=sys.stderr)
+        raise SystemExit(2)
+    if arguments.max_iters == completed_updates:
+        print("THOG2 INFO: -n is equal to the number of steps already completed!", file=sys.stderr)
+        print("For clarity, n is taken to be the total of all steps, not an additional amount of steps. It must therefore be greater than the number of steps completed to date", file=sys.stderr)
+        raise SystemExit(2)
+    return int(arguments.max_iters)
+
+
+def _paths_from_lifecycle(lifecycle: Mapping[str, Any], resolved: ResolvedCheckpoint) -> Dict[str, Path]:
+    log_path = Path(str(lifecycle["log_path"]))
+    result_path = Path(str(lifecycle["result_path"]))
+    return {
+        "checkpoint_dir": resolved.checkpoint_dir,
+        "checkpoint_path": resolved.checkpoint_path,
+        "manifest_path": resolved.checkpoint_dir / "run_manifest.json",
+        "log_dir": log_path.parent,
+        "log_path": log_path,
+        "tensorboard_dir": Path(str(lifecycle["tensorboard_dir"])),
+        "result_dir": result_path.parent,
+        "result_path": result_path,
+    }
+
+
+def _original_lr_phase(config: OwtRunConfig) -> Dict[str, Any]:
+    return {
+        "phase_type": COSINE_SCHEDULE,
+        "phase_start_update": 0,
+        "phase_end_update": int(config.decay_iters),
+        "phase_peak_lr": config.learning_rate,
+        "phase_min_lr": config.min_lr,
+        "phase_warmup_iters": config.warmup_iters,
+    }
+
+
+def _fork_lr_phase(config: OwtRunConfig) -> Dict[str, Any]:
+    return {
+        "phase_type": RESTART_COSINE_SCHEDULE,
+        "phase_start_update": config.phase_start_update,
+        "phase_start_lr": config.phase_start_lr,
+        "phase_peak_lr": config.phase_peak_lr,
+        "phase_rewarm_iters": config.phase_rewarm_iters,
+        "phase_end_update": config.phase_end_update,
+        "phase_min_lr": config.phase_min_lr,
+    }
+
+
+def _prepare_context(arguments: argparse.Namespace, explicit: Set[str], world_size: int) -> Dict[str, Any]:
+    mode = arguments.run_mode
+    if mode == "fresh":
+        if arguments.resume_from is not None:
+            raise ValueError("fresh mode forbids --resume-from")
+        if any(getattr(arguments, name) is not None for name in ("fork_lr_mode", "fork_learning_rate", "fork_min_lr", "fork_rewarm_iters")):
+            raise ValueError("fresh mode forbids fork-only learning-rate options")
+        config = config_from_fresh_arguments(arguments, explicit)
+        paths = config.paths(log_timestamp=arguments.log_timestamp)
+        paths["tensorboard_dir"] = Path(os.environ.get("THOG2_CURVE_ROOT", "curves")) / config.artifact_name
+        execution_options = execution_options_from_arguments(arguments, explicit)
+        lifecycle = fresh_lifecycle(
+            config=config,
+            paths=paths,
+            world_size=world_size,
+            instrumentation_backend=config.instrumentation_backend,
+            execution_options=execution_options,
+            lr_phase=_original_lr_phase(config),
+        )
+        return {"mode": mode, "config": config, "paths": paths, "lifecycle": lifecycle, "payload": None, "resolved": None, "allowed_override_fields": EXECUTION_OVERRIDE_FIELDS, "append_log": False, "execution_options": execution_options}
+
+    if arguments.resume_from is None:
+        raise ValueError(f"{mode} mode requires --resume-from")
+    if "artifact_suffix" in explicit:
+        raise ValueError(f"{mode} mode forbids --artifact-suffix; fork lineage is generated automatically")
+    if mode == "resume" and "run_start_label" in explicit:
+        raise ValueError("resume mode forbids --run-start-label because it continues the original logical run")
+    if arguments.max_iters is None:
+        print(f"THOG2 INFO: -n was omitted during {mode}!", file=sys.stderr)
+        print("You must specify a value for n, which must be greater than the number of steps already completed", file=sys.stderr)
+        raise SystemExit(2)
+    resolved = resolve_checkpoint(arguments.resume_from, arguments.checkpoint_root)
+    payload = load_payload(resolved.checkpoint_path)
+    parent_lifecycle = lifecycle_from_checkpoint(payload)
+    if int(parent_lifecycle["world_size"]) != world_size:
+        raise ValueError(f"{mode} world size mismatch: checkpoint={parent_lifecycle['world_size']}, current={world_size}")
+    completed_updates = int(payload["completed_updates"])
+    total_steps = _required_total_steps(arguments, completed_updates, mode)
+    parent_config = OwtRunConfig(**parent_lifecycle["run_config"])
+    instrumentation = selected_instrumentation(arguments, explicit, str(parent_lifecycle["instrumentation_backend"]))
+    execution_options = execution_options_from_arguments(arguments, explicit, parent_lifecycle["execution_options"])
+
+    if mode == "resume":
+        if any(getattr(arguments, name) is not None for name in ("fork_lr_mode", "fork_learning_rate", "fork_min_lr", "fork_rewarm_iters")):
+            raise ValueError("resume mode rejects fork-only learning-rate options")
+        config = inherited_config(parent_config, arguments, explicit, run_mode="resume", max_iters=total_steps, instrumentation_backend=instrumentation)
+        paths = _paths_from_lifecycle(parent_lifecycle, resolved)
+        lifecycle = resume_lifecycle(
+            parent_lifecycle,
+            config=config,
+            starting_completed_updates=completed_updates,
+            instrumentation_backend=instrumentation,
+            execution_options=execution_options,
+        )
+        return {"mode": mode, "config": config, "paths": paths, "lifecycle": lifecycle, "payload": payload, "resolved": resolved, "allowed_override_fields": EXECUTION_OVERRIDE_FIELDS, "append_log": True, "execution_options": execution_options}
+
+    if arguments.fork_lr_mode != "restart_cosine":
+        raise ValueError("initial fork implementation requires --fork-lr-mode restart_cosine")
+    missing = [name for name in ("fork_learning_rate", "fork_min_lr", "fork_rewarm_iters") if getattr(arguments, name) is None]
+    if missing:
+        raise ValueError(f"restart_cosine fork requires {missing}")
+    inherited = inherited_config(parent_config, arguments, explicit, run_mode="fork", max_iters=total_steps, instrumentation_backend=instrumentation)
+    parent_training_config = TrainingConfig(**payload["trainer_config"])
+    phase_start_lr = learning_rate_for_config(parent_training_config, completed_updates)
+    generation = int(parent_lifecycle["fork_generation"]) + 1
+    suffix = fork_suffix(generation, str(parent_lifecycle["root_start_label"]))
+    config = replace(
+        inherited,
+        run_start_label=run_start_label_from_arguments(arguments),
+        artifact_suffix=suffix,
+        learning_rate=float(arguments.fork_learning_rate),
+        min_lr=float(arguments.fork_min_lr),
+        decay_iters=total_steps,
+        lr_schedule_kind=RESTART_COSINE_SCHEDULE,
+        phase_start_update=completed_updates,
+        phase_start_lr=phase_start_lr,
+        phase_peak_lr=float(arguments.fork_learning_rate),
+        phase_rewarm_iters=int(arguments.fork_rewarm_iters),
+        phase_end_update=total_steps,
+        phase_min_lr=float(arguments.fork_min_lr),
+    )
+    paths = config.paths(log_timestamp=arguments.log_timestamp)
+    paths["tensorboard_dir"] = Path(os.environ.get("THOG2_CURVE_ROOT", "curves")) / config.artifact_name
+    lifecycle = fork_lifecycle(
+        parent_lifecycle,
+        config=config,
+        paths=paths,
+        parent_checkpoint=resolved.checkpoint_path,
+        parent_completed_updates=completed_updates,
+        world_size=world_size,
+        instrumentation_backend=instrumentation,
+        execution_options=execution_options,
+        child_lr_phase=_fork_lr_phase(config),
+    )
+    return {"mode": mode, "config": config, "paths": paths, "lifecycle": lifecycle, "payload": payload, "resolved": resolved, "allowed_override_fields": FORK_LR_OVERRIDE_FIELDS, "append_log": False, "execution_options": execution_options}
+
+
+def resolved_payload(context: Mapping[str, Any], *, world_size: int) -> Dict[str, Any]:
+    config: OwtRunConfig = context["config"]
+    paths: Mapping[str, Path] = context["paths"]
+    lifecycle: Mapping[str, Any] = context["lifecycle"]
+    return {
+        "artifact_name": config.artifact_name,
+        "artifact_descriptor": config.artifact_descriptor,
+        "artifact_prefix": config.artifact_prefix,
+        "model_type": config.model_type,
+        "run_mode": config.run_mode,
+        "world_size": world_size,
+        "tokens_per_iter": config.tokens_per_iter(),
+        "append_log": bool(context["append_log"]),
+        "session_id": lifecycle["session_id"],
+        "canonical_config": config.canonical_dict(world_size=world_size),
+        "paths": {name: str(path) for name, path in paths.items()},
+    }
+
+
 def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer) -> None:
     report = trainer.parameter_report
     persistent = int(report["persistent_parameters"])
@@ -375,65 +741,140 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     print("model parameters and options", flush=True)
     print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
     print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
-    print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)                                # <<< THOG show bounded recovery policy before the run
+    print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)
     print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
         print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}", flush=True)
     print(flush=True)
-# ^^^ THOG
 
 
-def main() -> int:
-    arguments = build_parser().parse_args()
-    config = config_from_arguments(arguments)
+def print_schedule_startup(mode: str, config: OwtRunConfig, completed_updates: int, training_config: TrainingConfig) -> None:
+    first_lr = learning_rate_for_config(training_config, completed_updates)
+    print(f"{mode} schedule", flush=True)
+    print(f"  completed steps:             {completed_updates}", flush=True)
+    print(f"  total steps:                 {config.max_iters}", flush=True)
+    print(f"  remaining steps:             {config.max_iters - completed_updates}", flush=True)
+    print(f"  schedule:                    {training_config.lr_schedule_kind}", flush=True)
+    if training_config.lr_schedule_kind == COSINE_SCHEDULE:
+        print(f"  original decay end:          {training_config.decay_updates}", flush=True)
+    else:
+        print(f"  active phase end:            {training_config.phase_end_update}", flush=True)
+    step_label = "first resumed step LR" if mode == "resume" else "first fork step LR"
+    print(f"  {step_label + chr(58):<30}{first_lr:.3e}", flush=True)
+    if completed_updates >= (training_config.phase_end_update if training_config.lr_schedule_kind == RESTART_COSINE_SCHEDULE else training_config.decay_updates):
+        print("  after decay end:             hold minimum LR", flush=True)
+    print(flush=True)
+
+
+def _configure_instrumentation_environment(config: OwtRunConfig, lifecycle: Mapping[str, Any], mode: str) -> None:
+    os.environ["THOG2_INSTRUMENTATION"] = config.instrumentation_backend
+    tensorboard_dir = Path(str(lifecycle["tensorboard_dir"]))
+    os.environ["THOG2_CURVE_ROOT"] = str(tensorboard_dir.parent)
+    if config.instrumentation_backend == "wandb" and mode == "resume":
+        if lifecycle.get("wandb_run_id"):
+            os.environ["WANDB_RUN_ID"] = str(lifecycle["wandb_run_id"])
+            os.environ["WANDB_RESUME"] = "allow"
+        else:
+            os.environ.pop("WANDB_RUN_ID", None)
+            os.environ.pop("WANDB_RESUME", None)
+            print("THOG2 WARNING: the resumed checkpoint has no W&B run ID; starting a new telemetry run without changing training state.", flush=True)
+    else:
+        os.environ.pop("WANDB_RUN_ID", None)
+        os.environ.pop("WANDB_RESUME", None)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    arguments = parser.parse_args(actual_argv)
+    explicit = explicit_destinations(parser, actual_argv)
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
-    payload = resolved_payload(config, world_size=world_size, log_timestamp=arguments.log_timestamp)
+    context = _prepare_context(arguments, explicit, world_size)
+    config: OwtRunConfig = context["config"]
+    paths: Dict[str, Path] = context["paths"]
+    lifecycle: Dict[str, Any] = context["lifecycle"]
+    payload = resolved_payload(context, world_size=world_size)
     if arguments.print_artifact_name:
         print(config.artifact_name)
         return 0
     if arguments.print_resolved_json or arguments.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
-    paths = config.paths(log_timestamp=arguments.log_timestamp)
+
     checkpoint_path = paths["checkpoint_path"]
-    result_path = paths["result_path"]
+    session_result_path = current_session_result_path(lifecycle)
     if config.run_mode == "fresh" and checkpoint_path.exists():
         raise FileExistsError(f"fresh run refuses to overwrite {checkpoint_path}")
-    if config.run_mode == "resume" and not checkpoint_path.is_file():
-        raise FileNotFoundError(f"resume checkpoint is missing: {checkpoint_path}")
+    for key in ("checkpoint_dir", "log_dir", "result_dir", "tensorboard_dir"):
+        paths[key].mkdir(parents=True, exist_ok=True)
+    if rank == 0:
+        write_run_manifest(paths["manifest_path"], lifecycle)
+
+    apply_execution_options(context["execution_options"])
+    configure_attention_backend(config.attention_backend)
+    _configure_instrumentation_environment(config, lifecycle, config.run_mode)
     dataset_dir = Path(config.data_dir)
     dataset = validate_dataset(dataset_dir, config.block_size)
     training_config = config.to_training_config(vocab_size=int(dataset["vocab_size"]), world_size=world_size, out_dir=paths["checkpoint_dir"])
-    if config.run_mode == "resume":
-        validate_resume_controls(checkpoint_path, training_config)
-    for key in ("checkpoint_dir", "log_dir", "result_dir"):
-        paths[key].mkdir(parents=True, exist_ok=True)
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
-    if config.run_mode == "resume":
-        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips})
+    if config.run_mode in ("resume", "fork"):
+        trainer = OwtTrainer.from_checkpoint(
+            context["resolved"].checkpoint_path,
+            train_tokens,
+            validation_tokens,
+            target_config=training_config,
+            allowed_override_fields=context["allowed_override_fields"],
+        )
     else:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
+    trainer.set_lifecycle_metadata(lifecycle)
+
     canonical = config.canonical_dict(world_size=world_size)
     source = source_identity()
-    telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
+    telemetry = WandbTelemetry(
+        enabled=(config.instrumentation_backend != "none" and trainer.distributed.is_primary),
+        project=config.wandb_project,
+        entity=config.wandb_entity,
+        mode=config.wandb_mode,
+        root=Path(config.wandb_root),
+        name=config.artifact_name,
+        group=config.experiment_prefix,
+        job_type="dense2" if config.model_type == "dense" else "sheet",
+        config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report},
+    )
     try:
         if trainer.distributed.is_primary:
             telemetry.start()
             telemetry.add_initial_summary(trainer.parameter_report)
+            wandb_id = str(getattr(telemetry.run, "id", "")) or lifecycle.get("wandb_run_id")
+            lifecycle = update_wandb_identity(lifecycle, wandb_id)
+            trainer.set_lifecycle_metadata(lifecycle)
+            write_run_manifest(paths["manifest_path"], lifecycle)
+        gathered_lifecycle = trainer.distributed.all_gather_object(lifecycle if trainer.distributed.is_primary else None)
+        lifecycle = gathered_lifecycle[0]
+        trainer.set_lifecycle_metadata(lifecycle)
+        trainer.distributed.barrier()
         attach_telemetry(trainer, telemetry)
         if trainer.distributed.is_primary:
-            print_model_parameters_and_options(config, trainer)                                                                                         # <<< THOG show the complete effective training setup before the first update
-        result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=result_path)
-        result["artifact"] = {"name": config.artifact_name, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}
+            if config.run_mode == "resume":
+                print_schedule_startup("resume", config, int(context["payload"]["completed_updates"]), training_config)
+            elif config.run_mode == "fork":
+                print_schedule_startup("fork", config, int(context["payload"]["completed_updates"]), training_config)
+            print_model_parameters_and_options(config, trainer)
+        result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=session_result_path)
+        result["artifact"] = {"name": config.artifact_name, "descriptor": config.artifact_descriptor, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}
+        result["lifecycle"] = lifecycle
         result["canonical_config"] = canonical
         result["source"] = source
+        result["timing"]["session_training_seconds"] = result["timing"]["training_seconds"]
         if trainer.distributed.is_primary:
-            result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            session_result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            paths["result_path"].write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             telemetry.add_final_result(result)
-            print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
+            print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(paths["result_path"]), "session_result": str(session_result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
         return 0
     finally:
         if rank == 0:

@@ -1,0 +1,35 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Specification Review\b0\par
+\pard\qc\sa320\f0\fs22 Final completeness and consistency audit\par
+\pard\sa170\f0\fs23 Status: Final audit complete against the implemented branch.\par
+\pard\sa190\sb280\f0\fs29\b 1. Documents and code reviewed\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Enhanced Resume and Fork Requirements Specification.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Enhanced Resume and Fork Implementation Plan.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Enhanced Resume and Fork Test Plan.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Existing compact-geometry, checkpoint, wrapper, naming, scheduler, and telemetry contracts.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Implemented Python modules, wrappers, checkpoint payloads, manifests, and tests.\par
+\pard\sa190\sb280\f0\fs29\b 2. Total-step semantics\b0\par
+\pard\sa170\f0\fs23 -n has one meaning in all modes: total optimizer steps for the run, not additional steps. Resume/fork require it explicitly and reject values less than or equal to completed_updates.\par
+\pard\sa170\f0\fs23 This is consistent with the training loop condition completed_updates < max_updates and avoids invocation-relative ambiguity.\par
+\pard\sa190\sb280\f0\fs29\b 3. Learning-rate consistency\b0\par
+\pard\sa170\f0\fs23 Resume evaluates the saved original schedule at completed_updates. A larger -n changes only the stop condition. Fork restart_cosine creates a new checkpointed phase ending at -n.\par
+\pard\sa170\f0\fs23 The phrase first resumed step LR is precise: schedule parameters are immutable in resume, while the LR value may continue to evolve as the saved schedule is evaluated at later steps.\par
+\pard\sa190\sb280\f0\fs29\b 4. Artifact terminology and identity\b0\par
+\pard\sa170\f0\fs23 artifact_descriptor and artifact_name are distinct and used consistently. Runtime checkpoint paths use artifact_name because the directory includes the leading timestamp and optional fork suffix.\par
+\pard\sa170\f0\fs23 n_, w_, k_, and S_ are excluded. Batch, accumulation, model dimensions, geometry, basis, orders, residual identity, dataset, and original peak-LR code remain visible.\par
+\pard\sa190\sb280\f0\fs29\b 5. Material versus operational controls\b0\par
+\pard\sa170\f0\fs23 dtype and non-finite controls are material and must match. Device, attention backend, activation checkpointing, checkpoint segment size, evaluation/log/checkpoint cadence, and instrumentation are operational.\par
+\pard\sa170\f0\fs23 checkpoint_root is only a resolver input. It does not mutate inherited run configuration. eval_interval=0 consistently disables evaluation.\par
+\pard\sa190\sb280\f0\fs29\b 6. Lifecycle and lineage\b0\par
+\pard\sa170\f0\fs23 fresh, resume, and fork are disjoint. Resume reuses logical identity and outputs; fork creates a child identity and exactly one generated lineage suffix. Fork of fork increments generation while retaining the root timestamp.\par
+\pard\sa190\sb280\f0\fs29\b 7. Checkpoint and telemetry consistency\b0\par
+\pard\sa170\f0\fs23 Checkpoint schema 3 is self-sufficient for model and optimizer recovery and contains lifecycle and phase state. The atomic manifest supports discovery and telemetry continuity without replacing checkpoint state.\par
+\pard\sa170\f0\fs23 W&B reuse is best effort and isolated from training state. TensorBoard and lifetime step axes remain continuous across resume.\par
+\pard\sa190\sb280\f0\fs29\b 8. Compatibility scope\b0\par
+\pard\sa170\f0\fs23 Earlier checkpoints and earlier artifact grammars are deliberately unsupported. No migration promise remains in the specification, implementation plan, tests, or code.\par
+\pard\sa190\sb280\f0\fs29\b 9. Audit conclusion\b0\par
+\pard\sa170\f0\fs23 The requirements, implementation plan, test plan, and implementation are internally consistent for the approved initial scope. No unresolved semantic contradiction was found in the final audit.\par
+}

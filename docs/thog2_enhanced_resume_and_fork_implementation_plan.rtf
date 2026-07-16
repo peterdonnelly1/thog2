@@ -1,0 +1,46 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Implementation Plan\b0\par
+\pard\qc\sa320\f0\fs22 Implemented module map, staged delivery, and release gates\par
+\pard\sa170\f0\fs23 Status: Implementation complete; release verification is performed by focused tests, end-to-end CPU training, and branch CI.\par
+\pard\sa190\sb280\f0\fs29\b 1. Working rules\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Implement only on enhanced_resume_and_fork and preserve fresh, dense, compact, checkpoint, and instrumentation paths.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not change model mathematics or coefficient layouts.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not support pre-lifecycle checkpoints or copy, rename, or migrate checkpoints.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep lifecycle, resolution, manifest, and scheduler policy in Python; keep wrappers as user-facing argument adapters.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use snake_case and THOG source markers.\par
+\pard\sa190\sb280\f0\fs29\b 2. Implemented module boundaries\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - sheet/run_lifecycle.py owns logical IDs, sessions, parent/root lineage, fork generations, and lifecycle validation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - sheet/run_manifest.py owns atomic manifest writes and reads.\par
+\pard\sa100\li360\fi-240\f0\fs23 - sheet/checkpoint_resolver.py owns path, directory, artifact_name, and leading-timestamp resolution.\par
+\pard\sa100\li360\fi-240\f0\fs23 - sheet/lr_schedule.py owns original cosine and restart_cosine evaluation and validation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - sheet/training_config.py and checkpoint mixins own schema 3, override boundaries, scaler state, phase state, and restoration.\par
+\pard\sa100\li360\fi-240\f0\fs23 - run_thog2_owt.py owns mode-aware parsing, inheritance, diagnostics, startup schedule display, telemetry continuity, and orchestration.\par
+\pard\sa100\li360\fi-240\f0\fs23 - current_scruffy_train_OWT.sh and current_dreedle_train_OWT.sh expose -q, --resume-from, -0 through -3, operational overrides, and material assertions.\par
+\pard\sa190\sb280\f0\fs29\b 3. Stage 0 - contract tests\b0\par
+\pard\sa170\f0\fs23 Implemented named tests for total-step semantics, diagnostics, selector behavior, naming, LR calculations, fork phase boundaries, lineage, manifests, wrapper forwarding, and throughput accounting.\par
+\pard\sa190\sb280\f0\fs29\b 4. Stage 1 - stable identity and schema\b0\par
+\pard\sa170\f0\fs23 Removed n_, w_, k_, and S_ from artifact_descriptor. Added artifact_descriptor, timestamped artifact_name, lifecycle schema 1, checkpoint schema 3, logical/session IDs, phase history, and atomic manifests.\par
+\pard\sa190\sb280\f0\fs29\b 5. Stage 2 - deterministic resolver\b0\par
+\pard\sa170\f0\fs23 Implemented exact file, directory, artifact_name, and leading YYMMDD-HHMM selectors with zero/multiple-match failures and no newest-run fallback.\par
+\pard\sa190\sb280\f0\fs29\b 6. Stage 3 - mode-aware CLI and wrappers\b0\par
+\pard\sa170\f0\fs23 Implemented fresh, resume, and fork modes; mandatory total -n for resume/fork; numeric fork controls; long aliases; scalar resume assertions; and early validation.\par
+\pard\sa170\f0\fs23 Wrapper -e 0 and Python eval_interval=0 are supported. Invalid targets fail before training-side effects.\par
+\pard\sa190\sb280\f0\fs29\b 7. Stage 4 - checkpoint-driven resume\b0\par
+\pard\sa170\f0\fs23 Implemented checkpoint inheritance, material equality assertions, operational override whitelist, optimizer/scaler/RNG/batch-source restoration, original schedule continuation, and visible first resumed step LR.\par
+\pard\sa190\sb280\f0\fs29\b 8. Stage 5 - continuous outputs and telemetry\b0\par
+\pard\sa170\f0\fs23 Implemented checkpoint/log/TensorBoard reuse, append logging, session result files, aggregate results, session-only throughput, W&B ID persistence/reuse, and missing-ID warning.\par
+\pard\sa190\sb280\f0\fs29\b 9. Stage 6 - fork lineage\b0\par
+\pard\sa170\f0\fs23 Implemented child logical identity, new outputs, generated __FORK_n_FROM_root suffix, immediate-parent and root metadata, ordered lineage, and fork-of-fork generation.\par
+\pard\sa190\sb280\f0\fs29\b 10. Stage 7 - restart_cosine\b0\par
+\pard\sa170\f0\fs23 Implemented discrete phase validation and LR evaluation, parent boundary LR, linear rewarm, cosine decay, exact final minimum LR, optimizer-moment retention, checkpointed phase history, and resume within a child phase.\par
+\pard\sa190\sb280\f0\fs29\b 11. Stage 8 - regression and release\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Compile all Python sources.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run bash -n on both canonical wrappers.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run focused lifecycle, naming, wrapper, throughput, scheduler, manifest, and resolver tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run a real CPU fresh -> resume -> fork integration test.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run the repository regression suite in GitHub Actions on the clean branch.\par
+\pard\sa100\li360\fi-240\f0\fs23 - GPU smoke tests run only where a GPU runner is available; lack of a GPU runner is recorded rather than simulated.\par
+}

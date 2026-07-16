@@ -83,4 +83,66 @@ if '--print-resolved-json' in args or '--dry-run' in args:
         for lr_code in (60, 70):
             assert f"b_{batch_size}_LR_{lr_code:02d}_" in completed.stdout
             assert f"(LR_{lr_code})" in completed.stdout
+
+def test_resume_wrapper_forwards_explicit_material_values_as_assertions(tmp_path: Path) -> None:
+    fake_python = tmp_path / "fake_python_resume"
+    fake_python.write_text(
+        """#!/usr/bin/env python3
+import json
+import sys
+
+if len(sys.argv) >= 2 and sys.argv[1] == '-':
+    print(1)
+    raise SystemExit(0)
+args = sys.argv[1:]
+if '--print-resolved-json' in args:
+    print(json.dumps({
+        'artifact_name': '260715-1200_PARENT',
+        'paths': {'log_path': 'logs/260715-1200_PARENT/train.log'},
+        'append_log': True,
+    }))
+elif '--dry-run' in args:
+    print(json.dumps({'dry_run': True}))
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    environment = dict(os.environ)
+    environment["THOG2_PYTHON"] = str(fake_python)
+    for wrapper_name in WRAPPERS:
+        completed = subprocess.run(
+            [
+                "bash", wrapper_name, "-q", "resume", "--resume-from", "260715-1200", "-n", "20", "-x", "true",
+                "-g", "PARENT", "-p", "depth", "-b", "3", "-c", "60", "-f", "06", "-A", "4", "-w", "10",
+                "-L", "12", "-H", "4", "-D", "32", "-C", "16", "-P", "4", "-Q", "8", "-J", "4", "-O", "4",
+                "-X", "8", "-Y", "32", "-r", "depth_scaled", "-z", "dof_implied_depth", "-Z", "12", "-T", "bfloat16",
+                "-d", "openwebtext", "-t", "data/openwebtext", "-e", "0", "-I", "none",
+            ],
+            cwd=REPOSITORY_ROOT, env=environment, text=True, capture_output=True, check=False, timeout=30,
+        )
+        assert completed.returncode == 0, completed.stderr + completed.stdout
+        dry_run_line = next(line for line in completed.stdout.splitlines() if line.startswith("DRY RUN:"))
+        for expected in (
+            "--run-name PARENT", "--experiment-prefix PARENT", "--model-type sheet", "--geometry-preset depth",
+            "--batch-size 3", "--learning-rate 60e-5", "--min-lr 6e-5", "--gradient-accumulation-steps 4",
+            "--warmup-iters 10", "--n-layer 12", "--n-head 4", "--n-embd 32", "--block-size 16",
+            "--o-depth 4", "--o-attn-d-model 8", "--o-attn-qkv-per-channel 4", "--o-attn-out-per-channel 4",
+            "--o-mlp-d-model 8", "--o-mlp-hidden 32", "--dtype bfloat16", "--eval-interval 0",
+        ):
+            assert expected in dry_run_line
+
+
+def test_resume_wrapper_rejects_grid_valued_material_assertions(tmp_path: Path) -> None:
+    fake_python = tmp_path / "fake_python_resume_grid"
+    fake_python.write_text("#!/usr/bin/env python3\nimport sys\nprint(1)\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    environment = dict(os.environ)
+    environment["THOG2_PYTHON"] = str(fake_python)
+    completed = subprocess.run(
+        ["bash", "current_scruffy_train_OWT.sh", "-q", "resume", "--resume-from", "260715-1200", "-n", "20", "-b", "2,4"],
+        cwd=REPOSITORY_ROOT, env=environment, text=True, capture_output=True, check=False, timeout=30,
+    )
+    assert completed.returncode == 2
+    assert "BATCH_SIZE must be a single value" in completed.stderr
+
 # ^^^ THOG

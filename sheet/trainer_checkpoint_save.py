@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict, Mapping, Union
 
 from .checkpoints import (
     capture_rng_state,
@@ -12,13 +12,19 @@ from .checkpoints import (
     optimizer_group_names,
     save_payload,
 )
+from .run_lifecycle import validate_lifecycle
 from .training_config import CHECKPOINT_SCHEMA_VERSION
 
 
 class TrainerCheckpointSaveMixin:
+    # vvv THOG lifecycle metadata is attached by the OWT runner before the first checkpoint
+    def set_lifecycle_metadata(self, lifecycle: Mapping[str, Any]) -> None:
+        self.lifecycle_metadata = validate_lifecycle(lifecycle)
+    # ^^^ THOG
+
     def checkpoint_payload(self) -> Dict[str, Any]:
         compact_identity = self.config.compact_identity_metadata()
-        return {
+        payload: Dict[str, Any] = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "model_type": self.config.model_type,
             "model_args": self.config.model_arguments(),
@@ -29,6 +35,7 @@ class TrainerCheckpointSaveMixin:
             "model": compact_model_state(self.raw_model, self.config.model_type),
             "optimizer": self.optimizer.state_dict(),
             "optimizer_group_parameter_names": optimizer_group_names(self.optimizer),
+            "scaler": self.scaler.state_dict(),                                                                                                         # <<< THOG preserve float16 GradScaler state across resume and fork
             "trainer_state": asdict(self.state),
             "completed_updates": self.state.completed_updates,
             "trainer_config": asdict(self.config),
@@ -37,6 +44,10 @@ class TrainerCheckpointSaveMixin:
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},
             "distributed_training": self.distributed.report(),
         }
+        lifecycle = getattr(self, "lifecycle_metadata", None)
+        if lifecycle is not None:
+            payload["lifecycle"] = validate_lifecycle(lifecycle)                                                                                       # <<< THOG checkpoint self-sufficient lifecycle and lineage metadata
+        return payload
 
     def save_checkpoint(self, path: Union[str, Path]) -> Path:
         target = Path(path)
@@ -51,16 +62,16 @@ class TrainerCheckpointSaveMixin:
         return target
 
     def startup_report_json(self) -> str:
-        return json.dumps(
-            {
-                "model_type": self.config.model_type,
-                "model_args": self.config.model_arguments(),
-                "completed_updates": self.state.completed_updates,
-                "parameter_report": self.parameter_report,
-                "compact_identity": self.config.compact_identity_metadata(),
-                "distributed": self.distributed.report(),
-            },
-            indent=2,
-            sort_keys=True,
-        )
+        report = {
+            "model_type": self.config.model_type,
+            "model_args": self.config.model_arguments(),
+            "completed_updates": self.state.completed_updates,
+            "parameter_report": self.parameter_report,
+            "compact_identity": self.config.compact_identity_metadata(),
+            "distributed": self.distributed.report(),
+        }
+        lifecycle = getattr(self, "lifecycle_metadata", None)
+        if lifecycle is not None:
+            report["lifecycle"] = validate_lifecycle(lifecycle)
+        return json.dumps(report, indent=2, sort_keys=True)
 # ^^^ THOG
