@@ -35,6 +35,23 @@ def _session_consumed_tokens(
 # ^^^ THOG
 
 
+# vvv THOG soft wall-clock budget helpers for equal-time geometry grids
+def _max_wall_seconds(max_wall_minutes: int) -> Optional[float]:
+    if max_wall_minutes <= 0:
+        return None
+    return float(max_wall_minutes) * 60.0
+
+
+def _wall_limit_reached(
+    wall_started: float,
+    max_wall_seconds: Optional[float],
+) -> bool:
+    if max_wall_seconds is None:
+        return False
+    return (time.perf_counter() - wall_started) >= max_wall_seconds
+# ^^^ THOG
+
+
 # vvv THOG
 # _PROGRESS_FIELD_LABELS = {
 #     "completed_updates": "updates",
@@ -260,10 +277,15 @@ class Stage6Trainer(Stage4Trainer):
         update_rows: List[Dict[str, Any]] = []
         evaluation_rows: List[Dict[str, Any]] = []
         wall_started = time.perf_counter()
+        # vvv THOG stop equal-time geometry screens before starting an update after the budget expires
+        max_wall_seconds = _max_wall_seconds(int(self.config.max_wall_minutes))
+        stop_reason = "max_updates"
+        # ^^^ THOG
         self._print_progress(
             run_id,
             "run_started",
             max_updates=self.config.max_updates,
+            max_wall_minutes=self.config.max_wall_minutes,
             tokens_per_update=tokens_per_update,
         )
 
@@ -291,6 +313,18 @@ class Stage6Trainer(Stage4Trainer):
             )
 
         while self.state.completed_updates < self.config.max_updates:
+            # vvv THOG soft deadline is checked only between updates so checkpoint/eval semantics stay clean
+            if _wall_limit_reached(wall_started, max_wall_seconds):
+                stop_reason = "max_wall_minutes"
+                self._print_progress(
+                    run_id,
+                    "wall_time_limit_reached",
+                    completed_updates=self.state.completed_updates,
+                    cumulative_wall_seconds=time.perf_counter() - wall_started,
+                    max_wall_minutes=self.config.max_wall_minutes,
+                )
+                break
+            # ^^^ THOG
             metrics, elapsed = self._timed(self.train_one_update)
             training_seconds += elapsed
             completed_updates = self.state.completed_updates
@@ -454,6 +488,10 @@ class Stage6Trainer(Stage4Trainer):
                 "completed_updates": self.state.completed_updates,
                 "tokens_per_update": tokens_per_update,
                 "consumed_tokens": self.state.completed_updates * tokens_per_update,
+                # vvv THOG expose wall-budget stop evidence beside existing update-count budget
+                "stop_reason": stop_reason,
+                "max_wall_minutes": self.config.max_wall_minutes,
+                # ^^^ THOG
                 # vvv THOG expose this process session separately from lifetime progress
                 "session_completed_updates": self.state.completed_updates - starting_completed_updates,
                 "session_consumed_tokens": final_session_consumed_tokens,
@@ -464,6 +502,9 @@ class Stage6Trainer(Stage4Trainer):
                 "evaluation_seconds": evaluation_seconds,
                 "checkpoint_seconds": checkpoint_seconds,
                 "wall_seconds": wall_seconds,
+                # vvv THOG record the active soft deadline in seconds for post-run wall-time comparison
+                "max_wall_seconds": max_wall_seconds,
+                # ^^^ THOG
                 "tokens_per_training_second": (
                     final_session_consumed_tokens / training_seconds
                     if training_seconds > 0.0
