@@ -260,4 +260,21 @@ class TrainingConfig:
             mlp_geometry=self.mlp_geometry,
             basis_family=self.basis_family,
         )
+
+    # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added
+    def compatibility_signature(self) -> Dict[str, Any]:
+        values = asdict(self)
+        if self.model_type == "thog2_sheet":
+            values.update(
+                {
+                    "o_attn_d_model": self.resolved_o_attn_d_model,
+                    "o_attn_qkv_per_channel": self.resolved_o_attn_qkv_per_channel,
+                    "o_attn_out_per_channel": self.resolved_o_attn_out_per_channel,
+                    "o_mlp_d_model": self.resolved_o_mlp_d_model,
+                    "o_mlp_hidden": self.resolved_o_mlp_hidden,
+                    "basis_version": self.basis_version,
+                }
+            )
+        return {name: values[name] for name in MODEL_COMPATIBILITY_FIELDS}
+    # ^^^ THOG
 # ^^^ THOG
