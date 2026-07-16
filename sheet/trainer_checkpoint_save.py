@@ -36,6 +36,7 @@ class TrainerCheckpointSaveMixin:
             "rng_state": capture_rng_state(),
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},
             "distributed_training": self.distributed.report(),
+            "lifecycle": getattr(self, "lifecycle_metadata", None),
         }
 
     def save_checkpoint(self, path: Union[str, Path]) -> Path:

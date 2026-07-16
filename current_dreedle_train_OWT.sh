@@ -12,6 +12,11 @@ RUN_MODULE="run_thog2_owt"
 HOST_LABEL="dreedle"
 RUN_MODE="fresh"
 RUN_NAME=""
+RESUME_FROM=""
+FORK_LR_MODE=""
+FORK_LEARNING_RATE=""
+FORK_MIN_LR=""
+FORK_REWARM_ITERS=""
 # EXPERIMENT_PREFIX="${THOG2_EXPERIMENT_PREFIX:-NELSON}"                                                                                                  # <<< THOG removed redundant environment-controlled experiment naming
 EXPERIMENT_PREFIX="NO_PREFIX"                                                                                                                            # <<< THOG -g now supplies the sole human run-name prefix
 DATASET_NAME="openwebtext"
@@ -26,6 +31,7 @@ BASIS_VERSION="auto"
 ATTENTION_GEOMETRY=""
 MLP_GEOMETRY=""
 STEPS=250
+STEPS_EXPLICIT=false
 BATCH_SIZE=3
 LEARNING_RATE_CODES="60"                                                                                                                               # <<< THOG wrapper learning-rate code list; 70 means 7.0e-04
 MIN_LR_CODE="06"                                                                                                                                         # <<< THOG wrapper minimum learning-rate code; 1..100; 06 means 6.0e-05 and 100 means 1.0e-03
@@ -75,9 +81,14 @@ Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 Model/run:
   -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block
                                                    single value, comma list, or quoted space list
-  -q RUN_MODE=${RUN_MODE}                        fresh | resume
+  -q RUN_MODE=${RUN_MODE}                        fresh | resume | fork
   -g RUN_NAME=${RUN_NAME:-auto}
-  -n STEPS=${STEPS}
+  -n STEPS=${STEPS}                              total optimizer steps for the run (not additional steps)
+  --resume-from SELECTOR                         checkpoint path, artifact_name, or leading timestamp
+  -0 FORK_LEARNING_RATE=${FORK_LEARNING_RATE:-unset}
+  -1 FORK_MIN_LR=${FORK_MIN_LR:-unset}
+  -2 FORK_REWARM_ITERS=${FORK_REWARM_ITERS:-unset}
+  -3 FORK_LR_MODE=${FORK_LR_MODE:-unset}        continue | restart_cosine
   -b BATCH_SIZE=${BATCH_SIZE}                         single integer, comma list, or quoted space list
   -c LR_CODES=${LEARNING_RATE_CODES}                    learning-rate codes 1..1000; 70 means 7.0e-04; list allowed
   -f MIN_LR_CODE=${MIN_LR_CODE}                         minimum LR code; 1..100; 06 means 6.0e-05 and 100 means 1.0e-03
@@ -134,10 +145,27 @@ Paths:
 EOF_USAGE
 }
 
-while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+
+# vvv THOG pre-consume long lifecycle options before getopts handles compact wrapper flags
+NORMALIZED_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --resume-from) [[ $# -ge 2 ]] || { echo "--resume-from requires an argument." >&2; exit 2; }; RESUME_FROM="$2"; shift 2 ;;
+    --fork-lr-mode) [[ $# -ge 2 ]] || { echo "--fork-lr-mode requires an argument." >&2; exit 2; }; FORK_LR_MODE="$2"; shift 2 ;;
+    --fork-learning-rate) [[ $# -ge 2 ]] || { echo "--fork-learning-rate requires an argument." >&2; exit 2; }; FORK_LEARNING_RATE="$2"; shift 2 ;;
+    --fork-min-lr) [[ $# -ge 2 ]] || { echo "--fork-min-lr requires an argument." >&2; exit 2; }; FORK_MIN_LR="$2"; shift 2 ;;
+    --fork-rewarm-iters) [[ $# -ge 2 ]] || { echo "--fork-rewarm-iters requires an argument." >&2; exit 2; }; FORK_REWARM_ITERS="$2"; shift 2 ;;
+    --) NORMALIZED_ARGS+=("--"); shift; NORMALIZED_ARGS+=("$@"); break ;;
+    *) NORMALIZED_ARGS+=("$1"); shift ;;
+  esac
+done
+set -- "${NORMALIZED_ARGS[@]}"
+# ^^^ THOG
+
+while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:0:1:2:3:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
-    n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG" ;; f) MIN_LR_CODE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
+    n) STEPS="$OPTARG"; STEPS_EXPLICIT=true ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG" ;; f) MIN_LR_CODE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
@@ -145,6 +173,7 @@ while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
+    0) FORK_LEARNING_RATE="$OPTARG" ;; 1) FORK_MIN_LR="$OPTARG" ;; 2) FORK_REWARM_ITERS="$OPTARG" ;; 3) FORK_LR_MODE="$OPTARG" ;;
     h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
   esac
 done
@@ -217,7 +246,7 @@ parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE" BATCH_SIZE_VALUES         
 parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                            # <<< THOG parse LR grid
 validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                        # <<< THOG validate minimum LR code
 
-case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
+case "$RUN_MODE" in fresh|resume|fork) ;; *) echo "RUN_MODE must be fresh, resume, or fork." >&2; exit 2 ;; esac
 case "$BASIS_FAMILY" in chebyshev|dct) ;; *) echo "BASIS_FAMILY must be chebyshev or dct." >&2; exit 2 ;; esac
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
 # vvv THOG one instrumentation selector determines both backend and W&B mode; contradictory -I/-M/-W combinations no longer exist
@@ -307,10 +336,19 @@ run_preset_o_depth_batch_lr() {
   fi
 
   run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
+  resume_from_args=()
+  fork_lr_args=()
+  max_iters_args=()
+  [[ -n "$RESUME_FROM" ]] && resume_from_args=(--resume-from "$RESUME_FROM")
+  [[ -n "$FORK_LR_MODE" ]] && fork_lr_args+=(--fork-lr-mode "$FORK_LR_MODE")
+  [[ -n "$FORK_LEARNING_RATE" ]] && fork_lr_args+=(--fork-learning-rate "$FORK_LEARNING_RATE")
+  [[ -n "$FORK_MIN_LR" ]] && fork_lr_args+=(--fork-min-lr "$FORK_MIN_LR")
+  [[ -n "$FORK_REWARM_ITERS" ]] && fork_lr_args+=(--fork-rewarm-iters "$FORK_REWARM_ITERS")
+  if [[ "$RUN_MODE" == "fresh" || "$STEPS_EXPLICIT" == true ]]; then max_iters_args=(--max-iters "$STEPS"); fi
   train_args=(
-    --model-type "$run_model_type" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$run_name_value"
+    --model-type "$run_model_type" --run-mode "$RUN_MODE" "${resume_from_args[@]}" "${fork_lr_args[@]}" --host-label "$HOST_LABEL" --run-name "$run_name_value"
     --dataset "$DATASET_NAME" --data-dir "$DATA_DIR" --checkpoint-root "$CHECKPOINT_ROOT" --log-root "$LOG_ROOT" --result-root "$RESULT_ROOT" --wandb-root "$WANDB_ROOT"
-    --max-iters "$STEPS" --batch-size "$batch_size_value" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
+    "${max_iters_args[@]}" --batch-size "$batch_size_value" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
     --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS" --learning-rate "$learning_rate_value" --min-lr "$min_lr_value"
     --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE"
     --o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN"

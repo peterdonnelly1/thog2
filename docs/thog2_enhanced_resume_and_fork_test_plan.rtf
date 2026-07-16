@@ -1,0 +1,140 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Test Plan\b0\par
+\pard\qc\sa320\f0\fs22 Regression-heavy verification for stable identity, resume, fork lineage, telemetry continuity, and phase-aware LR schedules\par
+\pard\sa170\f0\fs23 Status: Draft for review. Tests are specified but not implemented in this branch.\par
+
+\pard\sa190\sb280\f0\fs29\b 1. Test principles\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Test public lifecycle semantics before private implementation details.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use descriptive names that state the requirement and failure condition.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Prefer deterministic tiny CPU fixtures for state, schedule, and lineage equivalence.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Treat ambiguity, silent fallback, hidden file movement, schedule-endpoint redefinition, and silent material mutation as failures.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fake W&B and TensorBoard; do not require network access.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use temporary real filesystem trees for selector, manifest, log, and result tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run wrapper dry-runs and shell syntax tests for scruffy and dreedle.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Retain full DENSE and compact-geometry regression.\par
+
+\pard\sa190\sb280\f0\fs29\b 2. Core fixtures\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Enhanced-schema fresh DENSE and full_block checkpoints.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Checkpoints before warmup end, mid-cosine, at decay endpoint, and after decay endpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - First- and second-generation fork artifact_name values.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Checkpoints mid-rewarm and mid-child-cosine.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fake W&B metadata with unique, missing, and conflicting IDs.\par
+\pard\sa100\li360\fi-240\f0\fs23 - An older checkpoint schema used only to verify hard failure.\par
+
+\pard\sa190\sb280\f0\fs29\b 3. Wrapper and CLI tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_help_describes_n_as_total_optimizer_steps_for_the_run_not_additional_steps.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_wrapper_accepts_fresh_resume_and_fork_modes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_requires_resume_from_and_explicit_n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fork_requires_resume_from_and_explicit_n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fresh_rejects_resume_from_and_fork_only_options.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_numeric_fork_options_zero_through_three_match_long_options.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_and_fork_preserve_omitted_values_as_none_instead_of_applying_fresh_defaults.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_scruffy_and_dreedle_wrapper_help_and_shell_syntax.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_user_facing_documents_do_not_use_redundant_exact_resume_term.\par
+
+\pard\sa190\sb280\f0\fs29\b 4. Mandatory total-STEPS validation tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_without_n_prints_required_info_and_exits_before_checkpoint_load.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fork_without_n_prints_required_info_and_exits_before_checkpoint_load.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_n_less_than_completed_prints_required_total_steps_explanation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_n_equal_to_completed_prints_accurate_equal_value_heading_and_same_explanation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fork_n_less_than_or_equal_to_parent_completion_fails_before_child_artifact_creation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_checkpoint_at_6000_with_n_10000_executes_exactly_4000_more_updates.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_checkpoint_at_10000_with_n_50000_executes_exactly_40000_more_updates.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_invalid_n_does_not_allocate_gpu_initialize_telemetry_append_logs_or_write_checkpoint.\par
+\pard\sa120\sb170\f0\fs24\b Exact diagnostic assertions\b0\par
+\pard\sa180\li360\f1\fs20 THOG2 INFO: -n was omitted during resume!\line You must specify a value for n, which must be greater than the number of steps already completed\par
+\pard\sa180\li360\f1\fs20 THOG2 INFO: -n is less than the number of steps already completed!\line For clarity, n is taken to be the total of all steps, not an additional amount of steps. It must therefore be greater than the number of steps completed to date\par
+
+\pard\sa190\sb280\f0\fs29\b 5. Artifact naming and terminology tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_future_artifact_descriptor_excludes_n_w_and_k.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_artifact_descriptor_retains_batch_accumulation_model_geometry_basis_orders_residual_identity_and_original_peak_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_artifact_name_is_timestamp_descriptor_and_optional_single_fork_suffix.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_checkpoint_path_placeholders_and_runtime_paths_use_artifact_name_not_artifact_descriptor.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_changing_only_total_steps_warmup_or_checkpoint_interval_does_not_change_artifact_descriptor.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_changing_batch_size_or_model_descriptive_field_changes_artifact_descriptor.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_reuses_original_artifact_name_and_path.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_lineage_examples_use_descriptor_of_parent_child_and_grandchild.\par
+
+\pard\sa190\sb280\f0\fs29\b 6. Checkpoint resolver tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_checkpoint_file_directory_artifact_name_and_leading_timestamp_selectors_resolve_same_checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_timestamp_selector_matches_only_leading_timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_root_timestamp_inside_fork_suffix_is_not_a_selector_match.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_zero_matches_fail_with_deterministic_diagnostic.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_multiple_matches_fail_without_latest_or_first_fallback.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resolver_never_copies_renames_or_normalizes_checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_checkpoint_without_enhanced_lifecycle_schema_hard_fails.\par
+
+\pard\sa190\sb280\f0\fs29\b 7. Resume configuration tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_minimal_resume_reconstructs_model_optimizer_batch_orders_seeds_and_schedule_from_checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_equal_explicit_material_values_are_accepted_as_assertions.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_each_material_mismatch_fails_before_trainer_construction.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_each_approved_operational_override_is_applied.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_unapproved_override_is_rejected.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_requires_checkpoint_world_size_until_safe_change_is_separately_approved.\par
+
+\pard\sa190\sb280\f0\fs29\b 8. Resume state equivalence tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_interrupted_and_uninterrupted_runs_match_model_optimizer_scaler_rng_batch_source_and_counters.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_nonfinite_skip_counters_resume_exactly.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_completed_updates_and_consumed_tokens_remain_lifetime_totals.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_session_completed_updates_and_session_consumed_tokens_start_at_zero_after_resume.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resumed_console_and_final_tok_per_second_use_session_tokens.\par
+
+\pard\sa190\sb280\f0\fs29\b 9. Resume LR calculation tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_before_warmup_end_calculates_same_first_resumed_step_lr_as_uninterrupted_run.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_mid_cosine_calculates_same_first_resumed_step_lr_as_uninterrupted_run.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_at_decay_endpoint_calculates_original_minimum_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_each_resumed_step_uses_completed_updates_as_input_to_restored_original_schedule.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_larger_total_steps_does_not_change_warmup_decay_endpoint_minimum_lr_or_first_resumed_step_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_extension_past_original_decay_endpoint_holds_original_minimum_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_startup_console_prints_completed_total_remaining_schedule_decay_end_first_resumed_step_lr_and_post_decay_rule.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_startup_console_does_not_print_redundant_restored_position.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_user_does_not_supply_schedule_input_and_checkpoint_completed_updates_is_authoritative.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_schedule_parameters_are_immutable_while_lr_value_continues_to_evolve_under_restored_schedule.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_larger_n_does_not_rebuild_cosine_with_n_as_new_decay_endpoint.\par
+
+\pard\sa190\sb280\f0\fs29\b 10. Log, result, and instrumentation continuity tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_appends_same_train_log_with_session_boundary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_reuses_same_tensorboard_logical_directory_and_lifetime_step_axis.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_reuses_stored_wandb_id_when_available.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_missing_or_failed_wandb_continuity_warns_without_changing_training_state.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_each_session_gets_distinct_result_record_and_aggregate_result_is_updated.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_telemetry_metrics_continue_at_lifetime_optimizer_update.\par
+
+\pard\sa190\sb280\f0\fs29\b 11. Fork identity and lineage tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_first_fork_uses_generation_one_and_root_timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fork_of_fork_uses_generation_two_and_same_root_timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_child_suffix_replaces_rather_than_appends_parent_suffix.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_child_artifact_name_contains_descriptor_of_child_not_parent_placeholder.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_fork_creates_new_logical_id_artifact_name_checkpoint_log_results_tensorboard_and_wandb_identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_child_records_immediate_parent_root_parent_checkpoint_parent_step_and_full_lineage_before_first_update.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_noop_continue_fork_fails_in_initial_implementation.\par
+
+\pard\sa190\sb280\f0\fs29\b 12. restart_cosine schedule tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_restart_cosine_requires_mode_peak_min_rewarm_and_total_steps.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_continue_rejects_peak_min_and_rewarm_controls.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_phase_start_update_equals_parent_completed_updates.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_phase_start_lr_equals_parent_schedule_lr_at_boundary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_phase_end_update_equals_total_steps_n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_nonzero_rewarm_starts_at_parent_lr_and_reaches_requested_peak.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_zero_rewarm_two_update_phase_uses_peak_on_first_child_update.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_final_child_update_uses_requested_minimum_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_optimizer_moments_are_preserved_across_fork.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_phase_history_and_active_index_are_checkpointed.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_mid_rewarm_matches_uninterrupted_child_lr_sequence.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_resume_mid_child_cosine_matches_uninterrupted_child_lr_sequence.\par
+
+\pard\sa190\sb280\f0\fs29\b 13. DDP and GPU tests\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_ddp_ranks_resolve_identical_checkpoint_and_lifecycle_identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_ddp_primary_rank_only_mutates_manifests_logs_and_telemetry.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_ddp_resume_calculates_identical_first_resumed_step_lr_on_all_ranks.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_ddp_fork_creates_identical_child_phase_on_all_ranks.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_gpu_resume_smoke_uses_checkpoint_device_dtype_and_same_first_resumed_step_lr.\par
+\pard\sa100\li360\fi-240\f0\fs23 - test_gpu_fork_restart_cosine_smoke_preserves_optimizer_moments.\par
+
+\pard\sa190\sb280\f0\fs29\b 14. Regression commands and exit gate\b0\par
+\pard\sa180\li360\f1\fs20 python -m unittest tests.test_enhanced_resume_cli\line python -m unittest tests.test_checkpoint_resolver\line python -m unittest tests.test_resume_schedule_calculation\line python -m unittest tests.test_resume_identity_and_throughput\line python -m unittest tests.test_fork_lineage\line python -m unittest tests.test_fork_lr_schedule\line python -m unittest discover tests\line bash -n current_dreedle_train_OWT.sh current_scruffy_train_OWT.sh\par
+\pard\sa170\f0\fs23 The feature is complete only when every requirement maps to a named passing test, the full CPU suite passes, wrapper syntax and dry-runs pass, focused DDP tests pass, available GPU smoke tests pass, and no test implies support for older checkpoint schemas.\par
+}

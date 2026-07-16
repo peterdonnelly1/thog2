@@ -9,12 +9,14 @@ from .checkpointing import validate_checkpoint_segment_size
 from .compact_identity import compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
 from .geometry import derive_row_order
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
+from .lr_schedule import COSINE_SCHEDULE, LR_SCHEDULE_KINDS
 
 
-CHECKPOINT_SCHEMA_VERSION = 2
+CHECKPOINT_SCHEMA_VERSION = 3
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+EXECUTION_OVERRIDE_FIELDS = {"device", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval"}
+FORK_LR_OVERRIDE_FIELDS = EXECUTION_OVERRIDE_FIELDS | {"learning_rate", "min_learning_rate", "decay_updates", "lr_schedule_kind", "phase_start_update", "phase_start_lr", "phase_peak_lr", "phase_rewarm_iters", "phase_end_update", "phase_min_lr"}
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -80,6 +82,13 @@ class TrainingConfig:
     warmup_updates: int = 0
     decay_updates: int = 10
     decay_learning_rate: bool = True
+    lr_schedule_kind: str = COSINE_SCHEDULE
+    phase_start_update: int = 0
+    phase_start_lr: float = 0.0
+    phase_peak_lr: float = 6.0e-4
+    phase_rewarm_iters: int = 0
+    phase_end_update: int = 10
+    phase_min_lr: float = 6.0e-5
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
@@ -117,7 +126,7 @@ class TrainingConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"{name} must be a positive integer or None; got {value!r}")
-        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips", "phase_start_update", "phase_rewarm_iters", "phase_end_update"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
@@ -153,6 +162,12 @@ class TrainingConfig:
             raise ValueError("min_learning_rate must not exceed learning_rate")
         if self.nonfinite_update_policy not in ("raise", "skip"):
             raise ValueError("nonfinite_update_policy must be raise or skip")
+        if self.lr_schedule_kind not in LR_SCHEDULE_KINDS:
+            raise ValueError(f"unsupported lr_schedule_kind: {self.lr_schedule_kind}")
+        if self.phase_end_update < self.phase_start_update:
+            raise ValueError("phase_end_update must not be earlier than phase_start_update")
+        if self.phase_start_lr < 0.0 or self.phase_peak_lr <= 0.0 or self.phase_min_lr < 0.0:
+            raise ValueError("phase learning rates must be non-negative and peak must be positive")
         if self.weight_decay < 0.0 or self.grad_clip < 0.0:
             raise ValueError("weight_decay and grad_clip must be non-negative")
         if not 0.0 <= self.beta1 < 1.0 or not 0.0 <= self.beta2 < 1.0:

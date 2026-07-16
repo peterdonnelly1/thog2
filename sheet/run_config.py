@@ -14,6 +14,7 @@ from .residual_init import (
     ResidualInitConfig,
 )
 from .run_naming import DEFAULT_COMPONENT_LIMIT, artifact_paths, dataset_label, normalize_component, truncate_component
+from .lr_schedule import COSINE_SCHEDULE
 from .training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 
 
@@ -80,6 +81,14 @@ class OwtRunConfig:
     learning_rate: float = 6.0e-4
     min_lr: float = 6.0e-5
     warmup_iters: int = 10
+    decay_iters: int = 100
+    lr_schedule_kind: str = COSINE_SCHEDULE
+    phase_start_update: int = 0
+    phase_start_lr: float = 0.0
+    phase_peak_lr: float = 6.0e-4
+    phase_rewarm_iters: int = 0
+    phase_end_update: int = 100
+    phase_min_lr: float = 6.0e-5
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
@@ -97,6 +106,7 @@ class OwtRunConfig:
     dtype: str = "bfloat16"
 
     wandb_enabled: bool = True
+    instrumentation_backend: str = "tensorboard"
     wandb_project: str = "thog"
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"
@@ -107,10 +117,12 @@ class OwtRunConfig:
     def __post_init__(self) -> None:
         if self.model_type not in PUBLIC_MODEL_TYPES:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
-        if self.run_mode not in ("fresh", "resume"):
-            raise ValueError("run_mode must be fresh or resume")
+        if self.run_mode not in ("fresh", "resume", "fork"):
+            raise ValueError("run_mode must be fresh, resume, or fork")
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
             raise ValueError("attention_backend must be auto, flash2, sdpa, or math")
+        if self.instrumentation_backend not in ("tensorboard", "wandb", "none"):
+            raise ValueError("instrumentation_backend must be tensorboard, wandb, or none")
         if self.wandb_mode not in ("online", "offline", "disabled"):
             raise ValueError("wandb_mode must be online, offline, or disabled")
         if self.wandb_mode == "disabled" and self.wandb_enabled:
@@ -128,7 +140,6 @@ class OwtRunConfig:
 
         positive = (
             "max_iters",
-            "eval_interval",
             "eval_iters",
             "log_interval",
             "batch_size",
@@ -144,12 +155,14 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        for name in ("checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("eval_interval", "checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips", "phase_start_update", "phase_rewarm_iters", "phase_end_update"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
         if self.warmup_iters >= self.max_iters:
             raise ValueError("warmup_iters must be less than max_iters")
+        if self.decay_iters < self.warmup_iters:
+            raise ValueError("decay_iters must not be less than warmup_iters")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         if self.model_type == "sheet":
@@ -255,8 +268,10 @@ class OwtRunConfig:
             f"b_{self.batch_size}",
             f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
             f"d_{dataset_label(self.dataset)}",
-            f"w_{self.warmup_iters}",
-            f"k_{self.checkpoint_interval}",
+            # vvv THOG artifact identity excludes mutable warmup and checkpoint cadence
+            # f"w_{self.warmup_iters}",
+            # f"k_{self.checkpoint_interval}",
+            # ^^^ THOG
             f"A_{self.gradient_accumulation_steps}",
             f"L_{self.n_layer}",
             f"H_{self.n_head}",
@@ -273,8 +288,15 @@ class OwtRunConfig:
                 f"Y_{self.o_mlp_hidden}",
             ])
         fields.append(self.residual_init_artifact_fragment())
-        fields.append(f"S_{self.checkpoint_segment_size}")
+        # vvv THOG checkpoint segment size is operational and does not identify the artifact
+        # fields.append(f"S_{self.checkpoint_segment_size}")
+        # ^^^ THOG
         return "_".join(fields)
+
+
+    @property
+    def artifact_descriptor(self) -> str:
+        return self.parameter_artifact_fragment()
 
     @property
     def artifact_name(self) -> str:
@@ -357,7 +379,14 @@ class OwtRunConfig:
             learning_rate=self.learning_rate,
             min_learning_rate=self.min_lr,
             warmup_updates=self.warmup_iters,
-            decay_updates=self.max_iters,
+            decay_updates=self.decay_iters,
+            lr_schedule_kind=self.lr_schedule_kind,
+            phase_start_update=self.phase_start_update,
+            phase_start_lr=self.phase_start_lr,
+            phase_peak_lr=self.phase_peak_lr,
+            phase_rewarm_iters=self.phase_rewarm_iters,
+            phase_end_update=self.phase_end_update,
+            phase_min_lr=self.phase_min_lr,
             decay_learning_rate=True,
             weight_decay=self.weight_decay,
             beta1=self.beta1,

@@ -1,0 +1,103 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Implementation Plan\b0\par
+\pard\qc\sa320\f0\fs22 Staged implementation of stable identity, resume, fork lineage, and LR phase control\par
+\pard\sa170\f0\fs23 Status: Draft for review. No implementation shall begin until the requirements, review, implementation plan, and test plan are approved.\par
+
+\pard\sa190\sb280\f0\fs29\b 1. Working rules\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Implement only on enhanced_resume_and_fork after explicit approval.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Preserve existing working fresh, resume, DENSE, compact, checkpoint, and instrumentation paths until replacement behaviour is proven.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not change model mathematics or compact coefficient layouts.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not implement compatibility or migration for checkpoints predating the enhanced lifecycle schema.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Do not copy, move, rename, or normalize checkpoints.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep lifecycle identity, resolution, manifests, and scheduler policy in Python rather than shell where possible.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use snake_case and the THOG source-marking convention.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Every stage must pass focused tests and full CPU regression before the next stage.\par
+
+\pard\sa190\sb280\f0\fs29\b 2. Target module boundaries\b0\par
+\pard\sa120\sb170\f0\fs24\b Lifecycle identity and manifest\b0\par
+\pard\sa170\f0\fs23 Add small modules such as sheet/run_lifecycle.py and sheet/run_manifest.py to own logical IDs, session IDs, start labels, artifact_descriptor, artifact_name, parent/root lineage, fork generation, suffix construction, and atomic manifest IO.\par
+\pard\sa120\sb170\f0\fs24\b Checkpoint resolution\b0\par
+\pard\sa170\f0\fs23 Add sheet/checkpoint_resolver.py to own selector classification, exact leading-timestamp matching, exact artifact_name matching, direct paths, ambiguity errors, and enhanced-schema validation.\par
+\pard\sa120\sb170\f0\fs24\b Learning-rate schedules\b0\par
+\pard\sa170\f0\fs23 Extend the scheduler behind an explicit schedule or phase object. Resume restores the original schedule parameters and uses completed_updates as the schedule input; the LR is then calculated normally for every resumed step. restart_cosine fork creates and persists a child phase.\par
+\pard\sa120\sb170\f0\fs24\b Telemetry continuity\b0\par
+\pard\sa170\f0\fs23 Extend telemetry construction to accept stored logical directories and W&B IDs. Keep W&B continuity best effort and training-state independent.\par
+
+\pard\sa190\sb280\f0\fs29\b 3. Stage 0: lock requirements into tests\b0\par
+\pard\sa170\f0\fs23 Add failing tests for the public contract before modifying runtime code.\par
+\pard\sa100\li360\fi-240\f0\fs23 - -n help text is exactly total optimizer steps for the run, not additional steps.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume and fork require explicit -n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Omitted, smaller, and equal -n diagnostics match the specification and fail before trainer construction.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume calculates and reports the LR for the first resumed step from the restored schedule, without redefining the schedule endpoint from -n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - artifact_name and artifact_descriptor terminology and grammar are tested explicitly.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Old lifecycle schemas hard-fail.\par
+\pard\sa170\f0\fs23 Exit gate: tests fail only because the new feature is not yet implemented; existing tests remain green.\par
+
+\pard\sa190\sb280\f0\fs29\b 4. Stage 1: stable naming and lifecycle metadata\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Remove n_, w_, and k_ from future artifact_descriptor values while retaining batch, accumulation, model dimensions, geometry, basis, orders, residual identity, and original peak-LR summary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Define artifact_name as <start_timestamp>_<artifact_descriptor>[__FORK_<generation>_FROM_<root_start_timestamp>].\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add logical_run_id, session_id, creation_mode, root_start_timestamp, fork_generation, immediate parent fields, and telemetry identity fields.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add atomic run manifest writing and recovery.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Bump lifecycle/checkpoint schema. Older schemas are rejected without conversion.\par
+\pard\sa170\f0\fs23 Exit gate: fresh runs produce stable names and complete lifecycle metadata without changing training behaviour.\par
+
+\pard\sa190\sb280\f0\fs29\b 5. Stage 2: selector resolver\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resolve exact checkpoint files, artifact directories named by artifact_name, exact artifact_name values, and exact leading YYMMDD-HHMM timestamps.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Match timestamps only at the beginning of artifact_name. Ignore root timestamps embedded in fork suffixes.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fail deterministically on zero or multiple matches.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Return a resolved checkpoint record without copying or renaming anything.\par
+\pard\sa170\f0\fs23 Exit gate: all selector forms resolve the same enhanced-schema checkpoint and ambiguity tests pass.\par
+
+\pard\sa190\sb280\f0\fs29\b 6. Stage 3: mode-aware parsing and mandatory total STEPS\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Extend -q to fresh, resume, and fork in both wrappers and Python.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add --resume-from and fork controls -0 through -3 plus long equivalents.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Apply fresh defaults only in fresh mode. Resume and fork option defaults must remain None until checkpoint inheritance and validation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Keep help text: -n STEPS total optimizer steps for the run (not additional steps).\par
+\pard\sa100\li360\fi-240\f0\fs23 - Require explicit -n in resume and fork before checkpoint state is loaded.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Reject -n less than or equal to checkpoint completed_updates before model construction, GPU allocation, telemetry initialization, or output mutation.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Print the required THOG2 INFO diagnostics exactly, with a separate accurate equal-value heading.\par
+\pard\sa170\f0\fs23 Exit gate: a minimal resume command requires only mode, selector, total STEPS, and any explicit operational overrides.\par
+
+\pard\sa190\sb280\f0\fs29\b 7. Stage 4: checkpoint-driven resume\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Load immutable model, optimizer, batch, seed, compact identity, schedule, and completed-update values from the checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Treat explicitly supplied material values as equality assertions. Reject mismatches.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Apply only the approved operational override whitelist.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Restore optimizer, scaler, RNG, batch-source, trainer counters, non-finite counters, and schedule state.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use supplied -n only as the new stopping target. Continue calculating LR from the original warmup and decay parameters using completed_updates; do not modify warmup_updates, decay_updates, phase boundaries, minimum LR, or current schedule parameters.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Before training, print completed steps, total steps, remaining steps, schedule identity, original decay endpoint, LR for the first resumed step, and post-decay behaviour.\par
+\pard\sa170\f0\fs23 Exit gate: interrupted and uninterrupted tiny runs match in model, optimizer, data-stream, and LR sequence. Larger resume STEPS extends only the stop point and does not redefine the original decay endpoint.\par
+
+\pard\sa190\sb280\f0\fs29\b 8. Stage 5: continuous files and instrumentation\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Reuse the same checkpoint path and artifact_name for resume.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Append train.log with explicit session boundaries.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Reuse the same TensorBoard logical directory and lifetime optimizer step.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Persist and reuse W&B run ID when available; warn and continue safely when W&B continuity fails.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Write per-session result records while retaining a current aggregate result.\par
+\pard\sa170\f0\fs23 Exit gate: a multi-session run appears as one logical run in local files and in supported telemetry, with no duplicate or reset step axis.\par
+
+\pard\sa190\sb280\f0\fs29\b 9. Stage 6: fork identity and inheritance\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Create a new logical_run_id, leading timestamp, artifact_descriptor, artifact_name, checkpoint path, log, result root, TensorBoard directory, and W&B identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Construct artifact_name as <start_timestamp>_<descriptor_of_child>__FORK_<generation>_FROM_<root_start_timestamp>.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Increment generation from the parent while retaining the original root timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Record immediate parent, root ancestor, parent checkpoint, parent completed update, and full lineage before the first child update.\par
+\pard\sa170\f0\fs23 Exit gate: first- and second-generation forks have truthful names, separate outputs, and complete lineage.\par
+
+\pard\sa190\sb280\f0\fs29\b 10. Stage 7: restart_cosine fork schedule\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Add -3 restart_cosine with required -0, -1, -2, and -n.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Derive phase_start_update from parent completed_updates and phase_start_lr from the parent schedule at that boundary.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Use total STEPS as phase_end_update.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Preserve optimizer moments.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Persist complete phase history and active phase index.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume a fork at the correct relative phase step without repeating rewarm.\par
+\pard\sa170\f0\fs23 Exit gate: analytic LR values, uninterrupted/fork-resume equivalence, and phase persistence tests pass.\par
+
+\pard\sa190\sb280\f0\fs29\b 11. Stage 8: integration and release gate\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Run full CPU regression, shell syntax checks, wrapper dry-runs, focused DDP tests, and available GPU smoke tests.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Verify fresh, resume, fork, DENSE, and compact paths.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Audit every new or replaced nanoGPT-derived line for the THOG marking convention.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Update user-facing help and examples only after all behaviour is tested.\par
+\pard\sa170\f0\fs23 Final exit gate: every requirement in the approved specification maps to at least one passing named test, and no unsupported old-checkpoint behaviour is implied.\par
+}

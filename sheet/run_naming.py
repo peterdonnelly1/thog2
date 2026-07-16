@@ -164,8 +164,10 @@ def build_artifact_name(
         # ^^^ THOG
         f"b_{batch_size}",
         f"d_{dataset_label(dataset_name)}",
-        f"w_{warmup_iters}",
-        f"k_{checkpoint_interval}",
+        # vvv THOG artifact identity excludes mutable warmup and checkpoint cadence
+        # f"w_{warmup_iters}",
+        # f"k_{checkpoint_interval}",
+        # ^^^ THOG
         f"A_{gradient_accumulation_steps}",
         f"L_{n_layer}",
         f"H_{n_head}",
@@ -182,7 +184,9 @@ def build_artifact_name(
         fields.extend([f"P_{depth_order}", f"Q_{base_row_order}"])
     elif depth_order is not None or base_row_order is not None:
         raise ValueError("DENSE2 naming must not include SHEET orders")
-    fields.append(f"S_{checkpoint_segment_size}")
+    # vvv THOG checkpoint segment size is operational and excluded from artifact identity
+    # fields.append(f"S_{checkpoint_segment_size}")
+    # ^^^ THOG
 
     name = (
         f"{prefix}_{normalize_component(host_label)}__"
@@ -213,6 +217,7 @@ def artifact_paths(
     return {
         "checkpoint_dir": checkpoint_dir,
         "checkpoint_path": checkpoint_dir / "ckpt.pt",
+        "manifest_path": checkpoint_dir / "run_manifest.json",
         "log_dir": log_dir,
         "log_path": log_dir / "train.log",
         "result_dir": log_dir,

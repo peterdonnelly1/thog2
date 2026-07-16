@@ -62,7 +62,8 @@ class RunnerScriptTests(unittest.TestCase):
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
         self.assertIn("TEST_DENSE_scruffy", output)
-        self.assertIn("_r_depth_scaled_z_true_layer_depth_S_1", output)
+        self.assertIn("_r_depth_scaled_z_true_layer_depth", output)
+        self.assertNotIn("_r_depth_scaled_z_true_layer_depth_S_1", output)
         self.assertIn("--model-type dense", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source true_layer_depth", output)
@@ -94,6 +95,10 @@ class RunnerScriptTests(unittest.TestCase):
         )
         self.assertIn("TEST_CHEBY_DEPTH_scruffy", output)
         self.assertIn(
+            "_P_2_Q_4_J_2_O_2_X_4_Y_16_r_depth_scaled_z_dof_implied_depth",
+            output,
+        )
+        self.assertNotIn(
             "_P_2_Q_4_J_2_O_2_X_4_Y_16_r_depth_scaled_z_dof_implied_depth_S_1",
             output,
         )

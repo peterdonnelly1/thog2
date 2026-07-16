@@ -177,6 +177,10 @@ class Stage6Trainer(Stage4Trainer):
     ) -> None:
         super().__init__(config, train_tokens, validation_tokens)
         self.gradient_diagnostics: List[Dict[str, Any]] = []
+        self.lifecycle_metadata: Optional[Dict[str, Any]] = None
+
+    def set_lifecycle_metadata(self, lifecycle: Optional[Dict[str, Any]]) -> None:
+        self.lifecycle_metadata = dict(lifecycle) if lifecycle is not None else None
 
     def _synchronize(self) -> None:
         if self.device.type == "cuda":
@@ -274,6 +278,7 @@ class Stage6Trainer(Stage4Trainer):
                 {
                     "completed_updates": 0,
                     "consumed_tokens": 0,
+                    "session_consumed_tokens": 0,
                     "training_seconds": 0.0,
                     "wall_seconds": time.perf_counter() - wall_started,
                     "evaluation_seconds": elapsed,
@@ -286,6 +291,7 @@ class Stage6Trainer(Stage4Trainer):
                 completed_updates=0,
                 consumed_tokens=0,
                 cumulative_training_seconds=0.0,                                                                                                        # <<< THOG keep validation rows aligned with training rows
+                session_consumed_tokens=0,
                 validation_loss=losses["val"],
                 training_loss=losses["train"],
             )
@@ -511,7 +517,7 @@ class Stage6Trainer(Stage4Trainer):
             completed_updates=self.state.completed_updates,
             consumed_tokens=self.state.completed_updates * tokens_per_update,
             session_consumed_tokens=final_session_consumed_tokens,
-            final_validation_loss=evaluation_rows[-1]["val"],
+            final_validation_loss=(evaluation_rows[-1]["val"] if evaluation_rows else float("nan")),
             training_seconds=training_seconds,
             checkpoint_bytes=checkpoint_path.stat().st_size,
         )

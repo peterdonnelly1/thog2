@@ -1,0 +1,149 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Requirements Specification\b0\par
+\pard\qc\sa320\f0\fs22 Stable identity, resume, explicit fork lineage, and phase-aware learning-rate restarts\par
+\pard\sa170\f0\fs23 Status: Draft for review. This document specifies behaviour only and does not authorize implementation.\par
+
+\pard\sa190\sb280\f0\fs29\b 1. Purpose\b0\par
+\pard\sa170\f0\fs23 THOG2 shall expose three explicit training lifecycle modes: fresh, resume, and fork. Resume continues one logical run without changing material training parameters. Fork starts a new logical run from a parent checkpoint under an explicitly changed material rule.\par
+\pard\sa170\f0\fs23 The lifecycle shall eliminate manual checkpoint copying, renaming, and reconstruction of full model commands. Filenames remain human-readable evidence, while checkpoints and manifests remain authoritative for complete lifecycle history.\par
+
+\pard\sa190\sb280\f0\fs29\b 2. Relationship to existing THOG2 specifications\b0\par
+\pard\sa170\f0\fs23 The accepted compact-geometry specification remains authoritative for model type, dimensions, compact geometry, basis family and version, semantic family metadata, coefficient shapes, and checkpoint compatibility.\par
+\pard\sa170\f0\fs23 Nothing in this lifecycle specification permits silent reinterpretation of model weights, compact coefficients, geometry, basis identity, model dimensions, head metadata, or resolved orders.\par
+\pard\sa170\f0\fs23 Only checkpoints written with the enhanced lifecycle schema are supported. Compatibility with earlier checkpoints and earlier artifact-name grammars is explicitly out of scope.\par
+
+\pard\sa190\sb280\f0\fs29\b 3. Vocabulary\b0\par
+\pard\sa120\sb170\f0\fs24\b Logical run\b0\par
+\pard\sa170\f0\fs23 One training history with one logical_run_id. Fresh creates it, resume continues it, and fork creates a new child logical run.\par
+\pard\sa120\sb170\f0\fs24\b Session\b0\par
+\pard\sa170\f0\fs23 One process invocation. A logical run may contain several sessions because of interruption, crash, reboot, or deliberate stop and resume.\par
+\pard\sa120\sb170\f0\fs24\b Material parameter\b0\par
+\pard\sa170\f0\fs23 A field that changes model state, optimizer state, data-stream semantics, or the learning trajectory.\par
+\pard\sa120\sb170\f0\fs24\b Operational parameter\b0\par
+\pard\sa170\f0\fs23 A field that changes observation, reporting, storage cadence, or a tested mathematically equivalent execution path without changing the intended learning trajectory.\par
+\pard\sa120\sb170\f0\fs24\b Resume\b0\par
+\pard\sa170\f0\fs23 Restoration of one logical run with all material configuration and all restorable training state preserved. Resume is exact by definition in this specification.\par
+\pard\sa120\sb170\f0\fs24\b Fork\b0\par
+\pard\sa170\f0\fs23 Restoration of a parent checkpoint into a new logical run with at least one approved explicit material mutation. The first implementation supports only a new cosine learning-rate phase.\par
+\pard\sa120\sb170\f0\fs24\b Artifact descriptor and artifact name\b0\par
+\pard\sa170\f0\fs23 artifact_descriptor is the human-readable model and starting-configuration portion of an artifact name. artifact_name is the complete checkpoint-directory name:\par
+\pard\sa180\li360\f1\fs20 <start_timestamp>_<artifact_descriptor>[__FORK_<generation>_FROM_<root_start_timestamp>]\par
+\pard\sa170\f0\fs23 Command paths and selectors refer to artifact_name, because the directory name includes the leading timestamp and, for forks, the lineage suffix.\par
+
+\pard\sa190\sb280\f0\fs29\b 4. Top-level lifecycle decisions\b0\par
+\pard\sa180\li360\f1\fs20 -q fresh\line -q resume\line -q fork\par
+\pard\sa170\f0\fs23 The wrapper and Python runner shall use the same mode names. Mode shall not be inferred from checkpoint presence.\par
+\pard\sa170\f0\fs23 Resume shall never mutate material parameters. A material option supplied in resume mode is an equality assertion; a different value must fail before trainer construction.\par
+\pard\sa170\f0\fs23 Fork-only material changes shall use fork-prefixed options. Fresh-run learning-rate controls shall not silently acquire fork semantics.\par
+\pard\sa170\f0\fs23 Ambiguous checkpoint selection shall fail. The resolver shall never silently choose the newest, first, or closest candidate.\par
+
+\pard\sa190\sb280\f0\fs29\b 5. Meaning of -n STEPS\b0\par
+\pard\sa180\li360\f1\fs20 -n STEPS    total optimizer steps for the run (not additional steps)\par
+\pard\sa170\f0\fs23 STEPS is the absolute final completed optimizer-step number. It is not the number of steps to add to the checkpoint and not the number of steps to execute in the current process.\par
+\pard\sa180\li360\f1\fs20 fresh at step 0 with -n 10000 -> execute 10000 steps\line checkpoint at step 6000 with -n 10000 -> execute 4000 more steps\line checkpoint at step 10000 with -n 50000 -> execute 40000 more steps\par
+\pard\sa170\f0\fs23 Resume and fork require an explicit -n. The wrapper must not apply a fresh-run default and must not silently reuse the stopping target stored in the checkpoint.\par
+\pard\sa170\f0\fs23 The supplied STEPS value must be strictly greater than completed_updates stored in the selected checkpoint. Equality and smaller values are invalid because they request no forward training.\par
+\pard\sa120\sb170\f0\fs24\b Required omitted-value diagnostic\b0\par
+\pard\sa180\li360\f1\fs20 THOG2 INFO: -n was omitted during resume!\line You must specify a value for n, which must be greater than the number of steps already completed\par
+\pard\sa170\f0\fs23 After printing this informational diagnostic, the command shall exit non-zero before model construction, GPU allocation, telemetry initialization, log mutation, or checkpoint writing.\par
+\pard\sa120\sb170\f0\fs24\b Required smaller-value diagnostic\b0\par
+\pard\sa180\li360\f1\fs20 THOG2 INFO: -n is less than the number of steps already completed!\line For clarity, n is taken to be the total of all steps, not an additional amount of steps. It must therefore be greater than the number of steps completed to date\par
+\pard\sa170\f0\fs23 The equal-value case shall print the same explanatory second line and an accurate first line stating that -n is equal to the number of steps already completed. It shall then exit non-zero before trainer construction.\par
+
+\pard\sa190\sb280\f0\fs29\b 6. Resume learning-rate semantics\b0\par
+\pard\sa170\f0\fs23 Resume restores the original learning-rate schedule parameters and uses completed_updates from the checkpoint as the input to that schedule. The learning rate shall then be calculated normally for every resumed optimizer step.\par
+\pard\sa170\f0\fs23 The correct schedule input is derived automatically. The user shall not supply or calculate it.\par
+\pard\sa170\f0\fs23 Increasing -n changes only the stopping point. It shall not replace the saved warmup length, original cosine decay endpoint, minimum learning rate, phase boundaries, or any other schedule parameter.\par
+\pard\sa170\f0\fs23 If the restored schedule has already reached its original decay endpoint, subsequent resumed steps use the original post-decay behaviour. Under the current schedule this means holding the original minimum learning rate.\par
+\pard\sa170\f0\fs23 The cosine is still evaluated on every resumed step. What resume forbids is rebuilding or stretching the cosine so that the larger -n becomes a new decay endpoint. Defining a different learning-rate curriculum requires fork mode.\par
+\pard\sa120\sb170\f0\fs24\b Required startup visibility\b0\par
+\pard\sa170\f0\fs23 Before the first resumed optimizer update, the console shall show at least completed steps, total requested steps, remaining steps, restored schedule identity, original decay endpoint, the learning rate calculated for the first resumed step, and post-decay behaviour where applicable.\par
+\pard\sa180\li360\f1\fs20 resume schedule\line   completed steps:             10000\line   total steps:                 50000\line   remaining steps:             40000\line   schedule:                    original cosine\line   original decay end:          10000\line   first resumed step LR:       9.000e-05\line   after decay end:             hold minimum LR\par
+\pard\sa170\f0\fs23 The learning-rate schedule parameters cannot be changed in resume mode. The calculated LR value may nevertheless change from step to step because the restored schedule continues to advance normally.\par
+
+\pard\sa190\sb280\f0\fs29\b 7. Command-line contract\b0\par
+\pard\sa180\li360\f1\fs20 -q fresh|resume|fork\line --resume-from SELECTOR\line -n STEPS\par
+\pard\sa170\f0\fs23 --resume-from is forbidden in fresh mode and required in resume and fork modes. -n is required in resume and fork modes.\par
+\pard\sa120\sb170\f0\fs24\b Fork learning-rate options\b0\par
+\pard\sa180\li360\f1\fs20 -3 MODE   --fork-lr-mode MODE\line -0 VALUE  --fork-learning-rate VALUE\line -1 VALUE  --fork-min-lr VALUE\line -2 COUNT  --fork-rewarm-iters COUNT\par
+\pard\sa170\f0\fs23 Numeric getopts 0 through 3 are reserved for fork-only controls and shall appear in wrapper help beside their long names.\par
+\pard\sa120\sb170\f0\fs24\b Fork LR modes\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - continue: preserve the parent schedule. In the initial implementation this is reserved for future forks with another approved material mutation and must fail as a no-op when used alone.\par
+\pard\sa100\li360\fi-240\f0\fs23 - restart_cosine: start a new phase at the parent checkpoint, rewarm to fork-learning-rate, and cosine-decay to fork-min-lr by total STEPS.\par
+\pard\sa170\f0\fs23 restart_cosine requires explicit -0, -1, -2, -3, and -n values. continue rejects -0, -1, and -2.\par
+\pard\sa170\f0\fs23 Fresh defaults shall be applied only in fresh mode. Resume and fork parsing must retain the distinction between omitted options and explicitly supplied values.\par
+
+\pard\sa190\sb280\f0\fs29\b 8. Checkpoint selection\b0\par
+\pard\sa180\li360\f1\fs20 --resume-from checkpoints/<artifact_name>/ckpt.pt\line --resume-from checkpoints/<artifact_name>\line --resume-from <artifact_name>\line --resume-from 260713-1950\par
+\pard\sa100\li360\fi-240\f0\fs23 - A selector containing a path separator or ending in .pt is a path. A directory resolves to its ckpt.pt child.\par
+\pard\sa100\li360\fi-240\f0\fs23 - A selector matching six digits, a hyphen, and four digits is an exact YYMMDD-HHMM leading start timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Timestamp matching applies only to artifact directories beginning with SELECTOR followed by an underscore. A timestamp inside a fork suffix is not a leading match.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Any other selector is an exact artifact_name under checkpoint_root.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Zero matches and multiple matches both fail with deterministic diagnostics.\par
+\pard\sa100\li360\fi-240\f0\fs23 - The selected checkpoint must contain the enhanced lifecycle schema. Older checkpoints hard-fail.\par
+\pard\sa100\li360\fi-240\f0\fs23 - No resolver path may copy, rename, migrate, or normalize a checkpoint.\par
+
+\pard\sa190\sb280\f0\fs29\b 9. Artifact identity and lineage\b0\par
+\pard\sa170\f0\fs23 Future artifact descriptors shall omit n_<steps>, w_<warmup updates>, and k_<checkpoint interval>.\par
+\pard\sa170\f0\fs23 artifact_descriptor shall retain batch size, gradient accumulation, dataset, model type, geometry or preset, basis family, dimensions, compact orders, residual-initialization identity, original peak-learning-rate summary, and other existing model-descriptive fields unless separately revised.\par
+\pard\sa170\f0\fs23 Fresh creates a new leading timestamp, logical_run_id, artifact_name, checkpoint path, log root, and telemetry identity. fork_generation is zero.\par
+\pard\sa170\f0\fs23 Resume reuses the artifact_name, directory, checkpoint path, logical_run_id, root lineage, and leading timestamp.\par
+\pard\sa170\f0\fs23 Fork creates a new leading timestamp and child artifact_descriptor followed by exactly one suffix:\par
+\pard\sa180\li360\f1\fs20 __FORK_<generation>_FROM_<root_start_timestamp>\par
+\pard\sa170\f0\fs23 generation is parent generation plus one. root_start_timestamp is the original fresh ancestor's leading timestamp. A child artifact_name is constructed afresh; a parent fork suffix is not copied or appended.\par
+\pard\sa180\li360\f1\fs20 260713-1950_<descriptor_of_parent>\line 260714-1030_<descriptor_of_child>__FORK_1_FROM_260713-1950\line 260715-0815_<descriptor_of_grandchild>__FORK_2_FROM_260713-1950\par
+\pard\sa170\f0\fs23 Immediate parent identity, root identity, parent checkpoint, parent completed update, and full lineage shall be persisted.\par
+
+\pard\sa190\sb280\f0\fs29\b 10. Configuration inheritance and permitted resume overrides\b0\par
+\pard\sa170\f0\fs23 In resume and fork modes, the checkpoint is the primary source for model, optimizer, data-stream, seed, compact identity, schedule, and completed-update state. The user need not repeat shape, orders, batch, accumulation, residual initialization, optimizer, or seed fields.\par
+\pard\sa120\sb170\f0\fs24\b Material fields preserved by resume\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Model type, compact identity, dimensions, dropout, bias, and compact orders.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Batch size, gradient accumulation, residual initialization, optimizer groups and moments, LR schedule, weight decay, betas, and gradient clipping.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Seeds, RNG state, batch-source state, completed updates, scaler state, and non-finite counters.\par
+\pard\sa120\sb170\f0\fs24\b Operational overrides permitted in resume\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Total STEPS; evaluation interval and batch count; log interval; checkpoint interval.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Instrumentation selector and online or offline mode; depth-curve controls.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Device and dtype subject to existing validation; attention backend.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Activation checkpointing and segment size; fast discard and approved mathematically equivalent execution optimizations.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Non-finite policy and bounded skip limit.\par
+\pard\sa170\f0\fs23 The initial implementation requires the same distributed world size as the checkpoint unless dedicated tests later prove a safe change.\par
+
+\pard\sa190\sb280\f0\fs29\b 11. Phase-aware fork learning-rate schedule\b0\par
+\pard\sa170\f0\fs23 restart_cosine records phase_start_update, phase_start_lr, phase_peak_lr, phase_rewarm_iters, phase_end_update, phase_min_lr, and phase_type. phase_end_update equals total STEPS.\par
+\pard\sa170\f0\fs23 phase_start_update is parent completed_updates. phase_start_lr is the LR calculated by the restored parent schedule at that boundary. Optimizer moments remain preserved.\par
+\pard\sa170\f0\fs23 A non-zero rewarm begins at phase_start_lr and reaches phase_peak_lr after phase_rewarm_iters. The remaining child phase cosine-decays to phase_min_lr on the final child update. A zero rewarm means the first child update uses phase_peak_lr when at least two child updates are requested; if only one child update is requested, the final-minimum rule is authoritative.\par
+\pard\sa170\f0\fs23 The active phase and complete ordered phase history shall be checkpointed. Resume of a fork shall continue the child phase at the correct relative step and shall not repeat rewarm or revert to the root schedule.\par
+
+\pard\sa190\sb280\f0\fs29\b 12. Checkpoint, manifest, logs, and instrumentation\b0\par
+\pard\sa170\f0\fs23 Checkpoint and manifest metadata shall include logical_run_id, session_id, creation mode, run_start_label, artifact_name, artifact_descriptor, root identity, fork generation, parent identity, parent checkpoint, parent completed update, phase history, active phase, instrumentation backend, W&B run ID when available, TensorBoard directory, log path, and session result path.\par
+\pard\sa170\f0\fs23 A small atomic run manifest is required for discovery and telemetry continuity. The checkpoint remains self-sufficient for model and optimizer recovery and retains compatibility-critical state.\par
+\pard\sa170\f0\fs23 Resume reuses the checkpoint path, appends the existing train.log with a visible session boundary, reuses the TensorBoard logical directory, and continues the lifetime optimizer step.\par
+\pard\sa170\f0\fs23 W&B continuity is best effort. A stored W&B run ID shall be reused where available. Failure to resume W&B must not corrupt or alter training state and must produce a prominent warning.\par
+\pard\sa170\f0\fs23 Fork creates a new W&B ID, TensorBoard directory, log, result root, artifact_name, checkpoint path, and logical_run_id, while recording parent and root lineage.\par
+
+\pard\sa190\sb280\f0\fs29\b 13. Lifetime and session accounting\b0\par
+\pard\sa170\f0\fs23 completed_updates and consumed_tokens are lifetime totals inherited across resume and fork. session_completed_updates, session_consumed_tokens, session_training_seconds, and tokens_per_training_second are local to one process invocation.\par
+\pard\sa170\f0\fs23 Console and final throughput use session tokens divided by session training seconds. Lifetime token totals remain separately visible.\par
+
+\pard\sa190\sb280\f0\fs29\b 14. Safety and acceptance requirements\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fresh refuses to overwrite an existing checkpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume and fork require explicit -n STEPS and reject STEPS less than or equal to completed_updates.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume and fork fail before state loading on selector ambiguity or material mismatch.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume rejects fork-only options.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume visibly reports the learning rate calculated for the first resumed step from the restored schedule.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Increasing resume STEPS does not redefine the original warmup or cosine decay endpoint.\par
+\pard\sa100\li360\fi-240\f0\fs23 - restart_cosine fork creates the specified LR phase, correct child artifact_name, and new telemetry identity.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Fork of fork increments generation and retains the original root timestamp.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Crash resume during rewarm and cosine decay reproduces the uninterrupted LR sequence.\par
+\pard\sa100\li360\fi-240\f0\fs23 - No old-checkpoint compatibility or migration behaviour is required.\par
+\pard\sa100\li360\fi-240\f0\fs23 - DENSE and compact save/resume regressions, full CPU suite, shell checks, DDP tests, and GPU smoke tests pass.\par
+
+\pard\sa190\sb280\f0\fs29\b Appendix A. Minimal commands\b0\par
+\pard\sa120\sb170\f0\fs24\b Resume\b0\par
+\pard\sa180\li360\f1\fs20 ./current_dreedle_train_OWT.sh \\\line   -q resume \\\line   --resume-from 260713-1950 \\\line   -n 50000\par
+\pard\sa120\sb170\f0\fs24\b LR fork\b0\par
+\pard\sa180\li360\f1\fs20 ./current_dreedle_train_OWT.sh \\\line   -q fork \\\line   --resume-from 260713-1950 \\\line   -n 50000 \\\line   -3 restart_cosine \\\line   -0 2.5e-4 \\\line   -1 5e-5 \\\line   -2 200\par
+}

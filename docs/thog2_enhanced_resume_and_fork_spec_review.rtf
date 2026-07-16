@@ -1,0 +1,72 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+\widowctrl\f0\fs23
+\pard\qc\sa240\f0\fs34\b THOG2 Enhanced Resume and Fork Specification Review\b0\par
+\pard\qc\sa320\f0\fs22 Completeness, internal consistency, and consistency with existing THOG2 specifications\par
+\pard\sa170\f0\fs23 Status: Completed design review of the revised requirements. No implementation is included.\par
+
+\pard\sa190\sb280\f0\fs29\b 1. Documents reviewed\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - THOG2 Enhanced Resume and Fork Requirements Specification.\par
+\pard\sa100\li360\fi-240\f0\fs23 - THOG2 Principled Compact Geometry Requirements Specification.\par
+\pard\sa100\li360\fi-240\f0\fs23 - THOG2 Principled Compact Geometry Implementation Plan.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Existing checkpoint compatibility, training configuration, schedule, wrapper, naming, and telemetry contracts on the source branch.\par
+
+\pard\sa190\sb280\f0\fs29\b 2. Review of -n semantics\b0\par
+\pard\sa170\f0\fs23 The revised public definition is unambiguous:\par
+\pard\sa180\li360\f1\fs20 -n STEPS    total optimizer steps for the run (not additional steps)\par
+\pard\sa170\f0\fs23 This is internally consistent with the existing max_updates interpretation: training continues while completed_updates is less than STEPS. It avoids a second, invocation-relative meaning for the same option.\par
+\pard\sa170\f0\fs23 Requiring explicit -n in resume and fork is consistent with the user's intent that omission is invalid rather than silently inheriting a target. Requiring STEPS to be strictly greater than checkpoint completed_updates removes no-op and backward-target ambiguity.\par
+\pard\sa170\f0\fs23 The omitted, smaller, and equal cases fail before trainer construction. The required informational wording explains the total-step meaning without implying that the process will proceed.\par
+\pard\sa170\f0\fs23 Finding: complete and internally consistent.\par
+
+\pard\sa190\sb280\f0\fs29\b 3. Review of resume LR semantics\b0\par
+\pard\sa170\f0\fs23 Resume restores the original schedule parameters and uses checkpoint completed_updates as the input to that schedule. The learning rate is calculated normally for every resumed optimizer step.\par
+\pard\sa170\f0\fs23 Increasing STEPS changes only the stop condition. It does not replace warmup_updates, decay_updates, phase boundaries, the minimum LR, or the LR calculated for the first resumed step.\par
+\pard\sa170\f0\fs23 The schedule parameters cannot be changed in resume mode. The LR value may nevertheless evolve from step to step because the restored schedule continues normally. Calling the displayed value first resumed step LR is therefore accurate and less ambiguous than next learning rate.\par
+\pard\sa170\f0\fs23 The prohibited operation is not calculating the cosine. The prohibited operation is rebuilding or stretching it so that the larger STEPS value becomes a new decay endpoint. That would change the learning trajectory and contradict the no-material-mutation rule.\par
+\pard\sa170\f0\fs23 The console no longer reports a separate restored position because completed steps already identify the schedule input.\par
+\pard\sa170\f0\fs23 Finding: complete and internally consistent.\par
+
+\pard\sa190\sb280\f0\fs29\b 4. Review of lifecycle modes\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - fresh creates a new model and logical run.\par
+\pard\sa100\li360\fi-240\f0\fs23 - resume continues the same logical run and permits only operational overrides. Resume is exact by definition, so the documents do not use the redundant phrase exact resume.\par
+\pard\sa100\li360\fi-240\f0\fs23 - fork creates a child logical run with an approved explicit material mutation.\par
+\pard\sa170\f0\fs23 The initial fork material scope is limited to restart_cosine. The continue mode is retained only as a defined future mode and cannot create a no-op fork in the first implementation.\par
+\pard\sa170\f0\fs23 Finding: the three modes are distinct and do not overlap.\par
+
+\pard\sa190\sb280\f0\fs29\b 5. Review of artifact terminology, identity, and lineage\b0\par
+\pard\sa170\f0\fs23 The revised terminology distinguishes artifact_descriptor from artifact_name. artifact_descriptor is the human-readable model/configuration portion. artifact_name is the complete checkpoint-directory name:\par
+\pard\sa180\li360\f1\fs20 <start_timestamp>_<artifact_descriptor>[__FORK_<generation>_FROM_<root_start_timestamp>]\par
+\pard\sa170\f0\fs23 Checkpoint paths therefore use <artifact_name>, not <artifact_descriptor>, because the directory includes the timestamp and optional fork suffix.\par
+\pard\sa170\f0\fs23 Removing n_, w_, and k_ from artifact_descriptor prevents mutable stopping and cadence controls from changing checkpoint location. Retaining batch, accumulation, model dimensions, compact identity, residual identity, and original peak-LR summary preserves model-descriptive raw evidence.\par
+\pard\sa170\f0\fs23 Resume reuses the original artifact_name. Fork creates one new suffix using generation and the root ancestor timestamp. The examples now use descriptor_of_parent, descriptor_of_child, and descriptor_of_grandchild rather than vague parent and child placeholders.\par
+\pard\sa170\f0\fs23 Timestamp checkpoint selection matches only the leading timestamp, so a root timestamp embedded in a fork suffix cannot select the wrong run.\par
+\pard\sa170\f0\fs23 Finding: complete and collision rules are explicit.\par
+
+\pard\sa190\sb280\f0\fs29\b 6. Review of checkpoint selection and inheritance\b0\par
+\pard\sa170\f0\fs23 File, directory named by artifact_name, exact artifact_name, and exact leading timestamp selectors are covered. Zero and multiple matches fail deterministically. No newest-run inference, copying, renaming, migration, or normalization is permitted.\par
+\pard\sa170\f0\fs23 Resume and fork reconstruct omitted model and optimizer configuration from the checkpoint. Explicit material values are assertions. Operational overrides are whitelisted.\par
+\pard\sa170\f0\fs23 Older checkpoint schemas are explicitly unsupported. This removes all legacy-discovery and conversion requirements and is consistent with the project's experimental status.\par
+\pard\sa170\f0\fs23 Finding: complete and consistent.\par
+
+\pard\sa190\sb280\f0\fs29\b 7. Review against compact-geometry specification\b0\par
+\pard\sa170\f0\fs23 The lifecycle spec does not weaken compact identity checks. Geometry preset, resolved attention and MLP geometry, basis family and version, dimensions, head metadata, and orders remain immutable under resume and outside the initial fork mutation scope.\par
+\pard\sa170\f0\fs23 The new lifecycle manifest supplements rather than replaces checkpoint compatibility metadata. No coefficient layout or materialization path is changed.\par
+\pard\sa170\f0\fs23 Finding: no conflict with the accepted compact-geometry requirements.\par
+
+\pard\sa190\sb280\f0\fs29\b 8. Completeness audit\b0\par
+\pard\sa100\li360\fi-240\f0\fs23 - User grammar: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Mandatory total STEPS and invalid-value diagnostics: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Automatic and visible LR calculation for the first resumed step: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resolver and ambiguity behaviour: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - artifact_descriptor, artifact_name, and fork lineage grammar: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Resume override boundaries: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - restart_cosine phase definition and persistence: complete.\par
+\pard\sa100\li360\fi-240\f0\fs23 - W&B, TensorBoard, logs, results, and session throughput: complete at best-effort level requested.\par
+\pard\sa100\li360\fi-240\f0\fs23 - Old-checkpoint policy: explicitly out of scope.\par
+
+\pard\sa190\sb280\f0\fs29\b 9. Final review conclusion\b0\par
+\pard\sa170\f0\fs23 The revised requirements are complete for the approved initial scope, internally consistent, and consistent with the accepted compact-geometry specification and current training semantics.\par
+\pard\sa170\f0\fs23 The implementation and test plans may be reviewed against this specification. This conclusion does not authorize implementation.\par
+}
