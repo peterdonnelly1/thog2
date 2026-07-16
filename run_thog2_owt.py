@@ -522,6 +522,10 @@ _OPERATIONAL_CONFIG_FIELDS = {
     "wandb_project",
     "wandb_entity",
     "wandb_mode",
+    # vvv THOG
+    "run_name",
+    "experiment_prefix",
+    # ^^^ THOG
 }
 
 
@@ -668,11 +672,17 @@ def _prepare_context(arguments: argparse.Namespace, explicit: Set[str], world_si
         )
         return {"mode": mode, "config": config, "paths": paths, "lifecycle": lifecycle, "payload": payload, "resolved": resolved, "allowed_override_fields": EXECUTION_OVERRIDE_FIELDS, "append_log": True, "execution_options": execution_options}
 
+    # vvv THOG
     if arguments.fork_lr_mode != "restart_cosine":
-        raise ValueError("initial fork implementation requires --fork-lr-mode restart_cosine")
+        print("THOG2 INFO: fork mode requires --fork-lr-mode restart_cosine!", file=sys.stderr)
+        print("For restart forks, also provide --fork-learning-rate, --fork-min-lr, and --fork-rewarm-iters.", file=sys.stderr)
+        raise SystemExit(2)
     missing = [name for name in ("fork_learning_rate", "fork_min_lr", "fork_rewarm_iters") if getattr(arguments, name) is None]
     if missing:
-        raise ValueError(f"restart_cosine fork requires {missing}")
+        print(f"THOG2 INFO: restart_cosine fork is missing required controls: {missing}", file=sys.stderr)
+        print("Provide --fork-learning-rate, --fork-min-lr, and --fork-rewarm-iters explicitly.", file=sys.stderr)
+        raise SystemExit(2)
+    # ^^^ THOG
     inherited = inherited_config(parent_config, arguments, explicit, run_mode="fork", max_iters=total_steps, instrumentation_backend=instrumentation)
     parent_training_config = TrainingConfig(**payload["trainer_config"])
     phase_start_lr = learning_rate_for_config(parent_training_config, completed_updates)

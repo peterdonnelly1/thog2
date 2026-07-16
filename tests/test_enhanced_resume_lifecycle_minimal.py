@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+from argparse import Namespace
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 from sheet.checkpoint_resolver import resolve_checkpoint
 from sheet.lr_schedule import restart_cosine_learning_rate
 from sheet.run_config import OwtRunConfig
+from run_thog2_owt import inherited_config
 
 
 class EnhancedResumeLifecycleMinimalTests(unittest.TestCase):
@@ -63,6 +65,27 @@ class EnhancedResumeLifecycleMinimalTests(unittest.TestCase):
         self.assertEqual(base.artifact_descriptor, changed.artifact_descriptor)
         for forbidden in ("n_", "w_", "k_", "S_"):
             self.assertNotIn(forbidden, base.artifact_descriptor)
+
+    def test_fork_inherited_config_allows_new_run_name_and_experiment_prefix(self) -> None:
+        parent = OwtRunConfig(
+            model_type="dense",
+            run_name="PARENT_RUN",
+            experiment_prefix="PARENT",
+            max_iters=100,
+        )
+        arguments = Namespace(run_name="CHILD_RUN", experiment_prefix="CHILD")
+        config = inherited_config(
+            parent,
+            arguments,
+            {"run_name", "experiment_prefix"},
+            run_mode="fork",
+            max_iters=200,
+            instrumentation_backend="none",
+        )
+        self.assertEqual(config.run_mode, "fork")
+        self.assertEqual(config.run_name, "CHILD_RUN")
+        self.assertEqual(config.experiment_prefix, "CHILD")
+        self.assertEqual(config.max_iters, 200)
 
 
 if __name__ == "__main__":
