@@ -39,6 +39,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent
 _CONSOLE_INTEGER_WIDTHS = {
     "completed_updates": 6,
     "max_updates": 6,
+    "max_wall_minutes": 6,
     "consumed_tokens": 14,
     "tokens_per_update": 12,
     "checkpoint_bytes": 14,
@@ -205,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-root", default="results")
     parser.add_argument("--wandb-root", default="wandb")
     parser.add_argument("--max-iters", type=int, default=100)
+    parser.add_argument("--max-wall-minutes", type=int, default=0)                                                                                   # <<< THOG soft wall-clock budget; zero preserves existing update-count runs
     parser.add_argument("--eval-interval", type=int, default=50)
     parser.add_argument("--eval-iters", type=int, default=5)
     parser.add_argument("--log-interval", type=int, default=10)
@@ -305,6 +307,7 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         result_root=arguments.result_root,
         wandb_root=arguments.wandb_root,
         max_iters=arguments.max_iters,
+        max_wall_minutes=arguments.max_wall_minutes,
         eval_interval=arguments.eval_interval,
         eval_iters=arguments.eval_iters,
         log_interval=arguments.log_interval,
@@ -375,6 +378,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     print("model parameters and options", flush=True)
     print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
     print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
+    print(f"  wall stop:  max_wall_minutes={config.max_wall_minutes}", flush=True)                                                                           # <<< THOG show soft wall-clock budget for equal-time grids
     print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)                                # <<< THOG show bounded recovery policy before the run
     print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
     if config.model_type == "sheet":
@@ -413,7 +417,7 @@ def main() -> int:
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
     if config.run_mode == "resume":
-        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips})
+        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "max_wall_minutes": training_config.max_wall_minutes, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips})
     else:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)
