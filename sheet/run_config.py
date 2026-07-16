@@ -43,6 +43,9 @@ class OwtRunConfig:
     wandb_root: str = "wandb"
 
     max_iters: int = 100
+    # vvv THOG optional wall-clock stop for equal-time geometry grids
+    max_wall_minutes: int = 0
+    # ^^^ THOG
     eval_interval: int = 50
     eval_iters: int = 5
     log_interval: int = 10
@@ -144,7 +147,7 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        for name in ("checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("max_wall_minutes", "checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
@@ -263,6 +266,10 @@ class OwtRunConfig:
             f"D_{self.n_embd}",
             f"C_{self.block_size}",
         ]
+        # vvv THOG include wall-clock budget in fresh-run identity only when active
+        if self.max_wall_minutes > 0:
+            fields.append(f"M_{self.max_wall_minutes}")
+        # ^^^ THOG
         if self.model_type == "sheet":
             fields.extend([
                 f"P_{self.o_depth}",
@@ -354,6 +361,7 @@ class OwtRunConfig:
             batch_size=self.batch_size,
             gradient_accumulation_steps=self.local_gradient_accumulation_steps(world_size),
             max_updates=self.max_iters,
+            max_wall_minutes=self.max_wall_minutes,
             learning_rate=self.learning_rate,
             min_learning_rate=self.min_lr,
             warmup_updates=self.warmup_iters,
