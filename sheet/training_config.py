@@ -14,7 +14,7 @@ from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -75,6 +75,9 @@ class TrainingConfig:
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
     max_updates: int = 10
+    # vvv THOG optional wall-clock stop for equal-time geometry comparisons
+    max_wall_minutes: int = 0
+    # ^^^ THOG
     learning_rate: float = 6.0e-4
     min_learning_rate: float = 6.0e-5
     warmup_updates: int = 0
@@ -117,7 +120,7 @@ class TrainingConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"{name} must be a positive integer or None; got {value!r}")
-        for name in ("warmup_updates", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
+        for name in ("warmup_updates", "max_wall_minutes", "eval_interval", "checkpoint_interval", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
@@ -257,8 +260,4 @@ class TrainingConfig:
             mlp_geometry=self.mlp_geometry,
             basis_family=self.basis_family,
         )
-
-    def compatibility_signature(self) -> Dict[str, Any]:
-        values = asdict(self)
-        return {name: values[name] for name in MODEL_COMPATIBILITY_FIELDS}
 # ^^^ THOG
