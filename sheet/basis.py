@@ -10,19 +10,18 @@ from torch import Tensor, nn
 
 from .basis_kernel import (
     BASIS_FAMILY_CHEBYSHEV,
-    BASIS_FAMILY_DCT,
     CHEBYSHEV_BASIS_VERSION,
-    DCT_BASIS_VERSION,
     SINGLE_POINT_COORDINATE,
-    basis_kernel_metadata,
-    basis_version_for_family,
     chebyshev_coordinates,
     chebyshev_raw_basis,
     deterministic_reduced_qr_positive_diagonal,
-    get_basis_kernel,
-    normalize_basis_family,
     validate_floating_dtype,
     validate_positive_integer,
+)
+from .basis_registry import (
+    basis_version_for_family,
+    build_registered_basis,
+    normalize_registered_basis_family,
 )
 
 
@@ -66,10 +65,9 @@ def deterministic_reduced_qr(raw_basis: Tensor) -> Tuple[Tensor, Tensor]:
 
 
 def build_stabilized_basis(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> Tensor:
-    """Build a stabilized basis in float64 on CPU, then cast for runtime use."""
+    """Build a registry-selected stabilized basis in float64 on CPU, then cast for runtime use."""
 
-    kernel = get_basis_kernel(basis_family)
-    return kernel.build(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version)
+    return build_registered_basis(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version, basis_family=basis_family)
 
 
 @dataclass(frozen=True)
@@ -92,7 +90,7 @@ class BasisCache:
     @staticmethod
     def make_key(sample_count: int, order: int, *, runtime_dtype: torch.dtype, device: Optional[DeviceLike], version: str, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> BasisCacheKey:
         target_device = torch.device("cpu" if device is None else device)
-        canonical_family = normalize_basis_family(basis_family)
+        canonical_family = normalize_registered_basis_family(basis_family)
         expected_version = basis_version_for_family(canonical_family)
         if version != expected_version:
             raise ValueError(f"basis_version mismatch for {canonical_family}: expected {expected_version!r}, got {version!r}")
