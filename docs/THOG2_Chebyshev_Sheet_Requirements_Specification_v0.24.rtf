@@ -8,11 +8,13 @@
 \widowctrl\f0\fs22
 \pard\qc\b\fs44 THOG2 Chebyshev Sheet Requirements Specification\b0\par
 \pard\qc\b\fs30 v0.24\b0\par
-\pard\qc\i\fs24 Integrated compact-depth, generic sheet, block, and semantic sheet geometry\i0\par
+\pard\qc\i\fs24 Integrated compact-depth, generic sheet, block, semantic sheet geometry, and minimal basis registry shim\i0\par
 \pard\sa240\par
-\pard\sa220 This revision replaces the cramped v0.23 RTF layout. It preserves the salient architecture work from v0.2, v0.21, and v0.22 while adding a title page, a separate contents page, page numbers, legal-style numbering, clearer whitespace, and a less compressed layout.\par
+\pard\sa220 This revision preserves the salient architecture work from v0.2, v0.21, v0.22, and the earlier v0.24 draft while adding the narrow basis-registry shim required before semantic sheet implementation.\par
 \pard\sa220 Status: implementation-control requirements document for the next THOG2 semantic-sheet geometry pass.\par
 \pard\sa220 Repository path: docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.24.rtf\par
+\pard\sa220 Companion implementation plan path: docs/THOG2_Chebyshev_Sheet_Implementation_Plan_v0.24.rtf\par
+\pard\sa220 Future test plan path: docs/THOG2_Chebyshev_Sheet_Test_Plan_v0.24.rtf\par
 \pard\sa220 Date: 18 July 2026\par
 \page
 \pard\qc\b\fs32 Detailed table of contents\b0\fs22\par
@@ -20,20 +22,18 @@
 \pard\sa120 1.1 Purpose and authority\tab 1.2 Architectural concept\tab 1.3 Residual-stream interface\par
 \pard\sa120 1.4 Depth, sheets, and blocks\tab 1.5 Clean-axis rule\tab 1.6 Integrated catalogue principle\par
 \pard\sa120 2 Definitions and notation\tab 2.1 Dimension symbols\tab 2.2 Repeated matrix families\par
-\pard\sa120 2.3 Basis families and compact orders\par
-\pard\sa120 3 Common compact-geometry requirements\par
-\pard\sa120 4 Existing compact geometries\tab 4.1 Specific observations retained from prior drafts\par
-\pard\sa120 5 New semantic sheet geometries\tab 5.1 Semantic MLP sheet\tab 5.2 Semantic QKV sheet\tab 5.3 Semantic attention-output alternatives\par
-\pard\sa120 6 Coefficient-shape requirements\tab 6.1 Materialisation formulas\tab 6.2 Biases, vectors, and embeddings\par
-\pard\sa120 7 Preset catalogue\tab 8 Resolver, aliases, and identity\tab 8.1 No archaeological paths\par
-\pard\sa120 9 Reporting, diagnostics, and accounting\tab 10 Correctness requirements\par
-\pard\sa120 11 Implementation-readiness requirements\tab 12 Non-goals and guardrails\tab 13 Acceptance checklist\par
+\pard\sa120 2.3 Basis families and compact orders\tab 2.4 Minimal basis-registry shim\par
+\pard\sa120 3 Common compact-geometry requirements\tab 4 Existing compact geometries\par
+\pard\sa120 5 New semantic sheet geometries\tab 6 Coefficient-shape requirements\tab 7 Preset catalogue\par
+\pard\sa120 8 Resolver, aliases, and identity\tab 9 Reporting, diagnostics, and accounting\par
+\pard\sa120 10 Correctness requirements\tab 11 Implementation-readiness requirements\par
+\pard\sa120 12 Non-goals and guardrails\tab 13 Acceptance checklist\par
 \page
 \pard\b\fs30 1 Concept and architecture\b0\fs22\par
 \pard\b\fs26 1.1 Purpose and authority\b0\fs22\par
-\pard\sa220 THOG2 is a compact transformer-weight architecture. Its purpose is to explore whether repeated transformer-block weights can be represented by a much smaller learned coefficient structure without destroying useful model capacity. This document is authoritative for compact non-dense geometry names, semantic decomposition, coefficient shapes, compact-order meanings, aliases, and reporting obligations.\par
+\pard\sa220 THOG2 is a compact transformer-weight architecture. Its purpose is to explore whether repeated transformer-block weights can be represented by a much smaller learned coefficient structure without destroying useful model capacity. This document is authoritative for compact non-dense geometry names, semantic decomposition, coefficient shapes, compact-order meanings, aliases, basis-shim obligations, and reporting obligations.\par
 \pard\sa220 Dense remains the conventional GPT control path. Dense is not a compact geometry and shall not be forced through compact basis identity. The dense path must stay clean and useful as an equal-wall and equal-memory control.\par
-\pard\sa220 This revision integrates the original Chebyshev-native GPT-2 draft, the curve/sheet/block basis work, and the v0.21/v0.22 semantic sheet hardening. It is arranged as a specification rather than as a history of experiments.\par
+\pard\sa220 This revision integrates the original Chebyshev-native GPT-2 discussion only where it clarifies boundaries. The current sheet work remains a THOG2 compact-weight geometry pass, not a Chebyshev-native residual-stream model.\par
 \pard\b\fs26 1.2 Architectural concept\b0\fs22\par
 \pard\sa220 A transformer block contains repeated matrix families: QKV input projection, attention output projection, MLP expansion, and MLP contraction. In an ordinary dense GPT, every layer owns dense matrix parameters for these families. In THOG2, a non-dense geometry stores learned coefficient tensors and deterministic orthogonal bases. At execution time, these coefficients and bases generate the layer-specific dense-equivalent matrix, or an equivalent direct factorised computation.\par
 \pard\sa220 The important distinction is between persistent trained state and ephemeral computation. The dense-equivalent matrix may be materialised locally for a kernel, but optimizer state, gradients, and learned model degrees of freedom live in the compact coefficient representation. This is why a geometry can be valuable even when it materialises a dense-equivalent matrix during the forward path.\par
@@ -61,10 +61,19 @@
 \pard\sa180 LayerNorm vectors, biases, embeddings, and unembedding may have compact handling where already supported, but the normative geometry catalogue in this document is concerned with the four repeated matrix families above.\par
 \pard\b\fs26 2.3 Basis families and compact orders\b0\fs22\par
 \pard\sa220 Chebyshev is the primary compact basis family. DCT is also a supported or planned orthogonal basis family under the same geometry contract. The basis family and basis version shall be recorded in compact identity. A coefficient tensor shall never be silently interpreted under a different basis family or basis version.\par
+\pard\sa220 In this sheet-geometry pass, a basis family is a deterministic weight-coordinate generator. It is not required to provide polynomial product tensors, activation order-growth rules, projection rules, or function-space nonlinearities. Those belong to a later Chebyshev-native residual-stream model, not this THOG2 compact-weight pass.\par
+\pard\b\fs26 2.4 Minimal basis-registry shim\b0\fs22\par
+\pard\sa160 2.4.1 Before adding new semantic sheet geometries, the implementation shall introduce a narrow basis registry that centralises accepted basis names, artifact tags, basis versions, and basis-matrix construction.\par
+\pard\sa160 2.4.2 The shim shall support the existing Chebyshev and DCT families without changing their numerical behaviour.\par
+\pard\sa160 2.4.3 The shim shall expose only the capabilities needed by current THOG2 compact-weight geometry: name, artifact_tag, version, basis_matrix, and supports_native_products metadata.\par
+\pard\sa160 2.4.4 The shim shall not introduce product_tensor, metric, activation_order, or projection_rule methods in this pass. Those methods shall be deferred until the Chebyshev-native model requires them.\par
+\pard\sa160 2.4.5 DCT shall be allowed as a compact-weight basis family but shall not be advertised as supporting native polynomial products.\par
+\pard\sa160 2.4.6 Chebyshev may declare supports_native_products as true for future use, but no current sheet-geometry code shall depend on that capability.\par
+\pard\sa160 2.4.7 Adding a later compact-weight basis should require adding one BasisSpec implementation, one registry entry, and basis-specific tests. It shall not require editing wrappers, naming, config validation, checkpoint identity, and materialisers separately.\par
 \page
 \pard\b\fs30 3 Common compact-geometry requirements\b0\fs22\par
 \pard\sa160 3.1.1 Every compact geometry shall define compressed axes, whole axes, coefficient shapes, consumed compact orders, and materialisation formula.\par
-\pard\sa160 3.1.2 All compact geometries shall share one basis-family identity mechanism and record basis family and basis version.\par
+\pard\sa160 3.1.2 All compact geometries shall share one basis-family identity mechanism and record basis family and basis version through the basis registry.\par
 \pard\sa160 3.1.3 All compact geometries shall be expressible through the unified MLP/QKV/attention-output component resolver.\par
 \pard\sa160 3.1.4 Dense shall remain a conventional GPT control path and shall not require compact selector fields.\par
 \pard\sa160 3.1.5 Compact execution may materialise dense-equivalent weights locally, but persistent trainable state shall be the compact coefficient representation.\par
@@ -73,6 +82,7 @@
 \pard\sa160 3.1.8 The implementation shall report enough geometry metadata that a run can be understood without reverse-engineering code or W&B names.\par
 \pard\sa160 3.1.9 All new compact code paths shall preserve existing working paths unless a branch is explicitly declared checkpoint-breaking.\par
 \pard\sa160 3.1.10 A compact preset name shall describe architecture, not implementation history. Historical aliases may exist, but canonical names shall be clear.\par
+\pard\sa160 3.1.11 Basis-family validation shall be registry-driven. Literal chebyshev-or-dct conditionals shall not spread into wrappers, resolver code, materialisers, or checkpoint identity.\par
 \page
 \pard\b\fs30 4 Existing compact geometries\b0\fs22\par
 \pard\sa220 The existing compact geometries remain important baselines. They are not archaeological leftovers. The new semantic sheet work should make them cleaner and more explicit, not bury them under more ad-hoc dispatch code.\par
@@ -156,6 +166,7 @@
 \pard\f2\fs18\sa80     attn_out_component: str\par
 \pard\f2\fs18\sa80     basis_family: str\par
 \pard\f2\fs18\sa80     basis_version: str\par
+\pard\f2\fs18\sa80     basis_artifact_tag: str\par
 \pard\f2\fs18\sa80     consumed_orders: tuple[str, ...]\par
 \pard\f2\fs18\sa80     coefficient_families: tuple[CoefficientFamily, ...]\par
 \pard\sa180 Alias policy: legacy_sheet_col shall resolve to generic_sheet_col. curve shall resolve to depth where old usage exists. New runs shall store both requested_preset and canonical_preset. New artifact names shall prefer canonical names unless compatibility mode explicitly requires otherwise. Existing checkpoints shall remain loadable unless an experimental branch explicitly declares a checkpoint-breaking boundary.\par
@@ -165,10 +176,10 @@
 \pard\b\fs30 9 Reporting, diagnostics, and accounting\b0\fs22\par
 \pard\sa160 9.1 Parameter reports shall include persistent_parameters, coefficient_parameters, dense_equivalent_parameters, and dense_equivalent / persistent ratio.\par
 \pard\sa160 9.2 Parameter reports shall include per-family coefficient shapes and dense-equivalent shapes.\par
-\pard\sa160 9.3 Parameter reports shall include resolved preset, MLP component, QKV component, attention-output component, basis family, basis version, and consumed compact orders.\par
+\pard\sa160 9.3 Parameter reports shall include resolved preset, MLP component, QKV component, attention-output component, basis family, basis version, basis artifact tag, and consumed compact orders.\par
 \pard\sa160 9.4 The reporting path shall make generic flattening visible. For example, generic_sheet_col attention output shall disclose that flattened head x local_head_channel input columns are compressed as one generic input axis.\par
 \pard\sa160 9.5 Checkpoint metadata shall be sufficient to reconstruct the same compact geometry without relying on current defaults.\par
-\pard\sa160 9.6 Changing compact geometry, basis family, basis version, or consumed order shall be a material model change.\par
+\pard\sa160 9.6 Changing compact geometry, basis family, basis version, basis artifact tag, or consumed order shall be a material model change.\par
 \page
 \pard\b\fs30 10 Correctness requirements\b0\fs22\par
 \pard\sa160 10.1.1 For every compact component, materialise-then-linear execution and direct/factorised execution, where both exist, shall produce equivalent outputs within dtype-appropriate tolerance.\par
@@ -176,17 +187,19 @@
 \pard\sa160 10.1.3 Gradient flow shall reach the correct coefficient tensor for each semantic component.\par
 \pard\sa160 10.1.4 The resolver shall reject invalid combinations before model construction.\par
 \pard\sa160 10.1.5 The resolver shall store both requested and canonical preset names.\par
-\pard\sa160 10.1.6 Changing compact geometry, basis family, basis version, or consumed order shall be a material model change.\par
+\pard\sa160 10.1.6 Changing compact geometry, basis family, basis version, basis artifact tag, or consumed order shall be a material model change.\par
 \pard\sa160 10.1.7 Checkpoint metadata shall be sufficient to reconstruct the same compact geometry without relying on current defaults.\par
+\pard\sa160 10.1.8 Basis-registry tests shall prove that Chebyshev and DCT basis matrix construction remains numerically unchanged after the shim.\par
 \page
 \pard\b\fs30 11 Implementation-readiness requirements\b0\fs22\par
-\pard\sa220 Before implementing semantic sheets, the codebase should receive a small integration pass. This is not a rewrite. It is a resolver and identity cleanup so that all non-dense geometries are treated coherently.\par
+\pard\sa220 Before implementing semantic sheets, the codebase should receive a small integration pass. This is not a rewrite. It is a resolver, identity, and basis-registry cleanup so that all non-dense geometries are treated coherently.\par
 \pard\sa160 11.1.1 Introduce canonical names generic_sheet_col and depth while preserving legacy_sheet_col and curve aliases.\par
-\pard\sa160 11.1.2 Replace the two-slot attention_geometry/mlp_geometry resolver spine with a resolved MLP/QKV/attention-output component object.\par
-\pard\sa160 11.1.3 Define semantic family descriptors once: MLP up/down, QKV, and attention output.\par
-\pard\sa160 11.1.4 Route existing compact presets through the new resolver without changing their numerical behaviour.\par
-\pard\sa160 11.1.5 Only after the resolver pass is stable, add generic_sheet_row, sheet_mlp, sheet_qkv, sheet_out_dmodel, and sheet_out_local.\par
-\pard\sa160 11.1.6 Make all new tests descriptive enough that failure output states the architectural contract being violated.\par
+\pard\sa160 11.1.2 Introduce the minimal basis-registry shim before semantic sheet implementation, and route existing Chebyshev and DCT basis matrix construction through it.\par
+\pard\sa160 11.1.3 Replace the two-slot attention_geometry/mlp_geometry resolver spine with a resolved MLP/QKV/attention-output component object.\par
+\pard\sa160 11.1.4 Define semantic family descriptors once: MLP up/down, QKV, and attention output.\par
+\pard\sa160 11.1.5 Route existing compact presets through the new resolver without changing their numerical behaviour.\par
+\pard\sa160 11.1.6 Only after the basis-registry shim and resolver pass are stable, add generic_sheet_row, sheet_mlp, sheet_qkv, sheet_out_dmodel, and sheet_out_local.\par
+\pard\sa160 11.1.7 Make all new tests descriptive enough that failure output states the architectural contract being violated.\par
 \page
 \pard\b\fs30 12 Non-goals and guardrails\b0\fs22\par
 \pard\sa160 - This document does not specify benchmark results or claim that a particular compact geometry currently beats dense.\par
@@ -194,6 +207,7 @@
 \pard\sa160 - This document does not approve hidden basis sharing across QKV role, attention head, or MLP hidden channel in semantic sheet presets.\par
 \pard\sa160 - This document does not approve dense/compact mixtures inside one compact preset except through a future named preset with explicit identity semantics.\par
 \pard\sa160 - This document does not require compatibility with every old experimental checkpoint, but any checkpoint-breaking branch must say so explicitly.\par
+\pard\sa160 - This document does not require a full polynomial-native basis interface. Product tensors, activation algebra, and projection rules are deferred until Chebyshev-native GPT work begins.\par
 \pard\sa160 - This document does not replace implementation plans or test plans. It supplies the architecture contract those plans must satisfy.\par
 \page
 \pard\b\fs30 13 Acceptance checklist\b0\fs22\par
@@ -205,5 +219,6 @@
 \pard\sa160 A6 Alias policy preserves legacy_sheet_col and curve compatibility.\par
 \pard\sa160 A7 Parameter-report and correctness requirements are explicit.\par
 \pard\sa160 A8 No implementation detail is allowed to smuggle semantic smearing into a semantic sheet preset.\par
+\pard\sa160 A9 The minimal basis-registry shim is specified narrowly enough not to become premature Chebyshev-native architecture work.\par
 \pard\sa220\i End of specification.\i0\par
 }
