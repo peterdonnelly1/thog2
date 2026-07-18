@@ -1,0 +1,209 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Liberation Serif;}{\f1 Liberation Sans;}{\f2 Liberation Mono;}}
+{\colortbl;\red217\green234\blue247;\red245\green245\blue245;}
+\paperw16840\paperh23820\margl1134\margr1134\margt1134\margb1134\titlepg
+{\header\pard\qc\i\f0\fs18 THOG2 Chebyshev Sheet Requirements Specification v0.24\par}
+{\footer\pard\qc\f0\fs18 Page {\field{\*\fldinst PAGE}{\fldrslt 1}} of {\field{\*\fldinst NUMPAGES}{\fldrslt 1}}\par}
+{\headerf\pard\par}{\footerf\pard\par}
+\widowctrl\f0\fs22
+\pard\qc\b\fs44 THOG2 Chebyshev Sheet Requirements Specification\b0\par
+\pard\qc\b\fs30 v0.24\b0\par
+\pard\qc\i\fs24 Integrated compact-depth, generic sheet, block, and semantic sheet geometry\i0\par
+\pard\sa240\par
+\pard\sa220 This revision replaces the cramped v0.23 RTF layout. It preserves the salient architecture work from v0.2, v0.21, and v0.22 while adding a title page, a separate contents page, page numbers, legal-style numbering, clearer whitespace, and a less compressed layout.\par
+\pard\sa220 Status: implementation-control requirements document for the next THOG2 semantic-sheet geometry pass.\par
+\pard\sa220 Repository path: docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.24.rtf\par
+\pard\sa220 Date: 18 July 2026\par
+\page
+\pard\qc\b\fs32 Detailed table of contents\b0\fs22\par
+\pard\sa120 1 Concept and architecture\par
+\pard\sa120 1.1 Purpose and authority\tab 1.2 Architectural concept\tab 1.3 Residual-stream interface\par
+\pard\sa120 1.4 Depth, sheets, and blocks\tab 1.5 Clean-axis rule\tab 1.6 Integrated catalogue principle\par
+\pard\sa120 2 Definitions and notation\tab 2.1 Dimension symbols\tab 2.2 Repeated matrix families\par
+\pard\sa120 2.3 Basis families and compact orders\par
+\pard\sa120 3 Common compact-geometry requirements\par
+\pard\sa120 4 Existing compact geometries\tab 4.1 Specific observations retained from prior drafts\par
+\pard\sa120 5 New semantic sheet geometries\tab 5.1 Semantic MLP sheet\tab 5.2 Semantic QKV sheet\tab 5.3 Semantic attention-output alternatives\par
+\pard\sa120 6 Coefficient-shape requirements\tab 6.1 Materialisation formulas\tab 6.2 Biases, vectors, and embeddings\par
+\pard\sa120 7 Preset catalogue\tab 8 Resolver, aliases, and identity\tab 8.1 No archaeological paths\par
+\pard\sa120 9 Reporting, diagnostics, and accounting\tab 10 Correctness requirements\par
+\pard\sa120 11 Implementation-readiness requirements\tab 12 Non-goals and guardrails\tab 13 Acceptance checklist\par
+\page
+\pard\b\fs30 1 Concept and architecture\b0\fs22\par
+\pard\b\fs26 1.1 Purpose and authority\b0\fs22\par
+\pard\sa220 THOG2 is a compact transformer-weight architecture. Its purpose is to explore whether repeated transformer-block weights can be represented by a much smaller learned coefficient structure without destroying useful model capacity. This document is authoritative for compact non-dense geometry names, semantic decomposition, coefficient shapes, compact-order meanings, aliases, and reporting obligations.\par
+\pard\sa220 Dense remains the conventional GPT control path. Dense is not a compact geometry and shall not be forced through compact basis identity. The dense path must stay clean and useful as an equal-wall and equal-memory control.\par
+\pard\sa220 This revision integrates the original Chebyshev-native GPT-2 draft, the curve/sheet/block basis work, and the v0.21/v0.22 semantic sheet hardening. It is arranged as a specification rather than as a history of experiments.\par
+\pard\b\fs26 1.2 Architectural concept\b0\fs22\par
+\pard\sa220 A transformer block contains repeated matrix families: QKV input projection, attention output projection, MLP expansion, and MLP contraction. In an ordinary dense GPT, every layer owns dense matrix parameters for these families. In THOG2, a non-dense geometry stores learned coefficient tensors and deterministic orthogonal bases. At execution time, these coefficients and bases generate the layer-specific dense-equivalent matrix, or an equivalent direct factorised computation.\par
+\pard\sa220 The important distinction is between persistent trained state and ephemeral computation. The dense-equivalent matrix may be materialised locally for a kernel, but optimizer state, gradients, and learned model degrees of freedom live in the compact coefficient representation. This is why a geometry can be valuable even when it materialises a dense-equivalent matrix during the forward path.\par
+\pard\b\fs26 1.3 Residual-stream interface\b0\fs22\par
+\pard\sa220 Token IDs are mapped through learned token embeddings. Positions are represented by the ordinary positional embedding mechanism unless a later specification explicitly changes that. There is no special Chebyshev input sequence interface in this requirements version. Compact weight geometry applies to repeated weight families across depth and selected matrix axes, not to vocabulary index space.\par
+\pard\b\fs26 1.4 Depth, sheets, and blocks\b0\fs22\par
+\pard\sa220 Depth is the privileged compact axis. It corresponds to repeated transformer layers. A depth-only geometry learns a depth trajectory for each scalar matrix element. A sheet geometry learns a surface over depth and one matrix axis. A block geometry learns a field over depth and both matrix axes.\par
+\pard\sa220 These are different experiments. A depth geometry preserves both matrix axes whole. A generic sheet compresses a flattened input or output axis. A semantic sheet chooses the second compressed axis according to transformer semantics. A block compresses both axes and therefore changes more than a sheet. Names shall not hide these distinctions.\par
+\pard\b\fs26 1.5 Clean-axis rule\b0\fs22\par
+\pard\sa220 Every compact geometry shall state exactly which axes are compressed and which axes remain whole. Generic geometries may flatten axes because their purpose is to test generic compression. Semantic geometries shall not flatten across axes that the design declares semantically distinct.\par
+\pard\sa220 QKV role, attention head, local head channel, residual d_model channel, and MLP hidden channel are distinct semantic axes. A semantic sheet preset shall not introduce basis sharing across QKV role or attention head. A semantic MLP sheet preset shall not introduce basis sharing across hidden_channel. Any future exception must be introduced under a new explicit geometry name.\par
+\pard\b\fs26 1.6 Integrated catalogue principle\b0\fs22\par
+\pard\sa220 All non-dense geometries shall be resolved through one integrated catalogue. The catalogue shall decompose each compact preset into an MLP component, a QKV component, and an attention-output component. The old two-slot model, preset to attention_geometry plus mlp_geometry, is no longer expressive enough because QKV and attention output require independent choices.\par
+\pard\sa220 Existing geometries are not debris. generic_sheet_col, depth, mlp_block, head_aware_block, and full_block remain first-class entries. New semantic sheet components are added to the same system rather than bolted on as special cases.\par
+\page
+\pard\b\fs30 2 Definitions and notation\b0\fs22\par
+\pard\b\fs26 2.1 Dimension symbols\b0\fs22\par
+\pard\f1\fs19\sa120 L = number of transformer layers.\tab D = residual model width, n_embd.\tab H = number of attention heads.\par
+\pard\f1\fs19\sa120 Dh = per-head channel width, D / H.\tab M = MLP hidden width, usually 4D.\par
+\pard\f1\fs19\sa120 P = depth order.\tab Q = attention/residual d_model order.\tab J = QKV local per-head channel order.\par
+\pard\f1\fs19\sa120 O = attention-output local per-head channel order.\tab X = MLP d_model order.\tab Y = MLP hidden order.\par
+\pard\f1\fs19\sa120 q_in = resolved generic input-axis order.\tab q_out = resolved generic output-axis order.\par
+\pard\b\fs26 2.2 Repeated matrix families\b0\fs22\par
+\pard\sa180 The repeated matrix families are attention_input_weight, attention_output_weight, mlp_expansion_weight, and mlp_contraction_weight. The packed QKV projection may also be viewed semantically as W_qkv[qkv_role, head, local_head_channel, d_model_input]. The attention output may be viewed as W_out[d_model_output, head, local_head_channel].\par
+\pard\sa180 LayerNorm vectors, biases, embeddings, and unembedding may have compact handling where already supported, but the normative geometry catalogue in this document is concerned with the four repeated matrix families above.\par
+\pard\b\fs26 2.3 Basis families and compact orders\b0\fs22\par
+\pard\sa220 Chebyshev is the primary compact basis family. DCT is also a supported or planned orthogonal basis family under the same geometry contract. The basis family and basis version shall be recorded in compact identity. A coefficient tensor shall never be silently interpreted under a different basis family or basis version.\par
+\page
+\pard\b\fs30 3 Common compact-geometry requirements\b0\fs22\par
+\pard\sa160 3.1.1 Every compact geometry shall define compressed axes, whole axes, coefficient shapes, consumed compact orders, and materialisation formula.\par
+\pard\sa160 3.1.2 All compact geometries shall share one basis-family identity mechanism and record basis family and basis version.\par
+\pard\sa160 3.1.3 All compact geometries shall be expressible through the unified MLP/QKV/attention-output component resolver.\par
+\pard\sa160 3.1.4 Dense shall remain a conventional GPT control path and shall not require compact selector fields.\par
+\pard\sa160 3.1.5 Compact execution may materialise dense-equivalent weights locally, but persistent trainable state shall be the compact coefficient representation.\par
+\pard\sa160 3.1.6 No semantic sheet preset shall share a basis across QKV role or attention head.\par
+\pard\sa160 3.1.7 No semantic MLP sheet preset shall share a basis across hidden_channel.\par
+\pard\sa160 3.1.8 The implementation shall report enough geometry metadata that a run can be understood without reverse-engineering code or W&B names.\par
+\pard\sa160 3.1.9 All new compact code paths shall preserve existing working paths unless a branch is explicitly declared checkpoint-breaking.\par
+\pard\sa160 3.1.10 A compact preset name shall describe architecture, not implementation history. Historical aliases may exist, but canonical names shall be clear.\par
+\page
+\pard\b\fs30 4 Existing compact geometries\b0\fs22\par
+\pard\sa220 The existing compact geometries remain important baselines. They are not archaeological leftovers. The new semantic sheet work should make them cleaner and more explicit, not bury them under more ad-hoc dispatch code.\par
+\pard\f1\fs18\sa120 Preset\tab Canonical interpretation\tab Requirement note\par
+\pard\f1\fs18\sa120 legacy_sheet_col\tab alias for generic_sheet_col\tab accepted indefinitely as input.\par
+\pard\f1\fs18\sa120 generic_sheet_col\tab depth + flattened input-axis sheet\tab canonical name for current legacy sheet-column geometry.\par
+\pard\f1\fs18\sa120 depth\tab depth-only compact matrices\tab matrix output and input axes remain whole.\par
+\pard\f1\fs18\sa120 mlp_block\tab MLP block + depth attention\tab compresses both MLP axes.\par
+\pard\f1\fs18\sa120 head_aware_block\tab depth MLP + head-aware attention\tab head-aware QKV and attention-output components.\par
+\pard\f1\fs18\sa120 full_block\tab mlp_block + head-aware attention\tab existing full block composition.\par
+\pard\b\fs26 4.1 Specific observations retained from prior drafts\b0\fs22\par
+\pard\sa220 generic_sheet_col keeps output rows whole and compresses the input axis. For QKV, this means Q/K/V role, head, and local channel distinctions are preserved on the output-row side because those distinctions are encoded in rows. For attention output, however, the compressed input columns correspond to flattened head x local_head_channel, so generic_sheet_col does smear that semantic input structure.\par
+\pard\sa220 depth is the cleanest geometric control because it changes only the layer axis. Its drawback is that it leaves every matrix element as an independent depth trajectory, so persistent parameter count can remain large. Its value is architectural interpretability and as a baseline for whether matrix-axis compression is helping or hurting.\par
+\pard\sa220 BLOCK-style geometries changed semantic decomposition and bilinear field factorisation together. That made some earlier experiments hard to interpret. The semantic sheet ladder is designed to make this more decomposable.\par
+\page
+\pard\b\fs30 5 New semantic sheet geometries\b0\fs22\par
+\pard\f1\fs18\sa120 Base option\tab Applies to\tab Compressed axes\tab Whole axes\par
+\pard\f1\fs18\sa120 generic_sheet_row\tab all matrix families\tab depth, output_rows\tab input_cols\par
+\pard\f1\fs18\sa120 sheet_mlp\tab MLP up/down\tab depth, d_model input/output\tab hidden_channel\par
+\pard\f1\fs18\sa120 sheet_qkv\tab QKV\tab depth, d_model_input\tab qkv_role, head, local_head_channel\par
+\pard\f1\fs18\sa120 sheet_out_dmodel\tab attention output\tab depth, d_model_output\tab head, local_head_channel\par
+\pard\f1\fs18\sa120 sheet_out_local\tab attention output\tab depth, local_head_channel\tab d_model_output, head\par
+\pard\b\fs26 5.1 Semantic MLP sheet\b0\fs22\par
+\pard\sa220 The semantic MLP sheet keeps hidden_channel whole. For the expansion matrix, each hidden channel owns a depth x d_model_input sheet. For the contraction matrix, each hidden channel owns a depth x d_model_output sheet. This is deliberately different from a full MLP block, which compresses both MLP axes. This component consumes P and X. It shall not consume Y because hidden_channel is whole.\par
+\pard\b\fs26 5.2 Semantic QKV sheet\b0\fs22\par
+\pard\sa220 The semantic QKV sheet treats qkv_role, head, and local_head_channel as whole categorical axes. For each role, head, and local channel, it learns a depth x d_model_input sheet. This component consumes P and Q. It shall not consume J because local_head_channel is whole.\par
+\pard\b\fs26 5.3 Semantic attention-output alternatives\b0\fs22\par
+\pard\sa220 Attention output is the ambiguous case. There are two plausible semantic sheets and both must be available. sheet_out_dmodel keeps head and local_head_channel whole and compresses depth x d_model_output. sheet_out_local keeps d_model_output and head whole and compresses depth x local_head_channel. Neither alternative should be silently treated as the other.\par
+\page
+\pard\b\fs30 6 Coefficient-shape requirements\b0\fs22\par
+\pard\f1\fs18\sa120 Component\tab Dense-equivalent family\tab Coefficient shape\tab Orders\par
+\pard\f1\fs18\sa120 depth\tab W[out, in]\tab coeff[out, in, P]\tab P\par
+\pard\f1\fs18\sa120 generic_sheet_col\tab W[out, in]\tab coeff[out, P, q_in]\tab P + q_in\par
+\pard\f1\fs18\sa120 generic_sheet_row\tab W[out, in]\tab coeff[in, P, q_out]\tab P + q_out\par
+\pard\f1\fs18\sa120 mlp_block up\tab W_up[M, D]\tab coeff[P, Y, X]\tab P + X + Y\par
+\pard\f1\fs18\sa120 mlp_block down\tab W_down[D, M]\tab coeff[P, X, Y]\tab P + X + Y\par
+\pard\f1\fs18\sa120 head_aware_block Q/K/V\tab W_role[head, local, d_model_in]\tab coeff[head, P, J, Q]\tab P + J + Q\par
+\pard\f1\fs18\sa120 head_aware_block out\tab W_out[d_model_out, head, local]\tab coeff[head, P, Q, O]\tab P + Q + O\par
+\pard\f1\fs18\sa120 sheet_mlp up\tab W_up[hidden, d_model_in]\tab coeff[hidden, P, X]\tab P + X\par
+\pard\f1\fs18\sa120 sheet_mlp down\tab W_down[d_model_out, hidden]\tab coeff[hidden, P, X]\tab P + X\par
+\pard\f1\fs18\sa120 sheet_qkv\tab W_qkv[role, head, local, d_model_in]\tab coeff[role, head, local, P, Q]\tab P + Q\par
+\pard\f1\fs18\sa120 sheet_out_dmodel\tab W_out[d_model_out, head, local]\tab coeff[head, local, P, Q]\tab P + Q\par
+\pard\f1\fs18\sa120 sheet_out_local\tab W_out[d_model_out, head, local]\tab coeff[d_model_out, head, P, O]\tab P + O\par
+\pard\b\fs26 6.1 Materialisation formulas\b0\fs22\par
+\pard\f2\fs18\sa80 depth:             W_l[o,i] = sum_p coeff[o,i,p] * B_depth[l,p]\par
+\pard\f2\fs18\sa80 generic_sheet_col: W_l[o,i] = sum_pq coeff[o,p,q] * B_depth[l,p] * B_in[i,q]\par
+\pard\f2\fs18\sa80 generic_sheet_row: W_l[o,i] = sum_pq coeff[i,p,q] * B_depth[l,p] * B_out[o,q]\par
+\pard\f2\fs18\sa80 block:             W_l[o,i] = sum_pab coeff[p,a,b] * B_depth[l,p] * B_out[o,a] * B_in[i,b]\par
+\pard\f2\fs18\sa80 sheet_qkv:         W_l[r,h,c,i] = sum_pq coeff[r,h,c,p,q] * B_depth[l,p] * B_d_model_in[i,q]\par
+\pard\f2\fs18\sa80 sheet_out_dmodel:  W_l[o,h,c] = sum_pq coeff[h,c,p,q] * B_depth[l,p] * B_d_model_out[o,q]\par
+\pard\f2\fs18\sa80 sheet_out_local:   W_l[o,h,c] = sum_po coeff[o,h,p,o2] * B_depth[l,p] * B_local[c,o2]\par
+\pard\b\fs26 6.2 Biases, vectors, and embeddings\b0\fs22\par
+\pard\sa220 This specification is about repeated matrix-family geometry. Existing vector or bias compact handling may continue, but it shall not determine the meaning of matrix geometry names. Embeddings and positional embeddings are outside this compact matrix-family contract unless a later specification explicitly brings them in.\par
+\page
+\pard\b\fs30 7 Preset catalogue\b0\fs22\par
+\pard\f1\fs18\sa120 Preset\tab MLP component\tab QKV component\tab Attention-output component\par
+\pard\f1\fs18\sa120 dense\tab conventional\tab conventional\tab conventional\par
+\pard\f1\fs18\sa120 legacy_sheet_col\tab generic_sheet_col\tab generic_sheet_col\tab generic_sheet_col\par
+\pard\f1\fs18\sa120 generic_sheet_col\tab generic_sheet_col\tab generic_sheet_col\tab generic_sheet_col\par
+\pard\f1\fs18\sa120 generic_sheet_row\tab generic_sheet_row\tab generic_sheet_row\tab generic_sheet_row\par
+\pard\f1\fs18\sa120 depth\tab depth\tab depth\tab depth\par
+\pard\f1\fs18\sa120 mlp_block\tab mlp_block\tab depth\tab depth\par
+\pard\f1\fs18\sa120 head_aware_block\tab depth\tab head_aware_block_qkv\tab head_aware_block_out\par
+\pard\f1\fs18\sa120 full_block\tab mlp_block\tab head_aware_block_qkv\tab head_aware_block_out\par
+\pard\f1\fs18\sa120 sheet_mlp\tab sheet_mlp\tab generic_sheet_col\tab generic_sheet_col\par
+\pard\f1\fs18\sa120 sheet_qkv\tab generic_sheet_col\tab sheet_qkv\tab generic_sheet_col\par
+\pard\f1\fs18\sa120 sheet_attn_dmodel\tab generic_sheet_col\tab sheet_qkv\tab sheet_out_dmodel\par
+\pard\f1\fs18\sa120 sheet_attn_local\tab generic_sheet_col\tab sheet_qkv\tab sheet_out_local\par
+\pard\f1\fs18\sa120 sheet_full_dmodel\tab sheet_mlp\tab sheet_qkv\tab sheet_out_dmodel\par
+\pard\f1\fs18\sa120 sheet_full_local\tab sheet_mlp\tab sheet_qkv\tab sheet_out_local\par
+\pard\sa220 The first serious ablation set should include generic_sheet_col, generic_sheet_row, depth, sheet_mlp, sheet_qkv, sheet_attn_dmodel, sheet_attn_local, sheet_full_dmodel, and sheet_full_local. The other combinations are useful diagnostics, but they are not all equally high-conviction.\par
+\page
+\pard\b\fs30 8 Resolver, aliases, and identity\b0\fs22\par
+\pard\sa220 The implementation shall expose a resolved geometry object. This object is the single source of truth for model construction, parameter reporting, artifact identity, checkpoint metadata, and run diagnostics.\par
+\pard\f2\fs18\sa80 @dataclass(frozen=True)\par
+\pard\f2\fs18\sa80 class ResolvedCompactGeometry:\par
+\pard\f2\fs18\sa80     requested_preset: str\par
+\pard\f2\fs18\sa80     canonical_preset: str\par
+\pard\f2\fs18\sa80     mlp_component: str\par
+\pard\f2\fs18\sa80     qkv_component: str\par
+\pard\f2\fs18\sa80     attn_out_component: str\par
+\pard\f2\fs18\sa80     basis_family: str\par
+\pard\f2\fs18\sa80     basis_version: str\par
+\pard\f2\fs18\sa80     consumed_orders: tuple[str, ...]\par
+\pard\f2\fs18\sa80     coefficient_families: tuple[CoefficientFamily, ...]\par
+\pard\sa180 Alias policy: legacy_sheet_col shall resolve to generic_sheet_col. curve shall resolve to depth where old usage exists. New runs shall store both requested_preset and canonical_preset. New artifact names shall prefer canonical names unless compatibility mode explicitly requires otherwise. Existing checkpoints shall remain loadable unless an experimental branch explicitly declares a checkpoint-breaking boundary.\par
+\pard\b\fs26 8.1 No archaeological paths\b0\fs22\par
+\pard\sa220 The code shall not accumulate one-off construction paths for every historical experiment. Existing trajectory modules may remain internally, but the public and checkpoint-facing geometry contract shall be integrated. Adding semantic sheets by bolting new special cases beside legacy sheet, depth, MLP block, and block trajectories without a coherent resolver is explicitly non-compliant.\par
+\page
+\pard\b\fs30 9 Reporting, diagnostics, and accounting\b0\fs22\par
+\pard\sa160 9.1 Parameter reports shall include persistent_parameters, coefficient_parameters, dense_equivalent_parameters, and dense_equivalent / persistent ratio.\par
+\pard\sa160 9.2 Parameter reports shall include per-family coefficient shapes and dense-equivalent shapes.\par
+\pard\sa160 9.3 Parameter reports shall include resolved preset, MLP component, QKV component, attention-output component, basis family, basis version, and consumed compact orders.\par
+\pard\sa160 9.4 The reporting path shall make generic flattening visible. For example, generic_sheet_col attention output shall disclose that flattened head x local_head_channel input columns are compressed as one generic input axis.\par
+\pard\sa160 9.5 Checkpoint metadata shall be sufficient to reconstruct the same compact geometry without relying on current defaults.\par
+\pard\sa160 9.6 Changing compact geometry, basis family, basis version, or consumed order shall be a material model change.\par
+\page
+\pard\b\fs30 10 Correctness requirements\b0\fs22\par
+\pard\sa160 10.1.1 For every compact component, materialise-then-linear execution and direct/factorised execution, where both exist, shall produce equivalent outputs within dtype-appropriate tolerance.\par
+\pard\sa160 10.1.2 Direct value checks shall match materialised matrix entries for representative layer, output, and input indices.\par
+\pard\sa160 10.1.3 Gradient flow shall reach the correct coefficient tensor for each semantic component.\par
+\pard\sa160 10.1.4 The resolver shall reject invalid combinations before model construction.\par
+\pard\sa160 10.1.5 The resolver shall store both requested and canonical preset names.\par
+\pard\sa160 10.1.6 Changing compact geometry, basis family, basis version, or consumed order shall be a material model change.\par
+\pard\sa160 10.1.7 Checkpoint metadata shall be sufficient to reconstruct the same compact geometry without relying on current defaults.\par
+\page
+\pard\b\fs30 11 Implementation-readiness requirements\b0\fs22\par
+\pard\sa220 Before implementing semantic sheets, the codebase should receive a small integration pass. This is not a rewrite. It is a resolver and identity cleanup so that all non-dense geometries are treated coherently.\par
+\pard\sa160 11.1.1 Introduce canonical names generic_sheet_col and depth while preserving legacy_sheet_col and curve aliases.\par
+\pard\sa160 11.1.2 Replace the two-slot attention_geometry/mlp_geometry resolver spine with a resolved MLP/QKV/attention-output component object.\par
+\pard\sa160 11.1.3 Define semantic family descriptors once: MLP up/down, QKV, and attention output.\par
+\pard\sa160 11.1.4 Route existing compact presets through the new resolver without changing their numerical behaviour.\par
+\pard\sa160 11.1.5 Only after the resolver pass is stable, add generic_sheet_row, sheet_mlp, sheet_qkv, sheet_out_dmodel, and sheet_out_local.\par
+\pard\sa160 11.1.6 Make all new tests descriptive enough that failure output states the architectural contract being violated.\par
+\page
+\pard\b\fs30 12 Non-goals and guardrails\b0\fs22\par
+\pard\sa160 - This document does not specify benchmark results or claim that a particular compact geometry currently beats dense.\par
+\pard\sa160 - This document does not specify a spectral attention replacement or a Chebyshev-native token representation.\par
+\pard\sa160 - This document does not approve hidden basis sharing across QKV role, attention head, or MLP hidden channel in semantic sheet presets.\par
+\pard\sa160 - This document does not approve dense/compact mixtures inside one compact preset except through a future named preset with explicit identity semantics.\par
+\pard\sa160 - This document does not require compatibility with every old experimental checkpoint, but any checkpoint-breaking branch must say so explicitly.\par
+\pard\sa160 - This document does not replace implementation plans or test plans. It supplies the architecture contract those plans must satisfy.\par
+\page
+\pard\b\fs30 13 Acceptance checklist\b0\fs22\par
+\pard\sa160 A1 The document has a title page, a separate detailed contents page, page numbers, and readable whitespace.\par
+\pard\sa160 A2 All existing compact geometries are present and named coherently.\par
+\pard\sa160 A3 All new semantic sheet geometries are present with compressed and whole axes.\par
+\pard\sa160 A4 Coefficient shapes are exact and use the same dimension/order symbols throughout.\par
+\pard\sa160 A5 Preset composition is expressed as MLP + QKV + attention-output components.\par
+\pard\sa160 A6 Alias policy preserves legacy_sheet_col and curve compatibility.\par
+\pard\sa160 A7 Parameter-report and correctness requirements are explicit.\par
+\pard\sa160 A8 No implementation detail is allowed to smuggle semantic smearing into a semantic sheet preset.\par
+\pard\sa220\i End of specification.\i0\par
+}
