@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THOG2 Chebyshev Sheet Requirements Specification v0.25</title>
+<style>
+  @page { size: A3 portrait; margin: 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: "Liberation Serif", serif; font-size: 10pt; } }
+  body { font-family: "Liberation Serif", Georgia, serif; font-size: 11pt; line-height: 1.35; color: #111; max-width: 260mm; margin: 0 auto; }
+  .title-page { min-height: 900px; display: flex; flex-direction: column; justify-content: center; text-align: center; page-break-after: always; }
+  .title-page h1 { font-size: 30pt; margin: 0 0 10pt 0; }
+  .title-page h2 { font-size: 18pt; margin: 0 0 20pt 0; font-weight: normal; font-style: italic; }
+  .title-meta { margin-top: 28pt; font-size: 11pt; }
+  .toc { page-break-after: always; }
+  h1 { font-size: 18pt; margin-top: 24pt; margin-bottom: 10pt; page-break-after: avoid; }
+  h2 { font-size: 13.5pt; margin-top: 16pt; margin-bottom: 8pt; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin-top: 12pt; margin-bottom: 6pt; page-break-after: avoid; }
+  p { margin: 0 0 10pt 0; }
+  .req { margin-left: 18pt; text-indent: -18pt; }
+  .req strong { margin-right: 4pt; }
+  .caption { font-weight: bold; margin-top: 16pt; margin-bottom: 6pt; page-break-after: avoid; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 16pt 0; font-family: "Liberation Sans", Arial, sans-serif; font-size: 8.6pt; page-break-inside: avoid; }
+  th { background: #d9eaf7; border: 1px solid #8aa9bf; padding: 6px 7px; text-align: left; vertical-align: top; }
+  td { border: 1px solid #c5c5c5; padding: 6px 7px; vertical-align: top; }
+  tr:nth-child(even) td { background: #f7f7f7; }
+  code, .mono { font-family: "Liberation Mono", Consolas, monospace; font-size: 90%; }
+  .note { border-left: 4px solid #8aa9bf; padding: 8px 12px; background: #f5f9fc; margin: 10pt 0 14pt 0; }
+  .toc-grid { columns: 2; column-gap: 24pt; }
+  .toc-grid p { break-inside: avoid; margin-bottom: 4pt; }
+</style>
+</head>
+<body>
+<section class="title-page">
+  <h1>THOG2 Chebyshev Sheet<br>Requirements Specification</h1>
+  <h2>v0.25</h2>
+  <p>Integrated compact-depth, generic sheet, block, and semantic sheet geometry</p>
+  <div class="title-meta">
+    <p><strong>Status:</strong> implementation-control requirements document for the next THOG2 compact-geometry pass.</p>
+    <p><strong>Repository path:</strong> <span class="mono">docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.25.html</span></p>
+    <p><strong>Date:</strong> 18 July 2026</p>
+  </div>
+  <p class="note">This revision replaces the cramped v0.24 RTF layout. It preserves the salient architecture work from v0.2, v0.21, v0.22, and v0.24 while using proper document-style tables, a header page, a separate contents page, page numbering for print/PDF export, and normal white space between paragraphs.</p>
+</section>
+
+<section class="toc">
+<h1>Detailed table of contents</h1>
+<div class="toc-grid">
+<p>1 Concept and architecture</p><p>1.1 Purpose and authority</p><p>1.2 Core compact-depth idea</p><p>1.3 Transformer interface and residual stream</p><p>1.4 Clean-axis rule</p><p>1.5 Integrated non-dense geometry catalogue</p>
+<p>2 Definitions and notation</p><p>2.1 Dimension symbols</p><p>2.2 Repeated matrix families</p><p>2.3 Basis families and orders</p><p>2.4 Materialisation vocabulary</p>
+<p>3 Existing geometry ladder</p><p>3.1 Depth-only geometry</p><p>3.2 Generic sheet-column geometry</p><p>3.3 MLP block geometry</p><p>3.4 Head-aware attention block geometry</p><p>3.5 Full block geometry</p>
+<p>4 New semantic sheet geometry</p><p>4.1 Semantic MLP sheet</p><p>4.2 Semantic QKV sheet</p><p>4.3 Semantic attention-output sheets</p><p>4.4 Generic row-transposed ablation</p>
+<p>5 Base options and exact shapes</p><p>5.1 Base option catalogue</p><p>5.2 Coefficient-shape requirements</p><p>5.3 Order-consumption requirements</p><p>5.4 Materialisation formulas</p>
+<p>6 Preset catalogue</p><p>6.1 Preset composition model</p><p>6.2 User-facing preset table</p><p>6.3 Serious first-run ablation set</p>
+<p>7 Resolver, identity, and checkpoint policy</p><p>8 Correctness, accounting, and non-goals</p><p>9 Implementation-plan implications</p>
+</div>
+</section>
+
+<h1>1 Concept and architecture</h1>
+<h2>1.1 Purpose and authority</h2>
+<p>This document is the requirements source for the next THOG2 semantic-sheet geometry pass. It does not replace the dense GPT control path. It governs the non-dense compact geometries that regenerate repeated transformer-block weights from learned compact coefficient tensors and deterministic orthogonal bases.</p>
+<p>The immediate implementation goal is not to invent a new training loop or a new language-modeling task. The goal is to make the compact geometry system coherent enough that depth, generic sheet, block, and semantic sheet variants are first-class alternatives in the same catalogue. The implementation must stop accreting one-off geometry classes whose differences are only discoverable by reading old files and wrapper history.</p>
+<p class="req"><strong>1.1.1</strong> All non-dense geometry names shall resolve through one documented catalogue.</p>
+<p class="req"><strong>1.1.2</strong> Dense shall remain a conventional control path and shall not masquerade as a compact geometry.</p>
+<p class="req"><strong>1.1.3</strong> Existing working compact paths shall be preserved unless a branch is explicitly declared checkpoint-breaking.</p>
+<h2>1.2 Core compact-depth idea</h2>
+<p>THOG2 treats repeated transformer matrix families across layer depth as structured learned objects. Instead of storing an unrelated dense matrix for every layer, the model stores learned coefficients in a compact basis representation. At runtime, layer-specific dense-equivalent weights are reconstructed or applied directly from those coefficients.</p>
+<p>Depth is privileged. Every compact geometry in this document has a depth basis. A depth-only geometry compresses only across layer depth. A sheet geometry compresses depth plus one matrix axis. A block geometry compresses depth plus both matrix axes. A semantic sheet geometry chooses that one matrix axis according to transformer semantics rather than blind matrix orientation.</p>
+<h2>1.3 Transformer interface and residual stream</h2>
+<p>The interface between token space and compact geometry remains the ordinary GPT residual stream. Token embedding and positional embedding produce dense residual-stream vectors. The compact representation is not a replacement tokenizer, not a separate token-space encoding, and not a Chebyshev representation of the input sequence. The compact basis acts on repeated parameter families, not on the raw token sequence.</p>
+<h2>1.4 Clean-axis rule</h2>
+<p>The central design rule is that a compact geometry must say which axes are compressed and which axes are left whole. Generic geometries may flatten a matrix into output rows and input columns. Semantic geometries must respect transformer structure: QKV role, attention head, local head channel, MLP hidden channel, and residual d_model channel are not the same thing.</p>
+<h2>1.5 Integrated non-dense geometry catalogue</h2>
+<p>The resolver shall decompose compact presets into three component selectors: <span class="mono">mlp_component</span>, <span class="mono">qkv_component</span>, and <span class="mono">attn_out_component</span>. Existing presets then become rows in the same catalogue as the new semantic sheet presets, not special historical cases.</p>
+
+<h1>2 Definitions and notation</h1>
+<p class="caption">Table 1. Compact notation and order symbols.</p>
+<table><thead><tr><th>Symbol</th><th>Meaning</th><th>Typical source</th></tr></thead><tbody>
+<tr><td>L</td><td>Number of transformer layers.</td><td><span class="mono">n_layer</span></td></tr>
+<tr><td>D</td><td>Residual model width.</td><td><span class="mono">n_embd</span></td></tr>
+<tr><td>H</td><td>Number of attention heads.</td><td><span class="mono">n_head</span></td></tr>
+<tr><td>Dh</td><td>Per-head local channel width, D / H.</td><td>derived</td></tr>
+<tr><td>M</td><td>MLP hidden width. For GPT-2 style MLP, M = 4D.</td><td>derived</td></tr>
+<tr><td>P</td><td>Depth basis order.</td><td><span class="mono">o_depth</span></td></tr>
+<tr><td>Q</td><td>Attention/residual d_model basis order.</td><td><span class="mono">o_attn_d_model</span></td></tr>
+<tr><td>J</td><td>QKV local head-channel basis order.</td><td><span class="mono">o_attn_qkv_per_channel</span></td></tr>
+<tr><td>O</td><td>Attention-output local head-channel basis order.</td><td><span class="mono">o_attn_out_per_channel</span></td></tr>
+<tr><td>X</td><td>MLP d_model basis order.</td><td><span class="mono">o_mlp_d_model</span></td></tr>
+<tr><td>Y</td><td>MLP hidden-channel basis order.</td><td><span class="mono">o_mlp_hidden</span></td></tr>
+</tbody></table>
+
+<p class="caption">Table 2. Repeated matrix families.</p>
+<table><thead><tr><th>Family</th><th>Dense-equivalent shape</th><th>Semantic view</th><th>Notes</th></tr></thead><tbody>
+<tr><td>attention_input_weight / packed QKV</td><td>W_qkv[3D, D]</td><td>qkv_role x head x local_head_channel x d_model_input</td><td>Legacy code may store packed QKV; semantic code should reason about role/head/local axes explicitly.</td></tr>
+<tr><td>attention_query_weight</td><td>W_q[D, D]</td><td>head x local_head_channel x d_model_input</td><td>Used by semantic materializer and head-aware block paths.</td></tr>
+<tr><td>attention_key_weight</td><td>W_k[D, D]</td><td>head x local_head_channel x d_model_input</td><td>Same axis structure as query.</td></tr>
+<tr><td>attention_value_weight</td><td>W_v[D, D]</td><td>head x local_head_channel x d_model_input</td><td>Same axis structure as query.</td></tr>
+<tr><td>attention_output_weight</td><td>W_out[D, D]</td><td>d_model_output x head x local_head_channel</td><td>Input columns are flattened head x local channel in dense layout.</td></tr>
+<tr><td>mlp_expansion_weight</td><td>W_up[M, D]</td><td>hidden_channel x d_model_input</td><td>M = 4D in the current GPT-style MLP.</td></tr>
+<tr><td>mlp_contraction_weight</td><td>W_down[D, M]</td><td>d_model_output x hidden_channel</td><td>Semantic MLP sheet keeps hidden_channel whole in both directions.</td></tr>
+</tbody></table>
+
+<h1>3 Existing geometry ladder</h1>
+<p>Depth, generic sheet-column, MLP block, head-aware attention block, and full block remain first-class geometries. They are not to be treated as obsolete historical debris. They shall route through the same component resolver used by the semantic sheet additions.</p>
+<p>Depth leaves both matrix axes whole and compresses only layer depth. Generic sheet-column leaves output rows whole and compresses depth plus input columns. MLP block and head-aware attention block compress both matrix axes in addition to depth. full_block composes the MLP block and head-aware attention block paths.</p>
+
+<h1>4 New semantic sheet geometry</h1>
+<p>Semantic sheet geometries keep declared semantic axes whole and compress depth plus exactly one selected matrix axis. The point is to isolate whether semantically meaningful sheet structure can preserve useful representation while reducing persistent parameter memory.</p>
+<p class="req"><strong>4.1.1</strong> <span class="mono">sheet_mlp</span> up shall represent W_up[hidden, d_model_input] with coeff[hidden, P, X].</p>
+<p class="req"><strong>4.1.2</strong> <span class="mono">sheet_mlp</span> down shall represent W_down[d_model_output, hidden] with coeff[hidden, P, X].</p>
+<p class="req"><strong>4.2.1</strong> <span class="mono">sheet_qkv</span> shall represent W_qkv[qkv_role, head, local_head_channel, d_model_input] with coeff[qkv_role, head, local_head_channel, P, Q].</p>
+<p class="req"><strong>4.3.1</strong> <span class="mono">sheet_out_dmodel</span> shall represent W_out[d_model_output, head, local_head_channel] with coeff[head, local_head_channel, P, Q].</p>
+<p class="req"><strong>4.3.2</strong> <span class="mono">sheet_out_local</span> shall represent W_out[d_model_output, head, local_head_channel] with coeff[d_model_output, head, P, O].</p>
+
+<h1>5 Base options and exact shapes</h1>
+<p class="caption">Table 3. Integrated base-option catalogue.</p>
+<table><thead><tr><th>Base option</th><th>Applies to</th><th>Coefficient shape</th><th>Compressed axes</th><th>Whole axes</th><th>Orders</th><th>Purpose / note</th></tr></thead><tbody>
+<tr><td>depth</td><td>All matrix families</td><td>coeff[out, in, P]</td><td>depth</td><td>output_rows, input_cols</td><td>P</td><td>Closest to every scalar matrix weight having its own depth polynomial.</td></tr>
+<tr><td>generic_sheet_col</td><td>Generic matrix families</td><td>coeff[out, P, q_in]</td><td>depth, input_cols</td><td>output_rows</td><td>P + q_in</td><td>Canonical name for legacy sheet-column geometry.</td></tr>
+<tr><td>generic_sheet_row</td><td>Generic matrix families</td><td>coeff[in, P, q_out]</td><td>depth, output_rows</td><td>input_cols</td><td>P + q_out</td><td>Transposed ablation for generic orientation.</td></tr>
+<tr><td>mlp_block</td><td>MLP up/down</td><td>up coeff[P,Y,X]; down coeff[P,X,Y]</td><td>depth, d_model_axis, hidden_axis</td><td>none for matrix axes</td><td>P + X + Y</td><td>Existing bilinear MLP block.</td></tr>
+<tr><td>head_aware_block_qkv</td><td>Q/K/V</td><td>coeff[head, P, J, Q] per role family</td><td>depth, local_head_channel, d_model_input</td><td>qkv_role, head</td><td>P + J + Q</td><td>Existing head-aware attention block QKV path.</td></tr>
+<tr><td>head_aware_block_out</td><td>Attention output</td><td>coeff[head, P, Q, O]</td><td>depth, d_model_output, local_head_channel</td><td>head</td><td>P + Q + O</td><td>Existing head-aware attention-output block path.</td></tr>
+<tr><td>sheet_mlp</td><td>MLP up/down</td><td>up coeff[hidden,P,X]; down coeff[hidden,P,X]</td><td>depth, d_model_input/output</td><td>hidden_channel</td><td>P + X</td><td>New semantic MLP sheet.</td></tr>
+<tr><td>sheet_qkv</td><td>Packed or split QKV</td><td>coeff[qkv_role, head, local_head_channel, P, Q]</td><td>depth, d_model_input</td><td>qkv_role, head, local_head_channel</td><td>P + Q</td><td>New semantic QKV sheet.</td></tr>
+<tr><td>sheet_out_dmodel</td><td>Attention output</td><td>coeff[head, local_head_channel, P, Q]</td><td>depth, d_model_output</td><td>head, local_head_channel</td><td>P + Q</td><td>Residual-output attention-output sheet.</td></tr>
+<tr><td>sheet_out_local</td><td>Attention output</td><td>coeff[d_model_output, head, P, O]</td><td>depth, local_head_channel</td><td>d_model_output, head</td><td>P + O</td><td>Local-channel attention-output sheet.</td></tr>
+</tbody></table>
+
+<p class="caption">Table 4. Exact coefficient-shape requirements.</p>
+<table><thead><tr><th>Component</th><th>Dense-equivalent shape</th><th>Coefficient shape</th><th>Materialisation sketch</th><th>Orders</th></tr></thead><tbody>
+<tr><td>depth</td><td>W[out, in]</td><td>coeff[out, in, P]</td><td>W_l[o,i] = sum_p coeff[o,i,p] B_depth[l,p]</td><td>P</td></tr>
+<tr><td>generic_sheet_col</td><td>W[out, in]</td><td>coeff[out, P, q_in]</td><td>W_l[o,i] = sum_pq coeff[o,p,q] B_depth[l,p] B_in[i,q]</td><td>P + q_in</td></tr>
+<tr><td>generic_sheet_row</td><td>W[out, in]</td><td>coeff[in, P, q_out]</td><td>W_l[o,i] = sum_pq coeff[i,p,q] B_depth[l,p] B_out[o,q]</td><td>P + q_out</td></tr>
+<tr><td>mlp_block up</td><td>W_up[M, D]</td><td>coeff[P, Y, X]</td><td>B_hidden @ mixed_depth @ B_d_model^T</td><td>P + Y + X</td></tr>
+<tr><td>mlp_block down</td><td>W_down[D, M]</td><td>coeff[P, X, Y]</td><td>B_d_model @ mixed_depth @ B_hidden^T</td><td>P + X + Y</td></tr>
+<tr><td>head-aware Q/K/V block</td><td>W_q/k/v[H, Dh, D]</td><td>coeff[head, P, J, Q]</td><td>Per-head block over local channel and d_model input.</td><td>P + J + Q</td></tr>
+<tr><td>head-aware output block</td><td>W_out[D, H, Dh]</td><td>coeff[head, P, Q, O]</td><td>Per-head block over d_model output and local channel.</td><td>P + Q + O</td></tr>
+<tr><td>sheet_mlp up</td><td>W_up[hidden, d_model_input]</td><td>coeff[hidden, P, X]</td><td>One depth x d_model sheet per hidden channel.</td><td>P + X</td></tr>
+<tr><td>sheet_mlp down</td><td>W_down[d_model_output, hidden]</td><td>coeff[hidden, P, X]</td><td>One depth x d_model_output sheet per hidden channel.</td><td>P + X</td></tr>
+<tr><td>sheet_qkv</td><td>W_qkv[qkv_role, head, local, d_model_input]</td><td>coeff[qkv_role, head, local, P, Q]</td><td>One depth x d_model sheet per role/head/local channel.</td><td>P + Q</td></tr>
+<tr><td>sheet_out_dmodel</td><td>W_out[d_model_output, head, local]</td><td>coeff[head, local, P, Q]</td><td>One depth x d_model_output sheet per head/local input channel.</td><td>P + Q</td></tr>
+<tr><td>sheet_out_local</td><td>W_out[d_model_output, head, local]</td><td>coeff[d_model_output, head, P, O]</td><td>One depth x local-channel sheet per output row/head.</td><td>P + O</td></tr>
+</tbody></table>
+
+<h1>6 Preset catalogue</h1>
+<p>Presets are flat user-facing names backed by component selectors. This table is intentionally explicit: it is the map that should stop future implementation work from turning into an archaeology dig.</p>
+<p class="caption">Table 5. User-facing compact preset catalogue.</p>
+<table><thead><tr><th>Preset</th><th>MLP component</th><th>QKV component</th><th>Attention-output component</th><th>Meaning</th><th>Priority</th></tr></thead><tbody>
+<tr><td>generic_sheet_col</td><td>generic_sheet_col</td><td>generic_sheet_col</td><td>generic_sheet_col</td><td>Current legacy sheet-column baseline.</td><td>primary baseline</td></tr>
+<tr><td>legacy_sheet_col</td><td>alias</td><td>alias</td><td>alias</td><td>Compatibility input alias for generic_sheet_col.</td><td>compatibility</td></tr>
+<tr><td>depth</td><td>depth</td><td>depth</td><td>depth</td><td>Depth-only compact baseline.</td><td>primary baseline</td></tr>
+<tr><td>generic_sheet_row</td><td>generic_sheet_row</td><td>generic_sheet_row</td><td>generic_sheet_row</td><td>Transposed generic sheet ablation.</td><td>serious ablation</td></tr>
+<tr><td>mlp_block</td><td>mlp_block</td><td>depth</td><td>depth</td><td>Existing MLP block with depth fallback attention.</td><td>existing</td></tr>
+<tr><td>head_aware_block</td><td>depth</td><td>head_aware_block_qkv</td><td>head_aware_block_out</td><td>Existing head-aware attention block with depth fallback MLP.</td><td>existing</td></tr>
+<tr><td>full_block</td><td>mlp_block</td><td>head_aware_block_qkv</td><td>head_aware_block_out</td><td>Existing full block baseline.</td><td>existing baseline</td></tr>
+<tr><td>sheet_mlp</td><td>sheet_mlp</td><td>generic_sheet_col</td><td>generic_sheet_col</td><td>Test semantic MLP only.</td><td>serious ablation</td></tr>
+<tr><td>sheet_qkv</td><td>generic_sheet_col</td><td>sheet_qkv</td><td>generic_sheet_col</td><td>Test semantic QKV only.</td><td>serious ablation</td></tr>
+<tr><td>sheet_attn_dmodel</td><td>generic_sheet_col</td><td>sheet_qkv</td><td>sheet_out_dmodel</td><td>Semantic attention with d_model-output attention-output sheet.</td><td>serious ablation</td></tr>
+<tr><td>sheet_attn_local</td><td>generic_sheet_col</td><td>sheet_qkv</td><td>sheet_out_local</td><td>Semantic attention with local-channel attention-output sheet.</td><td>serious ablation</td></tr>
+<tr><td>sheet_full_dmodel</td><td>sheet_mlp</td><td>sheet_qkv</td><td>sheet_out_dmodel</td><td>Full semantic sheet, residual-output attention-output variant.</td><td>serious ablation</td></tr>
+<tr><td>sheet_full_local</td><td>sheet_mlp</td><td>sheet_qkv</td><td>sheet_out_local</td><td>Full semantic sheet, local-channel attention-output variant.</td><td>serious ablation</td></tr>
+</tbody></table>
+
+<h1>7 Resolver, identity, and checkpoint policy</h1>
+<p>The resolver is the preliminary implementation work. Adding semantic sheets before this is how the code becomes an archaeological dig. The resolver object should be boring, explicit, and serializable.</p>
+<p class="caption">Table 6. Required resolver and identity fields.</p>
+<table><thead><tr><th>Field</th><th>Requirement</th></tr></thead><tbody>
+<tr><td>requested_preset</td><td>The exact user-provided preset string, before alias canonicalisation.</td></tr>
+<tr><td>canonical_preset</td><td>The canonical user-facing preset after alias resolution.</td></tr>
+<tr><td>mlp_component</td><td>Resolved MLP component selector.</td></tr>
+<tr><td>qkv_component</td><td>Resolved QKV component selector.</td></tr>
+<tr><td>attn_out_component</td><td>Resolved attention-output component selector.</td></tr>
+<tr><td>basis_family</td><td>chebyshev, dct, or conventional for dense.</td></tr>
+<tr><td>basis_version</td><td>Exact basis implementation version.</td></tr>
+<tr><td>consumed_orders</td><td>Per-component mapping from semantic order names to integer values.</td></tr>
+<tr><td>coefficient_families</td><td>Per-family coefficient shapes and dense-equivalent shapes.</td></tr>
+<tr><td>materialization_version</td><td>Version string specific enough to distinguish incompatible coefficient layouts.</td></tr>
+</tbody></table>
+<p class="req"><strong>7.2.1</strong> New runs shall store both requested_preset and canonical_preset.</p>
+<p class="req"><strong>7.2.2</strong> legacy_sheet_col shall remain accepted indefinitely as an input preset and shall canonicalise to generic_sheet_col.</p>
+<p class="req"><strong>7.2.3</strong> curve shall remain accepted as an input alias for depth where that alias is present in current user workflows.</p>
+
+<h1>8 Correctness, accounting, and non-goals</h1>
+<p class="req"><strong>8.1.1</strong> For every compact component, direct/factorised execution and materialise-then-linear execution, where both exist, shall produce equivalent outputs within dtype-appropriate tolerance.</p>
+<p class="req"><strong>8.1.2</strong> Forward and backward paths shall send gradients to the intended coefficient tensors and not to stale dense fallback parameters.</p>
+<p class="req"><strong>8.3.1</strong> No semantic sheet preset shall compress across qkv_role.</p>
+<p class="req"><strong>8.3.2</strong> No semantic sheet preset shall compress across attention head.</p>
+<p class="req"><strong>8.3.3</strong> No semantic MLP sheet preset shall compress across hidden_channel.</p>
+<p>This specification does not require changing the tokenizer, embedding interface, objective, dataset, optimizer, scheduler, or evaluation protocol. It does require that compact metadata be explicit enough to reconstruct the experiment without reading wrapper archaeology.</p>
+
+<h1>9 Implementation-plan implications</h1>
+<p>The implementation plan should begin with resolver and identity hygiene, not with new materialisers. First canonicalise generic_sheet_col, preserve legacy_sheet_col, introduce the three-slot component resolver, and route existing presets through it unchanged. Only then add generic_sheet_row and the semantic sheet components.</p>
+<p>The blunt criterion is this: after implementation, a reader should be able to look at a run artifact and know exactly which axes were compressed, which axes were whole, which compact orders were consumed, and which coefficient tensor shapes existed. If that is not true, the implementation has failed the integration goal even if the code runs.</p>
+</body>
+</html>
