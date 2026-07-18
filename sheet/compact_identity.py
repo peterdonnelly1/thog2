@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .basis import BASIS_VERSION
-from .basis_kernel import BASIS_FAMILY_DCT as KERNEL_BASIS_FAMILY_DCT, DCT_BASIS_VERSION, basis_version_for_family
+from .basis_registry import BASIS_FAMILIES as COMPACT_BASIS_FAMILIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, DCT_BASIS_VERSION, basis_version_for_family
 
 
 GEOMETRY_PRESET_LEGACY_SHEET_COL = "legacy_sheet_col"
@@ -25,8 +25,6 @@ MLP_GEOMETRY_DEPTH = "depth"
 MLP_GEOMETRY_MLP_BLOCK = "mlp_block"
 MLP_GEOMETRY_CONVENTIONAL = "conventional"
 
-BASIS_FAMILY_CHEBYSHEV = "chebyshev"
-BASIS_FAMILY_DCT = KERNEL_BASIS_FAMILY_DCT
 BASIS_FAMILY_CONVENTIONAL = "conventional"
 
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
@@ -57,7 +55,7 @@ MLP_GEOMETRIES = (
     MLP_GEOMETRY_MLP_BLOCK,
     MLP_GEOMETRY_CONVENTIONAL,
 )
-BASIS_FAMILIES = (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_CONVENTIONAL)
+BASIS_FAMILIES = (*COMPACT_BASIS_FAMILIES, BASIS_FAMILY_CONVENTIONAL)
 
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
     GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
@@ -201,7 +199,7 @@ def normalize_compact_basis_version(selectors: ResolvedCompactSelectors, basis_v
 
 
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
-    supported_basis = selectors.basis_family in (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT)
+    supported_basis = selectors.basis_family in COMPACT_BASIS_FAMILIES
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
     depth = selectors.geometry_preset == GEOMETRY_PRESET_DEPTH and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis
     mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
@@ -262,77 +260,5 @@ def head_metadata(n_embd: int, n_head: int) -> Dict[str, Any]:
         "qkv_role_ranges": role_ranges,
         "qkv_role_head_ranges": role_head_ranges,
         "attention_output_input_head_column_ranges": output_columns,
-    }
-
-
-def compact_identity_metadata(
-    *,
-    n_layer: int,
-    n_embd: int,
-    n_head: int,
-    o_depth: int,
-    o_attn_d_model: int,
-    o_attn_qkv_per_channel: int,
-    o_attn_out_per_channel: int,
-    o_mlp_d_model: int,
-    o_mlp_hidden: int,
-    basis_version: str = BASIS_VERSION,
-    row_order_scaling_rule: str,
-    geometry_preset: Optional[str] = None,
-    attention_geometry: Optional[str] = None,
-    mlp_geometry: Optional[str] = None,
-    basis_family: Optional[str] = None,
-    require_stage1_sheet_support: bool = True,
-) -> Dict[str, Any]:
-    selectors = resolve_compact_selectors(
-        geometry_preset=geometry_preset,
-        attention_geometry=attention_geometry,
-        mlp_geometry=mlp_geometry,
-        basis_family=basis_family,
-    )
-    if require_stage1_sheet_support:
-        validate_current_sheet_support(selectors)
-    basis_version = normalize_compact_basis_version(selectors, basis_version)
-    heads = head_metadata(n_embd, n_head)
-    return CompactIdentity(
-        requested_geometry_preset=selectors.requested_geometry_preset,
-        requested_attention_geometry=selectors.requested_attention_geometry,
-        requested_mlp_geometry=selectors.requested_mlp_geometry,
-        requested_basis_family=selectors.requested_basis_family,
-        geometry_preset=selectors.geometry_preset,
-        attention_geometry=selectors.attention_geometry,
-        mlp_geometry=selectors.mlp_geometry,
-        basis_family=selectors.basis_family,
-        basis_version=basis_version,
-        materialization_version=compact_materialization_version(selectors),
-        row_order_scaling_rule=row_order_scaling_rule,
-        n_layer=n_layer,
-        n_embd=n_embd,
-        n_head=n_head,
-        head_dim=int(heads["head_dim"]),
-        o_depth=o_depth,
-        o_attn_d_model=o_attn_d_model,
-        o_attn_qkv_per_channel=o_attn_qkv_per_channel,
-        o_attn_out_per_channel=o_attn_out_per_channel,
-        o_mlp_d_model=o_mlp_d_model,
-        o_mlp_hidden=o_mlp_hidden,
-        qkv_role_ranges=heads["qkv_role_ranges"],
-        qkv_role_head_ranges=heads["qkv_role_head_ranges"],
-        attention_output_input_head_column_ranges=heads["attention_output_input_head_column_ranges"],
-    ).to_dict()
-
-
-def conventional_identity_metadata(*, n_layer: int, n_embd: int, n_head: int) -> Dict[str, Any]:
-    return {
-        "geometry_preset": GEOMETRY_PRESET_CONVENTIONAL,
-        "attention_geometry": ATTENTION_GEOMETRY_CONVENTIONAL,
-        "mlp_geometry": MLP_GEOMETRY_CONVENTIONAL,
-        "basis_family": BASIS_FAMILY_CONVENTIONAL,
-        "basis_version": BASIS_VERSION,
-        "materialization_version": CONVENTIONAL_MATERIALIZATION_VERSION,
-        "n_layer": n_layer,
-        "n_embd": n_embd,
-        "n_head": n_head,
-        "head_dim": n_embd // n_head,
     }
 # ^^^ THOG
