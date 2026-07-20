@@ -1,0 +1,201 @@
+{\rtf1\ansi\ansicpg1252\deff0
+{\fonttbl{\f0\froman Times New Roman;}{\f1\fswiss Arial;}{\f2\fmodern Courier New;}}
+{\colortbl;\red23\green50\blue77;\red54\green95\blue145;\red220\green230\blue240;\red242\green244\blue246;}
+\paperw11906\paperh16838\margl1134\margr1134\margt1134\margb1134
+{\header\pard\qc\f0\fs18\i THOG2 Remainder Architecture Enhancement - Requirements Specification v0.14\i0\par}
+{\footer\pard\qc\f0\fs18 Page {\field{\*\fldinst PAGE}{\fldrslt 1}} of {\field{\*\fldinst NUMPAGES}{\fldrslt 1}}\par}
+\widowctrl
+
+\pard\qc\b\fs40 THOG2 Remainder Architecture Enhancement\b0\par
+\pard\qc\b\fs32 Requirements Specification\b0\par
+\pard\qc\b\fs28 v0.14\b0\par
+\pard\qc\i\fs24 Revised build specification for adding remainder codes to THOG2 spectral weights\i0\par
+\pard\sa240\par
+
+\trowd\trgaph90\trleft0\cellx2600\cellx9300
+\pard\intbl\b Document type\b0\cell\pard\intbl Requirements Specification\cell\row
+\trowd\trgaph90\trleft0\cellx2600\cellx9300
+\pard\intbl\b Status\b0\cell\pard\intbl Revised after terminology and readability review\cell\row
+\trowd\trgaph90\trleft0\cellx2600\cellx9300
+\pard\intbl\b Date\b0\cell\pard\intbl 20 July 2026\cell\row
+\trowd\trgaph90\trleft0\cellx2600\cellx9300
+\pard\intbl\b Target branch\b0\cell\pard\intbl remainder_architecture_enhancement\cell\row
+\trowd\trgaph90\trleft0\cellx2600\cellx9300
+\pard\intbl\b Supersedes\b0\cell\pard\intbl Requirements Specification v0.13 and HTML v0.12\cell\row
+\pard\sa240\par
+
+\pard\sa200 This revision addresses review comments against v0.13. It keeps the architecture buildable while tightening terminology and removing ambiguous wording. In particular, it restores the simple addition model for effective weights, renames gradient symbols to grad_effective style, defines gradient_projector before use, replaces covered with remainder-enabled, groups R0/R1/R2 into one optimiser section, and makes DDP compatibility a hard requirement.\par
+\page
+
+\pard\qc\b\fs30 Detailed Table of Contents\b0\fs22\par
+\pard\sa100 1 Purpose and Reader Contract\par
+\pard\sa100 2 Architectural Adjustments\par
+\pard\sa100 3 Persistent and Transient Objects\par
+\pard\sa100 4 Remainder-Enabled Scope\par
+\pard\sa100 5 Numerical Semantics\par
+\pard\sa100 6 Forward Path\par
+\pard\sa100 7 Backward Path and Gradient Projector\par
+\pard\sa100 8 Optimiser Profiles\par
+\pard\sa100 9 Configuration and Checkpointing\par
+\pard\sa100 10 Distributed Training and DDP Compatibility\par
+\pard\sa100 11 Diagnostics and Telemetry\par
+\pard\sa100 12 Normative Requirements\par
+\pard\sa100 13 Test and Acceptance Criteria\par
+\pard\sa100 14 Deferred Work and Risks\par
+\pard\sa100 15 Controlled Terminology\par
+\page
+
+\pard\b\fs30 1 Purpose and Reader Contract\b0\fs22\par
+\pard\sa160 This document specifies the THOG2 Remainder Architecture Enhancement. Its job is to define what must be built, what must not be built, and how correctness will be demonstrated.\par
+\pard\sa160 The enhancement adds a learned, low-bit remainder code at selected materialised weight positions. The transformer still consumes a single weight at each such position. The effective weight is the existing base weight plus a decoded remainder offset.\par
+\pard\f2\fs18\sa160 effective_weight = base_weight + remainder_offset\line remainder_offset = decode_remainder_offset(base_weight, remainder_value)\par
+\pard\f0\fs22\sa160 The phrase adjacent-representable is used only for the numerical decoding rule that decides the offset scale. It does not replace the basic architectural statement that the effective weight is formed by addition.\par
+
+\pard\b\fs30 2 Architectural Adjustments\b0\fs22\par
+\pard\sa160 This section is called Architectural Adjustments because it describes how the architecture changes while also giving a step-wise view of one training update. The step view is retained because it is useful, but the permanent architectural interfaces are the important part.\par
+
+\trowd\trgaph90\trleft0\clcbpat4\cellx700\clcbpat4\cellx3300\clcbpat4\cellx9300
+\pard\intbl\b Step\b0\cell\pard\intbl\b Adjustment\b0\cell\pard\intbl\b Meaning\b0\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 1\cell\pard\intbl Materialise base weights\cell\pard\intbl Existing THOG2 materialisation produces base_weight from base_coefficients.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 2\cell\pard\intbl Decode remainder offsets\cell\pard\intbl Each remainder_value is decoded into a floating-point remainder_offset.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 3\cell\pard\intbl Calculate effective weights\cell\pard\intbl The model calculates effective_weight by adding base_weight and remainder_offset.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 4\cell\pard\intbl Run transformer forward pass\cell\pard\intbl Linear operations consume effective_weight. They do not consume base_weight and remainder_value separately.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 5\cell\pard\intbl Obtain a \i single\i0 gradient\cell\pard\intbl Autograd obtains a single gradient with respect to effective_weight. This gradient is named grad_effective.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 6\cell\pard\intbl Split the gradient\cell\pard\intbl A gradient_projector separates grad_effective into grad_projected and grad_remainder.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 7a\cell\pard\intbl Update base_coefficients\cell\pard\intbl Existing AdamW updates base_coefficients using the projectable gradient component.\cell\row
+\trowd\trgaph90\trleft0\cellx700\cellx3300\cellx9300
+\pard\intbl 7b\cell\pard\intbl Update remainder_values\cell\pard\intbl The selected remainder optimiser updates the bounded integer remainder codes using the rejected gradient component.\cell\row
+\pard\sa160\par
+
+\pard\b\fs30 3 Persistent and Transient Objects\b0\fs22\par
+\pard\b\fs26 3.1 Persistent Objects\b0\fs22\par
+\pard\sa160 Persistent objects are saved in checkpoints and survive across training updates. They are not temporary matrices created for a single forward or backward pass.\par
+
+\trowd\trgaph90\trleft0\clcbpat4\cellx2100\clcbpat4\cellx4700\clcbpat4\cellx7000\clcbpat4\cellx9300
+\pard\intbl\b Object\b0\cell\pard\intbl\b Plain meaning\b0\cell\pard\intbl\b Why it exists\b0\cell\pard\intbl\b Owner and lifetime\b0\cell\row
+\trowd\trgaph90\trleft0\cellx2100\cellx4700\cellx7000\cellx9300
+\pard\intbl base_coefficients\cell\pard\intbl Existing learned spectral coefficient tensors.\cell\pard\intbl They generate structured base weights.\cell\pard\intbl Persistent model state, trained by base AdamW.\cell\row
+\trowd\trgaph90\trleft0\cellx2100\cellx4700\cellx7000\cellx9300
+\pard\intbl base_optimizer_state\cell\pard\intbl AdamW moments, counters, and schedule state for base coefficients.\cell\pard\intbl It gives the base path momentum and adaptive scaling.\cell\pard\intbl Persistent optimiser state, restored on resume.\cell\row
+\trowd\trgaph90\trleft0\cellx2100\cellx4700\cellx7000\cellx9300
+\pard\intbl remainder_values\cell\pard\intbl Signed low-bit integer remainder codes associated with selected materialised weight positions.\cell\pard\intbl They provide local freedom outside the current base spectral span.\cell\pard\intbl Persistent learned remainder state.\cell\row
+\trowd\trgaph90\trleft0\cellx2100\cellx4700\cellx7000\cellx9300
+\pard\intbl remainder_metadata\cell\pard\intbl Shape, tensor key, bit width, layout, decode mode, dtype policy, and compatibility information.\cell\pard\intbl It prevents a saved code from being decoded or applied to the wrong weight position.\cell\pard\intbl Persistent structural state.\cell\row
+\trowd\trgaph90\trleft0\cellx2100\cellx4700\cellx7000\cellx9300
+\pard\intbl remainder_optimizer_state\cell\pard\intbl The extra state required by R1 or R2 to train the remainder codes.\cell\pard\intbl It converts rejected gradients into bounded code updates.\cell\pard\intbl Persistent optimiser state, with different memory rules for R1 and R2.\cell\row
+\pard\sa160\par
+
+\pard\b\fs26 3.2 Transient Objects\b0\fs22\par
+\pard\sa160 Transient objects are allowed during a forward pass, backward pass, or optimiser step. They must not be checkpointed as dense learned weights.\par
+\pard\sa120 base_weight is the materialised dense-equivalent weight generated from base_coefficients.\par
+\pard\sa120 remainder_offset is the floating-point adjustment decoded from a remainder code.\par
+\pard\sa120 effective_weight is the single weight tensor consumed by the transformer operation.\par
+\pard\sa120 grad_effective is the gradient of the loss with respect to effective_weight.\par
+\pard\sa120 grad_projected is the component of grad_effective representable by the base spectral path.\par
+\pard\sa120 grad_remainder is the rejected component assigned to the remainder path.\par
+\pard\sa120 pending_integer_step is the temporary accumulated code movement over a gradient-accumulation window.\par
+
+\pard\b\fs30 4 Remainder-Enabled Scope\b0\fs22\par
+\pard\sa160 This document uses remainder-enabled instead of covered. A remainder-enabled weight is a weight tensor for which the enhancement allocates remainder_values and applies them when calculating effective_weight.\par
+\pard\sa160 The initial remainder-enabled families are attn_q, attn_k, attn_v, attn_out, mlp_in, and mlp_out. Biases, embeddings, layer-normalisation parameters, dense-model weights, and unrelated LM-head parameters are out of scope for the first implementation.\par
+
+\pard\b\fs30 5 Numerical Semantics\b0\fs22\par
+\pard\sa160 The persistent remainder parameter is a bounded signed integer code. The model does not feed that integer directly to a linear operation. It first converts the code into a floating-point remainder_offset, then adds that offset to base_weight.\par
+\pard\f2\fs18\sa160 remainder_value -> decode_remainder_offset(...) -> remainder_offset\line base_weight + remainder_offset -> effective_weight\par
+\pard\f0\fs22\sa160 The v0.14 decode mode is adjacent-representable-offset. A positive code moves upward through representable dtype values from base_weight. A negative code moves downward. The offset is the difference between the reached value and base_weight.\par
+\pard\f2\fs18\sa160 decoded_weight = adjacent_representable_step(base_weight, remainder_value, effective_dtype)\line remainder_offset = decoded_weight - base_weight\line effective_weight = base_weight + remainder_offset\par
+\pard\f0\fs22\sa160 This preserves the simple addition model while retaining exact behaviour around zero, subnormals, and exponent boundaries.\par
+
+\pard\b\fs30 6 Forward Path\b0\fs22\par
+\pard\sa160 The forward path has one additional conceptual calculation between base-weight materialisation and the existing linear operation: calculate effective_weight. The required order is materialise base_weight, read the matching remainder_values, decode remainder_offset, calculate effective_weight, and pass effective_weight to the existing operation.\par
+
+\pard\b\fs30 7 Backward Path and Gradient Projector\b0\fs22\par
+\pard\b\fs26 7.1 Minimal Definition\b0\fs22\par
+\pard\sa160 The gradient_projector is the component that decides which part of grad_effective can be represented by changes to base_coefficients. It uses the same basis matrices, axis order, and geometry as the forward materialiser. It is not a generic clipping operation and not a learned module.\par
+\pard\sa160 grad_effective is the gradient of the loss with respect to effective_weight. grad_projected is the component of grad_effective that lies in the base spectral representable span. grad_remainder is grad_effective minus grad_projected.\par
+\pard\b\fs26 7.2 A Single Backward Signal\b0\fs22\par
+\pard\sa160 The language-model loss produces a \i single\i0 gradient with respect to effective_weight. The enhancement does not run two losses and does not run two independent backward passes.\par
+\pard\f2\fs18\sa160 grad_effective = d(loss) / d(effective_weight)\line grad_projected = gradient_projector.project(grad_effective)\line grad_remainder = grad_effective - grad_projected\par
+\pard\f0\fs22\b\fs26 7.3 Clarified Straight-Through Behaviour\b0\fs22\par
+\pard\sa160 The remainder code is discrete, so the code selection itself is not differentiated. During backward, the local effective-weight expression is arranged so that a small change to base_weight would locally pass through as a change to effective_weight. In plain terms, before routing, the local derivative from effective_weight back to base_weight is treated as one.\par
+\pard\sa160 The gradient-routing hook then intercepts the incoming grad_effective. Instead of allowing the entire grad_effective to flow into the base coefficients, the hook returns only grad_projected to the existing base autograd path. The remainder optimiser receives grad_remainder as its training signal. This is why the hook is essential.\par
+
+\pard\b\fs30 8 Optimiser Profiles\b0\fs22\par
+\pard\sa160 The task of the remainder optimiser is to turn a floating-point training signal into updates of bounded integer remainder codes. It may use floating-point arithmetic transiently. It must not, in the target profile, keep dense per-weight floating-point optimiser state that destroys the memory advantage.\par
+\pard\f2\fs18\sa160 grad_remainder -> floating_point_code_update_proposal -> bounded_integer_remainder_code_change\par
+\pard\f0\fs22\b\fs26 8.1 R0 - Offline Representation Diagnostic\b0\fs22\par
+\pard\sa160 R0 is not training. It is an offline diagnostic used before touching the training loop. Its purpose is to measure whether a small number of remainder bits can represent useful local corrections at all.\par
+\pard\b\fs26 8.2 R1 - PoC Training Optimiser\b0\fs22\par
+\pard\sa160 R1 is Proof-of-Concept training. It is deliberately allowed to be wasteful because its purpose is to answer a scientific question: can the remainder path learn if optimisation quality is not constrained by memory? R1 replaces the earlier phrase reference training.\par
+\pard\b\fs26 8.3 R2 - Target Remainder Optimiser\b0\fs22\par
+\pard\sa160 R2 is the target optimiser. It must learn bounded integer remainder codes while avoiding dense per-weight floating-point masters or dense Adam moments. Floating-point values may be computed transiently during an update, but they may not persist as a dense shadow of every remainder code.\par
+\pard\b\fs26 8.4 Why All Three Profiles Exist\b0\fs22\par
+\pard\sa160 If R1 fails, the idea probably lacks representational value or the gradient split is wrong. In that case, R2 should not be built. If R1 works and R2 fails, the likely problem is the custom optimiser. This split prevents wasting effort on packed storage and custom optimiser machinery before the basic scientific signal exists.\par
+
+\pard\b\fs30 9 Configuration and Checkpointing\b0\fs22\par
+\pard\sa160 Required configuration fields include remainder_mode, remainder_bit_width, remainder_decode_mode, remainder_scope, remainder_optimizer, and remainder_ddp_mode. Checkpoints must include remainder_values, remainder_metadata, remainder_optimizer_state, RNG state, DDP compatibility mode, and all structural fields needed to reject incompatible resumes before training begins.\par
+
+\pard\b\fs30 10 Distributed Training and DDP Compatibility\b0\fs22\par
+\pard\sa160 DDP compatibility is a hard requirement. Remainder-enabled training must not silently become single-process only, nor may different ranks update remainder_values differently. All ranks must start with identical remainder_values and metadata. Stochastic R2 updates must be rank-consistent or explicitly synchronised. Remainder optimiser state must be checkpointed and restored consistently across ranks. Gradient routing must occur before or in coordination with DDP gradient reduction. Non-finite update skips must be atomic across ranks.\par
+
+\pard\b\fs30 11 Diagnostics and Telemetry\b0\fs22\par
+\pard\sa160 Required diagnostics include remainder bit width, value histogram, nonzero fraction, saturation fraction, mean absolute remainder_offset, grad_effective norm, grad_projected norm, grad_remainder norm, projection reconstruction error, code update frequency, clipping rate, stochastic acceptance rate, persistent bytes, theoretical packed bytes, peak memory delta, DDP rank agreement checks, and skipped-update consistency.\par
+
+\pard\b\fs30 12 Normative Requirements\b0\fs22\par
+\trowd\trgaph90\trleft0\clcbpat4\cellx1600\clcbpat4\cellx5200\clcbpat4\cellx7400\clcbpat4\cellx9300
+\pard\intbl\b ID\b0\cell\pard\intbl\b Requirement\b0\cell\pard\intbl\b Why it matters\b0\cell\pard\intbl\b Verification\b0\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-ARCH-001\cell\pard\intbl The transformer shall consume effective_weight for every remainder-enabled weight position.\cell\pard\intbl Preserves a single operational weight field.\cell\pard\intbl Forward integration tests.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-ARCH-002\cell\pard\intbl effective_weight shall equal base_weight plus remainder_offset.\cell\pard\intbl Removes ambiguity about decoded values versus addition.\cell\pard\intbl Decoder and forward tests.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-ARCH-003\cell\pard\intbl The persistent signed integer value shall be called a remainder code.\cell\pard\intbl Avoids parallel terms such as correction code.\cell\pard\intbl Documentation review.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-SCOPE-001\cell\pard\intbl The term remainder-enabled shall replace covered.\cell\pard\intbl Clarifies scope.\cell\pard\intbl Documentation review.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-GRAD-001\cell\pard\intbl Gradient names shall be grad_effective, grad_projected, and grad_remainder.\cell\pard\intbl Keeps naming consistent with code style.\cell\pard\intbl Interface review.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-GRAD-002\cell\pard\intbl gradient_projector shall be defined before use and shall use the active materialiser contract.\cell\pard\intbl Prevents undefined abstraction.\cell\pard\intbl Projection tests.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-OPT-001\cell\pard\intbl R0, R1, and R2 shall be defined in a single optimiser section.\cell\pard\intbl Avoids scattered optimiser semantics.\cell\pard\intbl Specification review.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-OPT-002\cell\pard\intbl R1 shall be called PoC training, not reference training.\cell\pard\intbl Clarifies that R1 proves learnability but is not final.\cell\pard\intbl Config review.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-OPT-003\cell\pard\intbl R2 may use transient floating-point update proposals but shall not persist dense per-weight floating-point state.\cell\pard\intbl Allows practical arithmetic without destroying memory economics.\cell\pard\intbl Memory tests.\cell\row
+\trowd\trgaph90\trleft0\cellx1600\cellx5200\cellx7400\cellx9300
+\pard\intbl REQ-DDP-001\cell\pard\intbl The enhancement shall maintain DDP compatibility.\cell\pard\intbl Distributed training must remain viable.\cell\pard\intbl Two-rank DDP tests.\cell\row
+\pard\sa160\par
+
+\pard\b\fs30 13 Test and Acceptance Criteria\b0\fs22\par
+\pard\sa120 Numerical decoding must show that remainder_offset calculations match the adjacent-representable reference behaviour.\par
+\pard\sa120 Forward equivalence must show that width zero and zero-code active mode reproduce the base model.\par
+\pard\sa120 Addressing tests must show that a single remainder code mutation affects exactly one intended matrix coordinate.\par
+\pard\sa120 Projection tests must show that grad_effective reconstructs as grad_projected plus grad_remainder within tolerance.\par
+\pard\sa120 R1 PoC training must improve a controlled objective and short language-model run if the idea has signal.\par
+\pard\sa120 R2 target optimiser tests must show bounded integer updates and no dense per-weight FP persistent state.\par
+\pard\sa120 DDP tests must show two-rank rank agreement, exact resume behaviour, and atomic skip semantics.\par
+
+\pard\b\fs30 14 Deferred Work and Risks\b0\fs22\par
+\pard\sa120 If R1 PoC training fails at four bits, stop before R2 and packed-storage work.\par
+\pard\sa120 If R1 works but R2 fails, revise the optimiser rather than immediately adding dense state.\par
+\pard\sa120 If DDP ranks diverge, block release until rank-consistency tests pass.\par
+\pard\sa120 If saturation is high, inspect grad_remainder and bit width before increasing update size.\par
+\pard\sa120 If peak memory rises too much, use streamed backward only after scientific value is established.\par
+
+\pard\b\fs30 15 Controlled Terminology\b0\fs22\par
+\pard\sa120 Approved: remainder code. Avoid: correction code.\par
+\pard\sa120 Approved: remainder_offset. Avoid: decoded value when the offset is meant.\par
+\pard\sa120 Approved: effective_weight. Avoid: effective value.\par
+\pard\sa120 Approved: remainder-enabled. Avoid: covered.\par
+\pard\sa120 Approved: gradient_projector. Avoid: projector before it has been defined.\par
+\pard\sa120 Approved: grad_effective, grad_projected, grad_remainder. Avoid: G_effective, G_projected, G_remainder.\par
+\pard\sa120 Approved: R1 PoC training. Avoid: reference training.\par
+\pard\qc\i\sa160 End of Requirements Specification v0.14.\i0\par
+}

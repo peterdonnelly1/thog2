@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>thog2: Remainder Architecture Enhancement v0.12</title>
+<style>
+:root{--t:#20262d;--m:#5b6670;--l:#d8dde3;--a:#26547c;--ab:#eef4f8;--bg:#f7f8fa;--ok:#246b4b;--okb:#eef8f2;--w:#815c11;--wb:#fff8e7;--r:#9a3333;--rb:#fff2f2}*{box-sizing:border-box}body{margin:0;color:var(--t);font:16px/1.58 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#fff}main{max-width:1040px;margin:auto;padding:48px 44px 84px}header{border-bottom:2px solid #bfc7cf;padding-bottom:28px}.eyebrow{color:var(--m);font-size:13px;font-weight:750;letter-spacing:.075em;text-transform:uppercase}h1{margin:10px 0 13px;font-size:38px;line-height:1.14;letter-spacing:-.025em;color:#111820}.subtitle{font-size:19px;color:#34414d;max-width:900px}.meta{display:grid;grid-template-columns:185px 1fr;gap:7px 18px;margin-top:25px;padding:17px 19px;border:1px solid var(--l);border-radius:7px;background:var(--bg);font-size:14px}.meta dt{font-weight:750}.meta dd{margin:0}.statusbox,.summary,.callout{margin:18px 0;padding:15px 17px;border-left:4px solid var(--a);background:var(--ab)}.statusbox{border-left-color:var(--ok);background:var(--okb)}.risk{border-left-color:var(--r);background:var(--rb)}.warn{border-left-color:var(--w);background:var(--wb)}nav{margin:34px 0 44px;padding:19px 23px;border:1px solid var(--l);border-radius:7px;background:var(--bg)}nav ol{columns:2;column-gap:42px}nav a{color:var(--a);text-decoration:none}section{margin-top:46px}h2{margin:0 0 18px;padding-bottom:9px;border-bottom:1px solid var(--l);font-size:29px;color:#111820}h3{margin:29px 0 10px;font-size:21px;color:#1b2936}p{margin:0 0 15px}.lead{font-size:18px;color:#34414d}code{background:#f3f5f7;padding:.1em .27em;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em}pre{margin:17px 0;padding:15px 17px;overflow:auto;border:1px solid var(--l);border-radius:6px;background:#f3f5f7;font:13.5px/1.47 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}table{width:100%;margin:17px 0 24px;border-collapse:collapse;font-size:14px}th,td{padding:9px 11px;border:1px solid var(--l);text-align:left;vertical-align:top}th{background:#edf1f4}tbody tr:nth-child(even) td{background:#fafbfc}ul,ol{padding-left:27px}.req,.stage{margin:12px 0;padding:13px 15px;border:1px solid var(--l);border-left:4px solid var(--a);border-radius:6px}.req b{display:block;color:var(--a);font-size:13px}.stage h3{margin-top:0}.terms td:first-child{width:260px;background:var(--bg);font-weight:750}footer{margin-top:58px;padding-top:18px;border-top:1px solid var(--l);color:var(--m);font-size:14px}@media(max-width:760px){main{padding:28px 20px 58px}h1{font-size:30px}.meta{grid-template-columns:1fr}nav ol{columns:1}}@media print{main{max-width:none;padding:17mm 18mm 20mm}nav{break-after:page}h2,h3,table,pre,.callout,.req,.stage{break-inside:avoid}}
+</style>
+</head>
+<body><main>
+<header>
+<div class="eyebrow">THOG2 architecture and requirements specification · Draft v0.12</div>
+<h1>thog2: “Remainder Architecture Enhancement”</h1>
+<p class="subtitle">A buildable specification for augmenting spectrally generated THOG2 weights with signed low-bit corrections indexed by canonical materialised weight position.</p>
+<dl class="meta"><dt>Document type</dt><dd>Architecture and normative requirements specification</dd><dt>Status</dt><dd>Buildable baseline defined; optimiser remains a substantial implementation workstream</dd><dt>Date</dt><dd>19 July 2026</dd><dt>Target branch</dt><dd><code>remainder_architecture_enhancement</code></dd><dt>Initial basis</dt><dd>CHEBY; basis-registry compatible</dd><dt>Initial compute dtypes</dt><dd>FP16 and BF16; FP32 reference path</dd></dl>
+<div class="statusbox"><strong>Buildability statement.</strong> This revision fixes an exact first implementation, an expensive reference optimiser, a memory-oriented target optimiser, update ordering, checkpoint state, gradient accumulation, correctness tests and go/no-go gates. The implementer should not invent architecture.</div>
+</header>
+<nav><h2>Contents</h2><ol><li><a href="#summary">Executive summary</a></li><li><a href="#profiles">Implementation profiles</a></li><li><a href="#data">Data model</a></li><li><a href="#numeric">Numeric encoding</a></li><li><a href="#forward">Forward path</a></li><li><a href="#backward">Backward and projection</a></li><li><a href="#r1">R1 reference optimiser</a></li><li><a href="#r2">R2 target optimiser</a></li><li><a href="#accum">Accumulation and non-finite handling</a></li><li><a href="#autograd">Autograd backends</a></li><li><a href="#config">Configuration and checkpointing</a></li><li><a href="#requirements">Requirements</a></li><li><a href="#tests">Tests and acceptance</a></li><li><a href="#stages">Implementation sequence</a></li><li><a href="#risks">Risks and deferred work</a></li><li><a href="#terms">Terminology</a></li></ol></nav>
+
+<section id="summary"><h2>1. Executive summary</h2><p class="lead">THOG2 currently learns compact spectral coefficients and recreates transformer weight matrices on demand. The enhancement adds one signed low-bit value at each canonical materialised weight position. The transformer continues to consume one effective weight field.</p><div class="summary"><code>effective_weight = base_weight + remainder_offset</code></div><p>The base object carries structured, basis-expressible content. The remainder object carries only local low-order corrections that the current base geometry cannot independently express.</p><div class="callout risk"><strong>Non-negotiable economic constraint.</strong> A 4-bit remainder plus byte-sized per-weight optimiser state is not meaningfully a 4-bit architecture. The final optimiser may not retain a dense float shadow or default byte-per-weight state.</div></section>
+
+<section id="profiles"><h2>2. Normative scope and implementation profiles</h2><table><thead><tr><th>Profile</th><th>Purpose</th><th>Storage</th><th>Optimiser</th><th>Gradient backend</th></tr></thead><tbody><tr><td><strong>R0 — Offline diagnostic</strong></td><td>Measure required remainder width.</td><td>Ordinary tensors permitted</td><td>Offline fitting</td><td>None</td></tr><tr><td><strong>R1 — Reference training</strong></td><td>Prove whether the concept learns when memory is ignored.</td><td>int8 codes plus FP32 master</td><td>AdamW reference</td><td>Full-matrix hook</td></tr><tr><td><strong>R2 — Target training</strong></td><td>Train without persistent dense float state.</td><td>int8 prototype; packed uint8 final</td><td>Factored-RMS stochastic integer updater</td><td>Hook first; streamed autograd if needed</td></tr></tbody></table><h3>2.1 Covered matrices</h3><p>The initial implementation covers spectrally generated q, k, v, attention-output, MLP-expansion and MLP-contraction matrices. Biases, embeddings, layer-normalisation parameters, unrelated LM-head parameters and dense-model weights are excluded.</p><h3>2.2 Geometry contract</h3><p>All registered spectral geometries must expose the same final two-dimensional matrix and the projection interface in Section 6. No geometry-specific remainder storage layout is permitted.</p></section>
+
+<section id="data"><h2>3. Data model and address contract</h2><pre>base_coefficients
+base_optimizer_state
+
+remainder_values
+remainder_metadata
+remainder_optimizer_state</pre><p>In R2, <code>remainder_values</code> is a managed buffer, not an ordinary floating-point Parameter.</p><h3>3.1 Canonical shape and key</h3><pre>remainder_values.shape == (out_features, in_features)
+
+tensor_key = "layer.{layer_index}.{tensor_family}"
+
+tensor_family in {
+    attn_q, attn_k, attn_v,
+    attn_out, mlp_in, mlp_out
+}</pre><p>Semantic qkv/head/channel views are metadata only. Physical indexing is row-major over the final matrix consumed by the linear operation.</p><h3>3.2 Invariant</h3><pre>one (tensor_key, row, column)
+    -> one base value
+    -> one remainder value or explicit zero
+    -> one effective value</pre><p>The association must not depend on qkv packing, materialisation order, vectorisation, kernel layout, head reshaping or checkpoint segmentation.</p><h3>3.3 Initialisation</h3><pre>remainder_values = 0
+reference_remainder_master = 0.0
+all remainder optimiser state = 0
+remainder RNG = deterministically seeded</pre></section>
+
+<section id="numeric"><h2>4. Numeric encoding and decoding</h2><h3>4.1 Signed range</h3><pre>q_min = -(2 ** (bit_width - 1))
+q_max =  (2 ** (bit_width - 1)) - 1</pre><p>Width zero disables the architecture. Required active widths are 1, 2, 3, 4, 6 and 8.</p><h3>4.2 Fixed v0.12 decoder</h3><p>v0.12 uses <code>adjacent_representable</code>. Positive codes step upward through adjacent values representable in the effective dtype; negative codes step downward.</p><pre>decode_adjacent(base, q, dtype):
+    x = cast(base, dtype)
+    if q > 0:
+        repeat q times: x = nextafter(x, +infinity)
+    if q < 0:
+        repeat abs(q) times: x = nextafter(x, -infinity)
+    return x</pre><p>This literal definition governs zero, subnormals and exponent boundaries. Any accelerated decoder must be bitwise identical.</p><h3>4.3 Straight-through base derivative</h3><pre>decoded = decode_adjacent(base_weight, remainder_value, effective_dtype)
+
+effective_weight =
+    base_weight
+    + stop_gradient(cast(decoded, base_weight.dtype) - base_weight)</pre><p>The forward value is decoded. Before routing, the derivative with respect to the base weight is the identity.</p><h3>4.4 Directional code step</h3><pre>step_up   = decode(base, q + 1) - decode(base, q)
+step_down = decode(base, q) - decode(base, q - 1)
+
+directional_step =
+    step_up   for intended positive code movement
+    step_down for intended negative code movement</pre><p>Outward movement at either code bound is masked.</p><div class="callout warn"><strong>Precision meaning.</strong> v0.12 selects nearby values representable in the existing compute dtype. It does not claim to append hidden sub-ULP mantissa bits. Sub-ULP carrier precision is deferred.</div></section>
+
+<section id="forward"><h2>5. Forward path</h2><pre>base_weight = materialiser.materialise(tensor_key, base_coefficients)
+q = remainder_store.get(tensor_key, shape=base_weight.shape)
+effective_weight = build_effective_weight(base_weight, q, effective_dtype)
+output = linear(input, effective_weight, bias)</pre><h3>5.1 Dtype order</h3><ol><li>Materialise through the existing THOG2 path.</li><li>Cast a detached base copy to the resolved effective dtype.</li><li>Decode the remainder in that dtype.</li><li>Cast the decoded value back to the materialised carrier for the straight-through expression.</li><li>Use the existing linear/autocast path.</li></ol><h3>5.2 Disabled path</h3><pre>if remainder_bit_width == 0:
+    effective_weight = base_weight
+    allocate no remainder state
+    install no remainder hooks</pre></section>
+
+<section id="backward"><h2>6. Backward path and projection contract</h2><pre>G_effective = d(loss) / d(effective_weight)
+
+G_coefficients, G_projected = projector.project_weight_gradient(
+    tensor_key,
+    G_effective,
+    projection_context,
+)
+
+G_remainder = G_effective - G_projected
+remainder_optimizer.observe(base_weight, q, G_remainder, ...)
+return G_projected</pre><p>The effective-weight hook consumes the full weight gradient, records or applies the remainder signal, and returns only the projectable component to existing autograd.</p><h3>6.1 Required projector interface</h3><pre>project_weight_gradient(
+    tensor_key,
+    weight_gradient,
+    projection_context,
+) -> (coefficient_gradient, projected_weight_gradient)</pre><p><code>coefficient_gradient</code> is the exact reverse contraction or analysis transform for the materialiser. <code>projected_weight_gradient</code> is obtained by rematerialising that coefficient gradient.</p><h3>6.2 Orthonormal CHEBY/DCT case</h3><pre>coefficient_gradient = B_transpose(weight_gradient)
+projected_gradient   = B(coefficient_gradient)</pre><p>Tensor-product geometries contract exactly the axes compressed in the forward path and preserve uncompressed axes. A future non-orthonormal basis must register a true least-squares projector; it may not silently use <code>B B^T</code>.</p><h3>6.3 Gradient ownership</h3><p>With the hook backend, autograd receives <code>G_projected</code> and generates coefficient gradients. The explicitly calculated coefficient gradient is for validation and the later streamed backend; it must not be applied twice.</p></section>
+
+<section id="r1"><h2>7. R1 reference optimiser</h2><p class="lead">R1 deliberately ignores optimiser memory so that optimiser inadequacy cannot be confused with representational failure.</p><h3>7.1 Persistent state</h3><pre>remainder_values: int8
+remainder_master: float32, same shape
+AdamW first moment: float32, same shape
+AdamW second moment: float32, same shape</pre><p>R1 requires gradient accumulation equal to 1 and must report its true byte cost.</p><h3>7.2 Master gradient</h3><pre>intended_direction = -sign(G_remainder)
+directional_step = resolve_directional_step(base_weight, q, intended_direction)
+G_master = G_remainder * directional_step
+G_master = mask_outward_gradient_at_bounds(G_master)</pre><h3>7.3 AdamW and quantisation</h3><pre>AdamW(
+    remainder_master,
+    lr=1e-3,
+    betas=(0.9, 0.999),
+    eps=1e-8,
+    weight_decay=0.0,
+)
+
+remainder_master = clamp(remainder_master, q_min, q_max)
+remainder_values = clamp(round_to_nearest_even(remainder_master), q_min, q_max).int8()</pre><div class="callout risk"><strong>Reference-only.</strong> R1 is an optimisation oracle and debugging aid. It is not the deployable architecture.</div></section>
+
+<section id="r2"><h2>8. R2 target remainder optimiser</h2><p class="lead">R2 is a separate optimiser coordinated with base AdamW. It uses factored second moments and stochastic integer updates, with no dense per-weight float shadow or moments.</p><h3>8.1 Persistent state per matrix</h3><pre>remainder_values: low-bit logical values
+row_second_moment: float32[out_features]
+column_second_moment: float32[in_features]
+optimizer_step: int64
+RNG state</pre><h3>8.2 Required defaults</h3><pre>remainder_lr = 0.05
+remainder_beta2 = 0.999
+remainder_eps = 1e-8
+remainder_clip_threshold = 1.0
+remainder_max_code_step = 1
+remainder_weight_decay = 0.0
+remainder_rounding = stochastic</pre><h3>8.3 Code-space gradient</h3><pre>intended_direction = -sign(G_remainder)
+directional_step = resolve_directional_step(base_weight, q, intended_direction)
+G_code = G_remainder.float32 * directional_step.float32
+G_code = mask_outward_gradient_at_bounds(G_code)</pre><h3>8.4 Factored second moment</h3><pre>row_obs = mean(G_code ** 2, dim=1)
+col_obs = mean(G_code ** 2, dim=0)
+
+row_v = beta2 * row_v + (1 - beta2) * row_obs
+col_v = beta2 * col_v + (1 - beta2) * col_obs
+
+normaliser = outer(row_v, col_v) / max(mean(row_v), eps)
+U = G_code / sqrt(normaliser + eps)
+
+u_rms = sqrt(mean(U ** 2))
+U = U / max(1.0, u_rms / clip_threshold)</pre><h3>8.5 Integer update</h3><pre>delta_code = clamp(-remainder_lr * U, -1, +1)
+probability = abs(delta_code)
+integer_step = sign(delta_code) * (rand() < probability).int8()
+remainder_values = clamp(remainder_values + integer_step, q_min, q_max)</pre><p>Each covered weight moves down one code, holds, or moves up one code per completed update. v0.12 deliberately omits a dense first moment. If smoothing is necessary, the next permitted experiment is block-shared or low-rank momentum.</p><div class="callout warn"><strong>Rationale.</strong> This retains Adam-like adaptive scaling through factored second moments, represents tiny desired updates statistically rather than with a dense debt tensor, and keeps persistent optimiser state at O(rows + columns).</div></section>
+
+<section id="accum"><h2>9. Gradient accumulation and non-finite handling</h2><h3>9.1 R2 microsteps</h3><p>R2 must not retain a dense float remainder gradient across microsteps. Remainder values remain unchanged during the accumulation window.</p><pre>micro_delta = full_delta_code / gradient_accumulation_steps
+micro_sample = stochastic_round(micro_delta)
+
+pending_integer_step = clamp(
+    pending_integer_step + micro_sample,
+    -remainder_max_code_step,
+    +remainder_max_code_step,
+)</pre><p><code>pending_integer_step</code> is transient int8 or packed low-bit state and is cleared after the completed optimiser update. Row/column observations are averaged across microsteps and persistent factors are updated once.</p><h3>9.2 Atomic update order</h3><pre>1. finish all microstep backward passes
+2. verify the whole update is finite
+3. base AdamW step
+4. apply pending remainder integer steps
+5. update persistent remainder factors
+6. clear transient state and gradients
+7. increment completed_updates</pre><h3>9.3 Non-finite skip</h3><p>If loss, required base gradients, remainder observations or factor updates are non-finite, both optimiser paths are skipped atomically. Pending steps and factor observations are discarded. The pre-update remainder RNG state is restored so uninterrupted and resumed runs remain identical.</p></section>
+
+<section id="autograd"><h2>10. Autograd and memory backends</h2><h3>10.1 Mandatory first backend</h3><p>The first implementation uses <code>effective_weight.register_hook(...)</code>. PyTorch may transiently materialise the full matrix gradient. The hook consumes it immediately, returns the projected component, and retains no dense float remainder gradient after returning.</p><h3>10.2 Streamed backend</h3><p>If measured peak memory is unacceptable, a custom autograd backend performs two tiled passes:</p><pre>Pass A:
+    recompute G_effective tiles
+    accumulate coefficient gradient
+    accumulate row/column squared-gradient observations
+
+Pass B:
+    recompute G_effective tiles
+    materialise G_projected tiles
+    G_remainder_tile = G_effective_tile - G_projected_tile
+    generate pending integer updates
+    discard each tile
+
+Return grad_input and publish coefficient gradient.</pre><p>The streamed backend is a major work item and should follow scientific proof unless the hook backend is unusable even for the proof.</p></section>
+
+<section id="config"><h2>11. Configuration and checkpoint schema</h2><h3>11.1 Required fields</h3><pre>remainder_mode = off | reference_adamw | factored_rms_stochastic
+remainder_bit_width = 0 | 1 | 2 | 3 | 4 | 6 | 8
+remainder_decode_mode = adjacent_representable
+remainder_scope = spectral_weights
+remainder_lr
+remainder_reference_lr
+remainder_beta2
+remainder_eps
+remainder_clip_threshold
+remainder_max_code_step
+remainder_weight_decay
+remainder_rounding
+remainder_gradient_backend = full_matrix_hook | streamed_custom_autograd</pre><h3>11.2 Validation</h3><ul><li>Mode off requires width zero.</li><li>Active mode requires positive width.</li><li>Reference AdamW requires accumulation 1.</li><li>Dense models reject active remainder modes.</li><li>Unavailable streamed support fails configuration validation.</li></ul><h3>11.3 Checkpoint</h3><pre>remainder_state = {
+  schema_version: 1,
+  mode, bit_width, decode_mode, scope,
+  optimizer_hyperparameters,
+  rng_state,
+  tensors: {
+    tensor_key: {
+      shape,
+      canonical_layout: row_major_2d,
+      values,
+      row_second_moment?,
+      column_second_moment?,
+      reference_master?,
+      reference_optimizer_state?
+    }
+  }
+}</pre><p>Mode, width, decoder, scope, tensor-key set, shapes, optimiser and optimiser hyperparameters are compatibility fields. Mismatch fails loudly unless an explicit fork/conversion is requested.</p></section>
+
+<section id="requirements"><h2>12. Normative requirements</h2><div class="req"><b>REQ-ARCH-001</b>The transformer shall consume exactly one effective value at every covered position.</div><div class="req"><b>REQ-ARCH-002</b>The remainder shall be indexed by canonical final two-dimensional matrix coordinate.</div><div class="req"><b>REQ-ARCH-003</b>The active architecture shall use one forward pass, one loss and one backward pass.</div><div class="req"><b>REQ-NUM-001</b>The required decoder shall be repeated adjacent-representable stepping in the selected dtype.</div><div class="req"><b>REQ-NUM-002</b>Any accelerated decoder shall be bitwise identical to the literal reference decoder.</div><div class="req"><b>REQ-GRAD-001</b>The base path shall receive the exact basis-projectable gradient component.</div><div class="req"><b>REQ-GRAD-002</b>The remainder path shall receive the effective gradient minus that component.</div><div class="req"><b>REQ-OPT-001</b>R1 shall implement the reference AdamW contract in Section 7.</div><div class="req"><b>REQ-OPT-002</b>R2 shall implement the factored-RMS stochastic contract in Section 8.</div><div class="req"><b>REQ-OPT-003</b>R2 shall retain no per-weight floating master, first moment or second moment.</div><div class="req"><b>REQ-MEM-001</b>R2 persistent optimiser state shall scale as O(rows + columns) per matrix.</div><div class="req"><b>REQ-MEM-002</b>Dense effective weights and gradients may be transient but shall not be checkpointed or retained.</div><div class="req"><b>REQ-COMPAT-001</b>Width zero shall preserve the existing THOG2 path without remainder allocation or hooks.</div><div class="req"><b>REQ-COMPAT-002</b>Non-finite updates shall skip base and remainder atomically.</div></section>
+
+<section id="tests"><h2>13. Tests and acceptance criteria</h2><h3>13.1 Decoder and address tests</h3><ul><li>Code zero is bitwise identical to the base cast to the effective dtype.</li><li>Every signed code matches literal repeated <code>nextafter</code>.</li><li>Tests cover ±0, subnormals, exponent boundaries and maximum finite values.</li><li>Changing one code changes exactly one intended matrix coordinate.</li><li>All six tensor families and first/middle/final layers are covered.</li><li>Checkpoint round-trip preserves all codes and keys exactly.</li></ul><h3>13.2 Projection tolerances</h3><pre>relative_reconstruction_error <= 1e-6  # FP32
+orthogonality_error          <= 1e-5  # FP32
+integration tolerance        <= 1e-3  # FP16/BF16</pre><h3>13.3 Optimiser tests</h3><ul><li>R1 decreases a deterministic quadratic objective.</li><li>R2 never updates outward at code bounds.</li><li>R2 is reproducible from saved RNG state.</li><li>Mean stochastic movement matches requested movement within 3% relative or 0.01 absolute code step over a fixed seed ensemble.</li><li>Skipped non-finite updates leave parameters, codes, factor state and RNG unchanged.</li><li>Fresh → save → resume matches uninterrupted execution.</li></ul><h3>13.4 Memory gate</h3><pre>target persistent bits per covered weight
+    <= remainder_bit_width + 0.5</pre><p>The int8 prototype is exempt but must report theoretical packed storage separately.</p><h3>13.5 Scientific gate</h3><p>A 4-bit R1 remainder must, on a matched-token controlled sweep, either close at least 25% of the validation-loss gap to the selected dense baseline or improve validation loss by at least 0.05 over width zero. The result must hold for at least two of three seeds without sustained saturation above 10%.</p><div class="callout risk"><strong>Stop rule.</strong> If 4-bit R1 fails, do not implement packed storage or streamed autograd. If R1 passes but R2 fails, the optimiser becomes the research target.</div></section>
+
+<section id="stages"><h2>14. Implementation sequence</h2><div class="stage"><h3>Stage 0 — Contracts and offline diagnostic</h3><p>Implement keys, canonical matrix views, literal decoder, projector interface and fixed-width diagnostic. Exit when decoder and projection tests pass.</p></div><div class="stage"><h3>Stage 1 — Forward path</h3><p>Add int8 buffers and effective-weight construction for all six matrix families. Exit when zero-code equivalence and existing regressions pass.</p></div><div class="stage"><h3>Stage 2 — R1 reference training</h3><p>Add full-matrix hook, gradient routing, FP32 master, AdamW, checkpointing and diagnostics. Exit when R1 learns on toy and short LM runs.</p></div><div class="stage"><h3>Stage 3 — R2 target optimiser</h3><p>Add factored moments, stochastic updates, accumulation pending state, RNG checkpointing and atomic skip. Exit when optimiser, resume and memory-state tests pass.</p></div><div class="stage"><h3>Stage 4 — Controlled sweep</h3><p>Compare widths 0,1,2,3,4,6,8 and compare R1/R2 at widths 2 and 4. Apply the scientific gate.</p></div><div class="stage"><h3>Stage 5 — Packed storage and streamed backward</h3><p>Implement only after Stage 4 demonstrates clear value or the hook backend fails the memory gate.</p></div></section>
+
+<section id="risks"><h2>15. Risks and deferred work</h2><table><thead><tr><th>Risk</th><th>Required response</th></tr></thead><tbody><tr><td>R1 fails at 4 bits</td><td>Stop; local low-bit freedom is insufficient.</td></tr><tr><td>R1 passes, R2 fails</td><td>Investigate block-shared or low-rank first moments before dense state.</td></tr><tr><td>High saturation</td><td>Inspect routing and width before increasing step size.</td></tr><tr><td>Hook memory is excessive</td><td>Implement streamed autograd after scientific proof.</td></tr><tr><td>Base and remainder fight</td><td>Investigate update-level reconciliation in a later revision.</td></tr></tbody></table><h3>15.1 Deferred</h3><p>Sub-ULP carrier precision; variable width; sparse exceptions; learned scales; dense or low-rank first moment; non-matrix parameters; update-level reconciliation; arbitrary optimiser-mode checkpoint conversion.</p></section>
+
+<section id="terms"><h2>16. Controlled terminology</h2><table class="terms"><tbody><tr><td><code>base_coefficients</code></td><td>Compact spectral learned object.</td></tr><tr><td><code>base_weight</code></td><td>Transient matrix materialised from coefficients.</td></tr><tr><td><code>remainder_value</code></td><td>Signed low-bit integer at one canonical matrix coordinate.</td></tr><tr><td><code>remainder_offset</code></td><td>Decoded difference between the selected adjacent-representable value and the base.</td></tr><tr><td><code>effective_weight</code></td><td>The single matrix consumed by the transformer.</td></tr><tr><td><code>materialised-weight-indexed</code></td><td>Indexed by final matrix position, not coefficient or kernel layout.</td></tr><tr><td>projected gradient</td><td>Effective gradient component expressible by the base materialiser.</td></tr><tr><td>rejected gradient</td><td>Effective gradient remaining after projection.</td></tr><tr><td>reference optimiser</td><td>Expensive FP32-master AdamW optimisation oracle.</td></tr><tr><td>target optimiser</td><td>Factored-RMS stochastic integer updater without dense per-weight float state.</td></tr></tbody></table><div class="summary">The architecture is buildable under this specification. The custom optimiser remains difficult, but its reference path, target state, equations, update order, accumulation behaviour and acceptance gates are now explicit.</div></section>
+<footer>thog2: “Remainder Architecture Enhancement” · Architecture and Requirements Specification · Draft v0.12 · 19 July 2026</footer>
+</main></body></html>

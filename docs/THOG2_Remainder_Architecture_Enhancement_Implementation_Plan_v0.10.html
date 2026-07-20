@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>thog2: Remainder Architecture Enhancement — Implementation Plan v0.10</title>
+<style>
+:root{--text:#20262d;--muted:#5b6670;--line:#d8dde3;--accent:#26547c;--accent-bg:#eef4f8;--light:#f7f8fa;--code:#f3f5f7;--ok:#246b4b;--ok-bg:#eef8f2;--warn:#815c11;--warn-bg:#fff8e7;--risk:#9a3333;--risk-bg:#fff2f2}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--text);background:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.58}main{max-width:1040px;margin:0 auto;padding:48px 44px 84px}header{margin-bottom:34px;padding-bottom:28px;border-bottom:2px solid #bfc7cf}.eyebrow{margin-bottom:10px;color:var(--muted);font-size:13px;font-weight:750;letter-spacing:.075em;text-transform:uppercase}h1{margin:0 0 13px;color:#111820;font-size:38px;line-height:1.14;letter-spacing:-.025em}.subtitle{max-width:900px;margin:0;color:#34414d;font-size:19px;line-height:1.48}.meta{display:grid;grid-template-columns:185px 1fr;gap:7px 18px;margin:25px 0 0;padding:17px 19px;border:1px solid var(--line);border-radius:7px;background:var(--light);font-size:14px}.meta dt{font-weight:750}.meta dd{margin:0}.document-status{margin-top:18px;padding:14px 17px;border-left:4px solid var(--ok);background:var(--ok-bg)}nav{margin:34px 0 44px;padding:19px 23px;border:1px solid var(--line);border-radius:7px;background:var(--light)}nav h2{margin:0 0 10px;padding:0 0 8px;border-bottom:1px solid var(--line);font-size:21px}nav ol{columns:2;column-gap:42px;margin:0;padding-left:25px}nav li{break-inside:avoid;margin:5px 0}nav a{color:var(--accent);text-decoration:none}section{margin-top:46px}h2{margin:0 0 18px;padding:0 0 9px;border-bottom:1px solid var(--line);color:#111820;font-size:29px;line-height:1.24}h3{margin:29px 0 10px;color:#1b2936;font-size:21px;line-height:1.32}p{margin:0 0 15px}.lead{color:#34414d;font-size:18px;line-height:1.56}.summary,.callout{margin:18px 0;padding:15px 17px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:6px;background:var(--accent-bg)}.callout.warn{border-left-color:var(--warn);background:var(--warn-bg)}.callout.risk{border-left-color:var(--risk);background:var(--risk-bg)}code{padding:.1em .27em;border-radius:4px;background:var(--code);color:#111820;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:.92em}pre{margin:17px 0;padding:15px 17px;overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--code);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:13.5px;line-height:1.47}table{width:100%;margin:17px 0 24px;border-collapse:collapse;font-size:14px}th,td{padding:9px 11px;border:1px solid var(--line);text-align:left;vertical-align:top}th{background:#edf1f4;font-weight:750}tbody tr:nth-child(even) td{background:#fafbfc}ul,ol{margin:0 0 16px;padding-left:27px}li{margin:5px 0}.stage{margin:15px 0;padding:16px 18px;border:1px solid var(--line);border-radius:7px}.stage h3{margin-top:0}footer{margin-top:58px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}@media(max-width:760px){main{padding:28px 20px 58px}h1{font-size:30px}nav ol{columns:1}.meta{grid-template-columns:1fr}}@media print{body{font-size:10.8pt}main{max-width:none;padding:17mm 18mm 20mm}nav{break-after:page}h2,h3{break-after:avoid}table,pre,.callout,.stage{break-inside:avoid}a{color:inherit;text-decoration:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">THOG2 implementation plan · Draft v0.10</div>
+<h1>thog2: “Remainder Architecture Enhancement”</h1>
+<p class="subtitle">Implementation plan for the architecture defined by <code>THOG2_Remainder_Architecture_Enhancement_v0.12.html</code>.</p>
+<dl class="meta">
+<dt>Document type</dt><dd>Implementation plan</dd>
+<dt>Status</dt><dd>Ready to govern staged implementation</dd>
+<dt>Date</dt><dd>19 July 2026</dd>
+<dt>Target branch</dt><dd><code>remainder_architecture_enhancement</code></dd>
+<dt>Requirements baseline</dt><dd>Architecture and Requirements Specification v0.12</dd>
+<dt>Implementation posture</dt><dd>Reference proof first; memory-clean optimiser only after scientific value is demonstrated</dd>
+</dl>
+<div class="document-status"><strong>Plan discipline.</strong> Each stage begins with a stage-specific test plan committed before production code. A stage is complete only when its exit criteria pass and the existing regression suite remains green.</div>
+</header>
+<nav aria-label="Table of contents"><h2>Contents</h2><ol>
+<li><a href="#summary">Executive summary</a></li><li><a href="#principles">Implementation principles</a></li><li><a href="#structure">Target code structure</a></li><li><a href="#stage0">Stage 0 — Contracts and test harness</a></li><li><a href="#stage1">Stage 1 — Forward-only remainder path</a></li><li><a href="#stage2">Stage 2 — Gradient routing and reference optimiser</a></li><li><a href="#stage3">Stage 3 — Target optimiser</a></li><li><a href="#stage4">Stage 4 — Controlled scientific evaluation</a></li><li><a href="#stage5">Stage 5 — Packed storage and streamed backward</a></li><li><a href="#cross">Cross-cutting requirements</a></li><li><a href="#done">Deliverables and completion</a></li><li><a href="#risks">Risk register</a></li>
+</ol></nav>
+<section id="summary"><h2>1. Executive summary</h2>
+<p class="lead">The implementation proceeds in six stages. Stages 0–2 establish correctness and whether the remainder can learn. Stage 3 develops the memory-clean custom optimiser. Stage 4 determines whether the architecture deserves completion. Stage 5 is entered only after a positive scientific result.</p>
+<div class="summary"><strong>Critical path:</strong> exact decoding → exact materialised-weight addressing → exact gradient decomposition → reference AdamW proof → memory-clean custom optimiser.</div>
+<table><thead><tr><th>Stage</th><th>Primary outcome</th><th>Exit decision</th></tr></thead><tbody>
+<tr><td>0</td><td>Contracts, decoder, projector and offline diagnostic</td><td>Core maths and indexing proven</td></tr>
+<tr><td>1</td><td>Forward-only int8 remainder path</td><td>Zero equivalence and address correctness</td></tr>
+<tr><td>2</td><td>One-backprop routing and R1 reference optimiser</td><td>Remainder can demonstrably learn</td></tr>
+<tr><td>3</td><td>R2 factored-RMS stochastic optimiser</td><td>Lean optimiser works and resumes exactly</td></tr>
+<tr><td>4</td><td>Matched controlled sweep</td><td>Proceed, revise optimiser, or stop</td></tr>
+<tr><td>5</td><td>Packed storage and optional streamed autograd</td><td>Production memory path</td></tr>
+</tbody></table>
+<div class="callout risk"><strong>Central caution.</strong> The custom optimiser is the largest implementation unknown. It shall not be developed in final packed form until the deliberately expensive reference optimiser proves the representation useful.</div>
+</section>
+<section id="principles"><h2>2. Implementation principles</h2><ol>
+<li><strong>Preserve the existing path.</strong> <code>remainder_mode=off</code> bypasses all new storage, hooks and optimiser code.</li>
+<li><strong>Test before code.</strong> Commit a stage-specific test plan before implementing that stage.</li>
+<li><strong>Separate science from optimisation engineering.</strong> R1 may be wasteful; R2 may not.</li>
+<li><strong>Use one canonical matrix layout.</strong> Remainders are row-major over final <code>(out_features, in_features)</code> matrices.</li>
+<li><strong>Do not double-apply coefficient gradients.</strong> Hook mode returns the projected weight gradient to existing autograd.</li>
+<li><strong>Fail loudly.</strong> Unsupported modes, geometries and checkpoint combinations raise explicit errors.</li>
+<li><strong>Measure peak and persistent memory separately.</strong></li>
+</ol>
+<h3>2.1 Code and branch policy</h3><p>Existing nanoGPT lines shall not be deleted; superseded lines shall be commented out. New THOG2 code shall use the established THOG markers. All work remains on <code>remainder_architecture_enhancement</code> unless explicitly directed otherwise.</p>
+</section>
+<section id="structure"><h2>3. Target code structure</h2>
+<table><thead><tr><th>Proposed module</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><code>thog2/remainder/config.py</code></td><td>Enums, validation and compatibility signature.</td></tr>
+<tr><td><code>thog2/remainder/addressing.py</code></td><td>Tensor keys, canonical views and address metadata.</td></tr>
+<tr><td><code>thog2/remainder/codec.py</code></td><td>Reference decoder, directional steps and packed codec.</td></tr>
+<tr><td><code>thog2/remainder/store.py</code></td><td>Int8/packed storage and checkpoint state.</td></tr>
+<tr><td><code>thog2/remainder/effective_weight.py</code></td><td>Straight-through effective-weight construction.</td></tr>
+<tr><td><code>thog2/remainder/projection.py</code></td><td>Common projector interface and geometry adapters.</td></tr>
+<tr><td><code>thog2/remainder/optimizer_reference.py</code></td><td>R1 FP32-master AdamW oracle.</td></tr>
+<tr><td><code>thog2/remainder/optimizer_factored.py</code></td><td>R2 factored-RMS stochastic updater.</td></tr>
+<tr><td><code>thog2/remainder/autograd.py</code></td><td>Full-matrix hook and later streamed backward.</td></tr>
+<tr><td><code>thog2/remainder/telemetry.py</code></td><td>State, gradient, update and memory metrics.</td></tr>
+<tr><td><code>tests/remainder/</code></td><td>Unit, integration, resume and memory tests.</td></tr>
+</tbody></table>
+<div class="callout warn"><strong>Integration rule.</strong> Do not introduce a second training backend. Plug into existing materialisation, lifecycle, checkpoint, telemetry and wrapper paths.</div>
+</section>
+<section id="stage0"><h2>4. Stage 0 — Contracts and test harness</h2>
+<p class="lead">Establish the contracts every later stage depends on.</p>
+<h3>Pre-code deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_0_Test_Plan_v0.10.html</code>.</p>
+<h3>Implementation</h3><ol>
+<li>Add configuration and validation with default mode <code>off</code>.</li><li>Define the six legal tensor-family keys and canonical final-matrix views.</li><li>Implement literal repeated-<code>nextafter</code> decoding for FP16, BF16 and FP32.</li><li>Implement directional code-step calculation and bound masking.</li><li>Add <code>project_weight_gradient()</code>.</li><li>Implement CHEBY projection adapters for every existing spectral geometry using the exact forward basis matrices and axis order.</li><li>Build the fixed-width offline diagnostic for 1, 2, 3, 4, 6 and 8 bits.</li>
+</ol>
+<h3>Tests and exit</h3><ul>
+<li>Bitwise decoder tests including zero, subnormals, exponent boundaries and max finite values.</li><li>Address stability across qkv/head reshaping.</li><li>Projection reconstruction and orthogonality tolerances from v0.12.</li><li>Every registered geometry covered.</li><li>All Stage 0 and existing tests green; diagnostic deterministic and machine-readable.</li>
+</ul>
+<div class="callout risk"><strong>Blocker.</strong> Projection must be the exact reverse contraction of the active materialiser, not a shape-based approximation.</div>
+</section>
+<section id="stage1"><h2>5. Stage 1 — Forward-only remainder path</h2>
+<p class="lead">Add int8 storage and effective-weight construction without learning.</p>
+<h3>Pre-code deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_1_Test_Plan_v0.10.html</code>.</p>
+<h3>Implementation</h3><ol>
+<li>Add zero-initialised int8 remainder buffers for covered spectral matrices.</li><li>Add shape, layout and tensor-key metadata.</li><li>Implement the straight-through effective-weight builder.</li><li>Integrate the six required matrix families.</li><li>Add checkpoint save/load.</li><li>Add non-zero, histogram, saturation and offset telemetry.</li>
+</ol>
+<h3>Tests and exit</h3><ul>
+<li>Width zero reproduces existing logits and loss.</li><li>Active mode with zero codes reproduces the base path.</li><li>Single-position mutation changes exactly one intended matrix element.</li><li>All families and first/middle/final layers covered.</li><li>Checkpoint round-trip exact.</li><li>CPU, scruffy BF16 and dreedle FP16 smoke tests pass.</li>
+</ul>
+</section>
+<section id="stage2"><h2>6. Stage 2 — Gradient routing and R1 reference optimiser</h2>
+<p class="lead">Establish the one-backprop architecture and determine whether the remainder can learn with familiar, deliberately expensive optimisation.</p>
+<h3>Pre-code deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_2_Test_Plan_v0.10.html</code>.</p>
+<h3>Implementation</h3><ol>
+<li>Attach effective-weight gradient hooks.</li><li>Compute <code>G_projected</code> and <code>G_remainder</code>.</li><li>Return only <code>G_projected</code> to autograd.</li><li>Verify coefficient gradients against direct analysis transforms.</li><li>Add FP32 remainder masters and AdamW reference groups.</li><li>Convert rejected gradients to code-space gradients through directional code steps.</li><li>Quantise masters to bounded int8 values after each update.</li><li>Add R1 checkpoint, resume and telemetry.</li><li>Require gradient accumulation equal to one.</li>
+</ol>
+<pre>loss.backward()
+validate finite update
+base_optimizer.step()
+reference_remainder_optimizer.step()
+quantise reference masters
+zero gradients
+increment completed_updates</pre>
+<h3>Tests and exit</h3><ul>
+<li>Gradient decomposition reconstructs the effective gradient.</li><li>Hook gradient and explicit projection produce the same coefficient gradient.</li><li>No gradient is applied twice.</li><li>R1 descends deterministic toy objectives.</li><li>Fresh → save → resume matches uninterrupted execution.</li><li>Atomic non-finite skip leaves both paths unchanged.</li>
+</ul>
+<h3>Mini-gate</h3><p>Run matched widths 0, 2 and 4. Stage 3 proceeds only if width 4 gives credible improvement and rejected gradients are non-trivial.</p>
+<div class="callout risk"><strong>Interpretation.</strong> If R1 fails, stop. The representation or routing is at fault; the future custom optimiser cannot rescue it.</div>
+</section>
+<section id="stage3"><h2>7. Stage 3 — R2 target optimiser</h2>
+<p class="lead">Implement the factored-RMS stochastic integer optimiser. This is the largest workstream and is not a small AdamW subclass.</p>
+<h3>Pre-code deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_3_Test_Plan_v0.10.html</code>.</p>
+<table><thead><tr><th>Milestone</th><th>Work</th><th>Proof</th></tr></thead><tbody>
+<tr><td>3A</td><td>Directional step, bound masking and FP32 code gradient</td><td>Finite-difference and sign tests</td></tr>
+<tr><td>3B</td><td>Row/column second moments and RMS clipping</td><td>Independent dense-reference match</td></tr>
+<tr><td>3C</td><td>Seeded stochastic integer update</td><td>Expected movement and reproducibility</td></tr>
+<tr><td>3D</td><td>Accumulation, skip, checkpoint and coordination</td><td>Resume equivalence and CUDA smoke</td></tr>
+</tbody></table>
+<h3>Implementation</h3><ol>
+<li>Store only row and column FP32 second-moment vectors per matrix.</li><li>Implement exact v0.12 equations and defaults.</li><li>Use a dedicated seeded device RNG and checkpoint its state.</li><li>Implement transient pending integer steps across accumulation microsteps.</li><li>Average factor observations across the accumulation window.</li><li>Apply values and factor state only after a complete finite update.</li><li>Restore pre-update RNG on skipped updates.</li><li>Report actual and theoretical packed persistent bytes.</li><li>Add update frequency, saturation and factor telemetry.</li>
+</ol>
+<h3>Tests and exit</h3><ul>
+<li>Factored normaliser matches an independent reference.</li><li>Mean stochastic update matches requested movement.</li><li>Seeded runs and resumes are reproducible.</li><li>Accumulation has the expected distribution.</li><li>Outward bound updates are impossible.</li><li>Skipped updates restore values, factors and RNG.</li><li>R2 trains stably on toy and short OWT runs.</li>
+</ul>
+</section>
+<section id="stage4"><h2>8. Stage 4 — Controlled scientific evaluation</h2>
+<p class="lead">Determine whether the architecture merits completion. This is an experiment package, not optimiser development.</p>
+<h3>Pre-run deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_4_Test_Plan_v0.10.html</code>, including exact run matrix, seeds, token budget and analysis.</p>
+<table><thead><tr><th>Comparison</th><th>Widths</th><th>Modes</th><th>Seeds</th></tr></thead><tbody>
+<tr><td>Bit-width curve</td><td>0, 1, 2, 3, 4, 6, 8</td><td>R2</td><td>3</td></tr><tr><td>Optimiser gap</td><td>2, 4</td><td>R1 vs R2</td><td>3</td></tr><tr><td>Base reference</td><td>0</td><td>off</td><td>3</td></tr>
+</tbody></table>
+<h3>Controls and outputs</h3><ul>
+<li>Identical geometry, basis, orders, initial base coefficients, data order, token budget and base AdamW schedule.</li><li>Validation loss versus bit width and R1/R2 gap.</li><li>Saturation, non-zero fraction, projected/rejected norms and update norms.</li><li>Persistent memory, peak memory, tokens/s and update time.</li>
+</ul>
+<h3>Decision</h3><ul><li><strong>Proceed:</strong> 4 bits passes and R2 is credible.</li><li><strong>Optimiser research:</strong> R1 passes materially but R2 does not.</li><li><strong>Stop:</strong> R1 fails at 4 bits.</li></ul>
+</section>
+<section id="stage5"><h2>9. Stage 5 — Packed storage and streamed backward</h2>
+<p class="lead">Enter only after Stage 4 passes.</p>
+<h3>Pre-code deliverable</h3><p><code>docs/THOG2_Remainder_Architecture_Enhancement_Stage_5_Test_Plan_v0.10.html</code>.</p>
+<h3>Packed storage</h3><ol>
+<li>Pack fixed-width signed values into <code>torch.uint8</code>.</li><li>Implement sign extension and exact unpacking for 1, 2, 3, 4, 6 and 8 bits.</li><li>Update and repack blockwise without a persistent unpacked shadow.</li><li>Implement an accelerated decoder bitwise-equivalent to the reference decoder.</li><li>Add packed checkpoint schema and int8-to-packed conversion.</li>
+</ol>
+<h3>Streamed autograd decision</h3><p>Measure the full-matrix-hook backend first. Implement streamed custom autograd only if peak memory violates the approved threshold or blocks intended model sizes.</p>
+<h3>Streamed backend</h3><ol>
+<li>Tiled effective-gradient recomputation.</li><li>Pass A accumulates coefficient gradients and factor observations.</li><li>Pass B rematerialises projected tiles, derives rejected tiles and generates pending integer updates.</li><li>Publish coefficient gradients once and discard each tile immediately.</li>
+</ol>
+<h3>Exit</h3><ul>
+<li>Packed and int8 logical values are bitwise equivalent.</li><li>Hook and streamed gradients match; stochastic updates match statistically.</li><li>Checkpoint conversion and resume pass.</li><li>Persistent optimiser overhead meets v0.12.</li><li>Measured peak-memory gain justifies complexity.</li>
+</ul>
+</section>
+<section id="cross"><h2>10. Cross-cutting requirements</h2>
+<h3>Configuration and lifecycle</h3><ul>
+<li>Add fields to canonical config and parser; expose wrapper controls only after implementation.</li><li>Preserve wrapper defaults with remainder off.</li><li>Include structural and optimiser settings in compatibility signatures and manifests.</li><li>Fresh, resume and fork follow the existing enhanced lifecycle.</li><li>RNG, values and optimiser state participate in exact resume.</li><li>Checkpoints occur only at completed update boundaries.</li>
+</ul>
+<h3>Required telemetry</h3><pre>remainder/bit_width
+remainder/nonzero_fraction
+remainder/saturation_fraction
+remainder/value_histogram
+remainder/mean_abs_offset
+remainder/effective_gradient_norm
+remainder/projected_gradient_norm
+remainder/rejected_gradient_norm
+remainder/projection_error
+remainder/update_frequency
+remainder/update_norm
+remainder/row_factor_norm
+remainder/column_factor_norm
+remainder/persistent_bytes
+remainder/theoretical_packed_bytes
+remainder/peak_memory_delta_bytes</pre>
+<h3>Performance discipline</h3><ul><li>No Python loop per materialised weight in training.</li><li>Literal repeated-<code>nextafter</code> is reference-only.</li><li>Profile vectorised code before custom kernels.</li><li>Any CUDA/Triton path requires an independent CPU reference.</li></ul>
+</section>
+<section id="done"><h2>11. Deliverables and completion</h2>
+<table><thead><tr><th>Deliverable</th><th>Required content</th></tr></thead><tbody>
+<tr><td>Stage test plans</td><td>One committed plan before code for Stages 0–5.</td></tr><tr><td>Implementation</td><td>Integrated modules with THOG markers.</td></tr><tr><td>Regression tests</td><td>Decoder, addressing, projection, optimiser, lifecycle, dtype and memory coverage.</td></tr><tr><td>Experiment package</td><td>Exact runs, manifests and result summariser.</td></tr><tr><td>Operator documentation</td><td>Configuration, compatibility and diagnostics.</td></tr><tr><td>Final report</td><td>Built scope, deviations, tests, memory and scientific result.</td></tr>
+</tbody></table>
+<p>The enhancement is complete only when Stage 4 passes and either the hook backend is formally accepted for intended use or Stage 5 packed storage and required streamed backward pass.</p>
+</section>
+<section id="risks"><h2>12. Risk register</h2>
+<table><thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead><tbody>
+<tr><td>Wrong projector for one geometry</td><td>Critical</td><td>Exact reconstruction and orthogonality tests before training.</td></tr><tr><td>Address drift under qkv/head views</td><td>Critical</td><td>Canonical final-matrix storage and single-position mutation tests.</td></tr><tr><td>R1 shows no gain</td><td>Project-ending</td><td>Stop before optimiser and packing sunk cost.</td></tr><tr><td>R2 underperforms R1</td><td>High</td><td>Use R1 as oracle; investigate block-shared or low-rank first moments only after diagnosis.</td></tr><tr><td>Stochastic update too noisy</td><td>High</td><td>Measure variance; tune LR and clipping before adding state.</td></tr><tr><td>Hook peak memory too high</td><td>High</td><td>Retain hook for proof; stream only after scientific gate.</td></tr><tr><td>Packed 3/6-bit complexity</td><td>Moderate</td><td>Fixed-width helpers and int8 equivalence tests.</td></tr><tr><td>RNG resume divergence</td><td>High</td><td>Atomic skip semantics and exact resume regression.</td></tr>
+</tbody></table>
+<div class="summary">The plan spends effort in the order that buys information: prove the maths, prove the forward path, prove learnability with R1, then undertake the custom optimiser.</div>
+</section>
+<footer>thog2: “Remainder Architecture Enhancement” · Implementation Plan · Draft v0.10 · 19 July 2026</footer>
+</main>
+</body>
+</html>
