@@ -97,8 +97,14 @@ Schedule/logging:
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
 Compact geometry:
-  -B BASIS_FAMILY=${BASIS_FAMILY}                   registered fixed basis family
-  -v BASIS_VERSION=${BASIS_VERSION}
+  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar
+                                                    Chebyshev aliases: cheby | chebyshev_first_kind_qr
+                                                    DCT aliases: dct_ii | dct_ii_orthonormal
+                                                    Haar aliases: balanced_haar | haar_balanced
+  -v BASIS_VERSION=${BASIS_VERSION}                 auto (recommended), or exact:
+                                                    chebyshev_first_kind_qr_v1
+                                                    dct_ii_orthonormal_v1
+                                                    haar_balanced_binary_orthonormal_v1
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
   -m MLP_GEOMETRY=${MLP_GEOMETRY:-preset default}
 

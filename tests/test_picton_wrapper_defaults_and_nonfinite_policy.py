@@ -53,8 +53,21 @@ import json
 import sys
 
 if len(sys.argv) >= 2 and sys.argv[1] == '-c':
-    payload = json.load(sys.stdin)
     code = sys.argv[2]
+    if 'basis_artifact_tag_for_family' in code:
+        family = sys.argv[3]
+        aliases = {
+            'cheby': 'chebyshev',
+            'chebyshev_first_kind_qr': 'chebyshev',
+            'dct_ii': 'dct',
+            'dct_ii_orthonormal': 'dct',
+            'balanced_haar': 'haar',
+            'haar_balanced': 'haar',
+        }
+        family = aliases.get(family, family)
+        print({'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family])
+        raise SystemExit(0)
+    payload = json.load(sys.stdin)
     if '["artifact_name"]' in code:
         print(payload['artifact_name'])
     elif '["paths"]["log_path"]' in code:
