@@ -9,34 +9,7 @@ WRAPPERS = (
 )
 
 
-def replace_once(text: str, old: str, new: str, *, label: str) -> str:
-    count = text.count(old)
-    if count != 1:
-        raise RuntimeError(f"{label}: expected exactly one match; found {count}")
-    return text.replace(old, new, 1)
-
-
-def update_wrapper(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-
-    text = replace_once(
-        text,
-        "  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar\n",
-        "  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar; single, comma, or quoted space list\n",
-        label=f"{path}: basis help",
-    )
-
-    text = replace_once(
-        text,
-        "O_DEPTH_VALUES=()\nPRESET_VALUES=()\nBATCH_SIZE_VALUES=()",
-        "O_DEPTH_VALUES=()\nPRESET_VALUES=()\nBASIS_FAMILY_VALUES=()                                                                                                                                    # <<< THOG basis-family grid axis\nBASIS_TAG_VALUES=()                                                                                                                                       # <<< THOG matching artifact tags for basis-family grid\nBATCH_SIZE_VALUES=()",
-        label=f"{path}: grid arrays",
-    )
-
-    parser_calls = '''parse_o_depth_values "$O_DEPTH"
-parse_geometry_preset_values "$GEOMETRY_PRESET"
-'''
-    parser_calls_with_basis = '''parse_basis_family_values() {
+BASIS_PARSER = '''parse_basis_family_values() {
   local normalized="${1//,/ }" value
   for value in $normalized; do
     [[ "$value" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "Invalid BASIS_FAMILY value: $value; expected a lowercase registry name or alias." >&2; exit 2; }
@@ -44,41 +17,10 @@ parse_geometry_preset_values "$GEOMETRY_PRESET"
   done
   (( ${#BASIS_FAMILY_VALUES[@]} > 0 )) || { echo "Invalid BASIS_FAMILY: empty value list." >&2; exit 2; }
 }
-parse_o_depth_values "$O_DEPTH"
-parse_geometry_preset_values "$GEOMETRY_PRESET"
-parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid
-'''
-    text = replace_once(
-        text,
-        parser_calls,
-        parser_calls_with_basis,
-        label=f"{path}: basis parser",
-    )
+'''.splitlines()
 
-    text = replace_once(
-        text,
-        '''# vvv THOG
-[[ "$BASIS_FAMILY" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "BASIS_FAMILY must be a lowercase registry name or alias." >&2; exit 2; }
-# ^^^ THOG
-''',
-        '''# vvv THOG basis-family grid validation
-if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then
-  echo "BASIS_VERSION must be auto when BASIS_FAMILY contains multiple values." >&2
-  exit 2
-fi
-# ^^^ THOG
-''',
-        label=f"{path}: basis validation",
-    )
 
-    text = replace_once(
-        text,
-        '''# vvv THOG
-BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
-# ^^^ THOG
-''',
-        '''# vvv THOG canonicalize and registry-validate every basis-family grid value before any run starts
-# BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
+BASIS_RESOLUTION = '''# BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
 BASIS_FAMILY_CANONICAL_VALUES=()
 for requested_basis_family in "${BASIS_FAMILY_VALUES[@]}"; do
   basis_resolution="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family, normalize_registered_basis_family; family = normalize_registered_basis_family(sys.argv[1]); print(f"{family}\\t{basis_artifact_tag_for_family(family)}")' "$requested_basis_family")"
@@ -86,122 +28,7 @@ for requested_basis_family in "${BASIS_FAMILY_VALUES[@]}"; do
   BASIS_FAMILY_CANONICAL_VALUES+=("$basis_family_value")
   BASIS_TAG_VALUES+=("$basis_tag")
 done
-BASIS_FAMILY_VALUES=("${BASIS_FAMILY_CANONICAL_VALUES[@]}")
-# ^^^ THOG
-''',
-        label=f"{path}: basis registry resolution",
-    )
-
-    text = replace_once(
-        text,
-        '''run_preset_o_depth_batch_lr() {
-  local geometry_preset_value="$1"
-  local o_depth_value="$2"
-  local batch_size_value="$3"                                                                                                                             # <<< THOG batch grid coordinate
-  local learning_rate_code="$4"                                                                                                                           # <<< THOG LR grid coordinate
-''',
-        '''run_grid_point() {
-  local geometry_preset_value="$1"
-  local o_depth_value="$2"
-  local batch_size_value="$3"                                                                                                                             # <<< THOG batch grid coordinate
-  local learning_rate_code="$4"                                                                                                                           # <<< THOG LR grid coordinate
-  local basis_family_value="$5"                                                                                                                           # <<< THOG canonical basis-family grid coordinate
-  local basis_tag="$6"                                                                                                                                    # <<< THOG matching basis artifact tag
-''',
-        label=f"{path}: grid function arguments",
-    )
-
-    text = replace_once(
-        text,
-        '    run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"\n',
-        '    run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"; basis_family_value="n/a"\n',
-        label=f"{path}: dense basis display",
-    )
-
-    text = replace_once(
-        text,
-        '''    run_tag="${BASIS_TAG}_${preset_tag}"
-    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION")
-''',
-        '''    run_tag="${basis_tag}_${preset_tag}"
-    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION")
-''',
-        label=f"{path}: compact basis identity",
-    )
-
-    text = replace_once(
-        text,
-        '  model/preset/basis: $display_model_type / $geometry_preset_value / $BASIS_FAMILY\n',
-        '  model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value\n',
-        label=f"{path}: basis display",
-    )
-
-    loop_start = text.index(
-        'if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then\n'
-    )
-    loop_end = text.rindex("# ^^^ THOG")
-    host_label = "scruffy" if "scruffy" in path.name else "dreedle"
-    new_loops = f'''if (( ${{#PRESET_VALUES[@]}} > 1 || ${{#BASIS_FAMILY_VALUES[@]}} > 1 || ${{#O_DEPTH_VALUES[@]}} > 1 || ${{#BATCH_SIZE_VALUES[@]}} > 1 || ${{#LEARNING_RATE_CODE_VALUES[@]}} > 1 )); then
-  echo "{host_label} OWT grid: p=${{PRESET_VALUES[*]}} B=${{BASIS_FAMILY_VALUES[*]}} P=${{O_DEPTH_VALUES[*]}} b=${{BATCH_SIZE_VALUES[*]}} LR=${{LEARNING_RATE_CODE_VALUES[*]}}"
-fi
-for geometry_preset_value in "${{PRESET_VALUES[@]}}"; do
-  if [[ "$geometry_preset_value" == dense ]]; then
-    for batch_size_value in "${{BATCH_SIZE_VALUES[@]}}"; do
-      for learning_rate_code in "${{LEARNING_RATE_CODE_VALUES[@]}}"; do
-        run_grid_point "$geometry_preset_value" "${{O_DEPTH_VALUES[0]}}" "$batch_size_value" "$learning_rate_code" "${{BASIS_FAMILY_VALUES[0]}}" "${{BASIS_TAG_VALUES[0]}}"
-      done
-    done
-  else
-    for basis_index in "${{!BASIS_FAMILY_VALUES[@]}}"; do
-      basis_family_value="${{BASIS_FAMILY_VALUES[$basis_index]}}"
-      basis_tag="${{BASIS_TAG_VALUES[$basis_index]}}"
-      for batch_size_value in "${{BATCH_SIZE_VALUES[@]}}"; do
-        for learning_rate_code in "${{LEARNING_RATE_CODE_VALUES[@]}}"; do
-          for o_depth_value in "${{O_DEPTH_VALUES[@]}}"; do
-            run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag"
-          done
-        done
-      done
-    done
-  fi
-done
-'''
-    text = text[:loop_start] + new_loops + text[loop_end:]
-    path.write_text(text, encoding="utf-8")
-
-
-FAKE_OLD = '''    if 'basis_artifact_tag_for_family' in code:
-        family = sys.argv[3]
-        aliases = {
-            'cheby': 'chebyshev',
-            'chebyshev_first_kind_qr': 'chebyshev',
-            'dct_ii': 'dct',
-            'dct_ii_orthonormal': 'dct',
-            'balanced_haar': 'haar',
-            'haar_balanced': 'haar',
-        }
-        family = aliases.get(family, family)
-        print({'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family])
-        raise SystemExit(0)
-'''
-FAKE_NEW = '''    if 'basis_artifact_tag_for_family' in code:
-        family = sys.argv[3]
-        aliases = {
-            'cheby': 'chebyshev',
-            'chebyshev_first_kind_qr': 'chebyshev',
-            'dct_ii': 'dct',
-            'dct_ii_orthonormal': 'dct',
-            'balanced_haar': 'haar',
-            'haar_balanced': 'haar',
-        }
-        family = aliases.get(family, family)
-        tag = {'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family]
-        if 'normalize_registered_basis_family' in code:
-            print(f'{family}\\t{tag}')
-        else:
-            print(tag)
-        raise SystemExit(0)
-'''
+BASIS_FAMILY_VALUES=("${BASIS_FAMILY_CANONICAL_VALUES[@]}")'''.splitlines()
 
 
 TEST_CONTENT = r'''# vvv THOG
@@ -330,18 +157,172 @@ def test_dense_preset_is_not_multiplied_by_basis_family_grid(fake_python: Path) 
 '''
 
 
+def update_wrapper(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    output: list[str] = []
+    counters: dict[str, int] = {}
+
+    def hit(name: str) -> None:
+        counters[name] = counters.get(name, 0) + 1
+
+    for line in lines:
+        stripped = line.strip()
+
+        if line.startswith("  -B BASIS_FAMILY=${BASIS_FAMILY}"):
+            output.append("  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar; single, comma, or quoted space list")
+            hit("help")
+            continue
+
+        if line == "PRESET_VALUES=()":
+            output.append(line)
+            output.append("BASIS_FAMILY_VALUES=()                                                                                                                                    # <<< THOG basis-family grid axis")
+            output.append("BASIS_TAG_VALUES=()                                                                                                                                       # <<< THOG matching artifact tags for basis-family grid")
+            hit("arrays")
+            continue
+
+        if line == 'parse_o_depth_values "$O_DEPTH"':
+            output.extend(BASIS_PARSER)
+            output.append(line)
+            hit("parser")
+            continue
+
+        if line.startswith('parse_geometry_preset_values "$GEOMETRY_PRESET"'):
+            output.append(line)
+            output.append('parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid')
+            hit("parser_call")
+            continue
+
+        if line == '[[ "$BASIS_FAMILY" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "BASIS_FAMILY must be a lowercase registry name or alias." >&2; exit 2; }':
+            output.extend(
+                [
+                    'if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then',
+                    '  echo "BASIS_VERSION must be auto when BASIS_FAMILY contains multiple values." >&2',
+                    '  exit 2',
+                    'fi',
+                ]
+            )
+            hit("validation")
+            continue
+
+        if line.startswith('BASIS_TAG="$("$PYTHON_BIN" -c '):
+            output.extend(BASIS_RESOLUTION)
+            hit("resolution")
+            continue
+
+        if line == "run_preset_o_depth_batch_lr() {":
+            output.append("run_grid_point() {")
+            hit("function")
+            continue
+
+        if stripped.startswith('local learning_rate_code="$4"'):
+            output.append(line)
+            output.append('  local basis_family_value="$5"                                                                                                                           # <<< THOG canonical basis-family grid coordinate')
+            output.append('  local basis_tag="$6"                                                                                                                                    # <<< THOG matching basis artifact tag')
+            hit("function_args")
+            continue
+
+        if 'run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"' in line:
+            output.append(line.replace('run_tag="DENSE"', 'run_tag="DENSE"; basis_family_value="n/a"'))
+            hit("dense")
+            continue
+
+        if stripped == 'run_tag="${BASIS_TAG}_${preset_tag}"':
+            output.append('    run_tag="${basis_tag}_${preset_tag}"')
+            hit("run_tag")
+            continue
+
+        if 'compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY"' in line:
+            output.append(line.replace('--basis-family "$BASIS_FAMILY"', '--basis-family "$basis_family_value"'))
+            hit("compact_args")
+            continue
+
+        if "model/preset/basis:" in line and "$BASIS_FAMILY" in line:
+            output.append(line.replace("$BASIS_FAMILY", "$basis_family_value"))
+            hit("display")
+            continue
+
+        output.append(line)
+
+    expected = {
+        "help", "arrays", "parser", "parser_call", "validation", "resolution",
+        "function", "function_args", "dense", "run_tag", "compact_args", "display",
+    }
+    if set(counters) != expected or any(count != 1 for count in counters.values()):
+        raise RuntimeError(f"{path}: wrapper transformation counters were {counters}")
+
+    loop_prefix = 'if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then'
+    try:
+        loop_start = output.index(loop_prefix)
+    except ValueError as exc:
+        raise RuntimeError(f"{path}: could not find old grid loop") from exc
+    loop_end = len(output) - 1
+    if output[loop_end] != "# ^^^ THOG":
+        raise RuntimeError(f"{path}: expected final THOG marker")
+
+    host_label = "scruffy" if "scruffy" in path.name else "dreedle"
+    new_loops = f'''if (( ${{#PRESET_VALUES[@]}} > 1 || ${{#BASIS_FAMILY_VALUES[@]}} > 1 || ${{#O_DEPTH_VALUES[@]}} > 1 || ${{#BATCH_SIZE_VALUES[@]}} > 1 || ${{#LEARNING_RATE_CODE_VALUES[@]}} > 1 )); then
+  echo "{host_label} OWT grid: p=${{PRESET_VALUES[*]}} B=${{BASIS_FAMILY_VALUES[*]}} P=${{O_DEPTH_VALUES[*]}} b=${{BATCH_SIZE_VALUES[*]}} LR=${{LEARNING_RATE_CODE_VALUES[*]}}"
+fi
+for geometry_preset_value in "${{PRESET_VALUES[@]}}"; do
+  if [[ "$geometry_preset_value" == dense ]]; then
+    for batch_size_value in "${{BATCH_SIZE_VALUES[@]}}"; do
+      for learning_rate_code in "${{LEARNING_RATE_CODE_VALUES[@]}}"; do
+        run_grid_point "$geometry_preset_value" "${{O_DEPTH_VALUES[0]}}" "$batch_size_value" "$learning_rate_code" "${{BASIS_FAMILY_VALUES[0]}}" "${{BASIS_TAG_VALUES[0]}}"
+      done
+    done
+  else
+    for basis_index in "${{!BASIS_FAMILY_VALUES[@]}}"; do
+      basis_family_value="${{BASIS_FAMILY_VALUES[$basis_index]}}"
+      basis_tag="${{BASIS_TAG_VALUES[$basis_index]}}"
+      for batch_size_value in "${{BATCH_SIZE_VALUES[@]}}"; do
+        for learning_rate_code in "${{LEARNING_RATE_CODE_VALUES[@]}}"; do
+          for o_depth_value in "${{O_DEPTH_VALUES[@]}}"; do
+            run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag"
+          done
+        done
+      done
+    done
+  fi
+done'''.splitlines()
+
+    output = output[:loop_start] + new_loops + output[loop_end:]
+    final_text = "\n".join(output) + "\n"
+
+    required_fragments = (
+        'BASIS_FAMILY_VALUES=()',
+        'BASIS_TAG_VALUES=()',
+        'run_grid_point()',
+        'for basis_index in "${!BASIS_FAMILY_VALUES[@]}"',
+        '--basis-family "$basis_family_value"',
+        'model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value',
+    )
+    for fragment in required_fragments:
+        if fragment not in final_text:
+            raise RuntimeError(f"{path}: missing final fragment {fragment!r}")
+
+    path.write_text(final_text, encoding="utf-8")
+
+
+def update_fake_python_harness(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    old = "        print({'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family])\n"
+    new = '''        tag = {'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family]
+        if 'normalize_registered_basis_family' in code:
+            print(f'{family}\\t{tag}')
+        else:
+            print(tag)
+'''
+    if text.count(old) != 1:
+        raise RuntimeError(f"{path}: expected one fake tag-print line; found {text.count(old)}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
 def main() -> None:
     for wrapper in WRAPPERS:
         update_wrapper(wrapper)
 
-    for path in (
-        Path("tests/test_picton_wrapper_defaults_and_nonfinite_policy.py"),
-        Path("tests/test_wrapper_learning_rate_and_batch_grids.py"),
-    ):
-        text = path.read_text(encoding="utf-8")
-        text = replace_once(text, FAKE_OLD, FAKE_NEW, label=f"{path}: fake basis resolver")
-        path.write_text(text, encoding="utf-8")
-
+    update_fake_python_harness(Path("tests/test_picton_wrapper_defaults_and_nonfinite_policy.py"))
+    update_fake_python_harness(Path("tests/test_wrapper_learning_rate_and_batch_grids.py"))
     Path("tests/test_wrapper_basis_family_grid.py").write_text(TEST_CONTENT, encoding="utf-8")
 
 
