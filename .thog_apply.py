@@ -96,7 +96,7 @@ def update_wrapper(path: Path) -> None:
             continue
 
         if 'run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"' in line:
-            output.append(line.replace('run_tag="DENSE"', 'run_tag="DENSE"; basis_family_value="n/a"'))
+            output.append(line)
             hit("dense")
             continue
 
@@ -194,12 +194,24 @@ def update_fake_python_harness(path: Path) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+def update_stage8_loop_assertion() -> None:
+    path = Path("tests/test_stage8_mlp_channel_order_and_wrapper_loops.py")
+    text = path.read_text(encoding="utf-8")
+    old = '        assert "run_preset_o_depth_batch_lr \\"$geometry_preset_value\\" \\"${O_DEPTH_VALUES[0]}\\" \\"$batch_size_value\\" \\"$learning_rate_code\\"" in text\n'
+    new = '        assert "run_grid_point \\"$geometry_preset_value\\" \\"${O_DEPTH_VALUES[0]}\\" \\"$batch_size_value\\" \\"$learning_rate_code\\" \\"${BASIS_FAMILY_VALUES[0]}\\" \\"${BASIS_TAG_VALUES[0]}\\"" in text\n'
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{path}: expected one old dense grid assertion; found {count}")
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
 def main() -> None:
     for wrapper in WRAPPERS:
         update_wrapper(wrapper)
 
     update_fake_python_harness(Path("tests/test_picton_wrapper_defaults_and_nonfinite_policy.py"))
     update_fake_python_harness(Path("tests/test_wrapper_learning_rate_and_batch_grids.py"))
+    update_stage8_loop_assertion()
 
 
 if __name__ == "__main__":
