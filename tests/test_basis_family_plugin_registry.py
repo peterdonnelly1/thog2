@@ -26,6 +26,7 @@ from sheet.bases import (
     get_basis_definition,
     normalize_registered_basis_family,
 )
+from sheet.bases.haar import BASIS_ARTIFACT_TAG_HAAR, BASIS_FAMILY_HAAR, HAAR_BASIS_VERSION
 from sheet.compact_identity import GEOMETRY_PRESET_DEPTH, resolve_compact_selectors
 from sheet.run_config import OwtRunConfig
 
@@ -58,18 +59,23 @@ def synthetic_definition(*, family: str = "synthetic_identity", aliases: tuple[s
 
 class BasisFamilyPluginRegistryTests(unittest.TestCase):
     def test_01_builtin_registry_preserves_family_version_alias_and_artifact_contracts(self) -> None:
-        self.assertEqual(BASIS_FAMILIES, (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT))
+        self.assertEqual(BASIS_FAMILIES, (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_HAAR))
         self.assertEqual(normalize_registered_basis_family("cheby"), BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(normalize_registered_basis_family(CHEBYSHEV_BASIS_VERSION), BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(normalize_registered_basis_family("dct_ii"), BASIS_FAMILY_DCT)
         self.assertEqual(normalize_registered_basis_family(DCT_BASIS_VERSION), BASIS_FAMILY_DCT)
+        self.assertEqual(normalize_registered_basis_family("balanced_haar"), BASIS_FAMILY_HAAR)
+        self.assertEqual(normalize_registered_basis_family(HAAR_BASIS_VERSION), BASIS_FAMILY_HAAR)
         self.assertEqual(basis_version_for_family(BASIS_FAMILY_CHEBYSHEV), CHEBYSHEV_BASIS_VERSION)
         self.assertEqual(basis_version_for_family(BASIS_FAMILY_DCT), DCT_BASIS_VERSION)
+        self.assertEqual(basis_version_for_family(BASIS_FAMILY_HAAR), HAAR_BASIS_VERSION)
         self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_CHEBYSHEV), BASIS_ARTIFACT_TAG_CHEBYSHEV)
         self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_DCT), BASIS_ARTIFACT_TAG_DCT)
+        self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_HAAR), BASIS_ARTIFACT_TAG_HAAR)
         self.assertEqual(get_basis_definition("cheby").family, BASIS_FAMILY_CHEBYSHEV)
+        self.assertEqual(get_basis_definition("haar_balanced").family, BASIS_FAMILY_HAAR)
 
-    def test_02_local_registry_accepts_a_third_basis_and_builds_it_without_geometry_code(self) -> None:
+    def test_02_local_registry_accepts_a_new_basis_and_builds_it_without_geometry_code(self) -> None:
         registry = BasisRegistry((synthetic_definition(),))
         self.assertEqual(registry.families(), ("synthetic_identity",))
         self.assertEqual(registry.normalize("synth"), "synthetic_identity")
@@ -88,30 +94,37 @@ class BasisFamilyPluginRegistryTests(unittest.TestCase):
             registry.register(synthetic_definition(family="other_c", aliases=("other_c",), version="other_c_v1", artifact_tag="SYNTH"))
 
     def test_04_selector_aliases_canonicalize_through_the_registry(self) -> None:
-        selectors = resolve_compact_selectors(geometry_preset=GEOMETRY_PRESET_DEPTH, basis_family="cheby")
-        self.assertEqual(selectors.basis_family, BASIS_FAMILY_CHEBYSHEV)
-        self.assertEqual(selectors.requested_basis_family, BASIS_FAMILY_CHEBYSHEV)
+        cheby = resolve_compact_selectors(geometry_preset=GEOMETRY_PRESET_DEPTH, basis_family="cheby")
+        haar = resolve_compact_selectors(geometry_preset=GEOMETRY_PRESET_DEPTH, basis_family="balanced_haar")
+        self.assertEqual(cheby.basis_family, BASIS_FAMILY_CHEBYSHEV)
+        self.assertEqual(cheby.requested_basis_family, BASIS_FAMILY_CHEBYSHEV)
+        self.assertEqual(haar.basis_family, BASIS_FAMILY_HAAR)
+        self.assertEqual(haar.requested_basis_family, BASIS_FAMILY_HAAR)
 
     def test_05_python_cli_choices_are_registry_derived(self) -> None:
         parser = run_thog2_owt.build_parser()
         action = next(action for action in parser._actions if action.dest == "basis_family")
         self.assertEqual(tuple(action.choices), BASIS_FAMILIES)
 
-    def test_06_run_artifact_tags_remain_unchanged(self) -> None:
+    def test_06_run_artifact_tags_are_registry_derived_and_existing_tags_remain_unchanged(self) -> None:
         cheby = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_CHEBYSHEV, basis_version="auto")
         dct = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_DCT, basis_version="auto")
+        haar = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_HAAR, basis_version="auto")
         self.assertEqual(cheby.compact_artifact_fragment(), "CHEBY_DEPTH")
         self.assertEqual(dct.compact_artifact_fragment(), "DCT_DEPTH")
+        self.assertEqual(haar.compact_artifact_fragment(), "HAAR_DEPTH")
         self.assertEqual(cheby.basis_version, CHEBYSHEV_BASIS_VERSION)
         self.assertEqual(dct.basis_version, DCT_BASIS_VERSION)
+        self.assertEqual(haar.basis_version, HAAR_BASIS_VERSION)
 
-    def test_07_primary_wrappers_have_no_chebyshev_dct_allow_list_or_tag_branch(self) -> None:
+    def test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch(self) -> None:
         root = Path(__file__).resolve().parents[1]
         for name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
             with self.subTest(name=name):
                 text = (root / name).read_text(encoding="utf-8")
                 self.assertNotIn("chebyshev|dct", text)
                 self.assertNotIn('BASIS_TAG="CHEBY"', text)
+                self.assertNotIn('BASIS_TAG="HAAR"', text)
                 self.assertIn("basis_artifact_tag_for_family", text)
 
 
