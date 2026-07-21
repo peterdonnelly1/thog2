@@ -18,7 +18,7 @@ def finite_float(value: Tensor) -> float:
 
 
 def normalized_energy(values: Tensor) -> Tuple[float, ...]:
-    energy = values.detach().to(dtype=torch.float64, device="cpu")
+    energy = values.detach().to(dtype=torch.float64, device="cpu").reshape(-1)
     total = float(energy.sum().item())
     if total <= 0.0:
         return tuple(0.0 for _ in range(energy.numel()))
@@ -30,6 +30,31 @@ def high_order_fraction(values: Tuple[float, ...]) -> float:
         return 0.0
     count = max(1, math.ceil(len(values) / 4))
     return float(sum(values[-count:]))
+
+
+def _coefficient_axis_plan(coefficient: Tensor, depth_order: int) -> Tuple[int, Tuple[int, ...]]:
+    shape = tuple(coefficient.shape)
+    if coefficient.ndim == 3 and shape[1] == depth_order:
+        return 1, (2,)
+    if coefficient.ndim == 3 and shape[0] == depth_order:
+        return 0, (1, 2)
+    if coefficient.ndim == 3 and shape[2] == depth_order:
+        return 2, ()
+    if coefficient.ndim == 4 and shape[1] == depth_order:
+        return 1, (2, 3)
+    raise ValueError(f"unsupported coefficient diagnostic shape {shape} for depth_order={depth_order}")
+
+
+def _axis_energy_fraction(coefficient: Tensor, axis: int) -> Tuple[float, ...]:
+    reduce_dims = tuple(index for index in range(coefficient.ndim) if index != axis)
+    return normalized_energy(coefficient.square().sum(dim=reduce_dims))
+
+
+def _combined_axis_energy_fraction(coefficient: Tensor, axes: Tuple[int, ...]) -> Tuple[float, ...]:
+    if not axes:
+        return tuple()
+    reduce_dims = tuple(index for index in range(coefficient.ndim) if index not in axes)
+    return normalized_energy(coefficient.square().sum(dim=reduce_dims))
 
 
 def gradient_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, float]]:
@@ -58,10 +83,12 @@ def gradient_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, float]]:
 @torch.no_grad()
 def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, Any]]:
     rows: Dict[str, Dict[str, Any]] = {}
+    depth_order = int(model.config.depth_order)
     for metadata in model.trajectory.metadata:
         coefficient = model.trajectory.coefficients[metadata.name].detach().float()
-        depth_fractions = normalized_energy(coefficient.square().sum(dim=(0, 2)))
-        row_fractions = normalized_energy(coefficient.square().sum(dim=(0, 1)))
+        depth_axis, order_axes = _coefficient_axis_plan(coefficient, depth_order)
+        depth_fractions = _axis_energy_fraction(coefficient, depth_axis)
+        row_fractions = _combined_axis_energy_fraction(coefficient, order_axes)
         rows[metadata.name] = {
             "semantic_type": metadata.semantic_type,
             "shape": list(coefficient.shape),

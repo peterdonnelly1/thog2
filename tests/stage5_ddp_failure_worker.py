@@ -21,7 +21,11 @@ def main() -> None:
     torch.set_num_threads(1)
     train_tokens, validation_tokens = token_splits()
     trainer = SharedTrainer(
-        stage5_config(max_updates=1, decay_updates=1),
+        stage5_config(
+            max_updates=1,
+            decay_updates=1,
+            nonfinite_update_policy="raise",
+        ),
         train_tokens,
         validation_tokens,
     )

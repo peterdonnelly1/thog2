@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THOG2 Chebyshev Sheet Implementation Plan v0.1</title>
+<style>
+@page { size: A3 portrait; margin: 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-family: "Liberation Serif", serif; font-size: 10pt; } }
+body { font-family: "Liberation Serif", Georgia, serif; font-size: 11pt; line-height: 1.38; color: #111; max-width: 260mm; margin: 0 auto; }
+.title-page { min-height: 900px; display: flex; flex-direction: column; justify-content: center; text-align: center; page-break-after: always; }
+.title-page h1 { font-size: 30pt; margin: 0 0 10pt 0; }
+.title-page h2 { font-size: 18pt; margin: 0 0 20pt 0; font-weight: normal; font-style: italic; }
+.title-meta { margin-top: 28pt; font-size: 11pt; }
+.toc { page-break-after: always; }
+h1 { font-size: 18pt; margin-top: 24pt; margin-bottom: 10pt; page-break-after: avoid; }
+h2 { font-size: 13.5pt; margin-top: 16pt; margin-bottom: 8pt; page-break-after: avoid; }
+p { margin: 0 0 10pt 0; }
+.req { margin-left: 18pt; text-indent: -18pt; }
+.caption { font-weight: bold; margin-top: 16pt; margin-bottom: 6pt; page-break-after: avoid; }
+table { width: 100%; border-collapse: collapse; margin: 0 0 16pt 0; font-family: "Liberation Sans", Arial, sans-serif; font-size: 8.3pt; page-break-inside: avoid; }
+th { background: #d9eaf7; border: 1px solid #8aa9bf; padding: 6px 7px; text-align: left; vertical-align: top; }
+td { border: 1px solid #c5c5c5; padding: 6px 7px; vertical-align: top; }
+tr:nth-child(even) td { background: #f7f7f7; }
+code, .mono { font-family: "Liberation Mono", Consolas, monospace; font-size: 90%; }
+.note { border-left: 4px solid #8aa9bf; padding: 8px 12px; background: #f5f9fc; margin: 10pt 0 14pt 0; }
+.toc-grid { columns: 2; column-gap: 24pt; }
+.toc-grid p { break-inside: avoid; margin-bottom: 4pt; }
+.stage { border-left: 4px solid #888; padding: 8px 12px; background: #fafafa; margin: 8pt 0 12pt 0; }
+</style>
+</head>
+<body>
+<section class="title-page">
+<h1>THOG2 Chebyshev Sheet Implementation Plan</h1>
+<h2>v0.1</h2>
+<p>Companion implementation plan for compact-depth, generic sheet, block, and semantic sheet geometry</p>
+<div class="title-meta">
+<p><strong>Status:</strong> companion implementation plan for THOG2 compact geometry.</p>
+<p><strong>Repository path:</strong> <span class="mono">docs/THOG2_Chebyshev_Sheet_Implementation_Plan_v0.1.html</span></p>
+<p><strong>Date:</strong> 18 July 2026</p>
+</div>
+</section>
+<section class="toc">
+<h1>Detailed table of contents</h1>
+<div class="toc-grid">
+<p>1 Purpose and operating principle</p><p>1.1 Purpose</p><p>1.2 Implementation principle</p><p>1.3 What this plan deliberately avoids</p>
+<p>2 Current codebase assessment</p><p>2.1 Useful existing structure</p><p>2.2 Main abstraction gap</p>
+<p>3 Target implementation shape</p><p>3.1 Public interface</p><p>3.2 Internal resolver contract</p><p>3.3 Trajectory/provider interface</p>
+<p>4 Optimal staging</p><p>4.1 Stage 1 - resolver, names, aliases, identity</p><p>4.2 Stage 2 - composed trajectory spine with old geometries only</p><p>4.3 Stage 3 - generic_sheet_row</p><p>4.4 Stage 4 - sheet_mlp</p><p>4.5 Stage 5 - semantic attention sheets</p><p>4.6 Stage 6 - preset integration, accounting, wrappers, smoke gates</p>
+<p>5 Regression and smoke-test plan</p><p>6 Risks and constraints</p><p>7 Definition of done</p>
+</div>
+</section>
+<h1>1 Purpose and operating principle</h1>
+<h2>1.1 Purpose</h2>
+<p>This implementation plan is the companion to the THOG2 Chebyshev Sheet Requirements Specification v0.25. Its job is not to restate the architecture. Its job is to turn that architecture into a low-risk sequence of code changes that preserves every currently working non-dense geometry while adding the new semantic sheet geometries.</p>
+<p>The plan assumes the existing dense path remains a control path, not part of the compact geometry system. The compact system must remain coherent: depth, generic sheet-column, generic sheet-row, MLP block, head-aware block, full block, and semantic sheets must all resolve through one component catalogue.</p>
+<h2>1.2 Implementation principle</h2>
+<p>The implementation shall be staged so that each stage has a small surface area, a clear regression gate, and a visible reason to exist. The most important sequencing decision is to refactor the resolver and trajectory spine before adding new geometry. Adding semantic sheet cases into the current two-slot resolver would reproduce the problem this work is meant to fix.</p>
+<div class="note"><strong>Blunt rule:</strong> do not add <span class="mono">sheet_mlp</span>, <span class="mono">sheet_qkv</span>, or <span class="mono">sheet_out_*</span> directly into the old <span class="mono">attention_geometry + mlp_geometry</span> split. That would be expedient but structurally wrong.</div>
+<h2>1.3 What this plan deliberately avoids</h2>
+<p>This plan does not chase direct/factorised hot paths first. Correct materialisation and gradient flow come first. Direct execution paths may be added only after materialise-then-linear equivalence is tested. This plan also does not redesign embeddings, positional embeddings, attention kernels, layernorm vectors, optimiser policy, resume semantics, or checkpoint format beyond the identity fields needed for compact geometry.</p>
+<h1>2 Current codebase assessment</h1>
+<p>The codebase is ready for the additions, but only after a small integration pass. The useful thing is that repeated-weight logic is already isolated into trajectory classes. The weak thing is that the resolver is still organised around only two component slots.</p>
+<p class="caption">Table 1. Codebase findings relevant to the implementation plan.</p>
+<table><thead><tr><th>Finding</th><th>Current location</th><th>Implementation consequence</th></tr></thead><tbody>
+<tr><td>Resolver is currently two-slot</td><td>sheet/compact_identity.py</td><td>Current selector resolution maps a preset to attention_geometry + mlp_geometry. That is usable for existing geometries, but too coarse for semantic sheet work because QKV and attention-output need independent choices.</td></tr>
+<tr><td>Model dispatch is preset/slot based</td><td>sheet/model.py</td><td>SheetGPT selects BlockTrajectory, MlpBlockTrajectory, DepthTrajectory, or SheetTrajectory in the constructor. This is the right insertion point for a factory, but not the right long-term place for component logic.</td></tr>
+<tr><td>Public CLI already carries order knobs</td><td>run_thog2_owt.py, sheet/run_config.py</td><td>The CLI and run config already expose P, Q, J, O, X, and Y order knobs. The plan should reuse them, not introduce new user-facing order names.</td></tr>
+<tr><td>Legacy sheet-col materializer exists</td><td>sheet/semantic_materializer.py</td><td>Existing semantic names and packed-QKV adapters can be reused, but new semantic providers should materialize the canonical legacy family names expected by the model.</td></tr>
+<tr><td>Existing trajectories already report families</td><td>sheet/trajectory.py; sheet/depth_trajectory.py; sheet/mlp_block_trajectory.py; sheet/block_trajectory.py</td><td>The provider spine should preserve materialize(), materialize_vector(), named_semantic_parameters(), family_report(), and count methods so old code paths keep working.</td></tr>
+</tbody></table>
+<h2>2.1 Useful existing structure</h2>
+<p>The current trajectory classes already expose the right broad interface: materialisation by family name, vector materialisation, semantic parameter enumeration, and parameter reports. The implementation should preserve that external shape. The model should not need to learn the internal coefficient layout of each geometry.</p>
+<h2>2.2 Main abstraction gap</h2>
+<p>The abstraction gap is the resolver. The new architecture has three independent compact component slots: MLP, QKV, and attention-output. The current resolver has attention and MLP only. The implementation therefore starts by making the resolver more precise, then makes the model consume a trajectory factory rather than choosing trajectory classes directly.</p>
+<h1>3 Target implementation shape</h1>
+<h2>3.1 Public interface</h2>
+<p>The public interface should remain simple. Users should normally select one <span class="mono">--geometry-preset</span>. Existing lower-level <span class="mono">--attention-geometry</span> and <span class="mono">--mlp-geometry</span> options may remain for compatibility, but new semantic sheet work should be driven by named presets rather than by asking users to compose internals manually.</p>
+<p class="req"><strong>3.1.1</strong> Existing presets <span class="mono">legacy_sheet_col</span>, <span class="mono">depth</span>, <span class="mono">mlp_block</span>, <span class="mono">head_aware_block</span>, and <span class="mono">full_block</span> shall remain accepted.</p>
+<p class="req"><strong>3.1.2</strong> <span class="mono">generic_sheet_col</span> shall become the canonical new name for <span class="mono">legacy_sheet_col</span>.</p>
+<p class="req"><strong>3.1.3</strong> New public presets shall not require users to specify separate internal component flags.</p>
+<h2>3.2 Internal resolver contract</h2>
+<p class="caption">Table 2. Required resolved geometry fields.</p>
+<table><thead><tr><th>Field</th><th>Meaning</th><th>Requirement</th></tr></thead><tbody>
+<tr><td>requested_preset</td><td>Raw user input</td><td>Store enough to tell whether the user requested legacy_sheet_col or generic_sheet_col.</td></tr>
+<tr><td>canonical_preset</td><td>Canonical public preset</td><td>Use generic_sheet_col for new names and artifact-preferred naming.</td></tr>
+<tr><td>mlp_component</td><td>MLP provider choice</td><td>One of depth, generic_sheet_col, generic_sheet_row, mlp_block, sheet_mlp.</td></tr>
+<tr><td>qkv_component</td><td>QKV provider choice</td><td>One of depth, generic_sheet_col, generic_sheet_row, head_aware_block_qkv, sheet_qkv.</td></tr>
+<tr><td>attn_out_component</td><td>Attention-output provider choice</td><td>One of depth, generic_sheet_col, generic_sheet_row, head_aware_block_out, sheet_out_dmodel, sheet_out_local.</td></tr>
+<tr><td>basis_family / basis_version</td><td>Basis identity</td><td>Continue to support chebyshev and dct; dense/conventional remains separate.</td></tr>
+<tr><td>consumed_orders</td><td>Order usage map</td><td>Expose P, Q, J, O, X, Y usage by component for reports and debugging.</td></tr>
+</tbody></table>
+<h2>3.3 Trajectory/provider interface</h2>
+<p>The cleanest implementation is a composed trajectory object that presents the same public interface as the existing trajectories while dispatching each repeated matrix family to the provider selected by the resolver. Existing trajectory classes can be wrapped or delegated to first; they do not need to be rewritten up front.</p>
+<p class="caption">Table 3. Provider-facing interface.</p>
+<table><thead><tr><th>Method / attribute</th><th>Purpose</th><th>Notes</th></tr></thead><tbody>
+<tr><td>materialize(name, layer_index)</td><td>Return dense-equivalent tensor for canonical family name.</td><td>Model should keep calling attention_input_weight, attention_output_weight, mlp_expansion_weight, mlp_contraction_weight.</td></tr>
+<tr><td>materialize_vector(name, layer_index)</td><td>Return layernorm/bias vector.</td><td>Do not redesign vector compression in this pass.</td></tr>
+<tr><td>named_semantic_parameters()</td><td>Optimizer grouping and weight decay metadata.</td><td>Must preserve existing grouping semantics.</td></tr>
+<tr><td>family_report()</td><td>Parameter and shape accounting.</td><td>Must include provider, coefficient shape, dense-equivalent shape, orders consumed.</td></tr>
+<tr><td>sheet_parameter_count()</td><td>Persistent compact count.</td><td>Used by model parameter_report().</td></tr>
+<tr><td>dense_equivalent_count()</td><td>Dense-equivalent repeated count.</td><td>Keep comparable to existing reports.</td></tr>
+</tbody></table>
+<h1>4 Optimal staging</h1>
+<p>The plan uses six stages. Fewer stages would hide too many failure modes; more stages would create ceremony. The ordering is deliberate: resolver first, old-path composition second, simplest new geometry third, MLP fourth, attention fifth, public integration last.</p>
+<p class="caption">Table 4. Stage overview and gates.</p>
+<table><thead><tr><th>Stage</th><th>Name</th><th>Main work</th><th>Primary files</th><th>Expected result</th><th>Gate</th></tr></thead><tbody>
+<tr><td>1</td><td>Resolver, names, aliases, identity</td><td>Add canonical generic_sheet_col; preserve legacy_sheet_col alias; introduce ResolvedCompactGeometry with mlp_component/qkv_component/attn_out_component.</td><td>sheet/compact_identity.py; sheet/run_config.py; run_thog2_owt.py</td><td>All existing presets resolve exactly as before except for added canonical fields.</td><td>Resolver unit tests; artifact identity tests; old presets still accepted.</td></tr>
+<tr><td>2</td><td>Composed trajectory spine, old geometries only</td><td>Introduce provider/factory layer that can compose family providers while routing all existing presets through current trajectory classes.</td><td>new sheet/compact_trajectory.py; sheet/model.py; existing trajectory classes</td><td>No new public geometry yet. Existing depth, generic_sheet_col, mlp_block, head_aware_block, full_block produce equivalent outputs.</td><td>Materialization equivalence tests for old presets; one tiny forward/backward per old preset.</td></tr>
+<tr><td>3</td><td>generic_sheet_row</td><td>Implement the transposed generic sheet ablation: coeff[in, P, q_out] for repeated matrix families. Keep vector families on the existing sheet-column/depth-safe path.</td><td>new sheet/generic_row_trajectory.py or provider module; factory; accounting</td><td>generic_sheet_row public preset works as a full-model geometry.</td><td>Shape/direct-value tests; gradient-flow tests; parameter-report tests.</td></tr>
+<tr><td>4</td><td>sheet_mlp</td><td>Implement semantic MLP sheet providers for W_up and W_down with hidden_channel whole and d_model compressed.</td><td>new semantic sheet provider; factory; model direct-MLP guard</td><td>sheet_mlp preset works with generic_sheet_col attention fallback.</td><td>Up/down materialization tests; materialize-vs-direct tests where direct exists; small train smoke.</td></tr>
+<tr><td>5</td><td>Semantic attention sheets</td><td>Implement sheet_qkv plus sheet_out_dmodel and sheet_out_local. QKV role, head, and local channel remain whole.</td><td>semantic attention provider; packed-QKV materializer; attention-output materializers</td><td>sheet_qkv, sheet_attn_dmodel, sheet_attn_local work.</td><td>Packed-QKV equivalence tests; no-head-smearing shape tests; forward/backward for both output variants.</td></tr>
+<tr><td>6</td><td>Preset integration, accounting, wrappers, smoke gates</td><td>Expose composed presets, update help text/wrappers, complete identity/accounting/checkpoint fields, run the serious ablation smoke matrix.</td><td>compact_identity.py; run_config.py; wrappers; tests; docs</td><td>sheet_full_dmodel and sheet_full_local plus diagnostic combinations are usable.</td><td>Full unittest suite; wrapper parsing tests; smoke matrix; final parameter report audit.</td></tr>
+</tbody></table>
+<h2>4.1 Stage 1 - resolver, names, aliases, identity</h2><div class="stage">
+<p class="req"><strong>4.1.1</strong> Add canonical constants for generic_sheet_col while keeping legacy_sheet_col as an accepted input alias.</p>
+<p class="req"><strong>4.1.2</strong> Introduce ResolvedCompactGeometry or equivalent. It must include mlp_component, qkv_component, and attn_out_component.</p>
+<p class="req"><strong>4.1.3</strong> Keep the old ResolvedCompactSelectors available temporarily or provide a compatibility shim so existing callers do not break in the same commit.</p>
+<p class="req"><strong>4.1.4</strong> Update compact_identity_metadata, artifact identity fields, and run_config canonical dictionaries to store requested and canonical names.</p>
+<p class="req"><strong>4.1.5</strong> No trajectory code should change in this stage.</p></div>
+<h2>4.2 Stage 2 - composed trajectory spine with old geometries only</h2><div class="stage">
+<p class="req"><strong>4.2.1</strong> Create a trajectory factory, for example build_compact_trajectory(config, resolved_geometry, ...).</p>
+<p class="req"><strong>4.2.2</strong> Create a ComposedTrajectory facade or equivalent provider map that supports materialize(), materialize_vector(), named_semantic_parameters(), family_report(), and count methods.</p>
+<p class="req"><strong>4.2.3</strong> Initially route existing presets to the existing concrete trajectory classes with no new geometry.</p>
+<p class="req"><strong>4.2.4</strong> Replace SheetGPT constructor branching with the factory. This is the main integration cut.</p>
+<p class="req"><strong>4.2.5</strong> Gate this stage by proving old presets are equivalent before and after the factory cutover.</p></div>
+<h2>4.3 Stage 3 - generic_sheet_row</h2><div class="stage">
+<p class="req"><strong>4.3.1</strong> Implement generic_sheet_row as the transposed generic ablation for repeated matrix families: coeff[in, P, q_out].</p>
+<p class="req"><strong>4.3.2</strong> Use an output-row basis with width equal to output_rows. Do not compress vectors through this path unless explicitly specified later.</p>
+<p class="req"><strong>4.3.3</strong> Expose generic_sheet_row as a public preset only after materialisation, direct_value, parameter count, and gradient-flow tests pass.</p>
+<p class="req"><strong>4.3.4</strong> This stage exercises the new provider spine with the least semantic complexity.</p></div>
+<h2>4.4 Stage 4 - sheet_mlp</h2><div class="stage">
+<p class="req"><strong>4.4.1</strong> Implement sheet_mlp up and down as semantic sheets with hidden_channel whole and d_model compressed.</p>
+<p class="req"><strong>4.4.2</strong> For W_up use coeff[hidden, P, X]. For W_down use coeff[hidden, P, X] over d_model_output.</p>
+<p class="req"><strong>4.4.3</strong> Do not reuse the current direct_factorised_mlp path unless the provider explicitly advertises support. Start with materialize-then-linear.</p>
+<p class="req"><strong>4.4.4</strong> Expose sheet_mlp with generic_sheet_col attention fallback.</p></div>
+<h2>4.5 Stage 5 - semantic attention sheets</h2><div class="stage">
+<p class="req"><strong>4.5.1</strong> Implement sheet_qkv so that qkv_role, head, and local_head_channel remain whole; only depth and d_model_input are compressed.</p>
+<p class="req"><strong>4.5.2</strong> The provider must materialize the packed legacy attention_input_weight expected by the current attention hot path.</p>
+<p class="req"><strong>4.5.3</strong> Implement sheet_out_dmodel and sheet_out_local as separate providers or provider modes. Do not collapse them prematurely.</p>
+<p class="req"><strong>4.5.4</strong> Expose sheet_qkv, sheet_attn_dmodel, and sheet_attn_local once role/head/local mapping tests pass.</p></div>
+<h2>4.6 Stage 6 - preset integration, accounting, wrappers, smoke gates</h2><div class="stage">
+<p class="req"><strong>4.6.1</strong> Expose sheet_full_dmodel and sheet_full_local, plus diagnostic mixed presets only after component-level tests pass.</p>
+<p class="req"><strong>4.6.2</strong> Update wrapper help text and preset validation lists. Do not change existing run strings unnecessarily.</p>
+<p class="req"><strong>4.6.3</strong> Extend parameter_report and family_report to include component name, coefficient shape, dense-equivalent shape, whole axes, compressed axes, and consumed orders.</p>
+<p class="req"><strong>4.6.4</strong> Run the full unit suite and a compact smoke matrix. Only then start wall-clock or serious OWT comparisons.</p></div>
+<h1>5 Regression and smoke-test plan</h1>
+<h2>5.1 Unit-test families</h2>
+<p>Regression tests should be added with descriptive names. The tests should make failures readable in the unittest output, not merely assert shapes in anonymous loops.</p>
+<p class="caption">Table 5. Unit-test families.</p>
+<table><thead><tr><th>Test family</th><th>Representative descriptive test names</th></tr></thead><tbody>
+<tr><td>Resolver and aliases</td><td>test_generic_sheet_col_is_canonical_but_legacy_sheet_col_remains_accepted; test_each_public_preset_resolves_to_expected_component_slots</td></tr>
+<tr><td>Old-path preservation</td><td>test_depth_materialization_is_unchanged_after_composed_trajectory_cutover; test_full_block_family_reports_are_unchanged_after_factory_cutover</td></tr>
+<tr><td>generic_sheet_row</td><td>test_generic_sheet_row_coefficients_use_input_rows_depth_and_output_basis; test_generic_sheet_row_direct_value_matches_materialized_weight_entry</td></tr>
+<tr><td>sheet_mlp</td><td>test_sheet_mlp_keeps_hidden_channel_whole_for_expansion_and_contraction; test_sheet_mlp_forward_backward_sends_gradients_to_both_mlp_coefficients</td></tr>
+<tr><td>semantic attention</td><td>test_sheet_qkv_never_shares_basis_across_role_or_head; test_sheet_out_dmodel_and_sheet_out_local_have_distinct_coefficient_shapes</td></tr>
+<tr><td>Accounting/checkpoints</td><td>test_parameter_report_includes_component_and_shape_for_every_family; test_checkpoint_identity_stores_requested_and_canonical_preset</td></tr>
+</tbody></table>
+<h2>5.2 Smoke-run matrix</h2>
+<p>The smoke matrix should use tiny dimensions and one or two updates. It is not a quality benchmark; it is a wiring and gradient-flow gate.</p>
+<pre><code>python -m unittest discover tests
+
+for preset in generic_sheet_col depth mlp_block head_aware_block full_block generic_sheet_row sheet_mlp sheet_qkv sheet_attn_dmodel sheet_attn_local sheet_full_dmodel sheet_full_local; do
+  python -m run_thog2_owt \
+    --model-type sheet --run-mode fresh --host-label smoke \
+    --run-name IMPL_SMOKE_${preset} --dataset openwebtext --data-dir data/openwebtext \
+    --max-iters 2 --eval-interval 1 --eval-iters 1 \
+    --batch-size 2 --gradient-accumulation-steps 1 --block-size 16 \
+    --n-layer 2 --n-head 2 --n-embd 64 \
+    --o-depth 2 --o-attn-d-model 8 --o-attn-qkv-per-channel 2 \
+    --o-attn-out-per-channel 2 --o-mlp-d-model 8 --o-mlp-hidden 16 \
+    --geometry-preset ${preset} --basis-family chebyshev --wandb-mode disabled \
+    --device cuda --dtype bfloat16
+done</code></pre>
+<h2>5.3 Benchmark gate</h2>
+<p>Only after the smoke matrix passes should serious OWT comparisons run. The first serious ablation set should be generic_sheet_col, generic_sheet_row, depth, sheet_mlp, sheet_qkv, sheet_attn_dmodel, sheet_attn_local, sheet_full_dmodel, and sheet_full_local. Equal-wall comparison remains the priority metric, with validation loss as the main result and throughput/memory as diagnostics.</p>
+<h1>6 Risks and constraints</h1>
+<p class="caption">Table 6. Main risks and mitigations.</p>
+<table><thead><tr><th>Risk</th><th>Why it matters</th><th>Mitigation</th></tr></thead><tbody>
+<tr><td>Resolver refactor breaks old runs</td><td>Existing long-run scripts and checkpoints depend on current names.</td><td>Stage 1 must be behavior-preserving; legacy aliases load indefinitely; old preset tests are mandatory.</td></tr>
+<tr><td>Composed trajectory becomes an over-engineered rewrite</td><td>A rewrite would burn time and obscure regressions.</td><td>Stage 2 only wraps existing trajectories first. No new geometry until old paths pass equivalence.</td></tr>
+<tr><td>Packed QKV semantics are mishandled</td><td>The model hot path expects attention_input_weight as [3D,D].</td><td>Semantic QKV provider returns the packed legacy family as its public materialization result; tests check role/head/local mapping.</td></tr>
+<tr><td>Direct/factorised MLP path silently uses wrong provider</td><td>Existing direct MLP path assumes block factorisation shapes.</td><td>Guard direct_factorised_mlp by provider capability; semantic MLP starts materialize-then-linear unless direct equivalence is proven.</td></tr>
+<tr><td>Reports become untrustworthy</td><td>These experiments are parameter/memory driven.</td><td>Every provider must emit coefficient shape, dense-equivalent shape, persistent count, consumed orders, and component name.</td></tr>
+</tbody></table>
+<p class="req"><strong>6.1.1</strong> All nanoGPT/THOG code edits shall preserve existing working code paths unless a stage explicitly replaces a path after tests pass.</p>
+<p class="req"><strong>6.1.2</strong> New code in nanoGPT-derived files shall continue to use THOG marking comments according to the project convention.</p>
+<p class="req"><strong>6.1.3</strong> Do not delete existing nanoGPT lines as part of this work. Comment out replaced lines and mark the new block.</p>
+<p class="req"><strong>6.1.4</strong> No semantic sheet preset shall introduce basis sharing across qkv_role or head.</p>
+<p class="req"><strong>6.1.5</strong> No semantic MLP sheet preset shall introduce basis sharing across hidden_channel.</p>
+<h1>7 Definition of done</h1>
+<p>The implementation is done when all six stages have landed, all existing compact presets still run, all new serious presets run, parameter reports are trustworthy, checkpoint identity is unambiguous, and the smoke matrix passes without non-finite recovery or shape exceptions.</p>
+<p>The implementation is not done merely because the model starts. It must produce correct materialised weights, route gradients to the right coefficients, preserve aliases, expose shape/accounting metadata, and support a clean equal-wall benchmark grid.</p>
+</body></html>

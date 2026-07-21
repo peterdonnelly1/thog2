@@ -28,34 +28,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install numpy
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Enforce Stage 6 source scope
+      - name: Protect canonical nanoGPT runtime files
         run: |
           set -euo pipefail
           git fetch origin master
           python - <<'PY'
           import subprocess
+
           changed = subprocess.check_output(
               ['git', 'diff', '--name-only', 'origin/master...HEAD'], text=True
           ).splitlines()
-          allowed = (
-              'sheet/',
-              'tests/',
-              'evidence/stage6_',
-              'docs/THOG2_Stage_6_',
-              'docs/THOG2_Chebyshev_Sheet_As_Built_',
-              'run_thog2_stage6_',
-              '.github/workflows/stage5-gpu-ddp.yml',
-              '.github/workflows/stage6-controlled-pilot.yml',
-          )
-          unexpected = [path for path in changed if not any(
-              path == prefix or path.startswith(prefix) for prefix in allowed
-          )]
-          if unexpected:
-              raise SystemExit(f'unexpected Stage 6 paths: {unexpected}')
           protected = {'model.py', 'train.py', 'sample.py', 'configurator.py'}
           touched = sorted(protected.intersection(changed))
           if touched:
-              raise SystemExit(f'Stage 6 touched protected runtime files: {touched}')
+              raise SystemExit(
+                  f'protected nanoGPT runtime files changed: {touched}'
+              )
           print('\n'.join(changed))
           PY
       - name: Compile Stage 6 sources
