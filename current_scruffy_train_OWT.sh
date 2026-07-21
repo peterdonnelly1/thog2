@@ -97,7 +97,7 @@ Schedule/logging:
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
 Compact geometry:
-  -B BASIS_FAMILY=${BASIS_FAMILY}                   chebyshev | dct
+  -B BASIS_FAMILY=${BASIS_FAMILY}                   registered fixed basis family
   -v BASIS_VERSION=${BASIS_VERSION}
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
   -m MLP_GEOMETRY=${MLP_GEOMETRY:-preset default}
@@ -213,7 +213,9 @@ parse_lr_code_values "$LEARNING_RATE_CODES"                                     
 validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                          # <<< THOG validate min LR
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
-case "$BASIS_FAMILY" in chebyshev|dct) ;; *) echo "BASIS_FAMILY must be chebyshev or dct." >&2; exit 2 ;; esac
+# vvv THOG
+[[ "$BASIS_FAMILY" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "BASIS_FAMILY must be a lowercase registry name or alias." >&2; exit 2; }
+# ^^^ THOG
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
 # vvv THOG one instrumentation selector determines both backend and W&B mode; contradictory -I/-M/-W combinations no longer exist
 case "$INSTRUMENTATION" in
@@ -253,7 +255,9 @@ fi
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
-BASIS_TAG="CHEBY"; [[ "$BASIS_FAMILY" == dct ]] && BASIS_TAG="DCT"
+# vvv THOG
+BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
+# ^^^ THOG
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 
 export THOG2_INSTRUMENTATION="$INSTRUMENTATION_BACKEND"

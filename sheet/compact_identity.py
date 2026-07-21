@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .basis import BASIS_VERSION
-from .basis_kernel import BASIS_FAMILY_DCT as KERNEL_BASIS_FAMILY_DCT, DCT_BASIS_VERSION, basis_version_for_family
+from .bases import BASIS_FAMILIES as REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, basis_version_for_family, normalize_basis_version, normalize_registered_basis_family
 
 
 GEOMETRY_PRESET_LEGACY_SHEET_COL = "legacy_sheet_col"
@@ -25,8 +25,10 @@ MLP_GEOMETRY_DEPTH = "depth"
 MLP_GEOMETRY_MLP_BLOCK = "mlp_block"
 MLP_GEOMETRY_CONVENTIONAL = "conventional"
 
-BASIS_FAMILY_CHEBYSHEV = "chebyshev"
-BASIS_FAMILY_DCT = KERNEL_BASIS_FAMILY_DCT
+# vvv THOG use the registry-owned basis-family constants imported above
+# BASIS_FAMILY_CHEBYSHEV = "chebyshev"
+# BASIS_FAMILY_DCT = KERNEL_BASIS_FAMILY_DCT
+# ^^^ THOG
 BASIS_FAMILY_CONVENTIONAL = "conventional"
 
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
@@ -57,7 +59,7 @@ MLP_GEOMETRIES = (
     MLP_GEOMETRY_MLP_BLOCK,
     MLP_GEOMETRY_CONVENTIONAL,
 )
-BASIS_FAMILIES = (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_CONVENTIONAL)
+BASIS_FAMILIES = (*REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CONVENTIONAL)
 
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
     GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
@@ -131,6 +133,18 @@ def _require_member(name: str, value: Optional[str], allowed: Tuple[str, ...]) -
     return normalized
 
 
+# vvv THOG basis-family canonicalisation is owned by the registry rather than duplicated selector allow-lists
+def _require_basis_family(value: Optional[str]) -> Optional[str]:
+    normalized = _canonical_optional_string("basis_family", value)
+    if normalized is None or normalized == BASIS_FAMILY_CONVENTIONAL:
+        return normalized
+    try:
+        return normalize_registered_basis_family(normalized)
+    except ValueError as error:
+        raise ValueError(f"basis_family must be one of {BASIS_FAMILIES} or None; got {value!r}") from error
+# ^^^ THOG
+
+
 def resolve_compact_selectors(
     *,
     geometry_preset: Optional[str] = None,
@@ -141,7 +155,7 @@ def resolve_compact_selectors(
     requested_preset = _require_member("geometry_preset", geometry_preset, GEOMETRY_PRESETS)
     requested_attention = _require_member("attention_geometry", attention_geometry, ATTENTION_GEOMETRIES)
     requested_mlp = _require_member("mlp_geometry", mlp_geometry, MLP_GEOMETRIES)
-    requested_basis = _require_member("basis_family", basis_family, BASIS_FAMILIES)
+    requested_basis = _require_basis_family(basis_family)
     preset = requested_preset or GEOMETRY_PRESET_LEGACY_SHEET_COL
     default_attention, default_mlp = _PRESET_DEFAULTS[preset]
     resolved_attention = requested_attention or default_attention
@@ -189,19 +203,11 @@ def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
 def normalize_compact_basis_version(selectors: ResolvedCompactSelectors, basis_version: str) -> str:
     if selectors.basis_family == BASIS_FAMILY_CONVENTIONAL:
         return basis_version
-    expected_version = basis_version_for_family(selectors.basis_family)
-    if selectors.basis_family == BASIS_FAMILY_DCT and basis_version == BASIS_VERSION:
-        return DCT_BASIS_VERSION
-    if basis_version != expected_version:
-        raise ValueError(
-            f"basis_version mismatch for basis_family={selectors.basis_family!r}: "
-            f"expected {expected_version!r}, got {basis_version!r}"
-        )
-    return basis_version
+    return normalize_basis_version(selectors.basis_family, basis_version, legacy_default_version=BASIS_VERSION)
 
 
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
-    supported_basis = selectors.basis_family in (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT)
+    supported_basis = selectors.basis_family in REGISTERED_BASIS_FAMILIES
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
     depth = selectors.geometry_preset == GEOMETRY_PRESET_DEPTH and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis
     mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
@@ -211,7 +217,7 @@ def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
         return
     raise ValueError(
         "supported compact presets are legacy_sheet_col, depth, mlp_block, head_aware_block, or full_block "
-        "with chebyshev or dct basis; "
+        f"with a registered basis family {REGISTERED_BASIS_FAMILIES}; "
         f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, "
         f"mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
     )

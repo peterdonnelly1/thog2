@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
-from .compact_identity import BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_DEPTH, compact_identity_metadata
+from .bases import basis_artifact_tag_for_family, basis_version_for_family
+from .compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_CONVENTIONAL, GEOMETRY_PRESET_DEPTH, compact_identity_metadata
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -19,7 +20,8 @@ from .training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 
 PUBLIC_MODEL_TYPES = ("dense", "sheet")
 INTERNAL_MODEL_TYPES = {"dense": "dense", "sheet": "thog2_sheet"}
-BASIS_LABELS = {"chebyshev": "CHEBY", "dct": "DCT"}
+# vvv THOG basis artifact tags now come from the basis-family registry
+# ^^^ THOG
 DEFAULT_O_ATTN_D_MODEL = 64
 DEFAULT_O_ATTN_QKV_PER_CHANNEL = 6
 DEFAULT_O_ATTN_OUT_PER_CHANNEL = 6
@@ -127,7 +129,9 @@ class OwtRunConfig:
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
         if self.basis_version == "auto":
-            object.__setattr__(self, "basis_version", BASIS_VERSION)
+            requested_family = self.basis_family or BASIS_FAMILY_CHEBYSHEV
+            resolved_version = BASIS_VERSION if requested_family == BASIS_FAMILY_CONVENTIONAL else basis_version_for_family(requested_family)
+            object.__setattr__(self, "basis_version", resolved_version)
 
         positive = (
             "max_iters",
@@ -241,7 +245,7 @@ class OwtRunConfig:
         if self.model_type != "sheet":
             return None
         identity = self.compact_identity()
-        basis_label = BASIS_LABELS.get(str(identity["basis_family"]), str(identity["basis_family"]).upper())
+        basis_label = basis_artifact_tag_for_family(str(identity["basis_family"]))
         preset_label = str(identity["geometry_preset"]).upper()
         return f"{basis_label}_{preset_label}"
 

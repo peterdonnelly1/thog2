@@ -15,8 +15,9 @@ import numpy as np
 import torch
 
 from sheet.basis import BASIS_VERSION
+from sheet.bases import BASIS_FAMILIES
 from sheet.checkpoints import load_payload
-from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
+from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
     DEFAULT_EXPERIMENT_PREFIX,
@@ -226,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
-    parser.add_argument("--basis-family", choices=(BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT), default=BASIS_FAMILY_CHEBYSHEV)
+    parser.add_argument("--basis-family", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
     parser.add_argument("--basis-version", default="auto")
     parser.add_argument("--attention-backend", choices=("auto", "flash2", "sdpa", "math"), default="auto")
     parser.add_argument("--experiment-prefix", default=DEFAULT_EXPERIMENT_PREFIX)
