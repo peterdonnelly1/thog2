@@ -32,7 +32,7 @@ For an interval with `left_count`, `right_count`, and `total_count = left_count 
 
 ## 3. Required numerical tests
 
-- Exact expected matrix for sample counts 1, 2, and 4.
+- Closed-form expected matrices for sample counts 1, 2, and 4, with exact structural zeros and rational entries and at most one float64 ULP for irrational entries.
 - Full-basis orthonormality for odd and even sample counts.
 - Full-basis orthonormality for representative THOG axis lengths, including 144.
 - Deterministic repeated construction.
