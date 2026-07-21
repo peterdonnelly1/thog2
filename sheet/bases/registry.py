@@ -13,6 +13,7 @@ from .protocol import BasisDefinition, BasisKernel, DeviceLike
 BUILTIN_BASIS_MODULES = (
     "chebyshev",
     "dct",
+    "haar",
 )
 
 
