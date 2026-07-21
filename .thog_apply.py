@@ -915,11 +915,9 @@ ATTENTION_GEOMETRY=""
     )
     replace_once(
         wrapper_path,
-        """                                                     Haar aliases: balanced_haar | haar_balanced
-""",
-        """                                                     Haar aliases: balanced_haar | haar_balanced
-                                                     Lapped cosine aliases: lapped | local_cosine | lapped_local_cosine
-""",
+        """Haar aliases: balanced_haar | haar_balanced""",
+        """Haar aliases: balanced_haar | haar_balanced
+                                                     Lapped cosine aliases: lapped | local_cosine | lapped_local_cosine""",
     )
     replace_once(
         wrapper_path,
