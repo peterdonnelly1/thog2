@@ -19,6 +19,29 @@ NEW_HELP = """Compact geometry:
                                                     haar_balanced_binary_orthonormal_v1
 """
 
+OLD_FAKE_PYTHON_BLOCK = """if len(sys.argv) >= 2 and sys.argv[1] == '-c':
+    payload = json.load(sys.stdin)
+    code = sys.argv[2]
+"""
+
+NEW_FAKE_PYTHON_BLOCK = """if len(sys.argv) >= 2 and sys.argv[1] == '-c':
+    code = sys.argv[2]
+    if 'basis_artifact_tag_for_family' in code:
+        family = sys.argv[3]
+        aliases = {
+            'cheby': 'chebyshev',
+            'chebyshev_first_kind_qr': 'chebyshev',
+            'dct_ii': 'dct',
+            'dct_ii_orthonormal': 'dct',
+            'balanced_haar': 'haar',
+            'haar_balanced': 'haar',
+        }
+        family = aliases.get(family, family)
+        print({'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family])
+        raise SystemExit(0)
+    payload = json.load(sys.stdin)
+"""
+
 TEST_CONTENT = '''# vvv THOG
 from __future__ import annotations
 
@@ -94,11 +117,30 @@ def main() -> None:
     if missing:
         raise RuntimeError(f"required wrappers not updated: {sorted(missing)}")
 
+    fake_python_replacements = 0
+    for path in sorted(Path("tests").glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        count = text.count(OLD_FAKE_PYTHON_BLOCK)
+        if count == 0:
+            continue
+        path.write_text(
+            text.replace(OLD_FAKE_PYTHON_BLOCK, NEW_FAKE_PYTHON_BLOCK),
+            encoding="utf-8",
+        )
+        fake_python_replacements += count
+
+    if fake_python_replacements != 2:
+        raise RuntimeError(
+            "expected to update exactly two wrapper fake-Python blocks; "
+            f"updated {fake_python_replacements}"
+        )
+
     Path("tests/test_wrapper_basis_help.py").write_text(TEST_CONTENT, encoding="utf-8")
 
     print("Updated wrapper basis help:")
     for path in wrapper_paths:
         print(f"  {path}")
+    print("Updated wrapper fake-Python test harnesses: 2")
     print("  tests/test_wrapper_basis_help.py")
 
 
