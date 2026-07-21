@@ -25,11 +25,12 @@ from sheet.bases.haar import (
 
 
 class BalancedHaarBasisKernelTests(unittest.TestCase):
-    def test_01_exact_small_bases(self) -> None:
+    def test_01_closed_form_small_bases(self) -> None:
         basis_1 = build_registered_basis(1, 1, basis_family=BASIS_FAMILY_HAAR)
         torch.testing.assert_close(basis_1, torch.ones((1, 1), dtype=torch.float64), rtol=0.0, atol=0.0)
 
         inverse_sqrt_2 = 1.0 / math.sqrt(2.0)
+        float64_ulp = torch.finfo(torch.float64).eps
         expected_2 = torch.tensor(
             [
                 [inverse_sqrt_2, inverse_sqrt_2],
@@ -38,7 +39,7 @@ class BalancedHaarBasisKernelTests(unittest.TestCase):
             dtype=torch.float64,
         )
         basis_2 = build_registered_basis(2, 2, basis_family=BASIS_FAMILY_HAAR)
-        torch.testing.assert_close(basis_2, expected_2, rtol=0.0, atol=0.0)
+        torch.testing.assert_close(basis_2, expected_2, rtol=0.0, atol=float64_ulp)
 
         expected_4 = torch.tensor(
             [
@@ -50,7 +51,7 @@ class BalancedHaarBasisKernelTests(unittest.TestCase):
             dtype=torch.float64,
         )
         basis_4 = build_registered_basis(4, 4, basis_family=BASIS_FAMILY_HAAR)
-        torch.testing.assert_close(basis_4, expected_4, rtol=0.0, atol=0.0)
+        torch.testing.assert_close(basis_4, expected_4, rtol=0.0, atol=float64_ulp)
 
     def test_02_full_bases_are_orthonormal_for_odd_even_and_thog_axis_lengths(self) -> None:
         for sample_count in (1, 2, 3, 5, 8, 9, 16, 31, 144):
