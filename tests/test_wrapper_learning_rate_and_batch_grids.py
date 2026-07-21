@@ -56,7 +56,11 @@ if len(sys.argv) >= 2 and sys.argv[1] == '-c':
             'haar_balanced': 'haar',
         }
         family = aliases.get(family, family)
-        print({'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family])
+        tag = {'chebyshev': 'CHEBY', 'dct': 'DCT', 'haar': 'HAAR'}[family]
+        if 'normalize_registered_basis_family' in code:
+            print(f'{family}\t{tag}')
+        else:
+            print(tag)
         raise SystemExit(0)
     payload = json.load(sys.stdin)
     if '[\"artifact_name\"]' in code:

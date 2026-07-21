@@ -106,7 +106,7 @@ def test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_dep
         assert "legacy_sheet_col|depth|head_aware_block|mlp_block|full_block) PRESET_VALUES+=(\"$value\"); HAS_COMPACT_PRESET=true" in text
         assert "if [[ \"$geometry_preset_value\" == dense ]]; then" in text
         # assert "run_preset_o_depth \"$geometry_preset_value\" \"${O_DEPTH_VALUES[0]}\"" in text
-        assert "run_preset_o_depth_batch_lr \"$geometry_preset_value\" \"${O_DEPTH_VALUES[0]}\" \"$batch_size_value\" \"$learning_rate_code\"" in text
+        assert "run_grid_point \"$geometry_preset_value\" \"${O_DEPTH_VALUES[0]}\" \"$batch_size_value\" \"$learning_rate_code\" \"${BASIS_FAMILY_VALUES[0]}\" \"${BASIS_TAG_VALUES[0]}\"" in text
         assert "for o_depth_value in \"${O_DEPTH_VALUES[@]}\"; do" in text
         assert "for batch_size_value in \"${BATCH_SIZE_VALUES[@]}\"; do" in text
         assert "for learning_rate_code in \"${LEARNING_RATE_CODE_VALUES[@]}\"; do" in text

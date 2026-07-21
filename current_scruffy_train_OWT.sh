@@ -97,7 +97,7 @@ Schedule/logging:
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
 Compact geometry:
-  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar
+  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar; single, comma, or quoted space list
                                                     Chebyshev aliases: cheby | chebyshev_first_kind_qr
                                                     DCT aliases: dct_ii | dct_ii_orthonormal
                                                     Haar aliases: balanced_haar | haar_balanced
@@ -165,6 +165,8 @@ validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; exp
 
 O_DEPTH_VALUES=()
 PRESET_VALUES=()
+BASIS_FAMILY_VALUES=()                                                                                                                                    # <<< THOG basis-family grid axis
+BASIS_TAG_VALUES=()                                                                                                                                       # <<< THOG matching artifact tags for basis-family grid
 BATCH_SIZE_VALUES=()                                                                                                                                        # <<< THOG batch grid axis
 LEARNING_RATE_CODE_VALUES=()                                                                                                                                # <<< THOG LR grid axis
 HAS_DENSE_PRESET=false
@@ -212,15 +214,27 @@ parse_geometry_preset_values() {
   done
   (( ${#PRESET_VALUES[@]} > 0 )) || { echo "Invalid PRESET: empty value list." >&2; exit 2; }
 }
+parse_basis_family_values() {
+  local normalized="${1//,/ }" value
+  for value in $normalized; do
+    [[ "$value" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "Invalid BASIS_FAMILY value: $value; expected a lowercase registry name or alias." >&2; exit 2; }
+    BASIS_FAMILY_VALUES+=("$value")
+  done
+  (( ${#BASIS_FAMILY_VALUES[@]} > 0 )) || { echo "Invalid BASIS_FAMILY: empty value list." >&2; exit 2; }
+}
 parse_o_depth_values "$O_DEPTH"
 parse_geometry_preset_values "$GEOMETRY_PRESET"
+parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid
 parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE"                                                                                                  # <<< THOG parse batch grid
 parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                              # <<< THOG parse LR grid
 validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                          # <<< THOG validate min LR
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 # vvv THOG
-[[ "$BASIS_FAMILY" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "BASIS_FAMILY must be a lowercase registry name or alias." >&2; exit 2; }
+if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then
+  echo "BASIS_VERSION must be auto when BASIS_FAMILY contains multiple values." >&2
+  exit 2
+fi
 # ^^^ THOG
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
 # vvv THOG one instrumentation selector determines both backend and W&B mode; contradictory -I/-M/-W combinations no longer exist
@@ -262,7 +276,15 @@ fi
 
 if [[ -n "${THOG2_PYTHON:-}" ]]; then PYTHON_BIN="$THOG2_PYTHON"; elif [[ -x .venv/bin/python ]]; then PYTHON_BIN=".venv/bin/python"; else PYTHON_BIN="python"; fi
 # vvv THOG
-BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
+# BASIS_TAG="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family; print(basis_artifact_tag_for_family(sys.argv[1]))' "$BASIS_FAMILY")"
+BASIS_FAMILY_CANONICAL_VALUES=()
+for requested_basis_family in "${BASIS_FAMILY_VALUES[@]}"; do
+  basis_resolution="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family, normalize_registered_basis_family; family = normalize_registered_basis_family(sys.argv[1]); print(f"{family}\t{basis_artifact_tag_for_family(family)}")' "$requested_basis_family")"
+  IFS=$'\t' read -r basis_family_value basis_tag <<< "$basis_resolution"
+  BASIS_FAMILY_CANONICAL_VALUES+=("$basis_family_value")
+  BASIS_TAG_VALUES+=("$basis_tag")
+done
+BASIS_FAMILY_VALUES=("${BASIS_FAMILY_CANONICAL_VALUES[@]}")
 # ^^^ THOG
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 
@@ -279,11 +301,13 @@ export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                     
 export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-run_preset_o_depth_batch_lr() {
+run_grid_point() {
   local geometry_preset_value="$1"
   local o_depth_value="$2"
   local batch_size_value="$3"                                                                                                                             # <<< THOG batch grid coordinate
   local learning_rate_code="$4"                                                                                                                           # <<< THOG LR grid coordinate
+  local basis_family_value="$5"                                                                                                                           # <<< THOG canonical basis-family grid coordinate
+  local basis_tag="$6"                                                                                                                                    # <<< THOG matching basis artifact tag
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
@@ -303,8 +327,8 @@ run_preset_o_depth_batch_lr() {
   else
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
-    run_tag="${BASIS_TAG}_${preset_tag}"
-    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$BASIS_FAMILY" --basis-version "$BASIS_VERSION")
+    run_tag="${basis_tag}_${preset_tag}"
+    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION")
     [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
     [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
@@ -339,7 +363,7 @@ scruffy OWT train
   start time:         $start_time_friendly
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
-  model/preset/basis: $display_model_type / $geometry_preset_value / $BASIS_FAMILY
+  model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
   fast discard:       $FAST_DISCARD
@@ -374,18 +398,28 @@ EOF_DONE
   return "$run_status"
 }
 
-if (( ${#PRESET_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then
-  echo "scruffy OWT grid: p=${PRESET_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"
+if (( ${#PRESET_VALUES[@]} > 1 || ${#BASIS_FAMILY_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then
+  echo "scruffy OWT grid: p=${PRESET_VALUES[*]} B=${BASIS_FAMILY_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"
 fi
 for geometry_preset_value in "${PRESET_VALUES[@]}"; do
-  for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
-    for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
-      if [[ "$geometry_preset_value" == dense ]]; then
-        run_preset_o_depth_batch_lr "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code"
-      else
-        for o_depth_value in "${O_DEPTH_VALUES[@]}"; do run_preset_o_depth_batch_lr "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code"; done
-      fi
+  if [[ "$geometry_preset_value" == dense ]]; then
+    for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
+      for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
+        run_grid_point "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code" "${BASIS_FAMILY_VALUES[0]}" "${BASIS_TAG_VALUES[0]}"
+      done
     done
-  done
+  else
+    for basis_index in "${!BASIS_FAMILY_VALUES[@]}"; do
+      basis_family_value="${BASIS_FAMILY_VALUES[$basis_index]}"
+      basis_tag="${BASIS_TAG_VALUES[$basis_index]}"
+      for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
+        for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
+          for o_depth_value in "${O_DEPTH_VALUES[@]}"; do
+            run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag"
+          done
+        done
+      done
+    done
+  fi
 done
 # ^^^ THOG
