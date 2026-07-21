@@ -24,9 +24,20 @@ jobs:
 
       - name: Apply pending THOG enhancement
         run: |
+          : > thog-apply.log
           if [[ -f .thog_apply.py ]]; then
-            python .thog_apply.py
+            set -o pipefail
+            python .thog_apply.py 2>&1 | tee thog-apply.log
           fi
+
+      - name: Upload THOG apply output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: thog-apply-log
+          path: thog-apply.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Archive tested source snapshot
         run: tar --exclude=.git -czf /tmp/picton-source.tgz .
