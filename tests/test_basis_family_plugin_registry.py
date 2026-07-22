@@ -27,6 +27,7 @@ from sheet.bases import (
     normalize_registered_basis_family,
 )
 from sheet.bases.haar import BASIS_ARTIFACT_TAG_HAAR, BASIS_FAMILY_HAAR, HAAR_BASIS_VERSION
+from sheet.bases.lapped_cosine import BASIS_ARTIFACT_TAG_LAPPED_COSINE, BASIS_FAMILY_LAPPED_COSINE, LAPPED_COSINE_BASIS_VERSION                                  # <<< THOG appended plugin contract
 from sheet.compact_identity import GEOMETRY_PRESET_DEPTH, resolve_compact_selectors
 from sheet.run_config import OwtRunConfig
 
@@ -59,19 +60,23 @@ def synthetic_definition(*, family: str = "synthetic_identity", aliases: tuple[s
 
 class BasisFamilyPluginRegistryTests(unittest.TestCase):
     def test_01_builtin_registry_preserves_family_version_alias_and_artifact_contracts(self) -> None:
-        self.assertEqual(BASIS_FAMILIES, (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_HAAR))
+        self.assertEqual(BASIS_FAMILIES, (BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, BASIS_FAMILY_HAAR, BASIS_FAMILY_LAPPED_COSINE))
         self.assertEqual(normalize_registered_basis_family("cheby"), BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(normalize_registered_basis_family(CHEBYSHEV_BASIS_VERSION), BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(normalize_registered_basis_family("dct_ii"), BASIS_FAMILY_DCT)
         self.assertEqual(normalize_registered_basis_family(DCT_BASIS_VERSION), BASIS_FAMILY_DCT)
         self.assertEqual(normalize_registered_basis_family("balanced_haar"), BASIS_FAMILY_HAAR)
         self.assertEqual(normalize_registered_basis_family(HAAR_BASIS_VERSION), BASIS_FAMILY_HAAR)
+        self.assertEqual(normalize_registered_basis_family("lapped"), BASIS_FAMILY_LAPPED_COSINE)
+        self.assertEqual(normalize_registered_basis_family(LAPPED_COSINE_BASIS_VERSION), BASIS_FAMILY_LAPPED_COSINE)
         self.assertEqual(basis_version_for_family(BASIS_FAMILY_CHEBYSHEV), CHEBYSHEV_BASIS_VERSION)
         self.assertEqual(basis_version_for_family(BASIS_FAMILY_DCT), DCT_BASIS_VERSION)
         self.assertEqual(basis_version_for_family(BASIS_FAMILY_HAAR), HAAR_BASIS_VERSION)
+        self.assertEqual(basis_version_for_family(BASIS_FAMILY_LAPPED_COSINE), LAPPED_COSINE_BASIS_VERSION)
         self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_CHEBYSHEV), BASIS_ARTIFACT_TAG_CHEBYSHEV)
         self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_DCT), BASIS_ARTIFACT_TAG_DCT)
         self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_HAAR), BASIS_ARTIFACT_TAG_HAAR)
+        self.assertEqual(basis_artifact_tag_for_family(BASIS_FAMILY_LAPPED_COSINE), BASIS_ARTIFACT_TAG_LAPPED_COSINE)
         self.assertEqual(get_basis_definition("cheby").family, BASIS_FAMILY_CHEBYSHEV)
         self.assertEqual(get_basis_definition("haar_balanced").family, BASIS_FAMILY_HAAR)
 
@@ -110,12 +115,15 @@ class BasisFamilyPluginRegistryTests(unittest.TestCase):
         cheby = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_CHEBYSHEV, basis_version="auto")
         dct = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_DCT, basis_version="auto")
         haar = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_HAAR, basis_version="auto")
+        lapped = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_LAPPED_COSINE, basis_version="auto")
         self.assertEqual(cheby.compact_artifact_fragment(), "CHEBY_DEPTH")
         self.assertEqual(dct.compact_artifact_fragment(), "DCT_DEPTH")
         self.assertEqual(haar.compact_artifact_fragment(), "HAAR_DEPTH")
+        self.assertEqual(lapped.compact_artifact_fragment(), "LAPPED_COSINE_DEPTH")
         self.assertEqual(cheby.basis_version, CHEBYSHEV_BASIS_VERSION)
         self.assertEqual(dct.basis_version, DCT_BASIS_VERSION)
         self.assertEqual(haar.basis_version, HAAR_BASIS_VERSION)
+        self.assertEqual(lapped.basis_version, LAPPED_COSINE_BASIS_VERSION)
 
     def test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch(self) -> None:
         root = Path(__file__).resolve().parents[1]

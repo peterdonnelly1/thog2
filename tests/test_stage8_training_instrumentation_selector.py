@@ -18,7 +18,8 @@ def test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selecto
         assert "-M WANDB_MODE" not in text
         assert "-W WANDB_ENABLED" not in text
         assert "M:" not in text.split("getopts", 1)[1].split(" option", 1)[0]
-        assert "W:" not in text.split("getopts", 1)[1].split(" option", 1)[0]
+        assert "-W LAPPED_COSINE_WINDOW_LENGTH=" in text
+        assert "W:" in text.split("getopts", 1)[1].split(" option", 1)[0]
 
 
 def test_stage8_training_wrappers_derive_consistent_wandb_flags_and_modes_from_instrumentation() -> None:

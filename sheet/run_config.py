@@ -6,7 +6,17 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
-from .bases import basis_artifact_tag_for_family, basis_version_for_family
+from .bases import basis_artifact_tag_for_family, basis_version_for_family, normalize_registered_basis_family
+# vvv THOG lapped cosine run controls and version identity
+from .bases.lapped_cosine import (
+    BASIS_FAMILY_LAPPED_COSINE,
+    DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,
+    DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
+    LAPPED_COSINE_BASIS_VERSION,
+    lapped_cosine_basis_version,
+    normalize_lapped_cosine_basis_version,
+)
+# ^^^ THOG
 from .compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_CONVENTIONAL, GEOMETRY_PRESET_DEPTH, compact_identity_metadata
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
@@ -71,6 +81,8 @@ class OwtRunConfig:
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
+    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG locality control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG overlap control
     attention_backend: str = "auto"
     experiment_prefix: str = DEFAULT_EXPERIMENT_PREFIX
     run_start_label: Optional[str] = None
@@ -128,10 +140,45 @@ class OwtRunConfig:
         object.__setattr__(self, "experiment_prefix", normalize_component(self.experiment_prefix, uppercase=True))
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
-        if self.basis_version == "auto":
-            requested_family = self.basis_family or BASIS_FAMILY_CHEBYSHEV
-            resolved_version = BASIS_VERSION if requested_family == BASIS_FAMILY_CONVENTIONAL else basis_version_for_family(requested_family)
-            object.__setattr__(self, "basis_version", resolved_version)
+        # vvv THOG derive and validate the parameterised lapped basis version from explicit controls
+        requested_family = self.basis_family or BASIS_FAMILY_CHEBYSHEV
+        canonical_family = (
+            requested_family
+            if requested_family == BASIS_FAMILY_CONVENTIONAL
+            else normalize_registered_basis_family(requested_family)
+        )
+        if canonical_family == BASIS_FAMILY_LAPPED_COSINE:
+            control_version = lapped_cosine_basis_version(
+                self.lapped_cosine_window_length,
+                self.lapped_cosine_overlap_fraction,
+            )
+            if self.basis_version in ("auto", BASIS_VERSION, LAPPED_COSINE_BASIS_VERSION):
+                object.__setattr__(self, "basis_version", control_version)
+            else:
+                explicit_version = normalize_lapped_cosine_basis_version(self.basis_version)
+                if explicit_version != control_version:
+                    raise ValueError(
+                        "lapped cosine controls do not match explicit basis_version: "
+                        f"controls imply {control_version!r}, got {explicit_version!r}"
+                    )
+                object.__setattr__(self, "basis_version", explicit_version)
+        else:
+            if (
+                self.lapped_cosine_window_length != DEFAULT_LAPPED_COSINE_WINDOW_LENGTH
+                or abs(
+                    float(self.lapped_cosine_overlap_fraction)
+                    - DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION
+                )
+                > 1.0e-12
+            ):
+                raise ValueError(
+                    "lapped cosine controls may be changed only when "
+                    "basis_family='lapped_cosine'"
+                )
+            if self.basis_version == "auto":
+                resolved_version = BASIS_VERSION if canonical_family == BASIS_FAMILY_CONVENTIONAL else basis_version_for_family(canonical_family)
+                object.__setattr__(self, "basis_version", resolved_version)
+        # ^^^ THOG
 
         positive = (
             "max_iters",
@@ -234,6 +281,8 @@ class OwtRunConfig:
             o_mlp_d_model=self.o_mlp_d_model,
             o_mlp_hidden=self.o_mlp_hidden,
             basis_version=self.basis_version,
+            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
+            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control
             row_order_scaling_rule=ROW_ORDER_SCALING_RULE,
             geometry_preset=self.geometry_preset,
             attention_geometry=self.attention_geometry,
@@ -283,6 +332,16 @@ class OwtRunConfig:
                 f"X_{self.o_mlp_d_model}",
                 f"Y_{self.o_mlp_hidden}",
             ])
+            # vvv THOG lapped locality and overlap are visible in run identity
+            if self.compact_identity()["basis_family"] == BASIS_FAMILY_LAPPED_COSINE:
+                overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
+                fields.extend(
+                    [
+                        f"LCW_{self.lapped_cosine_window_length}",
+                        f"LCO_{overlap_percent}",
+                    ]
+                )
+            # ^^^ THOG
         fields.append(self.residual_init_artifact_fragment())
         fields.append(f"S_{self.checkpoint_segment_size}")
         return "_".join(fields)
@@ -327,6 +386,8 @@ class OwtRunConfig:
                 "o_mlp_d_model": self.o_mlp_d_model,
                 "o_mlp_hidden": self.o_mlp_hidden,
                 "basis_version": self.basis_version,
+                "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                           # <<< THOG checkpoint locality control
+                "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                      # <<< THOG checkpoint overlap control
                 "geometry_preset": self.geometry_preset,
                 "attention_geometry": self.attention_geometry,
                 "mlp_geometry": self.mlp_geometry,

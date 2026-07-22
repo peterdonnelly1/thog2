@@ -51,6 +51,20 @@ class BasisKernel:
     coordinate_policy: str
     stabilization_policy: str
 
+    # vvv THOG permit basis families with parameterised but canonical version strings
+    def normalize_version(self, version: Optional[str]) -> str:
+        candidate = self.basis_version if version is None else version
+        if not isinstance(candidate, str) or not candidate.strip():
+            raise ValueError("basis_version must be a non-empty string")
+        normalized = candidate.strip().lower()
+        if normalized != self.basis_version:
+            raise ValueError(
+                f"basis_version mismatch for {self.basis_family}: "
+                f"expected {self.basis_version!r}, got {candidate!r}"
+            )
+        return normalized
+    # ^^^ THOG
+
     def coordinates(self, sample_count: int, *, dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None) -> Tensor:
         raise NotImplementedError
 
@@ -66,11 +80,9 @@ class BasisKernel:
         if order > sample_count:
             raise ValueError(f"order must not exceed sample_count; got order={order}, sample_count={sample_count}")
         validate_floating_dtype(runtime_dtype)
-        basis_version = self.basis_version if version is None else version
-        if not isinstance(basis_version, str) or not basis_version.strip():
-            raise ValueError("version must be a non-empty string")
-        if basis_version != self.basis_version:
-            raise ValueError(f"basis_version mismatch for {self.basis_family}: expected {self.basis_version!r}, got {basis_version!r}")
+        # vvv THOG version validation is delegated to the basis kernel
+        basis_version = self.normalize_version(version)
+        # ^^^ THOG
         coordinates = self.coordinates(sample_count, dtype=torch.float64, device="cpu")
         raw_basis = self.raw_basis(coordinates, order)
         stabilized_basis = self.stabilize(raw_basis)

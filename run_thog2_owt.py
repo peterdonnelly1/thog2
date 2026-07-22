@@ -16,6 +16,7 @@ import torch
 
 from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
+from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
 from sheet.checkpoints import load_payload
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
@@ -229,6 +230,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
     parser.add_argument("--basis-family", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
     parser.add_argument("--basis-version", default="auto")
+    # vvv THOG explicit lapped cosine controls
+    parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
+    parser.add_argument("--lapped-cosine-overlap-fraction", type=float, default=DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION)
+    # ^^^ THOG
     parser.add_argument("--attention-backend", choices=("auto", "flash2", "sdpa", "math"), default="auto")
     parser.add_argument("--experiment-prefix", default=DEFAULT_EXPERIMENT_PREFIX)
     parser.add_argument("--run-start-label")
@@ -295,7 +300,9 @@ def configure_attention_backend(attention_backend: str) -> None:
 
 
 def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
-    basis_version = BASIS_VERSION if arguments.basis_version == "auto" else arguments.basis_version
+    # vvv THOG OwtRunConfig resolves auto after seeing basis-specific controls
+    basis_version = arguments.basis_version
+    # ^^^ THOG
     config = OwtRunConfig(
         model_type=arguments.model_type,
         run_mode=arguments.run_mode,
@@ -330,6 +337,8 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         mlp_geometry=arguments.mlp_geometry,
         basis_family=arguments.basis_family,
         basis_version=basis_version,
+        lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
+        lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control
         attention_backend=arguments.attention_backend,
         experiment_prefix=arguments.experiment_prefix,
         run_start_label=run_start_label_from_arguments(arguments),

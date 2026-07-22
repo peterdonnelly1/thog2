@@ -93,10 +93,10 @@ class BasisCache:
     def make_key(sample_count: int, order: int, *, runtime_dtype: torch.dtype, device: Optional[DeviceLike], version: str, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> BasisCacheKey:
         target_device = torch.device("cpu" if device is None else device)
         canonical_family = normalize_basis_family(basis_family)
-        expected_version = basis_version_for_family(canonical_family)
-        if version != expected_version:
-            raise ValueError(f"basis_version mismatch for {canonical_family}: expected {expected_version!r}, got {version!r}")
-        return BasisCacheKey(sample_count=sample_count, order=order, basis_family=canonical_family, version=version, device_type=target_device.type, device_index=target_device.index, dtype=runtime_dtype)
+        # vvv THOG cache parameterised basis versions by their canonical kernel-normalised identity
+        normalized_version = get_basis_kernel(canonical_family).normalize_version(version)
+        return BasisCacheKey(sample_count=sample_count, order=order, basis_family=canonical_family, version=normalized_version, device_type=target_device.type, device_index=target_device.index, dtype=runtime_dtype)
+        # ^^^ THOG
 
     def get(self, sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: str = BASIS_VERSION, basis_family: str = BASIS_FAMILY_CHEBYSHEV) -> Tensor:
         key = self.make_key(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version, basis_family=basis_family)

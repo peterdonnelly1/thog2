@@ -14,6 +14,7 @@ BUILTIN_BASIS_MODULES = (
     "chebyshev",
     "dct",
     "haar",
+    "lapped_cosine",                                                                                                                                    # <<< THOG append the local lapped basis without reordering existing registry entries
 )
 
 
@@ -144,9 +145,9 @@ def normalize_basis_version(basis_family: str, basis_version: str, *, legacy_def
         return expected_version
     if legacy_default_version is not None and basis_version == legacy_default_version and expected_version != legacy_default_version:
         return expected_version
-    if basis_version != expected_version:
-        raise ValueError(f"basis_version mismatch for basis_family={normalize_registered_basis_family(basis_family)!r}: expected {expected_version!r}, got {basis_version!r}")
-    return expected_version
+    # vvv THOG allow a kernel to validate and canonicalise a parameterised version
+    return get_basis_kernel(basis_family).normalize_version(basis_version)
+    # ^^^ THOG
 
 
 def build_registered_basis(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: Optional[str] = None, basis_family: str) -> Tensor:

@@ -23,6 +23,8 @@ WANDB_ROOT="wandb"
 GEOMETRY_PRESET="depth"
 BASIS_FAMILY="chebyshev"
 BASIS_VERSION="auto"
+LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
+LAPPED_COSINE_OVERLAP_FRACTION="0.5"                                                                                                                       # <<< THOG v1 fixed overlap
 ATTENTION_GEOMETRY=""
 MLP_GEOMETRY=""
 STEPS=250
@@ -97,14 +99,18 @@ Schedule/logging:
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
 Compact geometry:
-  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar; single, comma, or quoted space list
+  -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
                                                     Chebyshev aliases: cheby | chebyshev_first_kind_qr
                                                     DCT aliases: dct_ii | dct_ii_orthonormal
                                                     Haar aliases: balanced_haar | haar_balanced
+                                                     Lapped cosine aliases: lapped | local_cosine | lapped_local_cosine
   -v BASIS_VERSION=${BASIS_VERSION}                 auto (recommended), or exact:
                                                     chebyshev_first_kind_qr_v1
                                                     dct_ii_orthonormal_v1
                                                     haar_balanced_binary_orthonormal_v1
+                                                     lapped_cosine_balanced_orthonormal_v1
+  -W LAPPED_COSINE_WINDOW_LENGTH=${LAPPED_COSINE_WINDOW_LENGTH}
+  -i LAPPED_COSINE_OVERLAP_FRACTION=${LAPPED_COSINE_OVERLAP_FRACTION}  currently 0.5 only
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
   -m MLP_GEOMETRY=${MLP_GEOMETRY:-preset default}
 
@@ -140,13 +146,13 @@ Paths:
 EOF_USAGE
 }
 
-while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG" ;; f) MIN_LR_CODE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
-    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
+    p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
@@ -250,7 +256,14 @@ case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must
 case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_RENDERER must be matplotlib, plotly, or both." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
-for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS"; do validate_positive_uint "$setting" "numeric setting"; done
+for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
+# vvv THOG lapped cosine v1 accepts exactly 50 percent overlap
+case "$LAPPED_COSINE_OVERLAP_FRACTION" in
+  .5|0.5|0.50|0.500) LAPPED_COSINE_OVERLAP_FRACTION="0.5" ;;
+  *) echo "LAPPED_COSINE_OVERLAP_FRACTION currently supports only 0.5." >&2; exit 2 ;;
+esac
+(( LAPPED_COSINE_WINDOW_LENGTH >= 2 && LAPPED_COSINE_WINDOW_LENGTH % 2 == 0 )) || { echo "LAPPED_COSINE_WINDOW_LENGTH must be an even integer >= 2." >&2; exit 2; }
+# ^^^ THOG
 validate_nonnegative_uint "$WARMUP_ITERS" "WARMUP_ITERS"
 validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
@@ -328,7 +341,7 @@ run_grid_point() {
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
     run_tag="${basis_tag}_${preset_tag}"
-    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION")
+    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION" --lapped-cosine-window-length "$LAPPED_COSINE_WINDOW_LENGTH" --lapped-cosine-overlap-fraction "$LAPPED_COSINE_OVERLAP_FRACTION")
     [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
     [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
@@ -364,6 +377,7 @@ scruffy OWT train
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
   model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
+  lapped cosine:      window=$LAPPED_COSINE_WINDOW_LENGTH overlap=$LAPPED_COSINE_OVERLAP_FRACTION
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
   fast discard:       $FAST_DISCARD

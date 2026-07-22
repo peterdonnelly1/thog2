@@ -5,6 +5,16 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
+# vvv THOG lapped cosine controls survive training config and checkpoints
+from .bases import normalize_registered_basis_family
+from .bases.lapped_cosine import (
+    BASIS_FAMILY_LAPPED_COSINE,
+    DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,
+    DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
+    LAPPED_COSINE_BASIS_VERSION,
+    lapped_cosine_basis_version,
+)
+# ^^^ THOG
 from .checkpointing import validate_checkpoint_segment_size
 from .compact_identity import compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
 from .geometry import derive_row_order
@@ -36,6 +46,8 @@ MODEL_COMPATIBILITY_FIELDS = (
     "residual_init_depth_source",
     "residual_init_depth_value",
     "basis_version",
+    "lapped_cosine_window_length",                                                                                                                        # <<< THOG checkpoint compatibility locality control
+    "lapped_cosine_overlap_fraction",                                                                                                                     # <<< THOG checkpoint compatibility overlap control
     "row_order_scaling_rule",
     "geometry_preset",
     "attention_geometry",
@@ -66,6 +78,8 @@ class TrainingConfig:
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
+    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG explicit locality control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG explicit overlap control
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -176,8 +190,21 @@ class TrainingConfig:
                 basis_family=self.basis_family,
             )
         else:
+            # vvv THOG derive the parameterised lapped version before compact identity validation
+            # vvv THOG preserve the established compact-identity error contract for unknown basis names
+            try:
+                canonical_basis_family = normalize_registered_basis_family(self.basis_family or "chebyshev")
+            except ValueError:
+                canonical_basis_family = None
+            # ^^^ THOG
+            if canonical_basis_family == BASIS_FAMILY_LAPPED_COSINE and self.basis_version in ("auto", BASIS_VERSION, LAPPED_COSINE_BASIS_VERSION):
+                self.basis_version = lapped_cosine_basis_version(
+                    self.lapped_cosine_window_length,
+                    self.lapped_cosine_overlap_fraction,
+                )
             identity = self.compact_identity_metadata()
             self.basis_version = str(identity["basis_version"])
+            # ^^^ THOG
         if not isinstance(self.bias, bool) or not isinstance(self.decay_learning_rate, bool):
             raise ValueError("bias and decay_learning_rate must be bool")
 
@@ -254,6 +281,8 @@ class TrainingConfig:
             o_mlp_d_model=self.resolved_o_mlp_d_model,
             o_mlp_hidden=self.resolved_o_mlp_hidden,
             basis_version=self.basis_version,
+            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
+            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control
             row_order_scaling_rule=self.row_order_scaling_rule,
             geometry_preset=self.geometry_preset,
             attention_geometry=self.attention_geometry,

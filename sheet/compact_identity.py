@@ -6,6 +6,15 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .basis import BASIS_VERSION
 from .bases import BASIS_FAMILIES as REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, basis_version_for_family, normalize_basis_version, normalize_registered_basis_family
+# vvv THOG lapped cosine controls are part of compact identity
+from .bases.lapped_cosine import (
+    BASIS_FAMILY_LAPPED_COSINE,
+    DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,
+    DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
+    lapped_cosine_basis_version,
+    validate_lapped_cosine_controls,
+)
+# ^^^ THOG
 
 
 GEOMETRY_PRESET_LEGACY_SHEET_COL = "legacy_sheet_col"
@@ -97,6 +106,8 @@ class CompactIdentity:
     mlp_geometry: str
     basis_family: str
     basis_version: str
+    lapped_cosine_window_length: int                                                                                                                     # <<< THOG explicit locality identity
+    lapped_cosine_overlap_fraction: float                                                                                                                # <<< THOG explicit overlap identity
     materialization_version: str
     row_order_scaling_rule: str
     n_layer: int
@@ -283,6 +294,8 @@ def compact_identity_metadata(
     o_mlp_d_model: int,
     o_mlp_hidden: int,
     basis_version: str = BASIS_VERSION,
+    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,                                                                               # <<< THOG locality control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,                                                                        # <<< THOG overlap control
     row_order_scaling_rule: str,
     geometry_preset: Optional[str] = None,
     attention_geometry: Optional[str] = None,
@@ -299,6 +312,34 @@ def compact_identity_metadata(
     if require_stage1_sheet_support:
         validate_current_sheet_support(selectors)
     basis_version = normalize_compact_basis_version(selectors, basis_version)
+    # vvv THOG bind the lapped controls to the canonical basis version and reject leakage into other families
+    if selectors.basis_family == BASIS_FAMILY_LAPPED_COSINE:
+        validate_lapped_cosine_controls(
+            lapped_cosine_window_length,
+            lapped_cosine_overlap_fraction,
+        )
+        expected_lapped_version = lapped_cosine_basis_version(
+            lapped_cosine_window_length,
+            lapped_cosine_overlap_fraction,
+        )
+        if basis_version != expected_lapped_version:
+            raise ValueError(
+                "lapped cosine controls do not match basis_version: "
+                f"controls imply {expected_lapped_version!r}, got {basis_version!r}"
+            )
+    elif (
+        lapped_cosine_window_length != DEFAULT_LAPPED_COSINE_WINDOW_LENGTH
+        or abs(
+            float(lapped_cosine_overlap_fraction)
+            - DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION
+        )
+        > 1.0e-12
+    ):
+        raise ValueError(
+            "lapped cosine controls may be changed only when "
+            "basis_family='lapped_cosine'"
+        )
+    # ^^^ THOG
     heads = head_metadata(n_embd, n_head)
     return CompactIdentity(
         requested_geometry_preset=selectors.requested_geometry_preset,
@@ -310,6 +351,8 @@ def compact_identity_metadata(
         mlp_geometry=selectors.mlp_geometry,
         basis_family=selectors.basis_family,
         basis_version=basis_version,
+        lapped_cosine_window_length=lapped_cosine_window_length,                                                                                          # <<< THOG persist locality identity
+        lapped_cosine_overlap_fraction=float(lapped_cosine_overlap_fraction),                                                                              # <<< THOG persist overlap identity
         materialization_version=compact_materialization_version(selectors),
         row_order_scaling_rule=row_order_scaling_rule,
         n_layer=n_layer,
