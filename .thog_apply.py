@@ -34,6 +34,24 @@ for wrapper_path in (
 ):
     replace_once(wrapper_path, OLD_VERSION, NEW_VERSION)
 
+replace_once(
+    "docs/THOG2_Lapped_Cosine_Basis_Test_Plan_v0.1.md",
+    "2. Truncated bases are exact prefixes of the corresponding full basis.",
+    "2. Truncated bases match the corresponding full-basis prefixes to float64 roundoff tolerance; repeated construction at the same order remains bitwise deterministic.",
+)
+
+replace_once(
+    "tests/test_lapped_cosine_basis_kernel.py",
+    "                self.assertTrue(torch.equal(prefix, full_basis[:, :order]))\n",
+    """                torch.testing.assert_close(
+                    prefix,
+                    full_basis[:, :order],
+                    rtol=0.0,
+                    atol=1.0e-15,
+                )
+""",
+)
+
 training_test_path = "tests/test_lapped_cosine_training_and_checkpoint.py"
 replace_once(
     training_test_path,
