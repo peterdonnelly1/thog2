@@ -28,6 +28,9 @@ jobs:
           if [[ -f .thog_apply.py ]]; then
             set -o pipefail
             python .thog_apply.py 2>&1 | tee thog-apply.log
+            if [[ -f .thog_post_apply.py ]]; then
+              python .thog_post_apply.py 2>&1 | tee -a thog-apply.log
+            fi
           fi
 
       - name: Upload THOG apply output
@@ -91,11 +94,11 @@ jobs:
             if [[ -f .thog_commit_message ]]; then
               commit_message="$(cat .thog_commit_message)"
             fi
-            rm -f .thog_apply.py .thog_commit_message .thog_patch_part_* .thog_apply_trigger
+            rm -f .thog_apply.py .thog_post_apply.py .thog_commit_message .thog_patch_part_* .thog_apply_trigger
             rm -f .github/workflows/apply_thog_patch_now.yml
             rm -f .github/workflows/apply_requested_optimisation_controls.yml
             git config user.name github-actions[bot]
-            git config user.email 41898236+github-actions[bot]@users.noreply.github.com
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add -A
             git commit -m "$commit_message"
             git push origin HEAD:BLOCK_enhancements_group
