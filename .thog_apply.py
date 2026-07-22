@@ -34,52 +34,6 @@ for wrapper_path in (
 ):
     replace_once(wrapper_path, OLD_VERSION, NEW_VERSION)
 
-replace_once(
-    "docs/THOG2_Lapped_Cosine_Basis_Test_Plan_v0.1.md",
-    f"- Version: `{OLD_VERSION}`",
-    f"- Version: `{NEW_VERSION}`",
-)
-replace_once(
-    "docs/THOG2_Lapped_Cosine_Basis_Test_Plan_v0.1.md",
-    "- Transform: balanced block-local orthonormal DCT-IV atoms followed by orthogonal sine/cosine boundary rotations",
-    "- Transform: normalized global DC, balanced block-mean coarse functions, block-local orthonormal DCT-II detail atoms, and DC-preserving orthogonal boundary prefilters",
-)
-replace_once(
-    "docs/THOG2_Lapped_Cosine_Basis_Test_Plan_v0.1.md",
-    "- Coefficient ordering: local mode first, balanced across all blocks before advancing to the next local mode",
-    "- Coefficient ordering: global DC first, balanced block-mean coarse functions next, then each local detail mode balanced across blocks",
-)
-
-basis_test_path = "tests/test_lapped_cosine_basis_kernel.py"
-replace_once(
-    basis_test_path,
-    "import unittest\nfrom pathlib import Path\n",
-    "import math\nimport unittest\nfrom pathlib import Path\n",
-)
-replace_once(
-    basis_test_path,
-    "    def test_09_invalid_controls_versions_and_indices_fail_explicitly(self) -> None:\n",
-    """    def test_09_first_column_is_exact_normalized_global_dc(self) -> None:
-        for sample_count, window_length in ((8, 8), (72, 24), (144, 48)):
-            with self.subTest(sample_count=sample_count, window_length=window_length):
-                version = lapped_cosine_basis_version(window_length, 0.5)
-                basis = build_registered_basis(
-                    sample_count,
-                    min(sample_count, 16),
-                    basis_family=BASIS_FAMILY_LAPPED_COSINE,
-                    version=version,
-                )
-                expected = torch.full(
-                    (sample_count,),
-                    1.0 / math.sqrt(float(sample_count)),
-                    dtype=torch.float64,
-                )
-                self.assertTrue(torch.equal(basis[:, 0], expected))
-
-    def test_10_invalid_controls_versions_and_indices_fail_explicitly(self) -> None:
-""",
-)
-
 training_test_path = "tests/test_lapped_cosine_training_and_checkpoint.py"
 replace_once(
     training_test_path,
