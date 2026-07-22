@@ -43,3 +43,26 @@ if cleanup_marker not in source:
 source = source.replace(cleanup_marker, cleanup_replacement, 1)
 
 exec(compile(source, str(body_path), "exec"), {"__name__": "__main__", "__file__": str(body_path)})
+
+basis_assignment = '''  basis_resolution="$($PYTHON_BIN -c 'import sys; from sheet.bases import basis_artifact_tag_for_family, normalize_registered_basis_family; family = normalize_registered_basis_family(sys.argv[1]); print(f"{family}\\t{basis_artifact_tag_for_family(family)}")' "$requested_basis_family")"'''
+basis_guard = '''  if ! basis_resolution="$($PYTHON_BIN -c 'import sys; from sheet.bases import basis_artifact_tag_for_family, normalize_registered_basis_family; family = normalize_registered_basis_family(sys.argv[1]); print(f"{family}\\t{basis_artifact_tag_for_family(family)}")' "$requested_basis_family")"; then
+    echo "Failed to resolve BASIS_FAMILY: $requested_basis_family" >&2
+    exit 2
+  fi'''
+
+for wrapper_name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    wrapper_path = Path(__file__).with_name(wrapper_name)
+    wrapper_source = wrapper_path.read_text(encoding="utf-8")
+    wrapper_source = wrapper_source.replace(
+        "before canonical getopts parsing",
+        "before canonical option parsing",
+        1,
+    )
+    if basis_assignment not in wrapper_source:
+        raise RuntimeError(f"missing basis-resolution assignment in {wrapper_name}")
+    wrapper_source = wrapper_source.replace(basis_assignment, basis_guard, 1)
+    wrapper_path.write_text(wrapper_source, encoding="utf-8")
+
+obsolete_test = Path(__file__).with_name("tests") / "test_optimizer_entry_wrappers.py"
+if obsolete_test.exists():
+    obsolete_test.unlink()
