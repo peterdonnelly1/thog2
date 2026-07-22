@@ -10,6 +10,14 @@ from typing import Any, Dict, Mapping, Optional
 
 import torch
 
+from .depth_curve_diagnostics import (
+    DEFAULT_DEPTH_CURVE_SAMPLE_ELEMENTS,
+    curve_depth_summaries,
+    depth_curve_figure,
+    normalize_depth_curve_plot_mode,
+    normalize_depth_curve_renderer,
+    write_depth_curve_local_viewer,
+)
 from .stage6_source import (
     evaluation_metric_payload,
     init_resilient_telemetry,
@@ -61,14 +69,65 @@ def _tensorboard_root(name: str) -> Path:
     return root / name
 
 
+# vvv THOG
+def _selected_depth_curve_plot_mode() -> str:
+    return normalize_depth_curve_plot_mode(os.environ.get("THOG2_DEPTH_CURVE_PLOTS", "none"))
+
+
+def _selected_depth_curve_renderer() -> str:
+    return normalize_depth_curve_renderer(os.environ.get("THOG2_DEPTH_CURVE_RENDERER", "plotly"))
+
+
+def _depth_curve_local_html_enabled() -> bool:
+    value = os.environ.get("THOG2_DEPTH_CURVE_LOCAL_HTML", "false").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(
+        "THOG2_DEPTH_CURVE_LOCAL_HTML must be true or false; "
+        f"got {value!r}"
+    )
+
+
+def _depth_curve_local_root(run_name: str) -> Path:
+    configured = os.environ.get("THOG2_DEPTH_CURVE_LOCAL_ROOT")
+    if configured is not None and configured.strip():
+        return Path(configured)
+    return Path("logs") / run_name / "depth_curves"
+
+
+def _depth_curve_sample_elements() -> int:
+    value = os.environ.get(
+        "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS",
+        str(DEFAULT_DEPTH_CURVE_SAMPLE_ELEMENTS),
+    )
+    try:
+        count = int(value)
+    except ValueError as error:
+        raise ValueError(
+            "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS must be a positive integer; "
+            f"got {value!r}"
+        ) from error
+    if count <= 0:
+        raise ValueError(
+            "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS must be a positive integer; "
+            f"got {value!r}"
+        )
+    return count
+# ^^^ THOG
+
+
 def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     metric = training_metric_payload(payload)
     update = int(metric["optimizer_update"])
+    training_loss = float(metric["training_loss"])
     return {
         "optimizer/update": update,
         "tokens/seen": int(metric["tokens_seen"]),
         "time/train_seconds": float(metric["clean_training_seconds"]),
-        "train/step_loss": float(metric["training_loss"]),
+        "train/step_loss": training_loss,
+        "train/loss": training_loss,
         "optim/lr": float(metric["learning_rate"]),
         "optim/grad_norm": float(metric["gradient_norm"]),
     }
@@ -82,6 +141,7 @@ def _evaluation_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "optimizer/update": int(metric["optimizer_update"]),
         "tokens/seen": int(metric["tokens_seen"]),
         "test/loss": test_loss,
+        "eval/val_loss": test_loss,
         "eval/loss": eval_loss,
         "test/perplexity": _safe_exp(test_loss),
         "eval/perplexity": _safe_exp(eval_loss),
@@ -270,7 +330,12 @@ class WandbTelemetry:
         root = _tensorboard_root(self.name)
         root.mkdir(parents=True, exist_ok=True)
         module = importlib.import_module("torch.utils.tensorboard")
-        self.writer = module.SummaryWriter(log_dir=str(root))
+        summary_writer = getattr(module, "SummaryWriter", None)
+        if summary_writer is None:
+            self.backend = "wandb"
+            self._start_wandb()
+            return
+        self.writer = summary_writer(log_dir=str(root))
         self.writer.add_text("run/artifact_name", self.name, 0)
         self.writer.add_text("run/group", self.group, 0)
         self.writer.add_text("run/job_type", self.job_type, 0)
@@ -281,6 +346,8 @@ class WandbTelemetry:
         )
 
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        if not self.enabled or self.backend == "none":
+            return
         metrics = _event_metrics(event, payload)
         if not metrics:
             return
@@ -291,10 +358,56 @@ class WandbTelemetry:
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)
         if self.run is not None:
-            self.run.log(scalars, step=step)
+            try:
+                self.run.log(scalars, step=step)
+            except TypeError:
+                self.run.log(scalars)
         if self.writer is not None:
             for name, value in scalars.items():
                 self.writer.add_scalar(name, value, step)
+
+    # vvv THOG
+    def log_depth_curve_figures(self, model: Any, step: int, *, final: bool) -> None:
+        if not self.enabled:
+            return
+        mode = _selected_depth_curve_plot_mode()
+        if mode == "none" or (mode == "final" and not final):
+            return
+        try:
+            summaries = curve_depth_summaries(model, _depth_curve_sample_elements())
+            if not summaries:
+                return
+            renderer = _selected_depth_curve_renderer()
+            if _depth_curve_local_html_enabled() and renderer in ("plotly", "both"):
+                index_path = write_depth_curve_local_viewer(
+                    summaries,
+                    _depth_curve_local_root(self.name),
+                    step,
+                    self.name,
+                )
+                print(f"THOG2 depth curve local viewer: {index_path}", flush=True)
+            if renderer not in ("matplotlib", "both") or self.backend == "none":
+                return
+            import matplotlib.pyplot as plt
+
+            for summary in summaries:
+                figure = depth_curve_figure(summary)
+                try:
+                    if self.run is not None and self.module is not None:
+                        self.run.log({summary.tag: self.module.Image(figure)}, step=step)
+                    if self.writer is not None:
+                        self.writer.add_figure(summary.tag, figure, step)
+                finally:
+                    plt.close(figure)
+            if self.writer is not None:
+                self.writer.flush()
+        except Exception as error:
+            print(
+                "THOG2 WARNING: depth curve figure logging failed; "
+                f"continuing without curve plots: {error}",
+                flush=True,
+            )
+    # ^^^ THOG
 
     def add_initial_summary(self, parameter_report: Mapping[str, Any]) -> None:
         if self.backend == "none":
@@ -373,6 +486,16 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
                     int(telemetry_payload["consumed_tokens"]) * multiplier
                 )
             telemetry.log_event(event, telemetry_payload)
+            # vvv THOG
+            if event == "evaluation_completed":
+                completed_updates = int(payload.get("completed_updates", 0))
+                final = completed_updates >= int(getattr(trainer.config, "max_updates", completed_updates + 1))
+                telemetry.log_depth_curve_figures(
+                    getattr(trainer, "raw_model", None),
+                    completed_updates,
+                    final=final,
+                )
+            # ^^^ THOG
 
     trainer._print_progress = progress
 

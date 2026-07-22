@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 
-TELEMETRY_FINISH_TIMEOUT_SECONDS = 120.0
+# vvv THOG
+TELEMETRY_INIT_TIMEOUT_SECONDS = float(os.environ.get("THOG2_WANDB_INIT_TIMEOUT", "86400"))
+TELEMETRY_FINISH_TIMEOUT_SECONDS = float(os.environ.get("THOG2_WANDB_FINISH_TIMEOUT", "86400"))
+# ^^^ THOG
 
 
 def _git_output(repository_root: Path, *arguments: str) -> str:
@@ -93,6 +96,7 @@ def init_resilient_telemetry(
     config: Dict[str, Any],
 ) -> Any:
     settings = module.Settings(
+        init_timeout=TELEMETRY_INIT_TIMEOUT_SECONDS,
         finish_timeout=TELEMETRY_FINISH_TIMEOUT_SECONDS,
         finish_timeout_raises=False,
     )
@@ -197,6 +201,7 @@ def telemetry_configuration(
 
 __all__ = [
     "TELEMETRY_FINISH_TIMEOUT_SECONDS",
+    "TELEMETRY_INIT_TIMEOUT_SECONDS",
     "evaluation_metric_payload",
     "init_resilient_telemetry",
     "metric_common",
