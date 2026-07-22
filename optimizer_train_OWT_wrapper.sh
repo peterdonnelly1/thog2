@@ -1,6 +1,45 @@
 #!/bin/bash
 set -euo pipefail
 
+# vvv THOG
+# Optimizer wrapper reference
+#
+# This wrapper adds optimizer selection to the existing host OWT wrappers without
+# changing their established controls. The target wrapper still owns all ordinary
+# run options.
+#
+# Optimizer controls:
+#   -y NAME, --optimizer NAME
+#       adamw | sgd | sgd_nesterov | adafactor | rmsprop
+#       Aliases: adam; nesterov; sgd-nesterov.
+#
+#   --optimizer-momentum VALUE
+#       Momentum used by sgd, sgd_nesterov, and rmsprop. Default: 0.9.
+#
+# Learning-rate controls inherited from the target wrapper:
+#   -c LR_CODE      maximum learning-rate code, where CODE means CODE * 1e-5
+#   -f MIN_LR_CODE  minimum learning-rate code, where CODE means CODE * 1e-5
+#   -C BLOCK_SIZE   context length; capital -C is unrelated to learning rate
+#
+# Optimizer-specific defaults apply only when -c and/or -f are omitted:
+#
+#   optimizer       -c       maximum LR      -f       minimum LR
+#   adamw             60       6.0e-4          06       6.0e-5
+#   sgd             1000       1.0e-2         100       1.0e-3
+#   sgd_nesterov    1000       1.0e-2         100       1.0e-3
+#   adafactor       1000       1.0e-2         100       1.0e-3
+#   rmsprop          100       1.0e-3          10       1.0e-4
+#
+# Explicit -c and -f values always override these defaults independently.
+# Non-AdamW runs automatically add OPT_<OPTIMIZER> to --artifact-suffix so that
+# otherwise identical optimizer comparisons cannot collide.
+#
+# Examples:
+#   ./current_scruffy_train_OWT_optimizer.sh -y sgd -g SGD_CHECK ...
+#   ./current_dreedle_train_OWT_optimizer.sh -y sgd_nesterov -c 500 -f 50 ...
+#   ./current_scruffy_train_OWT_optimizer.sh -y rmsprop --optimizer-momentum 0.95 ...
+# ^^^ THOG
+
 if (( $# < 1 )); then
   echo "Usage: $0 TARGET_WRAPPER [wrapper options]" >&2
   exit 2
