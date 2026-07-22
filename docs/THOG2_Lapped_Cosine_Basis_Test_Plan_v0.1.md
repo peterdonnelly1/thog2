@@ -19,7 +19,7 @@ Validate the `lapped_cosine` basis as a deterministic, orthonormal, locally supp
 ## 3. Basis-kernel tests
 
 1. Full bases are square and orthonormal for odd, even, small, and THOG-relevant axis lengths, including 144, 768, and 3072.
-2. Truncated bases are exact prefixes of the corresponding full basis.
+2. Truncated bases match the corresponding full-basis prefixes to float64 roundoff tolerance; repeated construction at the same order remains bitwise deterministic.
 3. Every retained column has unit norm and retained columns are mutually orthogonal.
 4. The first column is exactly the normalized global constant for every axis length and locality setting.
 5. Construction is deterministic across repeated CPU calls and runtime casts.

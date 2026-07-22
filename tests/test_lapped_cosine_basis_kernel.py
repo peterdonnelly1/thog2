@@ -106,7 +106,12 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
                     order,
                     basis_family=BASIS_FAMILY_LAPPED_COSINE,
                 )
-                self.assertTrue(torch.equal(prefix, full_basis[:, :order]))
+                torch.testing.assert_close(
+                    prefix,
+                    full_basis[:, :order],
+                    rtol=0.0,
+                    atol=1.0e-15,
+                )
 
         blocks = lapped_cosine_block_layout(
             144,

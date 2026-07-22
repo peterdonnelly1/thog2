@@ -68,7 +68,17 @@ class LappedCosineTrainingAndCheckpointTests(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
         optimizer.step()
 
-    def test_02_controls_are_checkpoint_compatibility_fields(self) -> None:
+    def test_02_layernorm_initialization_materializes_ones_at_every_layer(self) -> None:
+        config = self.training_config()
+        model = build_training_model(config)
+        expected = torch.ones(config.n_embd, dtype=torch.float32)
+        for family_name in ("ln_1_weight", "ln_2_weight"):
+            for layer_index in range(config.n_layer):
+                with self.subTest(family_name=family_name, layer_index=layer_index):
+                    actual = model.trajectory.materialize_vector(family_name, layer_index)
+                    torch.testing.assert_close(actual, expected, rtol=0.0, atol=1.0e-6)
+
+    def test_03_controls_are_checkpoint_compatibility_fields(self) -> None:
         first = self.training_config(window_length=8)
         second = self.training_config(window_length=12)
         first_signature = first.compatibility_signature()
@@ -78,7 +88,7 @@ class LappedCosineTrainingAndCheckpointTests(unittest.TestCase):
         self.assertNotEqual(first_signature, second_signature)
         self.assertNotEqual(first.basis_version, second.basis_version)
 
-    def test_03_run_identity_and_training_config_preserve_controls(self) -> None:
+    def test_04_run_identity_and_training_config_preserve_controls(self) -> None:
         run = OwtRunConfig(
             model_type="sheet",
             run_name="LAPPED_TEST",
@@ -118,7 +128,7 @@ class LappedCosineTrainingAndCheckpointTests(unittest.TestCase):
             lapped_cosine_basis_version(8, 0.5),
         )
 
-    def test_04_non_lapped_basis_rejects_nondefault_lapped_controls(self) -> None:
+    def test_05_non_lapped_basis_rejects_nondefault_lapped_controls(self) -> None:
         with self.assertRaisesRegex(ValueError, "only when"):
             OwtRunConfig(
                 model_type="sheet",

@@ -108,7 +108,7 @@ Compact geometry:
                                                     chebyshev_first_kind_qr_v1
                                                     dct_ii_orthonormal_v1
                                                     haar_balanced_binary_orthonormal_v1
-                                                     lapped_cosine_balanced_orthonormal_v1
+                                                     lapped_cosine_dc_preserving_orthonormal_v1
   -W LAPPED_COSINE_WINDOW_LENGTH=${LAPPED_COSINE_WINDOW_LENGTH}
   -i LAPPED_COSINE_OVERLAP_FRACTION=${LAPPED_COSINE_OVERLAP_FRACTION}  currently 0.5 only
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
