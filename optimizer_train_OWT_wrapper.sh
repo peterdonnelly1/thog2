@@ -4,9 +4,9 @@ set -euo pipefail
 # vvv THOG
 # Optimizer wrapper reference
 #
-# This wrapper adds optimizer selection to the existing host OWT wrappers without
-# changing their established controls. The target wrapper still owns all ordinary
-# run options.
+# This helper adds optimizer selection to the existing host OWT wrappers without
+# changing their established controls. Users invoke current_scruffy_train_OWT.sh
+# or current_dreedle_train_OWT.sh directly; this file is their shared implementation.
 #
 # Optimizer controls:
 #   -y NAME, --optimizer NAME
@@ -16,7 +16,7 @@ set -euo pipefail
 #   --optimizer-momentum VALUE
 #       Momentum used by sgd, sgd_nesterov, and rmsprop. Default: 0.9.
 #
-# Learning-rate controls inherited from the target wrapper:
+# Learning-rate controls inherited from the host wrapper:
 #   -c LR_CODE      maximum learning-rate code, where CODE means CODE * 1e-5
 #   -f MIN_LR_CODE  minimum learning-rate code, where CODE means CODE * 1e-5
 #   -C BLOCK_SIZE   context length; capital -C is unrelated to learning rate
@@ -35,9 +35,9 @@ set -euo pipefail
 # otherwise identical optimizer comparisons cannot collide.
 #
 # Examples:
-#   ./current_scruffy_train_OWT_optimizer.sh -y sgd -g SGD_CHECK ...
-#   ./current_dreedle_train_OWT_optimizer.sh -y sgd_nesterov -c 500 -f 50 ...
-#   ./current_scruffy_train_OWT_optimizer.sh -y rmsprop --optimizer-momentum 0.95 ...
+#   ./current_scruffy_train_OWT.sh -y sgd -g SGD_CHECK ...
+#   ./current_dreedle_train_OWT.sh -y sgd_nesterov -c 500 -f 50 ...
+#   ./current_scruffy_train_OWT.sh -y rmsprop --optimizer-momentum 0.95 ...
 # ^^^ THOG
 
 if (( $# < 1 )); then
@@ -175,7 +175,15 @@ fi
 export THOG2_OPTIMIZER="$OPTIMIZER"
 export THOG2_OPTIMIZER_MOMENTUM="$OPTIMIZER_MOMENTUM"
 
+TARGET_ARGUMENTS=("${PRE_ARGS[@]}")
 if (( ${#EXTRA_ARGS[@]} > 0 )); then
-  exec "$TARGET_WRAPPER" "${PRE_ARGS[@]}" -- "${EXTRA_ARGS[@]}"
+  TARGET_ARGUMENTS+=(-- "${EXTRA_ARGS[@]}")
 fi
-exec "$TARGET_WRAPPER" "${PRE_ARGS[@]}"
+
+if [[ "${THOG2_SOURCE_OPTIMIZER_TARGET:-false}" == true ]]; then
+  set -- "${TARGET_ARGUMENTS[@]}"
+  source "$TARGET_WRAPPER"
+  return 0 2>/dev/null || exit 0
+fi
+
+exec "$TARGET_WRAPPER" "${TARGET_ARGUMENTS[@]}"
