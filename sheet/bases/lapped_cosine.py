@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Dict, Optional, Tuple
+from collections import deque
+from typing import Deque, Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -12,13 +13,18 @@ from .protocol import BasisDefinition, BasisKernel, DeviceLike, validate_floatin
 
 
 BASIS_FAMILY_LAPPED_COSINE = "lapped_cosine"
-LAPPED_COSINE_BASIS_VERSION = "lapped_cosine_balanced_orthonormal_v1"
+LAPPED_COSINE_BASIS_VERSION = "lapped_cosine_dc_preserving_orthonormal_v1"
 BASIS_ARTIFACT_TAG_LAPPED_COSINE = "LAPPED_COSINE"
 DEFAULT_LAPPED_COSINE_WINDOW_LENGTH = 36
 DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION = 0.5
+_BOUNDARY_PREFILTER_ANGLE = math.pi / 4.0
 _VERSION_PATTERN = re.compile(
     rf"^{re.escape(LAPPED_COSINE_BASIS_VERSION)}_w(?P<window>[1-9][0-9]*)_o(?P<overlap_millis>[0-9]{{3}})$"
 )
+
+
+ColumnDescriptor = Tuple[str, int, int]
+BlockInterval = Tuple[int, int]
 
 
 def validate_lapped_cosine_controls(window_length: int, overlap_fraction: float) -> None:
@@ -132,10 +138,27 @@ def _validate_sample_indices(sample_indices: Tensor) -> int:
     return sample_count
 
 
+def _dct_ii_orthonormal_basis(
+    sample_count: int,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    validate_positive_integer("sample_count", sample_count)
+    sample_indices = torch.arange(sample_count, dtype=dtype, device=device).unsqueeze(1)
+    mode_indices = torch.arange(sample_count, dtype=dtype, device=device).unsqueeze(0)
+    angles = math.pi * (sample_indices + 0.5) * mode_indices / float(sample_count)
+    basis = torch.cos(angles)
+    basis[:, 0] *= math.sqrt(1.0 / float(sample_count))
+    if sample_count > 1:
+        basis[:, 1:] *= math.sqrt(2.0 / float(sample_count))
+    return basis
+
+
 def lapped_cosine_block_layout(
     sample_count: int,
     window_length: int,
-) -> Tuple[Tuple[int, int], ...]:
+) -> Tuple[BlockInterval, ...]:
     validate_positive_integer("sample_count", sample_count)
     validate_lapped_cosine_controls(
         window_length,
@@ -155,20 +178,26 @@ def lapped_cosine_column_schedule(
     sample_count: int,
     order: int,
     window_length: int,
-) -> Tuple[Tuple[int, int], ...]:
+) -> Tuple[ColumnDescriptor, ...]:
     validate_positive_integer("order", order)
     if order > sample_count:
         raise ValueError(
             f"order must not exceed sample_count; got order={order}, sample_count={sample_count}"
         )
     blocks = lapped_cosine_block_layout(sample_count, window_length)
+    schedule = [
+        ("coarse", coarse_index, 0)
+        for coarse_index in range(min(order, len(blocks)))
+    ]
+    if len(schedule) == order:
+        return tuple(schedule)
+
     maximum_block_length = max(end - start for start, end in blocks)
-    schedule = []
-    for local_mode in range(maximum_block_length):
+    for local_mode in range(1, maximum_block_length):
         for block_index, (start, end) in enumerate(blocks):
             if local_mode >= end - start:
                 continue
-            schedule.append((block_index, local_mode))
+            schedule.append(("detail", block_index, local_mode))
             if len(schedule) == order:
                 return tuple(schedule)
     raise RuntimeError(
@@ -176,21 +205,73 @@ def lapped_cosine_column_schedule(
     )
 
 
-def _dct_iv_column(
+def _weighted_balanced_block_mean_basis(
     sample_count: int,
-    local_mode: int,
+    blocks: Tuple[BlockInterval, ...],
     *,
     dtype: torch.dtype,
     device: torch.device,
 ) -> Tensor:
-    local_indices = torch.arange(sample_count, dtype=dtype, device=device)
-    angles = (
-        math.pi
-        * (local_indices + 0.5)
-        * (float(local_mode) + 0.5)
-        / float(sample_count)
+    block_count = len(blocks)
+    basis = torch.zeros((sample_count, block_count), dtype=dtype, device=device)
+    basis[:, 0] = 1.0 / math.sqrt(float(sample_count))
+    if block_count == 1:
+        return basis
+
+    intervals: Deque[Tuple[int, int]] = deque([(0, block_count)])
+    column_index = 1
+    while intervals and column_index < block_count:
+        first_block, final_block = intervals.popleft()
+        interval_block_count = final_block - first_block
+        if interval_block_count < 2:
+            continue
+        split_block = first_block + interval_block_count // 2
+        left_start = blocks[first_block][0]
+        left_end = blocks[split_block - 1][1]
+        right_start = blocks[split_block][0]
+        right_end = blocks[final_block - 1][1]
+        left_count = left_end - left_start
+        right_count = right_end - right_start
+        interval_count = left_count + right_count
+        left_value = math.sqrt(float(right_count) / float(left_count * interval_count))
+        right_value = -math.sqrt(float(left_count) / float(right_count * interval_count))
+        basis[left_start:left_end, column_index] = left_value
+        basis[right_start:right_end, column_index] = right_value
+        column_index += 1
+        if split_block - first_block > 1:
+            intervals.append((first_block, split_block))
+        if final_block - split_block > 1:
+            intervals.append((split_block, final_block))
+
+    if column_index != block_count:
+        raise RuntimeError(
+            f"weighted block-mean construction produced {column_index} columns; "
+            f"expected {block_count}"
+        )
+    return basis
+
+
+def _dc_preserving_boundary_prefilter(
+    sample_count: int,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    cosine_basis = _dct_ii_orthonormal_basis(
+        sample_count,
+        dtype=dtype,
+        device=device,
     )
-    return math.sqrt(2.0 / float(sample_count)) * torch.cos(angles)
+    mode_rotation = torch.eye(sample_count, dtype=dtype, device=device)
+    cosine = math.cos(_BOUNDARY_PREFILTER_ANGLE)
+    sine = math.sin(_BOUNDARY_PREFILTER_ANGLE)
+    for first_mode in range(1, sample_count - 1, 2):
+        second_mode = first_mode + 1
+        mode_rotation[first_mode, first_mode] = cosine
+        mode_rotation[first_mode, second_mode] = -sine
+        mode_rotation[second_mode, first_mode] = sine
+        mode_rotation[second_mode, second_mode] = cosine
+    return cosine_basis @ mode_rotation @ cosine_basis.transpose(0, 1)
 
 
 def lapped_cosine_orthonormal_raw_basis(
@@ -209,20 +290,36 @@ def lapped_cosine_orthonormal_raw_basis(
     validate_lapped_cosine_controls(window_length, overlap_fraction)
     blocks = lapped_cosine_block_layout(sample_count, window_length)
     schedule = lapped_cosine_column_schedule(sample_count, order, window_length)
+    coarse_basis = _weighted_balanced_block_mean_basis(
+        sample_count,
+        blocks,
+        dtype=sample_indices.dtype,
+        device=sample_indices.device,
+    )
+    local_bases = {
+        block_index: _dct_ii_orthonormal_basis(
+            end - start,
+            dtype=sample_indices.dtype,
+            device=sample_indices.device,
+        )
+        for block_index, (start, end) in enumerate(blocks)
+    }
     basis = torch.zeros(
         (sample_count, order),
         dtype=sample_indices.dtype,
         device=sample_indices.device,
     )
 
-    for column_index, (block_index, local_mode) in enumerate(schedule):
-        start, end = blocks[block_index]
-        basis[start:end, column_index] = _dct_iv_column(
-            end - start,
-            local_mode,
-            dtype=sample_indices.dtype,
-            device=sample_indices.device,
-        )
+    for column_index, (column_kind, block_or_coarse_index, local_mode) in enumerate(schedule):
+        if column_kind == "coarse":
+            basis[:, column_index] = coarse_basis[:, block_or_coarse_index]
+            continue
+        if column_kind != "detail":
+            raise RuntimeError(f"unknown lapped cosine column kind: {column_kind!r}")
+        block_start, block_end = blocks[block_or_coarse_index]
+        basis[block_start:block_end, column_index] = local_bases[block_or_coarse_index][
+            :, local_mode
+        ]
 
     for boundary_index in range(len(blocks) - 1):
         left_start, left_end = blocks[boundary_index]
@@ -230,17 +327,22 @@ def lapped_cosine_orthonormal_raw_basis(
         lap_count = min(left_end - left_start, right_end - right_start) // 2
         if lap_count == 0:
             continue
-        for lap_index in range(lap_count):
-            left_index = left_end - lap_count + lap_index
-            right_index = right_start + lap_index
-            angle = math.pi * (float(lap_index) + 0.5) / (2.0 * float(lap_count))
-            cosine = math.cos(angle)
-            sine = math.sin(angle)
-            left_values = basis[left_index].clone()
-            right_values = basis[right_index].clone()
-            basis[left_index] = cosine * left_values + sine * right_values
-            basis[right_index] = -sine * left_values + cosine * right_values
+        boundary_indices = torch.tensor(
+            [
+                *range(left_end - lap_count, left_end),
+                *range(right_start, right_start + lap_count),
+            ],
+            dtype=torch.long,
+            device=sample_indices.device,
+        )
+        prefilter = _dc_preserving_boundary_prefilter(
+            2 * lap_count,
+            dtype=sample_indices.dtype,
+            device=sample_indices.device,
+        )
+        basis[boundary_indices] = prefilter @ basis[boundary_indices]
 
+    basis[:, 0] = 1.0 / math.sqrt(float(sample_count))
     return basis
 
 
@@ -250,7 +352,7 @@ class LappedCosineOrthonormalBasisKernel(BasisKernel):
             basis_family=BASIS_FAMILY_LAPPED_COSINE,
             basis_version=LAPPED_COSINE_BASIS_VERSION,
             coordinate_policy="integer_sample_index_balanced_local_blocks_v1",
-            stabilization_policy="closed_form_dct_iv_with_orthogonal_boundary_rotations_no_qr_v1",
+            stabilization_policy="weighted_block_means_dct_ii_dc_preserving_boundary_prefilter_no_qr_v1",
         )
 
     def normalize_version(self, version: Optional[str]) -> str:
@@ -331,7 +433,8 @@ class LappedCosineOrthonormalBasisKernel(BasisKernel):
             "default_window_length": DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
             "default_overlap_fraction": DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,
             "boundary_policy": "finite_non_circular_v1",
-            "coefficient_ordering": "local_mode_then_block_v1",
+            "coefficient_ordering": "global_dc_block_means_then_local_mode_by_block_v1",
+            "initialization_contract": "normalized_global_dc_first_column_v1",
         }
 
 
