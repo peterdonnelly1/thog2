@@ -1,8 +1,8 @@
 # vvv THOG
 from __future__ import annotations
 
+import math
 import unittest
-from pathlib import Path
 
 import torch
 
@@ -48,8 +48,37 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
                     atol=5.0e-12,
                 )
 
-    def test_02_large_thog_axes_have_orthonormal_retained_columns(self) -> None:
-        for sample_count, order in ((768, 96), (3072, 128)):
+    def test_02_first_column_is_the_exact_global_dc_initialization_direction(self) -> None:
+        for sample_count, window_length in (
+            (1, 36),
+            (8, 8),
+            (17, 12),
+            (72, 24),
+            (144, 36),
+            (768, 48),
+        ):
+            with self.subTest(sample_count=sample_count, window_length=window_length):
+                version = lapped_cosine_basis_version(window_length, 0.5)
+                basis = build_registered_basis(
+                    sample_count,
+                    min(sample_count, 16),
+                    basis_family=BASIS_FAMILY_LAPPED_COSINE,
+                    version=version,
+                )
+                expected = torch.full(
+                    (sample_count,),
+                    1.0 / math.sqrt(float(sample_count)),
+                    dtype=torch.float64,
+                )
+                torch.testing.assert_close(
+                    basis[:, 0],
+                    expected,
+                    rtol=0.0,
+                    atol=2.0e-15,
+                )
+
+    def test_03_large_thog_axes_have_orthonormal_retained_columns(self) -> None:
+        for sample_count, order in ((768, 96), (3072, 256)):
             with self.subTest(sample_count=sample_count, order=order):
                 basis = build_registered_basis(
                     sample_count,
@@ -64,7 +93,7 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
                     atol=5.0e-12,
                 )
 
-    def test_03_basis_order_is_prefix_stable_and_balanced_across_blocks(self) -> None:
+    def test_04_basis_order_is_prefix_stable_and_balanced_across_blocks(self) -> None:
         full_basis = build_registered_basis(
             144,
             144,
@@ -78,26 +107,41 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
                     basis_family=BASIS_FAMILY_LAPPED_COSINE,
                 )
                 self.assertTrue(torch.equal(prefix, full_basis[:, :order]))
+
         blocks = lapped_cosine_block_layout(
             144,
             DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
         )
         schedule = lapped_cosine_column_schedule(
             144,
-            len(blocks),
+            2 * len(blocks),
             DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
         )
-        self.assertEqual(tuple(block_index for block_index, _ in schedule), tuple(range(len(blocks))))
-        self.assertTrue(all(local_mode == 0 for _, local_mode in schedule))
+        coarse = schedule[: len(blocks)]
+        first_detail_round = schedule[len(blocks) :]
+        self.assertEqual(
+            coarse,
+            tuple(("coarse", index, 0) for index in range(len(blocks))),
+        )
+        self.assertTrue(all(kind == "detail" for kind, _, _ in first_detail_round))
+        self.assertEqual(
+            {block_index for _, block_index, _ in first_detail_round},
+            set(range(len(blocks))),
+        )
+        self.assertTrue(all(local_mode == 1 for _, _, local_mode in first_detail_round))
 
-    def test_04_atoms_have_bounded_contiguous_support_and_no_circular_wrap(self) -> None:
+    def test_05_detail_atoms_have_bounded_contiguous_support_and_no_circular_wrap(self) -> None:
         basis = build_registered_basis(
             144,
             72,
             basis_family=BASIS_FAMILY_LAPPED_COSINE,
         )
+        blocks = lapped_cosine_block_layout(
+            144,
+            DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,
+        )
         tolerance = 1.0e-14
-        for column_index in range(basis.shape[1]):
+        for column_index in range(len(blocks), basis.shape[1]):
             indices = torch.nonzero(
                 torch.abs(basis[:, column_index]) > tolerance,
                 as_tuple=False,
@@ -113,7 +157,7 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
                 and bool(torch.abs(basis[-1, column_index]) > tolerance)
             )
 
-    def test_05_full_basis_reconstructs_vectors(self) -> None:
+    def test_06_full_basis_reconstructs_vectors(self) -> None:
         basis = build_registered_basis(
             72,
             72,
@@ -124,7 +168,7 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
         reconstructed = basis @ (basis.transpose(0, 1) @ vector)
         torch.testing.assert_close(reconstructed, vector, rtol=0.0, atol=5.0e-12)
 
-    def test_06_parameterised_version_changes_locality_and_is_canonical(self) -> None:
+    def test_07_parameterised_version_changes_locality_and_is_canonical(self) -> None:
         version = lapped_cosine_basis_version(48, 0.5)
         self.assertEqual(
             version,
@@ -136,19 +180,23 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
             basis_family=BASIS_FAMILY_LAPPED_COSINE,
             version=version,
         )
+        blocks = lapped_cosine_block_layout(144, 48)
         self.assertEqual(basis.shape, (144, 48))
         self.assertLessEqual(
             max(
                 int(indices[-1] - indices[0] + 1)
                 for indices in (
-                    torch.nonzero(torch.abs(basis[:, column]) > 1.0e-14, as_tuple=False).flatten()
-                    for column in range(basis.shape[1])
+                    torch.nonzero(
+                        torch.abs(basis[:, column]) > 1.0e-14,
+                        as_tuple=False,
+                    ).flatten()
+                    for column in range(len(blocks), basis.shape[1])
                 )
             ),
             48,
         )
 
-    def test_07_registry_alias_metadata_and_artifact_contract(self) -> None:
+    def test_08_registry_alias_metadata_and_artifact_contract(self) -> None:
         for alias in (
             BASIS_FAMILY_LAPPED_COSINE,
             "lapped",
@@ -179,8 +227,12 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
             DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,
         )
         self.assertEqual(metadata["boundary_policy"], "finite_non_circular_v1")
+        self.assertEqual(
+            metadata["initialization_contract"],
+            "normalized_global_dc_first_column_v1",
+        )
 
-    def test_08_construction_is_deterministic_and_runtime_cast_is_non_trainable(self) -> None:
+    def test_09_construction_is_deterministic_and_runtime_cast_is_non_trainable(self) -> None:
         version = lapped_cosine_basis_version(24, 0.5)
         first = build_registered_basis(
             144,
@@ -201,7 +253,7 @@ class LappedCosineBasisKernelTests(unittest.TestCase):
         self.assertFalse(first.requires_grad)
         self.assertTrue(torch.isfinite(first).all())
 
-    def test_09_invalid_controls_versions_and_indices_fail_explicitly(self) -> None:
+    def test_10_invalid_controls_versions_and_indices_fail_explicitly(self) -> None:
         indices = lapped_cosine_sample_indices(8)
         with self.assertRaisesRegex(ValueError, "even integer"):
             lapped_cosine_orthonormal_raw_basis(indices, 4, window_length=5)
