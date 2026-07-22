@@ -13,6 +13,7 @@ class OptimizerWrapperTests(unittest.TestCase):
         for filename in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
             path = ROOT / filename
             source = path.read_text(encoding="utf-8")
+            self.assertTrue(source.startswith("#!/bin/bash\nset -euo pipefail\n"))
             self.assertGreater(len(source.splitlines()), 400)
             self.assertIn("run_grid_point()", source)
             self.assertIn("-y NAME, --optimizer NAME", source)

@@ -1,3 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+
 # vvv THOG
 # Current dreedle OpenWebText training wrapper for the PICTON compact-geometry contract.
 # Dreedle runtime defaults: float16, sdpa. Dense baseline is available as -p dense.

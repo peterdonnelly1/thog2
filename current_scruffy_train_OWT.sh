@@ -1,3 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+
 # vvv THOG
 # Current scruffy OpenWebText training wrapper for the PICTON compact-geometry contract.
 # Scruffy runtime defaults: bfloat16, flash2. Dense baseline is available as -p dense.
