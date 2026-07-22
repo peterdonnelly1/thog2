@@ -7,6 +7,7 @@ set -euo pipefail
 #   -y / --optimizer: adamw | sgd | sgd_nesterov | adafactor | rmsprop
 #   --optimizer-momentum: momentum for SGD, Nesterov SGD, and RMSprop
 # Optimizer-specific -c/-f defaults are documented by current_scruffy_train_OWT.sh -h.
+# Optimizer controls pass through unchanged: -y/--optimizer and --optimizer-momentum.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
