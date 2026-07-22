@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+
+HEADER_TEMPLATE = """# vvv THOG
+# Current {host} OpenWebText training wrapper for the PICTON compact-geometry contract.
+# {runtime}. Dense baseline is available as -p dense.
+#
+# Optimizer selection is native to this full wrapper:
+#   -y NAME, --optimizer NAME
+#       adamw | sgd | sgd_nesterov | adafactor | rmsprop
+#       Aliases: adam; nesterov; sgd-nesterov.
+#   --optimizer-momentum VALUE
+#       Momentum for sgd, sgd_nesterov, and rmsprop. Default: 0.9.
+#
+# Optimizer-specific learning-rate defaults apply only when -c and/or -f are omitted:
+#   optimizer       -c / maximum LR       -f / minimum LR
+#   adamw             60 / 6.0e-4           06 / 6.0e-5
+#   sgd             1000 / 1.0e-2          100 / 1.0e-3
+#   sgd_nesterov    1000 / 1.0e-2          100 / 1.0e-3
+#   adafactor       1000 / 1.0e-2          100 / 1.0e-3
+#   rmsprop          100 / 1.0e-3           10 / 1.0e-4
+#
+# Explicit -c and -f values override those defaults independently. Lowercase -c is
+# the learning-rate code; capital -C remains the context length. Non-AdamW runs add
+# OPT_<OPTIMIZER> to the artifact suffix to prevent otherwise identical collisions.
+# ^^^ THOG"""
+
+OPTIMIZER_PARSE = r'''# vvv THOG native optimizer selection; strip optimizer-only controls before canonical getopts parsing
+OPTIMIZER="${THOG2_OPTIMIZER:-adamw}"
+OPTIMIZER_MOMENTUM="${THOG2_OPTIMIZER_MOMENTUM:-0.9}"
+OPTIMIZER_LR_EXPLICIT=false
+OPTIMIZER_MIN_LR_EXPLICIT=false
+OPTIMIZER_FILTERED_ARGS=()
+OPTIMIZER_SAW_SEPARATOR=false
+while (( $# > 0 )); do
+  if [[ "$OPTIMIZER_SAW_SEPARATOR" == true ]]; then
+    OPTIMIZER_FILTERED_ARGS+=("$1")
+    shift
+    continue
+  fi
+  case "$1" in
+    -y|--optimizer)
+      (( $# >= 2 )) || { echo "$1 requires an optimizer name" >&2; exit 2; }
+      OPTIMIZER="$2"
+      shift 2
+      ;;
+    --optimizer=*)
+      OPTIMIZER="${1#*=}"
+      shift
+      ;;
+    --optimizer-momentum)
+      (( $# >= 2 )) || { echo "$1 requires a numeric value" >&2; exit 2; }
+      OPTIMIZER_MOMENTUM="$2"
+      shift 2
+      ;;
+    --optimizer-momentum=*)
+      OPTIMIZER_MOMENTUM="${1#*=}"
+      shift
+      ;;
+    -c)
+      (( $# >= 2 )) || { echo "-c requires a learning-rate code" >&2; exit 2; }
+      OPTIMIZER_LR_EXPLICIT=true
+      OPTIMIZER_FILTERED_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    -f)
+      (( $# >= 2 )) || { echo "-f requires a minimum-learning-rate code" >&2; exit 2; }
+      OPTIMIZER_MIN_LR_EXPLICIT=true
+      OPTIMIZER_FILTERED_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --)
+      OPTIMIZER_FILTERED_ARGS+=("--")
+      OPTIMIZER_SAW_SEPARATOR=true
+      shift
+      ;;
+    *)
+      OPTIMIZER_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${OPTIMIZER_FILTERED_ARGS[@]}"
+
+case "${OPTIMIZER,,}" in
+  adam|adamw)
+    OPTIMIZER="adamw"; OPTIMIZER_DEFAULT_LR_CODE="60"; OPTIMIZER_DEFAULT_MIN_LR_CODE="06" ;;
+  sgd)
+    OPTIMIZER="sgd"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  nesterov|sgd-nesterov|sgd_nesterov)
+    OPTIMIZER="sgd_nesterov"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  adafactor)
+    OPTIMIZER="adafactor"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  rmsprop)
+    OPTIMIZER="rmsprop"; OPTIMIZER_DEFAULT_LR_CODE="100"; OPTIMIZER_DEFAULT_MIN_LR_CODE="10" ;;
+  *)
+    echo "Unsupported optimizer: $OPTIMIZER" >&2
+    echo "Expected: adamw | sgd | sgd_nesterov | adafactor | rmsprop" >&2
+    exit 2
+    ;;
+esac
+[[ "$OPTIMIZER_LR_EXPLICIT" == true ]] || LEARNING_RATE_CODES="$OPTIMIZER_DEFAULT_LR_CODE"
+[[ "$OPTIMIZER_MIN_LR_EXPLICIT" == true ]] || MIN_LR_CODE="$OPTIMIZER_DEFAULT_MIN_LR_CODE"
+export THOG2_OPTIMIZER="$OPTIMIZER"
+export THOG2_OPTIMIZER_MOMENTUM="$OPTIMIZER_MOMENTUM"
+# ^^^ THOG'''
+
+HELP = """  -y OPTIMIZER=${OPTIMIZER}                         adamw | sgd | sgd_nesterov | adafactor | rmsprop
+  --optimizer-momentum VALUE=${OPTIMIZER_MOMENTUM}  momentum for SGD/Nesterov/RMSprop
+                                                     defaults: adamw 60/06; sgd 1000/100;
+                                                     sgd_nesterov 1000/100; adafactor 1000/100;
+                                                     rmsprop 100/10. Explicit -c/-f override independently."""
+
+SUFFIX = r'''# vvv THOG make optimizer identity collision-safe in artifact naming
+if [[ "$OPTIMIZER" != "adamw" ]]; then
+  OPTIMIZER_SUFFIX="OPT_${OPTIMIZER^^}"
+  OPTIMIZER_UPDATED_EXTRA_ARGS=()
+  OPTIMIZER_FOUND_ARTIFACT_SUFFIX=false
+  for (( optimizer_index=0; optimizer_index < ${#EXTRA_ARGS[@]}; optimizer_index++ )); do
+    optimizer_argument="${EXTRA_ARGS[optimizer_index]}"
+    case "$optimizer_argument" in
+      --artifact-suffix)
+        (( optimizer_index + 1 < ${#EXTRA_ARGS[@]} )) || { echo "--artifact-suffix requires a value" >&2; exit 2; }
+        OPTIMIZER_UPDATED_EXTRA_ARGS+=("--artifact-suffix" "${EXTRA_ARGS[optimizer_index + 1]}_${OPTIMIZER_SUFFIX}")
+        optimizer_index=$((optimizer_index + 1))
+        OPTIMIZER_FOUND_ARTIFACT_SUFFIX=true
+        ;;
+      --artifact-suffix=*)
+        OPTIMIZER_UPDATED_EXTRA_ARGS+=("--artifact-suffix=${optimizer_argument#*=}_${OPTIMIZER_SUFFIX}")
+        OPTIMIZER_FOUND_ARTIFACT_SUFFIX=true
+        ;;
+      *)
+        OPTIMIZER_UPDATED_EXTRA_ARGS+=("$optimizer_argument")
+        ;;
+    esac
+  done
+  if [[ "$OPTIMIZER_FOUND_ARTIFACT_SUFFIX" == false ]]; then
+    OPTIMIZER_UPDATED_EXTRA_ARGS+=("--artifact-suffix" "$OPTIMIZER_SUFFIX")
+  fi
+  EXTRA_ARGS=("${OPTIMIZER_UPDATED_EXTRA_ARGS[@]}")
+fi
+# ^^^ THOG'''
+
+
+def integrate(source: Path, destination: Path, *, host: str, runtime: str) -> None:
+    text = source.read_text(encoding="utf-8")
+
+    old_header_end = text.index("# ^^^ THOG") + len("# ^^^ THOG")
+    text = HEADER_TEMPLATE.format(host=host, runtime=runtime) + text[old_header_end:]
+
+    marker = "N_EMBD_EXPLICIT=false\n\nusage() {"
+    if marker not in text:
+        raise RuntimeError(f"missing optimizer insertion marker in {source}")
+    text = text.replace(
+        marker,
+        "N_EMBD_EXPLICIT=false\n\n" + OPTIMIZER_PARSE + "\n\nusage() {",
+        1,
+    )
+
+    help_marker = "  -G NUM_GPUS=${NUM_GPUS}\n\nSchedule/logging:"
+    if help_marker not in text:
+        raise RuntimeError(f"missing help insertion marker in {source}")
+    text = text.replace(
+        help_marker,
+        "  -G NUM_GPUS=${NUM_GPUS}\n" + HELP + "\n\nSchedule/logging:",
+        1,
+    )
+
+    extra_marker = 'EXTRA_ARGS=("$@")\nEXPERIMENT_PREFIX='
+    if extra_marker not in text:
+        raise RuntimeError(f"missing suffix insertion marker in {source}")
+    text = text.replace(
+        extra_marker,
+        'EXTRA_ARGS=("$@")\n' + SUFFIX + "\nEXPERIMENT_PREFIX=",
+        1,
+    )
+
+    summary_marker = "  optimizer:          lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value"
+    if summary_marker not in text:
+        raise RuntimeError(f"missing optimizer summary marker in {source}")
+    text = text.replace(
+        summary_marker,
+        "  optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value",
+        1,
+    )
+
+    destination.write_text(text, encoding="utf-8")
+
+
+integrate(
+    ROOT / "tmp_scruffy_wrapper_source.sh",
+    ROOT / "current_scruffy_train_OWT.sh",
+    host="scruffy",
+    runtime="Scruffy runtime defaults: bfloat16, flash2",
+)
+integrate(
+    ROOT / "tmp_dreedle_wrapper_source.sh",
+    ROOT / "current_dreedle_train_OWT.sh",
+    host="dreedle",
+    runtime="Dreedle runtime defaults: float16, sdpa",
+)
+
+passthrough_updates = {
+    "current_scruffy_train_DENSE_OWT.sh": "# Optimizer controls pass through unchanged: -y/--optimizer and --optimizer-momentum.",
+    "current_scruffy_train_SHEET_OWT.sh": "# Optimizer controls pass through unchanged: -y/--optimizer and --optimizer-momentum.",
+    "scripts/current_scruffy_train_OWT.sh": "# Optimizer controls pass through unchanged: -y/--optimizer and --optimizer-momentum.",
+}
+for filename, comment in passthrough_updates.items():
+    path = ROOT / filename
+    if not path.exists():
+        continue
+    text = path.read_text(encoding="utf-8")
+    if comment not in text:
+        marker = "# ^^^ THOG"
+        text = text.replace(marker, comment + "\n" + marker, 1)
+        path.write_text(text, encoding="utf-8")
+
+for filename in (
+    ".current_scruffy_train_OWT_impl",
+    ".current_scruffy_train_OWT_body",
+    ".current_dreedle_train_OWT_impl",
+    ".current_dreedle_train_OWT_body",
+    "optimizer_train_OWT_wrapper.sh",
+    "current_scruffy_train_OWT_optimizer.sh",
+    "current_dreedle_train_OWT_optimizer.sh",
+    "tmp_scruffy_wrapper_source.sh",
+    "tmp_dreedle_wrapper_source.sh",
+    "tmp_scruffy_wrapper_source2.sh",
+    "tmp_wrapper_recovery_note.txt",
+    ".wrapper_repair_trigger",
+    ".github/workflows/repair_optimizer_wrappers.yml",
+):
+    path = ROOT / filename
+    if path.exists():
+        path.unlink()
+
+(ROOT / "tests/test_optimizer_wrapper.py").write_text(
+    '''from __future__ import annotations
+
+import subprocess
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class OptimizerWrapperTests(unittest.TestCase):
+    def test_full_wrappers_retain_body_and_native_optimizer_help(self) -> None:
+        for filename in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+            path = ROOT / filename
+            source = path.read_text(encoding="utf-8")
+            self.assertGreater(len(source.splitlines()), 400)
+            self.assertIn("run_grid_point()", source)
+            self.assertIn("-y NAME, --optimizer NAME", source)
+            self.assertIn('export THOG2_OPTIMIZER="$OPTIMIZER"', source)
+            self.assertNotIn(".current_", source)
+            self.assertNotIn("optimizer_train_OWT_wrapper.sh", source)
+
+    def test_shell_syntax(self) -> None:
+        subprocess.run(
+            ["bash", "-n", "current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"],
+            cwd=ROOT,
+            check=True,
+        )
+
+    def test_help_contains_old_and_new_controls(self) -> None:
+        for filename in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+            result = subprocess.run(
+                ["bash", filename, "-h"],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            self.assertIn("-p PRESET=", result.stdout)
+            self.assertIn("-B BASIS_FAMILY=", result.stdout)
+            self.assertIn("-y OPTIMIZER=", result.stdout)
+            self.assertIn("sgd_nesterov", result.stdout)
+            self.assertIn("capital -C", (ROOT / filename).read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+''',
+    encoding="utf-8",
+)
+
+for path in (ROOT / "current_scruffy_train_OWT.sh", ROOT / "current_dreedle_train_OWT.sh"):
+    path.chmod(path.stat().st_mode | 0o111)
