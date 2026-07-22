@@ -89,85 +89,10 @@ N_LAYER_EXPLICIT=false
 N_HEAD_EXPLICIT=false
 N_EMBD_EXPLICIT=false
 
-# vvv THOG native optimizer selection; strip optimizer-only controls before canonical option parsing
 OPTIMIZER="${THOG2_OPTIMIZER:-adamw}"
 OPTIMIZER_MOMENTUM="${THOG2_OPTIMIZER_MOMENTUM:-0.9}"
 OPTIMIZER_LR_EXPLICIT=false
 OPTIMIZER_MIN_LR_EXPLICIT=false
-OPTIMIZER_FILTERED_ARGS=()
-OPTIMIZER_SAW_SEPARATOR=false
-while (( $# > 0 )); do
-  if [[ "$OPTIMIZER_SAW_SEPARATOR" == true ]]; then
-    OPTIMIZER_FILTERED_ARGS+=("$1")
-    shift
-    continue
-  fi
-  case "$1" in
-    -y|--optimizer)
-      (( $# >= 2 )) || { echo "$1 requires an optimizer name" >&2; exit 2; }
-      OPTIMIZER="$2"
-      shift 2
-      ;;
-    --optimizer=*)
-      OPTIMIZER="${1#*=}"
-      shift
-      ;;
-    --optimizer-momentum)
-      (( $# >= 2 )) || { echo "$1 requires a numeric value" >&2; exit 2; }
-      OPTIMIZER_MOMENTUM="$2"
-      shift 2
-      ;;
-    --optimizer-momentum=*)
-      OPTIMIZER_MOMENTUM="${1#*=}"
-      shift
-      ;;
-    -c)
-      (( $# >= 2 )) || { echo "-c requires a learning-rate code" >&2; exit 2; }
-      OPTIMIZER_LR_EXPLICIT=true
-      OPTIMIZER_FILTERED_ARGS+=("$1" "$2")
-      shift 2
-      ;;
-    -f)
-      (( $# >= 2 )) || { echo "-f requires a minimum-learning-rate code" >&2; exit 2; }
-      OPTIMIZER_MIN_LR_EXPLICIT=true
-      OPTIMIZER_FILTERED_ARGS+=("$1" "$2")
-      shift 2
-      ;;
-    --)
-      OPTIMIZER_FILTERED_ARGS+=("--")
-      OPTIMIZER_SAW_SEPARATOR=true
-      shift
-      ;;
-    *)
-      OPTIMIZER_FILTERED_ARGS+=("$1")
-      shift
-      ;;
-  esac
-done
-set -- "${OPTIMIZER_FILTERED_ARGS[@]}"
-
-case "${OPTIMIZER,,}" in
-  adam|adamw)
-    OPTIMIZER="adamw"; OPTIMIZER_DEFAULT_LR_CODE="60"; OPTIMIZER_DEFAULT_MIN_LR_CODE="06" ;;
-  sgd)
-    OPTIMIZER="sgd"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
-  nesterov|sgd-nesterov|sgd_nesterov)
-    OPTIMIZER="sgd_nesterov"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
-  adafactor)
-    OPTIMIZER="adafactor"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
-  rmsprop)
-    OPTIMIZER="rmsprop"; OPTIMIZER_DEFAULT_LR_CODE="100"; OPTIMIZER_DEFAULT_MIN_LR_CODE="10" ;;
-  *)
-    echo "Unsupported optimizer: $OPTIMIZER" >&2
-    echo "Expected: adamw | sgd | sgd_nesterov | adafactor | rmsprop" >&2
-    exit 2
-    ;;
-esac
-[[ "$OPTIMIZER_LR_EXPLICIT" == true ]] || LEARNING_RATE_CODES="$OPTIMIZER_DEFAULT_LR_CODE"
-[[ "$OPTIMIZER_MIN_LR_EXPLICIT" == true ]] || MIN_LR_CODE="$OPTIMIZER_DEFAULT_MIN_LR_CODE"
-export THOG2_OPTIMIZER="$OPTIMIZER"
-export THOG2_OPTIMIZER_MOMENTUM="$OPTIMIZER_MOMENTUM"
-# ^^^ THOG
 
 usage() {
   cat <<EOF_USAGE
@@ -250,10 +175,52 @@ Paths:
 EOF_USAGE
 }
 
-while getopts ":q:g:n:b:c:f:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+# vvv THOG accept long optimizer controls without disturbing the established getopts contract
+OPTIMIZER_FILTERED_ARGS=()
+OPTIMIZER_SAW_SEPARATOR=false
+while (( $# > 0 )); do
+  if [[ "$OPTIMIZER_SAW_SEPARATOR" == true ]]; then
+    OPTIMIZER_FILTERED_ARGS+=("$1")
+    shift
+    continue
+  fi
+  case "$1" in
+    --optimizer)
+      (( $# >= 2 )) || { echo "--optimizer requires a name" >&2; exit 2; }
+      OPTIMIZER="$2"
+      shift 2
+      ;;
+    --optimizer=*)
+      OPTIMIZER="${1#*=}"
+      shift
+      ;;
+    --optimizer-momentum)
+      (( $# >= 2 )) || { echo "--optimizer-momentum requires a numeric value" >&2; exit 2; }
+      OPTIMIZER_MOMENTUM="$2"
+      shift 2
+      ;;
+    --optimizer-momentum=*)
+      OPTIMIZER_MOMENTUM="${1#*=}"
+      shift
+      ;;
+    --)
+      OPTIMIZER_FILTERED_ARGS+=("--")
+      OPTIMIZER_SAW_SEPARATOR=true
+      shift
+      ;;
+    *)
+      OPTIMIZER_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${OPTIMIZER_FILTERED_ARGS[@]}"
+# ^^^ THOG
+
+while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
-    n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG" ;; f) MIN_LR_CODE="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
+    n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG"; OPTIMIZER_LR_EXPLICIT=true ;; f) MIN_LR_CODE="$OPTARG"; OPTIMIZER_MIN_LR_EXPLICIT=true ;; y) OPTIMIZER="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
@@ -267,6 +234,31 @@ done
 shift $((OPTIND - 1))
 if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
+
+# vvv THOG normalize optimizer and apply its LR defaults only when -c/-f were omitted
+case "${OPTIMIZER,,}" in
+  adam|adamw)
+    OPTIMIZER="adamw"; OPTIMIZER_DEFAULT_LR_CODE="60"; OPTIMIZER_DEFAULT_MIN_LR_CODE="06" ;;
+  sgd)
+    OPTIMIZER="sgd"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  nesterov|sgd-nesterov|sgd_nesterov)
+    OPTIMIZER="sgd_nesterov"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  adafactor)
+    OPTIMIZER="adafactor"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
+  rmsprop)
+    OPTIMIZER="rmsprop"; OPTIMIZER_DEFAULT_LR_CODE="100"; OPTIMIZER_DEFAULT_MIN_LR_CODE="10" ;;
+  *)
+    echo "Unsupported optimizer: $OPTIMIZER" >&2
+    echo "Expected: adamw | sgd | sgd_nesterov | adafactor | rmsprop" >&2
+    exit 2
+    ;;
+esac
+[[ "$OPTIMIZER_LR_EXPLICIT" == true ]] || LEARNING_RATE_CODES="$OPTIMIZER_DEFAULT_LR_CODE"
+[[ "$OPTIMIZER_MIN_LR_EXPLICIT" == true ]] || MIN_LR_CODE="$OPTIMIZER_DEFAULT_MIN_LR_CODE"
+export THOG2_OPTIMIZER="$OPTIMIZER"
+export THOG2_OPTIMIZER_MOMENTUM="$OPTIMIZER_MOMENTUM"
+# ^^^ THOG
+
 # vvv THOG make optimizer identity collision-safe in artifact naming
 if [[ "$OPTIMIZER" != "adamw" ]]; then
   OPTIMIZER_SUFFIX="OPT_${OPTIMIZER^^}"
