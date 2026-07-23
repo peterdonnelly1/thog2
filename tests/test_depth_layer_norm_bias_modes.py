@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import torch
 
@@ -153,7 +154,15 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
         self.assertIn("_P_2_DLB_0_", first.artifact_name)
 
         torch.manual_seed(1234)
-        first_model = SheetGPT(first.to_training_config(vocab_size=32, world_size=1, out_dir=__import__("pathlib").Path("out-a")).model_arguments() and self._model_config())
+        first_model = SheetGPT(self._model_config(
+            base_row_order=1,
+            mlp_channel_order=1,
+            o_attn_d_model=1,
+            o_attn_qkv_per_channel=1,
+            o_attn_out_per_channel=1,
+            o_mlp_d_model=1,
+            o_mlp_hidden=1,
+        ))
         torch.manual_seed(1234)
         second_model = SheetGPT(self._model_config(
             base_row_order=999,
@@ -168,6 +177,22 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
         for name, value in first_model.state_dict().items():
             torch.testing.assert_close(value, second_model.state_dict()[name])
 
+    def test_parameter_accounting_does_not_double_count_conventional_vectors(self) -> None:
+        model = SheetGPT(self._model_config(compress=False))
+        trajectory = model.trajectory
+        report = model.parameter_report()
+        expected_total = (
+            sum(parameter.numel() for parameter in model.parameters())
+            - trajectory.sheet_parameter_count()
+            + trajectory.dense_equivalent_count()
+        )
+        self.assertEqual(report["dense_equivalent_total_parameters"], expected_total)
+        self.assertEqual(
+            trajectory.conventional_repeated_parameter_count()
+            + trajectory.dense_equivalent_count(),
+            trajectory.all_repeated_dense_equivalent_count(),
+        )
+
     def test_depth_mode_is_checkpoint_and_artifact_identity(self) -> None:
         conventional = self._run_config(compress=False)
         compressed = self._run_config(compress=True)
@@ -178,12 +203,12 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
         conventional_training = conventional.to_training_config(
             vocab_size=32,
             world_size=1,
-            out_dir=__import__("pathlib").Path("out-conventional"),
+            out_dir=Path("out-conventional"),
         )
         compressed_training = compressed.to_training_config(
             vocab_size=32,
             world_size=1,
-            out_dir=__import__("pathlib").Path("out-compressed"),
+            out_dir=Path("out-compressed"),
         )
         self.assertFalse(conventional_training.depth_compress_layer_norm_and_bias)
         self.assertTrue(compressed_training.depth_compress_layer_norm_and_bias)
