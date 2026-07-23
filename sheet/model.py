@@ -84,6 +84,7 @@ class SheetGPTConfig:
     attention_geometry: Optional[str] = None
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
     # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
@@ -108,6 +109,11 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias must be bool; "
+                f"got {self.depth_compress_layer_norm_and_bias!r}"
+            )
         if not isinstance(self.fast_discard, bool):
             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
@@ -118,8 +124,24 @@ class SheetGPTConfig:
             raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
         if not isinstance(self.vectorise_per_head_materialisation, bool):
             raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
-        geometry = self.sheet_geometry()
+
+        # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
         selectors = self.compact_selectors()
+        if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+            )
+        if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            self.base_row_order = 1
+            self.mlp_channel_order = 1
+            self.o_attn_d_model = 1
+            self.o_attn_qkv_per_channel = 1
+            self.o_attn_out_per_channel = 1
+            self.o_mlp_d_model = 1
+            self.o_mlp_hidden = 1
+        # ^^^ THOG
+
+        geometry = self.sheet_geometry()
         if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
             mlp_hidden_length = 4 * self.n_embd
             if mlp_hidden_length % self.mlp_hidden_group_size != 0:
@@ -210,6 +232,7 @@ class SheetGPT(nn.Module):
                 runtime_dtype=torch.float32,
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
+                depth_compress_layer_norm_and_bias=config.depth_compress_layer_norm_and_bias,                                                           # <<< THOG select conventional or pure-depth block vectors
             )
         else:
             self.trajectory = SheetTrajectory(
