@@ -31,7 +31,7 @@ from tests.stage4_test_support import stage4_training_config
 
 
 class PictonStage4DepthMaterializationTests(unittest.TestCase):
-    def depth_config(self) -> SheetGPTConfig:
+    def depth_config(self, *, compress_layer_norm_and_bias: bool = False) -> SheetGPTConfig:
         return SheetGPTConfig(
             block_size=8,
             vocab_size=32,
@@ -43,6 +43,7 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
             depth_order=3,
             base_row_order=8,
             geometry_preset=GEOMETRY_PRESET_DEPTH,
+            depth_compress_layer_norm_and_bias=compress_layer_norm_and_bias,
         )
 
     def test_picton_01_depth_config_identity_is_accepted_for_chebyshev_and_dct(self) -> None:
@@ -67,7 +68,12 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
 
     def test_picton_02_depth_trajectory_has_depth_only_matrix_coefficients_and_no_packed_qkv_parameter(self) -> None:
         config = self.depth_config()
-        trajectory = DepthTrajectory(config.sheet_geometry(), runtime_dtype=torch.float32, basis_version=config.basis_version)
+        trajectory = DepthTrajectory(
+            config.sheet_geometry(),
+            runtime_dtype=torch.float32,
+            basis_version=config.basis_version,
+            depth_compress_layer_norm_and_bias=False,
+        )
         expected_shapes = {
             ATTENTION_QUERY_WEIGHT: (16, 16, 3),
             ATTENTION_KEY_WEIGHT: (16, 16, 3),
@@ -81,10 +87,17 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(tuple(trajectory.coefficients[name].shape), shape)
         self.assertNotIn(LEGACY_ATTENTION_INPUT_WEIGHT, trajectory.coefficients)
+        self.assertEqual(tuple(trajectory.coefficients[LEGACY_ATTENTION_INPUT_BIAS].shape), (4, 1, 48))
+        self.assertEqual(set(dict(trajectory.bases.named_buffers())), {"depth_basis"})
 
     def test_picton_03_depth_contraction_direct_value_and_packed_qkv_boundary_are_exact(self) -> None:
         config = self.depth_config()
-        trajectory = DepthTrajectory(config.sheet_geometry(), runtime_dtype=torch.float32, basis_version=config.basis_version)
+        trajectory = DepthTrajectory(
+            config.sheet_geometry(),
+            runtime_dtype=torch.float32,
+            basis_version=config.basis_version,
+            depth_compress_layer_norm_and_bias=False,
+        )
         with torch.no_grad():
             for family in DEPTH_MATRIX_FAMILIES:
                 trajectory.coefficients[family].zero_()
@@ -114,12 +127,10 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
         torch.testing.assert_close(packed, reconstructed, rtol=0.0, atol=0.0)
         self.assertEqual(tuple(trajectory.materialize_vector(LEGACY_ATTENTION_INPUT_BIAS, layer_index).shape), (3 * config.n_embd,))
 
-    def test_picton_04_depth_parameter_report_counts_only_depth_matrices_plus_legacy_vectors(self) -> None:
-        torch.manual_seed(4101)
-        model = SheetGPT(self.depth_config())
-        report = model.parameter_report()
-        width = model.config.n_embd
-        depth_order = model.config.depth_order
+    def test_picton_04_depth_parameter_report_counts_default_and_optional_vector_modes_exactly(self) -> None:
+        width = 16
+        depth_order = 3
+        layer_count = 4
         depth_matrix_coefficients = depth_order * (
             width * width
             + width * width
@@ -128,17 +139,51 @@ class PictonStage4DepthMaterializationTests(unittest.TestCase):
             + (4 * width) * width
             + width * (4 * width)
         )
-        legacy_vector_coefficients = 312
-        conventional_parameters = 672
+        per_layer_vector_parameters = (
+            width
+            + width
+            + width
+            + width
+            + 3 * width
+            + width
+            + 4 * width
+            + width
+        )
+        conventional_external_parameters = 672
+        conventional_repeated_vectors = layer_count * per_layer_vector_parameters
+        pure_depth_vector_coefficients = depth_order * per_layer_vector_parameters
         self.assertEqual(depth_matrix_coefficients, 9216)
-        self.assertEqual(report["matrix_sheet_coefficients"], depth_matrix_coefficients)
-        self.assertEqual(report["sheet_coefficients"], depth_matrix_coefficients + legacy_vector_coefficients)
-        self.assertEqual(report["persistent_parameters"], depth_matrix_coefficients + legacy_vector_coefficients + conventional_parameters)
-        parameter_names = tuple(name for group in model.optimizer_parameter_groups(0.1) for name in group["parameter_names"])
-        self.assertIn("trajectory.coefficients.attention_query_weight", parameter_names)
-        self.assertIn("trajectory.coefficients.mlp_contraction_weight", parameter_names)
-        self.assertNotIn("trajectory.coefficients.attention_input_weight", parameter_names)
-        self.assertEqual(model.compact_state_violations(), ())
+        self.assertEqual(per_layer_vector_parameters, 208)
+        self.assertEqual(conventional_repeated_vectors, 832)
+        self.assertEqual(pure_depth_vector_coefficients, 624)
+
+        default_model = SheetGPT(self.depth_config(compress_layer_norm_and_bias=False))
+        default_report = default_model.parameter_report()
+        self.assertEqual(default_report["matrix_sheet_coefficients"], depth_matrix_coefficients)
+        self.assertEqual(default_report["sheet_coefficients"], depth_matrix_coefficients)
+        self.assertEqual(
+            default_report["persistent_parameters"],
+            depth_matrix_coefficients + conventional_repeated_vectors + conventional_external_parameters,
+        )
+
+        compressed_model = SheetGPT(self.depth_config(compress_layer_norm_and_bias=True))
+        compressed_report = compressed_model.parameter_report()
+        self.assertEqual(compressed_report["matrix_sheet_coefficients"], depth_matrix_coefficients)
+        self.assertEqual(
+            compressed_report["sheet_coefficients"],
+            depth_matrix_coefficients + pure_depth_vector_coefficients,
+        )
+        self.assertEqual(
+            compressed_report["persistent_parameters"],
+            depth_matrix_coefficients + pure_depth_vector_coefficients + conventional_external_parameters,
+        )
+
+        for model in (default_model, compressed_model):
+            parameter_names = tuple(name for group in model.optimizer_parameter_groups(0.1) for name in group["parameter_names"])
+            self.assertIn("trajectory.coefficients.attention_query_weight", parameter_names)
+            self.assertIn("trajectory.coefficients.mlp_contraction_weight", parameter_names)
+            self.assertNotIn("trajectory.coefficients.attention_input_weight", parameter_names)
+            self.assertEqual(model.compact_state_violations(), ())
 
     def test_picton_05_depth_model_forward_backward_sends_gradients_to_qkv_coefficients(self) -> None:
         torch.manual_seed(4101)
