@@ -17,7 +17,16 @@ from .bases.lapped_cosine import (
     normalize_lapped_cosine_basis_version,
 )
 # ^^^ THOG
-from .compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_CONVENTIONAL, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, MLP_GEOMETRY_JPEG_LIKE_V1, compact_identity_metadata
+from .compact_identity import (
+    BASIS_FAMILY_CHEBYSHEV,
+    BASIS_FAMILY_CONVENTIONAL,
+    DEFAULT_MLP_HIDDEN_COMPRESSOR,
+    DEFAULT_MLP_HIDDEN_GROUP_SIZE,
+    GEOMETRY_PRESET_DEPTH,
+    MLP_GEOMETRY_JPEG_LIKE_V1,
+    compact_identity_metadata,
+    resolve_compact_selectors,
+)
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -30,8 +39,6 @@ from .training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 
 PUBLIC_MODEL_TYPES = ("dense", "sheet")
 INTERNAL_MODEL_TYPES = {"dense": "dense", "sheet": "thog2_sheet"}
-# vvv THOG basis artifact tags now come from the basis-family registry
-# ^^^ THOG
 DEFAULT_O_ATTN_D_MODEL = 64
 DEFAULT_O_ATTN_QKV_PER_CHANNEL = 6
 DEFAULT_O_ATTN_OUT_PER_CHANNEL = 6
@@ -77,6 +84,7 @@ class OwtRunConfig:
     o_mlp_hidden: int = DEFAULT_O_MLP_HIDDEN
     mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
     mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias participation switch
 
     geometry_preset: Optional[str] = GEOMETRY_PRESET_DEPTH
     attention_geometry: Optional[str] = None
@@ -138,11 +146,17 @@ class OwtRunConfig:
             raise ValueError("dtype must be float32, float16, or bfloat16")
         if self.device.startswith("cpu") and self.dtype == "float16":
             raise ValueError("float16 training is not supported on CPU")
+        if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias must be bool; "
+                f"got {self.depth_compress_layer_norm_and_bias!r}"
+            )
 
         object.__setattr__(self, "experiment_prefix", normalize_component(self.experiment_prefix, uppercase=True))
         object.__setattr__(self, "mlp_hidden_compressor", normalize_registered_basis_family(self.mlp_hidden_compressor))
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
+
         # vvv THOG derive and validate the parameterised lapped basis version from explicit controls
         requested_family = self.basis_family or BASIS_FAMILY_CHEBYSHEV
         canonical_family = (
@@ -168,19 +182,38 @@ class OwtRunConfig:
         else:
             if (
                 self.lapped_cosine_window_length != DEFAULT_LAPPED_COSINE_WINDOW_LENGTH
-                or abs(
-                    float(self.lapped_cosine_overlap_fraction)
-                    - DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION
-                )
-                > 1.0e-12
+                or abs(float(self.lapped_cosine_overlap_fraction) - DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION) > 1.0e-12
             ):
                 raise ValueError(
-                    "lapped cosine controls may be changed only when "
-                    "basis_family='lapped_cosine'"
+                    "lapped cosine controls may be changed only when basis_family='lapped_cosine'"
                 )
             if self.basis_version == "auto":
                 resolved_version = BASIS_VERSION if canonical_family == BASIS_FAMILY_CONVENTIONAL else basis_version_for_family(canonical_family)
                 object.__setattr__(self, "basis_version", resolved_version)
+        # ^^^ THOG
+
+        # vvv THOG DEPTH has no within-tensor order controls; canonicalize them before validation, naming, and checkpoint construction.
+        if self.model_type == "sheet":
+            selectors = resolve_compact_selectors(
+                geometry_preset=self.geometry_preset,
+                attention_geometry=self.attention_geometry,
+                mlp_geometry=self.mlp_geometry,
+                basis_family=self.basis_family,
+            )
+            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                object.__setattr__(self, "o_attn_d_model", 1)
+                object.__setattr__(self, "o_attn_qkv_per_channel", 1)
+                object.__setattr__(self, "o_attn_out_per_channel", 1)
+                object.__setattr__(self, "o_mlp_d_model", 1)
+                object.__setattr__(self, "o_mlp_hidden", 1)
+            elif self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+                )
+        elif self.depth_compress_layer_norm_and_bias:
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+            )
         # ^^^ THOG
 
         positive = (
@@ -333,25 +366,29 @@ class OwtRunConfig:
             fields.append(f"M_{self.max_wall_minutes}")
         # ^^^ THOG
         if self.model_type == "sheet":
-            fields.extend([
-                f"P_{self.o_depth}",
-                f"Q_{self.o_attn_d_model}",
-                f"J_{self.o_attn_qkv_per_channel}",
-                f"O_{self.o_attn_out_per_channel}",
-                f"X_{self.o_mlp_d_model}",
-                f"Y_{self.o_mlp_hidden}",
-            ])
-            if self.compact_identity()["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
+            identity = self.compact_identity()
+            fields.append(f"P_{self.o_depth}")
+            # vvv THOG DEPTH identity excludes semantically dead Q/J/O/X/Y controls and records the vector participation mode.
+            if identity["geometry_preset"] == GEOMETRY_PRESET_DEPTH:
+                fields.append(f"DLB_{int(self.depth_compress_layer_norm_and_bias)}")
+            else:
+                fields.extend([
+                    f"Q_{self.o_attn_d_model}",
+                    f"J_{self.o_attn_qkv_per_channel}",
+                    f"O_{self.o_attn_out_per_channel}",
+                    f"X_{self.o_mlp_d_model}",
+                    f"Y_{self.o_mlp_hidden}",
+                ])
+            # ^^^ THOG
+            if identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
                 fields.append(f"MHG_{self.mlp_hidden_group_size}")
             # vvv THOG lapped locality and overlap are visible in run identity
-            if self.compact_identity()["basis_family"] == BASIS_FAMILY_LAPPED_COSINE:
+            if identity["basis_family"] == BASIS_FAMILY_LAPPED_COSINE:
                 overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
-                fields.extend(
-                    [
-                        f"LCW_{self.lapped_cosine_window_length}",
-                        f"LCO_{overlap_percent}",
-                    ]
-                )
+                fields.extend([
+                    f"LCW_{self.lapped_cosine_window_length}",
+                    f"LCO_{overlap_percent}",
+                ])
             # ^^^ THOG
         fields.append(self.residual_init_artifact_fragment())
         fields.append(f"S_{self.checkpoint_segment_size}")
@@ -398,6 +435,7 @@ class OwtRunConfig:
                 "o_mlp_hidden": self.o_mlp_hidden,
                 "mlp_hidden_group_size": self.mlp_hidden_group_size,
                 "mlp_hidden_compressor": self.mlp_hidden_compressor,
+                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG checkpoint and model vector mode
                 "basis_version": self.basis_version,
                 "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                           # <<< THOG checkpoint locality control
                 "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                      # <<< THOG checkpoint overlap control
@@ -418,6 +456,7 @@ class OwtRunConfig:
                 "o_mlp_hidden": None,
                 "mlp_hidden_group_size": DEFAULT_MLP_HIDDEN_GROUP_SIZE,
                 "mlp_hidden_compressor": DEFAULT_MLP_HIDDEN_COMPRESSOR,
+                "depth_compress_layer_norm_and_bias": False,
                 "basis_version": BASIS_VERSION,
                 "geometry_preset": None,
                 "attention_geometry": None,
@@ -476,6 +515,7 @@ class OwtRunConfig:
                 "o_mlp_hidden",
                 "mlp_hidden_group_size",
                 "mlp_hidden_compressor",
+                "depth_compress_layer_norm_and_bias",
                 "geometry_preset",
                 "attention_geometry",
                 "mlp_geometry",
