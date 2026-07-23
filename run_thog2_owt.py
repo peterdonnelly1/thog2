@@ -126,14 +126,10 @@ class OwtTrainer(Stage6Trainer):
         # ^^^ THOG
         for row in result["updates"]:
             row["consumed_tokens"] *= multiplier
-            # vvv THOG resumed-session token counts are global under DDP
-            row["session_consumed_tokens"] *= multiplier
-            # ^^^ THOG
+            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
         for row in result["evaluations"]:
             row["consumed_tokens"] *= multiplier
-            # vvv THOG resumed-session token counts are global under DDP
-            row["session_consumed_tokens"] *= multiplier
-            # ^^^ THOG
+            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
         result["timing"]["tokens_per_training_second"] *= multiplier
         target = Path(arguments["result_path"])
         if self.distributed.is_primary:
@@ -227,6 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
     parser.add_argument("--mlp-hidden-group-size", type=int, default=DEFAULT_MLP_HIDDEN_GROUP_SIZE)
     parser.add_argument("--mlp-hidden-compressor", choices=BASIS_FAMILIES, default=DEFAULT_MLP_HIDDEN_COMPRESSOR)
+    parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                  # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
@@ -302,9 +299,7 @@ def configure_attention_backend(attention_backend: str) -> None:
 
 
 def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
-    # vvv THOG OwtRunConfig resolves auto after seeing basis-specific controls
-    basis_version = arguments.basis_version
-    # ^^^ THOG
+    basis_version = arguments.basis_version                                                                                                               # <<< THOG OwtRunConfig resolves auto after seeing basis-specific controls
     config = OwtRunConfig(
         model_type=arguments.model_type,
         run_mode=arguments.run_mode,
@@ -336,6 +331,7 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         o_mlp_hidden=arguments.o_mlp_hidden,
         mlp_hidden_group_size=arguments.mlp_hidden_group_size,
         mlp_hidden_compressor=arguments.mlp_hidden_compressor,
+        depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                 # <<< THOG CLI vector mode
         geometry_preset=arguments.geometry_preset,
         attention_geometry=arguments.attention_geometry,
         mlp_geometry=arguments.mlp_geometry,
@@ -397,7 +393,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
-        print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}", flush=True)
+        print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}", flush=True)  # <<< THOG show DEPTH vector mode
     print(flush=True)
 # ^^^ THOG
 
