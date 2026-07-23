@@ -1,0 +1,45 @@
+name: Apply JPEG_LIKE_V1 now
+
+on:
+  push:
+    branches: [BLOCK_enhancements_group]
+    paths: [.thog_apply_jpeg_like_v1_trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: BLOCK_enhancements_group
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply prepared implementation
+        run: |
+          base64 -d .thog_apply_script.py.gz.b64 | gzip -d > /tmp/apply_jpeg_like_v1.py
+          python /tmp/apply_jpeg_like_v1.py
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch numpy pytest
+      - name: Compile and test
+        run: |
+          python -m compileall -q sheet run_thog2_owt.py tests
+          bash -n current_scruffy_train_OWT.sh
+          bash -n current_dreedle_train_OWT.sh
+          pytest -q
+      - name: Commit completed implementation
+        run: |
+          rm -f .thog_apply_script.py.gz.b64 .thog_apply_jpeg_like_v1_trigger
+          rm -f .github/workflows/apply_jpeg_like_v1_now.yml
+          find . -maxdepth 1 -name "*.sh" -exec chmod +x {} +
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Add JPEG_LIKE_V1 MLP hidden compressor'
+          git push origin HEAD:BLOCK_enhancements_group
