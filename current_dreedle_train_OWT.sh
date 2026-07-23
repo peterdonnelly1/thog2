@@ -76,6 +76,7 @@ O_ATTN_QKV_PER_CHANNEL=6
 O_ATTN_OUT_PER_CHANNEL=6
 O_MLP_D_MODEL=64
 O_MLP_HIDDEN=256
+DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=false                                                                                                                  # <<< THOG DEPTH-only repeated LayerNorm/bias participation switch
 RESIDUAL_INIT_POLICY="depth_scaled"
 RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
@@ -164,7 +165,9 @@ Shape/runtime:
   -J O_ATTN_QKV_PER_CHANNEL=${O_ATTN_QKV_PER_CHANNEL}
   -O O_ATTN_OUT_PER_CHANNEL=${O_ATTN_OUT_PER_CHANNEL}
   -X O_MLP_D_MODEL=${O_MLP_D_MODEL}
-  -Y O_MLP_HIDDEN=${O_MLP_HIDDEN}
+  -Y O_MLP_HIDDEN=${O_MLP_HIDDEN}                    ignored by DEPTH
+  --depth-compress-layer-norm-and-bias                   DEPTH only; default false
+  --no-depth-compress-layer-norm-and-bias                DEPTH only; explicit default
   -S CHECKPOINT_SEGMENT_SIZE=${CHECKPOINT_SEGMENT_SIZE}
   -E FAST_DISCARD=${FAST_DISCARD}                   true | false
   -T DTYPE=${DTYPE}                                 float32 | float16 | bfloat16
@@ -196,6 +199,14 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
+    --depth-compress-layer-norm-and-bias)
+      DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=true
+      shift
+      ;;
+    --no-depth-compress-layer-norm-and-bias)
+      DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=false
+      shift
+      ;;
     --optimizer)
       (( $# >= 2 )) || { echo "--optimizer requires a name" >&2; exit 2; }
       OPTIMIZER="$2"
@@ -335,6 +346,7 @@ LEARNING_RATE_CODE_VALUES=()                                                    
 HAS_DENSE_PRESET=false
 HAS_COMPACT_PRESET=false
 HAS_JPEG_LIKE_PRESET=false
+HAS_NON_DEPTH_COMPACT_PRESET=false                                                                                                                         # <<< THOG dead Q/J/O/X/Y controls must not constrain pure DEPTH runs
 parse_o_depth_values() {
   local normalized="${1//,/ }"
   local value
@@ -377,8 +389,9 @@ parse_geometry_preset_values() {
   for value in $normalized; do
     case "$value" in
       dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
-      legacy_sheet_col|depth|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
-      jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
+      depth) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      legacy_sheet_col|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
+      jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
       *) echo "Bad PRESET: $value" >&2; exit 2 ;;
     esac
   done
@@ -442,7 +455,10 @@ case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must
 case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_RENDERER must be matplotlib, plotly, or both." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
-for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
+for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
+if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
+  for setting in "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN"; do validate_positive_uint "$setting" "non-DEPTH compact order"; done
+fi
 # vvv THOG lapped cosine v1 accepts exactly 50 percent overlap
 case "$LAPPED_COSINE_OVERLAP_FRACTION" in
   .5|0.5|0.50|0.500) LAPPED_COSINE_OVERLAP_FRACTION="0.5" ;;
@@ -457,6 +473,7 @@ validate_true_false "$FAST_DISCARD" "FAST_DISCARD"
 validate_true_false "$BYPASS_SEMANTIC_QKV_ADAPTER" "BYPASS_SEMANTIC_QKV_ADAPTER"                                                                        # <<< THOG validate wrapper-only optimisation switch
 validate_true_false "$DIRECT_FACTORISED_MLP" "DIRECT_FACTORISED_MLP"                                                                                   # <<< THOG validate renamed exact MLP switch
 validate_true_false "$VECTORISE_PER_HEAD_MATERIALISATION" "VECTORISE_PER_HEAD_MATERIALISATION"                                                         # <<< THOG validate selectable head vectorisation
+validate_true_false "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" "DEPTH_COMPRESS_LAYER_NORM_AND_BIAS"                                                           # <<< THOG validate DEPTH vector participation switch
 validate_true_false "$DEPTH_CURVE_LOCAL_HTML" "DEPTH_CURVE_LOCAL_HTML"
 validate_true_false "$DRY_RUN" "DRY_RUN"
 
@@ -465,6 +482,8 @@ validate_true_false "$DRY_RUN" "DRY_RUN"
 HEAD_DIM=$((N_EMBD / N_HEAD))
 if [[ "$HAS_COMPACT_PRESET" == true ]]; then
   for value in "${O_DEPTH_VALUES[@]}"; do (( value <= N_LAYER )) || { echo "O_DEPTH must not exceed N_LAYER: P=${value}, L=${N_LAYER}." >&2; exit 2; }; done
+fi
+if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
   (( O_ATTN_D_MODEL <= N_EMBD )) || { echo "O_ATTN_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
   (( O_ATTN_QKV_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_QKV_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
   (( O_ATTN_OUT_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_OUT_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
@@ -476,6 +495,10 @@ if [[ "$HAS_COMPACT_PRESET" == true ]]; then
       (( O_MLP_HIDDEN <= group_size_value )) || { echo "O_MLP_HIDDEN/Y must not exceed MLP_HIDDEN_GROUP_SIZE: Y=$O_MLP_HIDDEN, group=$group_size_value." >&2; exit 2; }
     done
   fi
+fi
+if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true ) ]]; then
+  echo "--depth-compress-layer-norm-and-bias may be used only when every selected preset is depth." >&2
+  exit 2
 fi
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
@@ -533,11 +556,11 @@ run_grid_point() {
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode compact LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
-  local -a compact_args optional_args train_args command
+  local -a compact_args compact_order_args optional_args train_args command
 
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
-  optional_args=(); compact_args=()
+  optional_args=(); compact_args=(); compact_order_args=()
   if [[ "$geometry_preset_value" == dense ]]; then
     run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"
     [[ "$N_LAYER_EXPLICIT" == false ]] && n_layer_value=12
@@ -546,6 +569,7 @@ run_grid_point() {
     [[ "$residual_init_depth_source_value" == dof_implied_depth ]] && residual_init_depth_source_value="true_layer_depth"
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
     orders_summary="n/a"
+    compact_order_args=(--o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN")
   else
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
@@ -555,8 +579,19 @@ run_grid_point() {
     [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
     [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
-    orders_summary="P${o_depth_value} Q${O_ATTN_D_MODEL} J${O_ATTN_QKV_PER_CHANNEL} O${O_ATTN_OUT_PER_CHANNEL} X${O_MLP_D_MODEL} Y${O_MLP_HIDDEN}"
-    [[ "$geometry_preset_value" == jpeg_like_v1 ]] && orders_summary="${orders_summary} MHG${mlp_hidden_group_size_value}"
+    if [[ "$geometry_preset_value" == depth ]]; then
+      compact_order_args=(--o-depth "$o_depth_value" --o-attn-d-model 1 --o-attn-qkv-per-channel 1 --o-attn-out-per-channel 1 --o-mlp-d-model 1 --o-mlp-hidden 1)
+      orders_summary="P${o_depth_value} DLB=${DEPTH_COMPRESS_LAYER_NORM_AND_BIAS}"
+      if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true ]]; then
+        optional_args+=(--depth-compress-layer-norm-and-bias)
+      else
+        optional_args+=(--no-depth-compress-layer-norm-and-bias)
+      fi
+    else
+      compact_order_args=(--o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN")
+      orders_summary="P${o_depth_value} Q${O_ATTN_D_MODEL} J${O_ATTN_QKV_PER_CHANNEL} O${O_ATTN_OUT_PER_CHANNEL} X${O_MLP_D_MODEL} Y${O_MLP_HIDDEN}"
+      [[ "$geometry_preset_value" == jpeg_like_v1 ]] && orders_summary="${orders_summary} MHG${mlp_hidden_group_size_value}"
+    fi
   fi
 
   run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
@@ -566,7 +601,7 @@ run_grid_point() {
     --max-iters "$STEPS" --batch-size "$batch_size_value" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
     --eval-iters "$EVAL_ITERS" --eval-interval "$EVAL_INTERVAL" --log-interval "$LOG_INTERVAL" --checkpoint-interval "$CHECKPOINT_INTERVAL" --warmup-iters "$WARMUP_ITERS" --learning-rate "$learning_rate_value" --min-lr "$min_lr_value"
     --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE"
-    --o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN"
+    "${compact_order_args[@]}"
     "${compact_args[@]}" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
     --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${optional_args[@]}" "${EXTRA_ARGS[@]}"

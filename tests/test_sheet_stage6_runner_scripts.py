@@ -118,7 +118,6 @@ class RunnerScriptTests(unittest.TestCase):
             [
                 "-P",
                 "2",
-                "--",
                 "--depth-compress-layer-norm-and-bias",
             ],
         )

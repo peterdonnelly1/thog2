@@ -91,8 +91,8 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
 
         with torch.no_grad():
             trajectory.coefficients["ln_1_weight"][2, 0, 3] = 7.0
-        self.assertEqual(float(trajectory.materialize_vector("ln_1_weight", 2)[3]), 7.0)
-        self.assertEqual(float(trajectory.materialize_vector("ln_1_weight", 1)[3]), 1.0)
+        self.assertEqual(float(trajectory.materialize_vector("ln_1_weight", 2)[3].detach()), 7.0)
+        self.assertEqual(float(trajectory.materialize_vector("ln_1_weight", 1)[3].detach()), 1.0)
 
     def test_optional_mode_purely_depth_compresses_layer_norm_and_bias(self) -> None:
         config = self._model_config(compress=True)
