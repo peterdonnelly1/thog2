@@ -16,7 +16,15 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .checkpointing import validate_checkpoint_segment_size
-from .compact_identity import DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
+from .compact_identity import (
+    DEFAULT_MLP_HIDDEN_COMPRESSOR,
+    DEFAULT_MLP_HIDDEN_GROUP_SIZE,
+    GEOMETRY_PRESET_DEPTH,
+    compact_identity_metadata,
+    conventional_identity_metadata,
+    resolve_compact_selectors,
+    validate_dense_compact_fields,
+)
 from .geometry import derive_row_order
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 
@@ -44,6 +52,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "o_mlp_hidden",
     "mlp_hidden_group_size",
     "mlp_hidden_compressor",
+    "depth_compress_layer_norm_and_bias",                                                                                                               # <<< THOG DEPTH vector representation is checkpoint identity
     "residual_init_policy",
     "residual_init_depth_source",
     "residual_init_depth_value",
@@ -78,6 +87,7 @@ class TrainingConfig:
     o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
     mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
     mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias participation switch
     residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
@@ -122,6 +132,38 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         if self.model_type not in MODEL_TYPES:
             raise ValueError(f"model_type must be one of {MODEL_TYPES}; got {self.model_type!r}")
+        if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias must be bool; "
+                f"got {self.depth_compress_layer_norm_and_bias!r}"
+            )
+
+        # vvv THOG DEPTH ignores every within-tensor order; normalize before validation and checkpoint identity are derived.
+        if self.model_type == "thog2_sheet":
+            selectors = resolve_compact_selectors(
+                geometry_preset=self.geometry_preset,
+                attention_geometry=self.attention_geometry,
+                mlp_geometry=self.mlp_geometry,
+                basis_family=self.basis_family,
+            )
+            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                self.base_row_order = 1
+                self.mlp_channel_order = 1
+                self.o_attn_d_model = 1
+                self.o_attn_qkv_per_channel = 1
+                self.o_attn_out_per_channel = 1
+                self.o_mlp_d_model = 1
+                self.o_mlp_hidden = 1
+            elif self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+                )
+        elif self.depth_compress_layer_norm_and_bias:
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+            )
+        # ^^^ THOG
+
         for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -266,6 +308,7 @@ class TrainingConfig:
                 "o_mlp_hidden": self.resolved_o_mlp_hidden,
                 "mlp_hidden_group_size": self.mlp_hidden_group_size,
                 "mlp_hidden_compressor": self.mlp_hidden_compressor,
+                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                 "basis_version": self.basis_version,
                 "geometry_preset": self.geometry_preset,
                 "attention_geometry": self.attention_geometry,
