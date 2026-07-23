@@ -165,13 +165,13 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
         ))
         torch.manual_seed(1234)
         second_model = SheetGPT(self._model_config(
-            base_row_order=999,
-            mlp_channel_order=999,
-            o_attn_d_model=999,
-            o_attn_qkv_per_channel=999,
-            o_attn_out_per_channel=999,
-            o_mlp_d_model=999,
-            o_mlp_hidden=999,
+            base_row_order=8,
+            mlp_channel_order=32,
+            o_attn_d_model=8,
+            o_attn_qkv_per_channel=4,
+            o_attn_out_per_channel=4,
+            o_mlp_d_model=8,
+            o_mlp_hidden=32,
         ))
         self.assertEqual(first_model.state_dict().keys(), second_model.state_dict().keys())
         for name, value in first_model.state_dict().items():
@@ -181,11 +181,13 @@ class DepthLayerNormBiasModesTest(unittest.TestCase):
         model = SheetGPT(self._model_config(compress=False))
         trajectory = model.trajectory
         report = model.parameter_report()
-        expected_total = (
-            sum(parameter.numel() for parameter in model.parameters())
+        total_persistent = sum(parameter.numel() for parameter in model.parameters())
+        external_conventional = (
+            total_persistent
             - trajectory.sheet_parameter_count()
-            + trajectory.dense_equivalent_count()
+            - trajectory.conventional_repeated_parameter_count()
         )
+        expected_total = external_conventional + trajectory.all_repeated_dense_equivalent_count()
         self.assertEqual(report["dense_equivalent_total_parameters"], expected_total)
         self.assertEqual(
             trajectory.conventional_repeated_parameter_count()
