@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class TrainerRunMixin:
@@ -10,7 +10,7 @@ class TrainerRunMixin:
         self,
         *,
         target_updates: Optional[int] = None,
-    ) -> List[Dict[str, float]]:
+    ) -> List[Dict[str, Any]]:
         target = (
             self.config.max_updates
             if target_updates is None
@@ -20,11 +20,16 @@ class TrainerRunMixin:
             raise ValueError(
                 "target_updates is outside the valid completed-update range"
             )
-        history: List[Dict[str, float]] = []
+        history: List[Dict[str, Any]] = []
         if self.state.completed_updates == 0 and self.config.eval_interval > 0:
             history.append({"evaluation_update": 0.0, **self.evaluate()})
         while self.state.completed_updates < target:
-            history.append(self.train_one_update())
+            metrics = self.train_one_update()
+            history.append(metrics)
+            # vvv THOG skipped attempts do not trigger completed-update evaluation or checkpoint cadence
+            if metrics.get("skipped_update", 0.0):
+                continue
+            # ^^^ THOG
             if (
                 self.config.eval_interval > 0
                 and self.state.completed_updates % self.config.eval_interval == 0

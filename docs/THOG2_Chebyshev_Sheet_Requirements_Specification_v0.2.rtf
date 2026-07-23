@@ -1,0 +1,197 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Georgia;}{\f1 Courier New;}}
+\paperw11906\paperh16838\margl900\margr900\margt900\margb900
+\widowctrl\f0\fs22
+\pard\qc\sa180\f0\fs44\b THOG2 Chebyshev Sheet\line Requirements Specification\b0\par
+\pard\qc\sa220\f0\fs24\i v0.2 - integrated compact-depth, block, and semantic sheet geometry\i0\par
+\pard\qc\sa320\f0\fs18 Draft requirements document - July 2026\line Target location: docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.2.rtf\par
+\pard\sa220\f0\fs22 This document consolidates the original THOG2 Chebyshev sheet requirements, the curve/sheet/block basis requirements, and the new semantic sheet requirements into one logical specification. It is organised as if the geometry ladder, clean-axis rule, block variants, and semantic sheet variants had been designed together.\par
+
+\pard\sa180\sb260\f0\fs32\b Table of Contents\b0\par
+\pard\li360\sa60\f0\fs22 1. Concept and architecture\par
+\pard\li360\sa60\f0\fs22 2. Vocabulary, axes, and naming\par
+\pard\li360\sa60\f0\fs22 3. Basis families and compact orders\par
+\pard\li360\sa60\f0\fs22 4. Geometry base options\par
+\pard\li360\sa60\f0\fs22 5. Geometry presets\par
+\pard\li360\sa60\f0\fs22 6. Detailed geometry requirements\par
+\pard\li360\sa60\f0\fs22 7. Configuration and identity requirements\par
+\pard\li360\sa60\f0\fs22 8. Out of scope\par
+\page
+
+\pard\sa180\sb260\f0\fs32\b 1. Concept and architecture\b0\par
+\pard\sa120\sb180\f0\fs26\b 1.1 Core concept\b0\par
+\pard\sa80\f0\fs22\b 1.1.1\b0  THOG2 shall treat a repeated transformer matrix family across depth as one structured learned object, not as an unrelated list of dense layer matrices.\par
+\pard\sa80\f0\fs22\b 1.1.2\b0  The compact representation shall be learned directly during training. It shall not be defined as a post-training approximation to an already trained dense model.\par
+\pard\sa80\f0\fs22\b 1.1.3\b0  Depth shall be treated as the primary compact axis for THOG2 weight geometry. Other compact axes shall be admitted only when their architectural meaning is explicit.\par
+\pard\sa80\f0\fs22\b 1.1.4\b0  The architecture shall preserve the ordinary GPT/nanoGPT training boundary: token IDs remain categorical, the data pipeline and next-token objective remain conventional, and the transformer topology remains recognisable.\par
+\pard\sa80\f0\fs22\b 1.1.5\b0  The compact parameterisation shall define the hypothesis class. Materialisation of dense-equivalent weights, where used, is an execution boundary and not the architectural source of truth.\par
+
+\pard\sa120\sb180\f0\fs26\b 1.2 Transformer matrix families\b0\par
+\pard\sa80\f0\fs22\b 1.2.1\b0  The specification shall apply to repeated transformer matrix families: attention input projection, attention output projection, MLP expansion, and MLP contraction.\par
+\pard\sa80\f0\fs22\b 1.2.2\b0  The attention input projection may be stored in packed QKV form for compatibility, but the architecture shall understand Q, K, and V as semantic roles.\par
+\pard\sa80\f0\fs22\b 1.2.3\b0  The semantic attention axes are qkv_role, head, local_head_channel, d_model_input, and d_model_output.\par
+\pard\sa80\f0\fs22\b 1.2.4\b0  The semantic MLP axes are hidden_channel, d_model_input, and d_model_output.\par
+\pard\sa80\f0\fs22\b 1.2.5\b0  A linear weight shall be understood in the operator convention W[out_features, in_features]. Rows produce output channels; columns are input channels read by the row.\par
+
+\pard\sa120\sb180\f0\fs26\b 1.3 Clean-axis rule\b0\par
+\pard\sa80\f0\fs22\b 1.3.1\b0  A compact basis may span only axes that are meaningful enough to support ordered or basis-like interpolation.\par
+\pard\sa80\f0\fs22\b 1.3.2\b0  Depth is a clean ordered axis and is always eligible for compact representation.\par
+\pard\sa80\f0\fs22\b 1.3.3\b0  The residual d_model axes may be treated as compressible basis-like axes for sheet and block experiments.\par
+\pard\sa80\f0\fs22\b 1.3.4\b0  MLP hidden channels, attention heads, QKV role, and local head channels may be kept whole when the experiment is intended to preserve their semantic identity.\par
+\pard\sa80\f0\fs22\b 1.3.5\b0  No compact basis shall smear across QKV role or attention head index unless a later specification explicitly approves that research direction.\par
+
+\pard\sa120\sb180\f0\fs26\b 1.4 Whole axes and compressed axes\b0\par
+\pard\sa80\f0\fs22\b 1.4.1\b0  A whole axis is an explicit discrete index in the coefficient tensor. No Chebyshev or DCT smoothing is applied across that axis.\par
+\pard\sa80\f0\fs22\b 1.4.2\b0  A compressed axis is represented by a finite orthogonal basis order. The learned coefficients span that axis through the selected basis family.\par
+\pard\sa80\f0\fs22\b 1.4.3\b0  Each geometry option shall be describable by listing its compressed axes and its whole axes.\par
+\pard\sa80\f0\fs22\b 1.4.4\b0  For two-dimensional sheet geometries, depth is one compressed sheet axis and exactly one non-depth matrix axis is the other compressed sheet axis. Remaining matrix axes stay whole.\par
+\pard\sa80\f0\fs22\b 1.4.5\b0  For three-dimensional block geometries, depth and two matrix axes are compressed together. This is more compact but more restrictive than a sheet geometry.\par
+
+\pard\sa180\sb260\f0\fs32\b 2. Vocabulary, axes, and naming\b0\par
+\pard\sa120\sb180\f0\fs26\b 2.1 Axis vocabulary\b0\par
+\pard\f1\fs17\sa120
+Axis                Meaning                                                  Requirement note\line
+------------------  -------------------------------------------------------  ------------------------------------------\line
+depth              Layer index across the repeated transformer stack.        Usually compressed by P.\line
+output_rows        Rows of W[out,in]; one row produces one output feature.   Whole in generic_sheet_col.\line
+input_cols         Columns of W[out,in]; one column reads one input feature. Compressed in generic_sheet_col.\line
+d_model_input      Residual-stream channel axis read by a projection.        Usually compressible.\line
+d_model_output     Residual-stream channel axis produced by a projection.    Compressible in one attention-output option.\line
+hidden_channel     MLP intermediate channel.                                 Whole in sheet_mlp.\line
+qkv_role           Query, key, or value role.                                Always whole in semantic attention.\line
+head               Attention head index.                                     Always whole in semantic attention.\line
+local_head_channel Scalar channel inside one attention head.                 Whole or compressed depending on option.\par
+\pard\sa120\sb180\f0\fs26\b 2.2 Public naming rules\b0\par
+\pard\sa80\f0\fs22\b 2.2.1\b0  The name legacy_sheet_col shall remain a compatibility alias for the original sheet-column behaviour.\par
+\pard\sa80\f0\fs22\b 2.2.2\b0  The preferred public name for that behaviour shall be generic_sheet_col.\par
+\pard\sa80\f0\fs22\b 2.2.3\b0  The name depth shall be the preferred public name for the depth-only geometry. The older name curve may remain as a compatibility alias where needed.\par
+\pard\sa80\f0\fs22\b 2.2.4\b0  Preset names shall be flat, short, and descriptive. User-facing commands shall not require independent selection of MLP, QKV, and attention-output components unless an advanced override mode is deliberately added.\par
+
+\pard\sa180\sb260\f0\fs32\b 3. Basis families and compact orders\b0\par
+\pard\sa120\sb180\f0\fs26\b 3.1 Basis family\b0\par
+\pard\sa80\f0\fs22\b 3.1.1\b0  CHEBY shall mean the Chebyshev first-kind compact basis family used by THOG2.\par
+\pard\sa80\f0\fs22\b 3.1.2\b0  CHEBY shall use the finite sampled, QR-stabilised basis convention unless a later version explicitly changes that convention.\par
+\pard\sa80\f0\fs22\b 3.1.3\b0  DCT shall mean a real orthonormal DCT basis family. The initial DCT version shall correspond to DCT-II orthonormal basis columns.\par
+\pard\sa80\f0\fs22\b 3.1.4\b0  Geometry requirements shall be independent of basis family. A geometry describes axes and coefficient layout; a basis family describes how compressed axes are evaluated.\par
+\pard\sa80\f0\fs22\b 3.1.5\b0  The selected basis family and basis version shall be part of model identity.\par
+
+\pard\sa120\sb180\f0\fs26\b 3.2 Compact orders\b0\par
+\pard\sa80\f0\fs22\b 3.2.1\b0  P shall denote the retained depth order.\par
+\pard\sa80\f0\fs22\b 3.2.2\b0  Q shall denote the retained generic row/column or d_model order when a single generic matrix-axis order is used.\par
+\pard\sa80\f0\fs22\b 3.2.3\b0  J shall denote the retained per-head QKV/local-channel order where applicable.\par
+\pard\sa80\f0\fs22\b 3.2.4\b0  O shall denote the retained attention-output local-channel order where applicable.\par
+\pard\sa80\f0\fs22\b 3.2.5\b0  X shall denote the retained MLP d_model order where applicable.\par
+\pard\sa80\f0\fs22\b 3.2.6\b0  Y shall denote the retained MLP hidden-channel order where applicable.\par
+\pard\sa80\f0\fs22\b 3.2.7\b0  A geometry shall state which orders it consumes. Unused orders are configuration noise and shall not change the model identity for that geometry.\par
+
+\page
+\pard\sa180\sb260\f0\fs32\b 4. Geometry base options\b0\par
+\pard\sa120\f0\fs22 This table lists the base options available to the resolver. Some are complete whole-model presets. Others are module-level components used to form presets in Section 5.\par
+\pard\f1\fs16\sa160
+#  Base option          Applies to              Brief description                              Compressed axes                                  Uncompressed axes\line
+-- -------------------- ----------------------- ---------------------------------------------- ------------------------------------------------ ----------------------------------------------\line
+1  dense                all families            Conventional dense transformer weights.        none                                             all matrix axes, all layers\line
+2  depth                all families            Depth-only compact geometry; alias curve.      depth                                            output_rows, input_cols\line
+3  generic_sheet_col    all families            Original sheet-column behaviour.               depth, input_cols                                output_rows\line
+4  legacy_sheet_col     all families            Compatibility alias for generic_sheet_col.     depth, input_cols                                output_rows\line
+5  generic_sheet_row    all families            Transposed generic sheet ablation.             depth, output_rows                               input_cols\line
+6  mlp_block            MLP only                Existing MLP block geometry.                   depth, MLP output axis, MLP input axis           MLP family/direction\line
+7  head_aware_block     attention only          Existing attention block; keeps role/head.     QKV: depth, local, d_model_in; out: depth, d_model_out, local   QKV: role, head; out: head\line
+8  sheet_mlp            MLP only                Semantic MLP sheet.                            depth, d_model_input/output                      hidden_channel\line
+9  sheet_qkv            QKV only                Semantic QKV sheet.                            depth, d_model_input                             qkv_role, head, local_head_channel\line
+10 sheet_out_dmodel     attention output only   Output sheet gives Q to d_model output.        depth, d_model_output                            head, local_head_channel\line
+11 sheet_out_local      attention output only   Output sheet gives Q to local channel.         depth, local_head_channel                        d_model_output, head\par
+
+\page
+\pard\sa180\sb260\f0\fs32\b 5. Geometry presets\b0\par
+\pard\sa120\f0\fs22 Presets are flat user-facing names. They resolve to one MLP component, one QKV component, and one attention-output component. Existing presets remain available; new sheet presets are formed by composing the base options above.\par
+\pard\sa100\f0\fs24\b Existing and generic presets\b0\par
+\pard\f1\fs16\sa160
+#  Preset              MLP component       QKV component          Attn-out component      Purpose\line
+-- ------------------- ------------------- ---------------------- ----------------------- -----------------------------------------------\line
+1  dense               dense               dense                  dense                   Conventional dense baseline.\line
+2  depth               depth               depth                  depth                   Depth-only compact geometry; preferred curve name.\line
+3  curve               depth               depth                  depth                   Compatibility alias for depth.\line
+4  generic_sheet_col   generic_sheet_col   generic_sheet_col      generic_sheet_col       Preferred name for original sheet-column behaviour.\line
+5  legacy_sheet_col    generic_sheet_col   generic_sheet_col      generic_sheet_col       Compatibility alias for generic_sheet_col.\line
+6  generic_sheet_row   generic_sheet_row   generic_sheet_row      generic_sheet_row       Whole-model transposed generic sheet ablation.\line
+7  mlp_block           mlp_block           depth                  depth                   Existing MLP block preset; attention depth-only.\line
+8  head_aware_block    depth               head_aware_block       head_aware_block        Existing attention block preset; MLP depth-only.\line
+9  full_block          mlp_block           head_aware_block       head_aware_block        Existing full block preset.\par
+\pard\sa100\f0\fs24\b Semantic sheet presets\b0\par
+\pard\f1\fs16\sa160
+#  Preset                  MLP component       QKV component          Attn-out component      Purpose\line
+-- ----------------------- ------------------- ---------------------- ----------------------- -----------------------------------------------\line
+10 sheet_mlp               sheet_mlp           generic_sheet_col      generic_sheet_col       Semantic MLP only; attention generic.\line
+11 sheet_qkv               generic_sheet_col   sheet_qkv              generic_sheet_col       Semantic QKV only.\line
+12 sheet_out_dmodel        generic_sheet_col   generic_sheet_col      sheet_out_dmodel        Attention-output d_model option only.\line
+13 sheet_out_local         generic_sheet_col   generic_sheet_col      sheet_out_local         Attention-output local-channel option only.\line
+14 sheet_attn_dmodel       generic_sheet_col   sheet_qkv              sheet_out_dmodel        Semantic attention using d_model-output out sheet.\line
+15 sheet_attn_local        generic_sheet_col   sheet_qkv              sheet_out_local         Semantic attention using local-channel out sheet.\line
+16 sheet_mlp_qkv           sheet_mlp           sheet_qkv              generic_sheet_col       MLP plus semantic QKV; attention output generic.\line
+17 sheet_mlp_out_dmodel    sheet_mlp           generic_sheet_col      sheet_out_dmodel        MLP plus output d_model option; QKV generic.\line
+18 sheet_mlp_out_local     sheet_mlp           generic_sheet_col      sheet_out_local         MLP plus output local option; QKV generic.\line
+19 sheet_full_dmodel       sheet_mlp           sheet_qkv              sheet_out_dmodel        Full semantic sheet, d_model-output version.\line
+20 sheet_full_local        sheet_mlp           sheet_qkv              sheet_out_local         Full semantic sheet, local-channel version.\par
+
+\page
+\pard\sa180\sb260\f0\fs32\b 6. Detailed geometry requirements\b0\par
+\pard\sa120\sb180\f0\fs26\b 6.1 Dense and depth\b0\par
+\pard\sa80\f0\fs22\b 6.1.1\b0  The dense preset shall retain ordinary independently stored layer weights and shall not consume compact basis orders.\par
+\pard\sa80\f0\fs22\b 6.1.2\b0  The depth geometry shall represent W_l[o,i] as a function of layer depth while leaving output_rows and input_cols explicit.\par
+\pard\li360\f1\fs18\sa120 depth: W_l[o,i] = sum_p C[o,i,p] * B_depth[l,p]\par
+\pard\sa80\f0\fs22\b 6.1.3\b0  Depth shall be the primary compact baseline for comparing whether matrix-axis compression is useful beyond layerwise sharing.\par
+
+\pard\sa120\sb180\f0\fs26\b 6.2 Generic sheets\b0\par
+\pard\sa80\f0\fs22\b 6.2.1\b0  generic_sheet_col shall keep output_rows whole and compress depth with input_cols.\par
+\pard\li360\f1\fs18\sa120 generic_sheet_col: W_l[o,i] = sum_pq C[o,p,q] * B_depth[l,p] * B_in[i,q]\par
+\pard\sa80\f0\fs22\b 6.2.2\b0  generic_sheet_row shall keep input_cols whole and compress depth with output_rows.\par
+\pard\li360\f1\fs18\sa120 generic_sheet_row: W_l[o,i] = sum_pq C[i,p,q] * B_depth[l,p] * B_out[o,q]\par
+\pard\sa80\f0\fs22\b 6.2.3\b0  generic_sheet_row shall be treated as a geometry ablation, not as a replacement for semantic sheet design.\par
+
+\pard\sa120\sb180\f0\fs26\b 6.3 Existing block geometries\b0\par
+\pard\sa80\f0\fs22\b 6.3.1\b0  mlp_block shall apply only to MLP expansion and MLP contraction families.\par
+\pard\sa80\f0\fs22\b 6.3.2\b0  mlp_block shall compress depth, MLP output axis, and MLP input axis together.\par
+\pard\li360\f1\fs18\sa120 mlp_block: W_l[o,i] = sum_pqr C[p,q,r] * B_depth[l,p] * B_out[o,q] * B_in[i,r]\par
+\pard\sa80\f0\fs22\b 6.3.3\b0  head_aware_block shall apply only to attention families.\par
+\pard\sa80\f0\fs22\b 6.3.4\b0  head_aware_block shall keep qkv_role and head whole. It shall not construct a compact basis over head index.\par
+\pard\sa80\f0\fs22\b 6.3.5\b0  For QKV, head_aware_block shall compress depth, local head output channel, and residual-stream input channel per role and per head.\par
+\pard\sa80\f0\fs22\b 6.3.6\b0  For attention output, head_aware_block shall compress depth, residual-stream output channel, and local head input channel per input head.\par
+
+\pard\sa120\sb180\f0\fs26\b 6.4 Semantic MLP sheet\b0\par
+\pard\sa80\f0\fs22\b 6.4.1\b0  sheet_mlp shall apply only to MLP expansion and MLP contraction families.\par
+\pard\sa80\f0\fs22\b 6.4.2\b0  For MLP expansion, sheet_mlp shall keep hidden_channel whole and compress depth with d_model_input.\par
+\pard\li360\f1\fs18\sa120 MLP up: whole = hidden_channel; compressed = depth, d_model_input\par
+\pard\sa80\f0\fs22\b 6.4.3\b0  For MLP contraction, sheet_mlp shall keep hidden_channel whole and compress depth with d_model_output.\par
+\pard\li360\f1\fs18\sa120 MLP down: whole = hidden_channel; compressed = depth, d_model_output\par
+\pard\sa80\f0\fs22\b 6.4.4\b0  The purpose of sheet_mlp is to test whether MLP hidden channels should remain discrete semantic units while residual d_model axes are compressed.\par
+
+\pard\sa120\sb180\f0\fs26\b 6.5 Semantic attention sheet\b0\par
+\pard\sa80\f0\fs22\b 6.5.1\b0  sheet_qkv shall keep qkv_role, head, and local_head_channel whole.\par
+\pard\sa80\f0\fs22\b 6.5.2\b0  sheet_qkv shall compress depth with d_model_input.\par
+\pard\li360\f1\fs18\sa120 QKV: whole = qkv_role, head, local_head_channel; compressed = depth, d_model_input\par
+\pard\sa80\f0\fs22\b 6.5.3\b0  sheet_out_dmodel shall keep head and local_head_channel whole, and shall compress depth with d_model_output.\par
+\pard\li360\f1\fs18\sa120 attn_out_dmodel: whole = head, local_head_channel; compressed = depth, d_model_output\par
+\pard\sa80\f0\fs22\b 6.5.4\b0  sheet_out_local shall keep d_model_output and head whole, and shall compress depth with local_head_channel.\par
+\pard\li360\f1\fs18\sa120 attn_out_local: whole = d_model_output, head; compressed = depth, local_head_channel\par
+\pard\sa80\f0\fs22\b 6.5.5\b0  The attention presets shall include both attention-output choices because the correct second sheet axis for attention output is not settled by the clean-axis rule alone.\par
+
+\pard\sa180\sb260\f0\fs32\b 7. Configuration and identity requirements\b0\par
+\pard\sa120\sb180\f0\fs26\b 7.1 Resolved identity\b0\par
+\pard\sa80\f0\fs22\b 7.1.1\b0  Each run shall have a requested preset and a resolved compact identity.\par
+\pard\sa80\f0\fs22\b 7.1.2\b0  Resolved compact identity shall include model family, requested preset, MLP component, QKV component, attention-output component, basis family, basis version, model dimensions, and the compact orders consumed by that identity.\par
+\pard\sa80\f0\fs22\b 7.1.3\b0  Aliases shall resolve deterministically. legacy_sheet_col shall resolve to generic_sheet_col. curve shall resolve to depth.\par
+\pard\sa80\f0\fs22\b 7.1.4\b0  Run names and metadata shall be sufficient to distinguish all presets in Section 5.\par
+
+\pard\sa120\sb180\f0\fs26\b 7.2 Component composition\b0\par
+\pard\sa80\f0\fs22\b 7.2.1\b0  Internally, the resolver may use separate MLP, QKV, and attention-output component selectors.\par
+\pard\sa80\f0\fs22\b 7.2.2\b0  The normal user-facing interface shall expose flat presets rather than requiring users to compose component selectors manually.\par
+\pard\sa80\f0\fs22\b 7.2.3\b0  Advanced component overrides may exist for ablation work, but a preset must always expand to a complete, auditable component tuple.\par
+
+\pard\sa180\sb260\f0\fs32\b 8. Out of scope\b0\par
+\pard\sa80\f0\fs22\b 8.1.1\b0  This specification does not define correctness tests, implementation staging, or performance targets.\par
+\pard\sa80\f0\fs22\b 8.1.2\b0  This specification does not assess current experimental results.\par
+\pard\sa80\f0\fs22\b 8.1.3\b0  This specification does not require compaction of token embeddings, positional embeddings, LayerNorm, LM head, or biases.\par
+\pard\sa80\f0\fs22\b 8.1.4\b0  This specification does not spectralise the sequence-position axis or replace causal attention with a fixed spectral mixer.\par
+\pard\sa80\f0\fs22\b 8.1.5\b0  Alternative bases beyond CHEBY and DCT, including learned bases, wavelets, and Legendre bases, remain future candidates.\par
+}

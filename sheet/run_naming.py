@@ -159,7 +159,9 @@ def build_artifact_name(
 
     prefix = architecture_prefix(model_type)
     fields = [
-        f"n_{max_iters}",
+        # vvv THOG stable artifact identity must not depend on the mutable target update count
+        # f"n_{max_iters}",
+        # ^^^ THOG
         f"b_{batch_size}",
         f"d_{dataset_label(dataset_name)}",
         f"w_{warmup_iters}",

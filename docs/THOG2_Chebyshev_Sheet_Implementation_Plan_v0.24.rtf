@@ -1,0 +1,187 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Liberation Serif;}{\f1 Liberation Sans;}{\f2 Liberation Mono;}}
+{\colortbl;\red217\green234\blue247;\red245\green245\blue245;}
+\paperw16840\paperh23820\margl1134\margr1134\margt1134\margb1134\titlepg
+{\header\pard\qc\i\f0\fs18 THOG2 Chebyshev Sheet Implementation Plan v0.24\par}
+{\footer\pard\qc\f0\fs18 Page {\field{\*\fldinst PAGE}{\fldrslt 1}} of {\field{\*\fldinst NUMPAGES}{\fldrslt 1}}\par}
+{\headerf\pard\par}{\footerf\pard\par}
+\widowctrl\f0\fs22
+\pard\qc\b\fs44 THOG2 Chebyshev Sheet Implementation Plan\b0\par
+\pard\qc\b\fs30 v0.24\b0\par
+\pard\qc\i\fs24 Minimal basis-registry shim, compact-geometry resolver, and semantic sheet staging\i0\par
+\pard\sa240\par
+\pard\sa220 This implementation plan corresponds to docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.24.rtf. It keeps the work on the existing BLOCK_enhancements_group branch and does not create a new branch.\par
+\pard\sa220 Repository path: docs/THOG2_Chebyshev_Sheet_Implementation_Plan_v0.24.rtf\par
+\pard\sa220 Companion requirements path: docs/THOG2_Chebyshev_Sheet_Requirements_Specification_v0.24.rtf\par
+\pard\sa220 Future test plan path: docs/THOG2_Chebyshev_Sheet_Test_Plan_v0.24.rtf\par
+\pard\sa220 Date: 18 July 2026\par
+\page
+\pard\qc\b\fs32 Detailed table of contents\b0\fs22\par
+\pard\sa120 1 Operating principles\par
+\pard\sa120 2 Stage 0.5 - minimal basis-registry shim\par
+\pard\sa120 3 Stage 1 - compact-geometry resolver consolidation\par
+\pard\sa120 4 Stage 2 - preservation of existing compact geometries\par
+\pard\sa120 5 Stage 3 - generic sheet row\par
+\pard\sa120 6 Stage 4 - semantic MLP sheet\par
+\pard\sa120 7 Stage 5 - semantic QKV sheet\par
+\pard\sa120 8 Stage 6 - semantic attention-output sheets\par
+\pard\sa120 9 Stage 7 - preset catalogue and wrapper surface\par
+\pard\sa120 10 Stage 8 - diagnostics and metadata\par
+\pard\sa120 11 Release gates\par
+\pard\sa120 12 Explicit deferrals\par
+\page
+\pard\b\fs30 1 Operating principles\b0\fs22\par
+\pard\sa160 1.1.1 Work shall remain on BLOCK_enhancements_group unless a new branch is explicitly requested.\par
+\pard\sa160 1.1.2 Preserve dense, legacy_sheet_col, depth, mlp_block, head_aware_block, and full_block as working code paths throughout the staging.\par
+\pard\sa160 1.1.3 Do not delete existing nanoGPT or THOG2 lines when modifying source. Comment out obsolete lines where practical and use the THOG source-marking convention.\par
+\pard\sa160 1.1.4 Do not combine speculative Chebyshev-native GPT work with this sheet-geometry pass. This pass is about THOG2 compact-weight geometry.\par
+\pard\sa160 1.1.5 Prefer small mechanical seams before adding new geometry behaviour. The first seam is the basis-registry shim.\par
+\pard\sa160 1.1.6 Every stage shall add descriptive regression tests before or alongside behaviour changes.\par
+\pard\sa160 1.1.7 Existing numerical behaviour must remain stable unless a stage explicitly states a checkpoint-breaking or semantics-breaking boundary.\par
+\page
+\pard\b\fs30 2 Stage 0.5 - minimal basis-registry shim\b0\fs22\par
+\pard\b\fs26 2.1 Goal\b0\fs22\par
+\pard\sa220 Centralise basis-family names, artifact tags, basis versions, and basis-matrix construction before extending sheet geometry. This is deliberately a shim, not a full polynomial-native basis framework.\par
+\pard\b\fs26 2.2 New abstraction\b0\fs22\par
+\pard\f2\fs18\sa80 @dataclass(frozen=True)\par
+\pard\f2\fs18\sa80 class BasisSpec:\par
+\pard\f2\fs18\sa80     name: str\par
+\pard\f2\fs18\sa80     artifact_tag: str\par
+\pard\f2\fs18\sa80     version: str\par
+\pard\f2\fs18\sa80     supports_native_products: bool\par
+\pard\f2\fs18\sa80     def basis_matrix(self, sample_count: int, order: int, *, device, dtype): ...\par
+\pard\sa160 2.2.1 Add a registry resembling:\par
+\pard\f2\fs18\sa80 BASIS_REGISTRY = {\par
+\pard\f2\fs18\sa80     "chebyshev": ChebyshevBasisSpec(...),\par
+\pard\f2\fs18\sa80     "dct": DctBasisSpec(...),\par
+\pard\f2\fs18\sa80 }\par
+\pard\sa160 2.2.2 Add helpers get_basis_spec(name), basis_family_names(), basis_artifact_tag(name), and basis_version(name) if they simplify call sites.\par
+\pard\sa160 2.2.3 Chebyshev shall keep the existing Chebyshev basis matrix semantics and version.\par
+\pard\sa160 2.2.4 DCT shall keep the existing DCT basis matrix semantics and version.\par
+\pard\sa160 2.2.5 DCT shall report supports_native_products=False.\par
+\pard\sa160 2.2.6 Chebyshev may report supports_native_products=True as future metadata, but no current sheet code may depend on it.\par
+\pard\b\fs26 2.3 Explicit non-work\b0\fs22\par
+\pard\sa160 2.3.1 Do not add product_tensor.\par
+\pard\sa160 2.3.2 Do not add coefficient-space metric.\par
+\pard\sa160 2.3.3 Do not add activation_order or projection_rule.\par
+\pard\sa160 2.3.4 Do not make DCT pretend to be a polynomial-product basis.\par
+\pard\b\fs26 2.4 Required edits\b0\fs22\par
+\pard\sa160 2.4.1 Update sheet/basis.py or a sibling module so basis-family construction is registry-backed.\par
+\pard\sa160 2.4.2 Replace scattered chebyshev-or-dct validation with registry-driven validation.\par
+\pard\sa160 2.4.3 Replace hand-coded artifact tag logic such as CHEBY/DCT branching with basis_spec.artifact_tag.\par
+\pard\sa160 2.4.4 Preserve all existing public CLI spellings: chebyshev and dct.\par
+\pard\sa160 2.4.5 Preserve all existing artifact tag spellings: CHEBY and DCT.\par
+\pard\b\fs26 2.5 Stage 0.5 tests\b0\fs22\par
+\pard\sa160 2.5.1 Test that registry names include exactly the currently supported compact-weight basis families.\par
+\pard\sa160 2.5.2 Test that Chebyshev basis matrices are unchanged relative to the previous builder.\par
+\pard\sa160 2.5.3 Test that DCT basis matrices are unchanged relative to the previous builder.\par
+\pard\sa160 2.5.4 Test that artifact tags are registry-driven.\par
+\pard\sa160 2.5.5 Test that invalid basis families fail before model construction.\par
+\pard\sa160 2.5.6 Test that DCT does not advertise native polynomial products.\par
+\page
+\pard\b\fs30 3 Stage 1 - compact-geometry resolver consolidation\b0\fs22\par
+\pard\b\fs26 3.1 Goal\b0\fs22\par
+\pard\sa220 Replace the old two-slot geometry spine with a resolved MLP/QKV/attention-output component object. This must happen before adding semantic sheets, otherwise the new presets will become another set of one-off branches.\par
+\pard\b\fs26 3.2 Resolver object\b0\fs22\par
+\pard\f2\fs18\sa80 @dataclass(frozen=True)\par
+\pard\f2\fs18\sa80 class ResolvedCompactGeometry:\par
+\pard\f2\fs18\sa80     requested_preset: str\par
+\pard\f2\fs18\sa80     canonical_preset: str\par
+\pard\f2\fs18\sa80     mlp_component: str\par
+\pard\f2\fs18\sa80     qkv_component: str\par
+\pard\f2\fs18\sa80     attn_out_component: str\par
+\pard\f2\fs18\sa80     basis_family: str\par
+\pard\f2\fs18\sa80     basis_version: str\par
+\pard\f2\fs18\sa80     basis_artifact_tag: str\par
+\pard\f2\fs18\sa80     consumed_orders: tuple[str, ...]\par
+\pard\f2\fs18\sa80     coefficient_families: tuple[CoefficientFamily, ...]\par
+\pard\b\fs26 3.3 Required behaviour\b0\fs22\par
+\pard\sa160 3.3.1 legacy_sheet_col resolves to generic_sheet_col.\par
+\pard\sa160 3.3.2 curve resolves to depth where compatibility aliases still exist.\par
+\pard\sa160 3.3.3 Existing presets resolve through the same catalogue as new presets.\par
+\pard\sa160 3.3.4 Dense bypasses compact selector fields cleanly.\par
+\pard\sa160 3.3.5 Checkpoint metadata stores requested_preset and canonical_preset.\par
+\pard\sa160 3.3.6 Run diagnostics print the resolved component triple.\par
+\pard\b\fs26 3.4 Stage 1 tests\b0\fs22\par
+\pard\sa160 3.4.1 Test every legacy and canonical preset resolves to the expected component triple.\par
+\pard\sa160 3.4.2 Test aliases preserve expected artifact compatibility where required.\par
+\pard\sa160 3.4.3 Test invalid component combinations fail before model construction.\par
+\pard\sa160 3.4.4 Test dense remains a conventional control path.\par
+\page
+\pard\b\fs30 4 Stage 2 - preservation of existing compact geometries\b0\fs22\par
+\pard\sa160 4.1.1 Route legacy_sheet_col/generic_sheet_col, depth, mlp_block, head_aware_block, and full_block through the new basis shim and resolver.\par
+\pard\sa160 4.1.2 Do not change their coefficient shapes, materialisation formulas, parameter counts, direct-factorised paths, or checkpoint identity unless a specific incompatibility is unavoidable and declared.\par
+\pard\sa160 4.1.3 Keep the existing wrappers working with their current basis-family arguments.\par
+\pard\sa160 4.1.4 Add parameter-report checks proving existing paths report the same dense-equivalent and persistent parameter counts as before.\par
+\pard\sa160 4.1.5 Add direct value checks for representative layer/output/input entries after resolver routing.\par
+\page
+\pard\b\fs30 5 Stage 3 - generic_sheet_row\b0\fs22\par
+\pard\sa160 5.1.1 Add generic_sheet_row as the row-side counterpart to generic_sheet_col.\par
+\pard\sa160 5.1.2 Coefficient shape shall be coeff[input_col, depth_order, output_order].\par
+\pard\sa160 5.1.3 Materialisation shall implement W_l[o,i] = sum_pq coeff[i,p,q] * B_depth[l,p] * B_out[o,q].\par
+\pard\sa160 5.1.4 generic_sheet_row may flatten semantic output structure because it is a generic geometry, not a semantic sheet.\par
+\pard\sa160 5.1.5 Add direct materialisation and gradient tests for all repeated matrix families.\par
+\page
+\pard\b\fs30 6 Stage 4 - semantic MLP sheet\b0\fs22\par
+\pard\sa160 6.1.1 Add sheet_mlp for MLP expansion and contraction.\par
+\pard\sa160 6.1.2 Keep hidden_channel whole.\par
+\pard\sa160 6.1.3 Expansion coefficient shape shall be coeff[hidden_channel, P, X].\par
+\pard\sa160 6.1.4 Contraction coefficient shape shall be coeff[hidden_channel, P, X].\par
+\pard\sa160 6.1.5 The component consumes P and X. It shall not consume Y.\par
+\pard\sa160 6.1.6 Test that gradients reach the expected hidden-channel-specific coefficient tensor and do not leak into a shared hidden basis.\par
+\page
+\pard\b\fs30 7 Stage 5 - semantic QKV sheet\b0\fs22\par
+\pard\sa160 7.1.1 Add sheet_qkv for the packed QKV input projection.\par
+\pard\sa160 7.1.2 Treat qkv_role, head, and local_head_channel as whole axes.\par
+\pard\sa160 7.1.3 Coefficient shape shall be coeff[qkv_role, head, local_head_channel, P, Q].\par
+\pard\sa160 7.1.4 The component consumes P and Q. It shall not consume J.\par
+\pard\sa160 7.1.5 Test that changing one role/head/local coefficient changes only the corresponding semantic slice.\par
+\pard\sa160 7.1.6 Test materialise-then-linear and direct/factorised paths where both exist.\par
+\page
+\pard\b\fs30 8 Stage 6 - semantic attention-output sheets\b0\fs22\par
+\pard\b\fs26 8.1 sheet_out_dmodel\b0\fs22\par
+\pard\sa160 8.1.1 Keep head and local_head_channel whole.\par
+\pard\sa160 8.1.2 Compress depth and d_model_output.\par
+\pard\sa160 8.1.3 Coefficient shape shall be coeff[head, local_head_channel, P, Q].\par
+\pard\b\fs26 8.2 sheet_out_local\b0\fs22\par
+\pard\sa160 8.2.1 Keep d_model_output and head whole.\par
+\pard\sa160 8.2.2 Compress depth and local_head_channel.\par
+\pard\sa160 8.2.3 Coefficient shape shall be coeff[d_model_output, head, P, O].\par
+\pard\b\fs26 8.3 Shared requirements\b0\fs22\par
+\pard\sa160 8.3.1 Neither attention-output alternative may be silently treated as the other.\par
+\pard\sa160 8.3.2 Add direct value checks that distinguish d_model compression from local-channel compression.\par
+\pard\sa160 8.3.3 Add parameter-report checks showing which attention-output axis is whole and which is compressed.\par
+\page
+\pard\b\fs30 9 Stage 7 - preset catalogue and wrapper surface\b0\fs22\par
+\pard\sa160 9.1.1 Add user-facing presets: generic_sheet_row, sheet_mlp, sheet_qkv, sheet_attn_dmodel, sheet_attn_local, sheet_full_dmodel, and sheet_full_local.\par
+\pard\sa160 9.1.2 Preserve existing user-facing presets: legacy_sheet_col, generic_sheet_col, depth, mlp_block, head_aware_block, and full_block.\par
+\pard\sa160 9.1.3 Keep wrapper basis selection using existing -B semantics, but validate through the registry.\par
+\pard\sa160 9.1.4 Avoid adding new basis-specific wrapper branches. The wrapper should not need to know whether the registry has two or ten basis families.\par
+\pard\sa160 9.1.5 Add dry-run tests proving each preset expands to the expected resolved component triple and artifact identity.\par
+\page
+\pard\b\fs30 10 Stage 8 - diagnostics and metadata\b0\fs22\par
+\pard\sa160 10.1.1 Parameter reports shall include per-family coefficient shape, dense-equivalent shape, component name, compressed axes, whole axes, basis family, basis version, and basis artifact tag.\par
+\pard\sa160 10.1.2 Console startup shall print requested preset, canonical preset, component triple, basis family, basis version, and consumed orders.\par
+\pard\sa160 10.1.3 Checkpoint metadata shall store the same resolver output required to reconstruct the compact geometry.\par
+\pard\sa160 10.1.4 Changing compact geometry, basis family, basis version, basis artifact tag, or consumed order shall remain a material model change.\par
+\pard\sa160 10.1.5 Existing depth-curve diagnostics may remain unchanged unless a geometry-specific diagnostic is cheap and useful.\par
+\page
+\pard\b\fs30 11 Release gates\b0\fs22\par
+\pard\sa160 11.1.1 Python source compilation passes.\par
+\pard\sa160 11.1.2 Both canonical wrappers pass bash syntax checks.\par
+\pard\sa160 11.1.3 Basis-registry tests pass.\par
+\pard\sa160 11.1.4 Resolver tests pass.\par
+\pard\sa160 11.1.5 Existing geometry regression tests pass unchanged or with explicitly justified expectation updates.\par
+\pard\sa160 11.1.6 New semantic sheet direct-value, shape, parameter-report, and gradient tests pass.\par
+\pard\sa160 11.1.7 Tiny CPU training smoke passes for at least dense, generic_sheet_col, depth, and one semantic-sheet full preset.\par
+\pard\sa160 11.1.8 The full CPU regression suite passes.\par
+\pard\sa160 11.1.9 GPU smoke is run where available and reported honestly if unavailable.\par
+\page
+\pard\b\fs30 12 Explicit deferrals\b0\fs22\par
+\pard\sa160 12.1.1 Do not implement a Chebyshev-native residual-stream model in this pass.\par
+\pard\sa160 12.1.2 Do not implement coefficient-space nonlinearities, product tensors, polynomial activation rules, or spectral LM heads in this pass.\par
+\pard\sa160 12.1.3 Do not replace SDPA or ordinary dense activations in the current THOG2 model.\par
+\pard\sa160 12.1.4 Do not add broad plugin-style architecture around bases before the actual polynomial-native requirements exist.\par
+\pard\sa160 12.1.5 Do not create new branches for documentation or implementation unless explicitly requested.\par
+\pard\sa220\i End of implementation plan.\i0\par
+}
