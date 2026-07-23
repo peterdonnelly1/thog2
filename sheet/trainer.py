@@ -9,6 +9,7 @@ from torch import Tensor
 from .batch_source import DeterministicBatchSource
 from .checkpoints import optimizer_group_names
 from .distributed import DistributedContext
+from .optimizer_factory import build_optimizer
 from .trainer_checkpoint_resume import TrainerCheckpointResumeMixin
 from .trainer_checkpoint_save import TrainerCheckpointSaveMixin
 from .trainer_run import TrainerRunMixin
@@ -53,11 +54,12 @@ class SharedTrainer(
             config.model_type,
         )
         self.model = self.distributed.wrap_model(self.raw_model)
-        self.optimizer = self.raw_model.configure_optimizers(
-            config.weight_decay,
-            config.learning_rate,
-            (config.beta1, config.beta2),
-            self.device.type,
+        self.optimizer = build_optimizer(
+            self.raw_model,
+            weight_decay=config.weight_decay,
+            learning_rate=config.learning_rate,
+            betas=(config.beta1, config.beta2),
+            device_type=self.device.type,
         )
         self.batch_source = DeterministicBatchSource(
             train_tokens,

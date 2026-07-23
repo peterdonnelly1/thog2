@@ -9,6 +9,7 @@ from torch import Tensor
 from .batch_source import DeterministicBatchSource
 from .distributed import DistributedContext
 from .memory import MemoryTelemetry
+from .optimizer_factory import build_optimizer
 from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
 from .training_config import TrainingConfig
@@ -47,11 +48,12 @@ class Stage4Trainer(SharedTrainer):
             config.model_type,
         )
         self.model = self.distributed.wrap_model(self.raw_model)
-        self.optimizer = self.raw_model.configure_optimizers(
-            config.weight_decay,
-            config.learning_rate,
-            (config.beta1, config.beta2),
-            self.device.type,
+        self.optimizer = build_optimizer(
+            self.raw_model,
+            weight_decay=config.weight_decay,
+            learning_rate=config.learning_rate,
+            betas=(config.beta1, config.beta2),
+            device_type=self.device.type,
         )
         self.memory_telemetry.snapshot("optimizer_allocation")
         self.batch_source = DeterministicBatchSource(
