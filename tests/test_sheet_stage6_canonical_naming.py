@@ -118,16 +118,28 @@ class CanonicalNamingTests(unittest.TestCase):
         values.update(overrides)
         return OwtRunConfig(**values)
 
-    def test_s6_23e_residual_init_fields_are_part_of_run_artifact_identity(self) -> None:
-        config = self.picton_config(
+    def test_s6_23e_residual_init_and_depth_vector_mode_are_artifact_identity(self) -> None:
+        conventional_vectors = self.picton_config(
             residual_init_policy="depth_scaled",
             residual_init_depth_source="dof_implied_depth",
             residual_init_depth_value=12,
         )
-        self.assertIn(
-            "P_16_Q_64_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12",
-            config.parameter_artifact_fragment(),
+        compressed_vectors = self.picton_config(
+            residual_init_policy="depth_scaled",
+            residual_init_depth_source="dof_implied_depth",
+            residual_init_depth_value=12,
+            depth_compress_layer_norm_and_bias=True,
         )
+        self.assertIn(
+            "P_16_DLB_0_r_depth_scaled_z_dof_implied_depth_S_12",
+            conventional_vectors.parameter_artifact_fragment(),
+        )
+        self.assertIn(
+            "P_16_DLB_1_r_depth_scaled_z_dof_implied_depth_S_12",
+            compressed_vectors.parameter_artifact_fragment(),
+        )
+        for dead_order in ("_Q_", "_J_", "_O_", "_X_", "_Y_"):
+            self.assertNotIn(dead_order, conventional_vectors.parameter_artifact_fragment())
 
     def test_s6_23f_user_forced_residual_depth_value_is_named_only_when_used(self) -> None:
         config = self.picton_config(
