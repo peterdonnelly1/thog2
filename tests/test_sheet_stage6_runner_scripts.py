@@ -59,6 +59,10 @@ class RunnerScriptTests(unittest.TestCase):
             )
         return completed.stdout
 
+    @staticmethod
+    def artifact_lines(output: str) -> list[str]:
+        return [line for line in output.splitlines() if "artifact:" in line]
+
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
         self.assertIn("TEST_DENSE_scruffy", output)
@@ -97,8 +101,10 @@ class RunnerScriptTests(unittest.TestCase):
             "_P_2_DLB_0_r_depth_scaled_z_dof_implied_depth_S_1",
             output,
         )
+        artifact_lines = self.artifact_lines(output)
+        self.assertTrue(artifact_lines)
         for dead_order in ("_Q_", "_J_", "_O_", "_X_", "_Y_"):
-            self.assertNotIn(dead_order, output.split("\n", 4)[2] if len(output.split("\n", 4)) > 2 else "")
+            self.assertTrue(all(dead_order not in line for line in artifact_lines))
         self.assertIn("--model-type sheet", output)
         self.assertIn("--geometry-preset depth", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
