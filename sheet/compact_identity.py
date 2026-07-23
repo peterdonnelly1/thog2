@@ -19,6 +19,7 @@ from .bases.lapped_cosine import (
 
 GEOMETRY_PRESET_LEGACY_SHEET_COL = "legacy_sheet_col"
 GEOMETRY_PRESET_DEPTH = "depth"
+GEOMETRY_PRESET_JPEG_LIKE_V1 = "jpeg_like_v1"
 GEOMETRY_PRESET_MLP_BLOCK = "mlp_block"
 GEOMETRY_PRESET_HEAD_AWARE_BLOCK = "head_aware_block"
 GEOMETRY_PRESET_FULL_BLOCK = "full_block"
@@ -31,6 +32,7 @@ ATTENTION_GEOMETRY_CONVENTIONAL = "conventional"
 
 MLP_GEOMETRY_LEGACY_SHEET_COL = "legacy_sheet_col"
 MLP_GEOMETRY_DEPTH = "depth"
+MLP_GEOMETRY_JPEG_LIKE_V1 = "jpeg_like_v1"
 MLP_GEOMETRY_MLP_BLOCK = "mlp_block"
 MLP_GEOMETRY_CONVENTIONAL = "conventional"
 
@@ -42,15 +44,19 @@ BASIS_FAMILY_CONVENTIONAL = "conventional"
 
 LEGACY_SHEET_COL_MATERIALIZATION_VERSION = "legacy_sheet_col_v1"
 DEPTH_MATERIALIZATION_VERSION = "depth_v1"
+JPEG_LIKE_V1_MATERIALIZATION_VERSION = "jpeg_like_v1"
 MLP_BLOCK_MATERIALIZATION_VERSION = "mlp_block_v2"
 HEAD_AWARE_BLOCK_MATERIALIZATION_VERSION = "head_aware_block_v2"
 FULL_BLOCK_MATERIALIZATION_VERSION = "full_block_v1"
 COMPACT_MATERIALIZATION_VERSION = LEGACY_SHEET_COL_MATERIALIZATION_VERSION
 CONVENTIONAL_MATERIALIZATION_VERSION = "conventional_dense_v1"
+DEFAULT_MLP_HIDDEN_GROUP_SIZE = 256
+DEFAULT_MLP_HIDDEN_COMPRESSOR = BASIS_FAMILY_DCT
 
 GEOMETRY_PRESETS = (
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
     GEOMETRY_PRESET_DEPTH,
+    GEOMETRY_PRESET_JPEG_LIKE_V1,
     GEOMETRY_PRESET_MLP_BLOCK,
     GEOMETRY_PRESET_HEAD_AWARE_BLOCK,
     GEOMETRY_PRESET_FULL_BLOCK,
@@ -65,6 +71,7 @@ ATTENTION_GEOMETRIES = (
 MLP_GEOMETRIES = (
     MLP_GEOMETRY_LEGACY_SHEET_COL,
     MLP_GEOMETRY_DEPTH,
+    MLP_GEOMETRY_JPEG_LIKE_V1,
     MLP_GEOMETRY_MLP_BLOCK,
     MLP_GEOMETRY_CONVENTIONAL,
 )
@@ -73,6 +80,7 @@ BASIS_FAMILIES = (*REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CONVENTIONAL)
 _PRESET_DEFAULTS: Mapping[str, Tuple[str, str]] = {
     GEOMETRY_PRESET_LEGACY_SHEET_COL: (ATTENTION_GEOMETRY_LEGACY_SHEET_COL, MLP_GEOMETRY_LEGACY_SHEET_COL),
     GEOMETRY_PRESET_DEPTH: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_DEPTH),
+    GEOMETRY_PRESET_JPEG_LIKE_V1: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_JPEG_LIKE_V1),
     GEOMETRY_PRESET_MLP_BLOCK: (ATTENTION_GEOMETRY_DEPTH, MLP_GEOMETRY_MLP_BLOCK),
     GEOMETRY_PRESET_HEAD_AWARE_BLOCK: (ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_DEPTH),
     GEOMETRY_PRESET_FULL_BLOCK: (ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK, MLP_GEOMETRY_MLP_BLOCK),
@@ -106,6 +114,9 @@ class CompactIdentity:
     mlp_geometry: str
     basis_family: str
     basis_version: str
+    mlp_hidden_group_size: int
+    mlp_hidden_compressor: str
+    mlp_hidden_compressor_version: str
     lapped_cosine_window_length: int                                                                                                                     # <<< THOG explicit locality identity
     lapped_cosine_overlap_fraction: float                                                                                                                # <<< THOG explicit overlap identity
     materialization_version: str
@@ -173,6 +184,8 @@ def resolve_compact_selectors(
     resolved_mlp = requested_mlp or default_mlp
     if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_DEPTH and resolved_mlp == MLP_GEOMETRY_DEPTH:
         preset = GEOMETRY_PRESET_DEPTH
+    if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_DEPTH and resolved_mlp == MLP_GEOMETRY_JPEG_LIKE_V1:
+        preset = GEOMETRY_PRESET_JPEG_LIKE_V1
     if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_DEPTH and resolved_mlp == MLP_GEOMETRY_MLP_BLOCK:
         preset = GEOMETRY_PRESET_MLP_BLOCK
     if requested_preset is None and resolved_attention == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and resolved_mlp == MLP_GEOMETRY_DEPTH:
@@ -201,6 +214,7 @@ def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
     versions = {
         GEOMETRY_PRESET_LEGACY_SHEET_COL: LEGACY_SHEET_COL_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_DEPTH: DEPTH_MATERIALIZATION_VERSION,
+        GEOMETRY_PRESET_JPEG_LIKE_V1: JPEG_LIKE_V1_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_MLP_BLOCK: MLP_BLOCK_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_HEAD_AWARE_BLOCK: HEAD_AWARE_BLOCK_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_FULL_BLOCK: FULL_BLOCK_MATERIALIZATION_VERSION,
@@ -221,13 +235,14 @@ def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
     supported_basis = selectors.basis_family in REGISTERED_BASIS_FAMILIES
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
     depth = selectors.geometry_preset == GEOMETRY_PRESET_DEPTH and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis
+    jpeg_like_v1 = selectors.geometry_preset == GEOMETRY_PRESET_JPEG_LIKE_V1 and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1 and supported_basis
     mlp_block = selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
     head_aware = selectors.geometry_preset == GEOMETRY_PRESET_HEAD_AWARE_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis
     full_block = selectors.geometry_preset == GEOMETRY_PRESET_FULL_BLOCK and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK and selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK and supported_basis
-    if legacy or depth or mlp_block or head_aware or full_block:
+    if legacy or depth or jpeg_like_v1 or mlp_block or head_aware or full_block:
         return
     raise ValueError(
-        "supported compact presets are legacy_sheet_col, depth, mlp_block, head_aware_block, or full_block "
+        "supported compact presets are legacy_sheet_col, depth, jpeg_like_v1, mlp_block, head_aware_block, or full_block "
         f"with a registered basis family {REGISTERED_BASIS_FAMILIES}; "
         f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, "
         f"mlp_geometry={selectors.mlp_geometry!r}, basis_family={selectors.basis_family!r}"
@@ -293,6 +308,8 @@ def compact_identity_metadata(
     o_attn_out_per_channel: int,
     o_mlp_d_model: int,
     o_mlp_hidden: int,
+    mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE,
+    mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR,
     basis_version: str = BASIS_VERSION,
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH,                                                                               # <<< THOG locality control
     lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION,                                                                        # <<< THOG overlap control
@@ -312,6 +329,22 @@ def compact_identity_metadata(
     if require_stage1_sheet_support:
         validate_current_sheet_support(selectors)
     basis_version = normalize_compact_basis_version(selectors, basis_version)
+    if isinstance(mlp_hidden_group_size, bool) or not isinstance(mlp_hidden_group_size, int) or mlp_hidden_group_size <= 0:
+        raise ValueError(f"mlp_hidden_group_size must be a positive integer; got {mlp_hidden_group_size!r}")
+    canonical_mlp_hidden_compressor = normalize_registered_basis_family(mlp_hidden_compressor)
+    mlp_hidden_compressor_version = basis_version_for_family(canonical_mlp_hidden_compressor)
+    if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+        mlp_hidden_length = 4 * n_embd
+        if mlp_hidden_length % mlp_hidden_group_size != 0:
+            raise ValueError(
+                "4*d_model must be divisible by mlp_hidden_group_size; "
+                f"got 4*d_model={mlp_hidden_length}, group_size={mlp_hidden_group_size}"
+            )
+        if o_mlp_hidden > mlp_hidden_group_size:
+            raise ValueError(
+                "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
+                f"got Y={o_mlp_hidden}, group_size={mlp_hidden_group_size}"
+            )
     # vvv THOG bind the lapped controls to the canonical basis version and reject leakage into other families
     if selectors.basis_family == BASIS_FAMILY_LAPPED_COSINE:
         validate_lapped_cosine_controls(
@@ -351,6 +384,9 @@ def compact_identity_metadata(
         mlp_geometry=selectors.mlp_geometry,
         basis_family=selectors.basis_family,
         basis_version=basis_version,
+        mlp_hidden_group_size=mlp_hidden_group_size,
+        mlp_hidden_compressor=canonical_mlp_hidden_compressor,
+        mlp_hidden_compressor_version=mlp_hidden_compressor_version,
         lapped_cosine_window_length=lapped_cosine_window_length,                                                                                          # <<< THOG persist locality identity
         lapped_cosine_overlap_fraction=float(lapped_cosine_overlap_fraction),                                                                              # <<< THOG persist overlap identity
         materialization_version=compact_materialization_version(selectors),

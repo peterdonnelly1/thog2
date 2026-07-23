@@ -16,7 +16,7 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .checkpointing import validate_checkpoint_segment_size
-from .compact_identity import compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
+from .compact_identity import DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, compact_identity_metadata, conventional_identity_metadata, validate_dense_compact_fields
 from .geometry import derive_row_order
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 
@@ -42,6 +42,8 @@ MODEL_COMPATIBILITY_FIELDS = (
     "o_attn_out_per_channel",
     "o_mlp_d_model",
     "o_mlp_hidden",
+    "mlp_hidden_group_size",
+    "mlp_hidden_compressor",
     "residual_init_policy",
     "residual_init_depth_source",
     "residual_init_depth_value",
@@ -74,6 +76,8 @@ class TrainingConfig:
     o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
     o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
     o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
+    mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
+    mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
     residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
@@ -118,7 +122,7 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         if self.model_type not in MODEL_TYPES:
             raise ValueError(f"model_type must be one of {MODEL_TYPES}; got {self.model_type!r}")
-        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "batch_size", "gradient_accumulation_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
@@ -158,6 +162,7 @@ class TrainingConfig:
             value = getattr(self, name)
             if value is not None and value > limit:
                 raise ValueError(f"{name} must not exceed {limit}")
+        self.mlp_hidden_compressor = normalize_registered_basis_family(self.mlp_hidden_compressor)
         residual_init = self.residual_init_config()
         self.residual_init_depth_source = residual_init.depth_source
         if self.model_type == "dense" and residual_init.depth_source == "dof_implied_depth":
@@ -259,6 +264,8 @@ class TrainingConfig:
                 "o_attn_out_per_channel": self.resolved_o_attn_out_per_channel,
                 "o_mlp_d_model": self.resolved_o_mlp_d_model,
                 "o_mlp_hidden": self.resolved_o_mlp_hidden,
+                "mlp_hidden_group_size": self.mlp_hidden_group_size,
+                "mlp_hidden_compressor": self.mlp_hidden_compressor,
                 "basis_version": self.basis_version,
                 "geometry_preset": self.geometry_preset,
                 "attention_geometry": self.attention_geometry,
@@ -280,6 +287,8 @@ class TrainingConfig:
             o_attn_out_per_channel=self.resolved_o_attn_out_per_channel,
             o_mlp_d_model=self.resolved_o_mlp_d_model,
             o_mlp_hidden=self.resolved_o_mlp_hidden,
+            mlp_hidden_group_size=self.mlp_hidden_group_size,
+            mlp_hidden_compressor=self.mlp_hidden_compressor,
             basis_version=self.basis_version,
             lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
             lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control

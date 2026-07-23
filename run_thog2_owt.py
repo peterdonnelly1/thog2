@@ -18,7 +18,7 @@ from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
 from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
 from sheet.checkpoints import load_payload
-from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
+from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
     DEFAULT_EXPERIMENT_PREFIX,
@@ -225,6 +225,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--o-attn-out-per-channel", type=int, default=DEFAULT_O_ATTN_OUT_PER_CHANNEL)
     parser.add_argument("--o-mlp-d-model", type=int, default=DEFAULT_O_MLP_D_MODEL)
     parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
+    parser.add_argument("--mlp-hidden-group-size", type=int, default=DEFAULT_MLP_HIDDEN_GROUP_SIZE)
+    parser.add_argument("--mlp-hidden-compressor", choices=BASIS_FAMILIES, default=DEFAULT_MLP_HIDDEN_COMPRESSOR)
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
@@ -332,6 +334,8 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         o_attn_out_per_channel=arguments.o_attn_out_per_channel,
         o_mlp_d_model=arguments.o_mlp_d_model,
         o_mlp_hidden=arguments.o_mlp_hidden,
+        mlp_hidden_group_size=arguments.mlp_hidden_group_size,
+        mlp_hidden_compressor=arguments.mlp_hidden_compressor,
         geometry_preset=arguments.geometry_preset,
         attention_geometry=arguments.attention_geometry,
         mlp_geometry=arguments.mlp_geometry,

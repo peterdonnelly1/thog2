@@ -69,7 +69,7 @@ def test_stage8_training_wrappers_use_final_preset_as_single_architecture_select
     for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
         assert "-p PRESET=${GEOMETRY_PRESET}" in text
-        assert "dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block" in text
+        assert "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block" in text
         assert "geometry_preset=\"curve\"" not in text.lower()
         assert "-p curve" not in text.lower()
         assert "Deprecated compatibility:" not in text

@@ -17,7 +17,7 @@ from .bases.lapped_cosine import (
     normalize_lapped_cosine_basis_version,
 )
 # ^^^ THOG
-from .compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_CONVENTIONAL, GEOMETRY_PRESET_DEPTH, compact_identity_metadata
+from .compact_identity import BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_CONVENTIONAL, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, MLP_GEOMETRY_JPEG_LIKE_V1, compact_identity_metadata
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -75,6 +75,8 @@ class OwtRunConfig:
     o_attn_out_per_channel: int = DEFAULT_O_ATTN_OUT_PER_CHANNEL
     o_mlp_d_model: int = DEFAULT_O_MLP_D_MODEL
     o_mlp_hidden: int = DEFAULT_O_MLP_HIDDEN
+    mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
+    mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
 
     geometry_preset: Optional[str] = GEOMETRY_PRESET_DEPTH
     attention_geometry: Optional[str] = None
@@ -138,6 +140,7 @@ class OwtRunConfig:
             raise ValueError("float16 training is not supported on CPU")
 
         object.__setattr__(self, "experiment_prefix", normalize_component(self.experiment_prefix, uppercase=True))
+        object.__setattr__(self, "mlp_hidden_compressor", normalize_registered_basis_family(self.mlp_hidden_compressor))
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
         # vvv THOG derive and validate the parameterised lapped basis version from explicit controls
@@ -191,6 +194,7 @@ class OwtRunConfig:
             "n_layer",
             "n_head",
             "n_embd",
+            "mlp_hidden_group_size",
             "checkpoint_segment_size",
             "artifact_name_limit",
         )
@@ -280,6 +284,8 @@ class OwtRunConfig:
             o_attn_out_per_channel=self.o_attn_out_per_channel,
             o_mlp_d_model=self.o_mlp_d_model,
             o_mlp_hidden=self.o_mlp_hidden,
+            mlp_hidden_group_size=self.mlp_hidden_group_size,
+            mlp_hidden_compressor=self.mlp_hidden_compressor,
             basis_version=self.basis_version,
             lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
             lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control
@@ -296,6 +302,9 @@ class OwtRunConfig:
         identity = self.compact_identity()
         basis_label = basis_artifact_tag_for_family(str(identity["basis_family"]))
         preset_label = str(identity["geometry_preset"]).upper()
+        if identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
+            compressor_label = basis_artifact_tag_for_family(str(identity["mlp_hidden_compressor"]))
+            return f"{basis_label}_{preset_label}_{compressor_label}"
         return f"{basis_label}_{preset_label}"
 
     def run_descriptor(self) -> str:
@@ -332,6 +341,8 @@ class OwtRunConfig:
                 f"X_{self.o_mlp_d_model}",
                 f"Y_{self.o_mlp_hidden}",
             ])
+            if self.compact_identity()["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
+                fields.append(f"MHG_{self.mlp_hidden_group_size}")
             # vvv THOG lapped locality and overlap are visible in run identity
             if self.compact_identity()["basis_family"] == BASIS_FAMILY_LAPPED_COSINE:
                 overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
@@ -385,6 +396,8 @@ class OwtRunConfig:
                 "o_attn_out_per_channel": self.o_attn_out_per_channel,
                 "o_mlp_d_model": self.o_mlp_d_model,
                 "o_mlp_hidden": self.o_mlp_hidden,
+                "mlp_hidden_group_size": self.mlp_hidden_group_size,
+                "mlp_hidden_compressor": self.mlp_hidden_compressor,
                 "basis_version": self.basis_version,
                 "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                           # <<< THOG checkpoint locality control
                 "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                      # <<< THOG checkpoint overlap control
@@ -403,6 +416,8 @@ class OwtRunConfig:
                 "o_attn_out_per_channel": None,
                 "o_mlp_d_model": None,
                 "o_mlp_hidden": None,
+                "mlp_hidden_group_size": DEFAULT_MLP_HIDDEN_GROUP_SIZE,
+                "mlp_hidden_compressor": DEFAULT_MLP_HIDDEN_COMPRESSOR,
                 "basis_version": BASIS_VERSION,
                 "geometry_preset": None,
                 "attention_geometry": None,
@@ -459,6 +474,8 @@ class OwtRunConfig:
                 "o_attn_out_per_channel",
                 "o_mlp_d_model",
                 "o_mlp_hidden",
+                "mlp_hidden_group_size",
+                "mlp_hidden_compressor",
                 "geometry_preset",
                 "attention_geometry",
                 "mlp_geometry",

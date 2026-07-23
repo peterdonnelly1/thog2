@@ -23,6 +23,13 @@ set -euo pipefail
 # Explicit -c and -f values override those defaults independently. Lowercase -c is
 # the learning-rate code; capital -C remains the context length. Non-AdamW runs add
 # OPT_<OPTIMIZER> to the artifact suffix to prevent otherwise identical collisions.
+#
+# Registry:
+#   geometry preset JPEG_LIKE_V1 segments MLP_UP along MLP_HIDDEN only.
+#   -B selects the registered DEPTH/global basis independently.
+#   --mlp-hidden-compressor selects the registered compressor inside each local segment.
+#   --mlp-hidden-group-size sets physical MLP_HIDDEN positions per segment.
+#   -Y remains the retained MLP_HIDDEN coefficient count; require 1 <= Y <= group size.
 # ^^^ THOG
 
 cd "$(dirname "$0")"
@@ -44,6 +51,8 @@ BASIS_FAMILY="chebyshev"
 BASIS_VERSION="auto"
 LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
 LAPPED_COSINE_OVERLAP_FRACTION="0.5"                                                                                                                       # <<< THOG v1 fixed overlap
+MLP_HIDDEN_COMPRESSOR="${THOG2_MLP_HIDDEN_COMPRESSOR:-dct}"
+MLP_HIDDEN_GROUP_SIZE="${THOG2_MLP_HIDDEN_GROUP_SIZE:-256}"
 ATTENTION_GEOMETRY=""
 MLP_GEOMETRY=""
 STEPS=250
@@ -99,7 +108,7 @@ usage() {
 Usage: $0 [options] [-- extra ${RUN_MODULE} args]
 
 Model/run:
-  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | head_aware_block | mlp_block | full_block
+  -p PRESET=${GEOMETRY_PRESET}                       dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block
                                                    single value, comma list, or quoted space list
   -q RUN_MODE=${RUN_MODE}                        fresh | resume
   -g RUN_NAME=${RUN_NAME:-auto}
@@ -142,6 +151,8 @@ Compact geometry:
   -i LAPPED_COSINE_OVERLAP_FRACTION=${LAPPED_COSINE_OVERLAP_FRACTION}  currently 0.5 only
   -a ATTENTION_GEOMETRY=${ATTENTION_GEOMETRY:-preset default}
   -m MLP_GEOMETRY=${MLP_GEOMETRY:-preset default}
+  --mlp-hidden-compressor NAME=${MLP_HIDDEN_COMPRESSOR}  registered local compressor; comma/space list allowed
+  --mlp-hidden-group-size N=${MLP_HIDDEN_GROUP_SIZE}     physical MLP_HIDDEN segment size; comma/space list allowed
 
 Shape/runtime:
   -L N_LAYER=${N_LAYER}
@@ -175,7 +186,7 @@ Paths:
 EOF_USAGE
 }
 
-# vvv THOG accept long optimizer controls without disturbing the established getopts contract
+# vvv THOG accept long optimizer controls and JPEG_LIKE_V1 controls without disturbing the established getopts contract
 OPTIMIZER_FILTERED_ARGS=()
 OPTIMIZER_SAW_SEPARATOR=false
 while (( $# > 0 )); do
@@ -201,6 +212,24 @@ while (( $# > 0 )); do
       ;;
     --optimizer-momentum=*)
       OPTIMIZER_MOMENTUM="${1#*=}"
+      shift
+      ;;
+    --mlp-hidden-compressor)
+      (( $# >= 2 )) || { echo "--mlp-hidden-compressor requires a registry name" >&2; exit 2; }
+      MLP_HIDDEN_COMPRESSOR="$2"
+      shift 2
+      ;;
+    --mlp-hidden-compressor=*)
+      MLP_HIDDEN_COMPRESSOR="${1#*=}"
+      shift
+      ;;
+    --mlp-hidden-group-size)
+      (( $# >= 2 )) || { echo "--mlp-hidden-group-size requires a positive integer or list" >&2; exit 2; }
+      MLP_HIDDEN_GROUP_SIZE="$2"
+      shift 2
+      ;;
+    --mlp-hidden-group-size=*)
+      MLP_HIDDEN_GROUP_SIZE="${1#*=}"
       shift
       ;;
     --)
@@ -298,10 +327,14 @@ O_DEPTH_VALUES=()
 PRESET_VALUES=()
 BASIS_FAMILY_VALUES=()                                                                                                                                    # <<< THOG basis-family grid axis
 BASIS_TAG_VALUES=()                                                                                                                                       # <<< THOG matching artifact tags for basis-family grid
+MLP_HIDDEN_COMPRESSOR_VALUES=()
+MLP_HIDDEN_COMPRESSOR_TAG_VALUES=()
+MLP_HIDDEN_GROUP_SIZE_VALUES=()
 BATCH_SIZE_VALUES=()                                                                                                                                        # <<< THOG batch grid axis
 LEARNING_RATE_CODE_VALUES=()                                                                                                                                # <<< THOG LR grid axis
 HAS_DENSE_PRESET=false
 HAS_COMPACT_PRESET=false
+HAS_JPEG_LIKE_PRESET=false
 parse_positive_uint_values() {
   local normalized="${1//,/ }" value
   for value in $normalized; do validate_positive_uint "$value" "$2"; BATCH_SIZE_VALUES+=("$value"); done
@@ -340,10 +373,27 @@ parse_geometry_preset_values() {
     case "$value" in
       dense) PRESET_VALUES+=("$value"); HAS_DENSE_PRESET=true ;;
       legacy_sheet_col|depth|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
+      jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
       *) echo "Bad PRESET: $value" >&2; exit 2 ;;
     esac
   done
   (( ${#PRESET_VALUES[@]} > 0 )) || { echo "Invalid PRESET: empty value list." >&2; exit 2; }
+}
+parse_mlp_hidden_group_size_values() {
+  local normalized="${1//,/ }" value
+  for value in $normalized; do
+    validate_positive_uint "$value" "MLP_HIDDEN_GROUP_SIZE"
+    MLP_HIDDEN_GROUP_SIZE_VALUES+=("$value")
+  done
+  (( ${#MLP_HIDDEN_GROUP_SIZE_VALUES[@]} > 0 )) || { echo "Invalid MLP_HIDDEN_GROUP_SIZE list." >&2; exit 2; }
+}
+parse_mlp_hidden_compressor_values() {
+  local normalized="${1//,/ }" value
+  for value in $normalized; do
+    [[ "$value" =~ ^[a-z][a-z0-9_]*$ ]] || { echo "Invalid MLP_HIDDEN_COMPRESSOR value: $value; expected a lowercase registry name or alias." >&2; exit 2; }
+    MLP_HIDDEN_COMPRESSOR_VALUES+=("$value")
+  done
+  (( ${#MLP_HIDDEN_COMPRESSOR_VALUES[@]} > 0 )) || { echo "Invalid MLP_HIDDEN_COMPRESSOR list." >&2; exit 2; }
 }
 parse_basis_family_values() {
   local normalized="${1//,/ }" value
@@ -356,12 +406,18 @@ parse_basis_family_values() {
 parse_o_depth_values "$O_DEPTH"
 parse_geometry_preset_values "$GEOMETRY_PRESET"
 parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid
+parse_mlp_hidden_compressor_values "$MLP_HIDDEN_COMPRESSOR"
+parse_mlp_hidden_group_size_values "$MLP_HIDDEN_GROUP_SIZE"
 parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE"                                                                                                  # <<< THOG parse batch grid
 parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                              # <<< THOG parse LR grid
 validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                          # <<< THOG validate min LR
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 # vvv THOG
+if [[ "$HAS_JPEG_LIKE_PRESET" == false ]] && (( ${#MLP_HIDDEN_COMPRESSOR_VALUES[@]} > 1 || ${#MLP_HIDDEN_GROUP_SIZE_VALUES[@]} > 1 )); then
+  echo "MLP_HIDDEN compressor/group grids require -p jpeg_like_v1." >&2
+  exit 2
+fi
 if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then
   echo "BASIS_VERSION must be auto when BASIS_FAMILY contains multiple values." >&2
   exit 2
@@ -409,6 +465,12 @@ if [[ "$HAS_COMPACT_PRESET" == true ]]; then
   (( O_ATTN_OUT_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_OUT_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
   (( O_MLP_D_MODEL <= N_EMBD )) || { echo "O_MLP_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
   (( O_MLP_HIDDEN <= 4 * N_EMBD )) || { echo "O_MLP_HIDDEN must not exceed 4*N_EMBD." >&2; exit 2; }
+  if [[ "$HAS_JPEG_LIKE_PRESET" == true ]]; then
+    for group_size_value in "${MLP_HIDDEN_GROUP_SIZE_VALUES[@]}"; do
+      (( 4 * N_EMBD % group_size_value == 0 )) || { echo "4*N_EMBD must be divisible by MLP_HIDDEN_GROUP_SIZE: 4*D=$((4 * N_EMBD)), group=$group_size_value." >&2; exit 2; }
+      (( O_MLP_HIDDEN <= group_size_value )) || { echo "O_MLP_HIDDEN/Y must not exceed MLP_HIDDEN_GROUP_SIZE: Y=$O_MLP_HIDDEN, group=$group_size_value." >&2; exit 2; }
+    done
+  fi
 fi
 (( GRADIENT_ACCUMULATION_STEPS % NUM_GPUS == 0 )) || { echo "GRADIENT_ACCUMULATION_STEPS must be divisible by NUM_GPUS." >&2; exit 2; }
 
@@ -426,6 +488,17 @@ for requested_basis_family in "${BASIS_FAMILY_VALUES[@]}"; do
   BASIS_TAG_VALUES+=("$basis_tag")
 done
 BASIS_FAMILY_VALUES=("${BASIS_FAMILY_CANONICAL_VALUES[@]}")
+MLP_HIDDEN_COMPRESSOR_CANONICAL_VALUES=()
+for requested_mlp_hidden_compressor in "${MLP_HIDDEN_COMPRESSOR_VALUES[@]}"; do
+  if ! compressor_resolution="$("$PYTHON_BIN" -c 'import sys; from sheet.bases import basis_artifact_tag_for_family, normalize_registered_basis_family; family = normalize_registered_basis_family(sys.argv[1]); print(f"{family}\t{basis_artifact_tag_for_family(family)}")' "$requested_mlp_hidden_compressor")"; then
+    echo "Failed to resolve MLP_HIDDEN_COMPRESSOR: $requested_mlp_hidden_compressor" >&2
+    exit 2
+  fi
+  IFS=$'\t' read -r compressor_family_value compressor_tag <<< "$compressor_resolution"
+  MLP_HIDDEN_COMPRESSOR_CANONICAL_VALUES+=("$compressor_family_value")
+  MLP_HIDDEN_COMPRESSOR_TAG_VALUES+=("$compressor_tag")
+done
+MLP_HIDDEN_COMPRESSOR_VALUES=("${MLP_HIDDEN_COMPRESSOR_CANONICAL_VALUES[@]}")
 # ^^^ THOG
 CHECKPOINT_FLAG="--no-activation-checkpointing"; [[ "$ACTIVATION_CHECKPOINTING" == true ]] && CHECKPOINT_FLAG="--activation-checkpointing"
 
@@ -449,6 +522,9 @@ run_grid_point() {
   local learning_rate_code="$4"                                                                                                                           # <<< THOG LR grid coordinate
   local basis_family_value="$5"                                                                                                                           # <<< THOG canonical basis-family grid coordinate
   local basis_tag="$6"                                                                                                                                    # <<< THOG matching basis artifact tag
+  local mlp_hidden_compressor_value="$7"
+  local mlp_hidden_compressor_tag="$8"
+  local mlp_hidden_group_size_value="$9"
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
@@ -469,11 +545,13 @@ run_grid_point() {
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
     run_tag="${basis_tag}_${preset_tag}"
-    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION" --lapped-cosine-window-length "$LAPPED_COSINE_WINDOW_LENGTH" --lapped-cosine-overlap-fraction "$LAPPED_COSINE_OVERLAP_FRACTION")
+    [[ "$geometry_preset_value" == jpeg_like_v1 ]] && run_tag="${run_tag}_${mlp_hidden_compressor_tag}_G${mlp_hidden_group_size_value}"
+    compact_args=(--geometry-preset "$geometry_preset_value" --basis-family "$basis_family_value" --basis-version "$BASIS_VERSION" --lapped-cosine-window-length "$LAPPED_COSINE_WINDOW_LENGTH" --lapped-cosine-overlap-fraction "$LAPPED_COSINE_OVERLAP_FRACTION" --mlp-hidden-compressor "$mlp_hidden_compressor_value" --mlp-hidden-group-size "$mlp_hidden_group_size_value")
     [[ -n "$ATTENTION_GEOMETRY" ]] && optional_args+=(--attention-geometry "$ATTENTION_GEOMETRY")
     [[ -n "$MLP_GEOMETRY" ]] && optional_args+=(--mlp-geometry "$MLP_GEOMETRY")
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
     orders_summary="P${o_depth_value} Q${O_ATTN_D_MODEL} J${O_ATTN_QKV_PER_CHANNEL} O${O_ATTN_OUT_PER_CHANNEL} X${O_MLP_D_MODEL} Y${O_MLP_HIDDEN}"
+    [[ "$geometry_preset_value" == jpeg_like_v1 ]] && orders_summary="${orders_summary} MHG${mlp_hidden_group_size_value}"
   fi
 
   run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
@@ -506,6 +584,7 @@ scruffy OWT train
   experiment:         $EXPERIMENT_PREFIX
   model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
   lapped cosine:      window=$LAPPED_COSINE_WINDOW_LENGTH overlap=$LAPPED_COSINE_OVERLAP_FRACTION
+  JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
   fast discard:       $FAST_DISCARD
@@ -540,27 +619,43 @@ EOF_DONE
   return "$run_status"
 }
 
-if (( ${#PRESET_VALUES[@]} > 1 || ${#BASIS_FAMILY_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then
-  echo "scruffy OWT grid: p=${PRESET_VALUES[*]} B=${BASIS_FAMILY_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"
+if (( ${#PRESET_VALUES[@]} > 1 || ${#BASIS_FAMILY_VALUES[@]} > 1 || ${#MLP_HIDDEN_COMPRESSOR_VALUES[@]} > 1 || ${#MLP_HIDDEN_GROUP_SIZE_VALUES[@]} > 1 || ${#O_DEPTH_VALUES[@]} > 1 || ${#BATCH_SIZE_VALUES[@]} > 1 || ${#LEARNING_RATE_CODE_VALUES[@]} > 1 )); then
+  echo "scruffy OWT grid: p=${PRESET_VALUES[*]} B=${BASIS_FAMILY_VALUES[*]} MHC=${MLP_HIDDEN_COMPRESSOR_VALUES[*]} MHG=${MLP_HIDDEN_GROUP_SIZE_VALUES[*]} P=${O_DEPTH_VALUES[*]} b=${BATCH_SIZE_VALUES[*]} LR=${LEARNING_RATE_CODE_VALUES[*]}"
 fi
 for geometry_preset_value in "${PRESET_VALUES[@]}"; do
   if [[ "$geometry_preset_value" == dense ]]; then
     for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
       for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
-        run_grid_point "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code" "${BASIS_FAMILY_VALUES[0]}" "${BASIS_TAG_VALUES[0]}"
+        run_grid_point "$geometry_preset_value" "${O_DEPTH_VALUES[0]}" "$batch_size_value" "$learning_rate_code" "${BASIS_FAMILY_VALUES[0]}" "${BASIS_TAG_VALUES[0]}" "${MLP_HIDDEN_COMPRESSOR_VALUES[0]}" "${MLP_HIDDEN_COMPRESSOR_TAG_VALUES[0]}" "${MLP_HIDDEN_GROUP_SIZE_VALUES[0]}"
       done
     done
   else
     for basis_index in "${!BASIS_FAMILY_VALUES[@]}"; do
       basis_family_value="${BASIS_FAMILY_VALUES[$basis_index]}"
       basis_tag="${BASIS_TAG_VALUES[$basis_index]}"
-      for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
-        for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
-          for o_depth_value in "${O_DEPTH_VALUES[@]}"; do
-            run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag"
+      if [[ "$geometry_preset_value" == jpeg_like_v1 ]]; then
+        for compressor_index in "${!MLP_HIDDEN_COMPRESSOR_VALUES[@]}"; do
+          mlp_hidden_compressor_value="${MLP_HIDDEN_COMPRESSOR_VALUES[$compressor_index]}"
+          mlp_hidden_compressor_tag="${MLP_HIDDEN_COMPRESSOR_TAG_VALUES[$compressor_index]}"
+          for mlp_hidden_group_size_value in "${MLP_HIDDEN_GROUP_SIZE_VALUES[@]}"; do
+            for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
+              for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
+                for o_depth_value in "${O_DEPTH_VALUES[@]}"; do
+                  run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag" "$mlp_hidden_compressor_value" "$mlp_hidden_compressor_tag" "$mlp_hidden_group_size_value"
+                done
+              done
+            done
           done
         done
-      done
+      else
+        for batch_size_value in "${BATCH_SIZE_VALUES[@]}"; do
+          for learning_rate_code in "${LEARNING_RATE_CODE_VALUES[@]}"; do
+            for o_depth_value in "${O_DEPTH_VALUES[@]}"; do
+              run_grid_point "$geometry_preset_value" "$o_depth_value" "$batch_size_value" "$learning_rate_code" "$basis_family_value" "$basis_tag" "${MLP_HIDDEN_COMPRESSOR_VALUES[0]}" "${MLP_HIDDEN_COMPRESSOR_TAG_VALUES[0]}" "${MLP_HIDDEN_GROUP_SIZE_VALUES[0]}"
+            done
+          done
+        done
+      fi
     done
   fi
 done

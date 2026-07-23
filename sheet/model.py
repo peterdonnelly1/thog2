@@ -15,14 +15,18 @@ from .basis import BASIS_VERSION
 from .block_trajectory import BlockTrajectory
 from .compact_identity import (
     ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
+    DEFAULT_MLP_HIDDEN_COMPRESSOR,
+    DEFAULT_MLP_HIDDEN_GROUP_SIZE,
     GEOMETRY_PRESET_DEPTH,
     GEOMETRY_PRESET_MLP_BLOCK,
+    MLP_GEOMETRY_JPEG_LIKE_V1,
     MLP_GEOMETRY_MLP_BLOCK,
     resolve_compact_selectors,
     validate_current_sheet_support,
 )
 from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
+from .jpeg_like_v1_trajectory import JpegLikeV1Trajectory
 from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
@@ -73,6 +77,8 @@ class SheetGPTConfig:
     o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
     o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
     o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
+    mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
+    mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
     basis_version: str = BASIS_VERSION
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -94,6 +100,10 @@ class SheetGPTConfig:
                 raise ValueError(f"mlp_channel_order must be a positive integer or None; got {self.mlp_channel_order!r}")
             if self.mlp_channel_order > 4 * self.n_embd:
                 raise ValueError("mlp_channel_order must not exceed 4*n_embd")
+        if isinstance(self.mlp_hidden_group_size, bool) or not isinstance(self.mlp_hidden_group_size, int) or self.mlp_hidden_group_size <= 0:
+            raise ValueError(f"mlp_hidden_group_size must be a positive integer; got {self.mlp_hidden_group_size!r}")
+        if not isinstance(self.mlp_hidden_compressor, str) or not self.mlp_hidden_compressor.strip():
+            raise ValueError("mlp_hidden_compressor must be a non-empty string")
         if not isinstance(self.dropout, (int, float)) or not 0.0 <= self.dropout < 1.0:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
@@ -108,8 +118,20 @@ class SheetGPTConfig:
             raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
         if not isinstance(self.vectorise_per_head_materialisation, bool):
             raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
-        self.sheet_geometry()
-        self.compact_selectors()
+        geometry = self.sheet_geometry()
+        selectors = self.compact_selectors()
+        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+            mlp_hidden_length = 4 * self.n_embd
+            if mlp_hidden_length % self.mlp_hidden_group_size != 0:
+                raise ValueError(
+                    "4*d_model must be divisible by mlp_hidden_group_size; "
+                    f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
+                )
+            if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
+                raise ValueError(
+                    "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
+                    f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
+                )
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -156,7 +178,16 @@ class SheetGPT(nn.Module):
             }
         )
         selectors = config.compact_selectors()
-        if selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+            self.trajectory = JpegLikeV1Trajectory(
+                config.sheet_geometry(),
+                mlp_hidden_group_size=config.mlp_hidden_group_size,
+                mlp_hidden_compressor=config.mlp_hidden_compressor,
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
             self.trajectory = BlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
