@@ -156,16 +156,16 @@ class Stage1MathematicalCoreTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(len(cache), 1)
 
-        version_variant = cache.get(
-            64,
-            16,
-            runtime_dtype=torch.float64,
-            version=BASIS_VERSION + "_test_variant",
-        )
+        with self.assertRaisesRegex(ValueError, "basis_version mismatch|unsupported"):
+            cache.get(
+                64,
+                16,
+                runtime_dtype=torch.float64,
+                version=BASIS_VERSION + "_test_variant",
+            )
         dtype_variant = cache.get(64, 16, runtime_dtype=torch.float32)
-        self.assertIsNot(first, version_variant)
         self.assertIsNot(first, dtype_variant)
-        self.assertEqual(len(cache), 3)
+        self.assertEqual(len(cache), 2)
 
         cpu_key = cache.make_key(
             64,

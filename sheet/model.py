@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import inspect
 import math
-from dataclasses import asdict, dataclass
+import os
+from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -11,8 +12,42 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from .basis import BASIS_VERSION
+from .block_trajectory import BlockTrajectory
+from .compact_identity import (
+    ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK,
+    DEFAULT_MLP_HIDDEN_COMPRESSOR,
+    DEFAULT_MLP_HIDDEN_GROUP_SIZE,
+    GEOMETRY_PRESET_DEPTH,
+    GEOMETRY_PRESET_MLP_BLOCK,
+    MLP_GEOMETRY_JPEG_LIKE_V1,
+    MLP_GEOMETRY_MLP_BLOCK,
+    resolve_compact_selectors,
+    validate_current_sheet_support,
+)
+from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
+from .jpeg_like_v1_trajectory import JpegLikeV1Trajectory
+from .mlp_block_trajectory import MlpBlockTrajectory
+from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
+
+
+# vvv THOG
+_FAST_DISCARD_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FAST_DISCARD_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    normalized_value = raw_value.strip().lower()
+    if normalized_value in _FAST_DISCARD_TRUE_VALUES:
+        return True
+    if normalized_value in _FAST_DISCARD_FALSE_VALUES:
+        return False
+    raise ValueError(f"{name} must be true or false; got {raw_value!r}")
+# ^^^ THOG
 
 
 class ConventionalLayerNorm(nn.Module):
@@ -22,13 +57,7 @@ class ConventionalLayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(width)) if bias else None
 
     def forward(self, inputs: Tensor) -> Tensor:
-        return F.layer_norm(
-            inputs,
-            self.weight.shape,
-            self.weight,
-            self.bias,
-            1.0e-5,
-        )
+        return F.layer_norm(inputs, self.weight.shape, self.weight, self.bias, 1.0e-5)
 
 
 @dataclass
@@ -42,18 +71,89 @@ class SheetGPTConfig:
     bias: bool = True
     depth_order: int = 12
     base_row_order: int = 128
+    mlp_channel_order: Optional[int] = None
+    o_attn_d_model: Optional[int] = None                                                                                                               # <<< THOG final attention model-axis order
+    o_attn_qkv_per_channel: Optional[int] = None                                                                                                       # <<< THOG final QKV per-head channel order
+    o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
+    o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
+    o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
+    mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
+    mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
     basis_version: str = BASIS_VERSION
+    geometry_preset: Optional[str] = None
+    attention_geometry: Optional[str] = None
+    mlp_geometry: Optional[str] = None
+    basis_family: Optional[str] = None
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
+    fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
+    bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
+    # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
+    direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
+    vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
 
     def __post_init__(self) -> None:
         for name in ("block_size", "vocab_size"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        if self.mlp_channel_order is not None:
+            if isinstance(self.mlp_channel_order, bool) or not isinstance(self.mlp_channel_order, int) or self.mlp_channel_order <= 0:
+                raise ValueError(f"mlp_channel_order must be a positive integer or None; got {self.mlp_channel_order!r}")
+            if self.mlp_channel_order > 4 * self.n_embd:
+                raise ValueError("mlp_channel_order must not exceed 4*n_embd")
+        if isinstance(self.mlp_hidden_group_size, bool) or not isinstance(self.mlp_hidden_group_size, int) or self.mlp_hidden_group_size <= 0:
+            raise ValueError(f"mlp_hidden_group_size must be a positive integer; got {self.mlp_hidden_group_size!r}")
+        if not isinstance(self.mlp_hidden_compressor, str) or not self.mlp_hidden_compressor.strip():
+            raise ValueError("mlp_hidden_compressor must be a non-empty string")
         if not isinstance(self.dropout, (int, float)) or not 0.0 <= self.dropout < 1.0:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
-        self.sheet_geometry()
+        if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias must be bool; "
+                f"got {self.depth_compress_layer_norm_and_bias!r}"
+            )
+        if not isinstance(self.fast_discard, bool):
+            raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
+        if not isinstance(self.bypass_semantic_qkv_adapter, bool):
+            raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
+        # if not isinstance(self.direct_thog_mlp_application, bool):                                                                                      # <<< THOG retired old option validation
+        #     raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")
+        if not isinstance(self.direct_factorised_mlp, bool):
+            raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
+        if not isinstance(self.vectorise_per_head_materialisation, bool):
+            raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
+
+        # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
+        selectors = self.compact_selectors()
+        if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+            raise ValueError(
+                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+            )
+        if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            self.base_row_order = 1
+            self.mlp_channel_order = 1
+            self.o_attn_d_model = 1
+            self.o_attn_qkv_per_channel = 1
+            self.o_attn_out_per_channel = 1
+            self.o_mlp_d_model = 1
+            self.o_mlp_hidden = 1
+        # ^^^ THOG
+
+        geometry = self.sheet_geometry()
+        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+            mlp_hidden_length = 4 * self.n_embd
+            if mlp_hidden_length % self.mlp_hidden_group_size != 0:
+                raise ValueError(
+                    "4*d_model must be divisible by mlp_hidden_group_size; "
+                    f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
+                )
+            if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
+                raise ValueError(
+                    "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
+                    f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
+                )
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -62,15 +162,31 @@ class SheetGPTConfig:
             n_head=self.n_head,
             depth_order=self.depth_order,
             base_row_order=self.base_row_order,
+            mlp_channel_order=self.mlp_channel_order,
+            o_attn_d_model=self.o_attn_d_model,
+            o_attn_qkv_per_channel=self.o_attn_qkv_per_channel,
+            o_attn_out_per_channel=self.o_attn_out_per_channel,
+            o_mlp_d_model=self.o_mlp_d_model,
+            o_mlp_hidden=self.o_mlp_hidden,
             bias=self.bias,
         )
+
+    def compact_selectors(self):
+        selectors = resolve_compact_selectors(
+            geometry_preset=self.geometry_preset,
+            attention_geometry=self.attention_geometry,
+            mlp_geometry=self.mlp_geometry,
+            basis_family=self.basis_family,
+        )
+        validate_current_sheet_support(selectors)
+        return selectors
 
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
 
 
 class SheetGPT(nn.Module):
-    """Sequential correctness-first GPT using compact Chebyshev Sheet weights."""
+    """Sequential correctness-first GPT using compact basis-generated weights."""
 
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__()
@@ -83,11 +199,49 @@ class SheetGPT(nn.Module):
                 "ln_f": ConventionalLayerNorm(config.n_embd, bias=config.bias),
             }
         )
-        self.trajectory = SheetTrajectory(
-            config.sheet_geometry(),
-            runtime_dtype=torch.float32,
-            basis_version=config.basis_version,
-        )
+        selectors = config.compact_selectors()
+        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+            self.trajectory = JpegLikeV1Trajectory(
+                config.sheet_geometry(),
+                mlp_hidden_group_size=config.mlp_hidden_group_size,
+                mlp_hidden_compressor=config.mlp_hidden_compressor,
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+            self.trajectory = BlockTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+                compact_attention=True,
+                compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
+                vectorise_per_head_materialisation=config.vectorise_per_head_materialisation,                                                            # <<< THOG pass selectable head vectorisation into block trajectory
+            )
+        elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+            self.trajectory = MlpBlockTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+            self.trajectory = DepthTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+                depth_compress_layer_norm_and_bias=config.depth_compress_layer_norm_and_bias,                                                           # <<< THOG select conventional or pure-depth block vectors
+            )
+        else:
+            self.trajectory = SheetTrajectory(
+                config.sheet_geometry(),
+                runtime_dtype=torch.float32,
+                basis_version=config.basis_version,
+                basis_family=selectors.basis_family,
+            )
+        self.semantic_materializer = LegacySheetColMaterializer(self.trajectory)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight
         self.apply(self._init_conventional_weights)
@@ -107,49 +261,35 @@ class SheetGPT(nn.Module):
             return None
         return self.trajectory.materialize_vector(name, layer_index)
 
-    def _sheet_layer_norm(
-        self,
-        inputs: Tensor,
-        weight_name: str,
-        bias_name: str,
-        layer_index: int,
-    ) -> Tensor:
+    def _sheet_layer_norm(self, inputs: Tensor, weight_name: str, bias_name: str, layer_index: int) -> Tensor:
         weight = self.trajectory.materialize_vector(weight_name, layer_index)
         bias = self._optional_bias(bias_name, layer_index)
-        return F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
+        output = F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
+        if self.config.fast_discard:
+            del weight, bias
+        return output
 
     def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
-        attention_weight = self.trajectory.materialize(
-            "attention_input_weight", layer_index
-        )
-        attention_bias = self._optional_bias("attention_input_bias", layer_index)
-        query, key, value = F.linear(
-            inputs,
-            attention_weight,
-            attention_bias,
-        ).split(self.config.n_embd, dim=2)
-
+        # vvv THOG selectable semantic-QKV adapter bypass for exact A/B timing comparisons
+        if self.config.bypass_semantic_qkv_adapter:
+            attention_weight = self.trajectory.materialize("attention_input_weight", layer_index)
+            attention_bias = None
+            if self.config.bias:
+                attention_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
+        else:
+            attention_weight = self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+            attention_bias = None
+            if self.config.bias:
+                attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
+        # ^^^ THOG
+        query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
+        if self.config.fast_discard:
+            del attention_weight, attention_bias
         head_width = embedding_width // self.config.n_head
-        key = key.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-        query = query.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-        value = value.view(
-            batch_size,
-            sequence_length,
-            self.config.n_head,
-            head_width,
-        ).transpose(1, 2)
-
+        key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+        query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+        value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
         if hasattr(F, "scaled_dot_product_attention"):
             attended = F.scaled_dot_product_attention(
                 query,
@@ -161,104 +301,126 @@ class SheetGPT(nn.Module):
             )
         else:
             scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
-            causal_mask = torch.tril(
-                torch.ones(
-                    sequence_length,
-                    sequence_length,
-                    dtype=torch.bool,
-                    device=inputs.device,
-                )
-            )
-            scores = scores.masked_fill(
-                ~causal_mask.view(1, 1, sequence_length, sequence_length),
-                float("-inf"),
-            )
+            causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
+            scores = scores.masked_fill(~causal_mask.view(1, 1, sequence_length, sequence_length), float("-inf"))
             probabilities = F.softmax(scores, dim=-1)
-            probabilities = F.dropout(
-                probabilities,
-                p=self.config.dropout,
-                training=self.training,
-            )
+            probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
             attended = probabilities @ value
-
-        attended = attended.transpose(1, 2).contiguous().view(
-            batch_size,
-            sequence_length,
-            embedding_width,
-        )
-        output_weight = self.trajectory.materialize(
-            "attention_output_weight", layer_index
-        )
+            if self.config.fast_discard:
+                del scores, causal_mask, probabilities
+        if self.config.fast_discard:
+            del query, key, value
+        attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
+        output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
-        return F.dropout(
-            projected,
-            p=self.config.dropout,
-            training=self.training,
-        )
+        if self.config.fast_discard:
+            del attended, output_weight, output_bias
+        output = F.dropout(projected, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del projected
+        return output
+
+    # vvv THOG exact direct application of the existing THOG MLP factorisation, selectable for A/B timing
+    def _supports_direct_factorised_mlp(self) -> bool:
+        if isinstance(self.trajectory, MlpBlockTrajectory):
+            return True
+        return isinstance(self.trajectory, BlockTrajectory) and self.trajectory.compact_mlp
+
+    def _direct_factorised_mlp_linear(
+        self,
+        inputs: Tensor,
+        weight_name: str,
+        layer_index: int,
+        bias: Optional[Tensor],
+    ) -> Tensor:
+        coefficient = self.trajectory.coefficients[weight_name]
+        depth_row = self.trajectory.depth_basis[layer_index].to(coefficient)
+        mixed = torch.einsum("p,pab->ab", depth_row, coefficient)
+        input_basis = self.trajectory.input_basis(weight_name).to(coefficient)
+        output_basis = self.trajectory.output_basis(weight_name).to(coefficient)
+        projected = torch.matmul(inputs, input_basis)
+        projected = torch.matmul(projected, mixed.transpose(0, 1))
+        output = torch.matmul(projected, output_basis.transpose(0, 1))
+        if bias is not None:
+            output = output + bias
+        return output
 
     def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
-        expansion_weight = self.trajectory.materialize(
-            "mlp_expansion_weight", layer_index
+        direct_application = (
+            self.config.direct_factorised_mlp
+            and self._supports_direct_factorised_mlp()
         )
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
-        hidden = F.linear(inputs, expansion_weight, expansion_bias)
+        if direct_application:
+            hidden = self._direct_factorised_mlp_linear(
+                inputs,
+                "mlp_expansion_weight",
+                layer_index,
+                expansion_bias,
+            )
+        else:
+            expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            hidden = F.linear(inputs, expansion_weight, expansion_bias)
+            if self.config.fast_discard:
+                del expansion_weight
+        if self.config.fast_discard:
+            del expansion_bias
         hidden = F.gelu(hidden)
-        contraction_weight = self.trajectory.materialize(
-            "mlp_contraction_weight", layer_index
-        )
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
-        output = F.linear(hidden, contraction_weight, contraction_bias)
-        return F.dropout(output, p=self.config.dropout, training=self.training)
+        if direct_application:
+            output = self._direct_factorised_mlp_linear(
+                hidden,
+                "mlp_contraction_weight",
+                layer_index,
+                contraction_bias,
+            )
+        else:
+            contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            output = F.linear(hidden, contraction_weight, contraction_bias)
+            if self.config.fast_discard:
+                del contraction_weight
+        if self.config.fast_discard:
+            del hidden, contraction_bias
+        dropped = F.dropout(output, p=self.config.dropout, training=self.training)
+        if self.config.fast_discard:
+            del output
+        return dropped
+    # ^^^ THOG
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
-        normalized_attention = self._sheet_layer_norm(
-            inputs,
-            "ln_1_weight",
-            "ln_1_bias",
-            layer_index,
-        )
-        inputs = inputs + self._attention(normalized_attention, layer_index)
-        normalized_mlp = self._sheet_layer_norm(
-            inputs,
-            "ln_2_weight",
-            "ln_2_bias",
-            layer_index,
-        )
-        return inputs + self._mlp(normalized_mlp, layer_index)
+        normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
+        attention_output = self._attention(normalized_attention, layer_index)
+        if self.config.fast_discard:
+            del normalized_attention
+        inputs = inputs + attention_output
+        if self.config.fast_discard:
+            del attention_output
+        normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
+        mlp_output = self._mlp(normalized_mlp, layer_index)
+        if self.config.fast_discard:
+            del normalized_mlp
+        output = inputs + mlp_output
+        if self.config.fast_discard:
+            del inputs, mlp_output
+        return output
 
-    def forward(
-        self,
-        idx: Tensor,
-        targets: Optional[Tensor] = None,
-    ) -> Tuple[Tensor, Optional[Tensor]]:
+    def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
         _, sequence_length = idx.shape
         if sequence_length > self.config.block_size:
-            raise ValueError(
-                f"Cannot forward sequence of length {sequence_length}; "
-                f"block size is {self.config.block_size}"
-            )
-        positions = torch.arange(
-            sequence_length,
-            dtype=torch.long,
-            device=idx.device,
-        )
+            raise ValueError(f"Cannot forward sequence of length {sequence_length}; block size is {self.config.block_size}")
+        positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
         for layer_index in range(self.config.n_layer):
             hidden = self._logical_block(hidden, layer_index)
         hidden = self.transformer.ln_f(hidden)
-
         if targets is not None:
             logits = self.lm_head(hidden)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                targets.view(-1),
-                ignore_index=-1,
-            )
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             logits = self.lm_head(hidden[:, [-1], :])
             loss = None
@@ -287,116 +449,47 @@ class SheetGPT(nn.Module):
             parameter_count -= self.transformer.wpe.weight.numel()
         return parameter_count
 
-    def optimizer_parameter_groups(
-        self,
-        weight_decay: float,
-    ) -> Tuple[Dict[str, object], Dict[str, object]]:
+    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
         decay: Dict[str, nn.Parameter] = {}
         no_decay: Dict[str, nn.Parameter] = {}
-
         for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
             target = decay if metadata.weight_decay else no_decay
             target[f"trajectory.coefficients.{family_name}"] = parameter
-
-        sheet_parameter_ids = {
-            id(parameter) for parameter in self.trajectory.coefficients.values()
-        }
+        sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
         for name, parameter in self.named_parameters():
             if id(parameter) in sheet_parameter_ids:
                 continue
             if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
-                decay[name] = parameter
+                target = no_decay
+            elif parameter.ndim >= 2:
+                target = decay
             else:
-                no_decay[name] = parameter
-
-        all_trainable = {
-            id(parameter)
-            for parameter in self.parameters()
-            if parameter.requires_grad
-        }
-        grouped_ids = [id(parameter) for parameter in decay.values()] + [
-            id(parameter) for parameter in no_decay.values()
-        ]
-        if len(grouped_ids) != len(set(grouped_ids)):
-            raise RuntimeError("a trainable parameter appears in more than one optimizer group")
-        if set(grouped_ids) != all_trainable:
-            missing = all_trainable - set(grouped_ids)
-            extra = set(grouped_ids) - all_trainable
-            raise RuntimeError(
-                f"optimizer grouping does not cover trainable parameters exactly; "
-                f"missing={len(missing)}, extra={len(extra)}"
-            )
-
-        decay_names = tuple(sorted(decay))
-        no_decay_names = tuple(sorted(no_decay))
+                target = no_decay
+            target[name] = parameter
         return (
-            {
-                "params": [decay[name] for name in decay_names],
-                "weight_decay": weight_decay,
-                "group_name": "decay",
-                "parameter_names": decay_names,
-            },
-            {
-                "params": [no_decay[name] for name in no_decay_names],
-                "weight_decay": 0.0,
-                "group_name": "no_decay",
-                "parameter_names": no_decay_names,
-            },
+            {"params": list(decay.values()), "parameter_names": tuple(decay.keys()), "weight_decay": weight_decay},
+            {"params": list(no_decay.values()), "parameter_names": tuple(no_decay.keys()), "weight_decay": 0.0},
         )
 
-    def configure_optimizers(
-        self,
-        weight_decay: float,
-        learning_rate: float,
-        betas: Tuple[float, float],
-        device_type: str,
-    ) -> torch.optim.Optimizer:
-        groups = list(self.optimizer_parameter_groups(weight_decay))
+    def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: Tuple[float, float], device_type: str) -> torch.optim.Optimizer:
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
-        extra_args = {"fused": True} if use_fused else {}
-        return torch.optim.AdamW(
-            groups,
-            lr=learning_rate,
-            betas=betas,
-            **extra_args,
-        )
+        return torch.optim.AdamW(self.optimizer_parameter_groups(weight_decay), lr=learning_rate, betas=betas, fused=use_fused)
 
     def compact_state_violations(self) -> Tuple[str, ...]:
         violations: List[str] = []
-        for key in self.state_dict():
-            if key.startswith("trajectory.bases."):
-                violations.append(f"persistent fixed basis: {key}")
+        compact_coefficient_prefixes = (
+            "trajectory.coefficients.",
+            "trajectory.depth.coefficients.",
+        )
         for name, parameter in self.named_parameters():
-            if name.startswith("trajectory.coefficients."):
+            if name.startswith(compact_coefficient_prefixes):
                 continue
-            if parameter.ndim == 3 and parameter.shape[0] == self.config.n_layer:
-                violations.append(
-                    f"possible persistent dense logical stack: {name} {tuple(parameter.shape)}"
-                )
+            if name.startswith("transformer.wte") or name.startswith("transformer.wpe") or name.startswith("transformer.ln_f") or name.startswith("lm_head"):
+                continue
+            violations.append(name)
         return tuple(violations)
 
-    @torch.no_grad()
-    def generate(
-        self,
-        idx: Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-    ) -> Tensor:
-        for _ in range(max_new_tokens):
-            idx_cond = (
-                idx
-                if idx.size(1) <= self.config.block_size
-                else idx[:, -self.config.block_size :]
-            )
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / temperature
-            if top_k is not None:
-                values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < values[:, [-1]]] = -float("inf")
-            probabilities = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probabilities, num_samples=1)
-            idx = torch.cat((idx, next_token), dim=1)
-        return idx
+
+__all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
 # ^^^ THOG

@@ -21,10 +21,8 @@ class RunnerScriptTests(unittest.TestCase):
                 str(REPOSITORY_ROOT / script),
                 "-x",
                 "true",
-                "-W",
-                "false",
-                "-M",
-                "disabled",
+                "-I",
+                "none",
                 "-g",
                 "TEST",
                 "-n",
@@ -61,34 +59,78 @@ class RunnerScriptTests(unittest.TestCase):
             )
         return completed.stdout
 
+    @staticmethod
+    def artifact_lines(output: str) -> list[str]:
+        return [line for line in output.splitlines() if "artifact:" in line]
+
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
-        self.assertIn("DENSE2_scruffy__TEST__n_2_b_1_d_owt", output)
+        self.assertIn("TEST_DENSE_scruffy", output)
         self.assertIn("_r_depth_scaled_z_true_layer_depth_S_1", output)
         self.assertIn("--model-type dense", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source true_layer_depth", output)
-        self.assertIn("activation checkpoint:  false", output)
-        self.assertIn("checkpoint segment:     1", output)
+        self.assertIn("model/preset/basis: dense / dense / chebyshev", output)
+        self.assertIn("instrumentation:    none", output)
         self.assertIn("DRY RUN:", output)
 
-    def test_s6_34_sheet_runner_resolves_orders_and_default_dof_implied_depth(self) -> None:
+    def test_s6_34_depth_runner_ignores_non_depth_orders_by_default(self) -> None:
         output = self.run_script(
             "current_scruffy_train_SHEET_OWT.sh",
-            ["-P", "2", "-Q", "4", "-r", "depth_scaled", "-Z", "12"],
+            [
+                "-P",
+                "2",
+                "-Q",
+                "4",
+                "-J",
+                "2",
+                "-O",
+                "2",
+                "-X",
+                "4",
+                "-Y",
+                "16",
+                "-r",
+                "depth_scaled",
+                "-Z",
+                "12",
+            ],
         )
-        self.assertIn("SHEET_scruffy__TEST__n_2_b_1_d_owt", output)
-        self.assertIn("_P_2_Q_4_r_depth_scaled_z_dof_implied_depth_S_1", output)
+        self.assertIn("TEST_CHEBY_DEPTH_scruffy", output)
+        self.assertIn(
+            "_P_2_DLB_0_r_depth_scaled_z_dof_implied_depth_S_1",
+            output,
+        )
+        artifact_lines = self.artifact_lines(output)
+        self.assertTrue(artifact_lines)
+        for dead_order in ("_Q_", "_J_", "_O_", "_X_", "_Y_"):
+            self.assertTrue(all(dead_order not in line for line in artifact_lines))
         self.assertIn("--model-type sheet", output)
+        self.assertIn("--geometry-preset depth", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source dof_implied_depth", output)
-        self.assertIn("sheet orders:           P2 / Q4", output)
+        self.assertIn("instrumentation:    none", output)
         self.assertIn("DRY RUN:", output)
 
-    def test_s6_35_shell_sources_pass_bash_syntax_check(self) -> None:
+    def test_s6_35_depth_runner_passes_pure_depth_layer_norm_bias_mode(self) -> None:
+        output = self.run_script(
+            "current_scruffy_train_SHEET_OWT.sh",
+            [
+                "-P",
+                "2",
+                "--depth-compress-layer-norm-and-bias",
+            ],
+        )
+        self.assertIn("_P_2_DLB_1_", output)
+        self.assertIn("--depth-compress-layer-norm-and-bias", output)
+        self.assertIn("DRY RUN:", output)
+
+    def test_s6_36_shell_sources_pass_bash_syntax_check(self) -> None:
         for script in (
             "current_scruffy_train_DENSE_OWT.sh",
             "current_scruffy_train_SHEET_OWT.sh",
+            "current_scruffy_train_OWT.sh",
+            "current_dreedle_train_OWT.sh",
         ):
             completed = subprocess.run(
                 ["bash", "-n", str(REPOSITORY_ROOT / script)],
@@ -97,7 +139,7 @@ class RunnerScriptTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 if __name__ == "__main__":
