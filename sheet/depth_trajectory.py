@@ -277,7 +277,23 @@ class DepthTrajectory(nn.Module):
             if self._is_depth_compressed(item)
         )
 
+    def conventional_repeated_parameter_count(self) -> int:
+        return sum(
+            item.dense_equivalent_count(self.config.n_layer)
+            for item in self.metadata
+            if not self._is_depth_compressed(item)
+        )
+
     def dense_equivalent_count(self) -> int:
+        # vvv THOG the model report already counts conventional per-layer vectors in its conventional term; return only generated families here.
+        return sum(
+            item.dense_equivalent_count(self.config.n_layer)
+            for item in self.metadata
+            if self._is_depth_compressed(item)
+        )
+        # ^^^ THOG
+
+    def all_repeated_dense_equivalent_count(self) -> int:
         return sum(
             item.dense_equivalent_count(self.config.n_layer)
             for item in self.metadata
