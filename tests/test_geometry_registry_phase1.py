@@ -204,7 +204,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         report = format_geometry_plan(plan)
         self.assertIn("MLP_UP.MLP_HIDDEN", report)
         self.assertIn("implied element type:  CURVE", report)
-        self.assertIn("compressed axis:       MLP_HIDDEN", report)
+        self.assertRegex(report, r"compressed axis:\s+MLP_HIDDEN")
         self.assertNotIn("DEPTH × MLP_HIDDEN", report)
         self.assertIn("implementation status: implemented through legacy adapter", report)
         self.assertIn("not semantically sensible", report)
