@@ -8,7 +8,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .bases import BASIS_FAMILIES, basis_version_for_family, normalize_registered_basis_family
 
-GEOMETRY_REGISTRY_VERSION = "geometry_registry_v3"
+GEOMETRY_REGISTRY_VERSION = "geometry_registry_v4"
 GEOMETRY_PLAN_SCHEMA_VERSION = 1
 
 ELEMENT_TYPE_CURVE = "CURVE"
@@ -287,14 +287,18 @@ def _validate_selection_overlaps(entries: Sequence[GeometryEntry]) -> None:
 
 def _validate_option_targets(parsed_options: Sequence[ParsedOption], entries: Sequence[GeometryEntry], *, depth_enabled: bool) -> None:
     selected_elements = {entry.element for entry in entries}
+    selected_selectors = {entry.selector for entry in entries}
     selected_axis_targets = {f"{entry.element}.{axis}" for entry in entries for axis in entry.compressed_axes}
     for option in parsed_options:
         if option.property in ("compressor", "compressor_version"):
             if option.target == AXIS_DEPTH:
                 if not depth_enabled:
                     raise ValueError(f"{option.source!r} targets DEPTH, but --select-depth was not supplied")
-            elif option.target not in selected_elements:
-                raise ValueError(f"{option.source!r} must target a selected element; selected elements are {tuple(sorted(selected_elements))}")
+            elif option.target not in selected_elements and option.target not in selected_selectors:
+                raise ValueError(
+                    f"{option.source!r} must target a selected element or selector; selected elements are "
+                    f"{tuple(sorted(selected_elements))}; selected selectors are {tuple(sorted(selected_selectors))}"
+                )
         elif option.property == "order":
             if option.target == AXIS_DEPTH:
                 if not depth_enabled:
@@ -315,12 +319,33 @@ def _option_map(parsed_options: Sequence[ParsedOption]) -> Dict[Tuple[str, str],
     return values
 
 
+def _scoped_value(values: Mapping[Tuple[str, str], str], *, selector: str, element: str, property_name: str) -> Optional[str]:
+    selector_value = values.get((selector, property_name))
+    element_value = values.get((element, property_name))
+    if selector_value is not None and element_value is not None and selector_value != element_value:
+        raise ValueError(
+            f"conflicting geometry options for {property_name}: {element}.{property_name}={element_value!r} "
+            f"and {selector}.{property_name}={selector_value!r}"
+        )
+    return selector_value if selector_value is not None else element_value
+
+
 def _compressor_for_target(target: str, values: Mapping[Tuple[str, str], str], *, default_family: str) -> Tuple[str, str]:
     family, inline_version = _split_compressor_value(values.get((target, "compressor"), default_family))
     capability = COMPRESSOR_REGISTRY[family]
     explicit_version = values.get((target, "compressor_version"))
     if inline_version is not None and explicit_version is not None and inline_version != explicit_version:
         raise ValueError(f"conflicting compressor versions for {target}: {inline_version!r} and {explicit_version!r}")
+    return family, explicit_version or inline_version or capability.default_version
+
+
+def _compressor_for_entry(entry: GeometryEntry, values: Mapping[Tuple[str, str], str], *, default_family: str) -> Tuple[str, str]:
+    raw_family = _scoped_value(values, selector=entry.selector, element=entry.element, property_name="compressor") or default_family
+    family, inline_version = _split_compressor_value(raw_family)
+    capability = COMPRESSOR_REGISTRY[family]
+    explicit_version = _scoped_value(values, selector=entry.selector, element=entry.element, property_name="compressor_version")
+    if inline_version is not None and explicit_version is not None and inline_version != explicit_version:
+        raise ValueError(f"conflicting compressor versions for {entry.selector}: {inline_version!r} and {explicit_version!r}")
     return family, explicit_version or inline_version or capability.default_version
 
 
@@ -388,7 +413,7 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
     incompatibilities: list[str] = []
     for entry in entries:
         implied_type = entry.resolved_type(bool(select_depth))
-        family, version = _compressor_for_target(entry.element, values, default_family=default_non_depth_compressor)
+        family, version = _compressor_for_entry(entry, values, default_family=default_non_depth_compressor)
         compressor_pairs.add((family, version))
         incompatibility = _compatibility_message(entry.selector, implied_type, family, version)
         if incompatibility:
@@ -436,21 +461,45 @@ def validate_resolved_geometry_plan(plan: Mapping[str, Any]) -> Dict[str, Any]:
     return values
 
 
+def _format_field(label_width: int, label: str, value: Any) -> str:
+    return f"  {label:<{label_width}}{value}"
+
+
+def _geometry_plan_label_width(plan: ResolvedGeometryPlan) -> int:
+    labels = ["implied element type:", "compressed axis:", "compressed axes:", "uncompressed axes:", "compressor:", "order:"]
+    for selection in plan.selections:
+        labels.extend(f"order {axis}:" for axis in selection.orders)
+        labels.extend(f"{axis}.{name}:" for axis, options in selection.axis_options.items() for name in options)
+    return max(len(label) for label in labels) + 4
+
+
 def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) -> str:
+    label_width = _geometry_plan_label_width(plan)
     lines = ["selected geometry", "-----------------"]
     if plan.depth_enabled:
-        lines.extend(["DEPTH", "  implied element type:  CURVE", "  compressed axis:       DEPTH", f"  compressor:            {plan.depth_compressor}@{plan.depth_compressor_version}", f"  order:                 {plan.depth_order}"])
+        lines.extend([
+            "DEPTH",
+            _format_field(label_width, "implied element type:", ELEMENT_TYPE_CURVE),
+            _format_field(label_width, "compressed axis:", AXIS_DEPTH),
+            _format_field(label_width, "compressor:", f"{plan.depth_compressor}@{plan.depth_compressor_version}"),
+            _format_field(label_width, "order:", plan.depth_order),
+        ])
     for selection in plan.selections:
         axis_label = "compressed axis:" if len(selection.compressed_axes) == 1 else "compressed axes:"
-        lines.extend(["", selection.selector, f"  implied element type:  {selection.implied_type}", f"  {axis_label:<22}{' × '.join(selection.compressed_axes)}"])
+        lines.extend([
+            "",
+            selection.selector,
+            _format_field(label_width, "implied element type:", selection.implied_type),
+            _format_field(label_width, axis_label, " × ".join(selection.compressed_axes)),
+        ])
         if selection.independent_indices:
-            lines.append(f"  independent instances: {' × '.join(selection.independent_indices)}")
-        lines.append(f"  compressor:            {selection.compressor}@{selection.compressor_version}")
+            lines.append(_format_field(label_width, "uncompressed axes:", " × ".join(selection.independent_indices)))
+        lines.append(_format_field(label_width, "compressor:", f"{selection.compressor}@{selection.compressor_version}"))
         for axis, order in selection.orders.items():
-            lines.append(f"  order {axis}:          {order}")
+            lines.append(_format_field(label_width, f"order {axis}:", order))
         for axis, options in selection.axis_options.items():
             for name, value in options.items():
-                lines.append(f"  {axis}.{name}:      {value}")
+                lines.append(_format_field(label_width, f"{axis}.{name}:", value))
     if plan.materializer.implemented and plan.materializer.legacy:
         status = "implemented through legacy adapter"
     else:
@@ -466,13 +515,20 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
 
 
 def format_geometry_registry() -> str:
-    lines = [f"geometry registry ({GEOMETRY_REGISTRY_VERSION})", "=======================================", "", "selectors", "---------", f"{'selector':40} {'type':10} {'depth ok':8} {'implemented':12} {'legacy':7} axes / independent instances"]
+    lines = [
+        f"geometry registry ({GEOMETRY_REGISTRY_VERSION})",
+        "=======================================",
+        "",
+        "selectors",
+        "---------",
+        f"{'selector':40} {'type':10} {'depth ok':8} {'implemented':12} {'legacy':7} axes / uncompressed axes",
+    ]
     for entry in GEOMETRY_REGISTRY.values():
         implemented = "yes" if entry.implemented else "no"
         legacy = "yes" if entry.legacy_only else "no"
         axes = " × ".join(entry.compressed_axes)
-        independent = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
-        lines.append(f"{entry.selector:40} {entry.implied_type:10} {str(entry.permits_depth_companion):8} {implemented:12} {legacy:7} {axes}; independent={independent}")
+        uncompressed = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
+        lines.append(f"{entry.selector:40} {entry.implied_type:10} {str(entry.permits_depth_companion):8} {implemented:12} {legacy:7} {axes}; uncompressed={uncompressed}")
     lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':14} {'implemented':12} {'legacy':7} {'group':7} notes"])
     for name, capability in COMPRESSOR_REGISTRY.items():
         lines.append(f"{name:18} {','.join(capability.element_types):14} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
@@ -518,7 +574,20 @@ def _print_geometry_registry_and_exit_if_requested() -> None:
         raise SystemExit(0)
 
 
+def _consume_initial_eval_flags() -> None:
+    retained = [sys.argv[0]]
+    for argument in sys.argv[1:]:
+        if argument == "--no-initial-eval":
+            os.environ["THOG2_INITIAL_EVAL"] = "0"
+        elif argument == "--initial-eval":
+            os.environ["THOG2_INITIAL_EVAL"] = "1"
+        else:
+            retained.append(argument)
+    sys.argv[:] = retained
+
+
 _print_geometry_registry_and_exit_if_requested()
+_consume_initial_eval_flags()
 _warn_for_legacy_semantics()
 _install_clean_cli_excepthook()
 
