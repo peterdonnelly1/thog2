@@ -54,10 +54,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
                 "ATTENTION_OUTPUT",
             },
         )
-        self.assertEqual(
-            {entry.implied_type for entry in GEOMETRY_REGISTRY.values()},
-            {ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET},
-        )
+        self.assertEqual({entry.implied_type for entry in GEOMETRY_REGISTRY.values()}, {ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET})
         self.assertTrue(all(not hasattr(entry, "implemented_with_depth") for entry in GEOMETRY_REGISTRY.values()))
 
     def test_compressor_registry_has_no_true_sheet_compressor(self):
@@ -65,12 +62,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertTrue(COMPRESSOR_REGISTRY["jpeg_like"].legacy_only)
         self.assertTrue(COMPRESSOR_REGISTRY["jpeg_like"].supports_group_size)
         self.assertEqual(COMPRESSOR_REGISTRY["jpeg_like"].supported_selectors, ("MLP_UP.MLP_HIDDEN",))
-        self.assertFalse(
-            any(
-                ELEMENT_TYPE_SHEET in capability.element_types or ELEMENT_TYPE_SHEET_SET in capability.element_types
-                for capability in COMPRESSOR_REGISTRY.values()
-            )
-        )
+        self.assertFalse(any(ELEMENT_TYPE_SHEET in capability.element_types or ELEMENT_TYPE_SHEET_SET in capability.element_types for capability in COMPRESSOR_REGISTRY.values()))
 
     def test_bare_mlp_is_a_sheet(self):
         plan = self.resolve(elements=("MLP_UP",), options=("MLP_UP.compressor=dct",))
@@ -87,10 +79,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertIn("cannot be used with a SHEET_SET geometry", plan.materializer.message)
 
     def test_attention_axis_is_a_curve_not_curve_set(self):
-        plan = self.resolve(
-            elements=("ATTENTION_QKV.ATTENTION_D_MODEL",),
-            options=("ATTENTION_QKV.compressor=dct",),
-        )
+        plan = self.resolve(elements=("ATTENTION_QKV.ATTENTION_D_MODEL",), options=("ATTENTION_QKV.compressor=dct",))
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_CURVE)
         self.assertIn("QKV_ROLE", plan.selections[0].independent_indices)
 
@@ -114,43 +103,52 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(plan.materializer.legacy_mlp_hidden_compressor, "dct")
         self.assertEqual(plan.materializer.legacy_mlp_hidden_group_size, 128)
 
-    def test_depth_plus_dct_axis_is_valid_but_not_materialized(self):
+    def test_selector_scoped_jpeg_like_axis_options_are_accepted(self):
         plan = self.resolve(
             depth=True,
             elements=("MLP_UP.MLP_HIDDEN",),
-            options=("DEPTH.compressor=chebyshev", "MLP_UP.compressor=dct"),
+            options=(
+                "DEPTH.compressor=chebyshev",
+                "MLP_UP.MLP_HIDDEN.compressor=jpeg_like",
+                "MLP_UP.MLP_HIDDEN.order=8",
+                "MLP_UP.MLP_HIDDEN.group_size=128",
+            ),
         )
+        selection = plan.selections[0]
+        self.assertEqual(selection.compressor, "jpeg_like")
+        self.assertEqual(selection.compressed_axes, ("MLP_HIDDEN",))
+        self.assertTrue(plan.materializer.legacy)
+
+    def test_selector_and_element_compressor_conflict_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "conflicting geometry options"):
+            self.resolve(
+                elements=("MLP_UP.MLP_HIDDEN",),
+                options=("MLP_UP.compressor=dct", "MLP_UP.MLP_HIDDEN.compressor=jpeg_like"),
+            )
+
+    def test_axis_scoped_compressor_cannot_target_unselected_complete_sheet_axis(self):
+        with self.assertRaisesRegex(ValueError, "must target a selected element or selector"):
+            self.resolve(elements=("MLP_UP",), options=("MLP_UP.MLP_HIDDEN.compressor=jpeg_like",))
+
+    def test_depth_plus_dct_axis_is_valid_but_not_materialized(self):
+        plan = self.resolve(depth=True, elements=("MLP_UP.MLP_HIDDEN",), options=("DEPTH.compressor=chebyshev", "MLP_UP.compressor=dct"))
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_CURVE)
         self.assertEqual(plan.selections[0].compressed_axes, ("MLP_HIDDEN",))
         self.assertFalse(plan.materializer.implemented)
         self.assertIn("registered geometry is not currently implemented", plan.materializer.message)
 
     def test_jpeg_like_is_rejected_for_other_curve_selectors(self):
-        plan = self.resolve(
-            elements=("MLP_DOWN.MLP_HIDDEN",),
-            options=("MLP_DOWN.compressor=jpeg_like",),
-        )
+        plan = self.resolve(elements=("MLP_DOWN.MLP_HIDDEN",), options=("MLP_DOWN.compressor=jpeg_like",))
         self.assertFalse(plan.materializer.implemented)
         self.assertIn("not valid for MLP_DOWN.MLP_HIDDEN", plan.materializer.message)
 
     def test_group_size_is_rejected_for_non_grouped_curve_compressors(self):
         with self.assertRaisesRegex(ValueError, "does not accept group_size"):
-            self.resolve(
-                elements=("MLP_UP.MLP_HIDDEN",),
-                options=("MLP_UP.compressor=dct", "MLP_UP.MLP_HIDDEN.group_size=128"),
-            )
+            self.resolve(elements=("MLP_UP.MLP_HIDDEN",), options=("MLP_UP.compressor=dct", "MLP_UP.MLP_HIDDEN.group_size=128"))
 
     def test_jpeg_like_order_must_not_exceed_group_size(self):
         with self.assertRaisesRegex(ValueError, "order must not exceed group_size"):
-            self.resolve(
-                depth=True,
-                elements=("MLP_UP.MLP_HIDDEN",),
-                options=(
-                    "MLP_UP.compressor=jpeg_like",
-                    "MLP_UP.MLP_HIDDEN.order=129",
-                    "MLP_UP.MLP_HIDDEN.group_size=128",
-                ),
-            )
+            self.resolve(depth=True, elements=("MLP_UP.MLP_HIDDEN",), options=("MLP_UP.compressor=jpeg_like", "MLP_UP.MLP_HIDDEN.order=129", "MLP_UP.MLP_HIDDEN.group_size=128"))
 
     def test_depth_only_maps_to_existing_depth_path(self):
         plan = self.resolve(depth=True, options=("DEPTH.compressor=haar", "DEPTH.order=16"))
@@ -160,10 +158,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(plan.depth_order, 16)
 
     def test_two_axis_selectors_do_not_accumulate_into_a_sheet(self):
-        plan = self.resolve(
-            elements=("MLP_UP.MLP_HIDDEN", "MLP_UP.MLP_D_MODEL"),
-            options=("MLP_UP.compressor=dct",),
-        )
+        plan = self.resolve(elements=("MLP_UP.MLP_HIDDEN", "MLP_UP.MLP_D_MODEL"), options=("MLP_UP.compressor=dct",))
         self.assertEqual([selection.implied_type for selection in plan.selections], [ELEMENT_TYPE_CURVE, ELEMENT_TYPE_CURVE])
 
     def test_complete_and_axis_selector_overlap_is_rejected(self):
@@ -176,10 +171,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
 
     def test_phase1_rejects_different_non_depth_compressors(self):
         with self.assertRaisesRegex(ValueError, "Phase 1 requires"):
-            self.resolve(
-                elements=("MLP_UP.MLP_HIDDEN", "ATTENTION_QKV.ATTENTION_D_MODEL"),
-                options=("MLP_UP.compressor=dct", "ATTENTION_QKV.compressor=haar"),
-            )
+            self.resolve(elements=("MLP_UP.MLP_HIDDEN", "ATTENTION_QKV.ATTENTION_D_MODEL"), options=("MLP_UP.compressor=dct", "ATTENTION_QKV.compressor=haar"))
 
     def test_option_grammar_splits_property_from_qualified_target(self):
         option = parse_option_assignment("MLP_UP.MLP_HIDDEN.group_size=128")
@@ -188,7 +180,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(option.value, "128")
 
     def test_option_target_must_be_selected(self):
-        with self.assertRaisesRegex(ValueError, "must target a selected element"):
+        with self.assertRaisesRegex(ValueError, "must target a selected element or selector"):
             self.resolve(elements=("MLP_UP.MLP_HIDDEN",), options=("MLP_DOWN.compressor=dct",))
 
     def test_plan_round_trips_checkpoint_validation(self):
@@ -196,23 +188,23 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(validate_resolved_geometry_plan(plan.to_dict()), plan.to_dict())
 
     def test_console_report_does_not_call_legacy_jpeg_path_a_sheet(self):
-        plan = self.resolve(
-            depth=True,
-            elements=("MLP_UP.MLP_HIDDEN",),
-            options=("MLP_UP.compressor=jpeg_like",),
-        )
+        plan = self.resolve(depth=True, elements=("MLP_UP.MLP_HIDDEN",), options=("MLP_UP.MLP_HIDDEN.compressor=jpeg_like",))
         report = format_geometry_plan(plan)
         self.assertIn("MLP_UP.MLP_HIDDEN", report)
-        self.assertIn("implied element type:  CURVE", report)
+        self.assertIn("implied element type:", report)
+        self.assertIn("CURVE", report)
         self.assertRegex(report, r"compressed axis:\s+MLP_HIDDEN")
+        self.assertRegex(report, r"uncompressed axes:\s+MLP_D_MODEL")
+        self.assertNotIn("independent instances", report)
         self.assertNotIn("DEPTH × MLP_HIDDEN", report)
         self.assertIn("implementation status: implemented through legacy adapter", report)
         self.assertIn("not semantically sensible", report)
 
     def test_registry_console_report_is_complete_and_explicit(self):
         report = format_geometry_registry()
-        self.assertIn("geometry registry (geometry_registry_v3)", report)
+        self.assertIn("geometry registry (geometry_registry_v4)", report)
         self.assertIn("MLP_UP.MLP_HIDDEN", report)
+        self.assertIn("axes / uncompressed axes", report)
         self.assertIn("compressor registry", report)
         self.assertIn("jpeg_like", report)
         self.assertIn("No SHEET or SHEET_SET compressor is currently implemented.", report)
