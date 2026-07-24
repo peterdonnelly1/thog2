@@ -55,7 +55,7 @@ def _wall_limit_reached(
 
 # vvv THOG optionally skip the update-zero validation tax for known-good long runs
 def _initial_eval_enabled() -> bool:
-    value = os.environ.get("THOG2_INITIAL_EVAL", "1").strip().lower()
+    value = os.environ.get("THOG2_INITIAL_EVAL", "0").strip().lower()
     return value not in {"0", "false", "no", "off"}
 # ^^^ THOG
 
