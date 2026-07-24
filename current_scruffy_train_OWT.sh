@@ -137,6 +137,12 @@ Schedule/logging:
   -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
 
+Systematic geometry (repeat --select-element as needed):
+  --select-depth
+  --select-element SELECTOR
+  --option TARGET.PROPERTY=VALUE
+  --explain-geometry
+
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
                                                     Chebyshev aliases: cheby | chebyshev_first_kind_qr
@@ -191,6 +197,8 @@ EOF_USAGE
 
 # vvv THOG accept long optimizer controls and JPEG_LIKE_V1 controls without disturbing the established getopts contract
 OPTIMIZER_FILTERED_ARGS=()
+GEOMETRY_UI_EXTRA_ARGS=()
+EXPLAIN_GEOMETRY=false
 OPTIMIZER_SAW_SEPARATOR=false
 while (( $# > 0 )); do
   if [[ "$OPTIMIZER_SAW_SEPARATOR" == true ]]; then
@@ -199,6 +207,24 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
+    --select-depth)
+      GEOMETRY_UI_EXTRA_ARGS+=("--select-depth")
+      shift
+      ;;
+    --select-element|--option)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      GEOMETRY_UI_EXTRA_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --select-element=*|--option=*)
+      GEOMETRY_UI_EXTRA_ARGS+=("$1")
+      shift
+      ;;
+    --explain-geometry)
+      GEOMETRY_UI_EXTRA_ARGS+=("--explain-geometry")
+      EXPLAIN_GEOMETRY=true
+      shift
+      ;;
     --depth-compress-layer-norm-and-bias)
       DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=true
       shift
@@ -274,6 +300,7 @@ done
 shift $((OPTIND - 1))
 if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
+EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
 
 # vvv THOG normalize optimizer and apply its LR defaults only when -c/-f were omitted
 case "${OPTIMIZER,,}" in
@@ -601,6 +628,11 @@ run_grid_point() {
     --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${optional_args[@]}" "${EXTRA_ARGS[@]}"
   )
+
+  if [[ "$EXPLAIN_GEOMETRY" == true ]]; then
+    "$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}"
+    return 0
+  fi
 
   LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   start_time_friendly="$(date '+%H:%M  %d-%m-%y')"

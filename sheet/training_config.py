@@ -26,6 +26,7 @@ from .compact_identity import (
     validate_dense_compact_fields,
 )
 from .geometry import derive_row_order
+from .geometry_registry import validate_resolved_geometry_plan
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 
 
@@ -64,6 +65,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "attention_geometry",
     "mlp_geometry",
     "basis_family",
+    "resolved_geometry_plan",
 )
 
 
@@ -99,6 +101,7 @@ class TrainingConfig:
     attention_geometry: Optional[str] = None
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
+    resolved_geometry_plan: Optional[Dict[str, Any]] = None
     checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
@@ -132,6 +135,10 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         if self.model_type not in MODEL_TYPES:
             raise ValueError(f"model_type must be one of {MODEL_TYPES}; got {self.model_type!r}")
+        if self.resolved_geometry_plan is not None:
+            if self.model_type != "thog2_sheet":
+                raise ValueError("resolved_geometry_plan is defined only for thog2_sheet model_type")
+            self.resolved_geometry_plan = validate_resolved_geometry_plan(self.resolved_geometry_plan)
         if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
             raise ValueError(
                 "depth_compress_layer_norm_and_bias must be bool; "
@@ -320,7 +327,7 @@ class TrainingConfig:
     def compact_identity_metadata(self) -> Dict[str, Any]:
         if self.model_type == "dense":
             return conventional_identity_metadata(n_layer=self.n_layer, n_embd=self.n_embd, n_head=self.n_head)
-        return compact_identity_metadata(
+        identity = compact_identity_metadata(
             n_layer=self.n_layer,
             n_embd=self.n_embd,
             n_head=self.n_head,
@@ -341,6 +348,9 @@ class TrainingConfig:
             mlp_geometry=self.mlp_geometry,
             basis_family=self.basis_family,
         )
+        if self.resolved_geometry_plan is not None:
+            identity["resolved_geometry_plan"] = self.resolved_geometry_plan
+        return identity
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added
     def compatibility_signature(self) -> Dict[str, Any]:

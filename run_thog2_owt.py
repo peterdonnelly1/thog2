@@ -19,6 +19,7 @@ from sheet.bases import BASIS_FAMILIES
 from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
 from sheet.checkpoints import load_payload
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
+from sheet.geometry_registry import AXIS_MLP_HIDDEN, format_geometry_plan, resolve_geometry_plan
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
     DEFAULT_EXPERIMENT_PREFIX,
@@ -193,7 +194,11 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
-    parser.add_argument("--model-type", choices=("dense", "sheet"), required=True)
+    parser.add_argument("--model-type", choices=("dense", "sheet"))
+    parser.add_argument("--select-depth", action="store_true", help="select the universal registered DEPTH curve")
+    parser.add_argument("--select-element", action="append", default=[], metavar="SELECTOR", help="select one registered permitted geometry; repeat for multiple elements")
+    parser.add_argument("--option", dest="geometry_options", action="append", default=[], metavar="TARGET.PROPERTY=VALUE", help="assign an element- or axis-scoped systematic geometry option")
+    parser.add_argument("--explain-geometry", action="store_true", help="resolve and report systematic geometry, then exit before model construction")
     parser.add_argument("--run-mode", choices=("fresh", "resume"), default="fresh")
     parser.add_argument("--host-label", default=socket.gethostname().split(".")[0])
     parser.add_argument("--run-name", default="AKAROA")
@@ -298,10 +303,55 @@ def configure_attention_backend(attention_backend: str) -> None:
     raise ValueError(f"unsupported attention backend: {attention_backend}")
 
 
-def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
-    basis_version = arguments.basis_version                                                                                                               # <<< THOG OwtRunConfig resolves auto after seeing basis-specific controls
+def systematic_geometry_requested(arguments: argparse.Namespace) -> bool:
+    return bool(arguments.select_depth or arguments.select_element or arguments.geometry_options or arguments.explain_geometry)
+
+
+def geometry_plan_from_arguments(arguments: argparse.Namespace):
+    if not systematic_geometry_requested(arguments):
+        return None
+    if arguments.model_type == "dense":
+        raise ValueError("the systematic geometry UI requires model_type='sheet' or an omitted --model-type")
+    if arguments.geometry_preset not in (None, GEOMETRY_PRESET_DEPTH):
+        raise ValueError("the systematic geometry UI cannot be mixed with a non-default --geometry-preset")
+    if arguments.attention_geometry is not None or arguments.mlp_geometry is not None:
+        raise ValueError("the systematic geometry UI cannot be mixed with --attention-geometry or --mlp-geometry")
+    if arguments.basis_family not in (None, BASIS_FAMILY_CHEBYSHEV):
+        raise ValueError("the systematic geometry UI cannot be mixed with a non-default --basis-family; use --option DEPTH.compressor=...")
+    if arguments.basis_version not in ("auto", BASIS_VERSION):
+        raise ValueError("the systematic geometry UI cannot be mixed with --basis-version; assign compressor versions through --option")
+    return resolve_geometry_plan(
+        select_depth=arguments.select_depth,
+        selected_elements=arguments.select_element,
+        option_assignments=arguments.geometry_options,
+        legacy_orders={
+            "o_depth": arguments.o_depth,
+            "o_attn_d_model": arguments.o_attn_d_model,
+            "o_attn_qkv_per_channel": arguments.o_attn_qkv_per_channel,
+            "o_attn_out_per_channel": arguments.o_attn_out_per_channel,
+            "o_mlp_d_model": arguments.o_mlp_d_model,
+            "o_mlp_hidden": arguments.o_mlp_hidden,
+        },
+        default_mlp_hidden_group_size=arguments.mlp_hidden_group_size,
+    )
+
+
+def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) -> OwtRunConfig:
+    geometry_plan = geometry_plan if geometry_plan is not None else geometry_plan_from_arguments(arguments)
+    if geometry_plan is not None and not geometry_plan.materializer.implemented:
+        raise ValueError(geometry_plan.materializer.message)
+    model_type = arguments.model_type or ("sheet" if geometry_plan is not None else None)
+    if model_type is None:
+        raise ValueError("--model-type is required for legacy runs; systematic geometry selections imply model_type='sheet'")
+    adapter = None if geometry_plan is None else geometry_plan.materializer
+    basis_version = arguments.basis_version if adapter is None else str(adapter.legacy_basis_version)
+    selected_mlp_hidden_order = arguments.o_mlp_hidden
+    if geometry_plan is not None:
+        for selection in geometry_plan.selections:
+            if AXIS_MLP_HIDDEN in selection.orders:
+                selected_mlp_hidden_order = selection.orders[AXIS_MLP_HIDDEN]
     config = OwtRunConfig(
-        model_type=arguments.model_type,
+        model_type=model_type,
         run_mode=arguments.run_mode,
         host_label=arguments.host_label,
         run_name=arguments.run_name,
@@ -323,20 +373,21 @@ def config_from_arguments(arguments: argparse.Namespace) -> OwtRunConfig:
         n_layer=arguments.n_layer,
         n_head=arguments.n_head,
         n_embd=arguments.n_embd,
-        o_depth=arguments.o_depth,
+        o_depth=arguments.o_depth if geometry_plan is None or geometry_plan.depth_order is None else geometry_plan.depth_order,
         o_attn_d_model=arguments.o_attn_d_model,
         o_attn_qkv_per_channel=arguments.o_attn_qkv_per_channel,
         o_attn_out_per_channel=arguments.o_attn_out_per_channel,
         o_mlp_d_model=arguments.o_mlp_d_model,
-        o_mlp_hidden=arguments.o_mlp_hidden,
-        mlp_hidden_group_size=arguments.mlp_hidden_group_size,
-        mlp_hidden_compressor=arguments.mlp_hidden_compressor,
+        o_mlp_hidden=selected_mlp_hidden_order,
+        mlp_hidden_group_size=arguments.mlp_hidden_group_size if adapter is None or adapter.legacy_mlp_hidden_group_size is None else adapter.legacy_mlp_hidden_group_size,
+        mlp_hidden_compressor=arguments.mlp_hidden_compressor if adapter is None or adapter.legacy_mlp_hidden_compressor is None else adapter.legacy_mlp_hidden_compressor,
         depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                 # <<< THOG CLI vector mode
-        geometry_preset=arguments.geometry_preset,
-        attention_geometry=arguments.attention_geometry,
-        mlp_geometry=arguments.mlp_geometry,
-        basis_family=arguments.basis_family,
+        geometry_preset=arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset,
+        attention_geometry=arguments.attention_geometry if adapter is None else None,
+        mlp_geometry=arguments.mlp_geometry if adapter is None else None,
+        basis_family=arguments.basis_family if adapter is None else adapter.legacy_basis_family,
         basis_version=basis_version,
+        resolved_geometry_plan=None if geometry_plan is None else geometry_plan.to_dict(),
         lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
         lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control
         attention_backend=arguments.attention_backend,
@@ -400,7 +451,13 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
 
 def main() -> int:
     arguments = build_parser().parse_args()
-    config = config_from_arguments(arguments)
+    geometry_plan = geometry_plan_from_arguments(arguments)
+    if arguments.explain_geometry:
+        if geometry_plan is None:
+            raise ValueError("--explain-geometry requires systematic geometry selections")
+        print(format_geometry_plan(geometry_plan, detailed=True))
+        return 0
+    config = config_from_arguments(arguments, geometry_plan=geometry_plan)
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     payload = resolved_payload(config, world_size=world_size, log_timestamp=arguments.log_timestamp)
@@ -439,6 +496,9 @@ def main() -> int:
             telemetry.add_initial_summary(trainer.parameter_report)
         attach_telemetry(trainer, telemetry)
         if trainer.distributed.is_primary:
+            if geometry_plan is not None:
+                print(format_geometry_plan(geometry_plan), flush=True)
+                print(flush=True)
             print_model_parameters_and_options(config, trainer)                                                                                         # <<< THOG show the complete effective training setup before the first update
         result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=result_path)
         result["artifact"] = {"name": config.artifact_name, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}

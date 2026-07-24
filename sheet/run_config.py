@@ -17,6 +17,7 @@ from .bases.lapped_cosine import (
     normalize_lapped_cosine_basis_version,
 )
 # ^^^ THOG
+from .geometry_registry import validate_resolved_geometry_plan
 from .compact_identity import (
     BASIS_FAMILY_CHEBYSHEV,
     BASIS_FAMILY_CONVENTIONAL,
@@ -91,6 +92,7 @@ class OwtRunConfig:
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
+    resolved_geometry_plan: Optional[Dict[str, Any]] = None
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG locality control
     lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG overlap control
     attention_backend: str = "auto"
@@ -153,6 +155,10 @@ class OwtRunConfig:
             )
 
         object.__setattr__(self, "experiment_prefix", normalize_component(self.experiment_prefix, uppercase=True))
+        if self.resolved_geometry_plan is not None:
+            if self.model_type != "sheet":
+                raise ValueError("resolved_geometry_plan is defined only for sheet model_type")
+            object.__setattr__(self, "resolved_geometry_plan", validate_resolved_geometry_plan(self.resolved_geometry_plan))
         object.__setattr__(self, "mlp_hidden_compressor", normalize_registered_basis_family(self.mlp_hidden_compressor))
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
@@ -307,7 +313,7 @@ class OwtRunConfig:
     def compact_identity(self) -> Dict[str, Any]:
         if self.model_type != "sheet":
             raise ValueError("compact identity is only defined for SHEET runs")
-        return compact_identity_metadata(
+        identity = compact_identity_metadata(
             n_layer=self.n_layer,
             n_embd=self.n_embd,
             n_head=self.n_head,
@@ -328,6 +334,9 @@ class OwtRunConfig:
             mlp_geometry=self.mlp_geometry,
             basis_family=self.basis_family,
         )
+        if self.resolved_geometry_plan is not None:
+            identity["resolved_geometry_plan"] = self.resolved_geometry_plan
+        return identity
 
     def compact_artifact_fragment(self) -> Optional[str]:
         if self.model_type != "sheet":
@@ -443,6 +452,7 @@ class OwtRunConfig:
                 "attention_geometry": self.attention_geometry,
                 "mlp_geometry": self.mlp_geometry,
                 "basis_family": self.basis_family,
+                "resolved_geometry_plan": self.resolved_geometry_plan,
             }
         else:
             sheet_kwargs = {
@@ -462,6 +472,7 @@ class OwtRunConfig:
                 "attention_geometry": None,
                 "mlp_geometry": None,
                 "basis_family": None,
+                "resolved_geometry_plan": None,
             }
         return TrainingConfig(
             model_type=self.internal_model_type,
