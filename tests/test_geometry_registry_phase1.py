@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from sheet.geometry_registry import (
+    COMPRESSOR_REGISTRY,
     ELEMENT_TYPE_CURVE,
     ELEMENT_TYPE_SHEET,
     ELEMENT_TYPE_SHEET_SET,
@@ -34,65 +35,76 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
             default_mlp_hidden_group_size=128,
         )
 
-    def test_registry_is_complete_and_contains_no_block_or_curve_set_type(self):
+    def test_registry_is_complete_and_contains_implementation_flags(self):
         self.assertEqual(
             set(GEOMETRY_REGISTRY),
             {
-                "MLP_UP.MLP_HIDDEN",
-                "MLP_UP.MLP_D_MODEL",
-                "MLP_UP",
-                "MLP_DOWN.MLP_HIDDEN",
-                "MLP_DOWN.MLP_D_MODEL",
-                "MLP_DOWN",
-                "ATTENTION_QKV.ATTENTION_D_MODEL",
-                "ATTENTION_QKV.ATTENTION_HEAD_CHANNEL",
-                "ATTENTION_QKV",
-                "ATTENTION_OUTPUT.ATTENTION_D_MODEL",
-                "ATTENTION_OUTPUT.ATTENTION_HEAD_CHANNEL",
-                "ATTENTION_OUTPUT",
+                "MLP_UP.MLP_HIDDEN", "MLP_UP.MLP_D_MODEL", "MLP_UP",
+                "MLP_DOWN.MLP_HIDDEN", "MLP_DOWN.MLP_D_MODEL", "MLP_DOWN",
+                "ATTENTION_QKV.ATTENTION_D_MODEL", "ATTENTION_QKV.ATTENTION_HEAD_CHANNEL", "ATTENTION_QKV",
+                "ATTENTION_OUTPUT.ATTENTION_D_MODEL", "ATTENTION_OUTPUT.ATTENTION_HEAD_CHANNEL", "ATTENTION_OUTPUT",
             },
         )
-        self.assertEqual(
-            {entry.implied_type for entry in GEOMETRY_REGISTRY.values()},
-            {ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET},
-        )
+        self.assertEqual({entry.implied_type for entry in GEOMETRY_REGISTRY.values()}, {ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET})
+        self.assertTrue(all(hasattr(entry, "implemented") for entry in GEOMETRY_REGISTRY.values()))
+        self.assertTrue(all(hasattr(entry, "implemented_with_depth") for entry in GEOMETRY_REGISTRY.values()))
+        self.assertTrue(all(not entry.implemented for entry in GEOMETRY_REGISTRY.values()))
+        self.assertTrue(all(not entry.implemented_with_depth for entry in GEOMETRY_REGISTRY.values()))
 
-    def test_bare_mlp_is_a_sheet(self):
+    def test_compressor_registry_contains_only_curve_compressors(self):
+        self.assertEqual(set(COMPRESSOR_REGISTRY), {"chebyshev", "dct", "haar", "lapped_cosine"})
+        for capability in COMPRESSOR_REGISTRY.values():
+            self.assertEqual(capability.element_types, (ELEMENT_TYPE_CURVE,))
+            self.assertTrue(capability.implemented)
+
+    def test_bare_mlp_is_registered_but_not_implemented(self):
         plan = self.resolve(elements=("MLP_UP",), options=("MLP_UP.compressor=dct",))
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_SHEET)
-        self.assertEqual(plan.selections[0].compressed_axes, ("MLP_HIDDEN", "MLP_D_MODEL"))
         self.assertFalse(plan.materializer.implemented)
+        self.assertIn("cannot be used with a SHEET geometry", plan.materializer.message)
+        self.assertIn("no SHEET compressor is currently implemented", plan.materializer.message)
 
-    def test_bare_attention_is_a_compound_sheet_set(self):
+    def test_bare_attention_is_registered_but_not_implemented(self):
         plan = self.resolve(elements=("ATTENTION_QKV",), options=("ATTENTION_QKV.compressor=dct",))
         selection = plan.selections[0]
         self.assertEqual(selection.implied_type, ELEMENT_TYPE_SHEET_SET)
         self.assertEqual(selection.independent_indices, ("QKV_ROLE", "ATTENTION_HEAD"))
+        self.assertFalse(plan.materializer.implemented)
+        self.assertIn("no SHEET_SET compressor is currently implemented", plan.materializer.message)
 
     def test_attention_axis_is_a_curve_not_curve_set(self):
-        plan = self.resolve(
-            elements=("ATTENTION_QKV.ATTENTION_D_MODEL",),
-            options=("ATTENTION_QKV.compressor=dct",),
-        )
+        plan = self.resolve(elements=("ATTENTION_QKV.ATTENTION_D_MODEL",), options=("ATTENTION_QKV.compressor=dct",))
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_CURVE)
         self.assertIn("QKV_ROLE", plan.selections[0].independent_indices)
+        self.assertFalse(plan.materializer.implemented)
+        self.assertIn("registered geometry is not currently implemented", plan.materializer.message)
 
-    def test_depth_plus_mlp_axis_implies_sheet_and_maps_to_existing_jpeg_path(self):
+    def test_depth_plus_mlp_axis_is_not_mapped_to_legacy_jpeg_path(self):
         plan = self.resolve(
             depth=True,
             elements=("MLP_UP.MLP_HIDDEN",),
-            options=(
-                "DEPTH.compressor=chebyshev",
-                "MLP_UP.compressor=jpeg_like",
-                "MLP_UP.MLP_HIDDEN.order=8",
-                "MLP_UP.MLP_HIDDEN.group_size=128",
-            ),
+            options=("DEPTH.compressor=chebyshev", "MLP_UP.compressor=dct", "MLP_UP.MLP_HIDDEN.order=8"),
         )
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_SHEET)
         self.assertEqual(plan.selections[0].compressed_axes, ("DEPTH", "MLP_HIDDEN"))
-        self.assertTrue(plan.materializer.implemented)
-        self.assertEqual(plan.materializer.legacy_geometry_preset, "jpeg_like_v1")
-        self.assertEqual(plan.materializer.legacy_mlp_hidden_group_size, 128)
+        self.assertFalse(plan.materializer.implemented)
+        self.assertIsNone(plan.materializer.legacy_geometry_preset)
+        self.assertIn("cannot be used with a SHEET geometry", plan.materializer.message)
+
+    def test_jpeg_like_is_rejected_as_a_systematic_compressor(self):
+        with self.assertRaisesRegex(ValueError, "not currently implemented as a semantically valid SHEET compressor"):
+            self.resolve(
+                depth=True,
+                elements=("MLP_UP.MLP_HIDDEN",),
+                options=("MLP_UP.compressor=jpeg_like",),
+            )
+
+    def test_group_size_is_rejected_for_curve_compressors(self):
+        with self.assertRaisesRegex(ValueError, "does not accept group_size"):
+            self.resolve(
+                elements=("MLP_UP.MLP_HIDDEN",),
+                options=("MLP_UP.compressor=dct", "MLP_UP.MLP_HIDDEN.group_size=128"),
+            )
 
     def test_depth_only_maps_to_existing_depth_path(self):
         plan = self.resolve(depth=True, options=("DEPTH.compressor=haar", "DEPTH.order=16"))
@@ -101,10 +113,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(plan.depth_order, 16)
 
     def test_two_axis_selectors_do_not_accumulate_into_a_sheet(self):
-        plan = self.resolve(
-            elements=("MLP_UP.MLP_HIDDEN", "MLP_UP.MLP_D_MODEL"),
-            options=("MLP_UP.compressor=dct",),
-        )
+        plan = self.resolve(elements=("MLP_UP.MLP_HIDDEN", "MLP_UP.MLP_D_MODEL"), options=("MLP_UP.compressor=dct",))
         self.assertEqual([selection.implied_type for selection in plan.selections], [ELEMENT_TYPE_CURVE, ELEMENT_TYPE_CURVE])
 
     def test_complete_and_axis_selector_overlap_is_rejected(self):
@@ -136,12 +145,12 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         plan = self.resolve(depth=True, options=("DEPTH.compressor=chebyshev",))
         self.assertEqual(validate_resolved_geometry_plan(plan.to_dict()), plan.to_dict())
 
-    def test_console_report_contains_implied_type(self):
+    def test_console_report_uses_not_currently_implemented_wording(self):
         plan = self.resolve(elements=("ATTENTION_OUTPUT",), options=("ATTENTION_OUTPUT.compressor=dct",))
         report = format_geometry_plan(plan)
         self.assertIn("implied element type:  SHEET_SET", report)
         self.assertIn("independent instances: ATTENTION_HEAD", report)
-        self.assertIn("not implemented", report)
+        self.assertIn("implementation status: not currently implemented", report)
 
 
 if __name__ == "__main__":
