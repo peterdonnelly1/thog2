@@ -8,7 +8,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .bases import BASIS_FAMILIES, basis_version_for_family, normalize_registered_basis_family
 
-GEOMETRY_REGISTRY_VERSION = "geometry_registry_v2"
+GEOMETRY_REGISTRY_VERSION = "geometry_registry_v3"
 GEOMETRY_PLAN_SCHEMA_VERSION = 1
 
 ELEMENT_TYPE_CURVE = "CURVE"
@@ -29,10 +29,7 @@ ELEMENT_ATTENTION_OUTPUT = "ATTENTION_OUTPUT"
 
 COMPRESSOR_JPEG_LIKE = "jpeg_like"
 JPEG_LIKE_VERSION = "jpeg_like_v1"
-
-LEGACY_SEMANTICALLY_UNSOUND_PRESETS = frozenset(
-    {"legacy_sheet_col", "jpeg_like_v1", "mlp_block", "head_aware_block", "full_block"}
-)
+LEGACY_SEMANTICALLY_UNSOUND_PRESETS = frozenset({"legacy_sheet_col", "jpeg_like_v1", "mlp_block", "head_aware_block", "full_block"})
 
 ORDER_OPTION_FIELDS: Mapping[Tuple[str, str], str] = {
     (ELEMENT_MLP_UP, AXIS_MLP_HIDDEN): "o_mlp_hidden",
@@ -52,29 +49,24 @@ class GeometryEntry:
     element: str
     compressed_axes: Tuple[str, ...]
     implied_type: str
-    implied_type_with_depth: Optional[str]
+    permits_depth_companion: bool
     independent_indices: Tuple[str, ...] = ()
     description: str = ""
     implemented: bool = False
-    implemented_with_depth: bool = False
+    legacy_only: bool = False
+    implementation_note: str = ""
 
     @property
     def is_complete_element(self) -> bool:
         return self.selector == self.element
 
     def resolved_type(self, depth_enabled: bool) -> str:
-        if not depth_enabled:
-            return self.implied_type
-        if self.implied_type_with_depth is None:
+        if depth_enabled and not self.permits_depth_companion:
             raise ValueError(
-                f"{self.selector} is a permitted {self.implied_type} geometry, but combining it "
-                "with DEPTH would imply a three-dimensional BLOCK/BLOCK_SET field, which is not "
-                "part of the systematic geometry design"
+                f"{self.selector} is a permitted {self.implied_type} geometry, but combining it with DEPTH would imply "
+                "a three-dimensional BLOCK/BLOCK_SET field, which is not part of the systematic geometry design"
             )
-        return self.implied_type_with_depth
-
-    def is_implemented(self, depth_enabled: bool) -> bool:
-        return self.implemented_with_depth if depth_enabled else self.implemented
+        return self.implied_type
 
 
 @dataclass(frozen=True)
@@ -83,12 +75,14 @@ class CompressorCapability:
     default_version: str
     element_types: Tuple[str, ...]
     implemented: bool
+    legacy_only: bool = False
     supports_group_size: bool = False
+    supported_selectors: Tuple[str, ...] = ()
     notes: str = ""
 
     @property
     def semantic_dimensions(self) -> Tuple[int, ...]:
-        return tuple(sorted({1 if kind == ELEMENT_TYPE_CURVE else 2 for kind in self.element_types}))
+        return tuple(sorted({1 if element_type == ELEMENT_TYPE_CURVE else 2 for element_type in self.element_types}))
 
     @property
     def implemented_dimensions(self) -> Tuple[int, ...]:
@@ -135,6 +129,7 @@ class MaterializerAdapter:
     legacy_mlp_hidden_group_size: Optional[int]
     materialization_version: Optional[str]
     message: str
+    legacy: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -171,20 +166,19 @@ class ResolvedGeometryPlan:
 
 
 _GEOMETRY_ENTRIES = (
-    GeometryEntry("MLP_UP.MLP_HIDDEN", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, (AXIS_MLP_D_MODEL,), "MLP expansion hidden-axis curve"),
-    GeometryEntry("MLP_UP.MLP_D_MODEL", ELEMENT_MLP_UP, (AXIS_MLP_D_MODEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, (AXIS_MLP_HIDDEN,), "MLP expansion model-axis curve"),
-    GeometryEntry("MLP_UP", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN, AXIS_MLP_D_MODEL), ELEMENT_TYPE_SHEET, None, (), "Complete MLP expansion sheet"),
-    GeometryEntry("MLP_DOWN.MLP_HIDDEN", ELEMENT_MLP_DOWN, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, (AXIS_MLP_D_MODEL,), "MLP contraction hidden-axis curve"),
-    GeometryEntry("MLP_DOWN.MLP_D_MODEL", ELEMENT_MLP_DOWN, (AXIS_MLP_D_MODEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, (AXIS_MLP_HIDDEN,), "MLP contraction model-axis curve"),
-    GeometryEntry("MLP_DOWN", ELEMENT_MLP_DOWN, (AXIS_MLP_HIDDEN, AXIS_MLP_D_MODEL), ELEMENT_TYPE_SHEET, None, (), "Complete MLP contraction sheet"),
-    GeometryEntry("ATTENTION_QKV.ATTENTION_D_MODEL", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_D_MODEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET_SET, ("QKV_ROLE", "ATTENTION_HEAD", AXIS_ATTENTION_HEAD_CHANNEL), "QKV input-model-axis curves"),
-    GeometryEntry("ATTENTION_QKV.ATTENTION_HEAD_CHANNEL", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_HEAD_CHANNEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET_SET, ("QKV_ROLE", "ATTENTION_HEAD", AXIS_ATTENTION_D_MODEL), "QKV within-head channel curves"),
-    GeometryEntry("ATTENTION_QKV", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_D_MODEL, AXIS_ATTENTION_HEAD_CHANNEL), ELEMENT_TYPE_SHEET_SET, None, ("QKV_ROLE", "ATTENTION_HEAD"), "One QKV sheet per role and head"),
-    GeometryEntry("ATTENTION_OUTPUT.ATTENTION_D_MODEL", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_D_MODEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET_SET, ("ATTENTION_HEAD", AXIS_ATTENTION_HEAD_CHANNEL), "Attention-output model-axis curves"),
-    GeometryEntry("ATTENTION_OUTPUT.ATTENTION_HEAD_CHANNEL", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_HEAD_CHANNEL,), ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET_SET, ("ATTENTION_HEAD", AXIS_ATTENTION_D_MODEL), "Attention-output within-head channel curves"),
-    GeometryEntry("ATTENTION_OUTPUT", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_D_MODEL, AXIS_ATTENTION_HEAD_CHANNEL), ELEMENT_TYPE_SHEET_SET, None, ("ATTENTION_HEAD",), "One attention-output sheet per head"),
+    GeometryEntry("MLP_UP.MLP_HIDDEN", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_D_MODEL,), "MLP expansion hidden-axis curve", True, True, "Implemented only through the legacy DEPTH + JPEG_LIKE_V1 adapter."),
+    GeometryEntry("MLP_UP.MLP_D_MODEL", ELEMENT_MLP_UP, (AXIS_MLP_D_MODEL,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_HIDDEN,), "MLP expansion model-axis curve"),
+    GeometryEntry("MLP_UP", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN, AXIS_MLP_D_MODEL), ELEMENT_TYPE_SHEET, False, (), "Complete MLP expansion sheet"),
+    GeometryEntry("MLP_DOWN.MLP_HIDDEN", ELEMENT_MLP_DOWN, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_D_MODEL,), "MLP contraction hidden-axis curve"),
+    GeometryEntry("MLP_DOWN.MLP_D_MODEL", ELEMENT_MLP_DOWN, (AXIS_MLP_D_MODEL,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_HIDDEN,), "MLP contraction model-axis curve"),
+    GeometryEntry("MLP_DOWN", ELEMENT_MLP_DOWN, (AXIS_MLP_HIDDEN, AXIS_MLP_D_MODEL), ELEMENT_TYPE_SHEET, False, (), "Complete MLP contraction sheet"),
+    GeometryEntry("ATTENTION_QKV.ATTENTION_D_MODEL", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_D_MODEL,), ELEMENT_TYPE_CURVE, True, ("QKV_ROLE", "ATTENTION_HEAD", AXIS_ATTENTION_HEAD_CHANNEL), "QKV input-model-axis curves"),
+    GeometryEntry("ATTENTION_QKV.ATTENTION_HEAD_CHANNEL", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_HEAD_CHANNEL,), ELEMENT_TYPE_CURVE, True, ("QKV_ROLE", "ATTENTION_HEAD", AXIS_ATTENTION_D_MODEL), "QKV within-head channel curves"),
+    GeometryEntry("ATTENTION_QKV", ELEMENT_ATTENTION_QKV, (AXIS_ATTENTION_D_MODEL, AXIS_ATTENTION_HEAD_CHANNEL), ELEMENT_TYPE_SHEET_SET, False, ("QKV_ROLE", "ATTENTION_HEAD"), "One QKV sheet per role and head"),
+    GeometryEntry("ATTENTION_OUTPUT.ATTENTION_D_MODEL", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_D_MODEL,), ELEMENT_TYPE_CURVE, True, ("ATTENTION_HEAD", AXIS_ATTENTION_HEAD_CHANNEL), "Attention-output model-axis curves"),
+    GeometryEntry("ATTENTION_OUTPUT.ATTENTION_HEAD_CHANNEL", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_HEAD_CHANNEL,), ELEMENT_TYPE_CURVE, True, ("ATTENTION_HEAD", AXIS_ATTENTION_D_MODEL), "Attention-output within-head channel curves"),
+    GeometryEntry("ATTENTION_OUTPUT", ELEMENT_ATTENTION_OUTPUT, (AXIS_ATTENTION_D_MODEL, AXIS_ATTENTION_HEAD_CHANNEL), ELEMENT_TYPE_SHEET_SET, False, ("ATTENTION_HEAD",), "One attention-output sheet per head"),
 )
-
 GEOMETRY_REGISTRY: Mapping[str, GeometryEntry] = {entry.selector: entry for entry in _GEOMETRY_ENTRIES}
 
 
@@ -192,13 +186,17 @@ def _build_compressor_registry() -> Dict[str, CompressorCapability]:
     capabilities: Dict[str, CompressorCapability] = {}
     for family in BASIS_FAMILIES:
         canonical = normalize_registered_basis_family(family)
-        capabilities[canonical] = CompressorCapability(
-            family=canonical,
-            default_version=basis_version_for_family(canonical),
-            element_types=(ELEMENT_TYPE_CURVE,),
-            implemented=True,
-            notes="Implemented one-dimensional CURVE compressor.",
-        )
+        capabilities[canonical] = CompressorCapability(canonical, basis_version_for_family(canonical), (ELEMENT_TYPE_CURVE,), True, notes="Implemented one-dimensional CURVE compressor.")
+    capabilities[COMPRESSOR_JPEG_LIKE] = CompressorCapability(
+        COMPRESSOR_JPEG_LIKE,
+        JPEG_LIKE_VERSION,
+        (ELEMENT_TYPE_CURVE,),
+        True,
+        legacy_only=True,
+        supports_group_size=True,
+        supported_selectors=("MLP_UP.MLP_HIDDEN",),
+        notes="Local grouped DCT CURVE compressor; executable only through legacy JPEG_LIKE_V1 with DEPTH.",
+    )
     return capabilities
 
 
@@ -253,10 +251,7 @@ def _positive_integer(label: str, value: str) -> int:
 def normalize_compressor_family(value: str) -> str:
     normalized = value.strip().lower()
     if normalized == COMPRESSOR_JPEG_LIKE:
-        raise ValueError(
-            "compressor 'jpeg_like' is not currently implemented as a semantically valid SHEET compressor; "
-            "JPEG_LIKE_V1 remains available only through the legacy geometry preset"
-        )
+        return normalized
     try:
         canonical = normalize_registered_basis_family(normalized)
     except ValueError as error:
@@ -331,23 +326,30 @@ def _compressor_for_target(target: str, values: Mapping[Tuple[str, str], str], *
 
 def _order_for_axis(element: str, axis: str, values: Mapping[Tuple[str, str], str], legacy_orders: Mapping[str, int]) -> int:
     target = f"{element}.{axis}"
-    explicit = values.get((target, "order"))
-    if explicit is not None:
-        return _positive_integer(f"{target}.order", explicit)
-    field_name = ORDER_OPTION_FIELDS[(element, axis)]
-    value = int(legacy_orders[field_name])
+    if (target, "order") in values:
+        return _positive_integer(f"{target}.order", values[(target, "order")])
+    value = int(legacy_orders[ORDER_OPTION_FIELDS[(element, axis)]])
     if value < 1:
-        raise ValueError(f"{field_name} must be positive; got {value!r}")
+        raise ValueError(f"{ORDER_OPTION_FIELDS[(element, axis)]} must be positive; got {value!r}")
     return value
 
 
-def _compatibility_message(element_type: str, family: str, version: str) -> str:
+def _compatibility_message(selector: str, element_type: str, family: str, version: str) -> str:
     capability = COMPRESSOR_REGISTRY[family]
-    if element_type in capability.element_types:
-        return ""
-    implemented_for_type = [name for name, item in COMPRESSOR_REGISTRY.items() if item.implemented and element_type in item.element_types]
-    suffix = f" implemented {element_type} compressors: {', '.join(implemented_for_type)}" if implemented_for_type else f" no {element_type} compressor is currently implemented"
-    return f"compressor {family}@{version} is a {ELEMENT_TYPE_CURVE} compressor and cannot be used with a {element_type} geometry;{suffix}"
+    if element_type not in capability.element_types:
+        implemented_for_type = [name for name, item in COMPRESSOR_REGISTRY.items() if item.implemented and element_type in item.element_types]
+        suffix = f" implemented {element_type} compressors: {', '.join(implemented_for_type)}" if implemented_for_type else f" no {element_type} compressor is currently implemented"
+        return f"compressor {family}@{version} is a CURVE compressor and cannot be used with a {element_type} geometry;{suffix}"
+    if capability.supported_selectors and selector not in capability.supported_selectors:
+        return f"compressor {family}@{version} is not valid for {selector}; supported selectors: {', '.join(capability.supported_selectors)}"
+    return ""
+
+
+def _legacy_semantic_warning(preset: str, *, stream=sys.stderr) -> str:
+    text = f"WARNING: legacy geometry '{preset}' is not semantically sensible: it combines unrelated weight coordinates under one compact field. It remains runnable only for legacy comparison."
+    if stream.isatty() and os.environ.get("NO_COLOR") is None:
+        return f"\033[1;38;5;208m{text}\033[0m"
+    return text
 
 
 def _materializer_adapter(*, depth_enabled: bool, depth_compressor: Optional[str], depth_version: Optional[str], selections: Sequence[ResolvedGeometrySelection], incompatibilities: Sequence[str]) -> MaterializerAdapter:
@@ -355,14 +357,16 @@ def _materializer_adapter(*, depth_enabled: bool, depth_compressor: Optional[str
         return MaterializerAdapter(False, None, None, None, None, None, None, "; ".join(incompatibilities))
     if depth_enabled and not selections:
         return MaterializerAdapter(True, "depth", depth_compressor, depth_version, None, None, "depth_v1", "Implemented by the existing DEPTH trajectory.")
+    if depth_enabled and len(selections) == 1 and selections[0].selector == "MLP_UP.MLP_HIDDEN" and selections[0].compressor == COMPRESSOR_JPEG_LIKE:
+        group_size = int(selections[0].axis_options.get(AXIS_MLP_HIDDEN, {}).get("group_size", 256))
+        return MaterializerAdapter(True, "jpeg_like_v1", depth_compressor, depth_version, "dct", group_size, "jpeg_like_v1", "Implemented through the legacy JPEG_LIKE_V1 adapter. This is DEPTH plus a local MLP_HIDDEN CURVE, not a semantically valid SHEET compressor.", True)
     if not depth_enabled and not selections:
         return MaterializerAdapter(False, None, None, None, None, None, None, "No geometry was selected; supply --select-depth and/or at least one --select-element.")
-    unimplemented = [selection.selector for selection in selections]
-    return MaterializerAdapter(False, None, None, None, None, None, None, f"registered geometry is not currently implemented: {', '.join(unimplemented)}")
+    unimplemented = ", ".join(selection.selector for selection in selections)
+    return MaterializerAdapter(False, None, None, None, None, None, None, f"registered geometry is not currently implemented: {unimplemented}")
 
 
 def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str], option_assignments: Sequence[str], legacy_orders: Mapping[str, int], default_depth_compressor: str = "chebyshev", default_non_depth_compressor: str = "dct", default_mlp_hidden_group_size: int = 256) -> ResolvedGeometryPlan:
-    del default_mlp_hidden_group_size
     entries = tuple(GEOMETRY_REGISTRY[normalize_selector(value)] for value in selected_elements)
     _validate_selection_overlaps(entries)
     parsed_options = tuple(parse_option_assignment(value) for value in option_assignments)
@@ -376,6 +380,8 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
     if select_depth:
         depth_compressor, depth_version = _compressor_for_target(AXIS_DEPTH, values, default_family=default_depth_compressor)
         depth_order = _positive_integer("DEPTH.order", values[(AXIS_DEPTH, "order")]) if (AXIS_DEPTH, "order") in values else int(legacy_orders["o_depth"])
+        if depth_order < 1:
+            raise ValueError(f"o_depth must be positive; got {depth_order!r}")
 
     resolved: list[ResolvedGeometrySelection] = []
     compressor_pairs: set[Tuple[str, str]] = set()
@@ -384,16 +390,23 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
         implied_type = entry.resolved_type(bool(select_depth))
         family, version = _compressor_for_target(entry.element, values, default_family=default_non_depth_compressor)
         compressor_pairs.add((family, version))
-        incompatibility = _compatibility_message(implied_type, family, version)
+        incompatibility = _compatibility_message(entry.selector, implied_type, family, version)
         if incompatibility:
             incompatibilities.append(f"{entry.selector}: {incompatibility}")
+        capability = COMPRESSOR_REGISTRY[family]
         orders = {axis: _order_for_axis(entry.element, axis, values, legacy_orders) for axis in entry.compressed_axes}
         axis_options: Dict[str, Dict[str, Any]] = {}
         for axis in entry.compressed_axes:
             target = f"{entry.element}.{axis}"
             if (target, "group_size") in values:
-                raise ValueError(f"compressor {family}@{version} does not accept group_size, but {target}.group_size was supplied")
-        resolved.append(ResolvedGeometrySelection(entry.selector, entry.element, implied_type, ((AXIS_DEPTH,) + entry.compressed_axes) if select_depth else entry.compressed_axes, entry.independent_indices, family, version, orders, axis_options))
+                if not capability.supports_group_size:
+                    raise ValueError(f"compressor {family}@{version} does not accept group_size, but {target}.group_size was supplied")
+                axis_options.setdefault(axis, {})["group_size"] = _positive_integer(f"{target}.group_size", values[(target, "group_size")])
+        if family == COMPRESSOR_JPEG_LIKE and AXIS_MLP_HIDDEN in entry.compressed_axes:
+            axis_options.setdefault(AXIS_MLP_HIDDEN, {}).setdefault("group_size", int(default_mlp_hidden_group_size))
+            if orders[AXIS_MLP_HIDDEN] > int(axis_options[AXIS_MLP_HIDDEN]["group_size"]):
+                raise ValueError(f"{entry.element}.{AXIS_MLP_HIDDEN}.order must not exceed group_size: order={orders[AXIS_MLP_HIDDEN]}, group_size={axis_options[AXIS_MLP_HIDDEN]['group_size']}")
+        resolved.append(ResolvedGeometrySelection(entry.selector, entry.element, implied_type, entry.compressed_axes, entry.independent_indices, family, version, orders, axis_options))
 
     if len(compressor_pairs) > 1:
         assignments = ", ".join(f"{family}@{version}" for family, version in sorted(compressor_pairs))
@@ -426,9 +439,10 @@ def validate_resolved_geometry_plan(plan: Mapping[str, Any]) -> Dict[str, Any]:
 def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) -> str:
     lines = ["selected geometry", "-----------------"]
     if plan.depth_enabled:
-        lines.extend(["DEPTH", f"  implied element type:  {ELEMENT_TYPE_CURVE}", f"  compressed axis:       {AXIS_DEPTH}", f"  compressor:            {plan.depth_compressor}@{plan.depth_compressor_version}", f"  order:                 {plan.depth_order}"])
+        lines.extend(["DEPTH", "  implied element type:  CURVE", "  compressed axis:       DEPTH", f"  compressor:            {plan.depth_compressor}@{plan.depth_compressor_version}", f"  order:                 {plan.depth_order}"])
     for selection in plan.selections:
-        lines.extend(["", selection.selector, f"  implied element type:  {selection.implied_type}", f"  compressed axes:       {' × '.join(selection.compressed_axes)}"])
+        axis_label = "compressed axis:" if len(selection.compressed_axes) == 1 else "compressed axes:"
+        lines.extend(["", selection.selector, f"  implied element type:  {selection.implied_type}", f"  {axis_label:<22}{' × '.join(selection.compressed_axes)}"])
         if selection.independent_indices:
             lines.append(f"  independent instances: {' × '.join(selection.independent_indices)}")
         lines.append(f"  compressor:            {selection.compressor}@{selection.compressor_version}")
@@ -437,7 +451,13 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
         for axis, options in selection.axis_options.items():
             for name, value in options.items():
                 lines.append(f"  {axis}.{name}:      {value}")
-    lines.extend(["", f"implementation status: {'implemented' if plan.materializer.implemented else 'not currently implemented'}", f"  {plan.materializer.message}"])
+    if plan.materializer.implemented and plan.materializer.legacy:
+        status = "implemented through legacy adapter"
+    else:
+        status = "implemented" if plan.materializer.implemented else "not currently implemented"
+    lines.extend(["", f"implementation status: {status}", f"  {plan.materializer.message}"])
+    if plan.materializer.legacy:
+        lines.append(f"  {_legacy_semantic_warning(str(plan.materializer.legacy_geometry_preset), stream=sys.stdout)}")
     if detailed:
         lines.extend([f"registry version:      {plan.registry_version}", f"plan schema:           {plan.schema_version}"])
         if plan.materializer.legacy_geometry_preset:
@@ -445,10 +465,25 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
     return "\n".join(lines)
 
 
-# vvv THOG keep legacy geometries runnable while making their semantic defect impossible to miss.
+def format_geometry_registry() -> str:
+    lines = [f"geometry registry ({GEOMETRY_REGISTRY_VERSION})", "=======================================", "", "selectors", "---------", f"{'selector':40} {'type':10} {'depth ok':8} {'implemented':12} {'legacy':7} axes / independent instances"]
+    for entry in GEOMETRY_REGISTRY.values():
+        implemented = "yes" if entry.implemented else "no"
+        legacy = "yes" if entry.legacy_only else "no"
+        axes = " × ".join(entry.compressed_axes)
+        independent = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
+        lines.append(f"{entry.selector:40} {entry.implied_type:10} {str(entry.permits_depth_companion):8} {implemented:12} {legacy:7} {axes}; independent={independent}")
+    lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':14} {'implemented':12} {'legacy':7} {'group':7} notes"])
+    for name, capability in COMPRESSOR_REGISTRY.items():
+        lines.append(f"{name:18} {','.join(capability.element_types):14} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
+    if not any(ELEMENT_TYPE_SHEET in item.element_types or ELEMENT_TYPE_SHEET_SET in item.element_types for item in COMPRESSOR_REGISTRY.values()):
+        lines.extend(["", "No SHEET or SHEET_SET compressor is currently implemented."])
+    return "\n".join(lines)
+
+
 def _legacy_geometry_preset_from_argv(arguments: Sequence[str]) -> Optional[str]:
     for index, argument in enumerate(arguments):
-        if argument == "--geometry-preset" and index + 1 < len(arguments):
+        if argument in ("--geometry-preset", "-p") and index + 1 < len(arguments):
             return arguments[index + 1].strip().lower()
         if argument.startswith("--geometry-preset="):
             return argument.split("=", 1)[1].strip().lower()
@@ -459,11 +494,8 @@ def _warn_for_legacy_semantics() -> None:
     if any(argument in ("--select-depth", "--select-element", "--explain-geometry") or argument.startswith("--select-element=") for argument in sys.argv[1:]):
         return
     preset = _legacy_geometry_preset_from_argv(sys.argv[1:])
-    if preset not in LEGACY_SEMANTICALLY_UNSOUND_PRESETS:
-        return
-    orange = "\033[1;38;5;208m" if sys.stderr.isatty() and os.environ.get("NO_COLOR") is None else ""
-    reset = "\033[0m" if orange else ""
-    print(f"{orange}WARNING: legacy geometry '{preset}' is not semantically sensible: it combines unrelated weight coordinates under one compact field. It remains runnable only for legacy comparison.{reset}", file=sys.stderr, flush=True)
+    if preset in LEGACY_SEMANTICALLY_UNSOUND_PRESETS:
+        print(_legacy_semantic_warning(preset, stream=sys.stderr), file=sys.stderr, flush=True)
 
 
 def _install_clean_cli_excepthook() -> None:
@@ -480,16 +512,21 @@ def _install_clean_cli_excepthook() -> None:
     sys.excepthook = clean_excepthook
 
 
+def _print_geometry_registry_and_exit_if_requested() -> None:
+    if "--print-geometry-registry" in sys.argv[1:]:
+        print(format_geometry_registry())
+        raise SystemExit(0)
+
+
+_print_geometry_registry_and_exit_if_requested()
 _warn_for_legacy_semantics()
 _install_clean_cli_excepthook()
-# ^^^ THOG
-
 
 __all__ = [
     "AXIS_ATTENTION_D_MODEL", "AXIS_ATTENTION_HEAD_CHANNEL", "AXIS_DEPTH", "AXIS_MLP_D_MODEL", "AXIS_MLP_HIDDEN",
     "COMPRESSOR_JPEG_LIKE", "COMPRESSOR_REGISTRY", "ELEMENT_TYPE_CURVE", "ELEMENT_TYPE_SHEET", "ELEMENT_TYPE_SHEET_SET",
     "GEOMETRY_PLAN_SCHEMA_VERSION", "GEOMETRY_REGISTRY", "GEOMETRY_REGISTRY_VERSION", "GeometryEntry", "MaterializerAdapter",
-    "ParsedOption", "ResolvedGeometryPlan", "ResolvedGeometrySelection", "format_geometry_plan", "normalize_selector",
+    "ParsedOption", "ResolvedGeometryPlan", "ResolvedGeometrySelection", "format_geometry_plan", "format_geometry_registry", "normalize_selector",
     "parse_option_assignment", "permitted_geometry_selectors", "resolve_geometry_plan", "validate_resolved_geometry_plan",
 ]
 # ^^^ THOG
