@@ -34,7 +34,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
         self.assertEqual(config.geometry_preset, "depth")
         self.assertIsNotNone(config.resolved_geometry_plan)
 
-    def test_jpeg_like_is_not_adapted_from_systematic_ui(self):
+    def test_jpeg_like_axis_curve_is_adapted_through_legacy_path(self):
         arguments = self.parse(
             "--select-depth",
             "--select-element", "MLP_UP.MLP_HIDDEN",
@@ -43,14 +43,33 @@ class GeometryPhase1CliTests(unittest.TestCase):
             "--option", "MLP_UP.MLP_HIDDEN.order=8",
             "--option", "MLP_UP.MLP_HIDDEN.group_size=128",
         )
-        with self.assertRaisesRegex(ValueError, "not currently implemented as a semantically valid SHEET compressor"):
-            run_thog2_owt.geometry_plan_from_arguments(arguments)
+        plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
+        self.assertEqual(plan.selections[0].implied_type, "CURVE")
+        self.assertEqual(plan.selections[0].compressed_axes, ("MLP_HIDDEN",))
+        self.assertTrue(plan.materializer.implemented)
+        self.assertTrue(plan.materializer.legacy)
+        config = run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
+        self.assertEqual(config.geometry_preset, "jpeg_like_v1")
+        self.assertEqual(config.o_mlp_hidden, 8)
+        self.assertEqual(config.mlp_hidden_group_size, 128)
+        self.assertEqual(config.mlp_hidden_compressor, "dct")
 
-    def test_curve_compressor_on_sheet_fails_before_model_allocation(self):
+    def test_depth_plus_dct_axis_curve_is_valid_but_not_materialized(self):
         arguments = self.parse(
             "--select-depth",
             "--select-element", "MLP_UP.MLP_HIDDEN",
             "--option", "DEPTH.compressor=chebyshev",
+            "--option", "MLP_UP.compressor=dct",
+        )
+        plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
+        self.assertEqual(plan.selections[0].implied_type, "CURVE")
+        self.assertFalse(plan.materializer.implemented)
+        with self.assertRaisesRegex(ValueError, "registered geometry is not currently implemented"):
+            run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
+
+    def test_curve_compressor_on_complete_sheet_fails_before_model_allocation(self):
+        arguments = self.parse(
+            "--select-element", "MLP_UP",
             "--option", "MLP_UP.compressor=dct",
         )
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
