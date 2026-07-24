@@ -42,6 +42,8 @@ def _coefficient_axis_plan(coefficient: Tensor, depth_order: int) -> Tuple[int, 
         return 2, ()
     if coefficient.ndim == 4 and shape[1] == depth_order:
         return 1, (2, 3)
+    if coefficient.ndim == 4 and shape[0] == depth_order:
+        return 0, (1,)                                                                                                                                        # <<< THOG JPEG-like coefficients are DEPTH x retained-order x physical-group-position x group-instance
     raise ValueError(f"unsupported coefficient diagnostic shape {shape} for depth_order={depth_order}")
 
 
