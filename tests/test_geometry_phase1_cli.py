@@ -24,10 +24,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
         self.assertEqual(len(arguments.geometry_options), 2)
 
     def test_systematic_selection_implies_sheet_model_type(self):
-        arguments = self.parse(
-            "--select-depth",
-            "--option", "DEPTH.compressor=chebyshev",
-        )
+        arguments = self.parse("--select-depth", "--option", "DEPTH.compressor=chebyshev")
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         config = run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
         self.assertEqual(config.model_type, "sheet")
@@ -39,7 +36,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
             "--select-depth",
             "--select-element", "MLP_UP.MLP_HIDDEN",
             "--option", "DEPTH.compressor=chebyshev",
-            "--option", "MLP_UP.compressor=jpeg_like",
+            "--option", "MLP_UP.MLP_HIDDEN.compressor=jpeg_like",
             "--option", "MLP_UP.MLP_HIDDEN.order=8",
             "--option", "MLP_UP.MLP_HIDDEN.group_size=128",
         )
@@ -59,7 +56,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
             "--select-depth",
             "--select-element", "MLP_UP.MLP_HIDDEN",
             "--option", "DEPTH.compressor=chebyshev",
-            "--option", "MLP_UP.compressor=dct",
+            "--option", "MLP_UP.MLP_HIDDEN.compressor=dct",
         )
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertEqual(plan.selections[0].implied_type, "CURVE")
@@ -68,20 +65,19 @@ class GeometryPhase1CliTests(unittest.TestCase):
             run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
 
     def test_curve_compressor_on_complete_sheet_fails_before_model_allocation(self):
-        arguments = self.parse(
-            "--select-element", "MLP_UP",
-            "--option", "MLP_UP.compressor=dct",
-        )
+        arguments = self.parse("--select-element", "MLP_UP", "--option", "MLP_UP.compressor=dct")
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertFalse(plan.materializer.implemented)
         with self.assertRaisesRegex(ValueError, "cannot be used with a SHEET geometry"):
             run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
 
+    def test_axis_scoped_compressor_cannot_target_unselected_complete_sheet_axis(self):
+        arguments = self.parse("--select-element", "MLP_UP", "--option", "MLP_UP.MLP_HIDDEN.compressor=jpeg_like")
+        with self.assertRaisesRegex(ValueError, "must target a selected element or selector"):
+            run_thog2_owt.geometry_plan_from_arguments(arguments)
+
     def test_registered_unimplemented_curve_fails_before_model_allocation(self):
-        arguments = self.parse(
-            "--select-element", "MLP_UP.MLP_HIDDEN",
-            "--option", "MLP_UP.compressor=dct",
-        )
+        arguments = self.parse("--select-element", "MLP_UP.MLP_HIDDEN", "--option", "MLP_UP.MLP_HIDDEN.compressor=dct")
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertFalse(plan.materializer.implemented)
         with self.assertRaisesRegex(ValueError, "not currently implemented"):
@@ -108,11 +104,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
         self.assertIn("not currently implemented", output.getvalue())
 
     def test_non_default_legacy_geometry_cannot_be_mixed(self):
-        arguments = self.parse(
-            "--model-type", "sheet",
-            "--geometry-preset", "mlp_block",
-            "--select-depth",
-        )
+        arguments = self.parse("--model-type", "sheet", "--geometry-preset", "mlp_block", "--select-depth")
         with self.assertRaisesRegex(ValueError, "cannot be mixed"):
             run_thog2_owt.geometry_plan_from_arguments(arguments)
 
