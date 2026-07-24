@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import torch
 
@@ -77,7 +78,7 @@ class Stage6TrainerTests(unittest.TestCase):
             self.assertEqual(result["budget"]["consumed_tokens"], 32)
             self.assertEqual(
                 [row["completed_updates"] for row in result["evaluations"]],
-                [0, 1, 2],
+                [1, 2],                                                                                                                                    # <<< THOG update-zero validation is disabled by default
             )
             self.assertEqual(len(result["trace"]["training_starts"]), 2)
             self.assertGreater(result["checkpoint"]["bytes"], 0)
@@ -96,6 +97,27 @@ class Stage6TrainerTests(unittest.TestCase):
         result = self.run_case("dense")
         self.assertIsNone(result["sheet_diagnostics"])
         self.assertEqual(result["gradient_diagnostics"], [])
+
+    def test_s6_14_initial_eval_can_be_reenabled_for_smoke_runs(self) -> None:
+        with mock.patch.dict("os.environ", {"THOG2_INITIAL_EVAL": "1"}):
+            train, validation = self.token_splits()
+            with tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory) / "initial_eval"
+                run_dir.mkdir()
+                trainer = Stage6Trainer(self.config("dense", run_dir), train, validation)
+                try:
+                    result = trainer.run_pilot(
+                        run_id="dense_initial_eval",
+                        protocol_sha256="protocol",
+                        dataset={"fixture": True},
+                        result_path=run_dir / "result.json",
+                    )
+                finally:
+                    trainer.close()
+        self.assertEqual(
+            [row["completed_updates"] for row in result["evaluations"]],
+            [0, 1, 2],                                                                                                                                     # <<< THOG retain explicit smoke-test path for update-zero validation
+        )
 
 
 if __name__ == "__main__":
