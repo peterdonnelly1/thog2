@@ -71,6 +71,14 @@ set -euo pipefail
 #    -j LOG_ROOT
 #    -R RESULT_ROOT
 
+# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+export THOG2_HOST_LABEL="scruffy"
+export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
+export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
+export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
+export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+# ^^^ THOG
+
 python -m run_thog2_owt --print-geometry-registry
 
 export THOG2_WANDB_FINISH_TIMEOUT=7200
@@ -80,6 +88,7 @@ export WANDB_CONSOLE=off
   -n 10000 \
   -b 16 \
   -A 8 \
+  -G "$THOG2_NUM_GPUS" \
   -S 4 \
   -u 1 \
   -e 10001 \
@@ -95,8 +104,9 @@ export WANDB_CONSOLE=off
   -P 16 \
   -Y 64 \
   -E true \
-  -T bfloat16 \
-  -K flash2 \
+  -T "$THOG2_DTYPE" \
+  -K "$THOG2_ATTENTION_BACKEND" \
+  -t "$THOG2_OWT_DATA_DIR" \
   -r depth_scaled \
   -z dof_implied_depth \
   -I wandb \
@@ -109,4 +119,6 @@ export WANDB_CONSOLE=off
   --option MLP_UP.compressor=jpeg_like \
   --option MLP_UP.MLP_HIDDEN.order=64 \
   --option MLP_UP.MLP_HIDDEN.group_size=256 \
-  --explain-geometry
+  --explain-geometry \
+  -- \
+  --host-label "$THOG2_HOST_LABEL"
