@@ -75,6 +75,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
         arguments = self.parse(
             "--select-element", "MLP_DOWN.MLP_HIDDEN",
             "--option", "MLP_DOWN.MLP_HIDDEN.compressor=jpeg_like",
+            "--option", "MLP_DOWN.MLP_HIDDEN.order=8",
             "--option", "MLP_DOWN.MLP_HIDDEN.group_size=128",
         )
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
