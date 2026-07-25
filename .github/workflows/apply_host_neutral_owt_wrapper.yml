@@ -1,0 +1,140 @@
+name: Apply host-neutral OWT wrapper defaults
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/apply_host_neutral_owt_wrapper.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Make the canonical wrapper host-neutral
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          train_path = Path('train_OWT.sh')
+          text = train_path.read_text()
+
+          replacements = {
+              '# Current scruffy OpenWebText training wrapper for the PICTON compact-geometry contract.':
+                  '# Canonical host-neutral OpenWebText training wrapper for the PICTON compact-geometry contract.',
+              '# Scruffy runtime defaults: bfloat16, flash2. Dense baseline is available as -p dense.':
+                  '# Host runstrings provide host label, dataset path, GPU count, dtype, and attention backend.',
+              'HOST_LABEL="scruffy"':
+                  'HOST_LABEL="${THOG2_HOST_LABEL:-scruffy}"                                                                                                            # <<< THOG host runstrings select artifact and telemetry host identity',
+              'DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"':
+                  'DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"                                                                                                  # <<< THOG host runstrings select the host-local OpenWebText path',
+              'NUM_GPUS=1':
+                  'NUM_GPUS="${THOG2_NUM_GPUS:-1}"                                                                                                                     # <<< THOG host runstrings select the visible training GPU count',
+              'DTYPE="bfloat16"':
+                  'DTYPE="${THOG2_DTYPE:-bfloat16}"                                                                                                                    # <<< THOG host runstrings select the supported host dtype',
+              'ATTENTION_BACKEND="flash2"':
+                  'ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"                                                                                              # <<< THOG host runstrings select the supported attention backend',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new)
+
+          train_path.write_text(text)
+
+          host_blocks = {
+              'scruffy_simple_runstring.sh': '''# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+          export THOG2_HOST_LABEL="scruffy"
+          export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
+          export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
+          export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
+          export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+          # ^^^ THOG
+
+          ''',
+              'scruffy_general_runstring.sh': '''# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+          export THOG2_HOST_LABEL="scruffy"
+          export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
+          export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
+          export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
+          export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+          # ^^^ THOG
+
+          ''',
+              'dreedle_simple_runstring.sh': '''# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+          export THOG2_HOST_LABEL="dreedle"
+          export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
+          export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-2}"
+          export THOG2_DTYPE="${THOG2_DTYPE:-float16}"
+          export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-sdpa}"
+          # ^^^ THOG
+
+          ''',
+          }
+
+          for filename, block in host_blocks.items():
+              path = Path(filename)
+              runstring = path.read_text()
+              if 'THOG2_HOST_LABEL=' in runstring:
+                  raise SystemExit(f'{filename} already contains a host profile')
+              marker = 'python -m run_thog2_owt --print-geometry-registry\n' if 'python -m run_thog2_owt --print-geometry-registry\n' in runstring else 'export THOG2_WANDB_FINISH_TIMEOUT='
+              if marker.startswith('export'):
+                  index = runstring.index(marker)
+                  runstring = runstring[:index] + block + runstring[index:]
+              else:
+                  runstring = runstring.replace(marker, block + marker, 1)
+              path.write_text(runstring)
+          PY
+
+      - name: Validate shell and host contracts
+        run: |
+          bash -n train_OWT.sh
+          bash -n scruffy_simple_runstring.sh
+          bash -n dreedle_simple_runstring.sh
+          bash -n scruffy_general_runstring.sh
+          grep -F 'HOST_LABEL="${THOG2_HOST_LABEL:-scruffy}"' train_OWT.sh
+          grep -F 'NUM_GPUS="${THOG2_NUM_GPUS:-1}"' train_OWT.sh
+          grep -F 'DTYPE="${THOG2_DTYPE:-bfloat16}"' train_OWT.sh
+          grep -F 'ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"' train_OWT.sh
+          grep -F 'export THOG2_HOST_LABEL="dreedle"' dreedle_simple_runstring.sh
+          grep -F 'export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-2}"' dreedle_simple_runstring.sh
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run wrapper regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest -q \
+            tests/test_picton_cli_wrapper_contract.py \
+            tests/test_picton_wrapper_defaults_and_nonfinite_policy.py \
+            tests/test_stage8_wrapper_shell_syntax.py \
+            tests/test_stage8_wrappers_and_run_config.py \
+            tests/test_wrapper_basis_help.py \
+            tests/test_wrapper_learning_rate_and_batch_grids.py
+
+      - name: Commit completed correction
+        run: |
+          rm -f .github/workflows/apply_host_neutral_owt_wrapper.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Make canonical OWT wrapper host-neutral'
+          git push origin HEAD:master
