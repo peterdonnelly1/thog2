@@ -8,7 +8,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .bases import BASIS_FAMILIES, basis_version_for_family, normalize_registered_basis_family
 
-GEOMETRY_REGISTRY_VERSION = "geometry_registry_v4"
+GEOMETRY_REGISTRY_VERSION = "geometry_registry_v5"
 GEOMETRY_PLAN_SCHEMA_VERSION = 1
 
 ELEMENT_TYPE_CURVE = "CURVE"
@@ -166,7 +166,7 @@ class ResolvedGeometryPlan:
 
 
 _GEOMETRY_ENTRIES = (
-    GeometryEntry("MLP_UP.MLP_HIDDEN", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_D_MODEL,), "MLP expansion hidden-axis curve", True, True, "Implemented only through the legacy DEPTH + JPEG_LIKE_V1 adapter."),
+    GeometryEntry("MLP_UP.MLP_HIDDEN", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_D_MODEL,), "MLP expansion hidden-axis curve", False, False, "One legacy adapter covers DEPTH + jpeg_like; generic materialisation is Phase 2."),
     GeometryEntry("MLP_UP.MLP_D_MODEL", ELEMENT_MLP_UP, (AXIS_MLP_D_MODEL,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_HIDDEN,), "MLP expansion model-axis curve"),
     GeometryEntry("MLP_UP", ELEMENT_MLP_UP, (AXIS_MLP_HIDDEN, AXIS_MLP_D_MODEL), ELEMENT_TYPE_SHEET, False, (), "Complete MLP expansion sheet"),
     GeometryEntry("MLP_DOWN.MLP_HIDDEN", ELEMENT_MLP_DOWN, (AXIS_MLP_HIDDEN,), ELEMENT_TYPE_CURVE, True, (AXIS_MLP_D_MODEL,), "MLP contraction hidden-axis curve"),
@@ -182,22 +182,31 @@ _GEOMETRY_ENTRIES = (
 GEOMETRY_REGISTRY: Mapping[str, GeometryEntry] = {entry.selector: entry for entry in _GEOMETRY_ENTRIES}
 
 
+# vvv THOG first-class compressor capabilities are separated from current materializer executability
 def _build_compressor_registry() -> Dict[str, CompressorCapability]:
     capabilities: Dict[str, CompressorCapability] = {}
+    first_class_types = (ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET)
     for family in BASIS_FAMILIES:
         canonical = normalize_registered_basis_family(family)
-        capabilities[canonical] = CompressorCapability(canonical, basis_version_for_family(canonical), (ELEMENT_TYPE_CURVE,), True, notes="Implemented one-dimensional CURVE compressor.")
+        capabilities[canonical] = CompressorCapability(
+            canonical,
+            basis_version_for_family(canonical),
+            first_class_types,
+            True,
+            notes="First-class basis-backed compressor; current runtime materializers remain a separate capability boundary.",
+        )
     capabilities[COMPRESSOR_JPEG_LIKE] = CompressorCapability(
         COMPRESSOR_JPEG_LIKE,
         JPEG_LIKE_VERSION,
-        (ELEMENT_TYPE_CURVE,),
+        first_class_types,
         True,
-        legacy_only=True,
+        legacy_only=False,
         supports_group_size=True,
-        supported_selectors=("MLP_UP.MLP_HIDDEN",),
-        notes="Local grouped DCT CURVE compressor; executable only through legacy JPEG_LIKE_V1 with DEPTH.",
+        supported_selectors=(),
+        notes="First-class grouped local compressor; only the DEPTH + MLP_UP.MLP_HIDDEN legacy adapter is executable today.",
     )
     return capabilities
+# ^^^ THOG
 
 
 COMPRESSOR_REGISTRY: Mapping[str, CompressorCapability] = _build_compressor_registry()
@@ -362,9 +371,9 @@ def _order_for_axis(element: str, axis: str, values: Mapping[Tuple[str, str], st
 def _compatibility_message(selector: str, element_type: str, family: str, version: str) -> str:
     capability = COMPRESSOR_REGISTRY[family]
     if element_type not in capability.element_types:
-        implemented_for_type = [name for name, item in COMPRESSOR_REGISTRY.items() if item.implemented and element_type in item.element_types]
-        suffix = f" implemented {element_type} compressors: {', '.join(implemented_for_type)}" if implemented_for_type else f" no {element_type} compressor is currently implemented"
-        return f"compressor {family}@{version} is a CURVE compressor and cannot be used with a {element_type} geometry;{suffix}"
+        compatible = [name for name, item in COMPRESSOR_REGISTRY.items() if item.implemented and element_type in item.element_types]
+        suffix = f" compatible {element_type} compressors: {', '.join(compatible)}" if compatible else f" no {element_type} compressor is currently registered"
+        return f"compressor {family}@{version} is not registered for {element_type} geometry;{suffix}"
     if capability.supported_selectors and selector not in capability.supported_selectors:
         return f"compressor {family}@{version} is not valid for {selector}; supported selectors: {', '.join(capability.supported_selectors)}"
     return ""
@@ -384,11 +393,20 @@ def _materializer_adapter(*, depth_enabled: bool, depth_compressor: Optional[str
         return MaterializerAdapter(True, "depth", depth_compressor, depth_version, None, None, "depth_v1", "Implemented by the existing DEPTH trajectory.")
     if depth_enabled and len(selections) == 1 and selections[0].selector == "MLP_UP.MLP_HIDDEN" and selections[0].compressor == COMPRESSOR_JPEG_LIKE:
         group_size = int(selections[0].axis_options.get(AXIS_MLP_HIDDEN, {}).get("group_size", 256))
-        return MaterializerAdapter(True, "jpeg_like_v1", depth_compressor, depth_version, "dct", group_size, "jpeg_like_v1", "Implemented through the legacy JPEG_LIKE_V1 adapter. This is DEPTH plus a local MLP_HIDDEN CURVE, not a semantically valid SHEET compressor.", True)
+        return MaterializerAdapter(True, "jpeg_like_v1", depth_compressor, depth_version, "dct", group_size, "jpeg_like_v1", "Implemented through the legacy JPEG_LIKE_V1 adapter. The compressor is first-class; this materializer remains the old narrow runtime path.", True)
     if not depth_enabled and not selections:
         return MaterializerAdapter(False, None, None, None, None, None, None, "No geometry was selected; supply --select-depth and/or at least one --select-element.")
     unimplemented = ", ".join(selection.selector for selection in selections)
-    return MaterializerAdapter(False, None, None, None, None, None, None, f"registered geometry is not currently implemented: {unimplemented}")
+    return MaterializerAdapter(False, None, None, None, None, None, None, f"registered geometry is valid, but no current materializer exists for: {unimplemented}")
+
+
+def _apply_jpeg_like_axis_options(*, entry: GeometryEntry, orders: Mapping[str, int], axis_options: Dict[str, Dict[str, Any]], default_mlp_hidden_group_size: int) -> None:
+    for axis in entry.compressed_axes:
+        if axis == AXIS_MLP_HIDDEN:
+            axis_options.setdefault(axis, {}).setdefault("group_size", int(default_mlp_hidden_group_size))
+        group_size = axis_options.get(axis, {}).get("group_size")
+        if group_size is not None and orders[axis] > int(group_size):
+            raise ValueError(f"{entry.element}.{axis}.order must not exceed group_size: order={orders[axis]}, group_size={group_size}")
 
 
 def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str], option_assignments: Sequence[str], legacy_orders: Mapping[str, int], default_depth_compressor: str = "chebyshev", default_non_depth_compressor: str = "dct", default_mlp_hidden_group_size: int = 256) -> ResolvedGeometryPlan:
@@ -427,10 +445,8 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
                 if not capability.supports_group_size:
                     raise ValueError(f"compressor {family}@{version} does not accept group_size, but {target}.group_size was supplied")
                 axis_options.setdefault(axis, {})["group_size"] = _positive_integer(f"{target}.group_size", values[(target, "group_size")])
-        if family == COMPRESSOR_JPEG_LIKE and AXIS_MLP_HIDDEN in entry.compressed_axes:
-            axis_options.setdefault(AXIS_MLP_HIDDEN, {}).setdefault("group_size", int(default_mlp_hidden_group_size))
-            if orders[AXIS_MLP_HIDDEN] > int(axis_options[AXIS_MLP_HIDDEN]["group_size"]):
-                raise ValueError(f"{entry.element}.{AXIS_MLP_HIDDEN}.order must not exceed group_size: order={orders[AXIS_MLP_HIDDEN]}, group_size={axis_options[AXIS_MLP_HIDDEN]['group_size']}")
+        if family == COMPRESSOR_JPEG_LIKE:
+            _apply_jpeg_like_axis_options(entry=entry, orders=orders, axis_options=axis_options, default_mlp_hidden_group_size=default_mlp_hidden_group_size)
         resolved.append(ResolvedGeometrySelection(entry.selector, entry.element, implied_type, entry.compressed_axes, entry.independent_indices, family, version, orders, axis_options))
 
     if len(compressor_pairs) > 1:
@@ -521,7 +537,7 @@ def format_geometry_registry() -> str:
         "",
         "selectors",
         "---------",
-        f"{'selector':40} {'type':10} {'depth ok':8} {'implemented':12} {'legacy':7} axes / uncompressed axes",
+        f"{'selector':40} {'type':10} {'depth ok':8} {'generic mat':12} {'legacy':7} axes / uncompressed axes",
     ]
     for entry in GEOMETRY_REGISTRY.values():
         implemented = "yes" if entry.implemented else "no"
@@ -529,11 +545,10 @@ def format_geometry_registry() -> str:
         axes = " × ".join(entry.compressed_axes)
         uncompressed = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
         lines.append(f"{entry.selector:40} {entry.implied_type:10} {str(entry.permits_depth_companion):8} {implemented:12} {legacy:7} {axes}; uncompressed={uncompressed}")
-    lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':14} {'implemented':12} {'legacy':7} {'group':7} notes"])
+    lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':30} {'registered':12} {'legacy':7} {'group':7} notes"])
     for name, capability in COMPRESSOR_REGISTRY.items():
-        lines.append(f"{name:18} {','.join(capability.element_types):14} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
-    if not any(ELEMENT_TYPE_SHEET in item.element_types or ELEMENT_TYPE_SHEET_SET in item.element_types for item in COMPRESSOR_REGISTRY.values()):
-        lines.extend(["", "No SHEET or SHEET_SET compressor is currently implemented."])
+        lines.append(f"{name:18} {','.join(capability.element_types):30} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
+    lines.extend(["", "Compressor capability is first-class; generic SHEET/SHEET_SET materializers are still Phase 2."])
     return "\n".join(lines)
 
 
