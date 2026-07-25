@@ -61,14 +61,26 @@ class GeometryPhase1CliTests(unittest.TestCase):
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertEqual(plan.selections[0].implied_type, "CURVE")
         self.assertFalse(plan.materializer.implemented)
-        with self.assertRaisesRegex(ValueError, "registered geometry is not currently implemented"):
+        with self.assertRaisesRegex(ValueError, "no current materializer"):
             run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
 
-    def test_curve_compressor_on_complete_sheet_fails_before_model_allocation(self):
+    def test_curve_compressor_on_complete_sheet_is_valid_but_not_materialized(self):
         arguments = self.parse("--select-element", "MLP_UP", "--option", "MLP_UP.compressor=dct")
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertFalse(plan.materializer.implemented)
-        with self.assertRaisesRegex(ValueError, "cannot be used with a SHEET geometry"):
+        with self.assertRaisesRegex(ValueError, "no current materializer"):
+            run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
+
+    def test_jpeg_like_on_other_curve_is_valid_but_not_materialized(self):
+        arguments = self.parse(
+            "--select-element", "MLP_DOWN.MLP_HIDDEN",
+            "--option", "MLP_DOWN.MLP_HIDDEN.compressor=jpeg_like",
+            "--option", "MLP_DOWN.MLP_HIDDEN.group_size=128",
+        )
+        plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
+        self.assertEqual(plan.selections[0].compressor, "jpeg_like")
+        self.assertFalse(plan.materializer.implemented)
+        with self.assertRaisesRegex(ValueError, "no current materializer"):
             run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
 
     def test_axis_scoped_compressor_cannot_target_unselected_complete_sheet_axis(self):
@@ -80,7 +92,7 @@ class GeometryPhase1CliTests(unittest.TestCase):
         arguments = self.parse("--select-element", "MLP_UP.MLP_HIDDEN", "--option", "MLP_UP.MLP_HIDDEN.compressor=dct")
         plan = run_thog2_owt.geometry_plan_from_arguments(arguments)
         self.assertFalse(plan.materializer.implemented)
-        with self.assertRaisesRegex(ValueError, "not currently implemented"):
+        with self.assertRaisesRegex(ValueError, "no current materializer"):
             run_thog2_owt.config_from_arguments(arguments, geometry_plan=plan)
 
     def test_explain_geometry_does_not_touch_dataset_or_model(self):
