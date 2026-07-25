@@ -1,0 +1,38 @@
+name: Consolidate OWT wrapper now
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/consolidate_owt_wrapper_now.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Replace obsolete wrapper references
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/consolidate_owt_wrapper_now.yml'
+          while IFS= read -r -d '' file; do
+            sed -i 's/current_scruffy_train_OWT\.sh/train_OWT.sh/g; s/current_dreedle_train_OWT\.sh/train_OWT.sh/g' "$file"
+          done < <(git grep -lz -e 'current_scruffy_train_OWT.sh' -e 'current_dreedle_train_OWT.sh' -- . ":!${workflow}" || true)
+          chmod +x train_OWT.sh scruffy_simple_runstring.sh dreedle_simple_runstring.sh scruffy_general_runstring.sh
+          rm -f "$workflow"
+      - name: Commit consolidation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'Update references to canonical OWT wrapper'
+          git push origin HEAD:master
