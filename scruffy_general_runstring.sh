@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Model/run:
 #    -b BATCH_SIZE                                  single integer, comma list, or quoted space list
-#    -A GRADIENT_ACCUMULATION_STEPS
+#    -A GRADIENT_ACCUMULATION_STEPS                 single integer, comma list, or quoted space list in this runstring
 #    -c LR_CODES                                    1..1000; 70 means 7.0e-04 and 1000 means 1.0e-02; comma or quoted space list
 #    -f MIN_LR_CODE                                 1..100; 06 means 6.0e-05 and 100 means 1.0e-03
 #    -G NUM_GPUS
@@ -45,14 +45,14 @@ set -euo pipefail
 # Shape/runtime:
 #    -K ATTENTION_BACKEND                           auto | flash2 | sdpa | math
 #    -C BLOCK_SIZE
-#    -S CHECKPOINT_SEGMENT_SIZE
+#    -S CHECKPOINT_SEGMENT_SIZE                     single integer, comma list, or quoted space list in this runstring
 #    --depth-compress-layer-norm-and-bias           DEPTH only; default false
 #    --no-depth-compress-layer-norm-and-bias        DEPTH only; explicit default
 #    -T DTYPE                                       float32 | float16 | bfloat16
 #    -E FAST_DISCARD                                true | false
 #    -D N_EMBD
 #    -H N_HEAD
-#    -L N_LAYER
+#    -L N_LAYER                                     single integer, comma list, or quoted space list in this runstring
 #    -Q O_ATTN_D_MODEL
 #    -O O_ATTN_OUT_PER_CHANNEL
 #    -J O_ATTN_QKV_PER_CHANNEL
@@ -79,42 +79,71 @@ export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
 # ^^^ THOG
 
+# vvv THOG temporary outer-grid axes not yet handled by train_OWT.sh
+optimizers="${THOG2_GENERAL_OPTIMIZERS:-adamw sgd sgd_nesterov adafactor rmsprop}"
+gradient_accumulation_steps_values="${THOG2_GENERAL_GRADIENT_ACCUMULATION_STEPS:-1}"
+checkpoint_segment_size_values="${THOG2_GENERAL_CHECKPOINT_SEGMENT_SIZES:-12}"
+n_layer_values="${THOG2_GENERAL_N_LAYERS:-144}"
+
+normalize_grid_values() {
+  printf '%s\n' "${1//,/ }"
+}
+
+read -r -a optimizer_values <<< "$(normalize_grid_values "$optimizers")"
+read -r -a gradient_accumulation_values <<< "$(normalize_grid_values "$gradient_accumulation_steps_values")"
+read -r -a checkpoint_segment_values <<< "$(normalize_grid_values "$checkpoint_segment_size_values")"
+read -r -a layer_values <<< "$(normalize_grid_values "$n_layer_values")"
+
+for value in "${gradient_accumulation_values[@]}" "${checkpoint_segment_values[@]}" "${layer_values[@]}"; do
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "Grid values for -A, -S, and -L must be positive integers: $value" >&2; exit 2; }
+done
+# ^^^ THOG
+
 export THOG2_WANDB_FINISH_TIMEOUT=180
 export WANDB_CONSOLE=off
-for y in adamw  sgd  sgd_nesterov  adafactor  rmsprop; do
-  ./train_OWT.sh \
-    -g "OPTIMISER_SWEEP_${y}" \
-    -p depth \
-    -B lapped_cosine \
-    -y "$y" \
-    -n 500 \
-    -b 16 \
-    -A 1 \
-    -G "$THOG2_NUM_GPUS" \
-    -l 10 \
-    -u 1 \
-    -e 99999 \
-    -w 30 \
-    -k 0 \
-    -L 144 \
-    -H 12 \
-    -D 768 \
-    -C 256 \
-    -P 32 \
-    -Q 256 \
-    -J 6 \
-    -O 6 \
-    -X 64 \
-    -Y 256 \
-    -S 12 \
-    -E true \
-    -T "$THOG2_DTYPE" \
-    -K "$THOG2_ATTENTION_BACKEND" \
-    -t "$THOG2_OWT_DATA_DIR" \
-    -I wandb \
-    -F none \
-    -W 36 \
-    -i 0.5 \
-    -- \
-    --host-label "$THOG2_HOST_LABEL"
+
+# vvv THOG Cartesian product over optimizer plus the three temporary wrapper-only grid axes
+for y in "${optimizer_values[@]}"; do
+  for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
+    for checkpoint_segment_size in "${checkpoint_segment_values[@]}"; do
+      for n_layer in "${layer_values[@]}"; do
+        ./train_OWT.sh \
+          -g "OPTIMISER_SWEEP_${y}_A${gradient_accumulation_steps}_S${checkpoint_segment_size}_L${n_layer}" \
+          -p depth \
+          -B lapped_cosine \
+          -y "$y" \
+          -n 500 \
+          -b 16 \
+          -A "$gradient_accumulation_steps" \
+          -G "$THOG2_NUM_GPUS" \
+          -l 10 \
+          -u 1 \
+          -e 99999 \
+          -w 30 \
+          -k 0 \
+          -L "$n_layer" \
+          -H 12 \
+          -D 768 \
+          -C 256 \
+          -P 32 \
+          -Q 256 \
+          -J 6 \
+          -O 6 \
+          -X 64 \
+          -Y 256 \
+          -S "$checkpoint_segment_size" \
+          -E true \
+          -T "$THOG2_DTYPE" \
+          -K "$THOG2_ATTENTION_BACKEND" \
+          -t "$THOG2_OWT_DATA_DIR" \
+          -I wandb \
+          -F none \
+          -W 36 \
+          -i 0.5 \
+          -- \
+          --host-label "$THOG2_HOST_LABEL"
+      done
+    done
+  done
 done
+# ^^^ THOG
