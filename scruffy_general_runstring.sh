@@ -71,6 +71,12 @@ set -euo pipefail
 #    -j LOG_ROOT
 #    -R RESULT_ROOT
 
+
+THOG2_GENERAL_GRADIENT_ACCUMULATION_STEPS="8"
+THOG2_GENERAL_CHECKPOINT_SEGMENT_SIZES="4"
+THOG2_GENERAL_N_LAYERS="96,128,256"
+
+
 # vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
 export THOG2_HOST_LABEL="scruffy"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
@@ -80,16 +86,15 @@ export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
 # ^^^ THOG
 
 # vvv THOG temporary outer-grid axes not yet handled by train_OWT.sh
-optimizers="${THOG2_GENERAL_OPTIMIZERS:-adamw sgd sgd_nesterov adafactor rmsprop}"
 gradient_accumulation_steps_values="${THOG2_GENERAL_GRADIENT_ACCUMULATION_STEPS:-1}"
 checkpoint_segment_size_values="${THOG2_GENERAL_CHECKPOINT_SEGMENT_SIZES:-12}"
 n_layer_values="${THOG2_GENERAL_N_LAYERS:-144}"
+
 
 normalize_grid_values() {
   printf '%s\n' "${1//,/ }"
 }
 
-read -r -a optimizer_values <<< "$(normalize_grid_values "$optimizers")"
 read -r -a gradient_accumulation_values <<< "$(normalize_grid_values "$gradient_accumulation_steps_values")"
 read -r -a checkpoint_segment_values <<< "$(normalize_grid_values "$checkpoint_segment_size_values")"
 read -r -a layer_values <<< "$(normalize_grid_values "$n_layer_values")"
@@ -97,53 +102,44 @@ read -r -a layer_values <<< "$(normalize_grid_values "$n_layer_values")"
 for value in "${gradient_accumulation_values[@]}" "${checkpoint_segment_values[@]}" "${layer_values[@]}"; do
   [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "Grid values for -A, -S, and -L must be positive integers: $value" >&2; exit 2; }
 done
-# ^^^ THOG
 
-export THOG2_WANDB_FINISH_TIMEOUT=180
+export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 
-# vvv THOG Cartesian product over optimizer plus the three temporary wrapper-only grid axes
-for y in "${optimizer_values[@]}"; do
-  for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
-    for checkpoint_segment_size in "${checkpoint_segment_values[@]}"; do
-      for n_layer in "${layer_values[@]}"; do
-        ./train_OWT.sh \
-          -g "OPTIMISER_SWEEP_${y}_A${gradient_accumulation_steps}_S${checkpoint_segment_size}_L${n_layer}" \
-          -p depth \
-          -B lapped_cosine \
-          -y "$y" \
-          -n 500 \
-          -b 16 \
-          -A "$gradient_accumulation_steps" \
-          -G "$THOG2_NUM_GPUS" \
-          -l 10 \
-          -u 1 \
-          -e 99999 \
-          -w 30 \
-          -k 0 \
-          -L "$n_layer" \
-          -H 12 \
-          -D 768 \
-          -C 256 \
-          -P 32 \
-          -Q 256 \
-          -J 6 \
-          -O 6 \
-          -X 64 \
-          -Y 256 \
-          -S "$checkpoint_segment_size" \
-          -E true \
-          -T "$THOG2_DTYPE" \
-          -K "$THOG2_ATTENTION_BACKEND" \
-          -t "$THOG2_OWT_DATA_DIR" \
-          -I wandb \
-          -F none \
-          -W 36 \
-          -i 0.5 \
-          -- \
-          --host-label "$THOG2_HOST_LABEL"
-      done
+for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
+  for checkpoint_segment_size in "${checkpoint_segment_values[@]}"; do
+    for n_layer in "${layer_values[@]}"; do
+      ./train_OWT.sh \
+        -g "REVAMP__NLAYERS_SWEEP_L${n_layer}" \
+        -n 1000 \
+        -b 16 \
+        -A "$gradient_accumulation_steps" \
+        -S "$checkpoint_segment_size" \
+        -u 1 \
+        -e 99999 \
+        -l 10 \
+        -w 100 \
+        -k 500 \
+        -L "$n_layer" \
+        -H 16 \
+        -D 1024 \
+        -C 768 \
+        -Y 64 \
+        -E true \
+        -T bfloat16 \
+        -K flash2 \
+        -I wandb \
+        -F none \
+        -y adamw \
+        --select-depth \
+        --option DEPTH.compressor=chebyshev \
+        --select-element MLP_UP.MLP_HIDDEN \
+        --option DEPTH.order=16 \
+        --option MLP_UP.compressor=jpeg_like \
+        --option MLP_UP.MLP_HIDDEN.order=64 \
+        --option MLP_UP.MLP_HIDDEN.group_size=256 \
+        -- \
+        --host-label "$THOG2_HOST_LABEL"
     done
   done
 done
-# ^^^ THOG
