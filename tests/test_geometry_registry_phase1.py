@@ -57,26 +57,29 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual({entry.implied_type for entry in GEOMETRY_REGISTRY.values()}, {ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET})
         self.assertTrue(all(not hasattr(entry, "implemented_with_depth") for entry in GEOMETRY_REGISTRY.values()))
 
-    def test_compressor_registry_has_no_true_sheet_compressor(self):
-        self.assertEqual(COMPRESSOR_REGISTRY["jpeg_like"].element_types, (ELEMENT_TYPE_CURVE,))
-        self.assertTrue(COMPRESSOR_REGISTRY["jpeg_like"].legacy_only)
-        self.assertTrue(COMPRESSOR_REGISTRY["jpeg_like"].supports_group_size)
-        self.assertEqual(COMPRESSOR_REGISTRY["jpeg_like"].supported_selectors, ("MLP_UP.MLP_HIDDEN",))
-        self.assertFalse(any(ELEMENT_TYPE_SHEET in capability.element_types or ELEMENT_TYPE_SHEET_SET in capability.element_types for capability in COMPRESSOR_REGISTRY.values()))
+    def test_compressor_registry_is_first_class_and_sheet_ready(self):
+        expected_types = (ELEMENT_TYPE_CURVE, ELEMENT_TYPE_SHEET, ELEMENT_TYPE_SHEET_SET)
+        for capability in COMPRESSOR_REGISTRY.values():
+            self.assertEqual(capability.element_types, expected_types)
+            self.assertTrue(capability.implemented)
+        jpeg_like = COMPRESSOR_REGISTRY["jpeg_like"]
+        self.assertFalse(jpeg_like.legacy_only)
+        self.assertTrue(jpeg_like.supports_group_size)
+        self.assertEqual(jpeg_like.supported_selectors, ())
 
     def test_bare_mlp_is_a_sheet(self):
         plan = self.resolve(elements=("MLP_UP",), options=("MLP_UP.compressor=dct",))
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_SHEET)
         self.assertEqual(plan.selections[0].compressed_axes, ("MLP_HIDDEN", "MLP_D_MODEL"))
         self.assertFalse(plan.materializer.implemented)
-        self.assertIn("cannot be used with a SHEET geometry", plan.materializer.message)
+        self.assertIn("no current materializer", plan.materializer.message)
 
     def test_bare_attention_is_a_compound_sheet_set(self):
         plan = self.resolve(elements=("ATTENTION_QKV",), options=("ATTENTION_QKV.compressor=dct",))
         selection = plan.selections[0]
         self.assertEqual(selection.implied_type, ELEMENT_TYPE_SHEET_SET)
         self.assertEqual(selection.independent_indices, ("QKV_ROLE", "ATTENTION_HEAD"))
-        self.assertIn("cannot be used with a SHEET_SET geometry", plan.materializer.message)
+        self.assertIn("no current materializer", plan.materializer.message)
 
     def test_attention_axis_is_a_curve_not_curve_set(self):
         plan = self.resolve(elements=("ATTENTION_QKV.ATTENTION_D_MODEL",), options=("ATTENTION_QKV.compressor=dct",))
@@ -135,12 +138,25 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
         self.assertEqual(plan.selections[0].implied_type, ELEMENT_TYPE_CURVE)
         self.assertEqual(plan.selections[0].compressed_axes, ("MLP_HIDDEN",))
         self.assertFalse(plan.materializer.implemented)
-        self.assertIn("registered geometry is not currently implemented", plan.materializer.message)
+        self.assertIn("no current materializer", plan.materializer.message)
 
-    def test_jpeg_like_is_rejected_for_other_curve_selectors(self):
+    def test_jpeg_like_is_accepted_for_other_curve_selectors_but_not_materialized(self):
         plan = self.resolve(elements=("MLP_DOWN.MLP_HIDDEN",), options=("MLP_DOWN.compressor=jpeg_like",))
+        self.assertEqual(plan.selections[0].compressor, "jpeg_like")
         self.assertFalse(plan.materializer.implemented)
-        self.assertIn("not valid for MLP_DOWN.MLP_HIDDEN", plan.materializer.message)
+        self.assertIn("no current materializer", plan.materializer.message)
+
+    def test_jpeg_like_accepts_group_size_on_non_hidden_curve_axes(self):
+        plan = self.resolve(
+            elements=("MLP_UP.MLP_D_MODEL",),
+            options=(
+                "MLP_UP.MLP_D_MODEL.compressor=jpeg_like",
+                "MLP_UP.MLP_D_MODEL.order=8",
+                "MLP_UP.MLP_D_MODEL.group_size=16",
+            ),
+        )
+        self.assertEqual(plan.selections[0].axis_options["MLP_D_MODEL"]["group_size"], 16)
+        self.assertFalse(plan.materializer.implemented)
 
     def test_group_size_is_rejected_for_non_grouped_curve_compressors(self):
         with self.assertRaisesRegex(ValueError, "does not accept group_size"):
@@ -148,7 +164,7 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
 
     def test_jpeg_like_order_must_not_exceed_group_size(self):
         with self.assertRaisesRegex(ValueError, "order must not exceed group_size"):
-            self.resolve(depth=True, elements=("MLP_UP.MLP_HIDDEN",), options=("MLP_UP.compressor=jpeg_like", "MLP_UP.MLP_HIDDEN.order=129", "MLP_UP.MLP_HIDDEN.group_size=128"))
+            self.resolve(elements=("MLP_UP.MLP_D_MODEL",), options=("MLP_UP.MLP_D_MODEL.compressor=jpeg_like", "MLP_UP.MLP_D_MODEL.order=17", "MLP_UP.MLP_D_MODEL.group_size=16"))
 
     def test_depth_only_maps_to_existing_depth_path(self):
         plan = self.resolve(depth=True, options=("DEPTH.compressor=haar", "DEPTH.order=16"))
@@ -202,12 +218,13 @@ class GeometryRegistryPhase1Tests(unittest.TestCase):
 
     def test_registry_console_report_is_complete_and_explicit(self):
         report = format_geometry_registry()
-        self.assertIn("geometry registry (geometry_registry_v4)", report)
+        self.assertIn("geometry registry (geometry_registry_v5)", report)
         self.assertIn("MLP_UP.MLP_HIDDEN", report)
         self.assertIn("axes / uncompressed axes", report)
         self.assertIn("compressor registry", report)
         self.assertIn("jpeg_like", report)
-        self.assertIn("No SHEET or SHEET_SET compressor is currently implemented.", report)
+        self.assertIn("CURVE,SHEET,SHEET_SET", report)
+        self.assertIn("Compressor capability is first-class", report)
 
 
 if __name__ == "__main__":
