@@ -111,7 +111,7 @@ for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
     for n_layer in "${layer_values[@]}"; do
       ./train_OWT.sh \
         -g "REVAMP__NLAYERS_SWEEP_L${n_layer}" \
-        -n 1000 \
+        -n 10000 \
         -b 16 \
         -A "$gradient_accumulation_steps" \
         -S "$checkpoint_segment_size" \
@@ -119,7 +119,9 @@ for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
         -e 99999 \
         -l 10 \
         -w 100 \
-        -k 500 \
+        -k 250 \
+        -c 90 \
+        -f 9 \
         -L "$n_layer" \
         -H 16 \
         -D 1024 \

@@ -84,7 +84,7 @@ python -m run_thog2_owt --print-geometry-registry
 export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 ./train_OWT.sh \
-  -g GEOMETRY_REVAMP \
+  -g REVAMPv1 \
   -n 10000 \
   -b 16 \
   -A 8 \
@@ -97,7 +97,7 @@ export WANDB_CONSOLE=off
   -k 1000 \
   -c 90 \
   -f 9 \
-  -L 64 \
+  -L 48 \
   -H 16 \
   -D 1024 \
   -C 768 \
@@ -119,6 +119,5 @@ export WANDB_CONSOLE=off
   --option MLP_UP.compressor=jpeg_like \
   --option MLP_UP.MLP_HIDDEN.order=64 \
   --option MLP_UP.MLP_HIDDEN.group_size=256 \
-  --explain-geometry \
   -- \
   --host-label "$THOG2_HOST_LABEL"
