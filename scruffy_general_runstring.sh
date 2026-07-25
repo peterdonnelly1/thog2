@@ -71,6 +71,14 @@ set -euo pipefail
 #    -j LOG_ROOT
 #    -R RESULT_ROOT
 
+# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+export THOG2_HOST_LABEL="scruffy"
+export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
+export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
+export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
+export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+# ^^^ THOG
+
 export THOG2_WANDB_FINISH_TIMEOUT=180
 export WANDB_CONSOLE=off
 for y in adamw  sgd  sgd_nesterov  adafactor  rmsprop; do
@@ -82,6 +90,7 @@ for y in adamw  sgd  sgd_nesterov  adafactor  rmsprop; do
     -n 500 \
     -b 16 \
     -A 1 \
+    -G "$THOG2_NUM_GPUS" \
     -l 10 \
     -u 1 \
     -e 99999 \
@@ -99,8 +108,13 @@ for y in adamw  sgd  sgd_nesterov  adafactor  rmsprop; do
     -Y 256 \
     -S 12 \
     -E true \
+    -T "$THOG2_DTYPE" \
+    -K "$THOG2_ATTENTION_BACKEND" \
+    -t "$THOG2_OWT_DATA_DIR" \
     -I wandb \
     -F none \
     -W 36 \
-    -i 0.5
+    -i 0.5 \
+    -- \
+    --host-label "$THOG2_HOST_LABEL"
 done
