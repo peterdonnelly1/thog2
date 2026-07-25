@@ -10,8 +10,8 @@ import pytest
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 WRAPPERS = (
-    REPOSITORY_ROOT / "current_scruffy_train_OWT.sh",
-    REPOSITORY_ROOT / "current_dreedle_train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
 )
 
 
@@ -96,7 +96,7 @@ def test_basis_family_grid_runs_cartesian_product_with_depth_order(fake_python: 
 
 
 def test_basis_family_grid_canonicalizes_aliases(fake_python: Path) -> None:
-    wrapper = REPOSITORY_ROOT / "current_scruffy_train_OWT.sh"
+    wrapper = REPOSITORY_ROOT / "train_OWT.sh"
     completed = run_wrapper(wrapper, fake_python, "-B", "dct_ii,balanced_haar", "-P", "1")
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout.count("OWT train") == 2
@@ -107,14 +107,14 @@ def test_basis_family_grid_canonicalizes_aliases(fake_python: Path) -> None:
 
 
 def test_multiple_basis_families_require_auto_version(fake_python: Path) -> None:
-    wrapper = REPOSITORY_ROOT / "current_scruffy_train_OWT.sh"
+    wrapper = REPOSITORY_ROOT / "train_OWT.sh"
     completed = run_wrapper(wrapper, fake_python, "-v", "dct_ii_orthonormal_v1")
     assert completed.returncode == 2
     assert "must be auto" in completed.stderr
 
 
 def test_dense_preset_is_not_multiplied_by_basis_family_grid(fake_python: Path) -> None:
-    wrapper = REPOSITORY_ROOT / "current_scruffy_train_OWT.sh"
+    wrapper = REPOSITORY_ROOT / "train_OWT.sh"
     completed = run_wrapper(wrapper, fake_python, "-p", "dense", "-P", "1")
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout.count("OWT train") == 1

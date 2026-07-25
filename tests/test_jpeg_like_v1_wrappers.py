@@ -9,8 +9,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WRAPPERS = (
-    ROOT / "current_scruffy_train_OWT.sh",
-    ROOT / "current_dreedle_train_OWT.sh",
+    ROOT / "train_OWT.sh",
+    ROOT / "train_OWT.sh",
 )
 
 
@@ -34,7 +34,7 @@ class JpegLikeV1WrapperTests(unittest.TestCase):
         result = subprocess.run(
             [
                 "bash",
-                "current_scruffy_train_OWT.sh",
+                "train_OWT.sh",
                 "-p", "jpeg_like_v1",
                 "-g", "JPEG_SMOKE",
                 "-n", "2",
@@ -78,7 +78,7 @@ class JpegLikeV1WrapperTests(unittest.TestCase):
         environment["THOG2_PYTHON"] = sys.executable
         result = subprocess.run(
             [
-                "bash", "current_scruffy_train_OWT.sh",
+                "bash", "train_OWT.sh",
                 "-p", "jpeg_like_v1",
                 "-n", "2", "-w", "0",
                 "-L", "4", "-H", "2", "-D", "8",

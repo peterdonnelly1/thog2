@@ -127,7 +127,7 @@ class BasisFamilyPluginRegistryTests(unittest.TestCase):
 
     def test_07_primary_wrappers_have_no_family_specific_allow_list_or_tag_branch(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        for name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        for name in ("train_OWT.sh", "train_OWT.sh"):
             with self.subTest(name=name):
                 text = (root / name).read_text(encoding="utf-8")
                 self.assertNotIn("chebyshev|dct", text)

@@ -21,8 +21,8 @@ PICTON_ORDER_FLAGS = {
     "-Y": "--o-mlp-hidden",
 }
 PICTON_CANONICAL_WRAPPERS = (
-    REPOSITORY_ROOT / "current_scruffy_train_OWT.sh",
-    REPOSITORY_ROOT / "current_dreedle_train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
 )
 PICTON_ALL_WRAPPERS = (
     *PICTON_CANONICAL_WRAPPERS,

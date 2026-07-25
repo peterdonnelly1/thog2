@@ -8,7 +8,7 @@ from pathlib import Path
 from sheet.run_config import OwtRunConfig
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-WRAPPERS = ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh")
+WRAPPERS = ("train_OWT.sh", "train_OWT.sh")
 
 
 def test_run_config_artifact_contains_two_digit_learning_rate_code() -> None:
@@ -85,7 +85,7 @@ if '--print-resolved-json' in args or '--dry-run' in args:
     environment["THOG2_PYTHON"] = str(fake_python)
     completed = subprocess.run(
         [
-            "bash", "current_scruffy_train_OWT.sh",
+            "bash", "train_OWT.sh",
             "-x", "true", "-p", "depth", "-P", "2",
             "-b", "2,4", "-c", "60,70", "-f", "06",
             "-n", "2", "-w", "1", "-L", "4", "-H", "2", "-D", "16", "-C", "8",

@@ -66,7 +66,7 @@ def test_stage8_sheet_geometry_keeps_legacy_mlp_hidden_order_when_no_semantic_or
 
 
 def test_stage8_training_wrappers_use_final_preset_as_single_architecture_selector() -> None:
-    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    for wrapper in ("train_OWT.sh", "train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
         assert "-p PRESET=${GEOMETRY_PRESET}" in text
         assert "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block" in text
@@ -87,14 +87,14 @@ def test_stage8_training_wrappers_share_the_six_order_letters() -> None:
         "-X O_MLP_D_MODEL=${O_MLP_D_MODEL}",
         "-Y O_MLP_HIDDEN=${O_MLP_HIDDEN}",
     )
-    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    for wrapper in ("train_OWT.sh", "train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
         for required_line in required_lines:
             assert required_line in text
 
 
 def test_stage8_training_wrappers_loop_dense_once_and_compact_presets_across_depth_orders() -> None:
-    for wrapper in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    for wrapper in ("train_OWT.sh", "train_OWT.sh"):
         text = Path(wrapper).read_text(encoding="utf-8")
         assert "PRESET_VALUES=()" in text
         assert "O_DEPTH_VALUES=()" in text

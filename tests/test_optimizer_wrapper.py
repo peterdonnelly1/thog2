@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class OptimizerWrapperTests(unittest.TestCase):
     def test_full_wrappers_retain_body_and_native_optimizer_help(self) -> None:
-        for filename in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        for filename in ("train_OWT.sh", "train_OWT.sh"):
             path = ROOT / filename
             source = path.read_text(encoding="utf-8")
             self.assertTrue(source.startswith("#!/bin/bash\nset -euo pipefail\n"))
@@ -26,13 +26,13 @@ class OptimizerWrapperTests(unittest.TestCase):
 
     def test_shell_syntax(self) -> None:
         subprocess.run(
-            ["bash", "-n", "current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"],
+            ["bash", "-n", "train_OWT.sh", "train_OWT.sh"],
             cwd=ROOT,
             check=True,
         )
 
     def test_help_contains_old_and_new_controls(self) -> None:
-        for filename in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        for filename in ("train_OWT.sh", "train_OWT.sh"):
             result = subprocess.run(
                 ["bash", filename, "-h"],
                 cwd=ROOT,
@@ -52,7 +52,7 @@ class OptimizerWrapperTests(unittest.TestCase):
         result = subprocess.run(
             [
                 "bash",
-                "current_scruffy_train_OWT.sh",
+                "train_OWT.sh",
                 *arguments,
                 "-p", "dense",
                 "-n", "2",

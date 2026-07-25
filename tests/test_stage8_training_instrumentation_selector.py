@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 TRAINING_WRAPPERS = (
-    "current_scruffy_train_OWT.sh",
-    "current_dreedle_train_OWT.sh",
+    "train_OWT.sh",
+    "train_OWT.sh",
 )
 
 

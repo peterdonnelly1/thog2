@@ -117,7 +117,7 @@ def test_direct_factorised_mlp_falls_back_to_materialisation_when_geometry_has_n
 # def test_training_wrappers_expose_default_off_direct_thog_mlp_application_without_getopts_letter() -> None:
 #     ...
 def test_training_wrappers_expose_default_on_direct_factorised_mlp_without_getopts_letter() -> None:
-    for wrapper_name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    for wrapper_name in ("train_OWT.sh", "train_OWT.sh"):
         source = (REPOSITORY_ROOT / wrapper_name).read_text(encoding="utf-8")
         assert 'DIRECT_FACTORISED_MLP="${THOG2_DIRECT_FACTORISED_MLP:-true}"' in source
         assert 'export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"' in source

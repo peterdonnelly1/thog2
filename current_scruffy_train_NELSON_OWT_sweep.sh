@@ -43,7 +43,7 @@ RUN_DENSE="${NELSON_RUN_DENSE:-true}"
 
 usage() {
   cat <<EOF_USAGE
-Usage: $0 [options] [-- extra current_scruffy_train_OWT.sh args]
+Usage: $0 [options] [-- extra train_OWT.sh args]
 
   -n STEPS=${STEPS}
   -C BLOCK_SIZE=${BLOCK_SIZE}
@@ -133,7 +133,7 @@ run_case() {
   echo "===== START ${label} tokens/update=${tokens_per_update} total_tokens=${total_tokens} ====="
   start_time="$(date +%s)"
   set +e
-  THOG2_EXPERIMENT_PREFIX="$EXPERIMENT_PREFIX" bash current_scruffy_train_OWT.sh "$@" "${EXTRA_ARGS[@]}" 2>&1 | tee "$SWEEP_LOG_DIR/${label}.combined.log"
+  THOG2_EXPERIMENT_PREFIX="$EXPERIMENT_PREFIX" bash train_OWT.sh "$@" "${EXTRA_ARGS[@]}" 2>&1 | tee "$SWEEP_LOG_DIR/${label}.combined.log"
   status=${PIPESTATUS[0]}
   set -e
   end_time="$(date +%s)"

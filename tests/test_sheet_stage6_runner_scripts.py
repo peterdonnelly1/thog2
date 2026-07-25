@@ -129,8 +129,8 @@ class RunnerScriptTests(unittest.TestCase):
         for script in (
             "current_scruffy_train_DENSE_OWT.sh",
             "current_scruffy_train_SHEET_OWT.sh",
-            "current_scruffy_train_OWT.sh",
-            "current_dreedle_train_OWT.sh",
+            "train_OWT.sh",
+            "train_OWT.sh",
         ):
             completed = subprocess.run(
                 ["bash", "-n", str(REPOSITORY_ROOT / script)],

@@ -13,7 +13,7 @@ EVAL_INTERVAL="${THOG2_GEOM_GRID_EVAL_INTERVAL:-1000000}"
 DRY_RUN="${THOG2_GEOM_GRID_DRY_RUN:-false}"
 # ^^^ THOG
 
-exec ./current_scruffy_train_OWT.sh \
+exec ./train_OWT.sh \
   -g "$RUN_NAME" \
   -p "$GEOMETRIES" \
   -n "$MAX_ITERS" \

@@ -71,8 +71,8 @@ Run:
 
 ```bash
 python -m compileall -q sheet tests run_thog2_owt.py
-bash -n current_scruffy_train_OWT.sh
-bash -n current_dreedle_train_OWT.sh
+bash -n train_OWT.sh
+bash -n train_OWT.sh
 python -m unittest tests.test_geometry_registry_phase1 tests.test_geometry_phase1_cli
 python -m unittest discover tests
 ```

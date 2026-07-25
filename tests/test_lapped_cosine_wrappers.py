@@ -61,8 +61,8 @@ class LappedCosineWrapperTests(unittest.TestCase):
 
     def test_01_primary_wrappers_propagate_controls_and_identity(self) -> None:
         for wrapper_name in (
-            "current_scruffy_train_OWT.sh",
-            "current_dreedle_train_OWT.sh",
+            "train_OWT.sh",
+            "train_OWT.sh",
         ):
             with self.subTest(wrapper_name=wrapper_name):
                 result = self.dry_run(wrapper_name)
@@ -79,7 +79,7 @@ class LappedCosineWrapperTests(unittest.TestCase):
         result = subprocess.run(
             [
                 "bash",
-                str(self.root / "current_scruffy_train_OWT.sh"),
+                str(self.root / "train_OWT.sh"),
                 "-B", "lapped_cosine",
                 "-i", "0.25",
                 "-x", "true",

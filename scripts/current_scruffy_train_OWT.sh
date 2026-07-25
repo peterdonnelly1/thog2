@@ -1,1 +1,1 @@
-# moved to ../current_scruffy_train_OWT.sh
+# moved to ../train_OWT.sh

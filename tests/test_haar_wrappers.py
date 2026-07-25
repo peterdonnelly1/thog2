@@ -58,7 +58,7 @@ class BalancedHaarWrapperTests(unittest.TestCase):
         )
 
     def test_01_scruffy_and_dreedle_dry_runs_accept_haar_and_use_haar_artifact_tag(self) -> None:
-        for wrapper_name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+        for wrapper_name in ("train_OWT.sh", "train_OWT.sh"):
             with self.subTest(wrapper_name=wrapper_name):
                 result = self.dry_run(wrapper_name)
                 combined = result.stdout + result.stderr
@@ -68,7 +68,7 @@ class BalancedHaarWrapperTests(unittest.TestCase):
                 self.assertIn("--basis-family haar", combined)
 
     def test_02_unregistered_basis_fails_before_training(self) -> None:
-        result = self.dry_run("current_scruffy_train_OWT.sh", basis_family="not_a_basis")
+        result = self.dry_run("train_OWT.sh", basis_family="not_a_basis")
         combined = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0, combined)
         self.assertIn("unknown basis_family", combined)

@@ -93,7 +93,7 @@ def test_loop_option_really_executes_one_depth_contraction_per_head_while_vector
 
 
 def test_training_wrappers_expose_default_on_vectorise_per_head_materialisation_without_getopts_letter() -> None:
-    for wrapper_name in ("current_scruffy_train_OWT.sh", "current_dreedle_train_OWT.sh"):
+    for wrapper_name in ("train_OWT.sh", "train_OWT.sh"):
         source = (REPOSITORY_ROOT / wrapper_name).read_text(encoding="utf-8")
         assert 'VECTORISE_PER_HEAD_MATERIALISATION="${THOG2_VECTORISE_PER_HEAD_MATERIALISATION:-true}"' in source
         assert 'export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"' in source

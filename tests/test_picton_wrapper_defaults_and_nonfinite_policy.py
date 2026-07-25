@@ -15,8 +15,8 @@ from sheet.training_config import TrainingConfig
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 TRAINING_WRAPPERS = (
-    REPOSITORY_ROOT / "current_scruffy_train_OWT.sh",
-    REPOSITORY_ROOT / "current_dreedle_train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
+    REPOSITORY_ROOT / "train_OWT.sh",
 )
 
 
