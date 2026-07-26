@@ -83,6 +83,8 @@ python -m run_thog2_owt --print-geometry-registry
 
 export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
+
+
 ./train_OWT.sh \
   -g REVAMPv1 \
   -n 10000 \
@@ -95,6 +97,7 @@ export WANDB_CONSOLE=off
   -l 10 \
   -w 100 \
   -k 1000 \
+  -y adamw \
   -c 90 \
   -f 9 \
   -L 48 \
@@ -104,20 +107,26 @@ export WANDB_CONSOLE=off
   -P 16 \
   -Y 64 \
   -E true \
-  -T "$THOG2_DTYPE" \
-  -K "$THOG2_ATTENTION_BACKEND" \
-  -t "$THOG2_OWT_DATA_DIR" \
   -r depth_scaled \
   -z dof_implied_depth \
   -I wandb \
   -F none \
-  -y adamw \
+  -T "$THOG2_DTYPE" \
+  -K "$THOG2_ATTENTION_BACKEND" \
+  -t "$THOG2_OWT_DATA_DIR" \
   --select-depth \
   --option DEPTH.compressor=chebyshev \
-  --select-element MLP_UP.MLP_HIDDEN \
-  --option DEPTH.order=16 \
-  --option MLP_UP.compressor=jpeg_like \
-  --option MLP_UP.MLP_HIDDEN.order=64 \
-  --option MLP_UP.MLP_HIDDEN.group_size=256 \
   -- \
   --host-label "$THOG2_HOST_LABEL"
+
+
+
+#  --select-depth \
+#  --option DEPTH.compressor=chebyshev \
+#  --select-element MLP_UP.MLP_HIDDEN \
+#  --option DEPTH.order=16 \
+#  --option MLP_UP.compressor=jpeg_like \
+#  --option MLP_UP.MLP_HIDDEN.order=64 \
+#  --option MLP_UP.MLP_HIDDEN.group_size=256 \
+#  -- \
+#  --host-label "$THOG2_HOST_LABEL"
