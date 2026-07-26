@@ -68,9 +68,9 @@ class LappedCosineWrapperTests(unittest.TestCase):
                 result = self.dry_run(wrapper_name)
                 combined = result.stdout + result.stderr
                 self.assertEqual(result.returncode, 0, combined)
-                self.assertIn("LAPPED_COSINE_DEPTH", combined)
-                self.assertIn("LCW_8", combined)
-                self.assertIn("LCO_50", combined)
+                self.assertIn("G0_lapped_cosine", combined)                                                                                              # <<< THOG descriptor v2 replaces legacy LAPPED_COSINE_DEPTH tag
+                self.assertIn("W_8", combined)
+                self.assertIn("i_50", combined)
                 self.assertIn("--basis-family lapped_cosine", combined)
                 self.assertIn("--lapped-cosine-window-length 8", combined)
                 self.assertIn("--lapped-cosine-overlap-fraction 0.5", combined)
