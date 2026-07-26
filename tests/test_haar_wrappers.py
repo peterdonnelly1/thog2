@@ -63,7 +63,7 @@ class BalancedHaarWrapperTests(unittest.TestCase):
                 result = self.dry_run(wrapper_name)
                 combined = result.stdout + result.stderr
                 self.assertEqual(result.returncode, 0, combined)
-                self.assertIn("HAAR_DEPTH", combined)
+                self.assertIn("G0_haar", combined)                                                                                                      # <<< THOG descriptor v2 replaces legacy HAAR_DEPTH tag
                 self.assertIn("spectral / depth / haar", combined)
                 self.assertIn("--basis-family haar", combined)
 
