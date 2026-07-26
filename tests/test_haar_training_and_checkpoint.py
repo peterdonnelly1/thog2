@@ -126,7 +126,7 @@ class BalancedHaarTrainingAndCheckpointTests(unittest.TestCase):
             basis_version="auto",
         )
         self.assertEqual(config.basis_version, HAAR_BASIS_VERSION)
-        self.assertEqual(config.compact_artifact_fragment(), "HAAR_DEPTH")
+        self.assertEqual(config.compact_artifact_fragment(), "G0_haar")                                                                                  # <<< THOG descriptor v2 uses the depth geometry slot label
 
 
 if __name__ == "__main__":
