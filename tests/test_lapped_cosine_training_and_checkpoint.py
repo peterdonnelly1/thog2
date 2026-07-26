@@ -113,9 +113,9 @@ class LappedCosineTrainingAndCheckpointTests(unittest.TestCase):
             wandb_enabled=False,
             wandb_mode="disabled",
         )
-        self.assertIn("LAPPED_COSINE_DEPTH", run.artifact_name)
-        self.assertIn("LCW_8", run.artifact_name)
-        self.assertIn("LCO_50", run.artifact_name)
+        self.assertIn("G0_lapped_cosine", run.artifact_name)                                                                                             # <<< THOG descriptor v2 depth slot for lapped cosine
+        self.assertIn("W_8", run.artifact_name)                                                                                                          # <<< THOG descriptor v2 lapped window getopts field
+        self.assertIn("i_50", run.artifact_name)                                                                                                         # <<< THOG descriptor v2 lapped overlap getopts field
         training = run.to_training_config(
             vocab_size=64,
             world_size=1,
