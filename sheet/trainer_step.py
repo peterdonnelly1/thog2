@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
+from .layer_dropout import LayerDropoutConfig                                                                                                               # <<< THOG deterministic stratified layer selection
+
 
 class TrainerStepMixin:
     @torch.no_grad()
@@ -38,6 +40,35 @@ class TrainerStepMixin:
         self._record("evaluation_completed", losses=results)
         self.model.train(was_training)
         return results
+
+    # vvv THOG one selection per resample bucket; all-active runs return before sampler construction
+    def _prepare_layer_dropout_for_update(self) -> None:
+        if not self.config.layer_dropout_enabled:
+            return
+        bucket = self.state.completed_updates // self.config.layer_dropout_resample_steps
+        if getattr(self, "_layer_dropout_resample_bucket", None) == bucket:
+            return
+        plan = LayerDropoutConfig(
+            n_layer=self.config.n_layer,
+            stratum_size=int(self.config.layer_dropout_stratum_size),
+            active_per_stratum=int(self.config.layer_dropout_active_per_stratum),
+            resample_steps=self.config.layer_dropout_resample_steps,
+            seed=self.config.model_seed,
+        )
+        active_layer_indices = plan.active_layer_indices(self.state.completed_updates)
+        if active_layer_indices is None:
+            raise RuntimeError("enabled layer dropout unexpectedly resolved to the all-active path")
+        self.raw_model.set_active_layer_indices(active_layer_indices)
+        self._layer_dropout_resample_bucket = bucket
+        self._record(
+            "layer_dropout_resampled",
+            resample_bucket=bucket,
+            n_active_layers=len(active_layer_indices),
+            stratum_size=plan.stratum_size,
+            active_per_stratum=plan.active_per_stratum,
+            active_layer_indices=active_layer_indices,
+        )
+    # ^^^ THOG
 
     # vvv THOG bounded non-finite update recovery with correct pre/post-unscale cleanup
     @staticmethod
@@ -211,6 +242,7 @@ class TrainerStepMixin:
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
         self.model.train()
+        self._prepare_layer_dropout_for_update()                                                                                                            # <<< THOG one active nominal set for the complete optimizer update
         learning_rate = self._set_learning_rate()
         self.optimizer.zero_grad(set_to_none=True)
         total_loss = 0.0
