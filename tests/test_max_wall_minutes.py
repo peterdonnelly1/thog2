@@ -25,7 +25,7 @@ class MaxWallMinutesTests(unittest.TestCase):
         self.assertIsNone(_max_wall_seconds(0))
         self.assertEqual(_max_wall_seconds(6), 360.0)
 
-    def test_run_config_surfaces_wall_budget_in_resolved_json_and_artifact_name(self):
+    def test_run_config_surfaces_wall_budget_in_resolved_json_and_not_artifact_name(self):
         command = [
             sys.executable,
             "-m",
@@ -85,7 +85,7 @@ class MaxWallMinutesTests(unittest.TestCase):
         resolved = json.loads(completed.stdout)
         self.assertEqual(resolved["canonical_config"]["max_wall_minutes"], 7)
         self.assertEqual(resolved["canonical_config"]["tokens_per_iter"], 16)
-        self.assertIn("_M_7_", resolved["artifact_name"])
+        self.assertNotIn("_M_7_", resolved["artifact_name"])                                                                                          # <<< THOG descriptor v2 drops wall-stop from artifact identity
 
     def test_geometry_wall_time_grid_wrapper_has_valid_shell_syntax_and_passes_budget(self):
         completed = subprocess.run(
