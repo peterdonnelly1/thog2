@@ -80,9 +80,9 @@ class JpegLikeV1IntegrationTests(unittest.TestCase):
             device="cpu",
             dtype="float32",
         )
-        self.assertIn("CHEBY_JPEG_LIKE_V1_DCT", config.artifact_name)
+        self.assertIn("G0_chebyshev_G1_jpeg_like_MLP_UP_MLP_HIDDEN", config.artifact_name)                                                              # <<< THOG descriptor v2 geometry slots replace legacy CHEBY_JPEG_LIKE_V1_DCT
         self.assertIn("Y_2", config.artifact_name)
-        self.assertIn("MHG_4", config.artifact_name)
+        self.assertIn("s_4", config.artifact_name)                                                                                                      # <<< THOG descriptor v2 uses shared group-size field rather than MHG
         identity = config.compact_identity()
         self.assertEqual(identity["basis_family"], "chebyshev")
         self.assertEqual(identity["mlp_hidden_compressor"], "dct")
