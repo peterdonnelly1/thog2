@@ -13,7 +13,7 @@ ARCHITECTURE_PREFIXES = {
 }
 DEFAULT_COMPONENT_LIMIT = 240
 FILESYSTEM_COMPONENT_LIMIT = 255
-_TRUNCATION_MARKER = "__TRUNC_"
+_HASH_TRUNCATION_PREFIX = "__h_"                                                                                                                           # <<< THOG descriptor v2 uses honest tail truncation with a stable hash suffix
 _RUN_NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 _COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9_-]+")
 _DATASET_PATTERN = re.compile(r"[^a-z0-9]+")
@@ -60,19 +60,17 @@ def _stable_digest(value: str, length: int = 12) -> str:
 
 
 def truncate_component(value: str, *, max_length: int = DEFAULT_COMPONENT_LIMIT) -> str:
-    """Bound one filesystem component while preserving identity with a digest."""
+    """Bound one filesystem component by right-truncating and appending a stable digest."""
 
     if max_length < 48:
         raise ValueError("max_length must be at least 48")
     if len(value) <= max_length:
         return value
-    marker = f"{_TRUNCATION_MARKER}{_stable_digest(value)}__"
-    remaining = max_length - len(marker)
-    tail_length = min(56, max(16, remaining // 3))
-    head_length = remaining - tail_length
+    suffix = f"{_HASH_TRUNCATION_PREFIX}{_stable_digest(value)}"                                                                                           # <<< THOG descriptor v2 truncates the tail rather than hiding a middle splice
+    head_length = max_length - len(suffix)
     if head_length < 16:
         raise ValueError("max_length is too small for stable truncation")
-    return f"{value[:head_length]}{marker}{value[-tail_length:]}"
+    return f"{value[:head_length]}{suffix}"
 
 
 def bounded_filename(
