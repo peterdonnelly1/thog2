@@ -45,8 +45,10 @@
 \pard\ql\f0\fs22\sa180 Activation-checkpoint segments shall be formed over consecutive active execution positions while _logical_block continues receiving the original nominal layer index.\par
 \pard\ql\f0\fs26\sa180 \b 2.5 Model interface\b0 \par
 \pard\ql\f0\fs22\sa180 TrainingDenseGPT and TrainingSheetGPT shall expose the selected layer sequence to the shared executor. The all-active state shall be represented so that forward calls take the unchanged fast path.\par
-\pard\ql\f0\fs26\sa180 \b 2.6 CLI, identity, and telemetry\b0 \par
-\pard\ql\f0\fs22\sa180 Expose first-class long-form CLI controls through run_thog2_owt.py. Preserve train_OWT.sh unchanged and use its existing -- extra-argument passthrough for these controls rather than adding another shell parsing path. Record resolved controls and derived active-layer count in run configuration/checkpoint identity and avoid run-name collisions. Do not print full selected-index lists on normal progress lines.\par
+\pard\ql\f0\fs26\sa180 \b 2.6 CLI, wrapper surface, identity, and telemetry\b0 \par
+\pard\ql\f0\fs22\sa180 Expose the three long-form CLI controls through run_thog2_owt.py. Update the full OWT wrappers so -s maps to --layer-dropout-stratum-size and -M maps to --layer-dropout-active-per-stratum. Keep --layer-dropout-resample-steps as a long wrapper option because no third getopts letter remains available without stealing an established control. Long forms for stratum size and active count shall also remain accepted.\par
+\pard\ql\f0\fs22\sa180 Implement descriptor v2.1 without changing the established L_<N_LAYERS> field. When dropout is active, append LS_<STRATUM_SIZE>_LA_<N_ACTIVE_PER_STRATUM> immediately after L_<N_LAYERS>. Append LI_<RESAMPLE_STEPS> only when the interval differs from the default 1. When all layers are active, emit none of LS, LA, or LI so explicit degenerate settings remain descriptor-identical to ordinary execution.\par
+\pard\ql\f0\fs22\sa180 Record resolved controls and derived active-layer count in run configuration/checkpoint identity and avoid run-name collisions. Do not print full selected-index lists on normal progress lines.\par
 \page
 \pard\ql\f0\fs30\sa180 \b 3 Test and release gates\b0 \par
 \pard\ql\f0\fs22\sa180 3.1 Unit-test validation, exact per-stratum cardinality, no duplicates, deterministic resampling, resample cadence, and sorted nominal indices.\par
@@ -55,7 +57,9 @@
 \pard\ql\f0\fs22\sa180 3.4 Test activation checkpointing with sparse nominal indices and confirm _logical_block receives original indices.\par
 \pard\ql\f0\fs22\sa180 3.5 Test evaluation uses all layers regardless of the training selection.\par
 \pard\ql\f0\fs22\sa180 3.6 Test dense and compact models, resume determinism, configuration identity, and CLI plumbing.\par
-\pard\ql\f0\fs22\sa180 3.7 Run the CPU unit-test suite locally before the branch is presented as complete.\par
+\pard\ql\f0\fs22\sa180 3.7 Test -s, -M, all three runner long forms, and wrapper forwarding on scruffy and dreedle surfaces.\par
+\pard\ql\f0\fs22\sa180 3.8 Test descriptor v2.1 ordering, omission of LI_1, and total omission of LS/LA/LI in all-active configurations.\par
+\pard\ql\f0\fs22\sa180 3.9 Run the CPU unit-test suite locally before the branch is presented as complete.\par
 \page
 \pard\ql\f0\fs30\sa180 \b 4 Explicit deferrals\b0 \par
 \pard\ql\f0\fs22\sa180 4.1 No non-uniform probability distributions.\par
