@@ -1,0 +1,66 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Liberation Serif;}{\f1 Liberation Sans;}{\f2 Liberation Mono;}}
+{\colortbl;\red217\green234\blue247;\red245\green245\blue245;}
+\paperw16840\paperh23820\margl1134\margr1134\margt1134\margb1134\titlepg
+{\header\pard\qc\i\f0\fs18 THOG2 Layer Dropout Implementation Plan v0.1\par}
+{\footer\pard\qc\f0\fs18 Page {\field{\*\fldinst PAGE}{\fldrslt 1}} of {\field{\*\fldinst NUMPAGES}{\fldrslt 1}}\par}
+{\headerf\pard\par}{\footerf\pard\par}
+\widowctrl\f0\fs22
+\pard\qc\f0\fs44\sa120 \b THOG2 Layer Dropout Implementation Plan\b0 \par
+\pard\qc\f0\fs30\sa120 \b v0.1\b0 \par
+\pard\qc\f0\fs24\sa360 \i Single-stage implementation of stratified stochastic logical-layer execution\i0 \par
+\pard\ql\f0\fs22\sa180 This plan corresponds to docs/THOG2_Layer_Dropout_Requirements_Specification_v0.1.rtf.\par
+\pard\ql\f0\fs22\sa180 Implementation branch: LAYER_DROPOUT_ENHANCEMENT, branched from DESCRIPTOR_VERSION_2. DESCRIPTOR_VERSION_2 and master remain untouched.\par
+\pard\ql\f0\fs22\sa180 Repository path: docs/THOG2_Layer_Dropout_Implementation_Plan_v0.1.rtf\par
+\pard\ql\f0\fs22\sa180 Date: 26 July 2026\par
+\page
+\pard\qc\f0\fs32\sa240 \b Table of contents\b0 \par
+\pard\ql\f0\fs22\sa110 1 Operating principles\par
+\pard\ql\f0\fs22\sa110 2 Stage 1 - layer dropout\par
+\pard\ql\f0\fs22\sa110 3 Test and release gates\par
+\pard\ql\f0\fs22\sa110 4 Explicit deferrals\par
+\page
+\pard\ql\f0\fs30\sa180 \b 1 Operating principles\b0 \par
+\pard\ql\f0\fs22\sa180 1.1 Preserve the existing all-layer execution path as the fast path. The degenerate all-active configuration must not perform sampling, construct active-index lists, or add per-layer membership tests.\par
+\pard\ql\f0\fs22\sa180 1.2 Keep N_LAYERS as the canonical architectural and depth-basis length. Selected layers retain their nominal indices.\par
+\pard\ql\f0\fs22\sa180 1.3 Implement selection outside compact materialisation. Dense and compact models should consume the same logical-layer selection mechanism.\par
+\pard\ql\f0\fs22\sa180 1.4 A sampled selection is fixed for an optimizer update and all of its gradient-accumulation microsteps. Resampling cadence is expressed in completed optimizer updates.\par
+\pard\ql\f0\fs22\sa180 1.5 Evaluation and generation always execute all N_LAYERS layers in v1.\par
+\pard\ql\f0\fs22\sa180 1.6 Preserve existing code paths and THOG source-marking conventions.\par
+\page
+\pard\ql\f0\fs30\sa180 \b 2 Stage 1 - layer dropout\b0 \par
+\pard\ql\f0\fs26\sa180 \b 2.1 Configuration\b0 \par
+\pard\ql\f0\fs22\sa180 Add the following run/training controls:\par
+\pard\ql\f2\fs19\sa100 layer_dropout_stratum_size\par
+\pard\ql\f2\fs19\sa100 layer_dropout_active_per_stratum\par
+\pard\ql\f2\fs19\sa140 layer_dropout_resample_steps\par
+\pard\ql\f0\fs22\sa180 Defaults shall resolve to all layers active. Validate N_LAYERS % stratum_size == 0, 1 <= active_per_stratum <= stratum_size, and resample_steps >= 1.\par
+\pard\ql\f0\fs26\sa180 \b 2.2 Sampler\b0 \par
+\pard\ql\f0\fs22\sa180 Add a small deterministic sampler utility. Each contiguous stratum begins at layer 0 boundaries and contributes exactly active_per_stratum uniformly sampled distinct nominal indices. Sort the union before execution.\par
+\pard\ql\f0\fs22\sa180 Selection identity shall be derived from model_seed and resample bucket so DDP ranks and resumed runs reproduce the same active set without checkpointing sampler state.\par
+\pard\ql\f0\fs26\sa180 \b 2.3 Trainer lifecycle\b0 \par
+\pard\ql\f0\fs22\sa180 Resolve the active set once at the start of each optimizer update, before the gradient-accumulation loop. Reuse it for every microstep. A resample bucket spans layer_dropout_resample_steps completed optimizer updates.\par
+\pard\ql\f0\fs26\sa180 \b 2.4 Logical-layer execution\b0 \par
+\pard\ql\f0\fs22\sa180 Extend the shared logical-layer executor to accept an optional ordered sequence of nominal layer indices. When no sequence is supplied, execute the existing range(N_LAYERS) path unchanged.\par
+\pard\ql\f0\fs22\sa180 Activation-checkpoint segments shall be formed over consecutive active execution positions while _logical_block continues receiving the original nominal layer index.\par
+\pard\ql\f0\fs26\sa180 \b 2.5 Model interface\b0 \par
+\pard\ql\f0\fs22\sa180 TrainingDenseGPT and TrainingSheetGPT shall expose the selected layer sequence to the shared executor. The all-active state shall be represented so that forward calls take the unchanged fast path.\par
+\pard\ql\f0\fs26\sa180 \b 2.6 CLI, identity, and telemetry\b0 \par
+\pard\ql\f0\fs22\sa180 Expose long-form CLI controls through run_thog2_owt.py and train_OWT.sh. Record resolved controls and derived active-layer count in run configuration/checkpoint identity and avoid run-name collisions. Do not print full selected-index lists on normal progress lines.\par
+\page
+\pard\ql\f0\fs30\sa180 \b 3 Test and release gates\b0 \par
+\pard\ql\f0\fs22\sa180 3.1 Unit-test validation, exact per-stratum cardinality, no duplicates, deterministic resampling, resample cadence, and sorted nominal indices.\par
+\pard\ql\f0\fs22\sa180 3.2 Regression-test the all-active path against current execution, including a guard proving the sampler is not invoked.\par
+\pard\ql\f0\fs22\sa180 3.3 Test that the selected set is constant across gradient-accumulation microsteps and changes only on configured resample boundaries.\par
+\pard\ql\f0\fs22\sa180 3.4 Test activation checkpointing with sparse nominal indices and confirm _logical_block receives original indices.\par
+\pard\ql\f0\fs22\sa180 3.5 Test evaluation uses all layers regardless of the training selection.\par
+\pard\ql\f0\fs22\sa180 3.6 Test dense and compact models, resume determinism, configuration identity, and CLI plumbing.\par
+\pard\ql\f0\fs22\sa180 3.7 Run the CPU unit-test suite locally before the branch is presented as complete.\par
+\page
+\pard\ql\f0\fs30\sa180 \b 4 Explicit deferrals\b0 \par
+\pard\ql\f0\fs22\sa180 4.1 No non-uniform probability distributions.\par
+\pard\ql\f0\fs22\sa180 4.2 No forced endpoint retention.\par
+\pard\ql\f0\fs22\sa180 4.3 No fractional/non-integer depth coordinates.\par
+\pard\ql\f0\fs22\sa180 4.4 No uneven strata or automatic remainder allocation.\par
+\pard\ql\f0\fs22\sa180 4.5 No inference-time stochastic layer selection.\par
+}
