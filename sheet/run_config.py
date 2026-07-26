@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
-from .bases import basis_artifact_tag_for_family, basis_version_for_family, normalize_registered_basis_family
+from .bases import basis_version_for_family, normalize_registered_basis_family
 # vvv THOG lapped cosine run controls and version identity
 from .bases.lapped_cosine import (
     BASIS_FAMILY_LAPPED_COSINE,
@@ -24,6 +24,7 @@ from .compact_identity import (
     DEFAULT_MLP_HIDDEN_COMPRESSOR,
     DEFAULT_MLP_HIDDEN_GROUP_SIZE,
     GEOMETRY_PRESET_DEPTH,
+    GEOMETRY_PRESET_JPEG_LIKE_V1,
     MLP_GEOMETRY_JPEG_LIKE_V1,
     compact_identity_metadata,
     resolve_compact_selectors,
@@ -47,6 +48,9 @@ DEFAULT_O_MLP_D_MODEL = 64
 DEFAULT_O_MLP_HIDDEN = 256
 DEFAULT_MLP_CHANNEL_ORDER = DEFAULT_O_MLP_HIDDEN                                                                                                      # <<< THOG retained module constant name for callers while public configuration uses o_mlp_hidden
 DEFAULT_EXPERIMENT_PREFIX = "NEL" + "SON"
+
+_RESIDUAL_POLICY_LABELS = {"depth_scaled": "ds", "unscaled": "us"}                                                                                 # <<< THOG descriptor v2 abbreviates long residual-init values only
+_RESIDUAL_DEPTH_SOURCE_LABELS = {"true_layer_depth": "tld", "dof_implied_depth": "did", "user_forced_depth": "ufd"}                              # <<< THOG descriptor v2 keeps getopts fields and shortens values
 
 
 @dataclass(frozen=True)
@@ -93,8 +97,8 @@ class OwtRunConfig:
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
     resolved_geometry_plan: Optional[Dict[str, Any]] = None
-    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG locality control
-    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG overlap control
+    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                              # <<< THOG locality control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                      # <<< THOG overlap control
     attention_backend: str = "auto"
     experiment_prefix: str = DEFAULT_EXPERIMENT_PREFIX
     run_start_label: Optional[str] = None
@@ -297,7 +301,9 @@ class OwtRunConfig:
 
     def residual_init_artifact_fragment(self) -> str:
         residual_init = self.residual_init_config()
-        parts = [f"r_{self.residual_init_policy}", f"z_{residual_init.depth_source}"]
+        policy_label = _RESIDUAL_POLICY_LABELS.get(self.residual_init_policy, normalize_component(self.residual_init_policy))
+        depth_source_label = _RESIDUAL_DEPTH_SOURCE_LABELS.get(residual_init.depth_source, normalize_component(residual_init.depth_source))
+        parts = [f"r_{policy_label}", f"z_{depth_source_label}"]                                                                                       # <<< THOG descriptor v2 keeps getopts letters and abbreviates long values
         if residual_init.depth_source == "user_forced_depth":
             parts.append(f"Z_{self.residual_init_depth_value}")
         return "_".join(parts)
@@ -326,8 +332,8 @@ class OwtRunConfig:
             mlp_hidden_group_size=self.mlp_hidden_group_size,
             mlp_hidden_compressor=self.mlp_hidden_compressor,
             basis_version=self.basis_version,
-            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
-            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control
+            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                # <<< THOG compact identity locality control
+            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                          # <<< THOG compact identity overlap control
             row_order_scaling_rule=ROW_ORDER_SCALING_RULE,
             geometry_preset=self.geometry_preset,
             attention_geometry=self.attention_geometry,
@@ -338,70 +344,131 @@ class OwtRunConfig:
             identity["resolved_geometry_plan"] = self.resolved_geometry_plan
         return identity
 
+    def _selector_fragment(self, selector: str) -> str:
+        return normalize_component(selector.replace(".", "_"))
+
+    def _geometry_slots_from_resolved_plan(self, plan: Dict[str, Any]) -> str:
+        fields: list[str] = []
+        if plan.get("depth_enabled"):
+            fields.append(f"G0_{plan.get('depth_compressor')}")
+        for index, selection in enumerate(plan.get("selections", []), start=1):
+            fields.append(f"G{index}_{selection['compressor']}_{self._selector_fragment(selection['selector'])}")
+        if not fields:
+            raise ValueError("resolved geometry plan produced no descriptor slots")
+        return "_".join(fields)
+
+    def _legacy_geometry_slots(self, identity: Dict[str, Any]) -> str:
+        basis_family = str(identity["basis_family"])
+        preset = str(identity["geometry_preset"])
+        if preset == GEOMETRY_PRESET_DEPTH:
+            return f"G0_{basis_family}"
+        if preset == GEOMETRY_PRESET_JPEG_LIKE_V1 or identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
+            return f"G0_{basis_family}_G1_jpeg_like_MLP_UP_MLP_HIDDEN"
+        return f"G0_{basis_family}_{normalize_component(preset)}"                                                                                       # <<< THOG legacy presets wither as resolved-ish compatibility labels
+
     def compact_artifact_fragment(self) -> Optional[str]:
         if self.model_type != "sheet":
             return None
-        identity = self.compact_identity()
-        basis_label = basis_artifact_tag_for_family(str(identity["basis_family"]))
-        preset_label = str(identity["geometry_preset"]).upper()
-        if identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
-            compressor_label = basis_artifact_tag_for_family(str(identity["mlp_hidden_compressor"]))
-            return f"{basis_label}_{preset_label}_{compressor_label}"
-        return f"{basis_label}_{preset_label}"
+        if self.resolved_geometry_plan is not None:
+            return self._geometry_slots_from_resolved_plan(self.resolved_geometry_plan)                                                                  # <<< THOG descriptor v2 names systematic geometry by ordered G slots
+        return self._legacy_geometry_slots(self.compact_identity())
 
     def run_descriptor(self) -> str:
-        model_fragment = self.compact_artifact_fragment() or "DENSE"
-        body = f"{self.experiment_prefix}_{model_fragment}_{normalize_component(self.host_label)}"
-        return f"{self.run_start_label}_{body}" if self.run_start_label else body
+        geometry_fragment = self.compact_artifact_fragment() or "DENSE"
+        host = normalize_component(self.host_label)
+        body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"
+        return f"{self.run_start_label}_{body}" if self.run_start_label else body                                                                        # <<< THOG descriptor v2 places host immediately after timestamp when present
+
+    def _learning_rate_code(self, value: float) -> int:
+        return int(round(value / 1.0e-5))
+
+    def _order_label_for_axis(self, *, element: str, axis: str) -> str:
+        if axis == "MLP_HIDDEN":
+            return "Y"
+        if axis == "MLP_D_MODEL":
+            return "X"
+        if axis == "ATTENTION_D_MODEL":
+            return "Q"
+        if axis == "ATTENTION_HEAD_CHANNEL" and element == "ATTENTION_QKV":
+            return "J"
+        if axis == "ATTENTION_HEAD_CHANNEL" and element == "ATTENTION_OUTPUT":
+            return "O"
+        raise ValueError(f"no descriptor order label for {element}.{axis}")
+
+    def _resolved_order_fields(self, plan: Dict[str, Any]) -> list[str]:
+        fields: list[str] = []
+        if plan.get("depth_enabled"):
+            fields.append(f"P_{self.o_depth}")
+        emitted: set[str] = set()
+        for selection in plan.get("selections", []):
+            element = str(selection["element"])
+            for axis in selection.get("compressed_axes", []):
+                label = self._order_label_for_axis(element=element, axis=str(axis))
+                if label not in emitted:
+                    fields.append(f"{label}_{selection['orders'][axis]}")
+                    emitted.add(label)
+                group_size = selection.get("axis_options", {}).get(axis, {}).get("group_size")
+                if group_size is not None and "s" not in emitted:
+                    fields.append(f"s_{int(group_size)}")
+                    emitted.add("s")
+        if plan.get("depth_enabled"):
+            fields.append(f"DLB_{int(self.depth_compress_layer_norm_and_bias)}")
+        if self._uses_lapped_cosine(plan=plan):
+            overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
+            fields.extend([f"W_{self.lapped_cosine_window_length}", f"i_{overlap_percent}"])
+        return fields
+
+    def _uses_lapped_cosine(self, *, plan: Optional[Dict[str, Any]] = None, identity: Optional[Dict[str, Any]] = None) -> bool:
+        if plan is not None:
+            if plan.get("depth_compressor") == BASIS_FAMILY_LAPPED_COSINE:
+                return True
+            return any(selection.get("compressor") == BASIS_FAMILY_LAPPED_COSINE for selection in plan.get("selections", []))
+        return bool(identity is not None and identity.get("basis_family") == BASIS_FAMILY_LAPPED_COSINE)
+
+    def _legacy_order_fields(self, identity: Dict[str, Any]) -> list[str]:
+        fields = [f"P_{self.o_depth}"]
+        if identity["geometry_preset"] == GEOMETRY_PRESET_DEPTH:
+            fields.append(f"DLB_{int(self.depth_compress_layer_norm_and_bias)}")
+        else:
+            fields.extend([
+                f"Q_{self.o_attn_d_model}",
+                f"J_{self.o_attn_qkv_per_channel}",
+                f"O_{self.o_attn_out_per_channel}",
+                f"X_{self.o_mlp_d_model}",
+                f"Y_{self.o_mlp_hidden}",
+            ])
+            if identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
+                fields.append(f"s_{self.mlp_hidden_group_size}")
+        if self._uses_lapped_cosine(identity=identity):
+            overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
+            fields.extend([f"W_{self.lapped_cosine_window_length}", f"i_{overlap_percent}"])
+        return fields
 
     def parameter_artifact_fragment(self) -> str:
-        fields = [
-            # vvv THOG stable artifact identity must not depend on the mutable target update count
-            # f"n_{self.max_iters}",
-            # ^^^ THOG
-            f"b_{self.batch_size}",
-            f"LR_{int(round(self.learning_rate / 1.0e-5)):02d}",                                                                                           # <<< THOG compact learning-rate code with e-04 convention left to the user
-            f"d_{dataset_label(self.dataset)}",
-            f"w_{self.warmup_iters}",
-            f"k_{self.checkpoint_interval}",
+        fit_fields = [
             f"A_{self.gradient_accumulation_steps}",
-            f"L_{self.n_layer}",
-            f"H_{self.n_head}",
-            f"D_{self.n_embd}",
-            f"C_{self.block_size}",
+            f"b_{self.batch_size}",
+            f"c_{self._learning_rate_code(self.learning_rate)}",
+            f"d_{dataset_label(self.dataset)}",
+            f"f_{self._learning_rate_code(self.min_lr)}",
+            f"w_{self.warmup_iters}",
         ]
-        # vvv THOG include wall-clock budget in fresh-run identity only when active
-        if self.max_wall_minutes > 0:
-            fields.append(f"M_{self.max_wall_minutes}")
-        # ^^^ THOG
+        shape_fields = [
+            f"C_{self.block_size}",
+            f"D_{self.n_embd}",
+            f"H_{self.n_head}",
+            f"L_{self.n_layer}",
+        ]
+        sections = ["_".join(fit_fields), "_".join(shape_fields)]
         if self.model_type == "sheet":
-            identity = self.compact_identity()
-            fields.append(f"P_{self.o_depth}")
-            # vvv THOG DEPTH identity excludes semantically dead Q/J/O/X/Y controls and records the vector participation mode.
-            if identity["geometry_preset"] == GEOMETRY_PRESET_DEPTH:
-                fields.append(f"DLB_{int(self.depth_compress_layer_norm_and_bias)}")
+            if self.resolved_geometry_plan is not None:
+                order_fields = self._resolved_order_fields(self.resolved_geometry_plan)
             else:
-                fields.extend([
-                    f"Q_{self.o_attn_d_model}",
-                    f"J_{self.o_attn_qkv_per_channel}",
-                    f"O_{self.o_attn_out_per_channel}",
-                    f"X_{self.o_mlp_d_model}",
-                    f"Y_{self.o_mlp_hidden}",
-                ])
-            # ^^^ THOG
-            if identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
-                fields.append(f"MHG_{self.mlp_hidden_group_size}")
-            # vvv THOG lapped locality and overlap are visible in run identity
-            if identity["basis_family"] == BASIS_FAMILY_LAPPED_COSINE:
-                overlap_percent = int(round(self.lapped_cosine_overlap_fraction * 100.0))
-                fields.extend([
-                    f"LCW_{self.lapped_cosine_window_length}",
-                    f"LCO_{overlap_percent}",
-                ])
-            # ^^^ THOG
-        fields.append(self.residual_init_artifact_fragment())
-        fields.append(f"S_{self.checkpoint_segment_size}")
-        return "_".join(fields)
+                order_fields = self._legacy_order_fields(self.compact_identity())
+            if order_fields:
+                sections.append("_".join(order_fields))                                                                                                 # <<< THOG descriptor v2 separates fit, shape, orders, and init with double underscores
+        sections.append("_".join([self.residual_init_artifact_fragment(), f"S_{self.checkpoint_segment_size}"]))
+        return "__".join(sections)
 
     @property
     def artifact_name(self) -> str:
@@ -444,10 +511,10 @@ class OwtRunConfig:
                 "o_mlp_hidden": self.o_mlp_hidden,
                 "mlp_hidden_group_size": self.mlp_hidden_group_size,
                 "mlp_hidden_compressor": self.mlp_hidden_compressor,
-                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG checkpoint and model vector mode
+                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                         # <<< THOG checkpoint and model vector mode
                 "basis_version": self.basis_version,
-                "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                           # <<< THOG checkpoint locality control
-                "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                      # <<< THOG checkpoint overlap control
+                "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                         # <<< THOG checkpoint locality control
+                "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                    # <<< THOG checkpoint overlap control
                 "geometry_preset": self.geometry_preset,
                 "attention_geometry": self.attention_geometry,
                 "mlp_geometry": self.mlp_geometry,
