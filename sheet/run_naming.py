@@ -21,6 +21,31 @@ _TIMESTAMP_PATTERN = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})
 _COMPACT_TIMESTAMP_PATTERN = re.compile(r"^\d{6}_\d{4}$")
 
 
+# vvv THOG descriptor v2.1 relocates active layer-dropout identity beside canonical L while preserving all-active names
+_LAYER_DROPOUT_V20_PATTERN = re.compile(r"_LDs_(?P<stratum>\d+)_LDa_(?P<active>\d+)_LDr_(?P<interval>\d+)(?=__)")
+_LAYER_COUNT_SECTION_END_PATTERN = re.compile(r"(?P<layer>_L_\d+)(?=__)")
+
+
+def _descriptor_v21_layer_dropout(value: str) -> str:
+    dropout_match = _LAYER_DROPOUT_V20_PATTERN.search(value)
+    if dropout_match is None:
+        return value
+    layer_match = _LAYER_COUNT_SECTION_END_PATTERN.search(value)
+    if layer_match is None:
+        return value
+
+    stratum_size = int(dropout_match.group("stratum"))
+    active_per_stratum = int(dropout_match.group("active"))
+    resample_steps = int(dropout_match.group("interval"))
+    suffix = f"_LS_{stratum_size}_LA_{active_per_stratum}"
+    if resample_steps != 1:
+        suffix += f"_LI_{resample_steps}"
+
+    without_v20_fields = _LAYER_DROPOUT_V20_PATTERN.sub("", value, count=1)
+    return _LAYER_COUNT_SECTION_END_PATTERN.sub(lambda match: match.group("layer") + suffix, without_v20_fields, count=1)
+# ^^^ THOG
+
+
 def normalize_component(value: str, *, uppercase: bool = False) -> str:
     normalized = _COMPONENT_PATTERN.sub("_", value.strip()).strip("_")
     normalized = normalized.upper() if uppercase else normalized
@@ -62,6 +87,9 @@ def _stable_digest(value: str, length: int = 12) -> str:
 def truncate_component(value: str, *, max_length: int = DEFAULT_COMPONENT_LIMIT) -> str:
     """Bound one filesystem component by right-truncating and appending a stable digest."""
 
+    # vvv THOG canonicalize descriptor v2.1 before length checks and hashing so paths and collision identity use the same spelling
+    value = _descriptor_v21_layer_dropout(value)
+    # ^^^ THOG
     if max_length < 48:
         raise ValueError("max_length must be at least 48")
     if len(value) <= max_length:
