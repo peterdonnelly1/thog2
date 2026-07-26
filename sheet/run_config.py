@@ -81,6 +81,11 @@ class OwtRunConfig:
     n_layer: int = 72
     n_head: int = 12
     n_embd: int = 768
+    # vvv THOG stratified layer-dropout run controls; omitted values preserve all-layer execution
+    layer_dropout_stratum_size: Optional[int] = None
+    layer_dropout_active_per_stratum: Optional[int] = None
+    layer_dropout_resample_steps: int = 1
+    # ^^^ THOG
     o_depth: int = 16
     o_attn_d_model: int = DEFAULT_O_ATTN_D_MODEL
     o_attn_qkv_per_channel: int = DEFAULT_O_ATTN_QKV_PER_CHANNEL
@@ -237,6 +242,7 @@ class OwtRunConfig:
             "n_layer",
             "n_head",
             "n_embd",
+            "layer_dropout_resample_steps",
             "mlp_hidden_group_size",
             "checkpoint_segment_size",
             "artifact_name_limit",
@@ -249,6 +255,26 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
+        # vvv THOG resolve layer-dropout defaults from the canonical depth and validate exact equal strata
+        stratum_size = self.n_layer if self.layer_dropout_stratum_size is None else self.layer_dropout_stratum_size
+        if isinstance(stratum_size, bool) or not isinstance(stratum_size, int) or stratum_size < 1:
+            raise ValueError("layer_dropout_stratum_size must be a positive integer")
+        active_per_stratum = stratum_size if self.layer_dropout_active_per_stratum is None else self.layer_dropout_active_per_stratum
+        if isinstance(active_per_stratum, bool) or not isinstance(active_per_stratum, int) or active_per_stratum < 1:
+            raise ValueError("layer_dropout_active_per_stratum must be a positive integer")
+        if self.n_layer % stratum_size != 0:
+            raise ValueError(
+                "n_layer must be divisible by layer_dropout_stratum_size; "
+                f"got n_layer={self.n_layer}, stratum_size={stratum_size}"
+            )
+        if active_per_stratum > stratum_size:
+            raise ValueError(
+                "layer_dropout_active_per_stratum must not exceed layer_dropout_stratum_size; "
+                f"got active={active_per_stratum}, stratum_size={stratum_size}"
+            )
+        object.__setattr__(self, "layer_dropout_stratum_size", stratum_size)
+        object.__setattr__(self, "layer_dropout_active_per_stratum", active_per_stratum)
+        # ^^^ THOG
         if self.warmup_iters >= self.max_iters:
             raise ValueError("warmup_iters must be less than max_iters")
         if self.n_embd % self.n_head != 0:
@@ -291,6 +317,20 @@ class OwtRunConfig:
     @property
     def head_dim(self) -> int:
         return self.n_embd // self.n_head
+
+    # vvv THOG derived layer-dropout quantities; these are not independent user controls
+    @property
+    def layer_dropout_n_strata(self) -> int:
+        return self.n_layer // int(self.layer_dropout_stratum_size)
+
+    @property
+    def n_active_layers(self) -> int:
+        return self.layer_dropout_n_strata * int(self.layer_dropout_active_per_stratum)
+
+    @property
+    def layer_dropout_enabled(self) -> bool:
+        return int(self.layer_dropout_active_per_stratum) < int(self.layer_dropout_stratum_size)
+    # ^^^ THOG
 
     def residual_init_config(self) -> ResidualInitConfig:
         return ResidualInitConfig(
@@ -453,6 +493,14 @@ class OwtRunConfig:
             f"f_{self._learning_rate_code(self.min_lr)}",
             f"w_{self.warmup_iters}",
         ]
+        # vvv THOG only stochastic layer-dropout runs acquire descriptor fields; all-active names remain unchanged
+        if self.layer_dropout_enabled:
+            fit_fields.extend([
+                f"LDs_{self.layer_dropout_stratum_size}",
+                f"LDa_{self.layer_dropout_active_per_stratum}",
+                f"LDr_{self.layer_dropout_resample_steps}",
+            ])
+        # ^^^ THOG
         shape_fields = [
             f"C_{self.block_size}",
             f"D_{self.n_embd}",
@@ -557,6 +605,9 @@ class OwtRunConfig:
             checkpoint_segment_size=self.checkpoint_segment_size if self.activation_checkpointing else 0,
             batch_size=self.batch_size,
             gradient_accumulation_steps=self.local_gradient_accumulation_steps(world_size),
+            layer_dropout_stratum_size=self.layer_dropout_stratum_size,                                                                                   # <<< THOG pass stratified layer-dropout controls into trainer config
+            layer_dropout_active_per_stratum=self.layer_dropout_active_per_stratum,                                                                         # <<< THOG pass active cardinality per stratum
+            layer_dropout_resample_steps=self.layer_dropout_resample_steps,                                                                                 # <<< THOG pass selection lifetime in optimizer updates
             max_updates=self.max_iters,
             max_wall_minutes=self.max_wall_minutes,
             learning_rate=self.learning_rate,
@@ -611,6 +662,9 @@ class OwtRunConfig:
             "world_size": world_size,
             "local_gradient_accumulation_steps": self.local_gradient_accumulation_steps(world_size),
             "tokens_per_iter": self.tokens_per_iter(),
+            "layer_dropout_n_strata": self.layer_dropout_n_strata,                                                                                      # <<< THOG expose derived stratum count in run identity/telemetry
+            "n_active_layers": self.n_active_layers,                                                                                                    # <<< THOG expose exact active depth per training update
+            "layer_dropout_enabled": self.layer_dropout_enabled,                                                                                        # <<< THOG make degenerate path explicit in resolved config
         })
         return values
 
