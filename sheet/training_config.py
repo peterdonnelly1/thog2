@@ -105,6 +105,11 @@ class TrainingConfig:
     checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
+    # vvv THOG stratified layer-dropout controls; None resolves to the all-active current behaviour
+    layer_dropout_stratum_size: Optional[int] = None
+    layer_dropout_active_per_stratum: Optional[int] = None
+    layer_dropout_resample_steps: int = 1
+    # ^^^ THOG
     max_updates: int = 10
     # vvv THOG optional wall-clock stop for equal-time geometry comparisons
     max_wall_minutes: int = 0
@@ -171,7 +176,7 @@ class TrainingConfig:
             )
         # ^^^ THOG
 
-        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
@@ -191,6 +196,26 @@ class TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer; got {value!r}")
+        # vvv THOG resolve layer-dropout defaults only after n_layer itself has been validated
+        if self.layer_dropout_stratum_size is None:
+            self.layer_dropout_stratum_size = self.n_layer
+        if isinstance(self.layer_dropout_stratum_size, bool) or not isinstance(self.layer_dropout_stratum_size, int) or self.layer_dropout_stratum_size <= 0:
+            raise ValueError(f"layer_dropout_stratum_size must be a positive integer; got {self.layer_dropout_stratum_size!r}")
+        if self.layer_dropout_active_per_stratum is None:
+            self.layer_dropout_active_per_stratum = self.layer_dropout_stratum_size
+        if isinstance(self.layer_dropout_active_per_stratum, bool) or not isinstance(self.layer_dropout_active_per_stratum, int) or self.layer_dropout_active_per_stratum <= 0:
+            raise ValueError(f"layer_dropout_active_per_stratum must be a positive integer; got {self.layer_dropout_active_per_stratum!r}")
+        if self.n_layer % self.layer_dropout_stratum_size != 0:
+            raise ValueError(
+                "n_layer must be divisible by layer_dropout_stratum_size; "
+                f"got n_layer={self.n_layer}, stratum_size={self.layer_dropout_stratum_size}"
+            )
+        if self.layer_dropout_active_per_stratum > self.layer_dropout_stratum_size:
+            raise ValueError(
+                "layer_dropout_active_per_stratum must not exceed layer_dropout_stratum_size; "
+                f"got active={self.layer_dropout_active_per_stratum}, stratum_size={self.layer_dropout_stratum_size}"
+            )
+        # ^^^ THOG
         validate_checkpoint_segment_size(self.checkpoint_segment_size)
         if self.n_embd % self.n_head != 0:
             raise ValueError(f"n_embd must be divisible by n_head; got {self.n_embd} and {self.n_head}")
@@ -265,6 +290,20 @@ class TrainingConfig:
     @property
     def head_dim(self) -> int:
         return self.n_embd // self.n_head
+
+    # vvv THOG derived layer-dropout quantities are configuration metadata, not independent knobs
+    @property
+    def layer_dropout_n_strata(self) -> int:
+        return self.n_layer // int(self.layer_dropout_stratum_size)
+
+    @property
+    def n_active_layers(self) -> int:
+        return self.layer_dropout_n_strata * int(self.layer_dropout_active_per_stratum)
+
+    @property
+    def layer_dropout_enabled(self) -> bool:
+        return int(self.layer_dropout_active_per_stratum) < int(self.layer_dropout_stratum_size)
+    # ^^^ THOG
 
     @property
     def resolved_o_attn_d_model(self) -> int:
