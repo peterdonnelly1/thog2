@@ -72,8 +72,7 @@ class CanonicalNamingTests(unittest.TestCase):
         self.assertNotEqual(first, different)
         self.assertEqual(len(first), 120)
         self.assertTrue(first.startswith("SHEET_scruffy__"))
-        self.assertIn("__TRUNC_", first)
-        self.assertTrue(first.endswith("__steps_100000"))
+        self.assertRegex(first, r"__h_[0-9a-f]{12}$")                                                                                                  # <<< THOG descriptor v2 right truncation uses a terminal digest
         filename = bounded_filename(first, "_train_20260703_120000.log")
         self.assertLessEqual(len(filename), 255)
 
@@ -131,11 +130,11 @@ class CanonicalNamingTests(unittest.TestCase):
             depth_compress_layer_norm_and_bias=True,
         )
         self.assertIn(
-            "P_16_DLB_0_r_depth_scaled_z_dof_implied_depth_S_12",
+            "P_16_DLB_0__r_ds_z_did_S_12",
             conventional_vectors.parameter_artifact_fragment(),
         )
         self.assertIn(
-            "P_16_DLB_1_r_depth_scaled_z_dof_implied_depth_S_12",
+            "P_16_DLB_1__r_ds_z_did_S_12",
             compressed_vectors.parameter_artifact_fragment(),
         )
         for dead_order in ("_Q_", "_J_", "_O_", "_X_", "_Y_"):
@@ -148,7 +147,7 @@ class CanonicalNamingTests(unittest.TestCase):
             residual_init_depth_value=24,
         )
         self.assertIn(
-            "_r_depth_scaled_z_user_forced_depth_Z_24_S_12",
+            "_r_ds_z_ufd_Z_24_S_12",
             config.parameter_artifact_fragment(),
         )
 
@@ -160,7 +159,7 @@ class CanonicalNamingTests(unittest.TestCase):
         )
         self.assertEqual(config.residual_init_depth_source, "dof_implied_depth")
         self.assertIn(
-            "_r_depth_scaled_z_dof_implied_depth_S_12",
+            "_r_ds_z_did_S_12",
             config.parameter_artifact_fragment(),
         )
 
