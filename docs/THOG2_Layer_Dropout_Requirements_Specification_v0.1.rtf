@@ -10,7 +10,7 @@
 \pard\qc\f0\fs30\sa120 \b v0.1\b0 \par
 \pard\qc\f0\fs24\sa360 \i Stratified stochastic execution of nominal transformer layers\i0 \par
 \pard\ql\f0\fs22\sa220 This specification defines a training-time layer-dropout facility for THOG2. The canonical model depth remains unchanged; each training update may execute only a sampled subset of the nominal layer positions.\par
-\pard\ql\f0\fs22\sa180 Status: requirements specification for initial implementation.\par
+\pard\ql\f0\fs22\sa180 Status: requirements specification for initial implementation, including wrapper controls and descriptor v2.1 identity.\par
 \pard\ql\f0\fs22\sa180 Repository path: docs/THOG2_Layer_Dropout_Requirements_Specification_v0.1.rtf\par
 \pard\ql\f0\fs22\sa180 Date: 26 July 2026\par
 \page
@@ -34,13 +34,13 @@
 \pard\ql\f0\fs30\sa180 \b 2 Parameters and derived quantities\b0 \par
 \pard\ql\f0\fs22\sa180 The v1 user-facing controls are:\par
 \pard\ql\f2\fs19\sa120 N_LAYERS\par
-\pard\ql\f0\fs22\sa120 Existing canonical model depth. Nominal layer indices are 0 through N_LAYERS - 1.\par
+\pard\ql\f0\fs22\sa120 Existing canonical model depth. Nominal layer indices are 0 through N_LAYERS - 1. Existing CLI: --n-layer / -L.\par
 \pard\ql\f2\fs19\sa120 STRATUM_SIZE\par
-\pard\ql\f0\fs22\sa120 Number of contiguous nominal layers in each equal stratum.\par
+\pard\ql\f0\fs22\sa120 Number of contiguous nominal layers in each equal stratum. Wrapper CLI: -s. Runner CLI: --layer-dropout-stratum-size.\par
 \pard\ql\f2\fs19\sa120 N_ACTIVE_PER_STRATUM\par
-\pard\ql\f0\fs22\sa120 Number of layers sampled uniformly without replacement from each stratum.\par
+\pard\ql\f0\fs22\sa120 Number of layers sampled uniformly without replacement from each stratum. Wrapper CLI: -M. Runner CLI: --layer-dropout-active-per-stratum.\par
 \pard\ql\f2\fs19\sa120 LAYER_DROPOUT_RESAMPLE_STEPS\par
-\pard\ql\f0\fs22\sa180 Number of completed optimizer updates for which one sampled layer set is retained before a new set is sampled.\par
+\pard\ql\f0\fs22\sa180 Number of completed optimizer updates for which one sampled layer set is retained before a new set is sampled. CLI: --layer-dropout-resample-steps. No single-letter wrapper option is allocated in v1.\par
 \pard\ql\f0\fs22\sa180 The following quantities are derived, not separately configured:\par
 \pard\ql\f2\fs19\sa120 N_STRATA = N_LAYERS / STRATUM_SIZE\par
 \pard\ql\f2\fs19\sa120 N_ACTIVE_LAYERS = N_STRATA * N_ACTIVE_PER_STRATUM\par
@@ -73,17 +73,19 @@
 \pard\ql\f2\fs19\sa120 1 <= N_ACTIVE_PER_STRATUM <= STRATUM_SIZE\par
 \pard\ql\f2\fs19\sa120 LAYER_DROPOUT_RESAMPLE_STEPS >= 1\par
 \pard\ql\f0\fs22\sa180 For backward compatibility, omission of the new layer-dropout controls shall resolve to the all-active fast path for the configured N_LAYERS. No existing run string should acquire stochastic layer execution merely by upgrading THOG2.\par
-\pard\ql\f0\fs22\sa180 Suggested CLI names are --layer-dropout-stratum-size, --layer-dropout-active-per-stratum, and --layer-dropout-resample-steps. The existing --n-layer / -L control remains the canonical model depth.\par
+\pard\ql\f0\fs22\sa180 The host wrappers shall accept -s STRATUM_SIZE and -M N_ACTIVE_PER_STRATUM as native short controls. The runner long forms remain --layer-dropout-stratum-size and --layer-dropout-active-per-stratum. --layer-dropout-resample-steps remains long-form in v1. The existing --n-layer / -L control remains the canonical model depth.\par
 \pard\ql\f0\fs30\sa180 \b 6 Identity, reporting, and resume\b0 \par
 \pard\ql\f0\fs22\sa180 Resolved layer-dropout controls and derived N_ACTIVE_LAYERS shall be included in run configuration, diagnostic output, run identity where needed to avoid collisions, and checkpoint resume compatibility checks. Resume must continue the same deterministic sampling schedule from completed optimizer-update count.\par
+\pard\ql\f0\fs22\sa180 Descriptor v2.1 shall preserve the existing L_<N_LAYERS> field. When and only when layer dropout is active, LS_<STRATUM_SIZE> and LA_<N_ACTIVE_PER_STRATUM> shall immediately follow L_<N_LAYERS>. LI_<LAYER_DROPOUT_RESAMPLE_STEPS> shall follow them only when the resampling interval is not the default value 1. Thus L_144_LS_4_LA_2 identifies 50 percent stratified execution resampled every update, while L_144_LS_4_LA_2_LI_10 retains each sample for ten updates.\par
+\pard\ql\f0\fs22\sa180 An explicitly all-active configuration is semantically identical to ordinary execution and shall retain the existing descriptor. For example, L=144, STRATUM_SIZE=144, N_ACTIVE_PER_STRATUM=144 shall emit only L_144, irrespective of the configured resampling interval. No LS, LA, or LI fields shall be emitted.\par
 \pard\ql\f0\fs22\sa180 The implementation should expose the currently selected nominal layer indices to tests and diagnostics without placing verbose layer lists in normal per-update console output.\par
 \pard\ql\f0\fs30\sa180 \b 7 Non-goals and future extensions\b0 \par
 \pard\ql\f0\fs22\sa180 V1 does not include non-uniform sampling, forced endpoint retention, independently sampled microsteps, or automatic uneven allocation between strata.\par
 \pard\ql\f0\fs22\sa180 V1 layer positions are integer nominal indices only. Fractional depth coordinates are explicitly outside scope. Supporting them would turn this mechanism from discrete layer dropout into sampling of a continuous depth field and would require separate semantics for basis evaluation, conventional per-layer parameters, residual scaling, validation, and inference.\par
 \pard\ql\f0\fs22\sa180 A later experiment may investigate fractional or jittered depth coordinates where the selected basis family and all required layer-specific parameters support well-defined continuous evaluation.\par
 \pard\ql\f0\fs30\sa180 \b 8 Acceptance checklist\b0 \par
-\pard\ql\f0\fs22\sa110 1. Existing runs with no new controls preserve current all-layer behaviour.\par
-\pard\ql\f0\fs22\sa110 2. The all-active configuration bypasses RNG and selected-index execution logic.\par
+\pard\ql\f0\fs22\sa110 1. Existing runs with no new controls preserve current all-layer behaviour and descriptor identity.\par
+\pard\ql\f0\fs22\sa110 2. The all-active configuration bypasses RNG and selected-index execution logic and emits no LS, LA, or LI descriptor fields.\par
 \pard\ql\f0\fs22\sa110 3. For each stratum, exactly N_ACTIVE_PER_STRATUM distinct nominal indices are selected.\par
 \pard\ql\f0\fs22\sa110 4. Selected layers execute in ascending nominal order and retain their original layer indices.\par
 \pard\ql\f0\fs22\sa110 5. One sampled set is shared across all accumulation microsteps in an optimizer update.\par
@@ -92,4 +94,5 @@
 \pard\ql\f0\fs22\sa110 8. DDP ranks and resumed runs reproduce the same selection schedule.\par
 \pard\ql\f0\fs22\sa110 9. Activation checkpointing works with sparse nominal indices.\par
 \pard\ql\f0\fs22\sa110 10. Dense and compact execution paths have regression coverage.\par
+\pard\ql\f0\fs22\sa110 11. Wrapper -s and -M controls, long-form resample control, and descriptor v2.1 fields have regression coverage.\par
 }
