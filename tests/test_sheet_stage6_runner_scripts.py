@@ -65,8 +65,8 @@ class RunnerScriptTests(unittest.TestCase):
 
     def test_s6_33_dense_runner_resolves_canonical_identity_and_shared_defaults(self) -> None:
         output = self.run_script("current_scruffy_train_DENSE_OWT.sh", [])
-        self.assertIn("TEST_DENSE_scruffy", output)
-        self.assertIn("_r_depth_scaled_z_true_layer_depth_S_1", output)
+        self.assertIn("scruffy_TEST_DENSE", output)                                                                                                      # <<< THOG descriptor v2 places host before run label
+        self.assertIn("_r_ds_z_tld_S_1", output)                                                                                                         # <<< THOG descriptor v2 abbreviates residual init values
         self.assertIn("--model-type dense", output)
         self.assertIn("--residual-init-policy depth_scaled", output)
         self.assertIn("--residual-init-depth-source true_layer_depth", output)
@@ -96,9 +96,9 @@ class RunnerScriptTests(unittest.TestCase):
                 "12",
             ],
         )
-        self.assertIn("TEST_CHEBY_DEPTH_scruffy", output)
+        self.assertIn("scruffy_TEST_G0_chebyshev", output)                                                                                               # <<< THOG descriptor v2 depth slot naming
         self.assertIn(
-            "_P_2_DLB_0_r_depth_scaled_z_dof_implied_depth_S_1",
+            "_P_2_DLB_0__r_ds_z_did_S_1",
             output,
         )
         artifact_lines = self.artifact_lines(output)
