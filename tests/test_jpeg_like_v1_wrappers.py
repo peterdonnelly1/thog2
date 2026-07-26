@@ -68,8 +68,8 @@ class JpegLikeV1WrapperTests(unittest.TestCase):
             capture_output=True,
         )
         self.assertIn("JPEG_LIKE_V1:       compressor=dct group=4 Y=2", result.stdout)
-        self.assertIn("CHEBY_JPEG_LIKE_V1_DCT", result.stdout)
-        self.assertIn("MHG_4", result.stdout)
+        self.assertIn("G0_chebyshev_G1_jpeg_like_MLP_UP_MLP_HIDDEN", result.stdout)                                                                      # <<< THOG descriptor v2 geometry slot contract
+        self.assertIn("s_4", result.stdout)                                                                                                               # <<< THOG descriptor v2 group-size token
         self.assertIn("--mlp-hidden-compressor dct", result.stdout)
         self.assertIn("--mlp-hidden-group-size 4", result.stdout)
 
