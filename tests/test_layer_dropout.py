@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -218,7 +219,7 @@ class LayerDropoutRunConfigTests(unittest.TestCase):
         self.assertIn("LDs_4", fragment)
         self.assertIn("LDa_2", fragment)
         self.assertIn("LDr_5", fragment)
-        training = config.to_training_config(vocab_size=50304, world_size=1, out_dir=torch.serialization.os.PathLike if False else __import__("pathlib").Path("out"))
+        training = config.to_training_config(vocab_size=50304, world_size=1, out_dir=Path("out"))
         self.assertEqual(training.layer_dropout_stratum_size, 4)
         self.assertEqual(training.layer_dropout_active_per_stratum, 2)
         self.assertEqual(training.layer_dropout_resample_steps, 5)
