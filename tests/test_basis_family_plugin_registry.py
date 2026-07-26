@@ -116,10 +116,10 @@ class BasisFamilyPluginRegistryTests(unittest.TestCase):
         dct = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_DCT, basis_version="auto")
         haar = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_HAAR, basis_version="auto")
         lapped = OwtRunConfig(model_type="sheet", basis_family=BASIS_FAMILY_LAPPED_COSINE, basis_version="auto")
-        self.assertEqual(cheby.compact_artifact_fragment(), "CHEBY_DEPTH")
-        self.assertEqual(dct.compact_artifact_fragment(), "DCT_DEPTH")
-        self.assertEqual(haar.compact_artifact_fragment(), "HAAR_DEPTH")
-        self.assertEqual(lapped.compact_artifact_fragment(), "LAPPED_COSINE_DEPTH")
+        self.assertEqual(cheby.compact_artifact_fragment(), "G0_chebyshev")                                                                            # <<< THOG descriptor v2 uses depth slot naming rather than legacy basis tags
+        self.assertEqual(dct.compact_artifact_fragment(), "G0_dct")                                                                                      # <<< THOG descriptor v2 uses depth slot naming rather than legacy basis tags
+        self.assertEqual(haar.compact_artifact_fragment(), "G0_haar")                                                                                    # <<< THOG descriptor v2 uses depth slot naming rather than legacy basis tags
+        self.assertEqual(lapped.compact_artifact_fragment(), "G0_lapped_cosine")                                                                         # <<< THOG descriptor v2 uses depth slot naming rather than legacy basis tags
         self.assertEqual(cheby.basis_version, CHEBYSHEV_BASIS_VERSION)
         self.assertEqual(dct.basis_version, DCT_BASIS_VERSION)
         self.assertEqual(haar.basis_version, HAAR_BASIS_VERSION)
