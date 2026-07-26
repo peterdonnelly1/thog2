@@ -1,7 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -22,6 +22,9 @@ class TrainingDenseGPT(GPT):
     def __init__(self, config) -> None:
         super().__init__(config)
         self.checkpoint_segment_size = 0
+        # vvv THOG training-only sparse nominal layer selection; None preserves the original path
+        self._active_layer_indices: Optional[Tuple[int, ...]] = None
+        # ^^^ THOG
         self.last_execution_report = CheckpointExecutionReport(
             checkpointing_used=False,
             checkpoint_segments=0,
@@ -31,6 +34,11 @@ class TrainingDenseGPT(GPT):
 
     def set_checkpoint_segment_size(self, segment_size: int) -> None:
         self.checkpoint_segment_size = validate_checkpoint_segment_size(segment_size)
+
+    # vvv THOG layer-dropout selection is external trainer state, not model parameters
+    def set_active_layer_indices(self, layer_indices: Optional[Sequence[int]]) -> None:
+        self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
+    # ^^^ THOG
 
     def _logical_block(self, hidden: Tensor, layer_index: int) -> Tensor:
         return self.transformer.h[layer_index](hidden)
@@ -52,13 +60,26 @@ class TrainingDenseGPT(GPT):
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
-        hidden, self.last_execution_report = execute_logical_layers(
-            hidden,
-            n_layer=self.config.n_layer,
-            segment_size=self.checkpoint_segment_size,
-            logical_block=self._logical_block,
-            training=self.training,
-        )
+        # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
+        layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
+        if layer_indices is None:
+            hidden, self.last_execution_report = execute_logical_layers(
+                hidden,
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+            )
+        else:
+            hidden, self.last_execution_report = execute_logical_layers(
+                hidden,
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=layer_indices,
+            )
+        # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
 
         if targets is not None:
@@ -80,6 +101,9 @@ class TrainingSheetGPT(SheetGPT):
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__(config)
         self.checkpoint_segment_size = 0
+        # vvv THOG training-only sparse nominal layer selection; None preserves the original path
+        self._active_layer_indices: Optional[Tuple[int, ...]] = None
+        # ^^^ THOG
         self.last_execution_report = CheckpointExecutionReport(
             checkpointing_used=False,
             checkpoint_segments=0,
@@ -89,6 +113,11 @@ class TrainingSheetGPT(SheetGPT):
 
     def set_checkpoint_segment_size(self, segment_size: int) -> None:
         self.checkpoint_segment_size = validate_checkpoint_segment_size(segment_size)
+
+    # vvv THOG layer-dropout selection is external trainer state, not compact model state
+    def set_active_layer_indices(self, layer_indices: Optional[Sequence[int]]) -> None:
+        self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
+    # ^^^ THOG
 
     def _sheet_layer_norm(
         self,
@@ -127,13 +156,26 @@ class TrainingSheetGPT(SheetGPT):
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
-        hidden, self.last_execution_report = execute_logical_layers(
-            hidden,
-            n_layer=self.config.n_layer,
-            segment_size=self.checkpoint_segment_size,
-            logical_block=self._logical_block,
-            training=self.training,
-        )
+        # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
+        layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
+        if layer_indices is None:
+            hidden, self.last_execution_report = execute_logical_layers(
+                hidden,
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+            )
+        else:
+            hidden, self.last_execution_report = execute_logical_layers(
+                hidden,
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=layer_indices,
+            )
+        # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
 
         if targets is not None:
