@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -34,6 +34,25 @@ def validate_checkpoint_segment_size(segment_size: int) -> int:
     return segment_size
 
 
+# vvv THOG layer dropout preserves the existing all-layer path and adds sparse nominal-index execution
+
+def _validate_layer_indices(layer_indices: Sequence[int], n_layer: int) -> Tuple[int, ...]:
+    resolved = tuple(layer_indices)
+    if not resolved:
+        raise ValueError("layer_indices must not be empty")
+    previous = -1
+    for layer_index in resolved:
+        if isinstance(layer_index, bool) or not isinstance(layer_index, int):
+            raise ValueError(f"layer index must be an integer; got {layer_index!r}")
+        if layer_index < 0 or layer_index >= n_layer:
+            raise ValueError(f"layer index out of range: {layer_index}; n_layer={n_layer}")
+        if layer_index <= previous:
+            raise ValueError("layer_indices must be strictly increasing")
+        previous = layer_index
+    return resolved
+# ^^^ THOG
+
+
 def execute_logical_layers(
     hidden: Tensor,
     *,
@@ -41,6 +60,7 @@ def execute_logical_layers(
     segment_size: int,
     logical_block: LogicalBlock,
     training: bool,
+    layer_indices: Optional[Sequence[int]] = None,                                                                                                         # <<< THOG optional sparse nominal execution sequence
 ) -> Tuple[Tensor, CheckpointExecutionReport]:
     validate_checkpoint_segment_size(segment_size)
     if isinstance(n_layer, bool) or not isinstance(n_layer, int) or n_layer <= 0:
@@ -51,33 +71,80 @@ def execute_logical_layers(
         and torch.is_grad_enabled()
         and segment_size > 0
     )
+
+    # vvv THOG preserve the pre-layer-dropout fast path byte-for-byte in its inner loops
+    if layer_indices is None:
+        if not use_checkpointing:
+            for layer_index in range(n_layer):
+                hidden = logical_block(hidden, layer_index)
+            return hidden, CheckpointExecutionReport(
+                checkpointing_used=False,
+                checkpoint_segments=0,
+                logical_layers=n_layer,
+                segment_size=segment_size,
+            )
+
+        checkpoint_segments = 0
+        for start in range(0, n_layer, segment_size):
+            end = min(start + segment_size, n_layer)
+
+            def run_segment(
+                segment_input: Tensor,
+                *,
+                segment_start: int = start,
+                segment_end: int = end,
+            ) -> Tensor:
+                segment_output = segment_input
+                for layer_index in range(segment_start, segment_end):
+                    segment_output = logical_block(segment_output, layer_index)
+                return segment_output
+
+            hidden = checkpoint(
+                run_segment,
+                hidden,
+                use_reentrant=False,
+                preserve_rng_state=True,
+            )
+            checkpoint_segments += 1
+
+        return hidden, CheckpointExecutionReport(
+            checkpointing_used=True,
+            checkpoint_segments=checkpoint_segments,
+            logical_layers=n_layer,
+            segment_size=segment_size,
+        )
+    # ^^^ THOG
+
+    # vvv THOG sparse path chunks active execution positions while preserving nominal layer indices
+    active_layer_indices = _validate_layer_indices(layer_indices, n_layer)
+    active_count = len(active_layer_indices)
     if not use_checkpointing:
-        for layer_index in range(n_layer):
+        for layer_index in active_layer_indices:
             hidden = logical_block(hidden, layer_index)
         return hidden, CheckpointExecutionReport(
             checkpointing_used=False,
             checkpoint_segments=0,
-            logical_layers=n_layer,
+            logical_layers=active_count,
             segment_size=segment_size,
         )
 
     checkpoint_segments = 0
-    for start in range(0, n_layer, segment_size):
-        end = min(start + segment_size, n_layer)
+    for start in range(0, active_count, segment_size):
+        end = min(start + segment_size, active_count)
+        segment_indices = active_layer_indices[start:end]
 
-        def run_segment(
+        def run_sparse_segment(
             segment_input: Tensor,
             *,
-            segment_start: int = start,
-            segment_end: int = end,
+            nominal_indices: Tuple[int, ...] = segment_indices,
         ) -> Tensor:
             segment_output = segment_input
-            for layer_index in range(segment_start, segment_end):
+            for layer_index in nominal_indices:
                 segment_output = logical_block(segment_output, layer_index)
             return segment_output
 
         hidden = checkpoint(
-            run_segment,
+            run_sparse_segment,
             hidden,
             use_reentrant=False,
             preserve_rng_state=True,
@@ -87,7 +154,8 @@ def execute_logical_layers(
     return hidden, CheckpointExecutionReport(
         checkpointing_used=True,
         checkpoint_segments=checkpoint_segments,
-        logical_layers=n_layer,
+        logical_layers=active_count,
         segment_size=segment_size,
     )
+    # ^^^ THOG
 # ^^^ THOG
