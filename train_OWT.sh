@@ -67,6 +67,11 @@ LOG_INTERVAL=1
 WARMUP_ITERS=10
 CHECKPOINT_INTERVAL=1000
 N_LAYER=144
+# vvv THOG layer-dropout wrapper controls; empty stratum/cardinality delegate all-active defaults to the runner
+LAYER_DROPOUT_STRATUM_SIZE=""
+LAYER_DROPOUT_ACTIVE_PER_STRATUM=""
+LAYER_DROPOUT_RESAMPLE_STEPS=1
+# ^^^ THOG
 N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
@@ -163,6 +168,9 @@ Compact geometry:
 
 Shape/runtime:
   -L N_LAYER=${N_LAYER}
+  -s STRATUM_SIZE=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER}                 layer-dropout nominal layers per stratum
+  -M N_ACTIVE_PER_STRATUM=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE}     layer-dropout active layers selected per stratum
+  --layer-dropout-resample-steps N=${LAYER_DROPOUT_RESAMPLE_STEPS}       optimizer updates per sampled layer set
   -H N_HEAD=${N_HEAD}
   -D N_EMBD=${N_EMBD}
   -C BLOCK_SIZE=${BLOCK_SIZE}
@@ -195,7 +203,7 @@ Paths:
 EOF_USAGE
 }
 
-# vvv THOG accept long optimizer controls and JPEG_LIKE_V1 controls without disturbing the established getopts contract
+# vvv THOG accept long optimizer, geometry, and layer-dropout controls without disturbing established short-option parsing
 OPTIMIZER_FILTERED_ARGS=()
 GEOMETRY_UI_EXTRA_ARGS=()
 EXPLAIN_GEOMETRY=false
@@ -231,6 +239,33 @@ while (( $# > 0 )); do
       ;;
     --no-depth-compress-layer-norm-and-bias)
       DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=false
+      shift
+      ;;
+    --layer-dropout-stratum-size)
+      (( $# >= 2 )) || { echo "--layer-dropout-stratum-size requires a positive integer" >&2; exit 2; }
+      LAYER_DROPOUT_STRATUM_SIZE="$2"
+      shift 2
+      ;;
+    --layer-dropout-stratum-size=*)
+      LAYER_DROPOUT_STRATUM_SIZE="${1#*=}"
+      shift
+      ;;
+    --layer-dropout-active-per-stratum)
+      (( $# >= 2 )) || { echo "--layer-dropout-active-per-stratum requires a positive integer" >&2; exit 2; }
+      LAYER_DROPOUT_ACTIVE_PER_STRATUM="$2"
+      shift 2
+      ;;
+    --layer-dropout-active-per-stratum=*)
+      LAYER_DROPOUT_ACTIVE_PER_STRATUM="${1#*=}"
+      shift
+      ;;
+    --layer-dropout-resample-steps)
+      (( $# >= 2 )) || { echo "--layer-dropout-resample-steps requires a positive integer" >&2; exit 2; }
+      LAYER_DROPOUT_RESAMPLE_STEPS="$2"
+      shift 2
+      ;;
+    --layer-dropout-resample-steps=*)
+      LAYER_DROPOUT_RESAMPLE_STEPS="${1#*=}"
       shift
       ;;
     --optimizer)
@@ -283,14 +318,14 @@ done
 set -- "${OPTIMIZER_FILTERED_ARGS[@]}"
 # ^^^ THOG
 
-while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
+while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:s:M:H:D:C:P:Q:J:O:X:Y:S:E:T:K:r:z:Z:d:t:o:j:R:x:h" option; do
   case "$option" in
     q) RUN_MODE="$OPTARG" ;; g) RUN_NAME="$OPTARG" ;;
     n) STEPS="$OPTARG" ;; b) BATCH_SIZE="$OPTARG" ;; c) LEARNING_RATE_CODES="$OPTARG"; OPTIMIZER_LR_EXPLICIT=true ;; f) MIN_LR_CODE="$OPTARG"; OPTIMIZER_MIN_LR_EXPLICIT=true ;; y) OPTIMIZER="$OPTARG" ;; A) GRADIENT_ACCUMULATION_STEPS="$OPTARG" ;; G) NUM_GPUS="$OPTARG" ;;
     u) EVAL_ITERS="$OPTARG" ;; e) EVAL_INTERVAL="$OPTARG" ;; l) LOG_INTERVAL="$OPTARG" ;; w) WARMUP_ITERS="$OPTARG" ;; k) CHECKPOINT_INTERVAL="$OPTARG" ;;
     I) INSTRUMENTATION="$OPTARG" ;; F) DEPTH_CURVE_PLOTS="$OPTARG" ;; N) DEPTH_CURVE_SAMPLE_ELEMENTS="$OPTARG" ;; U) DEPTH_CURVE_RENDERER="$OPTARG" ;; V) DEPTH_CURVE_LOCAL_HTML="$OPTARG" ;;
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
-    L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
+    L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; s) LAYER_DROPOUT_STRATUM_SIZE="$OPTARG" ;; M) LAYER_DROPOUT_ACTIVE_PER_STRATUM="$OPTARG" ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
     E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
@@ -451,6 +486,11 @@ parse_mlp_hidden_group_size_values "$MLP_HIDDEN_GROUP_SIZE"
 parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE"                                                                                                  # <<< THOG parse batch grid
 parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                              # <<< THOG parse LR grid
 validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                          # <<< THOG validate min LR
+# vvv THOG validate scalar layer-dropout wrapper controls before runner construction
+[[ -z "$LAYER_DROPOUT_STRATUM_SIZE" ]] || validate_positive_uint "$LAYER_DROPOUT_STRATUM_SIZE" "STRATUM_SIZE"
+[[ -z "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] || validate_positive_uint "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" "N_ACTIVE_PER_STRATUM"
+validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_STEPS"
+# ^^^ THOG
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
 # vvv THOG
@@ -464,7 +504,7 @@ if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then
 fi
 # ^^^ THOG
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
-# vvv THOG one instrumentation selector determines both backend and W&B mode; contradictory -I/-M/-W combinations no longer exist
+# vvv THOG one instrumentation selector determines backend and W&B mode; legacy instrumentation -M/-W meanings are retired
 case "$INSTRUMENTATION" in
   tensorboard) INSTRUMENTATION_BACKEND="tensorboard"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
   wandb) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="online" ;;
@@ -583,6 +623,11 @@ run_grid_point() {
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
   optional_args=(); compact_args=(); compact_order_args=()
+  # vvv THOG layer dropout is architecture-level and therefore applies to dense and compact runs alike
+  [[ -n "$LAYER_DROPOUT_STRATUM_SIZE" ]] && optional_args+=(--layer-dropout-stratum-size "$LAYER_DROPOUT_STRATUM_SIZE")
+  [[ -n "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] && optional_args+=(--layer-dropout-active-per-stratum "$LAYER_DROPOUT_ACTIVE_PER_STRATUM")
+  optional_args+=(--layer-dropout-resample-steps "$LAYER_DROPOUT_RESAMPLE_STEPS")
+  # ^^^ THOG
   if [[ "$geometry_preset_value" == dense ]]; then
     run_model_type="dense"; display_model_type="dense"; preset_tag="DENSE"; run_tag="DENSE"
     [[ "$N_LAYER_EXPLICIT" == false ]] && n_layer_value=12
@@ -636,9 +681,9 @@ run_grid_point() {
 
   LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   start_time_friendly="$(date '+%H:%M  %d-%m-%y')"
-  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
-  artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
-  log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  resolved_json="$("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
+  artifact_name="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
+  log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
   depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
@@ -658,6 +703,7 @@ scruffy OWT train
   semantic adapter bypass:   $BYPASS_SEMANTIC_QKV_ADAPTER
   direct factorised MLP:    $DIRECT_FACTORISED_MLP
   vectorise per-head materialisation: $VECTORISE_PER_HEAD_MATERIALISATION
+  layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
   depth viewer:       $viewer_url
   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
