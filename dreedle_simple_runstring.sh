@@ -72,9 +72,10 @@ set -euo pipefail
 #    -R RESULT_ROOT
 
 # vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
+export CUDA_VISIBLE_DEVICES="1"
 export THOG2_HOST_LABEL="dreedle"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-2}"
+export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
 export THOG2_DTYPE="${THOG2_DTYPE:-float16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-sdpa}"
 # ^^^ THOG
@@ -83,8 +84,10 @@ python -m run_thog2_owt --print-geometry-registry
 
 export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
+
+
 ./train_OWT.sh \
-  -g GEOMETRY_REVAMP \
+  -g REVAMPv1_GPU1 \
   -n 10000 \
   -b 16 \
   -A 8 \
@@ -95,25 +98,34 @@ export WANDB_CONSOLE=off
   -l 10 \
   -w 100 \
   -k 1000 \
+  -y adamw \
   -c 90 \
   -f 9 \
-  -L 64 \
+  -L 32 \
   -H 16 \
   -D 1024 \
   -C 768 \
-  -P 16 \
+  -Y 64 \
   -E true \
-  -T "$THOG2_DTYPE" \
-  -K "$THOG2_ATTENTION_BACKEND" \
-  -t "$THOG2_OWT_DATA_DIR" \
   -r depth_scaled \
   -z dof_implied_depth \
   -I wandb \
   -F none \
-  -y adamw \
+  -T "$THOG2_DTYPE" \
+  -K "$THOG2_ATTENTION_BACKEND" \
+  -t "$THOG2_OWT_DATA_DIR" \
   --select-depth \
   --option DEPTH.compressor=chebyshev \
-  --no-depth-compress-layer-norm-and-bias \
-  --explain-geometry \
+  --option DEPTH.order=16 \
   -- \
   --host-label "$THOG2_HOST_LABEL"
+
+  #  --select-depth \
+#  --option DEPTH.compressor=chebyshev \
+#  --select-element MLP_UP.MLP_HIDDEN \
+#  --option DEPTH.order=16 \
+#  --option MLP_UP.compressor=jpeg_like \
+#  --option MLP_UP.MLP_HIDDEN.order=64 \
+#  --option MLP_UP.MLP_HIDDEN.group_size=256 \
+#  -- \
+#  --host-label "$THOG2_HOST_LABEL"
