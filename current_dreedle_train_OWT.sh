@@ -403,16 +403,29 @@ BASIS_TAG_VALUES=()                                                             
 MLP_HIDDEN_COMPRESSOR_VALUES=()
 MLP_HIDDEN_COMPRESSOR_TAG_VALUES=()
 MLP_HIDDEN_GROUP_SIZE_VALUES=()
-BATCH_SIZE_VALUES=()                                                                                                                                        # <<< THOG batch grid axis
-LEARNING_RATE_CODE_VALUES=()                                                                                                                                # <<< THOG LR grid axis
+BATCH_SIZE_VALUES=()                                                                                                                                       # <<< THOG batch-size grid axis
+LEARNING_RATE_CODE_VALUES=()                                                                                                                               # <<< THOG learning-rate grid axis
 HAS_DENSE_PRESET=false
 HAS_COMPACT_PRESET=false
 HAS_JPEG_LIKE_PRESET=false
 HAS_NON_DEPTH_COMPACT_PRESET=false                                                                                                                         # <<< THOG dead Q/J/O/X/Y controls must not constrain pure DEPTH runs
+parse_o_depth_values() {
+  local normalized="${1//,/ }"
+  local value
+  for value in $normalized; do
+    validate_positive_uint "$value" "O_DEPTH"
+    O_DEPTH_VALUES+=("$value")
+  done
+  (( ${#O_DEPTH_VALUES[@]} > 0 )) || { echo "Invalid O_DEPTH: empty value list." >&2; exit 2; }
+}
 parse_positive_uint_values() {
-  local normalized="${1//,/ }" value
-  for value in $normalized; do validate_positive_uint "$value" "$2"; BATCH_SIZE_VALUES+=("$value"); done
-  (( ${#BATCH_SIZE_VALUES[@]} > 0 )) || { echo "Invalid BATCH_SIZE list." >&2; exit 2; }
+  local raw="$1" label="$2" array_name="$3"
+  local normalized="${raw//,/ }" value
+  for value in $normalized; do
+    validate_positive_uint "$value" "$label"
+    eval "$array_name+=(\"$value\")"
+  done
+  eval "(( \${#$array_name[@]} > 0 ))" || { echo "Invalid $label: empty value list." >&2; exit 2; }
 }
 # vvv THOG allow high-LR experiments while retaining bounded validation for each LR control
 validate_lr_code() {
@@ -431,15 +444,7 @@ parse_lr_code_values() {
   (( ${#LEARNING_RATE_CODE_VALUES[@]} > 0 )) || { echo "Invalid learning-rate code list." >&2; exit 2; }
 }
 # ^^^ THOG
-parse_o_depth_values() {
-  local normalized="${1//,/ }"
-  local value
-  for value in $normalized; do
-    validate_positive_uint "$value" "O_DEPTH"
-    O_DEPTH_VALUES+=("$value")
-  done
-  (( ${#O_DEPTH_VALUES[@]} > 0 )) || { echo "Invalid O_DEPTH: empty value list." >&2; exit 2; }
-}
+
 parse_geometry_preset_values() {
   local normalized="${1//,/ }"
   local value
@@ -483,9 +488,9 @@ parse_geometry_preset_values "$GEOMETRY_PRESET"
 parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid
 parse_mlp_hidden_compressor_values "$MLP_HIDDEN_COMPRESSOR"
 parse_mlp_hidden_group_size_values "$MLP_HIDDEN_GROUP_SIZE"
-parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE"                                                                                                  # <<< THOG parse batch grid
-parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                              # <<< THOG parse LR grid
-validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                          # <<< THOG validate min LR
+parse_positive_uint_values "$BATCH_SIZE" "BATCH_SIZE" BATCH_SIZE_VALUES                                                                             # <<< THOG parse batch grid
+parse_lr_code_values "$LEARNING_RATE_CODES"                                                                                                            # <<< THOG parse LR grid
+validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                                                                                                        # <<< THOG validate minimum LR code
 # vvv THOG validate scalar layer-dropout wrapper controls before runner construction
 [[ -z "$LAYER_DROPOUT_STRATUM_SIZE" ]] || validate_positive_uint "$LAYER_DROPOUT_STRATUM_SIZE" "STRATUM_SIZE"
 [[ -z "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] || validate_positive_uint "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" "N_ACTIVE_PER_STRATUM"
@@ -504,7 +509,7 @@ if (( ${#BASIS_FAMILY_VALUES[@]} > 1 )) && [[ "$BASIS_VERSION" != auto ]]; then
 fi
 # ^^^ THOG
 case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BACKEND: $ATTENTION_BACKEND" >&2; exit 2 ;; esac
-# vvv THOG one instrumentation selector determines backend and W&B mode; legacy instrumentation -M/-W meanings are retired
+# vvv THOG one instrumentation selector determines both backend and W&B mode; -M is now layer-dropout active-per-stratum
 case "$INSTRUMENTATION" in
   tensorboard) INSTRUMENTATION_BACKEND="tensorboard"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
   wandb) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="online" ;;
@@ -533,8 +538,8 @@ validate_nonnegative_uint "$CHECKPOINT_INTERVAL" "CHECKPOINT_INTERVAL"
 validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$FAST_DISCARD" "FAST_DISCARD"
 validate_true_false "$BYPASS_SEMANTIC_QKV_ADAPTER" "BYPASS_SEMANTIC_QKV_ADAPTER"                                                                        # <<< THOG validate wrapper-only optimisation switch
-validate_true_false "$DIRECT_FACTORISED_MLP" "DIRECT_FACTORISED_MLP"                                                                                   # <<< THOG validate renamed exact MLP option
-validate_true_false "$VECTORISE_PER_HEAD_MATERIALISATION" "VECTORISE_PER_HEAD_MATERIALISATION"                                                         # <<< THOG validate per-head option                                                                          # <<< THOG validate wrapper-only exact MLP application switch
+validate_true_false "$DIRECT_FACTORISED_MLP" "DIRECT_FACTORISED_MLP"                                                                                   # <<< THOG validate renamed exact MLP switch
+validate_true_false "$VECTORISE_PER_HEAD_MATERIALISATION" "VECTORISE_PER_HEAD_MATERIALISATION"                                                         # <<< THOG validate selectable head vectorisation
 validate_true_false "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" "DEPTH_COMPRESS_LAYER_NORM_AND_BIAS"                                                           # <<< THOG validate DEPTH vector participation switch
 validate_true_false "$DEPTH_CURVE_LOCAL_HTML" "DEPTH_CURVE_LOCAL_HTML"
 validate_true_false "$DRY_RUN" "DRY_RUN"
@@ -601,21 +606,21 @@ export THOG2_DEPTH_CURVE_RENDERER="$DEPTH_CURVE_RENDERER"
 export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
 export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"                                                                                  # <<< THOG pass wrapper-only optimisation switch into SheetGPTConfig
-export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
-export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
+export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed exact MLP switch into SheetGPTConfig
+export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass selectable head vectorisation into SheetGPTConfig
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 run_grid_point() {
   local geometry_preset_value="$1"
   local o_depth_value="$2"
-  local batch_size_value="$3"                                                                                                                             # <<< THOG batch grid coordinate
-  local learning_rate_code="$4"                                                                                                                           # <<< THOG LR grid coordinate
+  local batch_size_value="$3"                                                                                                                            # <<< THOG batch grid coordinate
+  local learning_rate_code="$4"                                                                                                                          # <<< THOG LR grid coordinate
   local basis_family_value="$5"                                                                                                                           # <<< THOG canonical basis-family grid coordinate
   local basis_tag="$6"                                                                                                                                    # <<< THOG matching basis artifact tag
   local mlp_hidden_compressor_value="$7"
   local mlp_hidden_compressor_tag="$8"
   local mlp_hidden_group_size_value="$9"
-  local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
+  local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode compact LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
   local -a compact_args compact_order_args optional_args train_args command
@@ -681,9 +686,9 @@ run_grid_point() {
 
   LOG_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
   start_time_friendly="$(date '+%H:%M  %d-%m-%y')"
-  resolved_json="$("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
-  artifact_name="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
-  log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  resolved_json="$($PYTHON_BIN -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
+  artifact_name="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
+  log_path="$(printf '%s' "$resolved_json" | $PYTHON_BIN -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
   depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
@@ -701,15 +706,15 @@ dreedle OWT train
   instrumentation:    $INSTRUMENTATION
   fast discard:       $FAST_DISCARD
   semantic adapter bypass:   $BYPASS_SEMANTIC_QKV_ADAPTER
-  direct factorised MLP:    $DIRECT_FACTORISED_MLP
+  direct factorised MLP:       $DIRECT_FACTORISED_MLP
   vectorise per-head materialisation: $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
   depth viewer:       $viewer_url
   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
   served URL:         $serve_url
-  optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
+  optimiser:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr_code=$learning_rate_code lr=$learning_rate_value min_lr_code=$MIN_LR_CODE min_lr=$min_lr_value
   shape:              $shape_summary
   orders:             $orders_summary
   batch/accum/gpus:   $batch_size_value / $GRADIENT_ACCUMULATION_STEPS / $NUM_GPUS
