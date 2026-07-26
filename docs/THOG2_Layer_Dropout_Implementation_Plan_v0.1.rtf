@@ -46,7 +46,7 @@
 \pard\ql\f0\fs26\sa180 \b 2.5 Model interface\b0 \par
 \pard\ql\f0\fs22\sa180 TrainingDenseGPT and TrainingSheetGPT shall expose the selected layer sequence to the shared executor. The all-active state shall be represented so that forward calls take the unchanged fast path.\par
 \pard\ql\f0\fs26\sa180 \b 2.6 CLI, identity, and telemetry\b0 \par
-\pard\ql\f0\fs22\sa180 Expose long-form CLI controls through run_thog2_owt.py and train_OWT.sh. Record resolved controls and derived active-layer count in run configuration/checkpoint identity and avoid run-name collisions. Do not print full selected-index lists on normal progress lines.\par
+\pard\ql\f0\fs22\sa180 Expose first-class long-form CLI controls through run_thog2_owt.py. Preserve train_OWT.sh unchanged and use its existing -- extra-argument passthrough for these controls rather than adding another shell parsing path. Record resolved controls and derived active-layer count in run configuration/checkpoint identity and avoid run-name collisions. Do not print full selected-index lists on normal progress lines.\par
 \page
 \pard\ql\f0\fs30\sa180 \b 3 Test and release gates\b0 \par
 \pard\ql\f0\fs22\sa180 3.1 Unit-test validation, exact per-stratum cardinality, no duplicates, deterministic resampling, resample cadence, and sorted nominal indices.\par
