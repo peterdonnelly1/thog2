@@ -186,7 +186,13 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
     if "trainer_config" not in payload:
         return
     stored = TrainingConfig(**payload["trainer_config"])
-    control_fields = ("batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip", "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed")
+    # vvv THOG layer-dropout execution policy must not silently change across normal resume
+    control_fields = (
+        "batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip",
+        "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed",
+        "layer_dropout_stratum_size", "layer_dropout_active_per_stratum", "layer_dropout_resample_steps",
+    )
+    # ^^^ THOG
     mismatches = [f"{name}: checkpoint={getattr(stored, name)!r}, requested={getattr(expected, name)!r}" for name in control_fields if getattr(stored, name) != getattr(expected, name)]
     if mismatches:
         raise ValueError("resume control mismatch: " + "; ".join(mismatches))
@@ -218,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=160)
     parser.add_argument("--block-size", type=int, default=256)
     parser.add_argument("--n-layer", type=int, default=72)
+    # vvv THOG public layer-dropout controls; omitted stratum/cardinality means all layers active
+    parser.add_argument("--layer-dropout-stratum-size", type=int)
+    parser.add_argument("--layer-dropout-active-per-stratum", type=int)
+    parser.add_argument("--layer-dropout-resample-steps", type=int, default=1)
+    # ^^^ THOG
     parser.add_argument("--n-head", type=int, default=12)
     parser.add_argument("--n-embd", type=int, default=768)
     parser.add_argument("--o-depth", type=int, default=16)
@@ -373,6 +384,9 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         n_layer=arguments.n_layer,
         n_head=arguments.n_head,
         n_embd=arguments.n_embd,
+        layer_dropout_stratum_size=arguments.layer_dropout_stratum_size,                                                                                   # <<< THOG CLI stratification interval
+        layer_dropout_active_per_stratum=arguments.layer_dropout_active_per_stratum,                                                                       # <<< THOG CLI exact active count per stratum
+        layer_dropout_resample_steps=arguments.layer_dropout_resample_steps,                                                                               # <<< THOG CLI selection lifetime
         o_depth=arguments.o_depth if geometry_plan is None or geometry_plan.depth_order is None else geometry_plan.depth_order,
         o_attn_d_model=arguments.o_attn_d_model,
         o_attn_qkv_per_channel=arguments.o_attn_qkv_per_channel,
@@ -442,6 +456,9 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     print(f"  wall stop:  max_wall_minutes={config.max_wall_minutes}", flush=True)                                                                           # <<< THOG show soft wall-clock budget for equal-time grids
     print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)                                # <<< THOG show bounded recovery policy before the run
     print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
+    # vvv THOG make stochastic execution depth visible without dumping selected layer indices
+    print(f"  layer dropout: strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}", flush=True)
+    # ^^^ THOG
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
         print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}", flush=True)  # <<< THOG show DEPTH vector mode
