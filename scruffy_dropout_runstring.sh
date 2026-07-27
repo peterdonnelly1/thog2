@@ -4,7 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # vvv THOG
-# Scruffy layer-dropout comparison matching the b16/A8 REVAMPV1 baseline shape.
+# Scruffy aggressive layer-dropout probe: nominal L72 DEPTH, one global stratum, 36 active layers, resampled every 5 updates.
+# b8/A16 keeps the 98,304 tokens/update regime while avoiding the b16 activation cliff on the 16GB 4090 Laptop.
 export THOG2_HOST_LABEL="${THOG2_HOST_LABEL:-scruffy_dropout}"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
 export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
@@ -18,10 +19,10 @@ export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 
 ./train_OWT.sh \
-  -g REVAMPv1_DROPOUT_LS4_LA3_LI10_b16_A8 \
+  -g REVAMPv1_DROPOUT_L72_LS72_LA36_LI5_b8_A16 \
   -n 10000 \
-  -b 16 \
-  -A 8 \
+  -b 8 \
+  -A 16 \
   -G "$THOG2_NUM_GPUS" \
   -S 4 \
   -u 1 \
@@ -32,10 +33,10 @@ export WANDB_CONSOLE=off
   -y adamw \
   -c 90 \
   -f 9 \
-  -L 32 \
-  -s 4 \
-  -M 3 \
-  --layer-dropout-resample-steps 10 \
+  -L 72 \
+  -s 72 \
+  -M 36 \
+  --layer-dropout-resample-steps 5 \
   -H 16 \
   -D 1024 \
   -C 768 \
