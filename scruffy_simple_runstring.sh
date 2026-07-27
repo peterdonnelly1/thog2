@@ -86,7 +86,7 @@ export WANDB_CONSOLE=off
 
 
 ./train_OWT.sh \
-  -g REVAMPv1 \
+  -g DREEDLE_BEST_RECAP \
   -n 10000 \
   -b 16 \
   -A 8 \
@@ -100,12 +100,11 @@ export WANDB_CONSOLE=off
   -y adamw \
   -c 90 \
   -f 9 \
-  -L 48 \
+  -L 32 \
   -H 16 \
   -D 1024 \
   -C 768 \
   -P 16 \
-  -Y 64 \
   -E true \
   -r depth_scaled \
   -z dof_implied_depth \

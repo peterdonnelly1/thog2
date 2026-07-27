@@ -97,7 +97,7 @@ export WANDB_CONSOLE=off
   -k 1000 \
   -c 90 \
   -f 9 \
-  -L 64 \
+  -L 32 \
   -H 16 \
   -D 1024 \
   -C 768 \
