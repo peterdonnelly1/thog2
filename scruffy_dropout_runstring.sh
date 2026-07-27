@@ -39,6 +39,7 @@ export WANDB_CONSOLE=off
   -H 16 \
   -D 1024 \
   -C 768 \
+  -P 16 \
   -Y 64 \
   -E true \
   -r depth_scaled \
