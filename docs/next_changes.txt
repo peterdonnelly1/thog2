@@ -1,0 +1,51 @@
+Thx
+
+1
+Please change the default of DEPTH_CURVE_PLOTS to none
+
+2
+make all of these align by movimng the second columns out to align with   vectorise per-head materialisation: true
+
+  start time:         17:42  13-07-26
+  artifact:           260713-1742_WAIROA_CHEBY_MLP_BLOCK_scruffy__n_10000_b_64_LR_100_d_owt_w_100_k_1000_A_1_L_144_H_32_D_1280_C_256_P_32_Q_256_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12
+  experiment:         WAIROA
+  model/preset/basis: spectral / mlp_block / chebyshev
+  backend/dtype:      flash2 / bfloat16
+  instrumentation:    wandb
+  fast discard:       true
+  semantic adapter bypass:   true
+  direct factorised MLP:    true
+  vectorise per-head materialisation: true
+  depth curves:       none  (sample elements: 16384, renderer: plotly, local html: true)
+  depth viewer:       file:///home/peter/git/thog2/logs/260713-1742_WAIROA_CHEBY_MLP_BLOCK_scruffy__n_10000_b_64_LR_100_d_owt_w_100_k_1000_A_1_L_144_H_32_D_1280_C_256_P_32_Q_256_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12/depth_curves/index.html
+  serve viewer:       (cd logs/260713-1742_WAIROA_CHEBY_MLP_BLOCK_scruffy__n_10000_b_64_LR_100_d_owt_w_100_k_1000_A_1_L_144_H_32_D_1280_C_256_P_32_Q_256_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12/depth_curves && python -m http.server 8787)
+  served URL:         http://localhost:8787/
+  optimizer:          lr=100e-5 (LR_100) min_lr=10e-5
+  schedule:           steps=10000 eval_every=250 eval_iters=1 log_every=10 ckpt_every=1000 warmup=100
+  shape:              L144 H32 D1280 C256
+  orders:             P32 Q256 J6 O6 X64 Y256
+  batch/accum/gpus:   64 / 1 / 1
+  log:                file:///home/peter/git/thog2/logs/260713-1742_WAIROA_CHEBY_MLP_BLOCK_scruffy__n_10000_b_64_LR_100_d_owt_w_100_k_1000_A_1_L_144_H_32_D_1280_C_256_P_32_Q_256_J_6_O_6_X_64_Y_256_r_depth_scaled_z_dof_implied_depth_S_12/train.log
+
+
+
+3
+Possible new compressors
+db2 or a low-order Alpert multiwavelet.
+Two-stage block-local orthogonal transforms with a permutation between them.
+Random local orthogonal blocks with the same support pattern.
+
+4
+overlap dct parms
+
+5
+JACOBI
+varied coordinates
+
+6
+Make it so that can do BOTH tensorboard and wandb
+
+#    -I INSTRUMENTATION                             tensorboard | wandb | wandb_offline | none
+
+7
+Trap Ctl-C for wandb
