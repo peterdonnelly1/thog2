@@ -71,13 +71,24 @@ set -euo pipefail
 #    -j LOG_ROOT
 #    -R RESULT_ROOT
 
-# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
-export CUDA_VISIBLE_DEVICES="1"
-export THOG2_HOST_LABEL="dreedle"
+# vvv THOG
+# Dreedle host profile consumed by the canonical train_OWT.sh wrapper.
+# THOG2_DREEDLE_GPU is the single physical-GPU selector. CUDA renumbers that visible GPU to logical cuda:0.
+export THOG2_DREEDLE_GPU="${THOG2_DREEDLE_GPU:-1}"
+export THOG2_DREEDLE_POWER_LIMIT_W="${THOG2_DREEDLE_POWER_LIMIT_W:-220}"
+export THOG2_DREEDLE_APPLY_POWER_LIMIT="${THOG2_DREEDLE_APPLY_POWER_LIMIT:-true}"
+
+export CUDA_VISIBLE_DEVICES="$THOG2_DREEDLE_GPU"
+export THOG2_HOST_LABEL="${THOG2_HOST_LABEL:-dreedle_gpu${THOG2_DREEDLE_GPU}_pl${THOG2_DREEDLE_POWER_LIMIT_W}}"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
 export THOG2_DTYPE="${THOG2_DTYPE:-float16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-sdpa}"
+
+if [[ "$THOG2_DREEDLE_APPLY_POWER_LIMIT" == "true" && "$THOG2_DREEDLE_POWER_LIMIT_W" != "0" ]]; then
+  echo "Applying Dreedle power limit: physical GPU ${THOG2_DREEDLE_GPU} -> ${THOG2_DREEDLE_POWER_LIMIT_W}W"
+  sudo nvidia-smi -i "$THOG2_DREEDLE_GPU" -pl "$THOG2_DREEDLE_POWER_LIMIT_W"
+fi
 # ^^^ THOG
 
 python -m run_thog2_owt --print-geometry-registry
@@ -87,7 +98,7 @@ export WANDB_CONSOLE=off
 
 
 ./train_OWT.sh \
-  -g REVAMPv1_GPU1 \
+  -g REVAMPv1_DREEDLE_GPU${THOG2_DREEDLE_GPU}_PL${THOG2_DREEDLE_POWER_LIMIT_W} \
   -n 10000 \
   -b 16 \
   -A 8 \
