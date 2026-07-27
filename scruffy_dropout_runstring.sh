@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 # vvv THOG
 # Scruffy layer-dropout experiment based on the stable REVAMPV1 L32 DEPTH run.
+# Scruffy has 16GB VRAM, so use b8/A16 to keep the same 98,304 tokens/update as the Dreedle b16/A8 baseline.
 export THOG2_HOST_LABEL="${THOG2_HOST_LABEL:-scruffy_dropout}"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
 export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
@@ -18,10 +19,10 @@ export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 
 ./train_OWT.sh \
-  -g REVAMPv1_DROPOUT_LS4_LA3_LI10 \
+  -g REVAMPv1_DROPOUT_LS4_LA3_LI10_b8_A16 \
   -n 10000 \
-  -b 16 \
-  -A 8 \
+  -b 8 \
+  -A 16 \
   -G "$THOG2_NUM_GPUS" \
   -S 4 \
   -u 1 \
