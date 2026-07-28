@@ -461,14 +461,22 @@ class WandbTelemetry:
         if self.writer is not None:
             self.writer.flush()
 
-    def finish(self) -> None:
+    # vvv THOG allow the runner to tell W&B that an intentional Ctrl-C finished cleanly
+    def finish(self, *, exit_code: Optional[int] = None) -> None:
         if self.run is not None:
-            self.run.finish()
+            if exit_code is None:
+                self.run.finish()
+            else:
+                try:
+                    self.run.finish(exit_code=exit_code)
+                except TypeError:
+                    self.run.finish()
             self.run = None
         if self.writer is not None:
             self.writer.flush()
             self.writer.close()
             self.writer = None
+    # ^^^ THOG
 
 
 def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:

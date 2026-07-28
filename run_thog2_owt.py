@@ -507,6 +507,9 @@ def main() -> int:
     canonical = config.canonical_dict(world_size=world_size)
     source = source_identity()
     telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
+    # vvv THOG preserve shell interrupt status while allowing W&B to record a clean intentional stop
+    telemetry_exit_code: Optional[int] = None
+    # ^^^ THOG
     try:
         if trainer.distributed.is_primary:
             telemetry.start()
@@ -526,10 +529,17 @@ def main() -> int:
             telemetry.add_final_result(result)
             print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
         return 0
+    # vvv THOG convert Ctrl-C into a clean telemetry finish while retaining conventional process status 130
+    except KeyboardInterrupt:
+        telemetry_exit_code = 0
+        if trainer.distributed.is_primary:
+            print("interrupted by Ctrl-C; finishing telemetry cleanly", flush=True)
+        return 130
     finally:
         if rank == 0:
-            telemetry.finish()
+            telemetry.finish(exit_code=telemetry_exit_code)
         trainer.close()
+    # ^^^ THOG
 
 
 if __name__ == "__main__":
