@@ -88,9 +88,20 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
     depth_order = int(model.config.depth_order)
     for metadata in model.trajectory.metadata:
         coefficient = model.trajectory.coefficients[metadata.name].detach().float()
-        depth_axis, order_axes = _coefficient_axis_plan(coefficient, depth_order)
-        depth_fractions = _axis_energy_fraction(coefficient, depth_axis)
-        row_fractions = _combined_axis_energy_fraction(coefficient, order_axes)
+        # vvv THOG unsupported coefficient layouts still report generic utilization instead of aborting a completed run
+        # depth_axis, order_axes = _coefficient_axis_plan(coefficient, depth_order)
+        # depth_fractions = _axis_energy_fraction(coefficient, depth_axis)
+        # row_fractions = _combined_axis_energy_fraction(coefficient, order_axes)
+        order_axis_diagnostics_error: Optional[str] = None
+        try:
+            depth_axis, order_axes = _coefficient_axis_plan(coefficient, depth_order)
+            depth_fractions = _axis_energy_fraction(coefficient, depth_axis)
+            row_fractions = _combined_axis_energy_fraction(coefficient, order_axes)
+        except ValueError as error:
+            depth_fractions = tuple()
+            row_fractions = tuple()
+            order_axis_diagnostics_error = str(error)
+        # ^^^ THOG
         rows[metadata.name] = {
             "semantic_type": metadata.semantic_type,
             "shape": list(coefficient.shape),
@@ -105,6 +116,15 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
             "high_depth_order_energy_fraction": high_order_fraction(depth_fractions),
             "high_row_order_energy_fraction": high_order_fraction(row_fractions),
         }
+        # vvv THOG never encode an unsupported order-axis diagnostic as a misleading zero-energy result
+        rows[metadata.name]["order_axis_diagnostics_supported"] = order_axis_diagnostics_error is None
+        if order_axis_diagnostics_error is not None:
+            rows[metadata.name]["depth_order_energy_fraction"] = None
+            rows[metadata.name]["row_order_energy_fraction"] = None
+            rows[metadata.name]["high_depth_order_energy_fraction"] = None
+            rows[metadata.name]["high_row_order_energy_fraction"] = None
+            rows[metadata.name]["order_axis_diagnostics_error"] = order_axis_diagnostics_error
+        # ^^^ THOG
     return rows
 
 
