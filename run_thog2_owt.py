@@ -444,6 +444,10 @@ def resolved_payload(config: OwtRunConfig, *, world_size: int, log_timestamp: Op
 
 
 # vvv THOG print resolved model parameters and execution options immediately before training
+def _print_model_option(label: str, value: str) -> None:
+    print(f"  {label:<24} {value}", flush=True)
+
+
 def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer) -> None:
     report = trainer.parameter_report
     persistent = int(report["persistent_parameters"])
@@ -451,17 +455,15 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     sheet_coefficients = int(report["sheet_coefficients"])
     compression = (dense_equivalent / persistent) if persistent else 0.0
     print("model parameters and options", flush=True)
-    print(f"  parameters: persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x", flush=True)
-    print(f"  optimiser:  lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}", flush=True)
-    print(f"  wall stop:  max_wall_minutes={config.max_wall_minutes}", flush=True)                                                                           # <<< THOG show soft wall-clock budget for equal-time grids
-    print(f"  non-finite: policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}", flush=True)                                # <<< THOG show bounded recovery policy before the run
-    print(f"  batches:    micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}", flush=True)
-    # vvv THOG make stochastic execution depth visible without dumping selected layer indices
-    print(f"  layer dropout: strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}", flush=True)
-    # ^^^ THOG
+    _print_model_option("parameters:", f"persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x")
+    _print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
+    _print_model_option("wall stop:", f"max_wall_minutes={config.max_wall_minutes}")
+    _print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
+    _print_model_option("batches:", f"micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}")
+    _print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
-        print(f"  execution:  semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}", flush=True)  # <<< THOG show DEPTH vector mode
+        _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
     print(flush=True)
 # ^^^ THOG
 
