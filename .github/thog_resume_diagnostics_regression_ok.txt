@@ -1,1 +1,0 @@
-THOG resume diagnostics regression checks passed
