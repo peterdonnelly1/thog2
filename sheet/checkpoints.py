@@ -57,6 +57,38 @@ def restore_rng_state(state: Mapping[str, Any]) -> None:
         torch.cuda.set_rng_state_all(state["torch_cuda"])
 
 
+# vvv THOG geometry option spelling/source is provenance; checkpoint identity is the resolved semantic plan
+_GEOMETRY_PROVENANCE_FIELDS = frozenset({"parsed_options"})
+
+
+def _semantic_geometry_plan(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    return {
+        key: nested_value
+        for key, nested_value in value.items()
+        if key not in _GEOMETRY_PROVENANCE_FIELDS
+    }
+
+
+def _semantic_compatibility_value(name: str, value: Any) -> Any:
+    if name == "resolved_geometry_plan":
+        return _semantic_geometry_plan(value)
+    return value
+
+
+def _semantic_compact_identity(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    normalized = dict(value)
+    if "resolved_geometry_plan" in normalized:
+        normalized["resolved_geometry_plan"] = _semantic_geometry_plan(
+            normalized["resolved_geometry_plan"]
+        )
+    return normalized
+# ^^^ THOG
+
+
 def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig) -> None:
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise ValueError(
@@ -67,14 +99,28 @@ def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig)
     expected_signature = expected.compatibility_signature()
     mismatches = []
     for name in MODEL_COMPATIBILITY_FIELDS:
-        if checkpoint_signature.get(name) != expected_signature[name]:
+        # if checkpoint_signature.get(name) != expected_signature[name]:
+        # vvv THOG compare semantic geometry while retaining strict compatibility for every other model field
+        checkpoint_value = _semantic_compatibility_value(
+            name,
+            checkpoint_signature.get(name),
+        )
+        expected_value = _semantic_compatibility_value(
+            name,
+            expected_signature[name],
+        )
+        if checkpoint_value != expected_value:
+        # ^^^ THOG
             mismatches.append(
                 f"{name}: checkpoint={checkpoint_signature.get(name)!r}, "
                 f"expected={expected_signature[name]!r}"
             )
     checkpoint_identity = payload.get("compact_identity")
     expected_identity = expected.compact_identity_metadata()
-    if checkpoint_identity != expected_identity:
+    # if checkpoint_identity != expected_identity:
+    # vvv THOG compact identity follows the same semantic geometry rule as the compatibility signature
+    if _semantic_compact_identity(checkpoint_identity) != _semantic_compact_identity(expected_identity):
+    # ^^^ THOG
         mismatches.append(
             "compact_identity: checkpoint does not match expected resolved compact metadata"
         )
