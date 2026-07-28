@@ -537,14 +537,21 @@ def format_geometry_registry() -> str:
         "",
         "selectors",
         "---------",
-        f"{'selector':40} {'type':10} {'depth ok':8} {'generic mat':12} {'legacy':7} axes / uncompressed axes",
+        "depth-compatible: selector may accompany DEPTH without implying a 3-D BLOCK/BLOCK_SET field",
+        "materializer:     generic systematic materializer exists for this exact selector",
+        "legacy-only:      compatibility-oriented entry rather than the systematic geometry path",
+        "",
+        f"{'selector':40} {'type':10} {'depth-compatible':16} {'materializer':12} {'legacy-only':11} {'compressed axes':36} uncompressed axes",
     ]
+    # vvv THOG expose compressed and uncompressed axes independently and make status columns self-explanatory
     for entry in GEOMETRY_REGISTRY.values():
-        implemented = "yes" if entry.implemented else "no"
-        legacy = "yes" if entry.legacy_only else "no"
-        axes = " × ".join(entry.compressed_axes)
-        uncompressed = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
-        lines.append(f"{entry.selector:40} {entry.implied_type:10} {str(entry.permits_depth_companion):8} {implemented:12} {legacy:7} {axes}; uncompressed={uncompressed}")
+        depth_compatible = "yes" if entry.permits_depth_companion else "no"
+        materializer = "yes" if entry.implemented else "no"
+        legacy_only = "yes" if entry.legacy_only else "no"
+        compressed_axes = " × ".join(entry.compressed_axes)
+        uncompressed_axes = " × ".join(entry.independent_indices) if entry.independent_indices else "none"
+        lines.append(f"{entry.selector:40} {entry.implied_type:10} {depth_compatible:16} {materializer:12} {legacy_only:11} {compressed_axes:36} {uncompressed_axes}")
+    # ^^^ THOG
     lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':30} {'registered':12} {'legacy':7} {'group':7} notes"])
     for name, capability in COMPRESSOR_REGISTRY.items():
         lines.append(f"{name:18} {','.join(capability.element_types):30} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
