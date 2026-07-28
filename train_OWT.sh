@@ -702,9 +702,9 @@ scruffy OWT train
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
   fast discard:       $FAST_DISCARD
-  semantic adapter bypass:   $BYPASS_SEMANTIC_QKV_ADAPTER
-  direct factorised MLP:    $DIRECT_FACTORISED_MLP
-  vectorise per-head materialisation: $VECTORISE_PER_HEAD_MATERIALISATION
+  semantic adapter bypass:                $BYPASS_SEMANTIC_QKV_ADAPTER
+  direct factorised MLP:                  $DIRECT_FACTORISED_MLP
+  vectorise per-head materialisation:     $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
   depth viewer:       $viewer_url
