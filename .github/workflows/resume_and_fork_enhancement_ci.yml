@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - master
+      - RESUME_AND_FORK_ENHANCEMENT
     types:
       - opened
       - synchronize
@@ -48,7 +49,7 @@ jobs:
       - name: Check shell syntax
         run: |
           set -euo pipefail
-          bash -n train_OWT.sh train_OWT_core.sh
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh
           bash -n scruffy_simple_runstring.sh dreedle_simple_runstring.sh scruffy_general_runstring.sh
 
       - name: Run focused lifecycle and retained resume regressions
@@ -58,6 +59,7 @@ jobs:
           set -euo pipefail
           pytest -q \
             tests/test_resume_and_fork_enhancement.py \
+            tests/test_resume_and_fork_wandb.py \
             tests/test_resume_identity_and_throughput.py \
             tests/test_sheet_stage6_runner_scripts.py
 
