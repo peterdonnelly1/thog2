@@ -138,7 +138,7 @@ Schedule/logging:
   -l LOG_INTERVAL=${LOG_INTERVAL}
   -w WARMUP_ITERS=${WARMUP_ITERS}
   -k CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL}     0 disables periodic saves
-  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | wandb_offline | none
+  -I INSTRUMENTATION=${INSTRUMENTATION}             tensorboard | wandb | both | wandb_offline | none
   -F DEPTH_CURVE_PLOTS=${DEPTH_CURVE_PLOTS}         none | final | eval
   -N DEPTH_CURVE_SAMPLE_ELEMENTS=${DEPTH_CURVE_SAMPLE_ELEMENTS}
   -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
@@ -510,9 +510,10 @@ case "$ATTENTION_BACKEND" in auto|flash2|sdpa|math) ;; *) echo "Bad ATTENTION_BA
 case "$INSTRUMENTATION" in
   tensorboard) INSTRUMENTATION_BACKEND="tensorboard"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
   wandb) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="online" ;;
+  both) INSTRUMENTATION_BACKEND="both"; WANDB_FLAG="--wandb"; WANDB_MODE="online" ;;
   wandb_offline) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="offline" ;;
   none) INSTRUMENTATION_BACKEND="none"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled" ;;
-  *) echo "INSTRUMENTATION must be tensorboard, wandb, wandb_offline, or none." >&2; exit 2 ;;
+  *) echo "INSTRUMENTATION must be tensorboard, wandb, both, wandb_offline, or none." >&2; exit 2 ;;
 esac
 # ^^^ THOG
 case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must be none, final, or eval." >&2; exit 2 ;; esac

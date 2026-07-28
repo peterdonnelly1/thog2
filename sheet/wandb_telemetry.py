@@ -25,7 +25,9 @@ from .stage6_source import (
 )
 
 
-INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "none")
+# vvv THOG simultaneous TensorBoard and W&B is a first-class instrumentation mode
+INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "both", "none")
+# ^^^ THOG
 _BYTES_PER_GIB = float(1024 ** 3)
 
 
@@ -59,7 +61,7 @@ def _selected_backend() -> str:
     if selected in INSTRUMENTATION_BACKENDS:
         return selected
     raise ValueError(
-        "THOG2_INSTRUMENTATION must be tensorboard, wandb, or none; "
+        "THOG2_INSTRUMENTATION must be tensorboard, wandb, both, or none; "
         f"got {selected!r}"
     )
 
@@ -281,13 +283,20 @@ class WandbTelemetry:
         self.writer: Optional[Any] = None
         self.sampler = _CudaSampler(str(self.config.get("device", "cuda")))
 
+    # vvv THOG start both telemetry sinks when requested while preserving existing single-sink behaviour
     def start(self) -> None:
         if not self.enabled or self.backend == "none":
+            return
+        if self.backend == "both":
+            self._start_tensorboard()
+            if self.run is None:
+                self._start_wandb()
             return
         if self.backend == "wandb":
             self._start_wandb()
             return
         self._start_tensorboard()
+    # ^^^ THOG
 
     def _start_wandb(self) -> None:
         if self.run is not None:
