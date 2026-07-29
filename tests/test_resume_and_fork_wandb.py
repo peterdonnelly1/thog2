@@ -5,7 +5,7 @@ import os
 import unittest
 from pathlib import Path
 
-from run_thog2_lifecycle import _configure_instrumentation_environment
+from run_thog2_lifecycle import _configure_instrumentation_environment, _wandb_continue_policy, build_parser
 from sheet.run_config import OwtRunConfig
 
 
@@ -24,7 +24,7 @@ class ResumeAndForkWandbTests(unittest.TestCase):
                 os.environ[name] = value
 
     @staticmethod
-    def config() -> OwtRunConfig:
+    def config(*, wandb_mode: str = "online") -> OwtRunConfig:
         return OwtRunConfig(
             model_type="dense",
             run_mode="resume",
@@ -35,7 +35,7 @@ class ResumeAndForkWandbTests(unittest.TestCase):
             device="cpu",
             dtype="float32",
             wandb_enabled=True,
-            wandb_mode="online",
+            wandb_mode=wandb_mode,
         )
 
     def test_resume_continuation_sets_strict_same_id_environment(self) -> None:
@@ -53,6 +53,28 @@ class ResumeAndForkWandbTests(unittest.TestCase):
         self.assertEqual(os.environ["WANDB_RUN_ID"], "abc123")
         self.assertEqual(os.environ["WANDB_RESUME"], "must")
         self.assertEqual(os.environ["WANDB_MODE"], "online")
+
+    def test_offline_resume_continuation_reuses_id_and_preserves_offline_mode(self) -> None:
+        context = {
+            "backend": "wandb",
+            "mode": "resume",
+            "config": self.config(wandb_mode="offline"),
+            "wandb_continue_run": True,
+            "lifecycle": {
+                "wandb_run_id": "offline123",
+                "tensorboard_dir": str(Path("curves") / "run"),
+            },
+        }
+        _configure_instrumentation_environment(context)
+        self.assertEqual(os.environ["WANDB_RUN_ID"], "offline123")
+        self.assertEqual(os.environ["WANDB_RESUME"], "must")
+        self.assertEqual(os.environ["WANDB_MODE"], "offline")
+
+    def test_combined_backend_uses_resume_default_continuation(self) -> None:
+        parser = build_parser()
+        arguments = parser.parse_args(["--resume", "260729-0100"])
+        self.assertTrue(_wandb_continue_policy(arguments, "resume", "both"))
+        self.assertFalse(_wandb_continue_policy(arguments, "fork", "both"))
 
     def test_resume_continuation_without_id_fails_before_training(self) -> None:
         context = {
