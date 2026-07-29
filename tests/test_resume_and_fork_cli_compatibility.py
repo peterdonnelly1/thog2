@@ -17,13 +17,34 @@ from sheet.wandb_telemetry import _evaluation_metrics, _final_metrics, _training
 
 
 class ResumeAndForkCliCompatibilityTests(unittest.TestCase):
+    @staticmethod
+    def _preserved_wrapper_text() -> str:
+        return (Path(__file__).resolve().parents[1] / "train_OWT_core.sh").read_text(encoding="utf-8")
+
     def test_lifecycle_short_option_coverage_matches_preserved_master_wrapper(self) -> None:
-        wrapper = (Path(__file__).resolve().parents[1] / "train_OWT_core.sh").read_text(encoding="utf-8")
+        wrapper = self._preserved_wrapper_text()
         match = re.search(r'while getopts "(?P<spec>:[^"]+)" option; do', wrapper)
         self.assertIsNotNone(match)
         spec = match.group("spec")[1:]
         master_options = {character for character in spec if character != ":"}
         self.assertEqual(master_options, lifecycle_cli._SHORT_VALUE_OPTIONS | {"h"})
+
+    def test_lifecycle_parser_accepts_all_preserved_master_long_controls(self) -> None:
+        wrapper = self._preserved_wrapper_text()
+        start = wrapper.index("OPTIMIZER_FILTERED_ARGS=()")
+        end = wrapper.index("while getopts", start)
+        master_preparser = wrapper[start:end]
+        master_long_options = set(re.findall(r"--[a-z][a-z0-9-]+", master_preparser))
+        lifecycle_long_options = {
+            option
+            for action in run_thog2_owt._lifecycle.build_parser()._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+        self.assertTrue(
+            master_long_options <= lifecycle_long_options,
+            f"lifecycle parser is missing preserved wrapper long options: {sorted(master_long_options - lifecycle_long_options)}",
+        )
 
     def test_established_eval_and_checkpoint_short_options_reach_lifecycle_parser(self) -> None:
         normalized = normalize_lifecycle_wrapper_argv(
