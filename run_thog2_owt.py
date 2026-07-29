@@ -15,6 +15,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
+from sheet.interactive_interrupt import interactive_interrupt_checkpoint                                                                                   # <<< THOG turn the first Ctrl-C into a safe-boundary checkpoint choice
 from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
@@ -174,7 +175,8 @@ def _call_lifecycle_main(argv: Sequence[str], environment: Optional[Mapping[str,
                 os.environ[name] = value
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+# vvv THOG keep all established dispatch paths inside the safe interactive Ctrl-C guard
+def _main_without_interrupt_checkpoint(argv: Optional[Sequence[str]] = None) -> int:
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     if _enhanced_lifecycle_requested(actual_argv):
         try:
@@ -190,6 +192,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # process-global sys.argv.
         return _call_lifecycle_main(actual_argv)
     return _call_preserved_core_main()
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    with interactive_interrupt_checkpoint():
+        return _main_without_interrupt_checkpoint(argv)
+# ^^^ THOG
 
 
 if __name__ == "__main__":
