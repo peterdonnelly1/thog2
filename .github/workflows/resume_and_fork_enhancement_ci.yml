@@ -60,6 +60,7 @@ jobs:
           pytest -q \
             tests/test_resume_and_fork_enhancement.py \
             tests/test_resume_and_fork_wandb.py \
+            tests/test_resume_and_fork_wandb_lineage.py \
             tests/test_resume_identity_and_throughput.py \
             tests/test_sheet_stage6_runner_scripts.py
 
@@ -79,10 +80,14 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet numpy pytest tiktoken tensorboard wandb matplotlib plotly
           python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Run real fresh resume no-brainer resume fork chain
+      - name: Run real fresh resume no-brainer resume fork chain and public shell shortcut
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_resume_and_fork_cpu_integration.py -vv
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_resume_and_fork_cpu_integration.py \
+            tests/test_resume_and_fork_shell_integration.py -vv
 
   cpu-ddp-lifecycle:
     runs-on: ubuntu-latest
@@ -125,7 +130,7 @@ jobs:
             --data-dir "$root/data" --checkpoint-root "$root/checkpoints" \
             --log-root "$root/logs" --result-root "$root/results" --wandb-root "$root/wandb" \
             --instrumentation none --no-wandb --device cpu --dtype float32 \
-            --batch-size 1 --gradient-accumulation-steps 2 --block-size 8 \
+            --batch-size 2 --gradient-accumulation-steps 2 --block-size 8 \
             --n-layer 1 --n-head 1 --n-embd 8 --warmup-iters 0 \
             --learning-rate 0.001 --min-lr 0.0001 --eval-interval 1 --eval-iters 1 \
             --log-interval 1 --checkpoint-interval 1 --residual-init-depth-source true_layer_depth \
