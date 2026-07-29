@@ -69,7 +69,7 @@ class ResumeAndForkDdpIntegrationTests(unittest.TestCase):
                 "--no-wandb",
                 "--device", "cpu",
                 "--dtype", "float32",
-                "--batch-size", "1",
+                "--batch-size", "2",
                 "--gradient-accumulation-steps", "2",
                 "--block-size", "8",
                 "--n-layer", "1",
