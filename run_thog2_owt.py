@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
+from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
@@ -34,6 +35,40 @@ _lifecycle._ARGUMENT_TO_CONFIG.update(
         "max_nonfinite_update_skips": "max_nonfinite_update_skips",
     }
 )
+# ^^^ THOG
+
+
+# vvv THOG align lifecycle schedule values with the established model-options console column
+
+def _print_lifecycle_schedule(
+    mode: str,
+    lifecycle: Mapping[str, Any],
+    training_config: Any,
+    completed_updates: int,
+) -> None:
+    first_lr = _lifecycle.learning_rate_for_lifecycle(training_config, lifecycle, completed_updates)
+
+    def row(label: str, value: Any) -> None:
+        print(f"  {label:<24} {value}", flush=True)
+
+    print(flush=True)
+    print(f"{mode} schedule", flush=True)
+    row("completed steps:", completed_updates)
+    row("total steps:", int(lifecycle["target_updates"]))
+    row("remaining steps:", int(lifecycle["target_updates"]) - completed_updates)
+    phases = lifecycle.get("lr_phases", [])
+    active_index = int(lifecycle.get("active_lr_phase_index", max(0, len(phases) - 1)))
+    active = phases[active_index] if phases else {"phase_type": _lifecycle.COSINE_SCHEDULE}
+    row("schedule:", active.get("phase_type", _lifecycle.COSINE_SCHEDULE))
+    if active.get("phase_type") == _lifecycle.RESTART_COSINE_SCHEDULE:
+        row("active phase end:", int(active["phase_end_update"]))
+    else:
+        row("original decay end:", training_config.decay_updates)
+    row(f"first {mode} step LR:", f"{first_lr:.3e}")
+    print(flush=True)
+
+
+_lifecycle._print_schedule_startup = _print_lifecycle_schedule
 _lifecycle_main = _lifecycle.main
 # ^^^ THOG
 
@@ -43,6 +78,11 @@ _LIFECYCLE_ENVIRONMENT_KEYS = (
     "THOG2_CURVE_ROOT",
     "THOG2_OPTIMIZER",
     "THOG2_OPTIMIZER_MOMENTUM",
+    "THOG2_DEPTH_CURVE_PLOTS",
+    "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS",
+    "THOG2_DEPTH_CURVE_RENDERER",
+    "THOG2_DEPTH_CURVE_LOCAL_HTML",
+    "THOG2_FAST_DISCARD",
     "WANDB_MODE",
     "WANDB_RUN_ID",
     "WANDB_RESUME",
@@ -120,9 +160,11 @@ def _call_preserved_core_main() -> int:
             setattr(_core, name, value)
 
 
-def _call_lifecycle_main(argv: Sequence[str]) -> int:
+def _call_lifecycle_main(argv: Sequence[str], environment: Optional[Mapping[str, str]] = None) -> int:
     saved_environment = {name: os.environ.get(name) for name in _LIFECYCLE_ENVIRONMENT_KEYS}
     try:
+        for name, value in (environment or {}).items():
+            os.environ[name] = value
         return int(_lifecycle_main(list(argv)))
     finally:
         for name, value in saved_environment.items():
@@ -135,7 +177,12 @@ def _call_lifecycle_main(argv: Sequence[str]) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     if _enhanced_lifecycle_requested(actual_argv):
-        return _call_lifecycle_main(actual_argv)
+        try:
+            normalized = normalize_lifecycle_wrapper_argv(actual_argv)
+        except ValueError as error:
+            print(f"train_OWT.sh: {error}", file=sys.stderr)
+            return 2
+        return _call_lifecycle_main(normalized.argv, normalized.environment)
     if argv is not None:
         # The preserved core main reads sys.argv directly. Programmatic callers
         # supplying argv use the lifecycle parser even for fresh mode so the
