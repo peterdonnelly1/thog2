@@ -111,23 +111,24 @@ if (( world_size > 1 )); then
 fi
 
 mkdir -p "$(dirname "$log_path")"
-startup_summary="$(cat <<EOF_RUN
-THOG2 lifecycle session
-  mode:               $run_mode
-  session:            $session_id
-  artifact:           $artifact_name
-  target updates:     $target_updates
-  world size:         $world_size
-  log:                file://$(realpath -m "$log_path")
-EOF_RUN
+# vvv THOG align lifecycle summary values with the model-options value column and visually separate the heading
+startup_summary="$(
+  printf '\nTHOG2 lifecycle session\n'
+  printf '  %-24s %s\n' 'mode:' "$run_mode"
+  printf '  %-24s %s\n' 'session:' "$session_id"
+  printf '  %-24s %s\n' 'artifact:' "$artifact_name"
+  printf '  %-24s %s\n' 'target updates:' "$target_updates"
+  printf '  %-24s %s\n' 'world size:' "$world_size"
+  printf '  %-24s %s\n' 'log:' "file://$(realpath -m "$log_path")"
 )"
 printf '%s\n' "$startup_summary"
-printf '  command:            '; printf '%q ' "${command[@]}"; printf '\n\n'
+printf '  %-24s ' 'command:'; printf '%q ' "${command[@]}"; printf '\n\n'
+# ^^^ THOG
 if [[ "$append_log" == true ]]; then
   {
     printf '\n%s\n' "============================================================"
     printf '%s\n' "$startup_summary"
-    printf '  command:            '; printf '%q ' "${command[@]}"; printf '\n'
+    printf '  %-24s ' 'command:'; printf '%q ' "${command[@]}"; printf '\n'
     printf '%s\n\n' "============================================================"
   } >> "$log_path"
 fi
