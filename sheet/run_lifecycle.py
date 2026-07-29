@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from dataclasses import asdict
@@ -10,6 +11,11 @@ from typing import Any, Dict, Mapping, Optional
 
 LIFECYCLE_SCHEMA_VERSION = 2
 _START_LABEL_PATTERN = re.compile(r"^\d{6}-\d{4}$")
+
+
+def _new_session_id() -> str:
+    requested = os.environ.get("THOG2_LIFECYCLE_SESSION_ID", "").strip()                                                                               # <<< THOG wrapper preflight and execution may share one explicit process-session identity
+    return requested or str(uuid.uuid4())
 
 
 def validate_start_label(value: str) -> str:
@@ -64,7 +70,7 @@ def _base_lifecycle(
     lr_phase: Mapping[str, Any],
 ) -> Dict[str, Any]:
     logical_run_id = str(uuid.uuid4())
-    session_id = str(uuid.uuid4())
+    session_id = _new_session_id()                                                                                                                       # <<< THOG stable across wrapper preflight and the real process when explicitly supplied
     run_start_label = config.run_start_label or start_label_from_artifact_name(artifact_name)
     lifecycle = {
         "lifecycle_schema_version": LIFECYCLE_SCHEMA_VERSION,
@@ -148,7 +154,7 @@ def resume_lifecycle(
 ) -> Dict[str, Any]:
     lifecycle = dict(parent)
     lifecycle["creation_mode"] = "resume"
-    lifecycle["session_id"] = str(uuid.uuid4())
+    lifecycle["session_id"] = _new_session_id()                                                                                                         # <<< THOG wrapper preflight resolves the same session identity later persisted by execution
     lifecycle["run_config"] = asdict(config)
     lifecycle["instrumentation_backend"] = instrumentation_backend
     lifecycle["resume_starting_completed_updates"] = int(starting_completed_updates)
@@ -195,7 +201,7 @@ def fork_lifecycle(
         "wandb_run_id": parent_wandb_run_id,                                                                                                            # <<< THOG lineage records the parent's exact W&B identity when available
     }
     logical_run_id = str(uuid.uuid4())
-    session_id = str(uuid.uuid4())
+    session_id = _new_session_id()                                                                                                                       # <<< THOG fork preflight and execution share the process-session identity without sharing logical-run identity
     root_start_label = parent.get("root_start_label") or parent.get("run_start_label")
     lifecycle = {
         "lifecycle_schema_version": LIFECYCLE_SCHEMA_VERSION,
