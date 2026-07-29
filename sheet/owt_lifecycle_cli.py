@@ -184,7 +184,7 @@ def normalize_lifecycle_wrapper_argv(argv: Sequence[str]) -> NormalizedLifecycle
     while index < len(argv):
         argument = argv[index]
         if argument == "--":
-            normalized.extend(argv[index:])
+            normalized.extend(argv[index + 1:])
             break
         if argument == "--mlp-hidden-compressor":
             if index + 1 >= len(argv):
