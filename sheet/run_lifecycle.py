@@ -82,6 +82,7 @@ def _base_lifecycle(
         "parent_artifact_name": None,
         "parent_checkpoint": None,
         "parent_completed_updates": None,
+        "parent_wandb_run_id": None,
         "lineage": [],
         "run_config": asdict(config),
         "checkpoint_path": str(paths["checkpoint_path"]),
@@ -181,12 +182,17 @@ def fork_lifecycle(
     child_lr_phase: Mapping[str, Any],
 ) -> Dict[str, Any]:
     parent_lineage = list(parent.get("lineage", []))
+    parent_wandb_run_id = parent.get("wandb_run_id")                                                                                                     # <<< THOG retain immediate telemetry ancestry even when the child starts a new W&B run
+    wandb_run_history = list(parent.get("wandb_run_history", []))
+    if parent_wandb_run_id and parent_wandb_run_id not in wandb_run_history:
+        wandb_run_history.append(parent_wandb_run_id)
     parent_record = {
         "logical_run_id": parent.get("logical_run_id"),
         "artifact_name": parent.get("artifact_name"),
         "checkpoint": str(parent_checkpoint),
         "completed_updates": int(parent_completed_updates),
         "fork_generation": int(parent.get("fork_generation", 0)),
+        "wandb_run_id": parent_wandb_run_id,                                                                                                            # <<< THOG lineage records the parent's exact W&B identity when available
     }
     logical_run_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
@@ -207,6 +213,7 @@ def fork_lifecycle(
         "parent_artifact_name": parent.get("artifact_name"),
         "parent_checkpoint": str(parent_checkpoint),
         "parent_completed_updates": int(parent_completed_updates),
+        "parent_wandb_run_id": parent_wandb_run_id,                                                                                                     # <<< THOG child metadata exposes immediate W&B ancestry separately from child identity
         "lineage": parent_lineage + [parent_record],
         "run_config": asdict(config),
         "checkpoint_path": str(paths["checkpoint_path"]),
@@ -215,8 +222,8 @@ def fork_lifecycle(
         "tensorboard_dir": str(paths["tensorboard_dir"]),
         "world_size": int(world_size),
         "instrumentation_backend": instrumentation_backend,
-        "wandb_run_id": parent.get("wandb_run_id") if wandb_continue_run else None,
-        "wandb_run_history": list(parent.get("wandb_run_history", [])),
+        "wandb_run_id": parent_wandb_run_id if wandb_continue_run else None,
+        "wandb_run_history": wandb_run_history,
         "optimizer_name": parent.get("optimizer_name", "adamw"),
         "optimizer_momentum": float(parent.get("optimizer_momentum", 0.9)),
         "target_updates": int(target_updates),
@@ -287,6 +294,7 @@ def validate_lifecycle(lifecycle: Mapping[str, Any]) -> Dict[str, Any]:
         normalized["lifecycle_schema_version"] = LIFECYCLE_SCHEMA_VERSION
         normalized.setdefault("root_run_id", normalized.get("logical_run_id"))
         normalized.setdefault("wandb_run_history", [])
+        normalized.setdefault("parent_wandb_run_id", None)
         normalized.setdefault("optimizer_name", "adamw")
         normalized.setdefault("optimizer_momentum", 0.9)
         run_config = normalized.get("run_config", {})
