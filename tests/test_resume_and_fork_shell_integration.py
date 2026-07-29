@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from run_thog2_owt import main
-from sheet.checkpoints import load_payload
+from sheet.checkpoints import load_payload, save_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +82,13 @@ class ResumeAndForkShellIntegrationTests(unittest.TestCase):
                 logical_run_id = before["lifecycle"]["logical_run_id"]
                 log_path = Path(before["lifecycle"]["log_path"])
 
+                # vvv THOG model an interruption at update 1 with an already-declared lifetime target of 2
+                before["trainer_config"]["max_updates"] = 2
+                before["lifecycle"]["target_updates"] = 2
+                before["lifecycle"]["run_config"]["max_iters"] = 2
+                save_payload(before, checkpoint_path)
+                # ^^^ THOG
+
                 environment = dict(os.environ)
                 environment["THOG2_PYTHON"] = sys.executable
                 completed = subprocess.run(
@@ -90,8 +97,6 @@ class ResumeAndForkShellIntegrationTests(unittest.TestCase):
                         "train_OWT.sh",
                         "--resume",
                         "260729-0410",
-                        "-n",
-                        "2",
                         "--checkpoint-root",
                         str(checkpoints),
                         "-I",
