@@ -22,6 +22,14 @@ The default scope should be one geometry/registry target at a time. A broader ag
 
 This specification does not introduce new trainable parameters and does not alter training behaviour.
 
+### Checkpoint-state contract
+
+The analyzer shall operate on THOG2's saved native persistent state. For a compact THOG2 model, the checkpoint must contain the learned coefficient tensors and any genuinely persistent conventional state required to reconstruct the model, such as embeddings, the final LayerNorm/head, and deliberately uncompressed parameter families.
+
+Derived materialized repeated layer weights are transient execution state. They must not be required by the analyzer and must not be introduced into compact checkpoints for this feature. Fixed reproducible bases likewise need not be persisted when they can be deterministically reconstructed from checkpointed geometry and basis identity.
+
+The analyzer must reject a compact checkpoint that lacks the coefficient state required by its selected measurement scope. It must not attempt to infer coefficients by fitting or projecting materialized dense weights.
+
 ## 3. Primary measurement: counterfactual loss impact
 
 Coefficient salience shall be defined primarily by direct counterfactual effect on held-out loss, not by coefficient magnitude.
@@ -154,6 +162,7 @@ The implementation is acceptable only when:
 4. No optimizer state, model parameter, checkpoint, or training artifact is modified.
 5. A tiny CPU configuration can exercise the complete measurement path.
 6. At least one real Chebyshev checkpoint is analyzed end-to-end before any salience-aware enhancement is designed.
+7. Compact checkpoint regression tests confirm that native coefficient tensors are persisted, reproducible fixed bases are not persisted, and materializing a repeated layer weight does not add that weight to checkpoint state. Dense checkpoints remain unchanged and continue to save their dense model state.
 
 ## 10. Explicit non-goals
 
