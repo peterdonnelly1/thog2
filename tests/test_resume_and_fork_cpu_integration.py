@@ -128,6 +128,11 @@ class ResumeAndForkCpuIntegrationTests(unittest.TestCase):
                     "--fork-min-lr", "0.00005",
                     "--fork-rewarm-iters", "1",
                     "--instrumentation", "none",
+                    # vvv THOG public wrapper operational controls remain mutable on fork exactly as on resume
+                    "-e", "2",
+                    "-u2",
+                    "-k", "2",
+                    # ^^^ THOG
                 ]
                 self.assertEqual(main(fork), 0)
                 dirs = [path for path in checkpoints.iterdir() if path.is_dir()]
@@ -146,6 +151,11 @@ class ResumeAndForkCpuIntegrationTests(unittest.TestCase):
                 self.assertEqual(child_lifecycle["lr_phases"][1]["phase_end_update"], 6)
                 self.assertEqual(child_payload["trainer_config"]["decay_updates"], 2)
                 self.assertEqual(child_payload["trainer_config"]["max_updates"], 6)
+                # vvv THOG prove -e/-u/-k survive the public CLI and apply to the forked child configuration
+                self.assertEqual(child_payload["trainer_config"]["eval_interval"], 2)
+                self.assertEqual(child_payload["trainer_config"]["eval_batches"], 2)
+                self.assertEqual(child_payload["trainer_config"]["checkpoint_interval"], 2)
+                # ^^^ THOG
                 self.assertTrue((child_dir / "run_manifest.json").is_file())
             finally:
                 if old_curve_root is None:
