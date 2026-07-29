@@ -27,8 +27,13 @@ for (( index=0; index<${#args[@]}; index++ )); do
     --log-timestamp|--log-timestamp=*)
       saw_log_timestamp=true
       ;;
-    --dry-run)
+    --dry-run|-xtrue)
       saw_dry_run=true
+      ;;
+    -x)
+      if (( index + 1 < ${#args[@]} )) && [[ "${args[index + 1]}" == true ]]; then
+        saw_dry_run=true
+      fi
       ;;
     -q)
       if (( index + 1 < ${#args[@]} )); then
