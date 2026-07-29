@@ -1,22 +1,18 @@
 # vvv THOG
 from __future__ import annotations
 
-import os
-import signal
-import sys
-import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, TextIO
 
+import torch
+
+from .checkpoints import save_payload
 from .stage6_trainer import Stage6Trainer
+from .wandb_telemetry import WandbTelemetry
 
 
-@dataclass
-class _InterruptState:
-    requested: bool = False
-    handling: bool = False
+_INTERRUPTED_TRAINER: Optional[Any] = None
 
 
 def _open_controlling_terminal() -> Optional[TextIO]:
@@ -24,21 +20,6 @@ def _open_controlling_terminal() -> Optional[TextIO]:
         return open("/dev/tty", "r+", encoding="utf-8", buffering=1)
     except OSError:
         return None
-
-
-def _redirect_process_output_to_controlling_terminal() -> None:
-    try:
-        terminal_fd = os.open("/dev/tty", os.O_WRONLY)
-    except OSError:
-        return
-    try:
-        for stream in (sys.stdout, sys.stderr):
-            try:
-                os.dup2(terminal_fd, stream.fileno())
-            except (AttributeError, OSError, ValueError):
-                continue
-    finally:
-        os.close(terminal_fd)
 
 
 def _terminal_message(message: str) -> None:
@@ -92,74 +73,71 @@ def _checkpoint_after_interrupt(
     prompt: Callable[[int], bool] = _prompt_save_checkpoint,
     message: Callable[[str], None] = _terminal_message,
 ) -> bool:
-    decision: Optional[bool] = None
-    if trainer.distributed.is_primary:
-        decision = prompt(int(trainer.state.completed_updates))
-    gathered = trainer.distributed.all_gather_object(decision)
-    save_checkpoint = bool(gathered[0])
-    if not save_checkpoint:
-        if trainer.distributed.is_primary:
-            message("Checkpoint skipped; finishing telemetry and exiting.\n")
+    completed_updates = int(trainer.state.completed_updates)
+    if not prompt(completed_updates):
+        message("Checkpoint skipped; finishing telemetry and exiting.\n")
         return False
 
     checkpoint_path = Path(trainer.config.out_dir) / "ckpt.pt"
-    if trainer.distributed.is_primary:
-        message(
-            f"Saving checkpoint at completed update {trainer.state.completed_updates}: "
-            f"{checkpoint_path}\n"
-        )
-    trainer.save_checkpoint(checkpoint_path)
-    if trainer.distributed.is_primary:
-        message(f"Checkpoint saved: {checkpoint_path}\n")
+    message(
+        f"Saving checkpoint at completed update {completed_updates}: "
+        f"{checkpoint_path}\n"
+    )
+    try:
+        trainer.optimizer.zero_grad(set_to_none=True)
+        device = getattr(trainer, "device", None)
+        if device is not None and getattr(device, "type", None) == "cuda":
+            torch.cuda.synchronize(device)
+        # Do not call trainer.save_checkpoint here: rank zero reaches telemetry.finish
+        # alone, and that method contains a distributed barrier. The payload is the
+        # same atomic checkpoint payload but is written without introducing a DDP
+        # collective mismatch during shutdown.
+        save_payload(trainer.checkpoint_payload(), checkpoint_path)
+    except Exception as error:
+        message(f"Checkpoint save failed: {error}\n")
+        return False
+    message(f"Checkpoint saved: {checkpoint_path}\n")
     return True
 
 
 @contextmanager
 def interactive_interrupt_checkpoint() -> Iterator[None]:
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
+    """Route the runner's proven KeyboardInterrupt path through an interactive save choice."""
 
-    state = _InterruptState()
-    original_handler = signal.getsignal(signal.SIGINT)
-    original_timed = Stage6Trainer._timed
+    global _INTERRUPTED_TRAINER
+    original_run_pilot = Stage6Trainer.run_pilot
+    original_finish = WandbTelemetry.finish
 
-    def handle_sigint(signum: int, frame: Any) -> None:
-        del signum, frame
-        if state.requested:
-            raise KeyboardInterrupt
-        state.requested = True
-        _redirect_process_output_to_controlling_terminal()
-        _terminal_message(
-            "\nCtrl-C received; stopping at the next safe boundary. "
-            "Press Ctrl-C again for an immediate abort.\n"
-        )
+    def run_pilot_with_interrupt_capture(trainer: Any, *args: Any, **kwargs: Any):
+        global _INTERRUPTED_TRAINER
+        try:
+            return original_run_pilot(trainer, *args, **kwargs)
+        except KeyboardInterrupt:
+            _INTERRUPTED_TRAINER = trainer
+            raise
 
-    def install_handler() -> None:
-        signal.signal(signal.SIGINT, handle_sigint)
+    def finish_with_interrupt_checkpoint(
+        telemetry: WandbTelemetry,
+        *,
+        exit_code: Optional[int] = None,
+    ) -> None:
+        global _INTERRUPTED_TRAINER
+        trainer = _INTERRUPTED_TRAINER
+        if exit_code == 0 and trainer is not None:
+            try:
+                _checkpoint_after_interrupt(trainer)
+            finally:
+                _INTERRUPTED_TRAINER = None
+        original_finish(telemetry, exit_code=exit_code)
 
-    def timed_with_interrupt_checkpoint(trainer: Any, function: Callable[[], Any]):
-        # vvv THOG trainer and library initialisation may replace SIGINT after program entry; reclaim it immediately before every safe timed operation
-        install_handler()
-        if state.requested and not state.handling:
-            state.handling = True
-            _checkpoint_after_interrupt(trainer)
-            raise KeyboardInterrupt
-        result = original_timed(trainer, function)
-        if state.requested and not state.handling:
-            state.handling = True
-            _checkpoint_after_interrupt(trainer)
-            raise KeyboardInterrupt
-        return result
-        # ^^^ THOG
-
-    install_handler()
-    Stage6Trainer._timed = timed_with_interrupt_checkpoint
+    Stage6Trainer.run_pilot = run_pilot_with_interrupt_capture
+    WandbTelemetry.finish = finish_with_interrupt_checkpoint
     try:
         yield
     finally:
-        Stage6Trainer._timed = original_timed
-        signal.signal(signal.SIGINT, original_handler)
+        Stage6Trainer.run_pilot = original_run_pilot
+        WandbTelemetry.finish = original_finish
+        _INTERRUPTED_TRAINER = None
 
 
 __all__ = [
