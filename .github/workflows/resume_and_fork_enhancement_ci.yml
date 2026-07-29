@@ -61,6 +61,7 @@ jobs:
             tests/test_resume_and_fork_enhancement.py \
             tests/test_resume_and_fork_wandb.py \
             tests/test_resume_and_fork_wandb_lineage.py \
+            tests/test_resume_and_fork_cli_compatibility.py \
             tests/test_resume_identity_and_throughput.py \
             tests/test_sheet_stage6_runner_scripts.py
 
