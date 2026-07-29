@@ -101,6 +101,11 @@ class ResumeAndForkShellIntegrationTests(unittest.TestCase):
                         str(checkpoints),
                         "-I",
                         "none",
+                        "-e",
+                        "2",
+                        "-u2",
+                        "-k",
+                        "2",
                     ],
                     cwd=ROOT,
                     env=environment,
@@ -114,11 +119,18 @@ class ResumeAndForkShellIntegrationTests(unittest.TestCase):
                 self.assertEqual(after["completed_updates"], 2)
                 self.assertEqual(after["lifecycle"]["logical_run_id"], logical_run_id)
                 self.assertEqual(len(after["lifecycle"]["sessions"]), 2)
+                self.assertEqual(after["trainer_config"]["eval_interval"], 2)
+                self.assertEqual(after["trainer_config"]["eval_batches"], 2)
+                self.assertEqual(after["trainer_config"]["checkpoint_interval"], 2)
                 self.assertTrue(log_path.is_file())
                 log_text = log_path.read_text(encoding="utf-8")
                 self.assertIn("THOG2 lifecycle session", log_text)
-                self.assertIn("mode:               resume", log_text)
-                self.assertIn("target updates:     2", log_text)
+                # vvv THOG lifecycle header values share the model-options value column at zero-based column 27
+                for label, value in (("mode:", "resume"), ("target updates:", "2")):
+                    matching = [line for line in log_text.splitlines() if line.startswith(f"  {label}") and value in line]
+                    self.assertTrue(matching, (label, value, log_text))
+                    self.assertEqual(matching[-1].index(value), 27)
+                # ^^^ THOG
                 self.assertIn(after["lifecycle"]["session_id"], log_text)
             finally:
                 if old_curve_root is None:
