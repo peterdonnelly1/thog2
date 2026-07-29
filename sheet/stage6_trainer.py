@@ -61,9 +61,9 @@ def _initial_eval_enabled() -> bool:
 # ^^^ THOG
 
 
-# vvv THOG compact timestamped progress rows with interval-normalised step time and validation-only emphasis
+# vvv THOG compact timestamped progress rows with exact interval timing and two-level validation emphasis
 _PROGRESS_FIELD_LABELS = {
-    "mean_step_seconds": "Δ step",
+    "mean_step_seconds": "Δstep",
     "consumed_tokens": "tokens",
     "training_loss": "training loss",
     "validation_loss": "validation loss",
@@ -71,7 +71,8 @@ _PROGRESS_FIELD_LABELS = {
     "gradient_norm": "gradient norm",
 }
 _PROGRESS_LOSS_LABEL_WIDTH = len("validation loss")
-_PROGRESS_VALIDATION_STYLE_START = "\033[1;93m"
+_PROGRESS_VALIDATION_ROW_STYLE_START = "\033[33m"
+_PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"
 _PROGRESS_VALIDATION_STYLE_END = "\033[0m"
 
 
@@ -82,7 +83,7 @@ def _progress_timestamp() -> str:
 def _progress_field(label: str, value: Any) -> str:
     if label in {"training loss", "validation loss"}:
         return f"{label:<{_PROGRESS_LOSS_LABEL_WIDTH}}={value}"
-    if label == "Δ step":
+    if label == "Δstep":
         return f"{label}={value}s"
     return f"{label}={value}"
 
@@ -139,9 +140,18 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         label = _PROGRESS_FIELD_LABELS.get(key, key)
         field = _progress_field(label, payload[key])
         if key == "validation_loss":
-            field = f"{_PROGRESS_VALIDATION_STYLE_START}{field}{_PROGRESS_VALIDATION_STYLE_END}"
+            field = (
+                f"{_PROGRESS_VALIDATION_FIELD_STYLE_START}{field}"
+                f"{_PROGRESS_VALIDATION_ROW_STYLE_START}"
+            )
         fields.append(field)
-    return "  ".join(fields)
+    line = "  ".join(fields)
+    if event == "evaluation_completed":
+        return (
+            f"{_PROGRESS_VALIDATION_ROW_STYLE_START}{line}"
+            f"{_PROGRESS_VALIDATION_STYLE_END}"
+        )
+    return line
 # ^^^ THOG
 
 
@@ -156,9 +166,10 @@ class Stage6Trainer(Stage4Trainer):
     ) -> None:
         super().__init__(config, train_tokens, validation_tokens)
         self.gradient_diagnostics: List[Dict[str, Any]] = []
-        # vvv THOG retain one optimizer-row timing baseline so validation rows reuse, rather than distort, the latest mean step duration
+        # vvv THOG retain exact optimizer timing independently of the whole-second cumulative console field
         self._console_previous_completed_updates = int(self.state.completed_updates)
         self._console_previous_training_seconds = 0.0
+        self._console_exact_training_seconds = 0.0
         self._console_latest_mean_step_seconds: Optional[float] = None
         # ^^^ THOG
 
@@ -171,9 +182,12 @@ class Stage6Trainer(Stage4Trainer):
         started = time.perf_counter()
         result = function()
         self._synchronize()
-        return result, time.perf_counter() - started
+        elapsed = time.perf_counter() - started
+        if getattr(function, "__name__", "") == "train_one_update":
+            self._console_exact_training_seconds += elapsed
+        return result, elapsed
 
-    # vvv THOG derive display-only interval timing from optimizer rows and normalise fixed-width token and throughput fields
+    # vvv THOG derive display-only interval timing from exact optimizer timings and compact fixed-width number fields
     @staticmethod
     def _console_int(value: Any) -> int:
         return int(str(value).strip().replace(",", ""))
@@ -187,17 +201,18 @@ class Stage6Trainer(Stage4Trainer):
         if event == "run_started":
             self._console_previous_completed_updates = int(self.state.completed_updates)
             self._console_previous_training_seconds = 0.0
+            self._console_exact_training_seconds = 0.0
             self._console_latest_mean_step_seconds = None
             return values
 
         if "tok/s" in values:
             values["tok/s"] = f"{self._console_float(values['tok/s']):6.0f}"
         if "consumed_tokens" in values:
-            values["consumed_tokens"] = f"{self._console_int(values['consumed_tokens']):14,d}"
+            values["consumed_tokens"] = f"{self._console_int(values['consumed_tokens']):11,d}"
 
         if event == "optimizer_progress":
             completed_updates = self._console_int(values["completed_updates"])
-            training_seconds = self._console_float(values["cumulative_training_seconds"])
+            training_seconds = self._console_exact_training_seconds
             update_delta = completed_updates - self._console_previous_completed_updates
             if update_delta > 0:
                 second_delta = training_seconds - self._console_previous_training_seconds
@@ -207,14 +222,14 @@ class Stage6Trainer(Stage4Trainer):
         if event in {"optimizer_progress", "evaluation_completed"}:
             values["timestamp"] = _progress_timestamp()
             if self._console_latest_mean_step_seconds is not None:
-                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:2.0f}"
+                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"
         return values
     # ^^^ THOG
 
     def _print_progress(self, run_id: str, event: str, **payload: Any) -> None:
         if not self.distributed.is_primary:
             return
-        values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, mean step duration and compact number formatting before rendering
+        values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
         print(format_progress_line(run_id, event, values), flush=True)                                                                                    # <<< THOG emit compact T/V progress without redundant per-row run_id
         if event == "run_started":
             print(flush=True)                                                                                                                            # <<< THOG separate startup summary from progress rows
