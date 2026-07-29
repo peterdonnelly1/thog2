@@ -95,17 +95,18 @@ class InteractiveInterruptTests(unittest.TestCase):
             operation_finished = []
 
             with mock.patch.object(interrupt_module, "_terminal_message"):
-                with mock.patch.object(interrupt_module, "_checkpoint_after_interrupt") as checkpoint:
-                    with interactive_interrupt_checkpoint():
-                        handler = signal.getsignal(signal.SIGINT)
+                with mock.patch.object(interrupt_module, "_redirect_process_output_to_controlling_terminal"):
+                    with mock.patch.object(interrupt_module, "_checkpoint_after_interrupt") as checkpoint:
+                        with interactive_interrupt_checkpoint():
+                            handler = signal.getsignal(signal.SIGINT)
 
-                        def operation():
-                            handler(signal.SIGINT, None)
-                            operation_finished.append(True)
-                            return "completed"
+                            def operation():
+                                handler(signal.SIGINT, None)
+                                operation_finished.append(True)
+                                return "completed"
 
-                        with self.assertRaises(KeyboardInterrupt):
-                            Stage6Trainer._timed(trainer, operation)
+                            with self.assertRaises(KeyboardInterrupt):
+                                Stage6Trainer._timed(trainer, operation)
 
             self.assertEqual(operation_finished, [True])
             self.assertEqual(trainer.synchronizations, 2)
