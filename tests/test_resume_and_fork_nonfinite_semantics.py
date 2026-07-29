@@ -3,10 +3,30 @@ from __future__ import annotations
 
 import unittest
 
+import run_thog2_lifecycle
+import run_thog2_owt  # noqa: F401  # <<< THOG public entry registers final lifecycle material classifications before assertions are tested
 from sheet.trainer_checkpoint_resume import _validate_override_fields
 
 
 class ResumeAndForkNonfiniteSemanticsTests(unittest.TestCase):
+    def test_public_lifecycle_preflight_classifies_nonfinite_controls_as_material(self) -> None:
+        self.assertNotIn(
+            "nonfinite_update_policy",
+            run_thog2_lifecycle._OPERATIONAL_CONFIG_DESTINATIONS,
+        )
+        self.assertNotIn(
+            "max_nonfinite_update_skips",
+            run_thog2_lifecycle._OPERATIONAL_CONFIG_DESTINATIONS,
+        )
+        self.assertEqual(
+            run_thog2_lifecycle._ARGUMENT_TO_CONFIG["nonfinite_update_policy"],
+            "nonfinite_update_policy",
+        )
+        self.assertEqual(
+            run_thog2_lifecycle._ARGUMENT_TO_CONFIG["max_nonfinite_update_skips"],
+            "max_nonfinite_update_skips",
+        )
+
     def test_matching_nonfinite_policy_is_assertion_not_override(self) -> None:
         overrides = {
             "device": "cpu",
