@@ -13,13 +13,29 @@ import os
 import sys
 from typing import Optional, Sequence
 
+import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
 
 from run_thog2_owt_core import *  # noqa: F401,F403                                                                                                        # <<< THOG preserve the complete current-master Python runner API and fresh-run implementation
-from run_thog2_lifecycle import main as _lifecycle_main                                                                                                     # <<< THOG enhanced lifecycle implementation is invoked only for explicit lifecycle syntax
+
+
+# vvv THOG non-finite controls alter future update acceptance; classify them as checkpoint-authoritative before lifecycle preflight
+for _material_destination in (
+    "nonfinite_update_policy",
+    "max_nonfinite_update_skips",
+):
+    _lifecycle._OPERATIONAL_CONFIG_DESTINATIONS.discard(_material_destination)
+_lifecycle._ARGUMENT_TO_CONFIG.update(
+    {
+        "nonfinite_update_policy": "nonfinite_update_policy",
+        "max_nonfinite_update_skips": "max_nonfinite_update_skips",
+    }
+)
+_lifecycle_main = _lifecycle.main
+# ^^^ THOG
 
 
 _LIFECYCLE_ENVIRONMENT_KEYS = (
