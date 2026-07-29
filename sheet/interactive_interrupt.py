@@ -135,7 +135,12 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
             "Press Ctrl-C again for an immediate abort.\n"
         )
 
+    def install_handler() -> None:
+        signal.signal(signal.SIGINT, handle_sigint)
+
     def timed_with_interrupt_checkpoint(trainer: Any, function: Callable[[], Any]):
+        # vvv THOG trainer and library initialisation may replace SIGINT after program entry; reclaim it immediately before every safe timed operation
+        install_handler()
         if state.requested and not state.handling:
             state.handling = True
             _checkpoint_after_interrupt(trainer)
@@ -146,8 +151,9 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
             _checkpoint_after_interrupt(trainer)
             raise KeyboardInterrupt
         return result
+        # ^^^ THOG
 
-    signal.signal(signal.SIGINT, handle_sigint)
+    install_handler()
     Stage6Trainer._timed = timed_with_interrupt_checkpoint
     try:
         yield
