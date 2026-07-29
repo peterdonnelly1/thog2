@@ -128,26 +128,26 @@ def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "optimizer/update": update,
         "tokens/seen": int(metric["tokens_seen"]),
         "time/train_seconds": float(metric["clean_training_seconds"]),
-        "train/step_loss": training_loss,
         "train/loss": training_loss,
         "optim/lr": float(metric["learning_rate"]),
         "optim/grad_norm": float(metric["gradient_norm"]),
     }
 
 
+# vvv THOG validation-pass metrics use one explicit namespace: sampled train split versus held-out validation split
 def _evaluation_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     metric = evaluation_metric_payload(payload)
-    test_loss = float(metric["validation_loss"])
-    eval_loss = float(metric["training_evaluation_loss"])
+    validation_loss = float(metric["validation_loss"])
+    training_evaluation_loss = float(metric["training_evaluation_loss"])
     return {
         "optimizer/update": int(metric["optimizer_update"]),
         "tokens/seen": int(metric["tokens_seen"]),
-        "test/loss": test_loss,
-        "eval/val_loss": test_loss,
-        "eval/loss": eval_loss,
-        "test/perplexity": _safe_exp(test_loss),
-        "eval/perplexity": _safe_exp(eval_loss),
+        "val/train_loss": training_evaluation_loss,
+        "val/val_loss": validation_loss,
+        "val/train_perplexity": _safe_exp(training_evaluation_loss),
+        "val/val_perplexity": _safe_exp(validation_loss),
     }
+# ^^^ THOG
 
 
 def _event_metrics(event: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
@@ -187,10 +187,10 @@ def _final_metrics(result: Mapping[str, Any]) -> Dict[str, Any]:
 
     evaluations = result.get("evaluations", [])
     if evaluations:
-        final_test_loss = float(evaluations[-1]["val"])
-        best_test_loss = min(float(row["val"]) for row in evaluations)
-        metrics["test/final_loss"] = final_test_loss
-        metrics["test/best_loss"] = best_test_loss
+        final_validation_loss = float(evaluations[-1]["val"])
+        best_validation_loss = min(float(row["val"]) for row in evaluations)
+        metrics["val/final_loss"] = final_validation_loss
+        metrics["val/best_loss"] = best_validation_loss
 
     diagnostics = result.get("sheet_diagnostics")
     if diagnostics is not None:
@@ -320,8 +320,7 @@ class WandbTelemetry:
             "tokens/*",
             "time/*",
             "train/*",
-            "eval/*",
-            "test/*",
+            "val/*",
             "optim/*",
             "perf/*",
             "model/*",
@@ -452,15 +451,15 @@ class WandbTelemetry:
         self._log_scalars(metrics, step)
         if self.run is not None:
             evaluations = result.get("evaluations", [])
-            final_test_loss = evaluations[-1]["val"] if evaluations else None
-            best_test_loss = (
+            final_validation_loss = evaluations[-1]["val"] if evaluations else None
+            best_validation_loss = (
                 min(row["val"] for row in evaluations) if evaluations else None
             )
             self.run.summary.update({
                 "completed_updates": step,
                 "consumed_tokens": result["budget"]["consumed_tokens"],
-                "final_test_loss": final_test_loss,
-                "best_test_loss": best_test_loss,
+                "final_validation_loss": final_validation_loss,
+                "best_validation_loss": best_validation_loss,
                 "training_seconds": result["timing"]["training_seconds"],
                 "tokens_per_training_second": result["timing"][
                     "tokens_per_training_second"
