@@ -93,6 +93,8 @@ run_mode="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; pr
 world_size="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["world_size"])')"
 log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
 append_log="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print("true" if json.load(sys.stdin)["append_log"] else "false")')"
+session_id="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["session_id"])')"
+target_updates="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["target_updates"])')"
 
 if [[ "$saw_dry_run" == true ]]; then
   printf '%s\n' "$resolved_json"
@@ -105,14 +107,26 @@ if (( world_size > 1 )); then
 fi
 
 mkdir -p "$(dirname "$log_path")"
-cat <<EOF_RUN
-THOG2 lifecycle run
+startup_summary="$(cat <<EOF_RUN
+THOG2 lifecycle session
   mode:               $run_mode
+  session:            $session_id
   artifact:           $artifact_name
+  target updates:     $target_updates
   world size:         $world_size
   log:                file://$(realpath -m "$log_path")
 EOF_RUN
+)"
+printf '%s\n' "$startup_summary"
 printf '  command:            '; printf '%q ' "${command[@]}"; printf '\n\n'
+if [[ "$append_log" == true ]]; then
+  {
+    printf '\n%s\n' "============================================================"
+    printf '%s\n' "$startup_summary"
+    printf '  command:            '; printf '%q ' "${command[@]}"; printf '\n'
+    printf '%s\n\n' "============================================================"
+  } >> "$log_path"
+fi
 
 set +e
 if [[ "$append_log" == true ]]; then
@@ -126,6 +140,7 @@ set -e
 cat <<EOF_DONE
 THOG2 lifecycle run finished
   status:             $run_status
+  session:            $session_id
   artifact:           $artifact_name
   log:                file://$(realpath -m "$log_path")
 EOF_DONE
