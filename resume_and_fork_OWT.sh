@@ -83,6 +83,10 @@ else
   PYTHON_BIN="python"
 fi
 
+if [[ -z "${THOG2_LIFECYCLE_SESSION_ID:-}" ]]; then
+  export THOG2_LIFECYCLE_SESSION_ID="$($PYTHON_BIN -c 'import uuid; print(uuid.uuid4())')"                                                                   # <<< THOG make preflight and execution resolve one process-session identity
+fi
+
 if [[ "$saw_log_timestamp" != true ]]; then
   args+=(--log-timestamp "$(date +%Y%m%d_%H%M%S)")
 fi
