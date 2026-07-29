@@ -3,8 +3,8 @@
 
 The complete pre-enhancement runner is preserved unchanged in
 run_thog2_owt_core.py. Ordinary fresh and legacy-resume execution continues
-through that implementation. Only the explicit enhanced lifecycle syntax is
-routed through run_thog2_lifecycle.
+through that implementation. Only explicit enhanced-lifecycle syntax is routed
+through run_thog2_lifecycle.
 """
 
 from __future__ import annotations
@@ -51,6 +51,11 @@ def _enhanced_lifecycle_requested(argv: Sequence[str]) -> bool:
             "--fork-rewarm-iters",
             "--wandb-continue-run",
             "--no-wandb-continue-run",
+            "--instrumentation",
+            "--optimizer",
+            "--optimizer-momentum",
+            "-I",
+            "-G",
         ):
             return True
         if argument.startswith((
@@ -61,11 +66,18 @@ def _enhanced_lifecycle_requested(argv: Sequence[str]) -> bool:
             "--fork-learning-rate=",
             "--fork-min-lr=",
             "--fork-rewarm-iters=",
+            "--instrumentation=",
+            "--optimizer=",
+            "--optimizer-momentum=",
         )):
             return True
-        if argument in ("-qresume", "-qfork"):
+        if argument in ("-qfresh", "-qresume", "-qfork"):
             return True
-        if previous in ("-q", "--run-mode") and argument in ("resume", "fork"):
+        if argument.startswith("-I") and len(argument) > 2:
+            return True
+        if argument.startswith("-G") and len(argument) > 2:
+            return True
+        if previous in ("-q", "--run-mode") and argument in ("fresh", "resume", "fork"):
             return True
         previous = argument
     return False
