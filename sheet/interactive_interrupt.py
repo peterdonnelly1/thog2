@@ -1,7 +1,9 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 import signal
+import sys
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -22,6 +24,21 @@ def _open_controlling_terminal() -> Optional[TextIO]:
         return open("/dev/tty", "r+", encoding="utf-8", buffering=1)
     except OSError:
         return None
+
+
+def _redirect_process_output_to_controlling_terminal() -> None:
+    try:
+        terminal_fd = os.open("/dev/tty", os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                os.dup2(terminal_fd, stream.fileno())
+            except (AttributeError, OSError, ValueError):
+                continue
+    finally:
+        os.close(terminal_fd)
 
 
 def _terminal_message(message: str) -> None:
@@ -112,6 +129,7 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
         if state.requested:
             raise KeyboardInterrupt
         state.requested = True
+        _redirect_process_output_to_controlling_terminal()
         _terminal_message(
             "\nCtrl-C received; stopping at the next safe boundary. "
             "Press Ctrl-C again for an immediate abort.\n"
