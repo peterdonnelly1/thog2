@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 import io
+import signal
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
+import sheet.interactive_interrupt as interrupt_module
 from sheet.interactive_interrupt import (
     _checkpoint_after_interrupt,
     _prompt_save_checkpoint,
+    interactive_interrupt_checkpoint,
 )
+from sheet.stage6_trainer import Stage6Trainer
 
 
 class _FakeDistributed:
@@ -27,6 +32,10 @@ class _FakeTrainer:
         self.state = SimpleNamespace(completed_updates=completed_updates)
         self.config = SimpleNamespace(out_dir=str(root))
         self.saved_paths = []
+        self.synchronizations = 0
+
+    def _synchronize(self) -> None:
+        self.synchronizations += 1
 
     def save_checkpoint(self, path: Path) -> Path:
         target = Path(path)
@@ -79,6 +88,28 @@ class InteractiveInterruptTests(unittest.TestCase):
             self.assertEqual(trainer.saved_paths, [expected])
             self.assertEqual(expected.read_bytes(), b"checkpoint")
             self.assertIn("Checkpoint saved", "".join(messages))
+
+    def test_first_sigint_finishes_current_timed_operation_before_checkpoint_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = _FakeTrainer(Path(temporary), completed_updates=31)
+            operation_finished = []
+
+            with mock.patch.object(interrupt_module, "_terminal_message"):
+                with mock.patch.object(interrupt_module, "_checkpoint_after_interrupt") as checkpoint:
+                    with interactive_interrupt_checkpoint():
+                        handler = signal.getsignal(signal.SIGINT)
+
+                        def operation():
+                            handler(signal.SIGINT, None)
+                            operation_finished.append(True)
+                            return "completed"
+
+                        with self.assertRaises(KeyboardInterrupt):
+                            Stage6Trainer._timed(trainer, operation)
+
+            self.assertEqual(operation_finished, [True])
+            self.assertEqual(trainer.synchronizations, 2)
+            checkpoint.assert_called_once_with(trainer)
 
 
 if __name__ == "__main__":
