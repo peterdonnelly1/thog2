@@ -112,6 +112,30 @@ class InteractiveInterruptTests(unittest.TestCase):
             self.assertEqual(trainer.synchronizations, 2)
             checkpoint.assert_called_once_with(trainer)
 
+    def test_timed_operation_reclaims_sigint_after_late_handler_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            trainer = _FakeTrainer(Path(temporary), completed_updates=41)
+            operation_finished = []
+
+            with mock.patch.object(interrupt_module, "_terminal_message"):
+                with mock.patch.object(interrupt_module, "_redirect_process_output_to_controlling_terminal"):
+                    with mock.patch.object(interrupt_module, "_checkpoint_after_interrupt") as checkpoint:
+                        with interactive_interrupt_checkpoint():
+                            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+                            def operation():
+                                active_handler = signal.getsignal(signal.SIGINT)
+                                self.assertIsNot(active_handler, signal.default_int_handler)
+                                active_handler(signal.SIGINT, None)
+                                operation_finished.append(True)
+                                return "completed"
+
+                            with self.assertRaises(KeyboardInterrupt):
+                                Stage6Trainer._timed(trainer, operation)
+
+            self.assertEqual(operation_finished, [True])
+            checkpoint.assert_called_once_with(trainer)
+
 
 if __name__ == "__main__":
     unittest.main()
