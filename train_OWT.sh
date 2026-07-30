@@ -3,11 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# vvv THOG expose the experimental pure-DEPTH materialisation matmul path as a granular default-off wrapper control
+# vvv THOG expose granular pure-DEPTH materialisation controls; profiling remains default-off so ordinary runs incur no timing-hook overhead
 THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
+THOG2_MATERIALISATION_PROFILING="${THOG2_MATERIALISATION_PROFILING:-false}"
 case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in
   true|false) ;;
   *) echo "THOG2_DEPTH_MATERIALISATION_MATMUL must be true or false; got: $THOG2_DEPTH_MATERIALISATION_MATMUL" >&2; exit 2 ;;
+esac
+case "$THOG2_MATERIALISATION_PROFILING" in
+  true|false) ;;
+  *) echo "THOG2_MATERIALISATION_PROFILING must be true or false; got: $THOG2_MATERIALISATION_PROFILING" >&2; exit 2 ;;
 esac
 THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS=()
 THOG2_DEPTH_MATERIALISATION_HELP=false
@@ -24,6 +29,17 @@ while (( $# > 0 )); do
       case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in true|false) ;; *) echo "--depth-materialisation-matmul requires true or false; got: $THOG2_DEPTH_MATERIALISATION_MATMUL" >&2; exit 2 ;; esac
       shift
       ;;
+    --materialisation-profiling)
+      (( $# >= 2 )) || { echo "--materialisation-profiling requires true or false" >&2; exit 2; }
+      case "$2" in true|false) ;; *) echo "--materialisation-profiling requires true or false; got: $2" >&2; exit 2 ;; esac
+      THOG2_MATERIALISATION_PROFILING="$2"
+      shift 2
+      ;;
+    --materialisation-profiling=*)
+      THOG2_MATERIALISATION_PROFILING="${1#*=}"
+      case "$THOG2_MATERIALISATION_PROFILING" in true|false) ;; *) echo "--materialisation-profiling requires true or false; got: $THOG2_MATERIALISATION_PROFILING" >&2; exit 2 ;; esac
+      shift
+      ;;
     -h|--help)
       THOG2_DEPTH_MATERIALISATION_HELP=true
       THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS+=("$1")
@@ -38,8 +54,15 @@ done
 set -- "${THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS[@]}"
 unset THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS
 export THOG2_DEPTH_MATERIALISATION_MATMUL
+export THOG2_MATERIALISATION_PROFILING
 if [[ "$THOG2_DEPTH_MATERIALISATION_HELP" == true ]]; then
-  printf '%s\n' 'DEPTH execution optimisation:' '  --depth-materialisation-matmul true|false   pure DEPTH only; default false' ''
+  printf '%s\n' \
+    'DEPTH execution optimisation:' \
+    '  --depth-materialisation-matmul true|false   pure DEPTH only; default false' \
+    '' \
+    'Profiling:' \
+    '  --materialisation-profiling true|false      pure DEPTH timing; default false' \
+    ''
 fi
 unset THOG2_DEPTH_MATERIALISATION_HELP
 # ^^^ THOG
@@ -106,6 +129,7 @@ cat() {
       printf '  %-35s %s\n' "$label" "$value"
       if [[ "$label" == "vectorise per-head materialisation:" ]]; then
         printf '  %-35s %s\n' 'depth materialisation matmul:' "$THOG2_DEPTH_MATERIALISATION_MATMUL"
+        printf '  %-35s %s\n' 'materialisation profiling:' "$THOG2_MATERIALISATION_PROFILING"
       fi
     else
       printf '%s\n' "$line"
