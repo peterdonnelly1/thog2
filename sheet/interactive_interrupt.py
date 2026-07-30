@@ -1,6 +1,14 @@
 # vvv THOG
 from __future__ import annotations
 
+import atexit
+import os
+import select
+import tempfile
+import termios
+import threading
+import time
+import tty
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, TextIO
@@ -13,6 +21,150 @@ from .wandb_telemetry import WandbTelemetry
 
 
 _INTERRUPTED_TRAINER: Optional[Any] = None
+_CTRL_G = b"\x07"
+_MIN_REQUEST_AGE_SECONDS = 0.25
+
+
+class CheckpointExitRequested(RuntimeError):
+    """Raised only after the requested safe-boundary checkpoint has completed."""
+
+    def __init__(self, checkpoint_path: Path, completed_updates: int) -> None:
+        self.checkpoint_path = Path(checkpoint_path)
+        self.completed_updates = int(completed_updates)
+        super().__init__(
+            f"checkpoint exit completed at update {self.completed_updates}: "
+            f"{self.checkpoint_path}"
+        )
+
+
+def checkpoint_exit_request_path() -> Path:
+    configured = os.environ.get("THOG2_CHECKPOINT_EXIT_FILE", "").strip()
+    if configured:
+        return Path(configured)
+    distributed_key = (
+        os.environ.get("TORCHELASTIC_RUN_ID")
+        or os.environ.get("MASTER_PORT")
+        or str(os.getppid())
+    )
+    return Path(tempfile.gettempdir()) / f"thog2_checkpoint_exit_{distributed_key}"
+
+
+class CheckpointExitController:
+    """Read Ctrl-G from /dev/tty and expose one shared safe-boundary request file."""
+
+    def __init__(self, *, is_primary: bool) -> None:
+        self.is_primary = bool(is_primary)
+        self.request_path = checkpoint_exit_request_path()
+        self._terminal_fd: Optional[int] = None
+        self._terminal_attributes: Optional[list[Any]] = None
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        if not self.is_primary:
+            return
+        self.request_path.parent.mkdir(parents=True, exist_ok=True)
+        self.request_path.unlink(missing_ok=True)
+        try:
+            terminal_fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+            terminal_attributes = termios.tcgetattr(terminal_fd)
+            tty.setcbreak(terminal_fd, termios.TCSANOW)
+        except (OSError, termios.error):
+            try:
+                os.close(terminal_fd)
+            except (UnboundLocalError, OSError):
+                pass
+            return
+        self._terminal_fd = terminal_fd
+        self._terminal_attributes = terminal_attributes
+        self._thread = threading.Thread(
+            target=self._listen,
+            name="thog2_ctrl_g_checkpoint_exit",
+            daemon=True,
+        )
+        self._thread.start()
+        atexit.register(self.close)
+        self._write_terminal(
+            "  checkpoint exit:                   Ctrl-G saves at the next safe boundary; Ctrl-C discards\n"
+        )
+
+    def requested(self) -> bool:
+        try:
+            age = time.time() - self.request_path.stat().st_mtime
+        except OSError:
+            return False
+        return age >= _MIN_REQUEST_AGE_SECONDS
+
+    def close(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=0.5)
+        self._restore_terminal()
+        if self.is_primary:
+            self.request_path.unlink(missing_ok=True)
+
+    def _listen(self) -> None:
+        try:
+            while not self._stop.is_set():
+                terminal_fd = self._terminal_fd
+                if terminal_fd is None:
+                    return
+                readable, _, _ = select.select([terminal_fd], [], [], 0.2)
+                if not readable:
+                    continue
+                value = os.read(terminal_fd, 1)
+                if value != _CTRL_G:
+                    continue
+                self.request_path.write_text(
+                    f"requested_ns={time.time_ns()}\n",
+                    encoding="utf-8",
+                )
+                self._write_terminal(
+                    "\nCtrl-G received; checkpointing after the current timed operation.\n"
+                )
+                return
+        except OSError:
+            return
+        finally:
+            self._restore_terminal()
+
+    def _write_terminal(self, message: str) -> None:
+        terminal_fd = self._terminal_fd
+        if terminal_fd is None:
+            return
+        try:
+            os.write(terminal_fd, message.encode("utf-8", errors="replace"))
+        except OSError:
+            pass
+
+    def _restore_terminal(self) -> None:
+        with self._lock:
+            terminal_fd = self._terminal_fd
+            terminal_attributes = self._terminal_attributes
+            self._terminal_fd = None
+            self._terminal_attributes = None
+        if terminal_fd is None:
+            return
+        try:
+            if terminal_attributes is not None:
+                termios.tcsetattr(
+                    terminal_fd,
+                    termios.TCSADRAIN,
+                    terminal_attributes,
+                )
+        except (OSError, termios.error):
+            pass
+        finally:
+            try:
+                os.close(terminal_fd)
+            except OSError:
+                pass
 
 
 def _open_controlling_terminal() -> Optional[TextIO]:
@@ -88,10 +240,6 @@ def _checkpoint_after_interrupt(
         device = getattr(trainer, "device", None)
         if device is not None and getattr(device, "type", None) == "cuda":
             torch.cuda.synchronize(device)
-        # Do not call trainer.save_checkpoint here: rank zero reaches telemetry.finish
-        # alone, and that method contains a distributed barrier. The payload is the
-        # same atomic checkpoint payload but is written without introducing a DDP
-        # collective mismatch during shutdown.
         save_payload(trainer.checkpoint_payload(), checkpoint_path)
     except Exception as error:
         message(f"Checkpoint save failed: {error}\n")
@@ -102,7 +250,7 @@ def _checkpoint_after_interrupt(
 
 @contextmanager
 def interactive_interrupt_checkpoint() -> Iterator[None]:
-    """Route the runner's proven KeyboardInterrupt path through an interactive save choice."""
+    """Legacy prompt hook retained for compatibility; public runs now use Ctrl-G."""
 
     global _INTERRUPTED_TRAINER
     original_run_pilot = Stage6Trainer.run_pilot
@@ -141,6 +289,9 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
 
 
 __all__ = [
+    "CheckpointExitController",
+    "CheckpointExitRequested",
+    "checkpoint_exit_request_path",
     "interactive_interrupt_checkpoint",
 ]
 # ^^^ THOG
