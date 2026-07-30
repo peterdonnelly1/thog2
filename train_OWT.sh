@@ -194,7 +194,7 @@ cat() {
           printf '  %-35s %s\n' "$label" "$value"
           ;;
         "semantic adapter bypass:")
-          [[ "$geometry_preset" == dense ]] && continue
+          [[ "$geometry_preset" == dense || "$geometry_preset" == depth ]] && continue
           printf '  %-35s %s\n' "$label" "$value"
           ;;
         "direct factorised MLP:")
