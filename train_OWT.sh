@@ -40,6 +40,18 @@ while (( $# > 0 )); do
       case "$THOG2_MATERIALISATION_PROFILING" in true|false) ;; *) echo "--materialisation-profiling requires true or false; got: $THOG2_MATERIALISATION_PROFILING" >&2; exit 2 ;; esac
       shift
       ;;
+    --print-geometry-registry)
+      # vvv THOG make the complete registry/help surface directly reachable from the canonical training wrapper
+      if [[ -n "${THOG2_PYTHON:-}" ]]; then
+        THOG2_REGISTRY_PYTHON="$THOG2_PYTHON"
+      elif [[ -x .venv/bin/python ]]; then
+        THOG2_REGISTRY_PYTHON=.venv/bin/python
+      else
+        THOG2_REGISTRY_PYTHON=python
+      fi
+      exec "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
+      # ^^^ THOG
+      ;;
     -h|--help)
       THOG2_DEPTH_MATERIALISATION_HELP=true
       THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS+=("$1")
