@@ -14,6 +14,41 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+
+# vvv THOG make --print-geometry-registry the complete discoverability surface for registered geometry plus every Python runner option and wrapper-only execution control
+def _print_complete_registry_help_if_requested() -> None:
+    if "--print-geometry-registry" not in sys.argv[1:]:
+        return
+    original_argv = list(sys.argv)
+    try:
+        sys.argv[:] = [sys.argv[0], *[argument for argument in sys.argv[1:] if argument != "--print-geometry-registry"]]
+        from sheet.geometry_registry import format_geometry_registry
+        import run_thog2_owt_core as registry_core
+
+        print(format_geometry_registry())
+        print()
+        print("training runner options")
+        print("-----------------------")
+        print(registry_core.build_parser().format_help().rstrip())
+        print()
+        print("registry / wrapper-only controls")
+        print("--------------------------------")
+        print("  --print-geometry-registry")
+        print("  --initial-eval | --no-initial-eval")
+        print("  -E true|false                                      fast discard")
+        print("  THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false      semantic adapter bypass")
+        print("  THOG2_DIRECT_FACTORISED_MLP=true|false             direct factorised MLP")
+        print("  THOG2_VECTORISE_PER_HEAD_MATERIALISATION=true|false  vectorise per-head materialisation")
+        print("  --depth-materialisation-matmul true|false          pure DEPTH; default false")
+        print("  --materialisation-profiling true|false             pure DEPTH timing; default false")
+    finally:
+        sys.argv[:] = original_argv
+    raise SystemExit(0)
+
+
+_print_complete_registry_help_if_requested()
+# ^^^ THOG
+
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
 import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
@@ -25,11 +60,73 @@ from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv            
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
 # vvv THOG install the default-off pure-DEPTH matmul experiment and low-overhead materialisation timing policy before any trainer is constructed
+import sheet.depth_materialisation_runtime as _depth_materialisation_runtime
 from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
 install_depth_materialisation_runtime()
 # ^^^ THOG
 
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
+
+# vvv THOG keep materialisation timing at five decimals and place the optional penalty at the absolute end of each progress row
+_ORIGINAL_MATERIALISATION_INTERVAL_FIELD = _depth_materialisation_runtime._materialisation_interval_field
+_ORIGINAL_MATERIALISATION_PROGRESS_FORMAT = _stage6.format_progress_line
+
+
+def _materialisation_interval_field_five_decimals(trainer: Any) -> Optional[str]:
+    value = _ORIGINAL_MATERIALISATION_INTERVAL_FIELD(trainer)
+    if value is None:
+        return None
+    mean_text, standard_deviation_text = value.removesuffix("s/layer").split("±", 1)
+    return f"{float(mean_text):.5f}±{float(standard_deviation_text):.5f}s/layer"
+
+
+def _format_progress_line_with_materialisation_last(run_id: str, event: str, payload: Any) -> str:
+    line = _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT(run_id, event, payload)
+    if event != "optimizer_progress" or "materialisation_penalty" not in payload:
+        return line
+    field = f"  materialisation penalty={payload['materialisation_penalty']}"
+    return f"{line.replace(field, '')}{field}"
+
+
+_depth_materialisation_runtime._materialisation_interval_field = _materialisation_interval_field_five_decimals
+_stage6.format_progress_line = _format_progress_line_with_materialisation_last
+# ^^^ THOG
+
+# vvv THOG expose the real optimisation state in the model-options report while preserving the established core report calculations
+_ORIGINAL_PRINT_MODEL_PARAMETERS_AND_OPTIONS = _core.print_model_parameters_and_options
+
+
+def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None:
+    report = trainer.parameter_report
+    persistent = int(report["persistent_parameters"])
+    dense_equivalent = int(report["dense_equivalent_total_parameters"])
+    sheet_coefficients = int(report["sheet_coefficients"])
+    compression = (dense_equivalent / persistent) if persistent else 0.0
+    print("model parameters and options", flush=True)
+    _core._print_model_option("parameters:", f"persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x")
+    _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
+    _core._print_model_option("wall stop:", f"max_wall_minutes={config.max_wall_minutes}")
+    _core._print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
+    _core._print_model_option("batches:", f"micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}")
+    _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
+    if config.model_type == "sheet":
+        model_config = trainer.raw_model.config
+        trajectory = getattr(trainer.raw_model, "trajectory", None)
+        depth_materialisation_matmul = bool(getattr(trajectory, "depth_materialisation_matmul", False))
+        _core._print_model_option(
+            "optimisations:",
+            f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  "
+            f"vectorise_per_head={model_config.vectorise_per_head_materialisation}  "
+            f"direct_factorised_mlp={model_config.direct_factorised_mlp}  "
+            f"activation_checkpointing={config.activation_checkpointing}  "
+            f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}  "
+            f"depth_materialisation_matmul={depth_materialisation_matmul}",
+        )
+    print(flush=True)
+
+
+_core.print_model_parameters_and_options = _print_model_parameters_and_optimisations
+# ^^^ THOG
 
 from run_thog2_owt_core import *  # noqa: F401,F403                                                                                                        # <<< THOG preserve the complete current-master Python runner API and fresh-run implementation
 
