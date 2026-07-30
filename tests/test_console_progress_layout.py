@@ -5,6 +5,7 @@ import re
 import unittest
 from types import SimpleNamespace
 
+import run_thog2_owt  # noqa: F401  # <<< THOG apply the public terminal-colour policy before formatting rows
 from sheet.stage6_trainer import Stage6Trainer, format_progress_line
 
 
@@ -63,7 +64,7 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertIn("tokens=999,999,999", line)
         self.assertIn("training loss  =   3.2000", line)
         self.assertIn(
-            "\033[1;93mvalidation loss=   3.1990\033[33m\033[0m",
+            "\033[1;33mvalidation loss=   3.1990\033[33m\033[0m",
             line,
         )
         self.assertNotIn("unchanging-run-id", line)
