@@ -5,7 +5,7 @@ import re
 import unittest
 from types import SimpleNamespace
 
-import run_thog2_owt  # noqa: F401  # <<< THOG apply the public terminal-colour policy before formatting rows
+import run_thog2_owt  # noqa: F401  # <<< THOG apply the public terminal-colour and progress-format policy before formatting rows
 from sheet.stage6_trainer import Stage6Trainer, format_progress_line
 
 
@@ -31,10 +31,10 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(values["mean_step_seconds"], "  0.03")
+        self.assertEqual(values["mean_step_seconds"], "  0.0250")
         self.assertEqual(values["tok/s"], "  8189")
         self.assertEqual(values["consumed_tokens"], "999,999,999")
-        self.assertRegex(values["timestamp"], r"^\d{6}-\d{4}$")
+        self.assertRegex(values["timestamp"], r"^\d{6}:\d{4}$")
 
     def test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis(self) -> None:
         trainer = object.__new__(Stage6Trainer)
@@ -55,11 +55,11 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
                 "validation_loss": "   3.1990",
             },
         )
-        values["timestamp"] = "300726-0840"
+        values["timestamp"] = "260730:0840"
         line = format_progress_line("unchanging-run-id", "evaluation_completed", values)
 
-        self.assertTrue(line.startswith("\033[33mV     100  300726-0840"))
-        self.assertIn("Δstep= 12.00s", line)
+        self.assertTrue(line.startswith("\033[33mV     100  260730:0840"))
+        self.assertIn("Δstep= 12.0000s", line)
         self.assertIn("tok/s=  8189", line)
         self.assertIn("tokens=999,999,999", line)
         self.assertIn("training loss  =   3.2000", line)
