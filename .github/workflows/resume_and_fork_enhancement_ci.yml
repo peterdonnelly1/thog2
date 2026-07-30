@@ -63,7 +63,10 @@ jobs:
             tests/test_resume_and_fork_wandb_lineage.py \
             tests/test_resume_and_fork_cli_compatibility.py \
             tests/test_resume_identity_and_throughput.py \
-            tests/test_sheet_stage6_runner_scripts.py
+            tests/test_sheet_stage6_runner_scripts.py \
+            tests/test_interactive_interrupt.py \
+            tests/test_console_progress_layout.py \
+            tests/test_train_owt_public_wrapper.py
 
   real-cpu-lifecycle:
     runs-on: ubuntu-latest
@@ -167,6 +170,7 @@ jobs:
           python -m pip install --quiet --upgrade pip
           python -m pip install --quiet numpy pytest tiktoken tensorboard wandb matplotlib plotly
           python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
       - name: Run repository-wide CPU regression
         env:
           PYTHONPATH: .
