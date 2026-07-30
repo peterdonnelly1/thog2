@@ -3,6 +3,47 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# vvv THOG expose the experimental pure-DEPTH materialisation matmul path as a granular default-off wrapper control
+THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
+case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in
+  true|false) ;;
+  *) echo "THOG2_DEPTH_MATERIALISATION_MATMUL must be true or false; got: $THOG2_DEPTH_MATERIALISATION_MATMUL" >&2; exit 2 ;;
+esac
+THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS=()
+THOG2_DEPTH_MATERIALISATION_HELP=false
+while (( $# > 0 )); do
+  case "$1" in
+    --depth-materialisation-matmul)
+      (( $# >= 2 )) || { echo "--depth-materialisation-matmul requires true or false" >&2; exit 2; }
+      case "$2" in true|false) ;; *) echo "--depth-materialisation-matmul requires true or false; got: $2" >&2; exit 2 ;; esac
+      THOG2_DEPTH_MATERIALISATION_MATMUL="$2"
+      shift 2
+      ;;
+    --depth-materialisation-matmul=*)
+      THOG2_DEPTH_MATERIALISATION_MATMUL="${1#*=}"
+      case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in true|false) ;; *) echo "--depth-materialisation-matmul requires true or false; got: $THOG2_DEPTH_MATERIALISATION_MATMUL" >&2; exit 2 ;; esac
+      shift
+      ;;
+    -h|--help)
+      THOG2_DEPTH_MATERIALISATION_HELP=true
+      THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+    *)
+      THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS[@]}"
+unset THOG2_DEPTH_MATERIALISATION_FILTERED_ARGS
+export THOG2_DEPTH_MATERIALISATION_MATMUL
+if [[ "$THOG2_DEPTH_MATERIALISATION_HELP" == true ]]; then
+  printf '%s\n' 'DEPTH execution optimisation:' '  --depth-materialisation-matmul true|false   pure DEPTH only; default false' ''
+fi
+unset THOG2_DEPTH_MATERIALISATION_HELP
+# ^^^ THOG
+
 # vvv THOG give fresh, resume, fork and every DDP rank one collision-safe Ctrl-G request path
 if [[ -z "${THOG2_CHECKPOINT_EXIT_FILE:-}" ]]; then
   export THOG2_CHECKPOINT_EXIT_FILE="/tmp/thog2_checkpoint_exit_${BASHPID}_$(date +%s%N)"
@@ -40,9 +81,9 @@ fi
 unset THOG2_LIFECYCLE_DISPATCH THOG2_LIFECYCLE_HELP
 # ^^^ THOG
 
-# vvv THOG align only the fresh-run startup summary; the longest label fixes the value column
+# vvv THOG align only the fresh-run startup summary; the longest label fixes the value column and optimisation controls form one visible block
 cat() {
-  local first_line line label value
+  local first_line line label value optimisations_started
   if ! IFS= read -r first_line; then
     return 0
   fi
@@ -53,11 +94,19 @@ cat() {
   fi
 
   printf '%s\n' "$first_line"
+  optimisations_started=false
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^[[:space:]]{2}([^:]+:)[[:space:]]*(.*)$ ]]; then
       label="${BASH_REMATCH[1]}"
       value="${BASH_REMATCH[2]}"
+      if [[ "$label" == "fast discard:" && "$optimisations_started" == false ]]; then
+        printf '  optimisations:\n'
+        optimisations_started=true
+      fi
       printf '  %-35s %s\n' "$label" "$value"
+      if [[ "$label" == "vectorise per-head materialisation:" ]]; then
+        printf '  %-35s %s\n' 'depth materialisation matmul:' "$THOG2_DEPTH_MATERIALISATION_MATMUL"
+      fi
     else
       printf '%s\n' "$line"
     fi
