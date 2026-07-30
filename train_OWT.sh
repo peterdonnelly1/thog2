@@ -52,6 +52,7 @@ while (( $# > 0 )); do
       "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
       printf '\ncanonical train_OWT.sh options\n------------------------------\n'
       bash ./train_OWT_core.sh -h
+      printf '\nTorch compilation:\n  --torch-compile true|false                  torch.compile execution wrapper; default false\n'
       exit 0
       # ^^^ THOG
       ;;
@@ -80,6 +81,50 @@ if [[ "$THOG2_DEPTH_MATERIALISATION_HELP" == true ]]; then
     ''
 fi
 unset THOG2_DEPTH_MATERIALISATION_HELP
+# ^^^ THOG
+
+# vvv THOG expose torch.compile as an execution-only A/B switch; default false preserves every established training path
+THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-false}"
+case "$THOG2_TORCH_COMPILE" in
+  true|false) ;;
+  *) echo "THOG2_TORCH_COMPILE must be true or false; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;;
+esac
+THOG2_TORCH_COMPILE_FILTERED_ARGS=()
+THOG2_TORCH_COMPILE_HELP=false
+while (( $# > 0 )); do
+  case "$1" in
+    --torch-compile)
+      (( $# >= 2 )) || { echo "--torch-compile requires true or false" >&2; exit 2; }
+      case "$2" in true|false) ;; *) echo "--torch-compile requires true or false; got: $2" >&2; exit 2 ;; esac
+      THOG2_TORCH_COMPILE="$2"
+      shift 2
+      ;;
+    --torch-compile=*)
+      THOG2_TORCH_COMPILE="${1#*=}"
+      case "$THOG2_TORCH_COMPILE" in true|false) ;; *) echo "--torch-compile requires true or false; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;; esac
+      shift
+      ;;
+    -h|--help)
+      THOG2_TORCH_COMPILE_HELP=true
+      THOG2_TORCH_COMPILE_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+    *)
+      THOG2_TORCH_COMPILE_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${THOG2_TORCH_COMPILE_FILTERED_ARGS[@]}"
+unset THOG2_TORCH_COMPILE_FILTERED_ARGS
+export THOG2_TORCH_COMPILE
+if [[ "$THOG2_TORCH_COMPILE_HELP" == true ]]; then
+  printf '%s\n' \
+    'Torch compilation:' \
+    '  --torch-compile true|false                  torch.compile execution wrapper; default false' \
+    ''
+fi
+unset THOG2_TORCH_COMPILE_HELP
 # ^^^ THOG
 
 # vvv THOG give fresh, resume, fork and every DDP rank one collision-safe Ctrl-G request path
@@ -166,6 +211,8 @@ cat() {
           ;;
         "instrumentation:")
           printf '  %-35s %s\n' "$label" "$value"
+          [[ "$optimisations_started" == false ]] && { printf '  optimisations:\n'; optimisations_started=true; }
+          printf '  %-35s %s\n' 'torch compile:' "$THOG2_TORCH_COMPILE"
           if [[ "$geometry_preset" == depth && "$THOG2_MATERIALISATION_PROFILING" == true ]]; then
             printf '  %-35s %s\n' 'materialisation profiling:' "$THOG2_MATERIALISATION_PROFILING"
           fi
