@@ -33,6 +33,29 @@ from run_thog2_owt_core import *  # noqa: F401,F403                             
 _BASE_OWT_TRAINER = _core.OwtTrainer
 _stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
 
+# vvv THOG explicitly report a successful Ctrl-G checkpoint exit as clean to W&B while retaining shell status 131
+_CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False
+_ORIGINAL_WANDB_TELEMETRY_FINISH = _core.WandbTelemetry.finish
+
+
+def _finish_telemetry_with_checkpoint_exit_policy(
+    telemetry: Any,
+    *,
+    exit_code: Optional[int] = None,
+) -> None:
+    global _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING
+    clean_checkpoint_exit = _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING
+    resolved_exit_code = 0 if clean_checkpoint_exit and exit_code is None else exit_code
+    try:
+        _ORIGINAL_WANDB_TELEMETRY_FINISH(telemetry, exit_code=resolved_exit_code)
+    finally:
+        if clean_checkpoint_exit:
+            _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False
+
+
+_core.WandbTelemetry.finish = _finish_telemetry_with_checkpoint_exit_policy
+# ^^^ THOG
+
 
 class _CheckpointExitOwtTrainer(_BASE_OWT_TRAINER):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -51,6 +74,7 @@ class _CheckpointExitOwtTrainer(_BASE_OWT_TRAINER):
         return any(bool(value) for value in gathered)
 
     def _timed(self, function: Any):
+        global _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING
         result, elapsed = super()._timed(function)
         if not self._checkpoint_exit_requested():
             return result, elapsed
@@ -65,6 +89,7 @@ class _CheckpointExitOwtTrainer(_BASE_OWT_TRAINER):
             )
         self.optimizer.zero_grad(set_to_none=True)
         self.save_checkpoint(checkpoint_path)
+        _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = True
         if self.distributed.is_primary:
             print(f"Ctrl-G checkpoint saved: {checkpoint_path}", flush=True)
         raise CheckpointExitRequested(checkpoint_path, completed_updates)
