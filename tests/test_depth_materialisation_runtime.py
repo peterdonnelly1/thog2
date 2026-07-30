@@ -1,11 +1,14 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 import unittest
 
 import torch
 
 import run_thog2_owt  # noqa: F401  # <<< THOG install the public DEPTH materialisation runtime policy under test
+from sheet import stage6_trainer
+from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
 from sheet.depth_trajectory import DepthTrajectory
 from sheet.geometry import SheetGeometryConfig
 from sheet.semantic_materializer import (
@@ -14,10 +17,21 @@ from sheet.semantic_materializer import (
     MLP_CONTRACTION_WEIGHT,
     MLP_EXPANSION_WEIGHT,
 )
-from sheet.stage6_trainer import format_progress_line
 
 
 class DepthMaterialisationRuntimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        previous = os.environ.get("THOG2_MATERIALISATION_PROFILING")
+        os.environ["THOG2_MATERIALISATION_PROFILING"] = "true"
+        try:
+            install_depth_materialisation_runtime()
+        finally:
+            if previous is None:
+                os.environ.pop("THOG2_MATERIALISATION_PROFILING", None)
+            else:
+                os.environ["THOG2_MATERIALISATION_PROFILING"] = previous
+
     @staticmethod
     def _trajectory() -> DepthTrajectory:
         geometry = SheetGeometryConfig(
@@ -88,7 +102,7 @@ class DepthMaterialisationRuntimeTests(unittest.TestCase):
         self.assertGreaterEqual(samples[0], 0.0)
 
     def test_console_progress_places_materialisation_penalty_after_step_time(self) -> None:
-        line = format_progress_line(
+        line = stage6_trainer.format_progress_line(
             "run-id",
             "optimizer_progress",
             {
