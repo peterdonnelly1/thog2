@@ -59,13 +59,18 @@ class PublicTrainOwtWrapperTests(unittest.TestCase):
 
         lines = completed.stdout.splitlines()
         start = lines.index("scruffy OWT train") + 1
-        end = next(index for index in range(start, len(lines)) if lines[index].startswith("DRY RUN:"))
-        summary_lines = [line for line in lines[start:end] if line.startswith("  ")]
+        end = next(
+            index
+            for index in range(start, len(lines))
+            if lines[index].startswith("  log:")
+        ) + 1
+        summary_lines = lines[start:end]
         self.assertTrue(summary_lines)
         self.assertTrue(
             any(line.startswith("  vectorise per-head materialisation:") for line in summary_lines)
         )
         for line in summary_lines:
+            self.assertTrue(line.startswith("  "), line)
             self.assertGreaterEqual(len(line), 38, line)
             self.assertEqual(line[37], " ", line)
             self.assertNotEqual(line[38:], "", line)
