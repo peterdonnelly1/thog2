@@ -33,6 +33,12 @@ class _RequestedController:
 
 
 class CheckpointExitControlTests(unittest.TestCase):
+    def setUp(self) -> None:
+        run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False
+
+    def tearDown(self) -> None:
+        run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False
+
     def test_shared_request_file_becomes_visible_after_maturation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             request_path = Path(temporary) / "checkpoint_exit.request"
@@ -71,6 +77,7 @@ class CheckpointExitControlTests(unittest.TestCase):
             self.assertEqual(raised.exception.checkpoint_path, checkpoint_path)
             trainer.optimizer.zero_grad.assert_called_once_with(set_to_none=True)
             trainer.save_checkpoint.assert_called_once_with(checkpoint_path)
+            self.assertTrue(run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING)
 
     def test_public_trainer_preserves_normal_timed_result_without_request(self) -> None:
         trainer = object.__new__(_CheckpointExitOwtTrainer)
@@ -82,6 +89,26 @@ class CheckpointExitControlTests(unittest.TestCase):
             return_value=("result", 0.25),
         ):
             self.assertEqual(trainer._timed(lambda: None), ("result", 0.25))
+
+    def test_ctrl_g_forces_explicit_clean_telemetry_finish(self) -> None:
+        recorded_exit_codes = []
+        run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = True
+
+        def record_finish(telemetry, *, exit_code=None) -> None:
+            recorded_exit_codes.append(exit_code)
+
+        with mock.patch.object(
+            run_thog2_owt,
+            "_ORIGINAL_WANDB_TELEMETRY_FINISH",
+            side_effect=record_finish,
+        ):
+            run_thog2_owt._finish_telemetry_with_checkpoint_exit_policy(
+                object(),
+                exit_code=None,
+            )
+
+        self.assertEqual(recorded_exit_codes, [0])
+        self.assertFalse(run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING)
 
     def test_public_main_maps_completed_checkpoint_exit_to_131(self) -> None:
         request = CheckpointExitRequested(Path("/tmp/ckpt.pt"), 19)
