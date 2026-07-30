@@ -40,7 +40,7 @@ def _print_complete_registry_help_if_requested() -> None:
         print("  THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false      semantic adapter bypass")
         print("  THOG2_DIRECT_FACTORISED_MLP=true|false             direct factorised MLP")
         print("  THOG2_VECTORISE_PER_HEAD_MATERIALISATION=true|false  vectorise per-head materialisation")
-        print("  --depth-materialisation-matmul true|false          pure DEPTH; default false")
+        print("  --depth-materialisation-matmul true|false          DEPTH matrix materialisation; default true")
         print("  --materialisation-profiling true|false             pure DEPTH timing; default false")
     finally:
         sys.argv[:] = original_argv
@@ -52,7 +52,9 @@ _print_complete_registry_help_if_requested()
 
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
+import sheet.geometry_registry as _geometry_registry                                                                                                        # <<< THOG align geometry report value columns with the shared console label width
 import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
+from sheet.depth_trajectory import DepthTrajectory                                                                                                          # <<< THOG identify geometries that actually retain DEPTH matrix materialisation
 from sheet.interactive_interrupt import (                                                                                                                   # <<< THOG Ctrl-G requests one safe-boundary checkpoint and exit
     CheckpointExitController,
     CheckpointExitRequested,
@@ -60,13 +62,36 @@ from sheet.interactive_interrupt import (                                       
 from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
-# vvv THOG install the default-off pure-DEPTH matmul experiment and low-overhead materialisation timing policy before any trainer is constructed
+# vvv THOG matmul is now the default DEPTH matrix materialiser after the measured A/B win; profiling remains default-off
+os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "true")
 import sheet.depth_materialisation_runtime as _depth_materialisation_runtime
 from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
 install_depth_materialisation_runtime()
 # ^^^ THOG
 
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
+
+# vvv THOG use the longest established two-column label as one shared width across geometry, model options and lifecycle summaries
+_CONSOLE_LABEL_WIDTH = len("vectorise per-head materialisation:")
+_ORIGINAL_GEOMETRY_PLAN_LABEL_WIDTH = _geometry_registry._geometry_plan_label_width
+
+
+def _geometry_plan_label_width_aligned(plan: Any) -> int:
+    return max(_CONSOLE_LABEL_WIDTH, _ORIGINAL_GEOMETRY_PLAN_LABEL_WIDTH(plan))
+
+
+def _format_geometry_field_aligned(label_width: int, label: str, value: Any) -> str:
+    return f"  {label:<{label_width}} {value}"
+
+
+def _print_model_option_aligned(label: str, value: str) -> None:
+    print(f"  {label:<{_CONSOLE_LABEL_WIDTH}} {value}", flush=True)
+
+
+_geometry_registry._geometry_plan_label_width = _geometry_plan_label_width_aligned
+_geometry_registry._format_field = _format_geometry_field_aligned
+_core._print_model_option = _print_model_option_aligned
+# ^^^ THOG
 
 # vvv THOG keep materialisation timing at five decimals and place the optional penalty at the absolute end of each progress row
 _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT = _stage6.format_progress_line
@@ -94,8 +119,39 @@ _depth_materialisation_runtime._materialisation_interval_field = _materialisatio
 _stage6.format_progress_line = _format_progress_line_with_materialisation_last
 # ^^^ THOG
 
-# vvv THOG expose the real optimisation state in the model-options report while preserving the established core report calculations
-_ORIGINAL_PRINT_MODEL_PARAMETERS_AND_OPTIONS = _core.print_model_parameters_and_options
+# vvv THOG expose only optimisation controls that can affect the selected geometry and suppress inactive optional-run rows
+def _depth_matrix_fallback(trajectory: Any) -> Optional[DepthTrajectory]:
+    if isinstance(trajectory, DepthTrajectory):
+        return trajectory
+    nested = getattr(trajectory, "depth", None)
+    if not isinstance(nested, DepthTrajectory):
+        return None
+    if any(parameter.ndim == 3 for parameter in nested.coefficients.values()):
+        return nested
+    return None
+
+
+def _optimisation_fields(config: Any, trainer: Any) -> list[str]:
+    fields: list[str] = []
+    if config.model_type == "sheet":
+        model = trainer.raw_model
+        model_config = model.config
+        trajectory = getattr(model, "trajectory", None)
+        fields.append(f"fast_discard={model_config.fast_discard}")
+        fields.append(f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}")
+        if hasattr(trajectory, "vectorise_per_head_materialisation"):
+            fields.append(f"vectorise_per_head={model_config.vectorise_per_head_materialisation}")
+        if model._supports_direct_factorised_mlp():
+            fields.append(f"direct_factorised_mlp={model_config.direct_factorised_mlp}")
+        fields.append(f"activation_checkpointing={config.activation_checkpointing}")
+        if isinstance(trajectory, DepthTrajectory):
+            fields.append(f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        depth_fallback = _depth_matrix_fallback(trajectory)
+        if depth_fallback is not None:
+            fields.append(f"depth_materialisation_matmul={bool(depth_fallback.depth_materialisation_matmul)}")
+        return fields
+    fields.append(f"activation_checkpointing={config.activation_checkpointing}")
+    return fields
 
 
 def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None:
@@ -107,23 +163,13 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
     print("model parameters and options", flush=True)
     _core._print_model_option("parameters:", f"persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x")
     _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
-    _core._print_model_option("wall stop:", f"max_wall_minutes={config.max_wall_minutes}")
+    if int(config.max_wall_minutes) > 0:
+        _core._print_model_option("wall time stop:", f"max_wall_minutes={config.max_wall_minutes}")
     _core._print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
     _core._print_model_option("batches:", f"micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}")
-    _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
-    if config.model_type == "sheet":
-        model_config = trainer.raw_model.config
-        trajectory = getattr(trainer.raw_model, "trajectory", None)
-        depth_materialisation_matmul = bool(getattr(trajectory, "depth_materialisation_matmul", False))
-        _core._print_model_option(
-            "optimisations:",
-            f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  "
-            f"vectorise_per_head={model_config.vectorise_per_head_materialisation}  "
-            f"direct_factorised_mlp={model_config.direct_factorised_mlp}  "
-            f"activation_checkpointing={config.activation_checkpointing}  "
-            f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}  "
-            f"depth_materialisation_matmul={depth_materialisation_matmul}",
-        )
+    if config.layer_dropout_enabled:
+        _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
+    _core._print_model_option("optimisations:", "  ".join(_optimisation_fields(config, trainer)))
     print(flush=True)
 
 
@@ -242,8 +288,7 @@ _lifecycle._ARGUMENT_TO_CONFIG.update(
 # ^^^ THOG
 
 
-# vvv THOG align lifecycle schedule values with the established model-options console column
-
+# vvv THOG align lifecycle schedule values with the same 35-character console label field
 def _print_lifecycle_schedule(
     mode: str,
     lifecycle: Mapping[str, Any],
@@ -253,7 +298,7 @@ def _print_lifecycle_schedule(
     first_lr = _lifecycle.learning_rate_for_lifecycle(training_config, lifecycle, completed_updates)
 
     def row(label: str, value: Any) -> None:
-        print(f"  {label:<24} {value}", flush=True)
+        print(f"  {label:<{_CONSOLE_LABEL_WIDTH}} {value}", flush=True)
 
     print(flush=True)
     print(f"{mode} schedule", flush=True)
