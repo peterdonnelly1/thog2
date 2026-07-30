@@ -3,6 +3,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# vvv THOG give fresh, resume, fork and every DDP rank one collision-safe Ctrl-G request path
+if [[ -z "${THOG2_CHECKPOINT_EXIT_FILE:-}" ]]; then
+  export THOG2_CHECKPOINT_EXIT_FILE="/tmp/thog2_checkpoint_exit_${BASHPID}_$(date +%s%N)"
+fi
+rm -f "$THOG2_CHECKPOINT_EXIT_FILE"
+# ^^^ THOG
+
 # vvv THOG keep lifecycle options additive while ordinary runs execute the preserved master wrapper
 THOG2_LIFECYCLE_DISPATCH=false
 THOG2_LIFECYCLE_HELP=false
