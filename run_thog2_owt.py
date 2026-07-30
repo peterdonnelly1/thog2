@@ -33,6 +33,23 @@ from run_thog2_owt_core import *  # noqa: F401,F403                             
 _BASE_OWT_TRAINER = _core.OwtTrainer
 _stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
 
+# vvv THOG render progress timestamp as YYMMDD:HHMM and mean step seconds with four fixed-width decimals
+_stage6._progress_timestamp = lambda: _stage6.datetime.now().strftime("%y%m%d:%H%M")
+_ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
+
+
+def _prepare_console_progress_payload_with_precise_step(self: Any, event: str, payload: Any):
+    values = _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD(self, event, payload)
+    if event in {"optimizer_progress", "evaluation_completed"}:
+        mean_step_seconds = getattr(self, "_console_latest_mean_step_seconds", None)
+        if mean_step_seconds is not None:
+            values["mean_step_seconds"] = f"{float(mean_step_seconds):8.4f}"
+    return values
+
+
+_stage6.Stage6Trainer._prepare_console_progress_payload = _prepare_console_progress_payload_with_precise_step
+# ^^^ THOG
+
 # vvv THOG explicitly report a successful Ctrl-G checkpoint exit as clean to W&B while retaining shell status 131
 _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False
 _ORIGINAL_WANDB_TELEMETRY_FINISH = _core.WandbTelemetry.finish
