@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# vvv THOG expose granular pure-DEPTH materialisation controls; profiling remains default-off so ordinary runs incur no timing-hook overhead
-THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
+# vvv THOG expose granular pure-DEPTH materialisation controls; matmul is default-on after the A/B win while profiling remains default-off
+THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"
 THOG2_MATERIALISATION_PROFILING="${THOG2_MATERIALISATION_PROFILING:-false}"
 case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in
   true|false) ;;
@@ -49,7 +49,10 @@ while (( $# > 0 )); do
       else
         THOG2_REGISTRY_PYTHON=python
       fi
-      exec "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
+      "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
+      printf '\ncanonical train_OWT.sh options\n------------------------------\n'
+      bash ./train_OWT_core.sh -h
+      exit 0
       # ^^^ THOG
       ;;
     -h|--help)
@@ -70,7 +73,7 @@ export THOG2_MATERIALISATION_PROFILING
 if [[ "$THOG2_DEPTH_MATERIALISATION_HELP" == true ]]; then
   printf '%s\n' \
     'DEPTH execution optimisation:' \
-    '  --depth-materialisation-matmul true|false   pure DEPTH only; default false' \
+    '  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true' \
     '' \
     'Profiling:' \
     '  --materialisation-profiling true|false      pure DEPTH timing; default false' \
@@ -116,9 +119,9 @@ fi
 unset THOG2_LIFECYCLE_DISPATCH THOG2_LIFECYCLE_HELP
 # ^^^ THOG
 
-# vvv THOG align only the fresh-run startup summary; the longest label fixes the value column and optimisation controls form one visible block
+# vvv THOG align the fresh-run summary on the longest optimisation label and show only controls that can affect the selected geometry
 cat() {
-  local first_line line label value optimisations_started
+  local first_line line label value optimisations_started geometry_preset
   if ! IFS= read -r first_line; then
     return 0
   fi
@@ -130,19 +133,47 @@ cat() {
 
   printf '%s\n' "$first_line"
   optimisations_started=false
+  geometry_preset=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^[[:space:]]{2}([^:]+:)[[:space:]]*(.*)$ ]]; then
       label="${BASH_REMATCH[1]}"
       value="${BASH_REMATCH[2]}"
-      if [[ "$label" == "fast discard:" && "$optimisations_started" == false ]]; then
-        printf '  optimisations:\n'
-        optimisations_started=true
+      if [[ "$label" == "model/preset/basis:" ]]; then
+        geometry_preset="${value#* / }"
+        geometry_preset="${geometry_preset%% / *}"
       fi
-      printf '  %-35s %s\n' "$label" "$value"
-      if [[ "$label" == "vectorise per-head materialisation:" ]]; then
-        printf '  %-35s %s\n' 'depth materialisation matmul:' "$THOG2_DEPTH_MATERIALISATION_MATMUL"
-        printf '  %-35s %s\n' 'materialisation profiling:' "$THOG2_MATERIALISATION_PROFILING"
-      fi
+      case "$label" in
+        "fast discard:")
+          [[ "$geometry_preset" == dense ]] && continue
+          [[ "$optimisations_started" == false ]] && { printf '  optimisations:\n'; optimisations_started=true; }
+          printf '  %-35s %s\n' "$label" "$value"
+          ;;
+        "semantic adapter bypass:")
+          [[ "$geometry_preset" == dense ]] && continue
+          printf '  %-35s %s\n' "$label" "$value"
+          ;;
+        "direct factorised MLP:")
+          [[ "$geometry_preset" == mlp_block || "$geometry_preset" == full_block ]] || continue
+          printf '  %-35s %s\n' "$label" "$value"
+          ;;
+        "vectorise per-head materialisation:")
+          if [[ "$geometry_preset" == head_aware_block || "$geometry_preset" == full_block ]]; then
+            printf '  %-35s %s\n' "$label" "$value"
+          fi
+          if [[ "$geometry_preset" == depth || "$geometry_preset" == jpeg_like_v1 || "$geometry_preset" == mlp_block || "$geometry_preset" == head_aware_block ]]; then
+            printf '  %-35s %s\n' 'depth materialisation matmul:' "$THOG2_DEPTH_MATERIALISATION_MATMUL"
+          fi
+          ;;
+        "instrumentation:")
+          printf '  %-35s %s\n' "$label" "$value"
+          if [[ "$geometry_preset" == depth && "$THOG2_MATERIALISATION_PROFILING" == true ]]; then
+            printf '  %-35s %s\n' 'materialisation profiling:' "$THOG2_MATERIALISATION_PROFILING"
+          fi
+          ;;
+        *)
+          printf '  %-35s %s\n' "$label" "$value"
+          ;;
+      esac
     else
       printf '%s\n' "$line"
     fi
