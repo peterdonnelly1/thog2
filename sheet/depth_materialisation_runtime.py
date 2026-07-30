@@ -18,6 +18,7 @@ from . import stage6_trainer as _stage6
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _INSTALLED = False
+_PROFILING_INSTALLED = False                                                                                                                            # <<< THOG install profiler hooks only when explicitly requested
 _ORIGINAL_DEPTH_INIT = DepthTrajectory.__init__
 _ORIGINAL_DEPTH_MATERIALIZE = DepthTrajectory.materialize
 _ORIGINAL_DEPTH_MATERIALIZE_PARAMETER = DepthTrajectory._materialize_depth_parameter
@@ -215,7 +216,11 @@ def _materialisation_interval_field(trainer: Any) -> Optional[str]:
 
 def _stage6_timed_with_materialisation_profile(self: Any, function: Any):
     trajectory = _pure_depth_trajectory(self)
-    profile_training = trajectory is not None and getattr(function, "__name__", "") == "train_one_update"
+    profile_training = (
+        _env_bool("THOG2_MATERIALISATION_PROFILING", False)
+        and trajectory is not None
+        and getattr(function, "__name__", "") == "train_one_update"
+    )                                                                                                                                                   # <<< THOG default-off profiler contributes no CUDA events unless explicitly enabled
     if profile_training:
         trajectory.begin_materialisation_profiling()
     try:
@@ -258,11 +263,13 @@ def _format_progress_line_with_materialisation(run_id: str, event: str, payload:
 
 
 def install_depth_materialisation_runtime() -> None:
-    global _INSTALLED
-    if _INSTALLED:
+    global _INSTALLED, _PROFILING_INSTALLED
+    if not _INSTALLED:
+        DepthTrajectory.__init__ = _depth_init_with_runtime_controls
+        DepthTrajectory._materialize_depth_parameter = _depth_materialize_parameter_with_matmul
+        _INSTALLED = True
+    if not _env_bool("THOG2_MATERIALISATION_PROFILING", False) or _PROFILING_INSTALLED:
         return
-    DepthTrajectory.__init__ = _depth_init_with_runtime_controls
-    DepthTrajectory._materialize_depth_parameter = _depth_materialize_parameter_with_matmul
     DepthTrajectory.materialize = _depth_materialize_with_timing
     DepthTrajectory.begin_materialisation_profiling = _begin_materialisation_profiling
     DepthTrajectory.end_materialisation_profiling = _end_materialisation_profiling
@@ -270,7 +277,7 @@ def install_depth_materialisation_runtime() -> None:
     _stage6.Stage6Trainer._timed = _stage6_timed_with_materialisation_profile
     _stage6.Stage6Trainer._print_progress = _stage6_print_progress_with_materialisation
     _stage6.format_progress_line = _format_progress_line_with_materialisation
-    _INSTALLED = True
+    _PROFILING_INSTALLED = True                                                                                                                          # <<< THOG leave the materialisation hot path untouched in ordinary default-off runs
 
 
 __all__ = ["install_depth_materialisation_runtime"]
