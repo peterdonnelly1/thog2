@@ -118,7 +118,10 @@ class WandbTelemetryTests(unittest.TestCase):
         self.assertEqual(module.init_arguments["name"], "SHEET_scruffy__TEST")
         self.assertEqual(module.init_arguments["mode"], "offline")
         self.assertTrue(any("train/loss" in row for row in module.run.logged))
-        self.assertTrue(any("eval/val_loss" in row for row in module.run.logged))
+        # vvv THOG evaluation telemetry names distinguish train-split evaluation from held-out validation
+        self.assertTrue(any("val/train_loss" in row for row in module.run.logged))
+        self.assertTrue(any("val/val_loss" in row for row in module.run.logged))
+        # ^^^ THOG
         self.assertTrue(any("resource/checkpoint_bytes" in row for row in module.run.logged))
         self.assertTrue(
             any(

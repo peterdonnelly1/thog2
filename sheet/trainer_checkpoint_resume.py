@@ -62,14 +62,40 @@ _LEGACY_SHEET_CONTROL_FIELDS = (
 )
 
 
+# vvv THOG non-finite handling changes future update acceptance, so resume/fork may assert but never override checkpoint values
+_NONFINITE_MATERIAL_ASSERTION_FIELDS = (
+    "nonfinite_update_policy",
+    "max_nonfinite_update_skips",
+)
+# ^^^ THOG
+
+
 def _trainer_state_from_payload(payload: Mapping[str, Any]) -> TrainerState:
     values: Dict[str, Any] = asdict(TrainerState())
     values.update(dict(payload["trainer_state"]))
     return TrainerState(**values)
 
 
-def _validate_override_fields(overrides: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+# vvv THOG matching non-finite values are accepted as assertions then removed before execution overrides are applied
+def _validate_override_fields(
+    overrides: Optional[Mapping[str, Any]],
+    *,
+    checkpoint_values: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
     override_values = dict(overrides or {})
+    authoritative = dict(checkpoint_values or {})
+    for name in _NONFINITE_MATERIAL_ASSERTION_FIELDS:
+        if name not in override_values or name not in authoritative:
+            continue
+        requested = override_values[name]
+        checkpoint_value = authoritative[name]
+        if requested != checkpoint_value:
+            raise ValueError(
+                f"resume material parameter mismatch: {name}: "
+                f"checkpoint={checkpoint_value!r}, requested={requested!r}"
+            )
+        del override_values[name]
+
     forbidden = sorted(set(override_values) - EXECUTION_OVERRIDE_FIELDS)
     if forbidden:
         raise ValueError(
@@ -77,6 +103,7 @@ def _validate_override_fields(overrides: Optional[Mapping[str, Any]]) -> Dict[st
             f"got {forbidden}"
         )
     return override_values
+# ^^^ THOG
 
 
 def _align_legacy_optimizer_groups_to_checkpoint(
@@ -247,8 +274,11 @@ class TrainerCheckpointResumeMixin:
         #         "resume overrides are restricted to execution fields; "
         #         f"got {forbidden}"
         #     )
-        # vvv THOG share exact override validation with schema-1 SHEET resume
-        override_values = _validate_override_fields(overrides)
+        # vvv THOG share exact override validation with schema-1 SHEET resume and enforce non-finite controls as assertions
+        override_values = _validate_override_fields(
+            overrides,
+            checkpoint_values=payload["trainer_config"],
+        )
         # ^^^ THOG
         values = asdict(checkpoint_config)
         values.update(override_values)
@@ -298,7 +328,10 @@ class TrainerCheckpointResumeMixin:
         expected_config: TrainingConfig,
     ):
         _validate_legacy_sheet_checkpoint(payload, expected_config)
-        override_values = _validate_override_fields(overrides)
+        override_values = _validate_override_fields(
+            overrides,
+            checkpoint_values=payload.get("trainer_config"),
+        )
         values = asdict(expected_config)
         values.update(override_values)
         resumed_config = TrainingConfig(**values)

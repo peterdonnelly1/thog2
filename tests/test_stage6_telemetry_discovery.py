@@ -111,8 +111,11 @@ class Stage6TelemetryDiscoveryTests(unittest.TestCase):
 
         self.assertEqual(module.init_arguments["project"], "thog")
         self.assertEqual(module.init_arguments["name"], "SHEET_scruffy__TEST")
-        self.assertTrue(any("train/step_loss" in row for row in module.run.logged))
-        self.assertTrue(any("test/loss" in row for row in module.run.logged))
+        # vvv THOG canonical telemetry uses train/loss and val/{train_loss,val_loss}; eval/test aliases are intentionally gone
+        self.assertTrue(any("train/loss" in row for row in module.run.logged))
+        self.assertTrue(any("val/train_loss" in row for row in module.run.logged))
+        self.assertTrue(any("val/val_loss" in row for row in module.run.logged))
+        # ^^^ THOG
         self.assertTrue(any("resource/checkpoint_bytes" in row for row in module.run.logged))
         self.assertTrue(any("sheet/attention_input_weight/high_depth_order_energy_fraction" in row for row in module.run.logged))
         self.assertTrue(module.run.finished)
