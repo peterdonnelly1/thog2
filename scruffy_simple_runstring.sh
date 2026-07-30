@@ -53,12 +53,19 @@ set -euo pipefail
 #    -D N_EMBD
 #    -H N_HEAD
 #    -L N_LAYER
+#    -s STRATUM_SIZE                                layer-dropout nominal layers per stratum
+#    -M N_ACTIVE_PER_STRATUM                        layer-dropout active layers selected per stratum
+#    --layer-dropout-resample-steps N               optimizer updates per sampled layer set
 #    -Q O_ATTN_D_MODEL
 #    -O O_ATTN_OUT_PER_CHANNEL
 #    -J O_ATTN_QKV_PER_CHANNEL
 #    -P O_DEPTH                                     single integer, comma list, or quoted space list; ignored by dense
 #    -X O_MLP_D_MODEL
 #    -Y O_MLP_HIDDEN                                ignored by DEPTH
+# Execution optimisation/debug:
+#    --depth-materialisation-matmul true|false      DEPTH matrix materialisation; default true
+#    --materialisation-profiling true|false         pure DEPTH timing; default false
+#    --torch-compile true|false                     torch.compile execution wrapper; default false
 # Residual init:
 #    -r RESIDUAL_INIT_POLICY                        depth_scaled | unscaled
 #    -z RESIDUAL_INIT_DEPTH_SOURCE                  true_layer_depth | dof_implied_depth | user_forced_depth
@@ -71,29 +78,33 @@ set -euo pipefail
 #    -j LOG_ROOT
 #    -R RESULT_ROOT
 
-# vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
-export THOG2_HOST_LABEL="scruffy"
-export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
-export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
-export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
-export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+# vvv THOG dreedle GPU1 profile; reproduce the hot CTX1024 run on physical GPU1 with its original 220 W power clamp
+THOG2_PHYSICAL_GPU="${THOG2_PHYSICAL_GPU:-1}"
+THOG2_POWER_LIMIT_W="${THOG2_POWER_LIMIT_W:-220}"
+sudo nvidia-smi -i "$THOG2_PHYSICAL_GPU" -pl "$THOG2_POWER_LIMIT_W"
+export CUDA_VISIBLE_DEVICES="$THOG2_PHYSICAL_GPU"
+export THOG2_HOST_LABEL="dreedle_gpu1"
+export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
+export THOG2_NUM_GPUS=1
+export THOG2_DTYPE=float16
+export THOG2_ATTENTION_BACKEND=sdpa
 # ^^^ THOG
 
-python -m run_thog2_owt --print-geometry-registry
+# python -m run_thog2_owt --print-geometry-registry
 
 export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 
-
+# vvv THOG exact hot-run training geometry/schedule, with only matmul and torch.compile added; profiling stays off because it graph-breaks checkpointed compilation
 ./train_OWT.sh \
-  -g DREEDLE_BEST_RECAP \
-  -n 10000 \
+  -g DREEDLE_GPU0_PL220_CTX1024_L32_D1024_P16 \
+  -n 50000 \
   -b 16 \
-  -A 8 \
+  -A 6 \
   -G "$THOG2_NUM_GPUS" \
   -S 4 \
-  -u 1 \
-  -e 10001 \
+  -u 10 \
+  -e 250 \
   -l 10 \
   -w 100 \
   -k 1000 \
@@ -103,7 +114,7 @@ export WANDB_CONSOLE=off
   -L 32 \
   -H 16 \
   -D 1024 \
-  -C 768 \
+  -C 1024 \
   -P 16 \
   -E true \
   -r depth_scaled \
@@ -115,9 +126,13 @@ export WANDB_CONSOLE=off
   -t "$THOG2_OWT_DATA_DIR" \
   --select-depth \
   --option DEPTH.compressor=chebyshev \
+  --no-depth-compress-layer-norm-and-bias \
+  --depth-materialisation-matmul true \
+  --materialisation-profiling false \
+  --torch-compile true \
   -- \
   --host-label "$THOG2_HOST_LABEL"
-
+# ^^^ THOG
 
 
 #  --select-depth \
