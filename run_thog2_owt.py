@@ -11,17 +11,66 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
-from sheet.interactive_interrupt import interactive_interrupt_checkpoint                                                                                   # <<< THOG turn the first Ctrl-C into a safe-boundary checkpoint choice
+import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
+from sheet.interactive_interrupt import (                                                                                                                   # <<< THOG Ctrl-G requests one safe-boundary checkpoint and exit
+    CheckpointExitController,
+    CheckpointExitRequested,
+)
 from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
 
 from run_thog2_owt_core import *  # noqa: F401,F403                                                                                                        # <<< THOG preserve the complete current-master Python runner API and fresh-run implementation
+
+
+# vvv THOG apply checkpoint-exit behaviour through one public trainer subclass used by fresh, resume and fork
+_BASE_OWT_TRAINER = _core.OwtTrainer
+_stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
+
+
+class _CheckpointExitOwtTrainer(_BASE_OWT_TRAINER):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._checkpoint_exit_controller = CheckpointExitController(
+            is_primary=self.distributed.is_primary,
+        )
+        self._checkpoint_exit_controller.start()
+
+    def _timed(self, function: Any):
+        result, elapsed = super()._timed(function)
+        if not self._checkpoint_exit_controller.requested():
+            return result, elapsed
+
+        checkpoint_path = Path(self.config.out_dir) / "ckpt.pt"
+        completed_updates = int(self.state.completed_updates)
+        if self.distributed.is_primary:
+            print(
+                f"Ctrl-G checkpoint exit started at completed update {completed_updates}: "
+                f"{checkpoint_path}",
+                flush=True,
+            )
+        self.optimizer.zero_grad(set_to_none=True)
+        self.save_checkpoint(checkpoint_path)
+        if self.distributed.is_primary:
+            print(f"Ctrl-G checkpoint saved: {checkpoint_path}", flush=True)
+        raise CheckpointExitRequested(checkpoint_path, completed_updates)
+
+    def close(self) -> None:
+        try:
+            self._checkpoint_exit_controller.close()
+        finally:
+            super().close()
+
+
+_core.OwtTrainer = _CheckpointExitOwtTrainer
+OwtTrainer = _CheckpointExitOwtTrainer
+# ^^^ THOG
 
 
 # vvv THOG non-finite controls alter future update acceptance; classify them as checkpoint-authoritative before lifecycle preflight
@@ -175,7 +224,7 @@ def _call_lifecycle_main(argv: Sequence[str], environment: Optional[Mapping[str,
                 os.environ[name] = value
 
 
-# vvv THOG keep all established dispatch paths inside the safe interactive Ctrl-C guard
+# vvv THOG keep all established dispatch paths inside the shared Ctrl-G checkpoint-exit trainer policy
 def _main_without_interrupt_checkpoint(argv: Optional[Sequence[str]] = None) -> int:
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     if _enhanced_lifecycle_requested(actual_argv):
@@ -195,8 +244,16 @@ def _main_without_interrupt_checkpoint(argv: Optional[Sequence[str]] = None) -> 
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    with interactive_interrupt_checkpoint():
+    try:
         return _main_without_interrupt_checkpoint(argv)
+    except CheckpointExitRequested as request:
+        if int(os.environ.get("RANK", "0")) == 0:
+            print(
+                f"checkpoint exit completed at update {request.completed_updates}; "
+                "telemetry finished cleanly",
+                flush=True,
+            )
+        return 131
 # ^^^ THOG
 
 
