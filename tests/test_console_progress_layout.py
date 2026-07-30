@@ -70,6 +70,39 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertNotIn("unchanging-run-id", line)
         self.assertEqual(len(re.findall(r"\033\[", line)), 4)
 
+    # vvv THOG keep semantic-QKV bypass reporting for non-DEPTH geometries while suppressing it for DEPTH
+    def test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting(self) -> None:
+        model_config = SimpleNamespace(
+            fast_discard=True,
+            bypass_semantic_qkv_adapter=True,
+            vectorise_per_head_materialisation=False,
+            direct_factorised_mlp=False,
+            depth_compress_layer_norm_and_bias=False,
+        )
+        model = SimpleNamespace(
+            config=model_config,
+            trajectory=SimpleNamespace(),
+            _supports_direct_factorised_mlp=lambda: False,
+        )
+        trainer = SimpleNamespace(raw_model=model)
+
+        depth_config = SimpleNamespace(
+            model_type="sheet",
+            geometry_preset="depth",
+            activation_checkpointing=True,
+        )
+        depth_fields = run_thog2_owt._optimisation_fields(depth_config, trainer)
+        self.assertNotIn("semantic_qkv_bypass=True", depth_fields)
+
+        non_depth_config = SimpleNamespace(
+            model_type="sheet",
+            geometry_preset="jpeg_like_v1",
+            activation_checkpointing=True,
+        )
+        non_depth_fields = run_thog2_owt._optimisation_fields(non_depth_config, trainer)
+        self.assertIn("semantic_qkv_bypass=True", non_depth_fields)
+    # ^^^ THOG
+
 
 if __name__ == "__main__":
     unittest.main()
