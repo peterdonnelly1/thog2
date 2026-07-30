@@ -1,12 +1,15 @@
 # vvv THOG
 from __future__ import annotations
 
+import contextlib
+import io
 import os
+import sys
 import unittest
 
 import torch
 
-import run_thog2_owt  # noqa: F401  # <<< THOG install the public DEPTH materialisation runtime policy under test
+import run_thog2_owt  # <<< THOG install and expose the public DEPTH materialisation/runtime console policy under test
 from sheet import stage6_trainer
 from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
 from sheet.depth_trajectory import DepthTrajectory
@@ -101,7 +104,18 @@ class DepthMaterialisationRuntimeTests(unittest.TestCase):
         self.assertEqual(len(samples), 1)
         self.assertGreaterEqual(samples[0], 0.0)
 
-    def test_console_progress_places_materialisation_penalty_after_step_time(self) -> None:
+    def test_materialisation_interval_uses_true_five_decimal_statistics(self) -> None:
+        class Trainer:
+            _thog_materialisation_penalty_count = 4
+            _thog_materialisation_penalty_mean = 0.0029345
+            _thog_materialisation_penalty_m2 = 4 * (0.0026123 ** 2)
+
+        self.assertEqual(
+            run_thog2_owt._materialisation_interval_field_five_decimals(Trainer()),
+            "0.00293±0.00261s/layer",
+        )
+
+    def test_console_progress_places_materialisation_penalty_last(self) -> None:
         line = stage6_trainer.format_progress_line(
             "run-id",
             "optimizer_progress",
@@ -115,13 +129,37 @@ class DepthMaterialisationRuntimeTests(unittest.TestCase):
                 "training_loss": "   3.2000",
                 "learning_rate": " 9.000e-04",
                 "gradient_norm": "   0.250",
-                "materialisation_penalty": "0.0123±0.0012s/layer",
+                "materialisation_penalty": "0.01234±0.00123s/layer",
             },
         )
-        self.assertIn(
-            "Δstep= 12.0000s  materialisation penalty=0.0123±0.0012s/layer  tok/s= 10240",
+        self.assertTrue(
+            line.endswith("  materialisation penalty=0.01234±0.00123s/layer"),
             line,
         )
+        self.assertIn("Δstep= 12.0000s  tok/s= 10240", line)
+
+    def test_registry_help_exposes_geometry_and_runtime_controls(self) -> None:
+        original_argv = list(sys.argv)
+        output = io.StringIO()
+        try:
+            sys.argv[:] = ["run_thog2_owt.py", "--print-geometry-registry"]
+            with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as raised:
+                run_thog2_owt._print_complete_registry_help_if_requested()
+        finally:
+            sys.argv[:] = original_argv
+        self.assertEqual(raised.exception.code, 0)
+        text = output.getvalue()
+        for expected in (
+            "--select-depth",
+            "--depth-compress-layer-norm-and-bias",
+            "--activation-checkpointing",
+            "--depth-materialisation-matmul true|false",
+            "--materialisation-profiling true|false",
+            "THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false",
+            "THOG2_DIRECT_FACTORISED_MLP=true|false",
+            "THOG2_VECTORISE_PER_HEAD_MATERIALISATION=true|false",
+        ):
+            self.assertIn(expected, text)
 
 
 if __name__ == "__main__":
