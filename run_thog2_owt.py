@@ -138,7 +138,8 @@ def _optimisation_fields(config: Any, trainer: Any) -> list[str]:
         model_config = model.config
         trajectory = getattr(model, "trajectory", None)
         fields.append(f"fast_discard={model_config.fast_discard}")
-        fields.append(f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}")
+        if not isinstance(trajectory, DepthTrajectory):
+            fields.append(f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}")
         if hasattr(trajectory, "vectorise_per_head_materialisation"):
             fields.append(f"vectorise_per_head={model_config.vectorise_per_head_materialisation}")
         if model._supports_direct_factorised_mlp():
