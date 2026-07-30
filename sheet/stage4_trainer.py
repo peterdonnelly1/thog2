@@ -1,10 +1,11 @@
 # vvv THOG
 from __future__ import annotations
 
+import os
 from typing import Dict, List
 
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 from .batch_source import DeterministicBatchSource
 from .distributed import DistributedContext
@@ -17,6 +18,26 @@ from .training_model_factory import (
     build_training_model,
     training_parameter_report,
 )
+
+
+# vvv THOG optional torch.compile execution wrapper; raw_model remains the authoritative parameter/checkpoint/diagnostic module
+def _torch_compile_enabled() -> bool:
+    value = os.environ.get("THOG2_TORCH_COMPILE", "false").strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise ValueError(f"THOG2_TORCH_COMPILE must be true or false; got {value!r}")
+
+
+def _execution_model(raw_model: nn.Module) -> nn.Module:
+    if not _torch_compile_enabled():
+        return raw_model
+    compile_function = getattr(torch, "compile", None)
+    if compile_function is None:
+        raise RuntimeError("THOG2_TORCH_COMPILE=true requires torch.compile support")
+    return compile_function(raw_model)
+# ^^^ THOG
 
 
 class Stage4Trainer(SharedTrainer):
@@ -47,7 +68,7 @@ class Stage4Trainer(SharedTrainer):
             self.raw_model,
             config.model_type,
         )
-        self.model = self.distributed.wrap_model(self.raw_model)
+        self.model = self.distributed.wrap_model(_execution_model(self.raw_model))
         self.optimizer = build_optimizer(
             self.raw_model,
             weight_decay=config.weight_decay,
