@@ -44,9 +44,10 @@ class _CheckpointExitOwtTrainer(_BASE_OWT_TRAINER):
 
     def _checkpoint_exit_requested(self) -> bool:
         local_request = self._checkpoint_exit_controller.requested()
-        if int(getattr(self.distributed, "world_size", 1)) <= 1:
+        distributed = getattr(self, "distributed", None)
+        if distributed is None or int(getattr(distributed, "world_size", 1)) <= 1:
             return local_request
-        gathered = self.distributed.all_gather_object(local_request)
+        gathered = distributed.all_gather_object(local_request)
         return any(bool(value) for value in gathered)
 
     def _timed(self, function: Any):
