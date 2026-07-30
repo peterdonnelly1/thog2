@@ -24,6 +24,11 @@ from sheet.interactive_interrupt import (                                       
 from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
+# vvv THOG install the default-off pure-DEPTH matmul experiment and low-overhead materialisation timing policy before any trainer is constructed
+from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
+install_depth_materialisation_runtime()
+# ^^^ THOG
+
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
 
 from run_thog2_owt_core import *  # noqa: F401,F403                                                                                                        # <<< THOG preserve the complete current-master Python runner API and fresh-run implementation
@@ -183,6 +188,7 @@ _LIFECYCLE_ENVIRONMENT_KEYS = (
     "THOG2_DEPTH_CURVE_RENDERER",
     "THOG2_DEPTH_CURVE_LOCAL_HTML",
     "THOG2_FAST_DISCARD",
+    "THOG2_DEPTH_MATERIALISATION_MATMUL",                                                                                                                  # <<< THOG preserve granular DEPTH execution control across lifecycle dispatch
     "WANDB_MODE",
     "WANDB_RUN_ID",
     "WANDB_RESUME",
