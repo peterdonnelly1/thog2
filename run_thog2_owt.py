@@ -9,6 +9,7 @@ through run_thog2_lifecycle.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -68,16 +69,17 @@ install_depth_materialisation_runtime()
 _core.artifact_paths = _artifact_paths                                                                                                                       # <<< THOG expose the current naming helper to the preserved runner module used by lifecycle orchestration
 
 # vvv THOG keep materialisation timing at five decimals and place the optional penalty at the absolute end of each progress row
-_ORIGINAL_MATERIALISATION_INTERVAL_FIELD = _depth_materialisation_runtime._materialisation_interval_field
 _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT = _stage6.format_progress_line
 
 
 def _materialisation_interval_field_five_decimals(trainer: Any) -> Optional[str]:
-    value = _ORIGINAL_MATERIALISATION_INTERVAL_FIELD(trainer)
-    if value is None:
+    count = int(getattr(trainer, "_thog_materialisation_penalty_count", 0))
+    if count <= 0:
         return None
-    mean_text, standard_deviation_text = value.removesuffix("s/layer").split("±", 1)
-    return f"{float(mean_text):.5f}±{float(standard_deviation_text):.5f}s/layer"
+    mean = float(trainer._thog_materialisation_penalty_mean)
+    variance = max(0.0, float(trainer._thog_materialisation_penalty_m2) / count)
+    standard_deviation = math.sqrt(variance)
+    return f"{mean:.5f}±{standard_deviation:.5f}s/layer"
 
 
 def _format_progress_line_with_materialisation_last(run_id: str, event: str, payload: Any) -> str:
@@ -286,6 +288,7 @@ _LIFECYCLE_ENVIRONMENT_KEYS = (
     "THOG2_DEPTH_CURVE_LOCAL_HTML",
     "THOG2_FAST_DISCARD",
     "THOG2_DEPTH_MATERIALISATION_MATMUL",                                                                                                                  # <<< THOG preserve granular DEPTH execution control across lifecycle dispatch
+    "THOG2_MATERIALISATION_PROFILING",                                                                                                                     # <<< THOG preserve default-off materialisation diagnostics across lifecycle dispatch
     "WANDB_MODE",
     "WANDB_RUN_ID",
     "WANDB_RESUME",
