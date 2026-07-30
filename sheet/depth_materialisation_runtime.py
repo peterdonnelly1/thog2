@@ -50,7 +50,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def _depth_init_with_runtime_controls(self: DepthTrajectory, *args: Any, **kwargs: Any) -> None:
     _ORIGINAL_DEPTH_INIT(self, *args, **kwargs)
-    requested_matmul = _env_bool("THOG2_DEPTH_MATERIALISATION_MATMUL", False)
+    requested_matmul = _env_bool("THOG2_DEPTH_MATERIALISATION_MATMUL", True)                                                                                 # <<< THOG matmul is the default DEPTH matrix materialiser
     self.depth_materialisation_matmul = bool(requested_matmul and not self.legacy_sheet_col_vectors)
     self._thog_materialisation_profiling_enabled = False
     self._thog_materialisation_timing_records: List[_MaterialisationTimingRecord] = []
@@ -250,16 +250,13 @@ def _stage6_print_progress_with_materialisation(self: Any, run_id: str, event: s
             _reset_materialisation_interval(self)
 
 
+# vvv THOG materialisation penalty is always the final progress field, independent of profiler/public-wrapper hook installation order
 def _format_progress_line_with_materialisation(run_id: str, event: str, payload: Any) -> str:
     line = _ORIGINAL_FORMAT_PROGRESS_LINE(run_id, event, payload)
     if event != "optimizer_progress" or "materialisation_penalty" not in payload:
         return line
-    field = f"materialisation penalty={payload['materialisation_penalty']}"
-    for marker in ("  tok/s=", "  tokens=", "  training loss"):
-        position = line.find(marker)
-        if position >= 0:
-            return f"{line[:position]}  {field}{line[position:]}"
-    return f"{line}  {field}"
+    return f"{line}  materialisation penalty={payload['materialisation_penalty']}"
+# ^^^ THOG
 
 
 def install_depth_materialisation_runtime() -> None:
