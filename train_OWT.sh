@@ -121,7 +121,7 @@ unset THOG2_LIFECYCLE_DISPATCH THOG2_LIFECYCLE_HELP
 
 # vvv THOG align the fresh-run summary on the longest optimisation label and show only controls that can affect the selected geometry
 cat() {
-  local first_line line label value optimisations_started geometry_preset
+  local first_line line label value optimisations_started geometry_preset effective_stratum_size effective_active_per_stratum
   if ! IFS= read -r first_line; then
     return 0
   fi
@@ -169,6 +169,12 @@ cat() {
           if [[ "$geometry_preset" == depth && "$THOG2_MATERIALISATION_PROFILING" == true ]]; then
             printf '  %-35s %s\n' 'materialisation profiling:' "$THOG2_MATERIALISATION_PROFILING"
           fi
+          ;;
+        "layer dropout:")
+          effective_stratum_size="${LAYER_DROPOUT_STRATUM_SIZE:-${N_LAYER:-}}"
+          effective_active_per_stratum="${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-$effective_stratum_size}"
+          [[ -n "$effective_stratum_size" && "$effective_active_per_stratum" == "$effective_stratum_size" ]] && continue
+          printf '  %-35s %s\n' "$label" "$value"
           ;;
         *)
           printf '  %-35s %s\n' "$label" "$value"
