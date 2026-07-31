@@ -35,9 +35,6 @@ def _execution_model(raw_model: nn.Module) -> nn.Module:
     compile_mode = _torch_compile_mode()
     if compile_mode == "false":
         return raw_model
-    compile_function = getattr(torch, "compile", None)
-    if compile_function is None:
-        raise RuntimeError("THOG2_TORCH_COMPILE requires torch.compile support")
     if compile_mode == "regional":
         compile_mode_setter = getattr(raw_model, "set_torch_compile_mode", None)
         if not callable(compile_mode_setter):
@@ -45,8 +42,14 @@ def _execution_model(raw_model: nn.Module) -> nn.Module:
                 "THOG2_TORCH_COMPILE=regional requires a training model with "
                 "set_torch_compile_mode support"
             )
+        compile_function = getattr(torch, "compile", None)
+        if compile_function is None:
+            raise RuntimeError("THOG2_TORCH_COMPILE=regional requires torch.compile support")
         compile_mode_setter("regional")
         return raw_model
+    compile_function = getattr(torch, "compile", None)
+    if compile_function is None:
+        raise RuntimeError("THOG2_TORCH_COMPILE=true requires torch.compile support")
     return compile_function(raw_model)
 # ^^^ THOG
 
