@@ -7,6 +7,7 @@ from typing import Tuple
 import torch
 from torch import Tensor
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 
 from .protocol import RecurrenceGeneratorDefinition
 
@@ -37,10 +38,8 @@ def _state_update(parameters: Tensor, x: Tensor, y: Tensor) -> Tuple[Tensor, Ten
     return x_next, y_next
 
 
-def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
-    _validate_parameters(parameters)
-    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
-        raise ValueError(f"BQRG index must be a non-negative integer; got {index!r}")
+# vvv THOG BQRG recurrent history is execution state; activation checkpoint it rather than retaining every full slab-sized quadratic intermediate through backward.
+def _materialize_bqrg_at_uncheckpointed(parameters: Tensor, index: int) -> Tensor:
     x = torch.tanh(parameters[..., 0])
     y = torch.tanh(parameters[..., 1])
     for _ in range(index):
@@ -48,6 +47,25 @@ def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
     offset = parameters[..., 14]
     scale = F.softplus(parameters[..., 15])
     return offset + scale * x
+
+
+def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
+    _validate_parameters(parameters)
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        raise ValueError(f"BQRG index must be a non-negative integer; got {index!r}")
+    if index == 0 or not torch.is_grad_enabled() or not parameters.requires_grad:
+        return _materialize_bqrg_at_uncheckpointed(parameters, index)
+
+    def materialize(checkpoint_parameters: Tensor) -> Tensor:
+        return _materialize_bqrg_at_uncheckpointed(checkpoint_parameters, index)
+
+    return checkpoint(
+        materialize,
+        parameters,
+        use_reentrant=False,
+        preserve_rng_state=False,
+    )
+# ^^^ THOG
 
 
 def materialize_bqrg_sequence(parameters: Tensor, length: int) -> Tensor:
