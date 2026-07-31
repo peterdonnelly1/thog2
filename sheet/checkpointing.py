@@ -10,7 +10,9 @@ from torch.utils.checkpoint import checkpoint
 
 
 LogicalBlock = Callable[[Tensor, int], Tensor]
-RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Tensor]]                                                                       # <<< THOG optional compiled checkpoint-segment runner factory
+# vvv THOG regional compilation hooks one cached compiled callable to each existing checkpoint segment
+RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Tensor]]
+# ^^^ THOG
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ def execute_logical_layers(
     logical_block: LogicalBlock,
     training: bool,
     layer_indices: Optional[Sequence[int]] = None,                                                                                                         # <<< THOG optional sparse nominal execution sequence
-    regional_segment_runner_factory: Optional[RegionalSegmentRunnerFactory] = None,                                                                         # <<< THOG optional compiled runner per activation-checkpoint segment
+    regional_segment_runner_factory: Optional[RegionalSegmentRunnerFactory] = None,
 ) -> Tuple[Tensor, CheckpointExecutionReport]:
     validate_checkpoint_segment_size(segment_size)
     if isinstance(n_layer, bool) or not isinstance(n_layer, int) or n_layer <= 0:
@@ -102,7 +104,7 @@ def execute_logical_layers(
                         segment_output = logical_block(segment_output, layer_index)
                     return segment_output
             else:
-                run_segment = regional_segment_runner_factory(tuple(range(start, end)))                                                                      # <<< THOG compile/cache exactly the logical layers already grouped by checkpointing
+                run_segment = regional_segment_runner_factory(tuple(range(start, end)))
 
             hidden = checkpoint(
                 run_segment,
@@ -120,9 +122,9 @@ def execute_logical_layers(
         )
     # ^^^ THOG
 
-    # vvv THOG sparse path chunks active execution positions while preserving nominal layer indices
+    # vvv THOG sparse path chunks active execution positions while preserving nominal layer indices; regional mode deliberately rejects changing random subsets
     if regional_segment_runner_factory is not None:
-        raise RuntimeError("regional torch compilation does not support layer dropout yet")                                                                   # <<< THOG avoid unbounded compilation across changing random layer subsets
+        raise RuntimeError("regional torch compilation does not support layer dropout yet")
     active_layer_indices = _validate_layer_indices(layer_indices, n_layer)
     active_count = len(active_layer_indices)
     if not use_checkpointing:
