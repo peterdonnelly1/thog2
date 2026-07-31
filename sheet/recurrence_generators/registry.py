@@ -62,6 +62,13 @@ class RecurrenceGeneratorRegistry(Mapping[str, RecurrenceGeneratorDefinition]):
     def __len__(self) -> int:
         return len(self._definitions)
 
+    # vvv THOG keep Mapping membership total even though normalize() intentionally raises ValueError for public validation failures.
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str) or not key.strip():
+            return False
+        return key.strip().lower() in self._lookup
+    # ^^^ THOG
+
 
 RECURRENCE_GENERATOR_REGISTRY = RecurrenceGeneratorRegistry((BQRG_DEFINITION,))
 RECURRENCE_GENERATOR_FAMILIES = RECURRENCE_GENERATOR_REGISTRY.families()
