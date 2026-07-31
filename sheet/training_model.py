@@ -1,7 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -16,6 +16,38 @@ from .checkpointing import (
 from .model import SheetGPT, SheetGPTConfig
 
 
+# vvv THOG regional compilation uses the existing activation-checkpoint segmentation as the compilation region boundary
+def _validate_torch_compile_mode(mode: str) -> str:
+    if mode not in {"false", "true", "regional"}:
+        raise ValueError(f"torch compile mode must be false, true, or regional; got {mode!r}")
+    return mode
+
+
+def _compiled_segment_runner(
+    logical_block: Callable[[Tensor, int], Tensor],
+    layer_indices: Tuple[int, ...],
+) -> Callable[[Tensor], Tensor]:
+    compile_function = getattr(torch, "compile", None)
+    if compile_function is None:
+        raise RuntimeError("regional torch compilation requires torch.compile support")
+
+    def run_segment(
+        segment_input: Tensor,
+        *,
+        nominal_indices: Tuple[int, ...] = layer_indices,
+    ) -> Tensor:
+        segment_output = segment_input
+        for layer_index in nominal_indices:
+            segment_output = logical_block(segment_output, layer_index)
+        return segment_output
+
+    return compile_function(
+        run_segment,
+        options={"triton.autotune_pointwise": False},
+    )
+# ^^^ THOG
+
+
 class TrainingDenseGPT(GPT):
     """nanoGPT dense control with the same segmented activation checkpointing API."""
 
@@ -24,6 +56,10 @@ class TrainingDenseGPT(GPT):
         self.checkpoint_segment_size = 0
         # vvv THOG training-only sparse nominal layer selection; None preserves the original path
         self._active_layer_indices: Optional[Tuple[int, ...]] = None
+        # ^^^ THOG
+        # vvv THOG regional torch.compile state is execution-only and excluded from parameters/checkpoints
+        self._torch_compile_mode = "false"
+        self._regional_segment_runners: Dict[Tuple[int, ...], Callable[[Tensor], Tensor]] = {}
         # ^^^ THOG
         self.last_execution_report = CheckpointExecutionReport(
             checkpointing_used=False,
@@ -38,6 +74,19 @@ class TrainingDenseGPT(GPT):
     # vvv THOG layer-dropout selection is external trainer state, not model parameters
     def set_active_layer_indices(self, layer_indices: Optional[Sequence[int]]) -> None:
         self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
+    # ^^^ THOG
+
+    # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
+    def set_torch_compile_mode(self, mode: str) -> None:
+        self._torch_compile_mode = _validate_torch_compile_mode(mode)
+        self._regional_segment_runners.clear()
+
+    def _regional_segment_runner(self, layer_indices: Tuple[int, ...]) -> Callable[[Tensor], Tensor]:
+        runner = self._regional_segment_runners.get(layer_indices)
+        if runner is None:
+            runner = _compiled_segment_runner(self._logical_block, layer_indices)
+            self._regional_segment_runners[layer_indices] = runner
+        return runner
     # ^^^ THOG
 
     def _logical_block(self, hidden: Tensor, layer_index: int) -> Tensor:
@@ -62,6 +111,7 @@ class TrainingDenseGPT(GPT):
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
         # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
         layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
+        regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
         if layer_indices is None:
             hidden, self.last_execution_report = execute_logical_layers(
                 hidden,
@@ -69,6 +119,7 @@ class TrainingDenseGPT(GPT):
                 segment_size=self.checkpoint_segment_size,
                 logical_block=self._logical_block,
                 training=self.training,
+                regional_segment_runner_factory=regional_segment_runner_factory,
             )
         else:
             hidden, self.last_execution_report = execute_logical_layers(
@@ -78,6 +129,7 @@ class TrainingDenseGPT(GPT):
                 logical_block=self._logical_block,
                 training=self.training,
                 layer_indices=layer_indices,
+                regional_segment_runner_factory=regional_segment_runner_factory,
             )
         # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
@@ -104,6 +156,10 @@ class TrainingSheetGPT(SheetGPT):
         # vvv THOG training-only sparse nominal layer selection; None preserves the original path
         self._active_layer_indices: Optional[Tuple[int, ...]] = None
         # ^^^ THOG
+        # vvv THOG regional torch.compile state is execution-only and excluded from parameters/checkpoints
+        self._torch_compile_mode = "false"
+        self._regional_segment_runners: Dict[Tuple[int, ...], Callable[[Tensor], Tensor]] = {}
+        # ^^^ THOG
         self.last_execution_report = CheckpointExecutionReport(
             checkpointing_used=False,
             checkpoint_segments=0,
@@ -117,6 +173,19 @@ class TrainingSheetGPT(SheetGPT):
     # vvv THOG layer-dropout selection is external trainer state, not compact model state
     def set_active_layer_indices(self, layer_indices: Optional[Sequence[int]]) -> None:
         self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
+    # ^^^ THOG
+
+    # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
+    def set_torch_compile_mode(self, mode: str) -> None:
+        self._torch_compile_mode = _validate_torch_compile_mode(mode)
+        self._regional_segment_runners.clear()
+
+    def _regional_segment_runner(self, layer_indices: Tuple[int, ...]) -> Callable[[Tensor], Tensor]:
+        runner = self._regional_segment_runners.get(layer_indices)
+        if runner is None:
+            runner = _compiled_segment_runner(self._logical_block, layer_indices)
+            self._regional_segment_runners[layer_indices] = runner
+        return runner
     # ^^^ THOG
 
     def _sheet_layer_norm(
@@ -158,6 +227,7 @@ class TrainingSheetGPT(SheetGPT):
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
         # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
         layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
+        regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
         if layer_indices is None:
             hidden, self.last_execution_report = execute_logical_layers(
                 hidden,
@@ -165,6 +235,7 @@ class TrainingSheetGPT(SheetGPT):
                 segment_size=self.checkpoint_segment_size,
                 logical_block=self._logical_block,
                 training=self.training,
+                regional_segment_runner_factory=regional_segment_runner_factory,
             )
         else:
             hidden, self.last_execution_report = execute_logical_layers(
@@ -174,6 +245,7 @@ class TrainingSheetGPT(SheetGPT):
                 logical_block=self._logical_block,
                 training=self.training,
                 layer_indices=layer_indices,
+                regional_segment_runner_factory=regional_segment_runner_factory,
             )
         # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
