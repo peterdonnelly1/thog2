@@ -81,8 +81,10 @@ class RegionalCompileSegmentTests(unittest.TestCase):
             runner = training_model._compiled_segment_runner(logical_block, (0, 1, 2, 3))
         self.assertIs(runner, compiled_runner)
         self.assertEqual(compile_function.call_count, 1)
-        compile_function.assert_called_once_with(compile_function.call_args.args[0])
-        self.assertEqual(compile_function.call_args.kwargs, {})
+        call_args, call_kwargs = compile_function.call_args                                                                                                 # <<< THOG Python 3.7-compatible mock-call inspection
+        self.assertEqual(len(call_args), 1)
+        self.assertTrue(callable(call_args[0]))
+        self.assertEqual(call_kwargs, {})
 
     def test_checkpoint_executor_uses_requested_regional_segments(self) -> None:
         requested_segments = []
