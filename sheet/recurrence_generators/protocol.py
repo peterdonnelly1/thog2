@@ -4,12 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, Tuple
 
-import torch
 from torch import Tensor
 
 
 MaterializeAt = Callable[[Tensor, int], Tensor]
 InitializeParameters = Callable[[Tensor, str, float, int], None]
+RescaleOutput = Callable[[Tensor, float], None]
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class RecurrenceGeneratorDefinition:
     description: str
     materialize_at: MaterializeAt
     initialize_parameters: InitializeParameters
+    rescale_output: RescaleOutput
 
     def __post_init__(self) -> None:
         family = self.family.strip().lower()
