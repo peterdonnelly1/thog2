@@ -7,7 +7,7 @@ from typing import Dict, Iterable, Iterator, Mapping, Optional, Tuple
 import torch
 from torch import Tensor
 
-from ..recurrence_generators import RECURRENCE_GENERATOR_FAMILIES, get_recurrence_generator_definition, is_recurrence_generator_family, normalize_recurrence_generator_family, recurrence_generator_version_for_family
+from ..recurrence_generators import get_recurrence_generator_definition, is_recurrence_generator_family, normalize_recurrence_generator_family, recurrence_generator_version_for_family
 from .protocol import BasisDefinition, BasisKernel, DeviceLike
 
 
@@ -97,13 +97,11 @@ def _load_builtin_definitions() -> Tuple[BasisDefinition, ...]:
 
 
 BASIS_REGISTRY = BasisRegistry(_load_builtin_definitions())
-# vvv THOG compressor-facing compatibility list includes registered recurrence generators without inserting them into BASIS_REGISTRY
-BASIS_FAMILIES = (*BASIS_REGISTRY.families(), *RECURRENCE_GENERATOR_FAMILIES)
-# ^^^ THOG
+BASIS_FAMILIES = BASIS_REGISTRY.families()
 
 
 def registered_basis_families() -> Tuple[str, ...]:
-    return BASIS_FAMILIES
+    return BASIS_REGISTRY.families()
 
 
 def normalize_registered_basis_family(basis_family: str) -> str:
