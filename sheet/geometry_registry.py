@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .bases import BASIS_FAMILIES, basis_version_for_family, normalize_registered_basis_family
+# vvv THOG recurrence generators are independent plugins consumed by the same geometry-facing compressor registry
+from .recurrence_generators import RECURRENCE_GENERATOR_REGISTRY, get_recurrence_generator_definition, is_recurrence_generator_family, normalize_recurrence_generator_family, validate_recurrence_generator_width
+# ^^^ THOG
 
 GEOMETRY_REGISTRY_VERSION = "geometry_registry_v5"
 GEOMETRY_PLAN_SCHEMA_VERSION = 1
@@ -195,6 +198,19 @@ def _build_compressor_registry() -> Dict[str, CompressorCapability]:
             True,
             notes="First-class basis-backed compressor; current runtime materializers remain a separate capability boundary.",
         )
+    # vvv THOG recurrence generators are independent plugins; BQRG v1 advertises only the DEPTH CURVE target
+    for definition in RECURRENCE_GENERATOR_REGISTRY.definitions():
+        if definition.family in capabilities:
+            raise ValueError(f"compressor registry collision for recurrence generator {definition.family!r}")
+        capabilities[definition.family] = CompressorCapability(
+            definition.family,
+            definition.version,
+            (ELEMENT_TYPE_CURVE,),
+            True,
+            supported_selectors=definition.supported_targets,
+            notes=f"Recurrence generator: {definition.description}",
+        )
+    # ^^^ THOG
     capabilities[COMPRESSOR_JPEG_LIKE] = CompressorCapability(
         COMPRESSOR_JPEG_LIKE,
         JPEG_LIKE_VERSION,
@@ -240,7 +256,7 @@ def parse_option_assignment(assignment: str) -> ParsedOption:
         raise ValueError(f"geometry option must use TARGET.PROPERTY=VALUE syntax; got {assignment!r}")
     target, property_name = left.rsplit(".", 1)
     property_normalized = property_name.strip().lower()
-    if property_normalized not in ("compressor", "compressor_version", "version", "order", "group_size"):
+    if property_normalized not in ("compressor", "compressor_version", "version", "order", "group_size") and not property_normalized.startswith("generator_"):
         raise ValueError(f"unsupported geometry option property {property_name!r} in {assignment!r}")
     if property_normalized == "version":
         property_normalized = "compressor_version"
@@ -263,8 +279,11 @@ def normalize_compressor_family(value: str) -> str:
         return normalized
     try:
         canonical = normalize_registered_basis_family(normalized)
-    except ValueError as error:
-        raise ValueError(f"unregistered compressor {value!r}; registered compressors are: {', '.join(COMPRESSOR_REGISTRY)}") from error
+    except ValueError:
+        try:
+            canonical = normalize_recurrence_generator_family(normalized)
+        except ValueError as error:
+            raise ValueError(f"unregistered compressor {value!r}; registered compressors are: {', '.join(COMPRESSOR_REGISTRY)}") from error
     if canonical not in COMPRESSOR_REGISTRY:
         raise ValueError(f"unregistered compressor {value!r}; registered compressors are: {', '.join(COMPRESSOR_REGISTRY)}")
     return canonical
@@ -299,7 +318,7 @@ def _validate_option_targets(parsed_options: Sequence[ParsedOption], entries: Se
     selected_selectors = {entry.selector for entry in entries}
     selected_axis_targets = {f"{entry.element}.{axis}" for entry in entries for axis in entry.compressed_axes}
     for option in parsed_options:
-        if option.property in ("compressor", "compressor_version"):
+        if option.property in ("compressor", "compressor_version") or option.property.startswith("generator_"):
             if option.target == AXIS_DEPTH:
                 if not depth_enabled:
                     raise ValueError(f"{option.source!r} targets DEPTH, but --select-depth was not supplied")
@@ -358,6 +377,35 @@ def _compressor_for_entry(entry: GeometryEntry, values: Mapping[Tuple[str, str],
     return family, explicit_version or inline_version or capability.default_version
 
 
+def _generator_options_for_target(target: str, values: Mapping[Tuple[str, str], str]) -> Dict[str, str]:
+    return {
+        property_name: value
+        for (option_target, property_name), value in values.items()
+        if option_target == target and property_name.startswith("generator_")
+    }
+
+
+def _generator_options_for_entry(entry: GeometryEntry, values: Mapping[Tuple[str, str], str]) -> Dict[str, str]:
+    options: Dict[str, str] = {}
+    properties = {property_name for (_, property_name) in values if property_name.startswith("generator_")}
+    for property_name in properties:
+        scoped = _scoped_value(values, selector=entry.selector, element=entry.element, property_name=property_name)
+        if scoped is not None:
+            options[property_name] = scoped
+    return options
+
+
+def _validate_generator_options(family: str, version: str, options: Dict[str, str]) -> None:
+    if is_recurrence_generator_family(family):
+        definition = get_recurrence_generator_definition(family)
+        if version != definition.version:
+            raise ValueError(f"recurrence generator version mismatch for {family}: expected {definition.version!r}, got {version!r}")
+        definition.validate_options(options)
+        return
+    if options:
+        raise ValueError(f"compressor {family}@{version} is not a recurrence generator and does not accept generator_* options")
+
+
 def _order_for_axis(element: str, axis: str, values: Mapping[Tuple[str, str], str], legacy_orders: Mapping[str, int]) -> int:
     target = f"{element}.{axis}"
     if (target, "order") in values:
@@ -390,7 +438,8 @@ def _materializer_adapter(*, depth_enabled: bool, depth_compressor: Optional[str
     if incompatibilities:
         return MaterializerAdapter(False, None, None, None, None, None, None, "; ".join(incompatibilities))
     if depth_enabled and not selections:
-        return MaterializerAdapter(True, "depth", depth_compressor, depth_version, None, None, "depth_v1", "Implemented by the existing DEPTH trajectory.")
+        materialization_version = depth_version if depth_compressor is not None and is_recurrence_generator_family(depth_compressor) else "depth_v1"
+        return MaterializerAdapter(True, "depth", depth_compressor, depth_version, None, None, materialization_version, "Implemented by the existing DEPTH trajectory.")
     if depth_enabled and len(selections) == 1 and selections[0].selector == "MLP_UP.MLP_HIDDEN" and selections[0].compressor == COMPRESSOR_JPEG_LIKE:
         group_size = int(selections[0].axis_options.get(AXIS_MLP_HIDDEN, {}).get("group_size", 256))
         return MaterializerAdapter(True, "jpeg_like_v1", depth_compressor, depth_version, "dct", group_size, "jpeg_like_v1", "Implemented through the legacy JPEG_LIKE_V1 adapter. The compressor is first-class; this materializer remains the old narrow runtime path.", True)
@@ -420,15 +469,24 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
 
     depth_compressor = depth_version = None
     depth_order: Optional[int] = None
+    incompatibilities: list[str] = []
     if select_depth:
         depth_compressor, depth_version = _compressor_for_target(AXIS_DEPTH, values, default_family=default_depth_compressor)
         depth_order = _positive_integer("DEPTH.order", values[(AXIS_DEPTH, "order")]) if (AXIS_DEPTH, "order") in values else int(legacy_orders["o_depth"])
         if depth_order < 1:
             raise ValueError(f"o_depth must be positive; got {depth_order!r}")
+        depth_capability = COMPRESSOR_REGISTRY[depth_compressor]
+        if depth_capability.supported_selectors and AXIS_DEPTH not in depth_capability.supported_selectors:
+            incompatibilities.append(
+                f"DEPTH: compressor {depth_compressor}@{depth_version} is not valid for DEPTH; supported selectors: {', '.join(depth_capability.supported_selectors)}"
+            )
+        depth_generator_options = _generator_options_for_target(AXIS_DEPTH, values)
+        _validate_generator_options(depth_compressor, str(depth_version), depth_generator_options)
+        if is_recurrence_generator_family(depth_compressor):
+            validate_recurrence_generator_width(depth_compressor, depth_order)
 
     resolved: list[ResolvedGeometrySelection] = []
     compressor_pairs: set[Tuple[str, str]] = set()
-    incompatibilities: list[str] = []
     for entry in entries:
         implied_type = entry.resolved_type(bool(select_depth))
         family, version = _compressor_for_entry(entry, values, default_family=default_non_depth_compressor)
@@ -436,6 +494,7 @@ def resolve_geometry_plan(*, select_depth: bool, selected_elements: Sequence[str
         incompatibility = _compatibility_message(entry.selector, implied_type, family, version)
         if incompatibility:
             incompatibilities.append(f"{entry.selector}: {incompatibility}")
+        _validate_generator_options(family, version, _generator_options_for_entry(entry, values))
         capability = COMPRESSOR_REGISTRY[family]
         orders = {axis: _order_for_axis(entry.element, axis, values, legacy_orders) for axis in entry.compressed_axes}
         axis_options: Dict[str, Dict[str, Any]] = {}
@@ -486,6 +545,7 @@ def _geometry_plan_label_width(plan: ResolvedGeometryPlan) -> int:
     for selection in plan.selections:
         labels.extend(f"order {axis}:" for axis in selection.orders)
         labels.extend(f"{axis}.{name}:" for axis, options in selection.axis_options.items() for name in options)
+    labels.extend(f"{option.property}:" for option in plan.parsed_options if option.property.startswith("generator_"))
     return max(len(label) for label in labels) + 4
 
 
@@ -500,6 +560,9 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
             _format_field(label_width, "compressor:", f"{plan.depth_compressor}@{plan.depth_compressor_version}"),
             _format_field(label_width, "order:", plan.depth_order),
         ])
+        for option in plan.parsed_options:
+            if option.target == AXIS_DEPTH and option.property.startswith("generator_"):
+                lines.append(_format_field(label_width, f"{option.property}:", option.value))
     for selection in plan.selections:
         axis_label = "compressed axis:" if len(selection.compressed_axes) == 1 else "compressed axes:"
         lines.extend([
@@ -516,6 +579,9 @@ def format_geometry_plan(plan: ResolvedGeometryPlan, *, detailed: bool = False) 
         for axis, options in selection.axis_options.items():
             for name, value in options.items():
                 lines.append(_format_field(label_width, f"{axis}.{name}:", value))
+        for option in plan.parsed_options:
+            if option.target in (selection.selector, selection.element) and option.property.startswith("generator_"):
+                lines.append(_format_field(label_width, f"{option.property}:", option.value))
     if plan.materializer.implemented and plan.materializer.legacy:
         status = "implemented through legacy adapter"
     else:
@@ -555,6 +621,15 @@ def format_geometry_registry() -> str:
     lines.extend(["", "compressor registry", "-------------------", f"{'compressor':18} {'types':30} {'registered':12} {'legacy':7} {'group':7} notes"])
     for name, capability in COMPRESSOR_REGISTRY.items():
         lines.append(f"{name:18} {','.join(capability.element_types):30} {str(capability.implemented):12} {str(capability.legacy_only):7} {str(capability.supports_group_size):7} {capability.notes}")
+    # vvv THOG dedicated RG subsection makes plugin identity, persistent widths, target guards, and option namespaces discoverable
+    lines.extend(["", "recurrence generator registry", "-----------------------------", f"{'generator':18} {'version':16} {'persistent widths':18} {'targets':18} options"])
+    for definition in RECURRENCE_GENERATOR_REGISTRY.definitions():
+        widths = ",".join(str(width) for width in definition.persistent_widths)
+        targets = ",".join(definition.supported_targets)
+        options = ",".join(definition.option_names) if definition.option_names else "none"
+        lines.append(f"{definition.family:18} {definition.version:16} {widths:18} {targets:18} {options}")
+        lines.append(f"  {definition.description}")
+    # ^^^ THOG
     lines.extend(["", "Compressor capability is first-class; generic SHEET/SHEET_SET materializers are still Phase 2."])
     return "\n".join(lines)
 
@@ -617,7 +692,7 @@ __all__ = [
     "AXIS_ATTENTION_D_MODEL", "AXIS_ATTENTION_HEAD_CHANNEL", "AXIS_DEPTH", "AXIS_MLP_D_MODEL", "AXIS_MLP_HIDDEN",
     "COMPRESSOR_JPEG_LIKE", "COMPRESSOR_REGISTRY", "ELEMENT_TYPE_CURVE", "ELEMENT_TYPE_SHEET", "ELEMENT_TYPE_SHEET_SET",
     "GEOMETRY_PLAN_SCHEMA_VERSION", "GEOMETRY_REGISTRY", "GEOMETRY_REGISTRY_VERSION", "GeometryEntry", "MaterializerAdapter",
-    "ParsedOption", "ResolvedGeometryPlan", "ResolvedGeometrySelection", "format_geometry_plan", "format_geometry_registry", "normalize_selector",
+    "ParsedOption", "ResolvedGeometryPlan", "ResolvedGeometrySelection", "format_geometry_plan", "format_geometry_registry", "normalize_compressor_family", "normalize_selector",
     "parse_option_assignment", "permitted_geometry_selectors", "resolve_geometry_plan", "validate_resolved_geometry_plan",
 ]
 # ^^^ THOG
