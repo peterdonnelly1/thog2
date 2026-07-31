@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 
 
 LogicalBlock = Callable[[Tensor, int], Tensor]
+RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Tensor]]                                                                       # <<< THOG optional compiled checkpoint-segment runner factory
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ def execute_logical_layers(
     logical_block: LogicalBlock,
     training: bool,
     layer_indices: Optional[Sequence[int]] = None,                                                                                                         # <<< THOG optional sparse nominal execution sequence
+    regional_segment_runner_factory: Optional[RegionalSegmentRunnerFactory] = None,                                                                         # <<< THOG optional compiled runner per activation-checkpoint segment
 ) -> Tuple[Tensor, CheckpointExecutionReport]:
     validate_checkpoint_segment_size(segment_size)
     if isinstance(n_layer, bool) or not isinstance(n_layer, int) or n_layer <= 0:
@@ -72,7 +74,7 @@ def execute_logical_layers(
         and segment_size > 0
     )
 
-    # vvv THOG preserve the pre-layer-dropout fast path byte-for-byte in its inner loops
+    # vvv THOG preserve the pre-layer-dropout fast path byte-for-byte in its inner loops unless regional compilation explicitly supplies segment runners
     if layer_indices is None:
         if not use_checkpointing:
             for layer_index in range(n_layer):
@@ -88,16 +90,19 @@ def execute_logical_layers(
         for start in range(0, n_layer, segment_size):
             end = min(start + segment_size, n_layer)
 
-            def run_segment(
-                segment_input: Tensor,
-                *,
-                segment_start: int = start,
-                segment_end: int = end,
-            ) -> Tensor:
-                segment_output = segment_input
-                for layer_index in range(segment_start, segment_end):
-                    segment_output = logical_block(segment_output, layer_index)
-                return segment_output
+            if regional_segment_runner_factory is None:
+                def run_segment(
+                    segment_input: Tensor,
+                    *,
+                    segment_start: int = start,
+                    segment_end: int = end,
+                ) -> Tensor:
+                    segment_output = segment_input
+                    for layer_index in range(segment_start, segment_end):
+                        segment_output = logical_block(segment_output, layer_index)
+                    return segment_output
+            else:
+                run_segment = regional_segment_runner_factory(tuple(range(start, end)))                                                                      # <<< THOG compile/cache exactly the logical layers already grouped by checkpointing
 
             hidden = checkpoint(
                 run_segment,
@@ -116,6 +121,8 @@ def execute_logical_layers(
     # ^^^ THOG
 
     # vvv THOG sparse path chunks active execution positions while preserving nominal layer indices
+    if regional_segment_runner_factory is not None:
+        raise RuntimeError("regional torch compilation does not support layer dropout yet")                                                                   # <<< THOG avoid unbounded compilation across changing random layer subsets
     active_layer_indices = _validate_layer_indices(layer_indices, n_layer)
     active_count = len(active_layer_indices)
     if not use_checkpointing:
