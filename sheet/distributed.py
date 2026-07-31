@@ -5,7 +5,7 @@ import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 import torch
 import torch.distributed as dist
@@ -54,7 +54,8 @@ class DistributedContext:
             raise ValueError(f"WORLD_SIZE must be positive; got {world_size}")
         if rank < 0 or rank >= world_size:
             raise ValueError(
-                f"RANK must be in [0, WORLD_SIZE); got rank={rank}, world_size={world_size}"
+                "RANK must be in [0, WORLD_SIZE); "
+                f"got rank={rank}, world_size={world_size}"
             )
         if local_rank < 0:
             raise ValueError(f"LOCAL_RANK must be non-negative; got {local_rank}")
@@ -153,7 +154,12 @@ class DistributedContext:
     def is_primary(self) -> bool:
         return self.rank == 0
 
-    def wrap_model(self, model: nn.Module) -> nn.Module:
+    def wrap_model(
+        self,
+        model: nn.Module,
+        *,
+        find_unused_parameters: bool = False,
+    ) -> nn.Module:
         if not self.active:
             return model
         if self.device.type == "cuda":
@@ -162,12 +168,12 @@ class DistributedContext:
                 device_ids=[self.local_rank],
                 output_device=self.local_rank,
                 broadcast_buffers=False,
-                find_unused_parameters=False,
+                find_unused_parameters=find_unused_parameters,
             )
         return DistributedDataParallel(
             model,
             broadcast_buffers=False,
-            find_unused_parameters=False,
+            find_unused_parameters=find_unused_parameters,
         )
 
     def no_sync_context(self, model: nn.Module, *, synchronize: bool):
@@ -191,6 +197,18 @@ class DistributedContext:
     def mean_float(self, value: Tensor) -> float:
         reduced = self.mean_tensor(value.to(dtype=torch.float64))
         return float(reduced.item())
+
+    # vvv THOG deferred recurrence gradients bypass DDP's autograd reducer and therefore require one explicit mean reduction after update-level adjoint materialisation
+    def mean_gradients_(self, parameters: Iterable[nn.Parameter]) -> None:
+        if not self.active:
+            return
+        for parameter in parameters:
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            dist.all_reduce(gradient, op=dist.ReduceOp.SUM)
+            gradient.div_(self.world_size)
+    # ^^^ THOG
 
     def all_true(self, condition: bool) -> bool:
         flag = torch.tensor(
