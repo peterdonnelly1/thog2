@@ -51,12 +51,23 @@ def _env_bool(name: str, default: bool) -> bool:
 def _depth_init_with_runtime_controls(self: DepthTrajectory, *args: Any, **kwargs: Any) -> None:
     _ORIGINAL_DEPTH_INIT(self, *args, **kwargs)
     requested_matmul = _env_bool("THOG2_DEPTH_MATERIALISATION_MATMUL", True)                                                                                 # <<< THOG matmul is the default DEPTH matrix materialiser
-    self.depth_materialisation_matmul = bool(requested_matmul and not self.legacy_sheet_col_vectors)
+    # vvv THOG fixed-basis matmul is inapplicable to recurrence generators; preserve the generator-owned materialiser instead
+    recurrence_generator_active = self.recurrence_generator is not None
+    self.depth_materialisation_matmul = bool(
+        requested_matmul
+        and not self.legacy_sheet_col_vectors
+        and not recurrence_generator_active
+    )
+    # ^^^ THOG
     self._thog_materialisation_profiling_enabled = False
     self._thog_materialisation_timing_records: List[_MaterialisationTimingRecord] = []
 
 
 def _depth_materialize_parameter_with_matmul(self: DepthTrajectory, name: str, layer_index: int) -> Tensor:
+    # vvv THOG recurrence generators own their DEPTH materialisation semantics and must never enter the fixed-basis matmul path
+    if self.recurrence_generator is not None:
+        return _ORIGINAL_DEPTH_MATERIALIZE_PARAMETER(self, name, layer_index)
+    # ^^^ THOG
     if not bool(getattr(self, "depth_materialisation_matmul", False)):
         return _ORIGINAL_DEPTH_MATERIALIZE_PARAMETER(self, name, layer_index)
 
@@ -89,17 +100,27 @@ def _generated_materialisation(self: DepthTrajectory, name: str) -> bool:
     return self._is_generated(item)
 
 
+# vvv THOG profiling must not assume a fixed DEPTH basis exists; recurrence generators execute on their compact parameter device
+def _materialisation_device(self: DepthTrajectory) -> torch.device:
+    first_parameter = next(self.parameters(), None)
+    if first_parameter is None:
+        raise RuntimeError("DEPTH trajectory has no parameters from which to determine materialisation device")
+    return first_parameter.device
+# ^^^ THOG
+
+
 def _depth_materialize_with_timing(self: DepthTrajectory, name: str, layer_index: int) -> Tensor:
     profiling = bool(getattr(self, "_thog_materialisation_profiling_enabled", False)) and _generated_materialisation(self, name)
     cpu_started: Optional[float] = None
     cuda_start: Any = None
     cuda_end: Any = None
+    runtime_device: Optional[torch.device] = None
     if profiling:
-        device = self.depth_basis.device
-        if device.type == "cuda":
+        runtime_device = _materialisation_device(self)
+        if runtime_device.type == "cuda":
             cuda_start = torch.cuda.Event(enable_timing=True)
             cuda_end = torch.cuda.Event(enable_timing=True)
-            cuda_start.record(torch.cuda.current_stream(device=device))
+            cuda_start.record(torch.cuda.current_stream(device=runtime_device))
         else:
             cpu_started = time.perf_counter()
 
@@ -107,7 +128,8 @@ def _depth_materialize_with_timing(self: DepthTrajectory, name: str, layer_index
 
     if profiling:
         if cuda_start is not None:
-            cuda_end.record(torch.cuda.current_stream(device=self.depth_basis.device))
+            assert runtime_device is not None
+            cuda_end.record(torch.cuda.current_stream(device=runtime_device))
             self._thog_materialisation_timing_records.append(
                 _MaterialisationTimingRecord(
                     layer_index=layer_index,
