@@ -6,6 +6,9 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 from .basis import BASIS_VERSION
 from .bases import BASIS_FAMILIES as REGISTERED_BASIS_FAMILIES, BASIS_FAMILY_CHEBYSHEV, BASIS_FAMILY_DCT, basis_version_for_family, normalize_basis_version, normalize_registered_basis_family
+# vvv THOG recurrence generators share compressor identity plumbing but remain a separate registered materialisation family
+from .recurrence_generators import get_recurrence_generator_definition, is_recurrence_generator_family
+# ^^^ THOG
 # vvv THOG lapped cosine controls are part of compact identity
 from .bases.lapped_cosine import (
     BASIS_FAMILY_LAPPED_COSINE,
@@ -211,6 +214,8 @@ def resolve_compact_selectors(
 
 
 def compact_materialization_version(selectors: ResolvedCompactSelectors) -> str:
+    if is_recurrence_generator_family(selectors.basis_family):
+        return get_recurrence_generator_definition(selectors.basis_family).version
     versions = {
         GEOMETRY_PRESET_LEGACY_SHEET_COL: LEGACY_SHEET_COL_MATERIALIZATION_VERSION,
         GEOMETRY_PRESET_DEPTH: DEPTH_MATERIALIZATION_VERSION,
@@ -232,6 +237,20 @@ def normalize_compact_basis_version(selectors: ResolvedCompactSelectors, basis_v
 
 
 def validate_current_sheet_support(selectors: ResolvedCompactSelectors) -> None:
+    if is_recurrence_generator_family(selectors.basis_family):
+        recurrence_depth = (
+            selectors.geometry_preset == GEOMETRY_PRESET_DEPTH
+            and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH
+            and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH
+        )
+        if recurrence_depth:
+            return
+        definition = get_recurrence_generator_definition(selectors.basis_family)
+        raise ValueError(
+            f"recurrence generator {definition.family}@{definition.version} is currently supported only for public DEPTH geometry; "
+            f"got geometry_preset={selectors.geometry_preset!r}, attention_geometry={selectors.attention_geometry!r}, "
+            f"mlp_geometry={selectors.mlp_geometry!r}"
+        )
     supported_basis = selectors.basis_family in REGISTERED_BASIS_FAMILIES
     legacy = selectors.geometry_preset == GEOMETRY_PRESET_LEGACY_SHEET_COL and selectors.attention_geometry == ATTENTION_GEOMETRY_LEGACY_SHEET_COL and selectors.mlp_geometry == MLP_GEOMETRY_LEGACY_SHEET_COL and supported_basis
     depth = selectors.geometry_preset == GEOMETRY_PRESET_DEPTH and selectors.attention_geometry == ATTENTION_GEOMETRY_DEPTH and selectors.mlp_geometry == MLP_GEOMETRY_DEPTH and supported_basis
