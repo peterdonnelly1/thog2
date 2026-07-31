@@ -7,6 +7,7 @@ from typing import Dict, Iterable, Iterator, Mapping, Optional, Tuple
 import torch
 from torch import Tensor
 
+from ..recurrence_generators import RECURRENCE_GENERATOR_FAMILIES, get_recurrence_generator_definition, is_recurrence_generator_family, normalize_recurrence_generator_family, recurrence_generator_version_for_family
 from .protocol import BasisDefinition, BasisKernel, DeviceLike
 
 
@@ -96,15 +97,23 @@ def _load_builtin_definitions() -> Tuple[BasisDefinition, ...]:
 
 
 BASIS_REGISTRY = BasisRegistry(_load_builtin_definitions())
-BASIS_FAMILIES = BASIS_REGISTRY.families()
+# vvv THOG compressor-facing compatibility list includes registered recurrence generators without inserting them into BASIS_REGISTRY
+BASIS_FAMILIES = (*BASIS_REGISTRY.families(), *RECURRENCE_GENERATOR_FAMILIES)
+# ^^^ THOG
 
 
 def registered_basis_families() -> Tuple[str, ...]:
-    return BASIS_REGISTRY.families()
+    return BASIS_FAMILIES
 
 
 def normalize_registered_basis_family(basis_family: str) -> str:
-    return BASIS_REGISTRY.normalize(basis_family)
+    try:
+        return BASIS_REGISTRY.normalize(basis_family)
+    except ValueError as basis_error:
+        try:
+            return normalize_recurrence_generator_family(basis_family)
+        except ValueError:
+            raise basis_error
 
 
 def normalize_basis_family(basis_family: str) -> str:
@@ -112,7 +121,10 @@ def normalize_basis_family(basis_family: str) -> str:
 
 
 def get_basis_definition(basis_family: str) -> BasisDefinition:
-    return BASIS_REGISTRY.get_definition(basis_family)
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        raise ValueError(f"{canonical!r} is a recurrence generator, not a fixed basis")
+    return BASIS_REGISTRY.get_definition(canonical)
 
 
 def get_basis_spec(basis_family: str) -> BasisDefinition:
@@ -124,33 +136,75 @@ def get_basis_kernel(basis_family: str) -> BasisKernel:
 
 
 def basis_version_for_family(basis_family: str) -> str:
-    return get_basis_definition(basis_family).version
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        return recurrence_generator_version_for_family(canonical)
+    return get_basis_definition(canonical).version
 
 
 def basis_artifact_tag_for_family(basis_family: str) -> str:
-    return get_basis_definition(basis_family).artifact_tag
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        return get_recurrence_generator_definition(canonical).artifact_tag
+    return get_basis_definition(canonical).artifact_tag
 
 
 def basis_kernel_metadata(basis_family: str) -> Dict[str, str]:
-    return get_basis_kernel(basis_family).metadata()
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        definition = get_recurrence_generator_definition(canonical)
+        return {
+            "basis_family": definition.family,
+            "basis_version": definition.version,
+            "coordinate_policy": "recurrent_sequence_index",
+            "stabilization_policy": "bounded_tanh_state",
+        }
+    return get_basis_kernel(canonical).metadata()
 
 
 def basis_registry_metadata(basis_family: str) -> Dict[str, object]:
-    return get_basis_definition(basis_family).metadata()
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        definition = get_recurrence_generator_definition(canonical)
+        return {
+            "basis_family": definition.family,
+            "basis_aliases": definition.aliases,
+            "basis_version": definition.version,
+            "artifact_tag": definition.artifact_tag,
+            "supports_weight_basis": False,
+            "supports_native_products": False,
+            "recurrence_generator": True,
+            "persistent_widths": definition.persistent_widths,
+            "supported_targets": definition.supported_targets,
+            "generator_options": definition.option_names,
+            "description": definition.description,
+        }
+    return get_basis_definition(canonical).metadata()
 
 
 def normalize_basis_version(basis_family: str, basis_version: str, *, legacy_default_version: Optional[str] = None) -> str:
-    expected_version = basis_version_for_family(basis_family)
+    canonical = normalize_registered_basis_family(basis_family)
+    expected_version = basis_version_for_family(canonical)
     if basis_version == "auto":
         return expected_version
     if legacy_default_version is not None and basis_version == legacy_default_version and expected_version != legacy_default_version:
         return expected_version
+    if is_recurrence_generator_family(canonical):
+        normalized = str(basis_version).strip().lower()
+        if normalized != expected_version:
+            raise ValueError(
+                f"recurrence generator version mismatch for {canonical}: expected {expected_version!r}, got {basis_version!r}"
+            )
+        return normalized
     # vvv THOG allow a kernel to validate and canonicalise a parameterised version
-    return get_basis_kernel(basis_family).normalize_version(basis_version)
+    return get_basis_kernel(canonical).normalize_version(basis_version)
     # ^^^ THOG
 
 
 def build_registered_basis(sample_count: int, order: int, *, runtime_dtype: torch.dtype = torch.float64, device: Optional[DeviceLike] = None, version: Optional[str] = None, basis_family: str) -> Tensor:
-    definition = get_basis_definition(basis_family)
+    canonical = normalize_registered_basis_family(basis_family)
+    if is_recurrence_generator_family(canonical):
+        raise ValueError(f"recurrence generator {canonical!r} materialises weights directly and has no fixed basis matrix")
+    definition = get_basis_definition(canonical)
     return definition.build(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version)
 # ^^^ THOG
