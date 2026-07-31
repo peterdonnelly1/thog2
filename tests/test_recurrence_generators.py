@@ -11,6 +11,8 @@ from sheet.geometry import SheetGeometryConfig
 from sheet.geometry_registry import COMPRESSOR_REGISTRY, format_geometry_registry, resolve_geometry_plan
 from sheet.recurrence_generators import BQRG_FAMILY, BQRG_PERSISTENT_WIDTH, BQRG_VERSION, RECURRENCE_GENERATOR_REGISTRY, get_recurrence_generator_definition, materialize_bqrg_at, materialize_bqrg_sequence
 from sheet.semantic_materializer import ATTENTION_QUERY_WEIGHT
+from sheet.training_config import TrainingConfig
+from sheet.training_model_factory import build_training_model
 
 
 LEGACY_ORDERS = {
@@ -37,6 +39,37 @@ def tiny_geometry(*, depth_order: int = 16) -> SheetGeometryConfig:
         o_mlp_d_model=1,
         o_mlp_hidden=1,
         bias=True,
+    )
+
+
+def tiny_training_config() -> TrainingConfig:
+    return TrainingConfig(
+        model_type="thog2_sheet",
+        block_size=4,
+        vocab_size=64,
+        n_layer=16,
+        n_head=2,
+        n_embd=8,
+        depth_order=16,
+        base_row_order=1,
+        mlp_channel_order=1,
+        o_attn_d_model=1,
+        o_attn_qkv_per_channel=1,
+        o_attn_out_per_channel=1,
+        o_mlp_d_model=1,
+        o_mlp_hidden=1,
+        geometry_preset="depth",
+        basis_family=BQRG_FAMILY,
+        basis_version=BQRG_VERSION,
+        checkpoint_segment_size=0,
+        batch_size=1,
+        gradient_accumulation_steps=1,
+        max_updates=2,
+        decay_updates=2,
+        eval_batches=1,
+        log_interval=1,
+        device="cpu",
+        dtype="float32",
     )
 
 
@@ -155,6 +188,20 @@ class BqrgMaterialisationTests(unittest.TestCase):
         self.assertIsNotNone(coefficient.grad)
         self.assertTrue(torch.isfinite(coefficient.grad).all())
         self.assertGreater(float(coefficient.grad.abs().sum()), 0.0)
+
+    def test_complete_cpu_model_forward_backward(self) -> None:
+        model = build_training_model(tiny_training_config(), device=torch.device("cpu"))
+        model.train()
+        inputs = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+        targets = torch.tensor([[2, 3, 4, 5]], dtype=torch.long)
+        logits, loss = model(inputs, targets)
+        self.assertEqual(logits.shape, (1, 4, 64))
+        self.assertIsNotNone(loss)
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+        coefficient = model.trajectory.coefficients[ATTENTION_QUERY_WEIGHT]
+        self.assertIsNotNone(coefficient.grad)
+        self.assertTrue(torch.isfinite(coefficient.grad).all())
 
     def test_bqrg_rejected_from_private_depth_fallback(self) -> None:
         with self.assertRaisesRegex(ValueError, "only by public DEPTH"):
