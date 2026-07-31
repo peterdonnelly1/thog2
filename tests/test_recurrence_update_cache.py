@@ -65,9 +65,15 @@ class RecurrenceUpdateCacheTests(unittest.TestCase):
 
         reference_1 = materialize_bqrg_at(reference_parameter, 5)
         reference_2 = materialize_bqrg_at(reference_parameter, 11)
-        0.25 * ((reference_1 * upstream_1).sum() + (reference_2 * upstream_2).sum()).backward()
+        (
+            0.25
+            * (
+                (reference_1 * upstream_1).sum()
+                + (reference_2 * upstream_2).sum()
+            )
+        ).backward()
 
-        self.assertIn(parameter, finalized)
+        self.assertTrue(any(item is parameter for item in finalized))
         self.assertFalse(controller.active)
         self.assertIsNotNone(parameter.grad)
         self.assertIsNotNone(reference_parameter.grad)
