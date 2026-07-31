@@ -16,7 +16,7 @@ BQRG_VERSION = "bqrg_v1"
 BQRG_ARTIFACT_TAG = "BQRG"
 BQRG_PERSISTENT_WIDTH = 16
 BQRG_SUPPORTED_TARGETS = ("DEPTH",)
-BQRG_BACKWARD_CHUNK_TRAJECTORIES = 262144                                                                                                              # <<< THOG bound transient analytic-BPTT state without changing BQRG semantics
+BQRG_BACKWARD_CHUNK_TRAJECTORIES = 262144                                                                                                              # <<< THOG bound each custom-autograd gradient object as well as analytic-BPTT transient state
 
 
 def _validate_parameters(parameters: Tensor) -> None:
@@ -38,7 +38,7 @@ def _state_update(parameters: Tensor, x: Tensor, y: Tensor) -> Tuple[Tensor, Ten
     return x_next, y_next
 
 
-# vvv THOG BQRG recurrent history is derived execution state; use a custom chunked analytic adjoint so backward never constructs the full slab-sized autograd graph.
+# vvv THOG BQRG recurrent history is derived execution state; use a custom chunked analytic adjoint so backward never constructs full-family recurrence graphs or full-family temporary gradients.
 def _advance_state(parameters: Tensor, x: Tensor, y: Tensor, steps: int) -> Tuple[Tensor, Tensor]:
     for _ in range(steps):
         x, y = _state_update(parameters, x, y)
@@ -118,7 +118,7 @@ def _accumulate_chunk_gradient(
     grad_parameters[..., 1].add_(grad_y * (1.0 - y_initial.square()))
 
 
-class _BQRGMaterializeAt(torch.autograd.Function):
+class _BQRGMaterializeChunk(torch.autograd.Function):
     @staticmethod
     def forward(ctx, parameters: Tensor, index: int) -> Tensor:
         ctx.index = int(index)
@@ -128,21 +128,14 @@ class _BQRGMaterializeAt(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: Tensor):
         (parameters,) = ctx.saved_tensors
-        index = int(ctx.index)
         with torch.no_grad():
             grad_parameters = torch.zeros_like(parameters)
-            flat_parameters = parameters.reshape(-1, BQRG_PERSISTENT_WIDTH)
-            flat_grad_output = grad_output.reshape(-1)
-            flat_grad_parameters = grad_parameters.reshape(-1, BQRG_PERSISTENT_WIDTH)
-            trajectory_count = flat_parameters.shape[0]
-            for start in range(0, trajectory_count, BQRG_BACKWARD_CHUNK_TRAJECTORIES):
-                end = min(start + BQRG_BACKWARD_CHUNK_TRAJECTORIES, trajectory_count)
-                _accumulate_chunk_gradient(
-                    flat_parameters[start:end],
-                    flat_grad_output[start:end],
-                    index,
-                    flat_grad_parameters[start:end],
-                )
+            _accumulate_chunk_gradient(
+                parameters,
+                grad_output,
+                int(ctx.index),
+                grad_parameters,
+            )
         return grad_parameters, None
 
 
@@ -152,7 +145,21 @@ def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
         raise ValueError(f"BQRG index must be a non-negative integer; got {index!r}")
     if not torch.is_grad_enabled() or not parameters.requires_grad:
         return _materialize_bqrg_at_uncheckpointed(parameters, index)
-    return _BQRGMaterializeAt.apply(parameters, index)
+
+    output_shape = parameters.shape[:-1]
+    flat_parameters = parameters.reshape(-1, BQRG_PERSISTENT_WIDTH)
+    trajectory_count = flat_parameters.shape[0]
+    generated_chunks: List[Tensor] = []
+    for start in range(0, trajectory_count, BQRG_BACKWARD_CHUNK_TRAJECTORIES):
+        end = min(start + BQRG_BACKWARD_CHUNK_TRAJECTORIES, trajectory_count)
+        generated_chunks.append(
+            _BQRGMaterializeChunk.apply(flat_parameters[start:end], index)
+        )
+    if len(generated_chunks) == 1:
+        generated = generated_chunks[0]
+    else:
+        generated = torch.cat(generated_chunks, dim=0)
+    return generated.reshape(output_shape)
 # ^^^ THOG
 
 
