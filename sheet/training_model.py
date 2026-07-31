@@ -41,10 +41,7 @@ def _compiled_segment_runner(
             segment_output = logical_block(segment_output, layer_index)
         return segment_output
 
-    return compile_function(
-        run_segment,
-        options={"triton.autotune_pointwise": False},
-    )
+    return compile_function(run_segment)
 # ^^^ THOG
 
 
@@ -78,7 +75,10 @@ class TrainingDenseGPT(GPT):
 
     # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
     def set_torch_compile_mode(self, mode: str) -> None:
-        self._torch_compile_mode = _validate_torch_compile_mode(mode)
+        resolved_mode = _validate_torch_compile_mode(mode)
+        if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
+            raise ValueError("regional torch compilation requires checkpoint_segment_size > 0")
+        self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
 
     def _regional_segment_runner(self, layer_indices: Tuple[int, ...]) -> Callable[[Tensor], Tensor]:
@@ -177,7 +177,10 @@ class TrainingSheetGPT(SheetGPT):
 
     # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
     def set_torch_compile_mode(self, mode: str) -> None:
-        self._torch_compile_mode = _validate_torch_compile_mode(mode)
+        resolved_mode = _validate_torch_compile_mode(mode)
+        if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
+            raise ValueError("regional torch compilation requires checkpoint_segment_size > 0")
+        self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
 
     def _regional_segment_runner(self, layer_indices: Tuple[int, ...]) -> Callable[[Tensor], Tensor]:
