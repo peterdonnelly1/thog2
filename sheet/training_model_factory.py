@@ -8,6 +8,7 @@ from torch import nn
 
 from model import GPT, GPTConfig
 from .model import SheetGPT, SheetGPTConfig
+from .recurrence_update_cache import attach_recurrence_update_cache
 from .training_config import TrainingConfig
 from .training_model import TrainingDenseGPT, TrainingSheetGPT
 from .trajectory import MATRIX_RESIDUAL_FAMILIES
@@ -89,7 +90,12 @@ def build_training_model(
     checkpoint_setter = getattr(model, "set_checkpoint_segment_size", None)
     if callable(checkpoint_setter):
         checkpoint_setter(config.checkpoint_segment_size)
-    return model.to(target_device)
+    model = model.to(target_device)
+    # vvv THOG update-level recurrence caching is execution-only and attaches after device placement so compact parameters remain ordinary model state
+    if isinstance(model, SheetGPT):
+        attach_recurrence_update_cache(model.trajectory)
+    # ^^^ THOG
+    return model
 
 
 def training_parameter_report(
