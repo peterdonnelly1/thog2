@@ -20,22 +20,33 @@ from .training_model_factory import (
 )
 
 
-# vvv THOG optional torch.compile execution wrapper; raw_model remains the authoritative parameter/checkpoint/diagnostic module
-def _torch_compile_enabled() -> bool:
+# vvv THOG optional torch.compile execution modes; raw_model remains the authoritative parameter/checkpoint/diagnostic module
+def _torch_compile_mode() -> str:
     value = os.environ.get("THOG2_TORCH_COMPILE", "false").strip().lower()
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    raise ValueError(f"THOG2_TORCH_COMPILE must be true or false; got {value!r}")
+    if value in {"false", "true", "regional"}:
+        return value
+    raise ValueError(
+        "THOG2_TORCH_COMPILE must be false, true, or regional; "
+        f"got {value!r}"
+    )
 
 
 def _execution_model(raw_model: nn.Module) -> nn.Module:
-    if not _torch_compile_enabled():
+    compile_mode = _torch_compile_mode()
+    if compile_mode == "false":
         return raw_model
     compile_function = getattr(torch, "compile", None)
     if compile_function is None:
-        raise RuntimeError("THOG2_TORCH_COMPILE=true requires torch.compile support")
+        raise RuntimeError("THOG2_TORCH_COMPILE requires torch.compile support")
+    if compile_mode == "regional":
+        compile_mode_setter = getattr(raw_model, "set_torch_compile_mode", None)
+        if not callable(compile_mode_setter):
+            raise RuntimeError(
+                "THOG2_TORCH_COMPILE=regional requires a training model with "
+                "set_torch_compile_mode support"
+            )
+        compile_mode_setter("regional")
+        return raw_model
     return compile_function(raw_model)
 # ^^^ THOG
 
