@@ -59,6 +59,8 @@ set -euo pipefail
 #    -P O_DEPTH                                     single integer, comma list, or quoted space list; ignored by dense
 #    -X O_MLP_D_MODEL
 #    -Y O_MLP_HIDDEN                                ignored by DEPTH
+# Execution optimisation/debug:
+#    --torch-compile false|true|regional            eager | whole-model compile | checkpoint-segment regional compile
 # Residual init:
 #    -r RESIDUAL_INIT_POLICY                        depth_scaled | unscaled
 #    -z RESIDUAL_INIT_DEPTH_SOURCE                  true_layer_depth | dof_implied_depth | user_forced_depth
@@ -83,6 +85,7 @@ export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-data/openwebtext}"
 export THOG2_NUM_GPUS="${THOG2_NUM_GPUS:-1}"
 export THOG2_DTYPE="${THOG2_DTYPE:-bfloat16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-flash2}"
+export THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-false}"
 # ^^^ THOG
 
 # vvv THOG temporary outer-grid axes not yet handled by train_OWT.sh
@@ -140,6 +143,7 @@ for gradient_accumulation_steps in "${gradient_accumulation_values[@]}"; do
         --option MLP_UP.compressor=jpeg_like \
         --option MLP_UP.MLP_HIDDEN.order=64 \
         --option MLP_UP.MLP_HIDDEN.group_size=256 \
+        --torch-compile "$THOG2_TORCH_COMPILE" \
         -- \
         --host-label "$THOG2_HOST_LABEL"
     done
