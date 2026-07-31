@@ -65,7 +65,7 @@ set -euo pipefail
 # Execution optimisation/debug:
 #    --depth-materialisation-matmul true|false      DEPTH matrix materialisation; default true
 #    --materialisation-profiling true|false         pure DEPTH timing; default false
-#    --torch-compile true|false                     torch.compile execution wrapper; default false
+#    --torch-compile false|true|regional            eager | whole-model compile | checkpoint-segment regional compile
 # Residual init:
 #    -r RESIDUAL_INIT_POLICY                        depth_scaled | unscaled
 #    -z RESIDUAL_INIT_DEPTH_SOURCE                  true_layer_depth | dof_implied_depth | user_forced_depth
@@ -88,6 +88,7 @@ export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext
 export THOG2_NUM_GPUS=1
 export THOG2_DTYPE=float16
 export THOG2_ATTENTION_BACKEND=sdpa
+export THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-true}"
 # ^^^ THOG
 
 # python -m run_thog2_owt --print-geometry-registry
@@ -129,7 +130,7 @@ export WANDB_CONSOLE=off
   --no-depth-compress-layer-norm-and-bias \
   --depth-materialisation-matmul true \
   --materialisation-profiling false \
-  --torch-compile true \
+  --torch-compile "$THOG2_TORCH_COMPILE" \
   -- \
   --host-label "$THOG2_HOST_LABEL"
 # ^^^ THOG
