@@ -70,6 +70,10 @@ def _raw_scale_for_target(target_weight_std: float) -> float:
     return math.log(math.expm1(target_scale))
 
 
+def _inverse_softplus(value: Tensor) -> Tensor:
+    return value + torch.log(-torch.expm1(-value))
+
+
 def initialize_bqrg_parameters(parameters: Tensor, initialization: str, target_weight_std: float, n_layer: int) -> None:
     _validate_parameters(parameters)
     if isinstance(n_layer, bool) or not isinstance(n_layer, int) or n_layer < 1:
@@ -96,6 +100,16 @@ def initialize_bqrg_parameters(parameters: Tensor, initialization: str, target_w
         raise RuntimeError(f"unsupported BQRG initialization policy {initialization!r}")
 
 
+def rescale_bqrg_output(parameters: Tensor, factor: float) -> None:
+    _validate_parameters(parameters)
+    if not isinstance(factor, (int, float)) or isinstance(factor, bool) or factor <= 0.0:
+        raise ValueError(f"BQRG output scale factor must be positive; got {factor!r}")
+    with torch.no_grad():
+        parameters[..., 14].mul_(float(factor))
+        scaled_output = F.softplus(parameters[..., 15]) * float(factor)
+        parameters[..., 15].copy_(_inverse_softplus(scaled_output))
+
+
 BQRG_DEFINITION = RecurrenceGeneratorDefinition(
     family=BQRG_FAMILY,
     aliases=("bounded_quadratic_recurrent_generator",),
@@ -107,5 +121,6 @@ BQRG_DEFINITION = RecurrenceGeneratorDefinition(
     description="Bounded two-state quadratic recurrence with tanh state updates and learned offset/scale.",
     materialize_at=materialize_bqrg_at,
     initialize_parameters=initialize_bqrg_parameters,
+    rescale_output=rescale_bqrg_output,
 )
 # ^^^ THOG
