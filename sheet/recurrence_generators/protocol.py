@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple
 
 from torch import Tensor
 
 
 MaterializeAt = Callable[[Tensor, int], Tensor]
+MaterializeSequence = Callable[[Tensor, int], Tensor]
+ParameterGradientFromLayerGradients = Callable[[Tensor, Sequence[Optional[Tensor]]], Tensor]
 InitializeParameters = Callable[[Tensor, str, float, int], None]
 RescaleOutput = Callable[[Tensor, float], None]
 
@@ -23,6 +25,8 @@ class RecurrenceGeneratorDefinition:
     option_names: Tuple[str, ...]
     description: str
     materialize_at: MaterializeAt
+    materialize_sequence: MaterializeSequence
+    parameter_gradient_from_layer_gradients: ParameterGradientFromLayerGradients
     initialize_parameters: InitializeParameters
     rescale_output: RescaleOutput
 
