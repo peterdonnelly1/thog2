@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -28,7 +29,7 @@ def _validate_parameters(parameters: Tensor) -> None:
         raise ValueError(f"BQRG parameters must be floating point; got {parameters.dtype}")
 
 
-def _state_update(parameters: Tensor, x: Tensor, y: Tensor) -> tuple[Tensor, Tensor]:
+def _state_update(parameters: Tensor, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
     a0, a1, a2, a3, a4, a5 = parameters[..., 2:8].unbind(dim=-1)
     b0, b1, b2, b3, b4, b5 = parameters[..., 8:14].unbind(dim=-1)
     x_next = torch.tanh(a0 + a1 * x + a2 * y + a3 * x.square() + a4 * x * y + a5 * y.square())
@@ -46,10 +47,7 @@ def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
         x, y = _state_update(parameters, x, y)
     offset = parameters[..., 14]
     scale = F.softplus(parameters[..., 15])
-    generated = offset + scale * x
-    if not torch.isfinite(generated).all():
-        raise FloatingPointError("BQRG materialisation produced a non-finite value")
-    return generated
+    return offset + scale * x
 
 
 def materialize_bqrg_sequence(parameters: Tensor, length: int) -> Tensor:
@@ -64,10 +62,7 @@ def materialize_bqrg_sequence(parameters: Tensor, length: int) -> Tensor:
     for _ in range(1, length):
         x, y = _state_update(parameters, x, y)
         values.append(offset + scale * x)
-    generated = torch.stack(values, dim=-1)
-    if not torch.isfinite(generated).all():
-        raise FloatingPointError("BQRG materialisation produced a non-finite value")
-    return generated
+    return torch.stack(values, dim=-1)
 
 
 def _raw_scale_for_target(target_weight_std: float) -> float:
