@@ -22,6 +22,8 @@ def _apply_sheet_residual_init_scaling(
         n_layer=config.n_layer,
         depth_order=config.depth_order,
     )
+    # vvv THOG nonlinear recurrence generators rescale only their generated output; fixed linear bases retain coefficient scaling
+    recurrence_generator = getattr(model.trajectory, "recurrence_generator", None)
     with torch.no_grad():
         for item in model.trajectory.metadata:
             if item.name not in MATRIX_RESIDUAL_FAMILIES:
@@ -31,8 +33,16 @@ def _apply_sheet_residual_init_scaling(
                 raise RuntimeError(
                     f"residual family {item.name} has non-positive init std {previous_std}"
                 )
-            model.trajectory.coefficients[item.name].mul_(residual_std / previous_std)
+            scale_factor = residual_std / previous_std
+            if recurrence_generator is None:
+                model.trajectory.coefficients[item.name].mul_(scale_factor)
+            else:
+                recurrence_generator.rescale_output(
+                    model.trajectory.coefficients[item.name],
+                    scale_factor,
+                )
             object.__setattr__(item, "target_weight_std", residual_std)
+    # ^^^ THOG
 
 
 def _sheet_model_arguments(config: TrainingConfig) -> Dict[str, Any]:
