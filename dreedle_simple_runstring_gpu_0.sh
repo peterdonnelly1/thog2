@@ -14,6 +14,7 @@ cd "$(dirname "$0")"
 #    THOG2_DREEDLE_APPLY_POWER_LIMIT=false ./dreedle_simple_runstring_gpu_0.sh
 #    THOG2_MIN_FREE_GPU_MEMORY_MIB=21000 ./dreedle_simple_runstring_gpu_0.sh
 #    THOG2_ALLOW_BUSY_GPU=true ./dreedle_simple_runstring_gpu_0.sh
+#    THOG2_TORCH_COMPILE=regional ./dreedle_simple_runstring_gpu_0.sh
 #
 # Schedule/logging:
 #    -e 250, -u 20 gives periodic validation without making the run validation-dominated.
@@ -22,6 +23,9 @@ cd "$(dirname "$0")"
 # Geometry:
 #    DEPTH chebyshev order 16.
 #    LayerNorm and bias are not depth-compressed.
+#
+# Compilation:
+#    THOG2_TORCH_COMPILE=false|true|regional        eager | whole-model compile | checkpoint-segment regional compile
 
 # vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
 export THOG2_DREEDLE_GPU=0
@@ -31,6 +35,7 @@ export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext
 export THOG2_NUM_GPUS=1
 export THOG2_DTYPE="${THOG2_DTYPE:-float16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-sdpa}"
+export THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-false}"
 # ^^^ THOG
 
 source ./dreedle_gpu_common.sh
@@ -73,5 +78,6 @@ export WANDB_CONSOLE=off
   --option DEPTH.compressor=chebyshev \
   --option DEPTH.order=16 \
   --no-depth-compress-layer-norm-and-bias \
+  --torch-compile "$THOG2_TORCH_COMPILE" \
   -- \
   --host-label "$THOG2_HOST_LABEL"
