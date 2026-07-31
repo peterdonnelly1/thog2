@@ -148,13 +148,15 @@ def materialize_bqrg_at(parameters: Tensor, index: int) -> Tensor:
 
     output_shape = parameters.shape[:-1]
     flat_parameters = parameters.reshape(-1, BQRG_PERSISTENT_WIDTH)
-    trajectory_count = flat_parameters.shape[0]
-    generated_chunks: List[Tensor] = []
-    for start in range(0, trajectory_count, BQRG_BACKWARD_CHUNK_TRAJECTORIES):
-        end = min(start + BQRG_BACKWARD_CHUNK_TRAJECTORIES, trajectory_count)
-        generated_chunks.append(
-            _BQRGMaterializeChunk.apply(flat_parameters[start:end], index)
-        )
+    parameter_chunks = torch.split(
+        flat_parameters,
+        BQRG_BACKWARD_CHUNK_TRAJECTORIES,
+        dim=0,
+    )                                                                                                                                                   # <<< THOG SplitBackward rejoins bounded chunk gradients once instead of materialising one full input gradient per slice
+    generated_chunks = tuple(
+        _BQRGMaterializeChunk.apply(parameter_chunk, index)
+        for parameter_chunk in parameter_chunks
+    )
     if len(generated_chunks) == 1:
         generated = generated_chunks[0]
     else:
