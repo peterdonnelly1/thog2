@@ -84,6 +84,13 @@ class BasisRegistry(Mapping[str, BasisDefinition]):
     def __len__(self) -> int:
         return len(self._definitions)
 
+    # vvv THOG Mapping.__contains__ otherwise routes through __getitem__, whose public unknown-family contract is ValueError rather than KeyError.
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str) or not key.strip():
+            return False
+        return key.strip().lower() in self._lookup
+    # ^^^ THOG
+
 
 def _load_builtin_definitions() -> Tuple[BasisDefinition, ...]:
     definitions = []
