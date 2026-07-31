@@ -123,6 +123,16 @@ class BqrgMaterialisationTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(parameters.grad).all())
         self.assertGreater(float(parameters.grad.abs().sum()), 0.0)
 
+    def test_output_rescale_preserves_dynamics_and_scales_sequence(self) -> None:
+        torch.manual_seed(13)
+        parameters = torch.randn(5, BQRG_PERSISTENT_WIDTH, dtype=torch.float64) * 0.1
+        before_parameters = parameters.clone()
+        before_sequence = materialize_bqrg_sequence(parameters, 16)
+        get_recurrence_generator_definition(BQRG_FAMILY).rescale_output(parameters, 0.25)
+        after_sequence = materialize_bqrg_sequence(parameters, 16)
+        self.assertTrue(torch.equal(parameters[..., :14], before_parameters[..., :14]))
+        self.assertTrue(torch.allclose(after_sequence, before_sequence * 0.25, atol=1.0e-12, rtol=1.0e-12))
+
     def test_wrong_parameter_width_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "persistent width 16"):
             materialize_bqrg_sequence(torch.zeros(2, 15), 16)
