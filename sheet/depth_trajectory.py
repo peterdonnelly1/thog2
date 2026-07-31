@@ -10,6 +10,9 @@ from torch import Tensor, nn
 
 from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisCache, BasisOwner
 from .geometry import SheetGeometryConfig
+# vvv THOG DEPTH can use either a fixed basis or a registered recurrence generator while preserving the same compact tensor shape
+from .recurrence_generators import get_recurrence_generator_definition, is_recurrence_generator_family, validate_recurrence_generator_width
+# ^^^ THOG
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
 
@@ -81,6 +84,21 @@ class DepthTrajectory(nn.Module):
         self.runtime_dtype = runtime_dtype
         self.basis_version = basis_version
         self.basis_family = basis_family
+        # vvv THOG recurrence generators are first-class DEPTH materializers, never private fallback row bases
+        self.recurrence_generator = get_recurrence_generator_definition(basis_family) if is_recurrence_generator_family(basis_family) else None
+        if self.recurrence_generator is not None:
+            if depth_compress_layer_norm_and_bias is None:
+                raise ValueError(
+                    f"recurrence generator {self.recurrence_generator.family}@{self.recurrence_generator.version} may be used only by public DEPTH"
+                )
+            if "DEPTH" not in self.recurrence_generator.supported_targets:
+                raise ValueError(
+                    f"recurrence generator {self.recurrence_generator.family}@{self.recurrence_generator.version} does not support DEPTH"
+                )
+            validate_recurrence_generator_width(self.recurrence_generator.family, config.depth_order)
+            self.basis_version = self.recurrence_generator.version
+            self.basis_family = self.recurrence_generator.family
+        # ^^^ THOG
         # vvv THOG omitted means an internal BLOCK/JPEG caller that must retain the old SHEET_COL vector fallback.
         self.legacy_sheet_col_vectors = depth_compress_layer_norm_and_bias is None
         self.depth_compress_layer_norm_and_bias = bool(depth_compress_layer_norm_and_bias)
@@ -90,14 +108,17 @@ class DepthTrajectory(nn.Module):
             item.name: item for item in self.metadata
         }
         self.bases = BasisOwner(basis_cache)
-        self.bases.add_basis(
-            "depth_basis",
-            config.n_layer,
-            config.depth_order,
-            runtime_dtype=runtime_dtype,
-            version=basis_version,
-            basis_family=basis_family,
-        )
+        # vvv THOG recurrence generators materialise directly from compact state and therefore own no fixed DEPTH basis buffer
+        if self.recurrence_generator is None:
+            self.bases.add_basis(
+                "depth_basis",
+                config.n_layer,
+                config.depth_order,
+                runtime_dtype=runtime_dtype,
+                version=basis_version,
+                basis_family=basis_family,
+            )
+        # ^^^ THOG
         # vvv THOG row bases exist only for private legacy fallback users, never for the public DEPTH preset.
         self._row_basis_name_by_family: Dict[str, str] = {}
         if self.legacy_sheet_col_vectors:
@@ -180,6 +201,8 @@ class DepthTrajectory(nn.Module):
 
     @property
     def depth_basis(self) -> Tensor:
+        if self.recurrence_generator is not None:
+            raise RuntimeError(f"recurrence generator {self.recurrence_generator.family} owns no fixed DEPTH basis")
         return self.bases.depth_basis
 
     def row_basis(self, name: str) -> Tensor:
@@ -195,7 +218,14 @@ class DepthTrajectory(nn.Module):
                 parameter.zero_()
                 representation = self._representation(item)
                 if representation == "depth_coefficients":
-                    if item.initialization == "depth_matrix_normal":
+                    if self.recurrence_generator is not None:
+                        self.recurrence_generator.initialize_parameters(
+                            parameter,
+                            item.initialization,
+                            item.target_weight_std,
+                            self.config.n_layer,
+                        )
+                    elif item.initialization == "depth_matrix_normal":
                         coefficient_std = item.target_weight_std * math.sqrt(self.config.n_layer)
                         torch.nn.init.normal_(parameter[:, :, 0], mean=0.0, std=coefficient_std)
                     elif item.initialization == "layernorm_one":
@@ -227,11 +257,14 @@ class DepthTrajectory(nn.Module):
 
     def _materialize_depth_parameter(self, name: str, layer_index: int) -> Tensor:
         coefficient = self.coefficients[name]
-        depth_row = self.depth_basis[layer_index].to(
-            device=coefficient.device,
-            dtype=coefficient.dtype,
-        )
-        generated = torch.einsum("p,rcp->rc", depth_row, coefficient)
+        if self.recurrence_generator is not None:
+            generated = self.recurrence_generator.materialize_at(coefficient, layer_index)
+        else:
+            depth_row = self.depth_basis[layer_index].to(
+                device=coefficient.device,
+                dtype=coefficient.dtype,
+            )
+            generated = torch.einsum("p,rcp->rc", depth_row, coefficient)
         item = self.family_metadata(name)
         expected_shape = (item.output_rows, item.row_width)
         if tuple(generated.shape) != expected_shape:
@@ -325,6 +358,8 @@ class DepthTrajectory(nn.Module):
         parameter = self.coefficients[name]
         if representation == "depth_coefficients":
             coefficient = parameter[output_row, row_index]
+            if self.recurrence_generator is not None:
+                return self.recurrence_generator.materialize_at(coefficient, layer_index)
             depth_row = self.depth_basis[layer_index].to(coefficient)
             return depth_row @ coefficient
         if representation == "legacy_sheet_col":
@@ -408,6 +443,8 @@ class DepthTrajectory(nn.Module):
                     "row_width": item.row_width,
                     "row_order": item.row_order,
                     "representation": representation,
+                    "materializer_family": self.basis_family,
+                    "recurrence_generator": self.recurrence_generator is not None,
                     "coefficient_shape": parameter_shape if representation != "conventional_per_layer" else None,
                     "parameter_shape": parameter_shape,
                     "sheet_parameters": persistent_parameters if representation != "conventional_per_layer" else 0,
