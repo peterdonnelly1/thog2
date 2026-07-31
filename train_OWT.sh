@@ -52,7 +52,7 @@ while (( $# > 0 )); do
       "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
       printf '\ncanonical train_OWT.sh options\n------------------------------\n'
       bash ./train_OWT_core.sh -h
-      printf '\nTorch compilation:\n  --torch-compile true|false                  torch.compile execution wrapper; default false\n'
+      printf '\nTorch compilation:\n  --torch-compile false|true|regional        false=eager, true=whole-model, regional=checkpoint-segment compile\n'
       exit 0
       # ^^^ THOG
       ;;
@@ -83,25 +83,25 @@ fi
 unset THOG2_DEPTH_MATERIALISATION_HELP
 # ^^^ THOG
 
-# vvv THOG expose torch.compile as an execution-only A/B switch; default false preserves every established training path
+# vvv THOG expose eager, whole-model compile, and checkpoint-segment regional compile without changing the established true/false meanings
 THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-false}"
 case "$THOG2_TORCH_COMPILE" in
-  true|false) ;;
-  *) echo "THOG2_TORCH_COMPILE must be true or false; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;;
+  false|true|regional) ;;
+  *) echo "THOG2_TORCH_COMPILE must be false, true, or regional; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;;
 esac
 THOG2_TORCH_COMPILE_FILTERED_ARGS=()
 THOG2_TORCH_COMPILE_HELP=false
 while (( $# > 0 )); do
   case "$1" in
     --torch-compile)
-      (( $# >= 2 )) || { echo "--torch-compile requires true or false" >&2; exit 2; }
-      case "$2" in true|false) ;; *) echo "--torch-compile requires true or false; got: $2" >&2; exit 2 ;; esac
+      (( $# >= 2 )) || { echo "--torch-compile requires false, true, or regional" >&2; exit 2; }
+      case "$2" in false|true|regional) ;; *) echo "--torch-compile requires false, true, or regional; got: $2" >&2; exit 2 ;; esac
       THOG2_TORCH_COMPILE="$2"
       shift 2
       ;;
     --torch-compile=*)
       THOG2_TORCH_COMPILE="${1#*=}"
-      case "$THOG2_TORCH_COMPILE" in true|false) ;; *) echo "--torch-compile requires true or false; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;; esac
+      case "$THOG2_TORCH_COMPILE" in false|true|regional) ;; *) echo "--torch-compile requires false, true, or regional; got: $THOG2_TORCH_COMPILE" >&2; exit 2 ;; esac
       shift
       ;;
     -h|--help)
@@ -121,7 +121,7 @@ export THOG2_TORCH_COMPILE
 if [[ "$THOG2_TORCH_COMPILE_HELP" == true ]]; then
   printf '%s\n' \
     'Torch compilation:' \
-    '  --torch-compile true|false                  torch.compile execution wrapper; default false' \
+    '  --torch-compile false|true|regional        false=eager, true=whole-model, regional=checkpoint-segment compile' \
     ''
 fi
 unset THOG2_TORCH_COMPILE_HELP
