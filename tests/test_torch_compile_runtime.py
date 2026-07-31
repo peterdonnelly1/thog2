@@ -72,7 +72,7 @@ class TorchCompileRuntimeTests(unittest.TestCase):
 
 
 class RegionalCompileSegmentTests(unittest.TestCase):
-    def test_segment_compiler_disables_pointwise_autotuning(self) -> None:
+    def test_segment_compiler_uses_default_torch_compile_settings(self) -> None:
         def logical_block(hidden: torch.Tensor, layer_index: int) -> torch.Tensor:
             return hidden + layer_index
 
@@ -81,10 +81,8 @@ class RegionalCompileSegmentTests(unittest.TestCase):
             runner = training_model._compiled_segment_runner(logical_block, (0, 1, 2, 3))
         self.assertIs(runner, compiled_runner)
         self.assertEqual(compile_function.call_count, 1)
-        self.assertEqual(
-            compile_function.call_args.kwargs,
-            {"options": {"triton.autotune_pointwise": False}},
-        )
+        compile_function.assert_called_once_with(compile_function.call_args.args[0])
+        self.assertEqual(compile_function.call_args.kwargs, {})
 
     def test_checkpoint_executor_uses_requested_regional_segments(self) -> None:
         requested_segments = []
