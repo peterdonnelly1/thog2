@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 from torch import Tensor, nn
@@ -11,6 +11,7 @@ from .batch_source import DeterministicBatchSource
 from .distributed import DistributedContext
 from .memory import MemoryTelemetry
 from .optimizer_factory import build_optimizer
+from .recurrence_update_cache import RecurrenceUpdateCacheController
 from .trainer import SharedTrainer
 from .trainer_state import TrainerEvent, TrainerState
 from .training_config import TrainingConfig
@@ -82,7 +83,25 @@ class Stage4Trainer(SharedTrainer):
             self.raw_model,
             config.model_type,
         )
-        self.model = self.distributed.wrap_model(_execution_model(self.raw_model))
+        # vvv THOG eager BQRG accumulation materialises once per optimizer update; compiled modes retain the established direct path until they gain an explicit cache contract
+        trajectory = getattr(self.raw_model, "trajectory", None)
+        attached_controller = getattr(
+            trajectory,
+            "_recurrence_update_cache_controller",
+            None,
+        )
+        self._recurrence_update_cache_controller: Optional[RecurrenceUpdateCacheController] = (
+            attached_controller
+            if isinstance(attached_controller, RecurrenceUpdateCacheController)
+            and config.gradient_accumulation_steps > 1
+            and _torch_compile_mode() == "false"
+            else None
+        )
+        # ^^^ THOG
+        self.model = self.distributed.wrap_model(
+            _execution_model(self.raw_model),
+            find_unused_parameters=self._recurrence_update_cache_controller is not None,
+        )
         self.optimizer = build_optimizer(
             self.raw_model,
             weight_decay=config.weight_decay,
@@ -118,11 +137,43 @@ class Stage4Trainer(SharedTrainer):
             parameter_report=self.parameter_report,
             distributed=self.distributed.report(),
             structure_signature=structure_signature,
+            recurrence_update_cache=(
+                self._recurrence_update_cache_controller is not None
+            ),
         )
+
+    # vvv THOG cached operational gradients are still GradScaler-scaled when the ordinary optimizer gradients have already been unscaled; materialise and unscale them before the shared finite check
+    def _finalize_recurrence_update_cache(self) -> None:
+        controller = self._recurrence_update_cache_controller
+        if controller is None or not controller.active:
+            return
+        scale = float(self.scaler.get_scale()) if self.scaler.is_enabled() else 1.0
+        finalized_parameters = controller.finalize(unscale_factor=1.0 / scale)
+        self.distributed.mean_gradients_(finalized_parameters)
+        self._record(
+            "recurrence_update_cache_finalized",
+            parameter_count=len(finalized_parameters),
+        )
+
+    def _local_gradients_are_finite(self) -> bool:
+        self._finalize_recurrence_update_cache()
+        return super()._local_gradients_are_finite()
+    # ^^^ THOG
 
     def train_one_update(self) -> Dict[str, float]:
         before = self.state.completed_updates
-        metrics = super().train_one_update()
+        controller = self._recurrence_update_cache_controller
+        if controller is not None:
+            controller.begin()
+            self._record(
+                "recurrence_update_cache_started",
+                accumulation_steps=self.config.gradient_accumulation_steps,
+            )
+        try:
+            metrics = super().train_one_update()
+        finally:
+            if controller is not None:
+                controller.discard()
         phase = "first_optimizer_state" if before == 0 else "steady_update"
         self.memory_telemetry.snapshot(phase)
         return metrics
