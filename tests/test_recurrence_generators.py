@@ -146,6 +146,21 @@ class BqrgMaterialisationTests(unittest.TestCase):
         for index in (0, 1, 7, 15):
             self.assertTrue(torch.allclose(sequence[..., index], materialize_bqrg_at(parameters, index), atol=1.0e-12, rtol=1.0e-12))
 
+    # vvv THOG indexed training materialisation is activation-checkpointed; prove that execution optimisation leaves exact BQRG gradients unchanged.
+    def test_checkpointed_indexed_materialisation_matches_sequence_gradient(self) -> None:
+        torch.manual_seed(9)
+        checkpointed_parameters = (torch.randn(4, BQRG_PERSISTENT_WIDTH, dtype=torch.float64) * 0.05).requires_grad_()
+        reference_parameters = checkpointed_parameters.detach().clone().requires_grad_()
+        checkpointed = materialize_bqrg_at(checkpointed_parameters, 15)
+        reference = materialize_bqrg_sequence(reference_parameters, 16)[..., 15]
+        self.assertTrue(torch.allclose(checkpointed, reference, atol=1.0e-12, rtol=1.0e-12))
+        checkpointed.square().sum().backward()
+        reference.square().sum().backward()
+        self.assertIsNotNone(checkpointed_parameters.grad)
+        self.assertIsNotNone(reference_parameters.grad)
+        self.assertTrue(torch.allclose(checkpointed_parameters.grad, reference_parameters.grad, atol=1.0e-10, rtol=1.0e-10))
+    # ^^^ THOG
+
     def test_materialisation_is_differentiable(self) -> None:
         torch.manual_seed(11)
         parameters = (torch.randn(4, BQRG_PERSISTENT_WIDTH, dtype=torch.float64) * 0.05).requires_grad_()
