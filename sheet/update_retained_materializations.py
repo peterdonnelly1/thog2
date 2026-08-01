@@ -31,6 +31,38 @@ def _retained_materialize(
     return controller.materialize(name, layer_index)
 
 
+def _optimizer_compatible_gradient(
+    parameter: nn.Parameter,
+    gradient: Tensor,
+) -> Tensor:
+    if tuple(gradient.shape) != tuple(parameter.shape):
+        raise RuntimeError(
+            "projected gradient shape does not match its compact parameter: "
+            f"gradient={tuple(gradient.shape)} parameter={tuple(parameter.shape)}"
+        )
+    if gradient.layout != parameter.layout:
+        raise RuntimeError(
+            "projected gradient layout does not match its compact parameter: "
+            f"gradient={gradient.layout} parameter={parameter.layout}"
+        )
+    converted = gradient.detach().to(
+        device=parameter.device,
+        dtype=parameter.dtype,
+    )
+    if parameter.layout != torch.strided:
+        return converted
+    if converted.stride() == parameter.stride():
+        return converted
+    matched = torch.empty_strided(
+        tuple(parameter.shape),
+        tuple(parameter.stride()),
+        dtype=parameter.dtype,
+        device=parameter.device,
+    )
+    matched.copy_(converted)
+    return matched
+
+
 class UpdateRetainedMaterializations:
     """Retain generated operational materialisations for one optimiser update."""
 
@@ -141,10 +173,19 @@ class UpdateRetainedMaterializations:
                 for parameter, gradient in zip(parameters, projected_gradients):
                     if gradient is None:
                         continue
+                    compatible_gradient = _optimizer_compatible_gradient(
+                        parameter,
+                        gradient,
+                    )
                     if parameter.grad is None:
-                        parameter.grad = gradient
+                        parameter.grad = compatible_gradient
                     else:
-                        parameter.grad.add_(gradient)
+                        compatible_existing = _optimizer_compatible_gradient(
+                            parameter,
+                            parameter.grad,
+                        )
+                        compatible_existing.add_(compatible_gradient)
+                        parameter.grad = compatible_existing
                     projected_parameters.append(parameter)
             return tuple(projected_parameters)
         finally:
