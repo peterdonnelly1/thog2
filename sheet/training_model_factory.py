@@ -21,6 +21,9 @@ def _apply_sheet_residual_init_scaling(
         model_type=config.model_type,
         n_layer=config.n_layer,
         depth_order=(
+            # vvv THOG preserve the pre-HYPERBLOCK residual-depth argument for source history
+            # depth_order=config.depth_order,
+            # ^^^ THOG
             config.hyperblock_depth_order
             if config.hyperblock_enabled
             else config.depth_order
