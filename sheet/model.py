@@ -5,7 +5,10 @@ import inspect
 import math
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Tuple
+# vvv THOG HYPERBLOCK layer bundles are passed as a typed matrix mapping
+# from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
+# ^^^ THOG
 
 import torch
 from torch import Tensor, nn
@@ -372,10 +375,23 @@ class SheetGPT(nn.Module):
             del weight, bias
         return output
 
-    def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # vvv THOG preserve the pre-bundle attention signature for source history
+    # def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # ^^^ THOG
+    def _attention(
+        self,
+        inputs: Tensor,
+        layer_index: int,
+        layer_materializations: Optional[Mapping[str, Tensor]] = None,
+    ) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
+        # vvv THOG consume the already-batched HYPERBLOCK layer matrices before legacy materialisation paths
+        if layer_materializations is not None:
+            attention_weight = layer_materializations["attention_input_weight"]
+            attention_bias = self._optional_bias("attention_input_bias", layer_index)
+        # ^^^ THOG
         # vvv THOG selectable semantic-QKV adapter bypass for exact A/B timing comparisons
-        if self.config.bypass_semantic_qkv_adapter:
+        elif self.config.bypass_semantic_qkv_adapter:
             attention_weight = self.trajectory.materialize("attention_input_weight", layer_index)
             attention_bias = None
             if self.config.bias:
@@ -414,7 +430,14 @@ class SheetGPT(nn.Module):
         if self.config.fast_discard:
             del query, key, value
         attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
-        output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
+        # vvv THOG preserve the pre-bundle output-weight line and reuse the layer bundle when present
+        # output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
+        output_weight = (
+            self.trajectory.materialize("attention_output_weight", layer_index)
+            if layer_materializations is None
+            else layer_materializations["attention_output_weight"]
+        )
+        # ^^^ THOG
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
         if self.config.fast_discard:
@@ -449,7 +472,15 @@ class SheetGPT(nn.Module):
             output = output + bias
         return output
 
-    def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # vvv THOG preserve the pre-bundle MLP signature for source history
+    # def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # ^^^ THOG
+    def _mlp(
+        self,
+        inputs: Tensor,
+        layer_index: int,
+        layer_materializations: Optional[Mapping[str, Tensor]] = None,
+    ) -> Tensor:
         direct_application = (
             self.config.direct_factorised_mlp
             and self._supports_direct_factorised_mlp()
@@ -463,7 +494,14 @@ class SheetGPT(nn.Module):
                 expansion_bias,
             )
         else:
-            expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            # vvv THOG preserve the pre-bundle expansion materialisation and use the shared layer result for HYPERBLOCK
+            # expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            expansion_weight = (
+                self.trajectory.materialize("mlp_expansion_weight", layer_index)
+                if layer_materializations is None
+                else layer_materializations["mlp_expansion_weight"]
+            )
+            # ^^^ THOG
             hidden = F.linear(inputs, expansion_weight, expansion_bias)
             if self.config.fast_discard:
                 del expansion_weight
@@ -479,7 +517,14 @@ class SheetGPT(nn.Module):
                 contraction_bias,
             )
         else:
-            contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            # vvv THOG preserve the pre-bundle contraction materialisation and use the shared layer result for HYPERBLOCK
+            # contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            contraction_weight = (
+                self.trajectory.materialize("mlp_contraction_weight", layer_index)
+                if layer_materializations is None
+                else layer_materializations["mlp_contraction_weight"]
+            )
+            # ^^^ THOG
             output = F.linear(hidden, contraction_weight, contraction_bias)
             if self.config.fast_discard:
                 del contraction_weight
@@ -492,20 +537,41 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
+        # vvv THOG one HYPERBLOCK contraction bundle supplies Q/K/V/O/UP/DOWN for this layer
+        layer_materializations = (
+            self.trajectory.materialize_layer_matrices(layer_index)
+            if isinstance(self.trajectory, CoupledFieldTrajectory)
+            else None
+        )
+        # ^^^ THOG
         normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
-        attention_output = self._attention(normalized_attention, layer_index)
+        # vvv THOG preserve the pre-bundle attention call for source history
+        # attention_output = self._attention(normalized_attention, layer_index)
+        attention_output = self._attention(
+            normalized_attention,
+            layer_index,
+            layer_materializations,
+        )
+        # ^^^ THOG
         if self.config.fast_discard:
             del normalized_attention
         inputs = inputs + attention_output
         if self.config.fast_discard:
             del attention_output
         normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
-        mlp_output = self._mlp(normalized_mlp, layer_index)
+        # vvv THOG preserve the pre-bundle MLP call for source history
+        # mlp_output = self._mlp(normalized_mlp, layer_index)
+        mlp_output = self._mlp(
+            normalized_mlp,
+            layer_index,
+            layer_materializations,
+        )
+        # ^^^ THOG
         if self.config.fast_discard:
             del normalized_mlp
         output = inputs + mlp_output
         if self.config.fast_discard:
-            del inputs, mlp_output
+            del inputs, mlp_output, layer_materializations
         return output
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
