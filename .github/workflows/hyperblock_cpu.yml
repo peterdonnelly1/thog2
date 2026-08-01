@@ -46,6 +46,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: head
+          fetch-depth: 0
 
       - name: Check out exact base
         uses: actions/checkout@v4
@@ -63,6 +64,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install numpy torch pytest psutil tensorboard
 
+      - name: Audit preservation of replaced source lines
+        run: |
+          python head/tests/hyperblock_source_history_check.py \
+            --repository head \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --head ${{ github.event.pull_request.head.sha }} \
+            --output hyperblock-source-history.json
+
       - name: Compare every legacy test file with the base
         run: |
           python head/tests/hyperblock_regression_compare.py \
@@ -71,10 +80,12 @@ jobs:
             --output hyperblock-regression-comparison.json \
             --timeout-seconds 240
 
-      - name: Upload regression evidence
+      - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hyperblock-regression-comparison-${{ github.event.pull_request.head.sha }}
-          path: hyperblock-regression-comparison.json
+          name: hyperblock-validation-evidence-${{ github.event.pull_request.head.sha }}
+          path: |
+            hyperblock-source-history.json
+            hyperblock-regression-comparison.json
           retention-days: 14
