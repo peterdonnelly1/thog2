@@ -11,7 +11,9 @@ from torch import Tensor, nn
 from .basis_provider import AxisBasisProvider, HyperblockBasisTables
 from .materializer import (
     materialize_attention_family_layer,
+    materialize_layer_staged,
     materialize_mlp_family_layer,
+    route_attention_input_matrices,
     route_attention_matrix,
     route_mlp_matrix,
 )
@@ -58,6 +60,8 @@ class HyperblockParameterMetadata:
 
 class CoupledFieldTrajectory(nn.Module):
     """One coupled coefficient system generating the six large block matrices."""
+
+    materialized_matrix_family_names = MATRIX_FAMILY_NAMES
 
     def __init__(
         self,
@@ -311,6 +315,27 @@ class CoupledFieldTrajectory(nn.Module):
             layer_index=layer_index,
         )
 
+    # vvv THOG batch the six matrix families for one layer and route them to the existing nanoGPT operational layouts
+    def materialize_layer_matrices(self, layer_index: int) -> Dict[str, Tensor]:
+        self._validate_layer_index(layer_index)
+        layer = materialize_layer_staged(
+            self.coefficients["common"],
+            self.coefficients["attention"],
+            self.coefficients["mlp"],
+            self._basis_mapping(),
+            layer_index=layer_index,
+        )
+        return {
+            ATTENTION_INPUT_WEIGHT: route_attention_input_matrices(layer.attention[:3]),
+            ATTENTION_OUTPUT_WEIGHT: route_attention_matrix(
+                layer.attention[3],
+                output_projection=True,
+            ),
+            MLP_EXPANSION_WEIGHT: route_mlp_matrix(layer.mlp[0], expansion=True),
+            MLP_CONTRACTION_WEIGHT: route_mlp_matrix(layer.mlp[1], expansion=False),
+        }
+    # ^^^ THOG
+
     def materialize(self, name: str, layer_index: int) -> Tensor:
         self._validate_layer_index(layer_index)
         if name == ATTENTION_INPUT_WEIGHT:
@@ -529,5 +554,6 @@ class CoupledFieldTrajectory(nn.Module):
             "dense_equivalent_matrix_count": self.plan.dense_equivalent_matrix_count,
             "compression_ratio": self.plan.compression_ratio,
             "conventional_vector_parameters": self.conventional_vector_parameter_count(),
+            "materialization_execution": "batched_all_matrix_families_per_layer_v1",
         }
 # ^^^ THOG
