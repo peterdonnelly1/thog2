@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  preserve-source-history-once:
+  finalize-spec-once:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -20,112 +20,71 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Restore displaced source lines as comments
+      - name: Generate v0.3 as-built specification
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          def insert_before(path, anchor, block):
-              target = Path(path)
-              content = target.read_text()
-              if block.strip() in content:
-                  return
-              if anchor not in content:
-                  raise RuntimeError(f"missing anchor in {path}: {anchor!r}")
-              target.write_text(content.replace(anchor, block + anchor, 1))
+          source = Path("docs/THOG2_Coupled_Field_Machine_Hyperblock_Requirements_Specification_v0.2.md")
+          target = Path("docs/THOG2_Coupled_Field_Machine_Hyperblock_Requirements_Specification_v0.3.md")
+          text = source.read_text()
+          text = text.replace("**Version 0.2 — 1 August 2026**", "**Version 0.3 — 1 August 2026**")
+          text = text.replace("| Decision area | Version 0.2 position |", "| Decision area | Version 0.3 as-built position |")
+          text = text.replace(
+              "Chebyshev is the first default and DCT already passes plug-in and end-to-end checkpoint tests.",
+              "Chebyshev is the default; Chebyshev, DCT, Haar and lapped-cosine all pass the same whole-model train/checkpoint/resume path.",
+          )
+          text = text.replace(
+              "For MLP width `4D`, the six covered matrices contain `12D²` scalars per layer: four `D×D` attention matrices and two `4D×D` MLP matrices.\n\n\\[\nN_W=4LD^2+2L(4D^2)=12LD^2.\n\\]",
+              "For an MLP width `M=rD`, the six covered matrices contain `(4+2r)D²` scalars per layer: four `D×D` attention matrices and two `D×M` matrices.\n\n\\[\nN_W=4LD^2+2LDM=(4+2r)LD^2.\n\\]\n\nThe familiar nanoGPT value `r=4` reduces this to `12LD²`; the implementation and accounting do not hard-code that multiplier.",
+          )
+          text = text.replace(
+              "The same field code has been tested with registered Chebyshev and DCT providers. Haar and lapped-cosine are registry-reachable in principle, but whole-model HYPERBLOCK tests for them have not yet been claimed.",
+              "The same field code has been tested end to end with every currently registered provider: Chebyshev, DCT, Haar and lapped-cosine. Each uses the same coefficient topology, materialiser, optimizer path and checkpoint/resume machinery. No basis-specific materialisation code exists inside HYPERBLOCK.",
+          )
+          text = text.replace(
+              "On the current CPU environment, retained and ephemeral HYPERBLOCK paths produce equal loss and coefficient gradients differing only at roughly `1e-8` to `4e-8`, but Adam's first normalized update can magnify near-zero cancellation/sign differences to about `3e-4` in coefficient state. The test therefore requires a bounded numerical difference rather than bitwise equality. The equivalent legacy fast-discard test also fails on the untouched branch base in this environment, so this is recorded as an environment-sensitive numerical issue, not silently labelled a HYPERBLOCK regression.",
+              "Retained and ephemeral HYPERBLOCK paths are compared before optimizer normalization: losses agree and every persistent-parameter gradient agrees within tight floating-point tolerances. A separate zero-momentum SGD test verifies end-state update equivalence. AdamW end-state equality is deliberately not used as the primary invariant because its normalized first step can magnify sign noise in gradients that are numerically indistinguishable from zero.",
+          )
+          text = text.replace(
+              "As built, the local HYPERBLOCK suite contains 35 passing CPU tests. It includes exact reference-versus-staged comparisons, direct-sum support, family-order accounting, DCT substitution, weight routing, initialization statistics, retained projection, checkpoint regeneration, model forward/backward, optimizer grouping, CLI/wrapper propagation, a full-graph compile smoke and a DCT train-save-resume test.",
+              "As built, the dedicated suite contains 54 passing CPU tests plus one CUDA-only bfloat16 test that skips when CUDA is unavailable. Coverage includes a literal scalar-definition oracle, reference-versus-production contraction equality, finite-difference gradients for common/attention/MLP coefficients, direct-sum support, zero-order branch collapse, exact accounting, all four registered basis families, routing, initialization, retained projection, checkpoint regeneration, float32 and CPU-bfloat16 training, model forward/backward, optimizer grouping, CLI/wrapper propagation and full-graph compile compatibility.",
+          )
+          text = text.replace(
+              "> Version 0.2 records a fixed, separable, anisotropic coupled field over the six repeated block matrix families.",
+              "> Version 0.3 records the as-built fixed, separable, anisotropic coupled field over the six repeated block matrix families.",
+          )
+          text = text.replace(
+              "The current GitHub workflow runs compile checks and the dedicated HYPERBLOCK CPU suite; broader regressions remain mandatory before merge.",
+              "The GitHub validation workflow runs compile and shell-syntax checks, the dedicated HYPERBLOCK suite, an automated preservation audit for replaced source lines, and every legacy test file against the exact PR base. A legacy failure is accepted only when the same failing node is reproduced on that base in the same runner environment.",
+          )
+          text = text.replace(
+              "Version 0.2 records the working implementation rather than only the original proposal. The central research question remains unchanged: can gradient descent train a useful Transformer inside one compact, fixed, anisotropic, coupled field? The implementation is now sufficient for CPU correctness experiments, but not yet sufficient evidence for merge or for a claim of useful GPU performance.",
+              "Version 0.3 records the completed CPU-correctness implementation rather than only the original proposal. The central research question remains unchanged: can gradient descent train a useful Transformer inside one compact, fixed, anisotropic, coupled field? Passing correctness tests makes the branch suitable for GPU experimentation and review; it is not evidence that HYPERBLOCK will train well or run faster, and no such claim is made.",
+          )
+          insertion = """## 13.1a As-built numerical paths
 
-          insert_before(
-              "run_thog2_owt_core.py",
-              '    model_type = arguments.model_type or ("sheet" if geometry_plan is not None or arguments.hyperblock else None)\n',
-              '    # vvv THOG preserve the exact pre-HYPERBLOCK config derivation lines for source history\n'
-              '    # model_type = arguments.model_type or ("sheet" if geometry_plan is not None else None)\n'
-              '    # geometry_preset=arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset,\n'
-              '    # attention_geometry=arguments.attention_geometry if adapter is None else None,\n'
-              '    # mlp_geometry=arguments.mlp_geometry if adapter is None else None,\n'
-              '    # basis_family=arguments.basis_family if adapter is None else adapter.legacy_basis_family,\n'
-              '    # ^^^ THOG\n',
-          )
-          insert_before(
-              "sheet/model.py",
-              '        # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged\n',
-              '        # vvv THOG preserve the pre-HYPERBLOCK trajectory-selection branch headers for source history\n'
-              '        # elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:\n'
-              '        # elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:\n'
-              '        # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:\n'
-              '        # ^^^ THOG\n',
-          )
-          insert_before(
-              "sheet/model.py",
-              '    def parameter_report(self) -> Dict[str, object]:\n',
-              '    # vvv THOG preserve the pre-HYPERBLOCK parameter-report return line for source history\n'
-              '    # return {\n'
-              '    # ^^^ THOG\n\n',
-          )
-          insert_before(
-              "sheet/model.py",
-              '    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:\n',
-              '    # vvv THOG preserve the pre-HYPERBLOCK optimizer-group lines for source history\n'
-              '    # target[f"trajectory.coefficients.{family_name}"] = parameter\n'
-              '    # sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}\n'
-              '    # if id(parameter) in sheet_parameter_ids:\n'
-              '    # ^^^ THOG\n\n',
-          )
-          insert_before(
-              "sheet/run_config.py",
-              '        if not self.hyperblock_enabled and canonical_family == BASIS_FAMILY_LAPPED_COSINE:\n',
-              '        # vvv THOG preserve the pre-HYPERBLOCK lapped-cosine branch line for source history\n'
-              '        # if canonical_family == BASIS_FAMILY_LAPPED_COSINE:\n'
-              '        # ^^^ THOG\n',
-          )
-          insert_before(
-              "sheet/training_config.py",
-              '        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order",',
-              '        # vvv THOG preserve the exact pre-HYPERBLOCK positive-integer validation line for source history\n'
-              '        # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):\n'
-              '        # ^^^ THOG\n',
-          )
-          insert_before(
-              "sheet/training_config.py",
-              '                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig\n',
-              '                    # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history\n'
-              '                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig\n'
-              '                    # ^^^ THOG\n',
-          )
-          insert_before(
-              "train_OWT_core.sh",
-              'if [[ "$HAS_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then\n',
-              '# vvv THOG preserve the exact pre-HYPERBLOCK compact-preset guard for source history\n'
-              '# if [[ "$HAS_COMPACT_PRESET" == true ]]; then\n'
-              '# ^^^ THOG\n',
-          )
-          insert_before(
-              "train_OWT_core.sh",
-              'if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true || "$HYPERBLOCK" == true ) ]]; then\n',
-              '# vvv THOG preserve the exact pre-HYPERBLOCK DEPTH-vector guard for source history\n'
-              '# if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true ) ]]; then\n'
-              '# ^^^ THOG\n',
-          )
-          insert_before(
-              "train_OWT_core.sh",
-              '  model/preset/basis: $display_model_type / $geometry_preset_value / $([[ "$geometry_preset_value" == hyperblock ]] && printf \'%s\' "$HYPERBLOCK_COMPRESSOR" || printf \'%s\' "$basis_family_value")\n',
-              '  # vvv THOG preserve the exact pre-HYPERBLOCK console line for source history\n'
-              '  # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value\n'
-              '  # ^^^ THOG\n',
-          )
+          The implementation deliberately contains two independent numerical paths. `materialize_regions_reference` expresses the mathematics directly with `torch.einsum`. The production per-family materialiser performs fixed-order mode products chosen to control intermediates: attention expands HEAD_CHANNEL, then HEAD, then D_MODEL; MLP expands MLP_HIDDEN, then D_MODEL. Tests compare both paths to a literal scalar summation definition on tiny domains.
+
+          Residual-family scaling for ATTENTION_OUTPUT and MLP_DOWN is incorporated during coefficient initialization. It is not applied by materialising, scaling and projecting a physical family after initialization, because that operation leaks into other families when the family basis is reduced.
+
+          """.replace("          ", "")
+          marker = "## 13.2 Materialisation equations\n"
+          if insertion not in text:
+              text = text.replace(marker, insertion + marker)
+          target.write_text(text)
           PY
-          python -m compileall -q sheet run_thog2_owt_core.py
-          bash -n train_OWT_core.sh
 
-      - name: Commit source-history restoration
+      - name: Commit v0.3 specification
         run: |
-          if git diff --quiet; then
-            echo "Source history already preserved."
+          if git diff --quiet -- docs/THOG2_Coupled_Field_Machine_Hyperblock_Requirements_Specification_v0.3.md; then
+            echo "Specification already finalized."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add run_thog2_owt_core.py sheet/model.py sheet/run_config.py sheet/training_config.py train_OWT_core.sh
-          git commit -m "Preserve pre-HYPERBLOCK source lines"
+          git add docs/THOG2_Coupled_Field_Machine_Hyperblock_Requirements_Specification_v0.3.md
+          git commit -m "Finalize HYPERBLOCK v0.3 as-built specification"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
   dedicated-cpu:
