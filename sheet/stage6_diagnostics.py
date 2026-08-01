@@ -104,6 +104,17 @@ def _diagnostic_depth_order(model: TrainingSheetGPT) -> int:
         return int(orders.depth)
     return int(model.config.depth_order)
 
+# vvv THOG preserve the exact replaced executable lines for the nanoGPT source-history contract
+# parameter = model.trajectory.coefficients[metadata.name]
+# coefficient = model.trajectory.coefficients[metadata.name].detach().float()
+# "semantic_type": metadata.semantic_type,
+# rows[metadata.name]["depth_order_energy_fraction"] = None
+# rows[metadata.name]["row_order_energy_fraction"] = None
+# rows[metadata.name]["high_depth_order_energy_fraction"] = None
+# rows[metadata.name]["high_row_order_energy_fraction"] = None
+# rows[metadata.name]["order_axis_diagnostics_error"] = order_axis_diagnostics_error
+# ^^^ THOG
+
 # ^^^ THOG
 
 
