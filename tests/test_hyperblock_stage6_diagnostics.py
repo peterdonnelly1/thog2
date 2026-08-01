@@ -10,6 +10,7 @@ import torch
 from sheet.hyperblock import HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig
+from sheet.wandb_telemetry import WandbTelemetry
 
 
 def _config(out_dir: Path) -> TrainingConfig:
@@ -66,8 +67,9 @@ def test_hyperblock_stage6_pilot_reports_persistent_regions(
     with tempfile.TemporaryDirectory() as directory:
         out_dir = Path(directory)
         trainer = Stage6Trainer(_config(out_dir), tokens, tokens)
-        expected_names = (
-            set(trainer.raw_model.trajectory.coefficients)
+        expected_coefficient_names = set(trainer.raw_model.trajectory.coefficients)
+        expected_gradient_names = (
+            expected_coefficient_names
             | set(trainer.raw_model.trajectory.vector_parameters)
         )
         try:
@@ -80,18 +82,36 @@ def test_hyperblock_stage6_pilot_reports_persistent_regions(
         finally:
             trainer.close()
 
+        monkeypatch.setenv("THOG2_INSTRUMENTATION", "none")
+        telemetry = WandbTelemetry(
+            enabled=True,
+            project="thog",
+            entity=None,
+            mode="offline",
+            root=out_dir / "wandb",
+            name=f"hyperblock_stage6_{fast_discard}",
+            group="HYPERBLOCK_STAGE6",
+            job_type="hyperblock",
+            config={"device": "cpu"},
+        )
+        telemetry.add_final_result(result)
+
     assert result["budget"]["completed_updates"] == 1
     assert result["checkpoint"]["bytes"] > 0
     assert len(result["gradient_diagnostics"]) == 1
     gradient_rows = result["gradient_diagnostics"][0]["families"]
-    assert set(gradient_rows) == expected_names
+    assert set(gradient_rows) == expected_gradient_names
     assert {"common", "attention", "mlp"} <= set(gradient_rows)
 
     sheet_diagnostics = result["sheet_diagnostics"]
     assert sheet_diagnostics is not None
     utilization_rows = sheet_diagnostics["coefficient_utilization"]
-    assert set(utilization_rows) == expected_names
+    assert set(utilization_rows) == expected_coefficient_names
     for name in ("common", "attention", "mlp"):
-        assert utilization_rows[name]["semantic_type"] == "coupled_coefficient_region"
+        row = utilization_rows[name]
+        assert row["semantic_type"] == "coupled_coefficient_region"
+        assert row["order_axis_diagnostics_supported"] is True
+        assert row["high_depth_order_energy_fraction"] is not None
+        assert row["high_row_order_energy_fraction"] is not None
     assert sheet_diagnostics["compact_state_violations"] == []
 # ^^^ THOG
