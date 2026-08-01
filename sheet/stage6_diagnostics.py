@@ -63,6 +63,8 @@ def _combined_axis_energy_fraction(coefficient: Tensor, axes: Tuple[int, ...]) -
 
 def _persistent_parameter_rows(
     model: TrainingSheetGPT,
+    *,
+    include_vectors: bool = True,
 ) -> Tuple[Tuple[str, str, Tensor], ...]:
     trajectory = model.trajectory
     metadata_by_name = {
@@ -85,7 +87,7 @@ def _persistent_parameter_rows(
         for name, parameter in trajectory.coefficients.items()
     ]
     vector_parameters = getattr(trajectory, "vector_parameters", None)
-    if vector_parameters is not None:
+    if include_vectors and vector_parameters is not None:
         for name, parameter in vector_parameters.items():
             metadata = metadata_by_name.get(name)
             semantic_type = (
@@ -168,7 +170,10 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
     # for metadata in model.trajectory.metadata:
     #     coefficient = model.trajectory.coefficients[metadata.name].detach().float()
     depth_order = _diagnostic_depth_order(model)
-    for name, semantic_type, parameter in _persistent_parameter_rows(model):
+    for name, semantic_type, parameter in _persistent_parameter_rows(
+        model,
+        include_vectors=False,
+    ):
         coefficient = parameter.detach().float()
         # ^^^ THOG
         # vvv THOG unsupported coefficient layouts still report generic utilization instead of aborting a completed run
