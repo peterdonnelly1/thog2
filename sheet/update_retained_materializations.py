@@ -14,7 +14,8 @@ from torch import Tensor, nn
 
 MaterializationKey = Tuple[str, int]
 MaterializeFunction = Callable[[nn.Module, str, int], Tensor]
-MaterializeLayerMatricesFunction = Callable[[nn.Module, int], Mapping[str, Tensor]]
+# MaterializeLayerMatricesFunction = Callable[[nn.Module, int], Mapping[str, Tensor]]                                                               # <<< THOG preserved full-bundle-only callable
+MaterializeLayerMatricesFunction = Callable[..., Mapping[str, Tensor]]                                                                                   # <<< THOG optional include_mlp keyword for partial HYPERBLOCK bundles
 _CONTROLLER_ATTRIBUTE = "_update_retained_materializations_controller"
 
 
@@ -37,14 +38,24 @@ def _retained_materialize(
 
 # vvv THOG let architecture-wide trajectories retain one batched matrix bundle per layer
 
+# def _retained_materialize_layer_matrices(                                                                                                       # <<< THOG preserved pre-partial-bundle signature
+#     trajectory: nn.Module,
+#     layer_index: int,
+# ) -> Mapping[str, Tensor]:
 def _retained_materialize_layer_matrices(
     trajectory: nn.Module,
     layer_index: int,
+    *,
+    include_mlp: bool = True,
 ) -> Mapping[str, Tensor]:
     controller = getattr(trajectory, _CONTROLLER_ATTRIBUTE, None)
     if not isinstance(controller, UpdateRetainedMaterializations):
         raise RuntimeError("trajectory has no update-retained materialisation controller")
-    return controller.materialize_layer_matrices(layer_index)
+#     return controller.materialize_layer_matrices(layer_index)                                                                                    # <<< THOG preserved full-bundle-only delegation
+    return controller.materialize_layer_matrices(
+        layer_index,
+        include_mlp=include_mlp,
+    )
 
 
 # ^^^ THOG
@@ -214,7 +225,13 @@ class UpdateRetainedMaterializations:
         return self._retain_generated(name, layer_index, generated)
 
     # vvv THOG retain and reuse all matrix families produced by one shared layer contraction
-    def materialize_layer_matrices(self, layer_index: int) -> Mapping[str, Tensor]:
+    # def materialize_layer_matrices(self, layer_index: int) -> Mapping[str, Tensor]:                                                               # <<< THOG preserved pre-partial-bundle signature
+    def materialize_layer_matrices(
+        self,
+        layer_index: int,
+        *,
+        include_mlp: bool = True,
+    ) -> Mapping[str, Tensor]:
         original = self._original_materialize_layer_matrices
         if original is None:
             raise AttributeError(
@@ -223,9 +240,16 @@ class UpdateRetainedMaterializations:
         if not self._active:
             return original(self._trajectory, layer_index)
 
-        expected_names = tuple(
-            getattr(self._trajectory, "materialized_matrix_family_names", ())
+        # vvv THOG a direct HYPERBLOCK MLP update retains only attention matrices; full bundles keep the established identity
+        expected_attribute = (
+            "materialized_matrix_family_names"
+            if include_mlp
+            else "attention_materialized_matrix_family_names"
         )
+        expected_names = tuple(
+            getattr(self._trajectory, expected_attribute, ())
+        )
+        # ^^^ THOG
         if expected_names:
             retained_bundle = {
                 name: self._retained[(name, layer_index)].operational
@@ -236,7 +260,12 @@ class UpdateRetainedMaterializations:
                 self._request_count += len(expected_names)
                 return retained_bundle
 
-        generated_bundle = original(self._trajectory, layer_index)
+#         generated_bundle = original(self._trajectory, layer_index)                                                                               # <<< THOG preserved full-bundle-only call
+        generated_bundle = (
+            original(self._trajectory, layer_index)
+            if include_mlp
+            else original(self._trajectory, layer_index, include_mlp=False)
+        )
         if not isinstance(generated_bundle, Mapping):
             raise TypeError(
                 "materialize_layer_matrices must return a mapping; "

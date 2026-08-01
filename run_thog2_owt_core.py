@@ -505,7 +505,10 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     _print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
-        _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        # vvv THOG preserve the pre-HYPERBLOCK-direct execution row exactly for source history
+        # _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  direct_factorised_hyperblock_mlp={model_config.direct_factorised_hyperblock_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
         hyperblock = report.get("hyperblock")
         if isinstance(hyperblock, dict):

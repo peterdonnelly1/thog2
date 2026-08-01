@@ -21,6 +21,13 @@ class MaterializedHyperblockLayer:
     mlp: Tensor
 
 
+# vvv THOG direct-factorised HYPERBLOCK MLP still batches the four attention families without constructing either dense MLP matrix
+@dataclass(frozen=True)
+class MaterializedHyperblockAttentionLayer:
+    attention: Tensor
+# ^^^ THOG
+
+
 def _restore_attention_unique_modes(
     coefficients: Tensor,
     attention_head_order: int,
@@ -187,6 +194,57 @@ def _materialize_family_layer_modes(
         family_expanded,
         dims=([0], [1]),
     )
+
+
+# vvv THOG attention-only sibling of the established staged layer materialiser; contraction order is intentionally identical
+def materialize_attention_layer_staged(
+    common_coefficients: Tensor,
+    attention_coefficients: Tensor,
+    bases: Mapping[str, Tensor],
+    *,
+    layer_index: int,
+) -> MaterializedHyperblockAttentionLayer:
+    common_modes = _materialize_family_layer_modes(
+        common_coefficients,
+        bases["family_common"],
+        bases["depth"],
+        layer_index,
+    )
+    common = torch.matmul(
+        common_modes,
+        bases["d_model"].to(common_coefficients).transpose(0, 1),
+    )
+
+    attention_full = _restore_attention_unique_modes(
+        attention_coefficients,
+        bases["attention_head"].shape[1],
+        bases["attention_head_channel"].shape[1],
+    )
+    attention_extension = _materialize_family_layer_modes(
+        attention_full,
+        bases["family_attention"],
+        bases["depth"],
+        layer_index,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["attention_head_channel"],
+        3,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["attention_head"],
+        2,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["d_model"],
+        1,
+    )
+    return MaterializedHyperblockAttentionLayer(
+        attention=common[:4, :, None, None] + attention_extension
+    )
+# ^^^ THOG
 
 
 def materialize_layer_staged(

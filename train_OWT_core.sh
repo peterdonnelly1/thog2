@@ -104,6 +104,7 @@ CHECKPOINT_SEGMENT_SIZE=12
 FAST_DISCARD="${THOG2_FAST_DISCARD:-true}"
 BYPASS_SEMANTIC_QKV_ADAPTER="${THOG2_BYPASS_SEMANTIC_QKV_ADAPTER:-true}"                                                                                  # <<< THOG default-on selectable semantic-QKV adapter bypass
 DIRECT_FACTORISED_MLP="${THOG2_DIRECT_FACTORISED_MLP:-true}"                                                                                              # <<< THOG renamed default-on exact factorised MLP application
+DIRECT_FACTORISED_HYPERBLOCK_MLP="${THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP:-false}"                                                                      # <<< THOG independent default-off direct HYPERBLOCK UP/DOWN application
 VECTORISE_PER_HEAD_MATERIALISATION="${THOG2_VECTORISE_PER_HEAD_MATERIALISATION:-true}"                                                                    # <<< THOG default-on selectable per-head batching
 DTYPE="bfloat16"
 ATTENTION_BACKEND="flash2"
@@ -177,6 +178,8 @@ HYPERBLOCK:
   --hyperblock-attention-head-order N=${HYPERBLOCK_ATTENTION_HEAD_ORDER}
   --hyperblock-attention-head-channel-order N=${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}
   --hyperblock-mlp-hidden-multiplier N=${HYPERBLOCK_MLP_HIDDEN_MULTIPLIER}
+  --direct-factorised-hyperblock-mlp               enable exact UP/DOWN application without dense MLP matrices
+  --no-direct-factorised-hyperblock-mlp            explicit default
 
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
@@ -263,6 +266,16 @@ while (( $# > 0 )); do
       EXPLAIN_GEOMETRY=true
       shift
       ;;
+    # vvv THOG direct HYPERBLOCK MLP is an independent Boolean execution option
+    --direct-factorised-hyperblock-mlp)
+      DIRECT_FACTORISED_HYPERBLOCK_MLP=true
+      shift
+      ;;
+    --no-direct-factorised-hyperblock-mlp)
+      DIRECT_FACTORISED_HYPERBLOCK_MLP=false
+      shift
+      ;;
+    # ^^^ THOG
     # vvv THOG consume HYPERBLOCK long controls before getopts and build one collision-free canonical run
     --hyperblock)
       HYPERBLOCK=true
@@ -625,6 +638,7 @@ validate_true_false "$ACTIVATION_CHECKPOINTING" "ACTIVATION_CHECKPOINTING"
 validate_true_false "$FAST_DISCARD" "FAST_DISCARD"
 validate_true_false "$BYPASS_SEMANTIC_QKV_ADAPTER" "BYPASS_SEMANTIC_QKV_ADAPTER"                                                                        # <<< THOG validate wrapper-only optimisation switch
 validate_true_false "$DIRECT_FACTORISED_MLP" "DIRECT_FACTORISED_MLP"                                                                                   # <<< THOG validate renamed exact MLP option
+validate_true_false "$DIRECT_FACTORISED_HYPERBLOCK_MLP" "DIRECT_FACTORISED_HYPERBLOCK_MLP"                                                           # <<< THOG validate independent direct HYPERBLOCK MLP option
 validate_true_false "$VECTORISE_PER_HEAD_MATERIALISATION" "VECTORISE_PER_HEAD_MATERIALISATION"                                                         # <<< THOG validate per-head option                                                                          # <<< THOG validate wrapper-only exact MLP application switch
 validate_true_false "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" "DEPTH_COMPRESS_LAYER_NORM_AND_BIAS"                                                           # <<< THOG validate DEPTH vector participation switch
 validate_true_false "$DEPTH_CURVE_LOCAL_HTML" "DEPTH_CURVE_LOCAL_HTML"
@@ -711,6 +725,7 @@ export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
 export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"                                                                                  # <<< THOG pass wrapper-only optimisation switch into SheetGPTConfig
 export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
+export THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP="$DIRECT_FACTORISED_HYPERBLOCK_MLP"                                                                      # <<< THOG pass independent direct HYPERBLOCK MLP option
 export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
 #export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
@@ -833,6 +848,7 @@ scruffy OWT train
   fast discard:       $FAST_DISCARD
   semantic adapter bypass:                $BYPASS_SEMANTIC_QKV_ADAPTER
   direct factorised MLP:                  $DIRECT_FACTORISED_MLP
+  direct factorised HYPERBLOCK MLP:           $DIRECT_FACTORISED_HYPERBLOCK_MLP
   vectorise per-head materialisation:     $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)

@@ -33,6 +33,8 @@ from .geometry import SheetGeometryConfig
 from .hyperblock import (
     HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
     CoupledFieldTrajectory,
+    FactorisedHyperblockMlpLayer,                                                                                                                        # <<< THOG typed compact UP/DOWN factor bundle
+    apply_factorised_hyperblock_mlp,                                                                                                                    # <<< THOG exact direct HYPERBLOCK MLP application
     HyperblockOrders,
     ResolvedHyperblockPlan,
 )
@@ -115,6 +117,9 @@ class SheetGPTConfig:
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
     # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
     direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
+    # vvv THOG separate default-off experiment; legacy direct-factorised MLP behaviour remains untouched
+    direct_factorised_hyperblock_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP", False))
+    # ^^^ THOG
     vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
 
     def __post_init__(self) -> None:
@@ -157,6 +162,17 @@ class SheetGPTConfig:
         #     raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")
         if not isinstance(self.direct_factorised_mlp, bool):
             raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
+        # vvv THOG validate and scope the independent HYPERBLOCK direct-application option
+        if not isinstance(self.direct_factorised_hyperblock_mlp, bool):
+            raise ValueError(
+                "direct_factorised_hyperblock_mlp must be bool; "
+                f"got {self.direct_factorised_hyperblock_mlp!r}"
+            )
+        if self.direct_factorised_hyperblock_mlp and not self.hyperblock_enabled:
+            raise ValueError(
+                "direct_factorised_hyperblock_mlp requires HYPERBLOCK"
+            )
+        # ^^^ THOG
         if not isinstance(self.vectorise_per_head_materialisation, bool):
             raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
 
@@ -478,18 +494,36 @@ class SheetGPT(nn.Module):
     # vvv THOG preserve the pre-bundle MLP signature for source history
     # def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
     # ^^^ THOG
+    # def _mlp(                                                                                                                                     # <<< THOG preserved pre-direct-HYPERBLOCK signature
+    #     self,
+    #     inputs: Tensor,
+    #     layer_index: int,
+    #     layer_materializations: Optional[Mapping[str, Tensor]] = None,
+    # ) -> Tensor:
     def _mlp(
         self,
         inputs: Tensor,
         layer_index: int,
         layer_materializations: Optional[Mapping[str, Tensor]] = None,
+        hyperblock_mlp_factors: Optional[FactorisedHyperblockMlpLayer] = None,
     ) -> Tensor:
         direct_application = (
             self.config.direct_factorised_mlp
             and self._supports_direct_factorised_mlp()
         )
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
-        if direct_application:
+        # vvv THOG direct HYPERBLOCK expansion bypasses the dense [MLP_HIDDEN,D_MODEL] matrix
+        if hyperblock_mlp_factors is not None:
+            hidden = apply_factorised_hyperblock_mlp(
+                inputs,
+                hyperblock_mlp_factors,
+                family_index=0,
+                expansion=True,
+                bias=expansion_bias,
+            )
+        # if direct_application:
+        elif direct_application:
+        # ^^^ THOG
             hidden = self._direct_factorised_mlp_linear(
                 inputs,
                 "mlp_expansion_weight",
@@ -512,7 +546,18 @@ class SheetGPT(nn.Module):
             del expansion_bias
         hidden = F.gelu(hidden)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
-        if direct_application:
+        # vvv THOG direct HYPERBLOCK contraction bypasses the dense [D_MODEL,MLP_HIDDEN] matrix
+        if hyperblock_mlp_factors is not None:
+            output = apply_factorised_hyperblock_mlp(
+                hidden,
+                hyperblock_mlp_factors,
+                family_index=1,
+                expansion=False,
+                bias=contraction_bias,
+            )
+        # if direct_application:
+        elif direct_application:
+        # ^^^ THOG
             output = self._direct_factorised_mlp_linear(
                 hidden,
                 "mlp_contraction_weight",
@@ -540,12 +585,30 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
-        # vvv THOG one HYPERBLOCK contraction bundle supplies Q/K/V/O/UP/DOWN for this layer
-        layer_materializations = (
-            self.trajectory.materialize_layer_matrices(layer_index)
-            if isinstance(self.trajectory, CoupledFieldTrajectory)
-            else None
-        )
+        # vvv THOG preserve the pre-direct-option full HYPERBLOCK bundle for source history
+        # layer_materializations = (
+        #     self.trajectory.materialize_layer_matrices(layer_index)
+        #     if isinstance(self.trajectory, CoupledFieldTrajectory)
+        #     else None
+        # )
+        # ^^^ THOG
+        # vvv THOG the option keeps Q/K/V/O batched and carries only low-dimensional UP/DOWN factors into the MLP
+        layer_materializations = None
+        hyperblock_mlp_factors = None
+        if isinstance(self.trajectory, CoupledFieldTrajectory):
+            direct_hyperblock_mlp = self.config.direct_factorised_hyperblock_mlp
+            if direct_hyperblock_mlp:
+                layer_materializations = self.trajectory.materialize_layer_matrices(
+                    layer_index,
+                    include_mlp=False,
+                )
+                hyperblock_mlp_factors = self.trajectory.factorised_mlp_layer(
+                    layer_index
+                )
+            else:
+                layer_materializations = self.trajectory.materialize_layer_matrices(
+                    layer_index
+                )
         # ^^^ THOG
         normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
         # vvv THOG preserve the pre-bundle attention call for source history
@@ -564,10 +627,16 @@ class SheetGPT(nn.Module):
         normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
         # vvv THOG preserve the pre-bundle MLP call for source history
         # mlp_output = self._mlp(normalized_mlp, layer_index)
+        # mlp_output = self._mlp(                                                                                                                   # <<< THOG preserved pre-factor-bundle call
+        #     normalized_mlp,
+        #     layer_index,
+        #     layer_materializations,
+        # )
         mlp_output = self._mlp(
             normalized_mlp,
             layer_index,
             layer_materializations,
+            hyperblock_mlp_factors,
         )
         # ^^^ THOG
         if self.config.fast_discard:
@@ -576,7 +645,8 @@ class SheetGPT(nn.Module):
         if self.config.fast_discard:
             # vvv THOG preserve the pre-bundle release line while also releasing the layer bundle
             # del inputs, mlp_output
-            del inputs, mlp_output, layer_materializations
+            # del inputs, mlp_output, layer_materializations                                                                                            # <<< THOG preserved pre-factor-bundle release
+            del inputs, mlp_output, layer_materializations, hyperblock_mlp_factors                                                                      # <<< THOG release optional compact UP/DOWN factors
             # ^^^ THOG
         return output
 
@@ -624,7 +694,9 @@ class SheetGPT(nn.Module):
         # vvv THOG expose the resolved HYPERBLOCK field identity without changing legacy report fields
         hyperblock_report = getattr(self.trajectory, "hyperblock_report", None)
         if callable(hyperblock_report):
+            # report["hyperblock"] = hyperblock_report()                                                                                               # <<< THOG preserved pre-execution-metadata report
             report["hyperblock"] = hyperblock_report()
+            report["hyperblock"]["direct_factorised_mlp"] = self.config.direct_factorised_hyperblock_mlp                                           # <<< THOG record exact HYPERBLOCK MLP execution path
         # ^^^ THOG
         return report
 

@@ -9,8 +9,10 @@ import torch
 from torch import Tensor, nn
 
 from .basis_provider import AxisBasisProvider, HyperblockBasisTables
+from .direct_mlp import FactorisedHyperblockMlpLayer, factorise_hyperblock_mlp_layer                                                                    # <<< THOG optional direct HYPERBLOCK MLP factors
 from .materializer import (
     materialize_attention_family_layer,
+    materialize_attention_layer_staged,                                                                                                                  # <<< THOG attention-only layer bundle when MLP stays factorised
     materialize_layer_staged,
     materialize_mlp_family_layer,
     route_attention_input_matrices,
@@ -62,6 +64,7 @@ class CoupledFieldTrajectory(nn.Module):
     """One coupled coefficient system generating the six large block matrices."""
 
     materialized_matrix_family_names = MATRIX_FAMILY_NAMES
+    attention_materialized_matrix_family_names = (ATTENTION_INPUT_WEIGHT, ATTENTION_OUTPUT_WEIGHT)                                                       # <<< THOG partial retained bundle identity
 
     def __init__(
         self,
@@ -316,8 +319,34 @@ class CoupledFieldTrajectory(nn.Module):
         )
 
     # vvv THOG batch the six matrix families for one layer and route them to the existing nanoGPT operational layouts
-    def materialize_layer_matrices(self, layer_index: int) -> Dict[str, Tensor]:
+    # def materialize_layer_matrices(self, layer_index: int) -> Dict[str, Tensor]:                                                                 # <<< THOG preserved pre-option signature
+    def materialize_layer_matrices(
+        self,
+        layer_index: int,
+        *,
+        include_mlp: bool = True,
+    ) -> Dict[str, Tensor]:
         self._validate_layer_index(layer_index)
+        if not isinstance(include_mlp, bool):
+            raise TypeError(f"include_mlp must be bool; got {include_mlp!r}")
+        # vvv THOG direct HYPERBLOCK MLP requests only Q/K/V/O; the established full bundle remains the default
+        if not include_mlp:
+            attention_layer = materialize_attention_layer_staged(
+                self.coefficients["common"],
+                self.coefficients["attention"],
+                self._basis_mapping(),
+                layer_index=layer_index,
+            )
+            return {
+                ATTENTION_INPUT_WEIGHT: route_attention_input_matrices(
+                    attention_layer.attention[:3]
+                ),
+                ATTENTION_OUTPUT_WEIGHT: route_attention_matrix(
+                    attention_layer.attention[3],
+                    output_projection=True,
+                ),
+            }
+        # ^^^ THOG
         layer = materialize_layer_staged(
             self.coefficients["common"],
             self.coefficients["attention"],
@@ -334,6 +363,20 @@ class CoupledFieldTrajectory(nn.Module):
             MLP_EXPANSION_WEIGHT: route_mlp_matrix(layer.mlp[0], expansion=True),
             MLP_CONTRACTION_WEIGHT: route_mlp_matrix(layer.mlp[1], expansion=False),
         }
+    # ^^^ THOG
+
+    # vvv THOG low-dimensional UP/DOWN factors share one family/depth contraction per logical layer
+    def factorised_mlp_layer(
+        self,
+        layer_index: int,
+    ) -> FactorisedHyperblockMlpLayer:
+        self._validate_layer_index(layer_index)
+        return factorise_hyperblock_mlp_layer(
+            self.coefficients["common"],
+            self.coefficients["mlp"],
+            self._basis_mapping(),
+            layer_index=layer_index,
+        )
     # ^^^ THOG
 
     def materialize(self, name: str, layer_index: int) -> Tensor:
