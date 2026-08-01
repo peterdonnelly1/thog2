@@ -107,7 +107,7 @@ AdamW first-step state equality is not used as the primary invariant. Adam norma
 Latest local CPU result before final GitHub validation:
 
 ```text
-54 passed
+49 passed
 1 skipped
 ```
 

@@ -817,14 +817,14 @@ run_grid_point() {
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
   log_url="file://$(realpath -m "$log_path")"; viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"; serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
 
+  # vvv THOG preserve the exact pre-HYPERBLOCK console line outside the emitted here-document
+  # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
+  # ^^^ THOG
   cat <<EOF_RUN
 scruffy OWT train
   start time:         $start_time_friendly
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
-  # vvv THOG preserve the exact pre-HYPERBLOCK console line for source history
-  # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
-  # ^^^ THOG
   model/preset/basis: $display_model_type / $geometry_preset_value / $([[ "$geometry_preset_value" == hyperblock ]] && printf '%s' "$HYPERBLOCK_COMPRESSOR" || printf '%s' "$basis_family_value")
   lapped cosine:      window=$LAPPED_COSINE_WINDOW_LENGTH overlap=$LAPPED_COSINE_OVERLAP_FRACTION
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN

@@ -706,7 +706,7 @@ HYPERBLOCK
 7. Generated orientations reproduce expected nanoGPT QKV packing and MLP shapes.
 8. A mock second basis provider replaces Chebyshev without topology or router changes.
 
-As built, the dedicated suite contains 54 passing CPU tests plus one CUDA-only bfloat16 test that skips when CUDA is unavailable. Coverage includes a literal scalar-definition oracle, reference-versus-production contraction equality, finite-difference gradients for common/attention/MLP coefficients, direct-sum support, zero-order branch collapse, exact accounting, all four registered basis families, routing, initialization, retained projection, checkpoint regeneration, float32 and CPU-bfloat16 training, model forward/backward, optimizer grouping, CLI/wrapper propagation and full-graph compile compatibility.
+As built, the dedicated suite contains 49 passing CPU tests plus one CUDA-only bfloat16 test that skips when CUDA is unavailable. Coverage includes a literal scalar-definition oracle, reference-versus-production contraction equality, finite-difference gradients for common/attention/MLP coefficients, direct-sum support, zero-order branch collapse, exact accounting, all four registered basis families, routing, initialization, retained projection, checkpoint regeneration, float32 and CPU-bfloat16 training, model forward/backward, optimizer grouping, CLI/wrapper propagation and full-graph compile compatibility.
 
 ## 16.2 Integration tests
 
