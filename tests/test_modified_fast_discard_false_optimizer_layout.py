@@ -5,8 +5,22 @@ import pytest
 import torch
 from torch import Tensor, nn
 
+from sheet.stage4_trainer import Stage4Trainer
+from sheet.training_config import TrainingConfig
 from sheet.update_retained_materializations import (
     attach_update_retained_materializations,
+)
+
+
+_CUDA_BFLOAT16_AVAILABLE = (
+    torch.cuda.is_available()
+    and bool(
+        getattr(
+            torch.cuda,
+            "is_bf16_supported",
+            lambda: False,
+        )()
+    )
 )
 
 
@@ -89,8 +103,8 @@ def test_bfloat16_projection_matches_compact_parameter_layout() -> None:
 
 
 @pytest.mark.skipif(
-    not torch.cuda.is_available(),
-    reason="CUDA is unavailable",
+    not _CUDA_BFLOAT16_AVAILABLE,
+    reason="CUDA bfloat16 is unavailable",
 )
 def test_bfloat16_projection_is_accepted_by_fused_adam() -> None:
     device = torch.device("cuda", torch.cuda.current_device())
@@ -113,4 +127,61 @@ def test_bfloat16_projection_is_accepted_by_fused_adam() -> None:
         fused=True,
     )
     optimizer.step()
+
+
+@pytest.mark.skipif(
+    not _CUDA_BFLOAT16_AVAILABLE,
+    reason="CUDA bfloat16 is unavailable",
+)
+def test_stage4_bfloat16_checkpointed_retained_update_uses_fused_adam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("THOG2_FAST_DISCARD", "false")
+    monkeypatch.setenv("THOG2_TORCH_COMPILE", "false")
+    monkeypatch.setenv("THOG2_OPTIMIZER", "adamw")
+    config = TrainingConfig(
+        model_type="thog2_sheet",
+        block_size=4,
+        vocab_size=32,
+        n_layer=2,
+        n_head=2,
+        n_embd=8,
+        dropout=0.0,
+        bias=True,
+        depth_order=2,
+        base_row_order=1,
+        geometry_preset="depth",
+        basis_family="chebyshev",
+        checkpoint_segment_size=1,
+        batch_size=1,
+        gradient_accumulation_steps=2,
+        max_updates=1,
+        learning_rate=1.0e-3,
+        min_learning_rate=1.0e-3,
+        decay_updates=1,
+        decay_learning_rate=False,
+        weight_decay=0.0,
+        grad_clip=1.0,
+        eval_interval=0,
+        checkpoint_interval=0,
+        model_seed=123,
+        data_seed=456,
+        device="cuda",
+        dtype="bfloat16",
+    )
+    tokens = torch.arange(128, dtype=torch.long).remainder(32)
+    trainer = Stage4Trainer(config, tokens, tokens)
+    try:
+        metrics = trainer.train_one_update()
+        assert metrics["completed_updates"] == 1.0
+        assert metrics["skipped_update"] == 0.0
+        report = (
+            trainer.raw_model.update_retained_materialization_report()
+        )
+        assert bool(report["enabled"]) is True
+        assert bool(report["active"]) is False
+        assert int(report["retained_count"]) == 0
+        assert int(report["materialization_count"]) > 0
+    finally:
+        trainer.close()
 # ^^^ THOG
