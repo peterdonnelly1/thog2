@@ -370,6 +370,13 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
     geometry_plan = geometry_plan if geometry_plan is not None else geometry_plan_from_arguments(arguments)
     if geometry_plan is not None and not geometry_plan.materializer.implemented:
         raise ValueError(geometry_plan.materializer.message)
+    # vvv THOG preserve the exact pre-HYPERBLOCK config derivation lines for source history
+    # model_type = arguments.model_type or ("sheet" if geometry_plan is not None else None)
+    # geometry_preset=arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset,
+    # attention_geometry=arguments.attention_geometry if adapter is None else None,
+    # mlp_geometry=arguments.mlp_geometry if adapter is None else None,
+    # basis_family=arguments.basis_family if adapter is None else adapter.legacy_basis_family,
+    # ^^^ THOG
     model_type = arguments.model_type or ("sheet" if geometry_plan is not None or arguments.hyperblock else None)
     if model_type is None:
         raise ValueError("--model-type is required for legacy runs; systematic geometry selections imply model_type='sheet'")

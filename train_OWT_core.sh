@@ -645,6 +645,9 @@ if [[ "$HYPERBLOCK" == true ]]; then
   (( HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER <= HEAD_DIM )) || { echo "HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
 fi
 # ^^^ THOG
+# vvv THOG preserve the exact pre-HYPERBLOCK compact-preset guard for source history
+# if [[ "$HAS_COMPACT_PRESET" == true ]]; then
+# ^^^ THOG
 if [[ "$HAS_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then
   for value in "${O_DEPTH_VALUES[@]}"; do (( value <= N_LAYER )) || { echo "O_DEPTH must not exceed N_LAYER: P=${value}, L=${N_LAYER}." >&2; exit 2; }; done
 fi
@@ -661,6 +664,9 @@ if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then
     done
   fi
 fi
+# vvv THOG preserve the exact pre-HYPERBLOCK DEPTH-vector guard for source history
+# if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true ) ]]; then
+# ^^^ THOG
 if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true || "$HYPERBLOCK" == true ) ]]; then
   echo "--depth-compress-layer-norm-and-bias may be used only when every selected preset is depth." >&2
   exit 2
@@ -816,6 +822,9 @@ scruffy OWT train
   start time:         $start_time_friendly
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
+  # vvv THOG preserve the exact pre-HYPERBLOCK console line for source history
+  # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
+  # ^^^ THOG
   model/preset/basis: $display_model_type / $geometry_preset_value / $([[ "$geometry_preset_value" == hyperblock ]] && printf '%s' "$HYPERBLOCK_COMPRESSOR" || printf '%s' "$basis_family_value")
   lapped cosine:      window=$LAPPED_COSINE_WINDOW_LENGTH overlap=$LAPPED_COSINE_OVERLAP_FRACTION
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN

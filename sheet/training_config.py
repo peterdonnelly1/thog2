@@ -243,6 +243,9 @@ class TrainingConfig:
             # ^^^ THOG
         # ^^^ THOG
 
+        # vvv THOG preserve the exact pre-HYPERBLOCK positive-integer validation line for source history
+        # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        # ^^^ THOG
         for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -481,6 +484,9 @@ class TrainingConfig:
                     "o_mlp_hidden": self.resolved_o_mlp_hidden,
                     "mlp_hidden_group_size": self.mlp_hidden_group_size,
                     "mlp_hidden_compressor": self.mlp_hidden_compressor,
+                    # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history
+                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    # ^^^ THOG
                     "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                     "basis_version": self.basis_version,
                     "geometry_preset": self.geometry_preset,

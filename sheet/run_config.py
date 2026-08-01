@@ -229,6 +229,9 @@ class OwtRunConfig:
             if requested_family == BASIS_FAMILY_CONVENTIONAL
             else normalize_registered_basis_family(requested_family)
         )
+        # vvv THOG preserve the pre-HYPERBLOCK lapped-cosine branch line for source history
+        # if canonical_family == BASIS_FAMILY_LAPPED_COSINE:
+        # ^^^ THOG
         if not self.hyperblock_enabled and canonical_family == BASIS_FAMILY_LAPPED_COSINE:
             control_version = lapped_cosine_basis_version(
                 self.lapped_cosine_window_length,

@@ -286,6 +286,11 @@ class SheetGPT(nn.Module):
                 "ln_f": ConventionalLayerNorm(config.n_embd, bias=config.bias),
             }
         )
+        # vvv THOG preserve the pre-HYPERBLOCK trajectory-selection branch headers for source history
+        # elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+        # elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        # ^^^ THOG
         # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged
         if config.hyperblock_enabled:
             self.trajectory = CoupledFieldTrajectory(
@@ -524,6 +529,10 @@ class SheetGPT(nn.Module):
             loss = None
         return logits, loss
 
+    # vvv THOG preserve the pre-HYPERBLOCK parameter-report return line for source history
+    # return {
+    # ^^^ THOG
+
     def parameter_report(self) -> Dict[str, object]:
         total_persistent = sum(parameter.numel() for parameter in self.parameters())
         sheet_coefficients = self.trajectory.sheet_parameter_count()
@@ -552,6 +561,12 @@ class SheetGPT(nn.Module):
         if non_embedding:
             parameter_count -= self.transformer.wpe.weight.numel()
         return parameter_count
+
+    # vvv THOG preserve the pre-HYPERBLOCK optimizer-group lines for source history
+    # target[f"trajectory.coefficients.{family_name}"] = parameter
+    # sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
+    # if id(parameter) in sheet_parameter_ids:
+    # ^^^ THOG
 
     def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
         decay: Dict[str, nn.Parameter] = {}
