@@ -15,6 +15,12 @@ class MaterializedHyperblockRegions:
     mlp_extension: Tensor
 
 
+@dataclass(frozen=True)
+class MaterializedHyperblockLayer:
+    attention: Tensor
+    mlp: Tensor
+
+
 def _restore_attention_unique_modes(
     coefficients: Tensor,
     attention_head_order: int,
@@ -157,6 +163,106 @@ def materialize_regions_staged(
     return MaterializedHyperblockRegions(common, attention_extension, mlp_extension)
 
 
+# vvv THOG batch all six matrix families for one layer so family/depth/common contractions and zero-mode restoration occur once
+
+def _materialize_family_layer_modes(
+    coefficients: Tensor,
+    family_basis: Tensor,
+    depth_basis: Tensor,
+    layer_index: int,
+) -> Tensor:
+    if isinstance(layer_index, bool) or not isinstance(layer_index, int):
+        raise ValueError(f"layer_index must be an integer; got {layer_index!r}")
+    if layer_index < 0 or layer_index >= depth_basis.shape[0]:
+        raise IndexError(
+            f"layer_index out of range: {layer_index}; n_layer={depth_basis.shape[0]}"
+        )
+    family_expanded = torch.tensordot(
+        family_basis.to(coefficients),
+        coefficients,
+        dims=([1], [0]),
+    )
+    return torch.tensordot(
+        depth_basis[layer_index].to(coefficients),
+        family_expanded,
+        dims=([0], [1]),
+    )
+
+
+def materialize_layer_staged(
+    common_coefficients: Tensor,
+    attention_coefficients: Tensor,
+    mlp_coefficients: Tensor,
+    bases: Mapping[str, Tensor],
+    *,
+    layer_index: int,
+) -> MaterializedHyperblockLayer:
+    common_modes = _materialize_family_layer_modes(
+        common_coefficients,
+        bases["family_common"],
+        bases["depth"],
+        layer_index,
+    )
+    common = torch.matmul(
+        common_modes,
+        bases["d_model"].to(common_coefficients).transpose(0, 1),
+    )
+
+    attention_full = _restore_attention_unique_modes(
+        attention_coefficients,
+        bases["attention_head"].shape[1],
+        bases["attention_head_channel"].shape[1],
+    )
+    attention_extension = _materialize_family_layer_modes(
+        attention_full,
+        bases["family_attention"],
+        bases["depth"],
+        layer_index,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["attention_head_channel"],
+        3,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["attention_head"],
+        2,
+    )
+    attention_extension = _mode_product(
+        attention_extension,
+        bases["d_model"],
+        1,
+    )
+    attention = common[:4, :, None, None] + attention_extension
+
+    mlp_full = _restore_mlp_unique_modes(
+        mlp_coefficients,
+        bases["mlp_hidden"].shape[1],
+    )
+    mlp_extension = _materialize_family_layer_modes(
+        mlp_full,
+        bases["family_mlp"],
+        bases["depth"],
+        layer_index,
+    )
+    mlp_extension = _mode_product(
+        mlp_extension,
+        bases["mlp_hidden"],
+        2,
+    )
+    mlp_extension = _mode_product(
+        mlp_extension,
+        bases["d_model"],
+        1,
+    )
+    mlp = common[4:6, :, None] + mlp_extension
+    return MaterializedHyperblockLayer(attention=attention, mlp=mlp)
+
+
+# ^^^ THOG
+
+
 def materialize_attention_family_layer(
     common_coefficients: Tensor,
     attention_coefficients: Tensor,
@@ -237,6 +343,19 @@ def materialize_mlp_family_layer(
     branch = _mode_product(branch_modes, mlp_hidden, 1)
     branch = _mode_product(branch, d_model_mlp, 0)
     return common[:, None] + branch
+
+
+def route_attention_input_matrices(canonical: Tensor) -> Tensor:
+    if canonical.ndim != 4 or canonical.shape[0] != 3:
+        raise ValueError(
+            "canonical QKV field must have [3, D_MODEL, HEAD, HEAD_CHANNEL]; "
+            f"got {tuple(canonical.shape)}"
+        )
+    family_count, d_model, n_head, head_dim = canonical.shape
+    return canonical.permute(0, 2, 3, 1).reshape(
+        family_count * n_head * head_dim,
+        d_model,
+    )
 
 
 def route_attention_matrix(canonical: Tensor, *, output_projection: bool) -> Tensor:
