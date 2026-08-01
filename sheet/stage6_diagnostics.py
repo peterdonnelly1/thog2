@@ -59,13 +59,79 @@ def _combined_axis_energy_fraction(coefficient: Tensor, axes: Tuple[int, ...]) -
     return normalized_energy(coefficient.square().sum(dim=reduce_dims))
 
 
+# vvv THOG report the actual persistent parameter regions when operational matrix-family metadata no longer maps one-to-one onto coefficients
+
+def _persistent_parameter_rows(
+    model: TrainingSheetGPT,
+) -> Tuple[Tuple[str, str, Tensor], ...]:
+    trajectory = model.trajectory
+    metadata_by_name = {
+        metadata.name: metadata
+        for metadata in trajectory.metadata
+    }
+    metadata_names = tuple(metadata_by_name)
+    if all(name in trajectory.coefficients for name in metadata_names):
+        return tuple(
+            (
+                metadata.name,
+                metadata.semantic_type,
+                trajectory.coefficients[metadata.name],
+            )
+            for metadata in trajectory.metadata
+        )
+
+    rows = [
+        (name, "coupled_coefficient_region", parameter)
+        for name, parameter in trajectory.coefficients.items()
+    ]
+    vector_parameters = getattr(trajectory, "vector_parameters", None)
+    if vector_parameters is not None:
+        for name, parameter in vector_parameters.items():
+            metadata = metadata_by_name.get(name)
+            semantic_type = (
+                metadata.semantic_type
+                if metadata is not None
+                else "vector_parameter"
+            )
+            rows.append((name, semantic_type, parameter))
+    return tuple(rows)
+
+
+def _diagnostic_depth_order(model: TrainingSheetGPT) -> int:
+    plan = getattr(model.trajectory, "plan", None)
+    orders = getattr(plan, "orders", None)
+    if orders is not None and hasattr(orders, "depth"):
+        return int(orders.depth)
+    return int(model.config.depth_order)
+
+# ^^^ THOG
+
+
 def gradient_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, float]]:
     rows: Dict[str, Dict[str, float]] = {}
-    for metadata in model.trajectory.metadata:
-        parameter = model.trajectory.coefficients[metadata.name]
+    # vvv THOG HYPERBLOCK operational families share common/attention/MLP parameters, so diagnose those persistent regions rather than indexing them by family name
+    # for metadata in model.trajectory.metadata:
+    #     parameter = model.trajectory.coefficients[metadata.name]
+    #     gradient = parameter.grad
+    #     if gradient is None:
+    #         rows[metadata.name] = {
+    #             "gradient_present": 0.0,
+    #             "gradient_l2_norm": 0.0,
+    #             "gradient_rms": 0.0,
+    #             "gradient_max_abs": 0.0,
+    #         }
+    #         continue
+    #     detached = gradient.detach().float()
+    #     rows[metadata.name] = {
+    #         "gradient_present": 1.0,
+    #         "gradient_l2_norm": finite_float(torch.linalg.vector_norm(detached)),
+    #         "gradient_rms": finite_float(torch.sqrt(torch.mean(detached.square()))),
+    #         "gradient_max_abs": finite_float(detached.abs().max()),
+    #     }
+    for name, _, parameter in _persistent_parameter_rows(model):
         gradient = parameter.grad
         if gradient is None:
-            rows[metadata.name] = {
+            rows[name] = {
                 "gradient_present": 0.0,
                 "gradient_l2_norm": 0.0,
                 "gradient_rms": 0.0,
@@ -73,21 +139,27 @@ def gradient_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, float]]:
             }
             continue
         detached = gradient.detach().float()
-        rows[metadata.name] = {
+        rows[name] = {
             "gradient_present": 1.0,
             "gradient_l2_norm": finite_float(torch.linalg.vector_norm(detached)),
             "gradient_rms": finite_float(torch.sqrt(torch.mean(detached.square()))),
             "gradient_max_abs": finite_float(detached.abs().max()),
         }
+    # ^^^ THOG
     return rows
 
 
 @torch.no_grad()
 def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[str, Any]]:
     rows: Dict[str, Dict[str, Any]] = {}
-    depth_order = int(model.config.depth_order)
-    for metadata in model.trajectory.metadata:
-        coefficient = model.trajectory.coefficients[metadata.name].detach().float()
+    # vvv THOG use the HYPERBLOCK retained DEPTH order and persistent coefficient regions while preserving the legacy metadata-driven path through the shared helper
+    # depth_order = int(model.config.depth_order)
+    # for metadata in model.trajectory.metadata:
+    #     coefficient = model.trajectory.coefficients[metadata.name].detach().float()
+    depth_order = _diagnostic_depth_order(model)
+    for name, semantic_type, parameter in _persistent_parameter_rows(model):
+        coefficient = parameter.detach().float()
+        # ^^^ THOG
         # vvv THOG unsupported coefficient layouts still report generic utilization instead of aborting a completed run
         # depth_axis, order_axes = _coefficient_axis_plan(coefficient, depth_order)
         # depth_fractions = _axis_energy_fraction(coefficient, depth_axis)
@@ -102,8 +174,12 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
             row_fractions = tuple()
             order_axis_diagnostics_error = str(error)
         # ^^^ THOG
-        rows[metadata.name] = {
-            "semantic_type": metadata.semantic_type,
+        # vvv THOG key utilization by the persistent parameter name; operational family names remain reserved for generated-weight diagnostics
+        # rows[metadata.name] = {
+        #     "semantic_type": metadata.semantic_type,
+        rows[name] = {
+            "semantic_type": semantic_type,
+            # ^^^ THOG
             "shape": list(coefficient.shape),
             "coefficient_rms": finite_float(torch.sqrt(torch.mean(coefficient.square()))),
             "coefficient_l2_norm": finite_float(torch.linalg.vector_norm(coefficient)),
@@ -117,13 +193,20 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
             "high_row_order_energy_fraction": high_order_fraction(row_fractions),
         }
         # vvv THOG never encode an unsupported order-axis diagnostic as a misleading zero-energy result
-        rows[metadata.name]["order_axis_diagnostics_supported"] = order_axis_diagnostics_error is None
+        # rows[metadata.name]["order_axis_diagnostics_supported"] = order_axis_diagnostics_error is None
+        # if order_axis_diagnostics_error is not None:
+        #     rows[metadata.name]["depth_order_energy_fraction"] = None
+        #     rows[metadata.name]["row_order_energy_fraction"] = None
+        #     rows[metadata.name]["high_depth_order_energy_fraction"] = None
+        #     rows[metadata.name]["high_row_order_energy_fraction"] = None
+        #     rows[metadata.name]["order_axis_diagnostics_error"] = order_axis_diagnostics_error
+        rows[name]["order_axis_diagnostics_supported"] = order_axis_diagnostics_error is None
         if order_axis_diagnostics_error is not None:
-            rows[metadata.name]["depth_order_energy_fraction"] = None
-            rows[metadata.name]["row_order_energy_fraction"] = None
-            rows[metadata.name]["high_depth_order_energy_fraction"] = None
-            rows[metadata.name]["high_row_order_energy_fraction"] = None
-            rows[metadata.name]["order_axis_diagnostics_error"] = order_axis_diagnostics_error
+            rows[name]["depth_order_energy_fraction"] = None
+            rows[name]["row_order_energy_fraction"] = None
+            rows[name]["high_depth_order_energy_fraction"] = None
+            rows[name]["high_row_order_energy_fraction"] = None
+            rows[name]["order_axis_diagnostics_error"] = order_axis_diagnostics_error
         # ^^^ THOG
     return rows
 
