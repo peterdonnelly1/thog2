@@ -35,3 +35,14 @@ jobs:
       - name: Run HYPERBLOCK tests
         run: |
           PYTHONPATH=. pytest -q tests/test_hyperblock*.py
+
+      - name: Export exact source tree
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperblock-source-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 2
