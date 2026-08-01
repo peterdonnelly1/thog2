@@ -134,11 +134,37 @@ def test_residual_scaling_changes_only_output_and_down_families() -> None:
     )
 
 
+def test_posthoc_residual_scaling_rejects_reduced_family_orders() -> None:
+    plan = ResolvedHyperblockPlan(
+        n_layer=3,
+        n_embd=8,
+        n_head=2,
+        mlp_hidden_multiplier=2,
+        orders=HyperblockOrders(
+            depth=3,
+            d_model=5,
+            mlp_hidden=6,
+            attention_head=2,
+            attention_head_channel=4,
+            common_family=3,
+            attention_family=2,
+            mlp_family=1,
+        ),
+    )
+    trajectory = CoupledFieldTrajectory(
+        plan,
+        bias=False,
+        runtime_dtype=torch.float64,
+    )
+    with pytest.raises(ValueError, match="not isolated"):
+        trajectory.apply_residual_init_scaling(0.02)
+
+
 def test_parameter_accounting_is_exact() -> None:
     trajectory = _trajectory()
     assert trajectory.sheet_parameter_count() == trajectory.plan.coefficient_counts["total"]
     assert trajectory.matrix_sheet_parameter_count() == trajectory.sheet_parameter_count()
-    assert trajectory.matrix_dense_equivalent_count() == 12 * 3 * 8 * 8
+    assert trajectory.matrix_dense_equivalent_count() == (4 + 2 * 2) * 3 * 8 * 8
     assert trajectory.conventional_vector_parameter_count() == sum(
         parameter.numel() for parameter in trajectory.vector_parameters.values()
     )

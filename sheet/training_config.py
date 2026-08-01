@@ -463,6 +463,11 @@ class TrainingConfig:
                     "hyperblock_attention_head_order": self.hyperblock_attention_head_order,
                     "hyperblock_attention_head_channel_order": self.hyperblock_attention_head_channel_order,
                     "hyperblock_mlp_hidden_multiplier": self.hyperblock_mlp_hidden_multiplier,
+                    "hyperblock_residual_weight_std": self.residual_init_config().residual_std(
+                        model_type=self.model_type,
+                        n_layer=self.n_layer,
+                        depth_order=self.hyperblock_depth_order,
+                    ),
                 })
             else:
                 arguments.update({

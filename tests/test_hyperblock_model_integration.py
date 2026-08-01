@@ -10,7 +10,8 @@ import pytest
 import torch
 from torch import Tensor
 
-from sheet.bases import DCT_BASIS_VERSION
+from sheet.bases import DCT_BASIS_VERSION, LAPPED_COSINE_BASIS_VERSION
+from sheet.bases.haar import HAAR_BASIS_VERSION
 from sheet.hyperblock import (
     HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
     CoupledFieldTrajectory,
@@ -110,6 +111,26 @@ def test_hyperblock_sheet_gpt_forward_backward_and_optimizer_groups() -> None:
     assert model.compact_state_violations() == ()
 
 
+def test_nonstandard_mlp_hidden_multiplier_runs_end_to_end() -> None:
+    config = dataclasses.replace(
+        _model_config(),
+        hyperblock_mlp_hidden_multiplier=3,
+        hyperblock_mlp_hidden_order=6,
+    )
+    model = SheetGPT(config)
+    assert model.trajectory.materialize("mlp_expansion_weight", 0).shape == (24, 8)
+    assert model.trajectory.materialize("mlp_contraction_weight", 0).shape == (8, 24)
+    tokens = torch.randint(0, 32, (2, 4))
+    logits, loss = model(tokens, tokens)
+    assert logits.shape == (2, 4, 32)
+    assert loss is not None
+    loss.backward()
+    assert all(
+        parameter.grad is not None
+        for parameter in model.trajectory.coefficients.values()
+    )
+
+
 def test_hyperblock_training_config_round_trip_and_identity() -> None:
     config = _training_config()
     restored = TrainingConfig(**dataclasses.asdict(config))
@@ -120,6 +141,25 @@ def test_hyperblock_training_config_round_trip_and_identity() -> None:
     assert identity["coefficient_counts"]["total"] == 320
     model = build_training_model(config)
     assert isinstance(model.trajectory, CoupledFieldTrajectory)
+
+
+def test_training_factory_resolves_residual_std_before_reduced_family_initialization() -> None:
+    config = dataclasses.replace(
+        _training_config(),
+        hyperblock_common_family_order=3,
+        hyperblock_attention_family_order=2,
+        hyperblock_mlp_family_order=1,
+        residual_init_policy="unscaled",
+    )
+    model = build_training_model(config)
+    assert model.trajectory.family_metadata("attention_output_weight").target_weight_std == pytest.approx(0.02)
+    assert model.trajectory.family_metadata("mlp_contraction_weight").target_weight_std == pytest.approx(0.02)
+
+    with torch.random.fork_rng():
+        torch.manual_seed(config.model_seed)
+        expected = SheetGPT(SheetGPTConfig(**config.model_arguments()))
+    for name, parameter in model.trajectory.coefficients.items():
+        torch.testing.assert_close(parameter, expected.trajectory.coefficients[name])
 
 
 def test_hyperblock_rejects_legacy_geometry_overlap() -> None:
@@ -214,18 +254,29 @@ def test_hyperblock_whole_model_is_fullgraph_compilable() -> None:
 
 # vvv THOG
 
-def test_dct_hyperblock_trains_checkpoints_and_resumes() -> None:
+@pytest.mark.parametrize(
+    ("compressor", "expected_version"),
+    (
+        ("dct", DCT_BASIS_VERSION),
+        ("haar", HAAR_BASIS_VERSION),
+        ("lapped_cosine", LAPPED_COSINE_BASIS_VERSION),
+    ),
+)
+def test_registered_non_chebyshev_hyperblock_trains_checkpoints_and_resumes(
+    compressor: str,
+    expected_version: str,
+) -> None:
     tokens = torch.arange(128, dtype=torch.long).remainder(32)
-    config = _training_config(compressor="dct")
+    config = _training_config(compressor=compressor)
     config.max_updates = 2
     config.decay_updates = 2
     trainer = Stage4Trainer(config, tokens, tokens)
     try:
         metrics = trainer.train_one_update()
         assert torch.isfinite(torch.tensor(metrics["training_loss"]))
-        assert trainer.config.hyperblock_compressor_version == DCT_BASIS_VERSION
+        assert trainer.config.hyperblock_compressor_version == expected_version
         with tempfile.TemporaryDirectory() as directory:
-            checkpoint = Path(directory) / "hyperblock_dct.pt"
+            checkpoint = Path(directory) / f"hyperblock_{compressor}.pt"
             trainer.save_checkpoint(checkpoint)
             resumed = Stage4Trainer.from_checkpoint(
                 checkpoint,
@@ -234,8 +285,8 @@ def test_dct_hyperblock_trains_checkpoints_and_resumes() -> None:
                 overrides={"max_updates": 2},
             )
             try:
-                assert resumed.config.hyperblock_compressor == "dct"
-                assert resumed.config.hyperblock_compressor_version == DCT_BASIS_VERSION
+                assert resumed.config.hyperblock_compressor == compressor
+                assert resumed.config.hyperblock_compressor_version == expected_version
                 resumed.train_one_update()
                 assert resumed.state.completed_updates == 2
             finally:

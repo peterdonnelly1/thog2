@@ -419,6 +419,16 @@ class CoupledFieldTrajectory(nn.Module):
         if previous <= 0.0:
             raise RuntimeError(f"stored residual std must be positive; got {previous}")
         ratio = residual_weight_std / previous
+        family_orders_are_full = (
+            self.plan.orders.common_family == len(WEIGHT_FAMILIES)
+            and self.plan.orders.attention_family == len(ATTENTION_FAMILIES)
+            and self.plan.orders.mlp_family == len(MLP_FAMILIES)
+        )
+        if not math.isclose(ratio, 1.0) and not family_orders_are_full:
+            raise ValueError(
+                "post-hoc residual-family scaling is not isolated when a WEIGHT_FAMILY "
+                "axis is compressed; supply residual_weight_std during initialization"
+            )
         with torch.no_grad():
             self._scale_family_coefficients(
                 "common",

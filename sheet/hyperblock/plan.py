@@ -186,7 +186,14 @@ class ResolvedHyperblockPlan:
 
     @property
     def dense_equivalent_matrix_count(self) -> int:
-        return 12 * self.n_layer * self.n_embd * self.n_embd
+        attention_matrix_count = 4 * self.n_layer * self.n_embd * self.n_embd
+        mlp_matrix_count = (
+            2
+            * self.n_layer
+            * self.n_embd
+            * self.mlp_hidden
+        )
+        return attention_matrix_count + mlp_matrix_count
 
     @property
     def compression_ratio(self) -> float:

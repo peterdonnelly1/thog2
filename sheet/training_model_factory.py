@@ -26,10 +26,8 @@ def _apply_sheet_residual_init_scaling(
             else config.depth_order
         ),
     )
-    # vvv THOG HYPERBLOCK scales physical O and MLP_DOWN families through its coupled family bases
-    trajectory_scaler = getattr(model.trajectory, "apply_residual_init_scaling", None)
-    if callable(trajectory_scaler):
-        trajectory_scaler(residual_std)
+    # vvv THOG HYPERBLOCK receives the resolved residual std before coefficient initialization; post-hoc family projection would leak when family order is reduced
+    if config.hyperblock_enabled:
         return
     # ^^^ THOG
     with torch.no_grad():

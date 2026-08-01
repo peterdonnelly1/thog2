@@ -193,13 +193,9 @@ def materialize_attention_family_layer(
         depth_attention,
         attention_full,
     )
-    branch = torch.einsum(
-        "dc,hr,ks,crs->dhk",
-        d_model_attention,
-        head,
-        channel,
-        branch_modes,
-    )
+    branch = _mode_product(branch_modes, channel, 2)
+    branch = _mode_product(branch, head, 1)
+    branch = _mode_product(branch, d_model_attention, 0)
     return common[:, None, None] + branch
 
 
@@ -238,12 +234,8 @@ def materialize_mlp_family_layer(
         depth_mlp,
         mlp_full,
     )
-    branch = torch.einsum(
-        "dc,mt,ct->dm",
-        d_model_mlp,
-        mlp_hidden,
-        branch_modes,
-    )
+    branch = _mode_product(branch_modes, mlp_hidden, 1)
+    branch = _mode_product(branch, d_model_mlp, 0)
     return common[:, None] + branch
 
 

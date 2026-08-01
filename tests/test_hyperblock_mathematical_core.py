@@ -69,7 +69,25 @@ def test_plan_counts_match_allocated_shapes() -> None:
     assert plan.coefficient_counts["attention"] == expected["attention"]
     assert plan.coefficient_counts["mlp"] == expected["mlp"]
     assert plan.coefficient_counts["total"] == sum(expected.values())
-    assert plan.dense_equivalent_matrix_count == 12 * 3 * 6 * 6
+    assert plan.dense_equivalent_matrix_count == (4 + 2 * 2) * 3 * 6 * 6
+
+
+def test_dense_equivalent_count_respects_mlp_hidden_multiplier() -> None:
+    plan = ResolvedHyperblockPlan(
+        n_layer=5,
+        n_embd=12,
+        n_head=3,
+        mlp_hidden_multiplier=3,
+        orders=HyperblockOrders(
+            depth=5,
+            d_model=6,
+            mlp_hidden=7,
+            attention_head=3,
+            attention_head_channel=4,
+        ),
+    )
+    expected = 4 * 5 * 12 * 12 + 2 * 5 * 12 * (3 * 12)
+    assert plan.dense_equivalent_matrix_count == expected
 
 
 def test_canonical_l32_d1024_count_matches_specification() -> None:

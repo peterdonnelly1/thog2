@@ -105,6 +105,7 @@ class SheetGPTConfig:
     hyperblock_attention_head_order: int = 16
     hyperblock_attention_head_channel_order: int = 16
     hyperblock_mlp_hidden_multiplier: int = 4
+    hyperblock_residual_weight_std: Optional[float] = None
     # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
@@ -131,6 +132,15 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        if self.hyperblock_residual_weight_std is not None and (
+            isinstance(self.hyperblock_residual_weight_std, bool)
+            or not isinstance(self.hyperblock_residual_weight_std, (int, float))
+            or self.hyperblock_residual_weight_std <= 0.0
+        ):
+            raise ValueError(
+                "hyperblock_residual_weight_std must be positive or None; "
+                f"got {self.hyperblock_residual_weight_std!r}"
+            )
         if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
             raise ValueError(
                 "depth_compress_layer_norm_and_bias must be bool; "
@@ -282,6 +292,7 @@ class SheetGPT(nn.Module):
                 config.hyperblock_plan(),
                 bias=config.bias,
                 runtime_dtype=torch.float32,
+                residual_weight_std=config.hyperblock_residual_weight_std,
             )
             selectors = None
         else:
