@@ -28,20 +28,10 @@ jobs:
         run: |
           python -m compileall -q sheet tests
 
+      - name: Validate wrapper syntax
+        run: |
+          bash -n train_OWT.sh train_OWT_core.sh
+
       - name: Run HYPERBLOCK tests
         run: |
-          if compgen -G 'tests/test_hyperblock*.py' > /dev/null; then
-            PYTHONPATH=. pytest -q tests/test_hyperblock*.py
-          else
-            echo 'No HYPERBLOCK tests exist yet.'
-          fi
-
-      - name: Upload checked-out source snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: hyperblock-source-snapshot
-          path: |
-            .
-            !.git
-          include-hidden-files: true
-          retention-days: 2
+          PYTHONPATH=. pytest -q tests/test_hyperblock*.py
