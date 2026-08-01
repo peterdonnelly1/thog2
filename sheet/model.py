@@ -390,6 +390,9 @@ class SheetGPT(nn.Module):
             attention_weight = layer_materializations["attention_input_weight"]
             attention_bias = self._optional_bias("attention_input_bias", layer_index)
         # ^^^ THOG
+        # vvv THOG preserve the pre-bundle semantic-QKV branch header for source history
+        # if self.config.bypass_semantic_qkv_adapter:
+        # ^^^ THOG
         # vvv THOG selectable semantic-QKV adapter bypass for exact A/B timing comparisons
         elif self.config.bypass_semantic_qkv_adapter:
             attention_weight = self.trajectory.materialize("attention_input_weight", layer_index)
@@ -571,7 +574,10 @@ class SheetGPT(nn.Module):
             del normalized_mlp
         output = inputs + mlp_output
         if self.config.fast_discard:
+            # vvv THOG preserve the pre-bundle release line while also releasing the layer bundle
+            # del inputs, mlp_output
             del inputs, mlp_output, layer_materializations
+            # ^^^ THOG
         return output
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
