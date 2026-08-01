@@ -1,11 +1,14 @@
 # vvv THOG
 from .basis_provider import AxisBasisProvider, HyperblockBasisTables, RegisteredAxisBasisProvider
 from .materializer import (
+    MaterializedHyperblockLayer,
     MaterializedHyperblockRegions,
     materialize_attention_family_layer,
+    materialize_layer_staged,
     materialize_mlp_family_layer,
     materialize_regions_reference,
     materialize_regions_staged,
+    route_attention_input_matrices,
     route_attention_matrix,
     route_mlp_matrix,
 )
@@ -29,14 +32,17 @@ __all__ = [
     "HyperblockBasisTables",
     "HyperblockOrders",
     "MLP_FAMILIES",
+    "MaterializedHyperblockLayer",
     "MaterializedHyperblockRegions",
     "RegisteredAxisBasisProvider",
     "ResolvedHyperblockPlan",
     "WEIGHT_FAMILIES",
     "materialize_attention_family_layer",
+    "materialize_layer_staged",
     "materialize_mlp_family_layer",
     "materialize_regions_reference",
     "materialize_regions_staged",
+    "route_attention_input_matrices",
     "route_attention_matrix",
     "route_mlp_matrix",
 ]
