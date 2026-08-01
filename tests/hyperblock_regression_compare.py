@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 Result = Dict[str, object]
@@ -124,7 +124,7 @@ def compare(
     base_checkout: Path,
     *,
     timeout_seconds: int,
-    max_files: int | None,
+    max_files: Optional[int],
 ) -> Dict[str, object]:
     head_files = _test_files(head_checkout)
     if max_files is not None:
@@ -177,7 +177,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.timeout_seconds <= 0:
         raise ValueError("--timeout-seconds must be positive")
