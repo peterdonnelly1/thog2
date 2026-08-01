@@ -18,6 +18,13 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .geometry_registry import validate_resolved_geometry_plan
+# vvv THOG coupled field machine HYPERBLOCK run identity is separate from selector-based BLOCK geometry
+from .hyperblock import (
+    HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+    HyperblockOrders,
+    ResolvedHyperblockPlan,
+)
+# ^^^ THOG
 from .compact_identity import (
     BASIS_FAMILY_CHEBYSHEV,
     BASIS_FAMILY_CONVENTIONAL,
@@ -102,6 +109,20 @@ class OwtRunConfig:
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
     resolved_geometry_plan: Optional[Dict[str, Any]] = None
+    # vvv THOG fixed coupled-field HYPERBLOCK controls
+    hyperblock_topology: Optional[str] = None
+    hyperblock_compressor: str = "chebyshev"
+    hyperblock_compressor_version: str = "auto"
+    hyperblock_common_family_order: int = 6
+    hyperblock_attention_family_order: int = 4
+    hyperblock_mlp_family_order: int = 2
+    hyperblock_depth_order: int = 16
+    hyperblock_d_model_order: int = 16
+    hyperblock_mlp_hidden_order: int = 16
+    hyperblock_attention_head_order: int = 16
+    hyperblock_attention_head_channel_order: int = 16
+    hyperblock_mlp_hidden_multiplier: int = 4
+    # ^^^ THOG
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                              # <<< THOG locality control
     lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                      # <<< THOG overlap control
     attention_backend: str = "auto"
@@ -172,6 +193,35 @@ class OwtRunConfig:
         if self.run_start_label is not None:
             object.__setattr__(self, "run_start_label", normalize_component(self.run_start_label))
 
+        # vvv THOG the v0 --hyperblock flag resolves to the sole implemented coupled-field topology
+        if self.hyperblock_enabled:
+            if self.model_type != "sheet":
+                raise ValueError("HYPERBLOCK requires model_type='sheet'")
+            conflicts = {
+                "geometry_preset": self.geometry_preset,
+                "attention_geometry": self.attention_geometry,
+                "mlp_geometry": self.mlp_geometry,
+                "basis_family": self.basis_family,
+                "resolved_geometry_plan": self.resolved_geometry_plan,
+            }
+            active_conflicts = {
+                name: value for name, value in conflicts.items() if value is not None
+            }
+            if active_conflicts:
+                raise ValueError(
+                    "HYPERBLOCK may not be combined with legacy geometry controls; "
+                    f"got {active_conflicts}"
+                )
+            if self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "HYPERBLOCK keeps LayerNorm and bias vectors conventional in v0"
+                )
+            plan = self.hyperblock_plan()
+            object.__setattr__(self, "hyperblock_topology", plan.topology)
+            object.__setattr__(self, "hyperblock_compressor", plan.compressor_family)
+            object.__setattr__(self, "hyperblock_compressor_version", plan.compressor_version)
+        # ^^^ THOG
+
         # vvv THOG derive and validate the parameterised lapped basis version from explicit controls
         requested_family = self.basis_family or BASIS_FAMILY_CHEBYSHEV
         canonical_family = (
@@ -179,7 +229,10 @@ class OwtRunConfig:
             if requested_family == BASIS_FAMILY_CONVENTIONAL
             else normalize_registered_basis_family(requested_family)
         )
-        if canonical_family == BASIS_FAMILY_LAPPED_COSINE:
+        # vvv THOG preserve the pre-HYPERBLOCK lapped-cosine branch line for source history
+        # if canonical_family == BASIS_FAMILY_LAPPED_COSINE:
+        # ^^^ THOG
+        if not self.hyperblock_enabled and canonical_family == BASIS_FAMILY_LAPPED_COSINE:
             control_version = lapped_cosine_basis_version(
                 self.lapped_cosine_window_length,
                 self.lapped_cosine_overlap_fraction,
@@ -194,7 +247,7 @@ class OwtRunConfig:
                         f"controls imply {control_version!r}, got {explicit_version!r}"
                     )
                 object.__setattr__(self, "basis_version", explicit_version)
-        else:
+        elif not self.hyperblock_enabled:
             if (
                 self.lapped_cosine_window_length != DEFAULT_LAPPED_COSINE_WINDOW_LENGTH
                 or abs(float(self.lapped_cosine_overlap_fraction) - DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION) > 1.0e-12
@@ -208,7 +261,7 @@ class OwtRunConfig:
         # ^^^ THOG
 
         # vvv THOG DEPTH has no within-tensor order controls; canonicalize them before validation, naming, and checkpoint construction.
-        if self.model_type == "sheet":
+        if self.model_type == "sheet" and not self.hyperblock_enabled:
             selectors = resolve_compact_selectors(
                 geometry_preset=self.geometry_preset,
                 attention_geometry=self.attention_geometry,
@@ -244,6 +297,15 @@ class OwtRunConfig:
             "n_embd",
             "layer_dropout_resample_steps",
             "mlp_hidden_group_size",
+            "hyperblock_common_family_order",
+            "hyperblock_attention_family_order",
+            "hyperblock_mlp_family_order",
+            "hyperblock_depth_order",
+            "hyperblock_d_model_order",
+            "hyperblock_mlp_hidden_order",
+            "hyperblock_attention_head_order",
+            "hyperblock_attention_head_channel_order",
+            "hyperblock_mlp_hidden_multiplier",
             "checkpoint_segment_size",
             "artifact_name_limit",
         )
@@ -279,7 +341,7 @@ class OwtRunConfig:
             raise ValueError("warmup_iters must be less than max_iters")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
-        if self.model_type == "sheet":
+        if self.model_type == "sheet" and not self.hyperblock_enabled:
             order_limits = {
                 "o_depth": self.n_layer,
                 "o_attn_d_model": self.n_embd,
@@ -317,6 +379,35 @@ class OwtRunConfig:
     @property
     def head_dim(self) -> int:
         return self.n_embd // self.n_head
+
+    # vvv THOG HYPERBLOCK topology is explicit resolved identity even though v0 exposes a Boolean user switch
+    @property
+    def hyperblock_enabled(self) -> bool:
+        return self.hyperblock_topology is not None
+
+    def hyperblock_plan(self) -> ResolvedHyperblockPlan:
+        if not self.hyperblock_enabled:
+            raise ValueError("HYPERBLOCK is not enabled")
+        return ResolvedHyperblockPlan(
+            n_layer=self.n_layer,
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            mlp_hidden_multiplier=self.hyperblock_mlp_hidden_multiplier,
+            orders=HyperblockOrders(
+                depth=self.hyperblock_depth_order,
+                d_model=self.hyperblock_d_model_order,
+                mlp_hidden=self.hyperblock_mlp_hidden_order,
+                attention_head=self.hyperblock_attention_head_order,
+                attention_head_channel=self.hyperblock_attention_head_channel_order,
+                common_family=self.hyperblock_common_family_order,
+                attention_family=self.hyperblock_attention_family_order,
+                mlp_family=self.hyperblock_mlp_family_order,
+            ),
+            compressor_family=self.hyperblock_compressor,
+            compressor_version=self.hyperblock_compressor_version,
+            topology=self.hyperblock_topology or HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+        )
+    # ^^^ THOG
 
     # vvv THOG derived layer-dropout quantities; these are not independent user controls
     @property
@@ -359,6 +450,15 @@ class OwtRunConfig:
     def compact_identity(self) -> Dict[str, Any]:
         if self.model_type != "sheet":
             raise ValueError("compact identity is only defined for SHEET runs")
+        if self.hyperblock_enabled:
+            return {
+                "model_type": self.model_type,
+                "hyperblock": self.hyperblock_plan().identity(),
+                "n_layer": self.n_layer,
+                "n_embd": self.n_embd,
+                "n_head": self.n_head,
+                "bias": self.bias,
+            }
         identity = compact_identity_metadata(
             n_layer=self.n_layer,
             n_embd=self.n_embd,
@@ -409,6 +509,8 @@ class OwtRunConfig:
     def compact_artifact_fragment(self) -> Optional[str]:
         if self.model_type != "sheet":
             return None
+        if self.hyperblock_enabled:
+            return f"HB_{normalize_component(self.hyperblock_compressor)}"
         if self.resolved_geometry_plan is not None:
             return self._geometry_slots_from_resolved_plan(self.resolved_geometry_plan)                                                                  # <<< THOG descriptor v2 names systematic geometry by ordered G slots
         return self._legacy_geometry_slots(self.compact_identity())
@@ -509,7 +611,18 @@ class OwtRunConfig:
         ]
         sections = ["_".join(fit_fields), "_".join(shape_fields)]
         if self.model_type == "sheet":
-            if self.resolved_geometry_plan is not None:
+            if self.hyperblock_enabled:
+                order_fields = [
+                    f"HFC_{self.hyperblock_common_family_order}",
+                    f"HFA_{self.hyperblock_attention_family_order}",
+                    f"HFM_{self.hyperblock_mlp_family_order}",
+                    f"HL_{self.hyperblock_depth_order}",
+                    f"HD_{self.hyperblock_d_model_order}",
+                    f"HM_{self.hyperblock_mlp_hidden_order}",
+                    f"HH_{self.hyperblock_attention_head_order}",
+                    f"HC_{self.hyperblock_attention_head_channel_order}",
+                ]
+            elif self.resolved_geometry_plan is not None:
                 order_fields = self._resolved_order_fields(self.resolved_geometry_plan)
             else:
                 order_fields = self._legacy_order_fields(self.compact_identity())
@@ -548,7 +661,29 @@ class OwtRunConfig:
     def to_training_config(self, *, vocab_size: int, world_size: int, out_dir: Path) -> TrainingConfig:
         sheet_kwargs: Dict[str, Any]
         if self.model_type == "sheet":
-            sheet_kwargs = {
+            if self.hyperblock_enabled:
+                sheet_kwargs = {
+                    "depth_compress_layer_norm_and_bias": False,
+                    "geometry_preset": None,
+                    "attention_geometry": None,
+                    "mlp_geometry": None,
+                    "basis_family": None,
+                    "resolved_geometry_plan": None,
+                    "hyperblock_topology": self.hyperblock_topology,
+                    "hyperblock_compressor": self.hyperblock_compressor,
+                    "hyperblock_compressor_version": self.hyperblock_compressor_version,
+                    "hyperblock_common_family_order": self.hyperblock_common_family_order,
+                    "hyperblock_attention_family_order": self.hyperblock_attention_family_order,
+                    "hyperblock_mlp_family_order": self.hyperblock_mlp_family_order,
+                    "hyperblock_depth_order": self.hyperblock_depth_order,
+                    "hyperblock_d_model_order": self.hyperblock_d_model_order,
+                    "hyperblock_mlp_hidden_order": self.hyperblock_mlp_hidden_order,
+                    "hyperblock_attention_head_order": self.hyperblock_attention_head_order,
+                    "hyperblock_attention_head_channel_order": self.hyperblock_attention_head_channel_order,
+                    "hyperblock_mlp_hidden_multiplier": self.hyperblock_mlp_hidden_multiplier,
+                }
+            else:
+                sheet_kwargs = {
                 "depth_order": self.o_depth,
                 "base_row_order": self.o_attn_d_model,
                 "mlp_channel_order": self.o_mlp_hidden,
@@ -567,8 +702,8 @@ class OwtRunConfig:
                 "attention_geometry": self.attention_geometry,
                 "mlp_geometry": self.mlp_geometry,
                 "basis_family": self.basis_family,
-                "resolved_geometry_plan": self.resolved_geometry_plan,
-            }
+                    "resolved_geometry_plan": self.resolved_geometry_plan,
+                }
         else:
             sheet_kwargs = {
                 "depth_order": 1,
@@ -650,6 +785,18 @@ class OwtRunConfig:
                 "mlp_geometry",
                 "basis_family",
                 "basis_version",
+                "hyperblock_topology",
+                "hyperblock_compressor",
+                "hyperblock_compressor_version",
+                "hyperblock_common_family_order",
+                "hyperblock_attention_family_order",
+                "hyperblock_mlp_family_order",
+                "hyperblock_depth_order",
+                "hyperblock_d_model_order",
+                "hyperblock_mlp_hidden_order",
+                "hyperblock_attention_head_order",
+                "hyperblock_attention_head_channel_order",
+                "hyperblock_mlp_hidden_multiplier",
             ):
                 values.pop(name, None)
         else:

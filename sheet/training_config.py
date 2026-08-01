@@ -27,6 +27,13 @@ from .compact_identity import (
 )
 from .geometry import derive_row_order
 from .geometry_registry import validate_resolved_geometry_plan
+# vvv THOG coupled field machine HYPERBLOCK has checkpoint identity independent of legacy geometry selectors
+from .hyperblock import (
+    HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+    HyperblockOrders,
+    ResolvedHyperblockPlan,
+)
+# ^^^ THOG
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 
 
@@ -66,6 +73,20 @@ MODEL_COMPATIBILITY_FIELDS = (
     "mlp_geometry",
     "basis_family",
     "resolved_geometry_plan",
+    # vvv THOG HYPERBLOCK topology, basis and anisotropic retained orders are model compatibility identity
+    "hyperblock_topology",
+    "hyperblock_compressor",
+    "hyperblock_compressor_version",
+    "hyperblock_common_family_order",
+    "hyperblock_attention_family_order",
+    "hyperblock_mlp_family_order",
+    "hyperblock_depth_order",
+    "hyperblock_d_model_order",
+    "hyperblock_mlp_hidden_order",
+    "hyperblock_attention_head_order",
+    "hyperblock_attention_head_channel_order",
+    "hyperblock_mlp_hidden_multiplier",
+    # ^^^ THOG
 )
 
 
@@ -102,6 +123,20 @@ class TrainingConfig:
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
     resolved_geometry_plan: Optional[Dict[str, Any]] = None
+    # vvv THOG fixed coupled-field HYPERBLOCK model controls
+    hyperblock_topology: Optional[str] = None
+    hyperblock_compressor: str = "chebyshev"
+    hyperblock_compressor_version: str = "auto"
+    hyperblock_common_family_order: int = 6
+    hyperblock_attention_family_order: int = 4
+    hyperblock_mlp_family_order: int = 2
+    hyperblock_depth_order: int = 16
+    hyperblock_d_model_order: int = 16
+    hyperblock_mlp_hidden_order: int = 16
+    hyperblock_attention_head_order: int = 16
+    hyperblock_attention_head_channel_order: int = 16
+    hyperblock_mlp_hidden_multiplier: int = 4
+    # ^^^ THOG
     checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
@@ -150,33 +185,68 @@ class TrainingConfig:
                 f"got {self.depth_compress_layer_norm_and_bias!r}"
             )
 
-        # vvv THOG DEPTH ignores every within-tensor order; normalize before validation and checkpoint identity are derived.
-        if self.model_type == "thog2_sheet":
-            selectors = resolve_compact_selectors(
-                geometry_preset=self.geometry_preset,
-                attention_geometry=self.attention_geometry,
-                mlp_geometry=self.mlp_geometry,
-                basis_family=self.basis_family,
-            )
-            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
-                self.base_row_order = 1
-                self.mlp_channel_order = 1
-                self.o_attn_d_model = 1
-                self.o_attn_qkv_per_channel = 1
-                self.o_attn_out_per_channel = 1
-                self.o_mlp_d_model = 1
-                self.o_mlp_hidden = 1
+        # vvv THOG HYPERBLOCK and legacy selector geometries are mutually exclusive persistent parameterisations
+        if self.hyperblock_enabled:
+            if self.model_type != "thog2_sheet":
+                raise ValueError("HYPERBLOCK requires model_type='thog2_sheet'")
+            conflicting_fields = {
+                "geometry_preset": self.geometry_preset,
+                "attention_geometry": self.attention_geometry,
+                "mlp_geometry": self.mlp_geometry,
+                "basis_family": self.basis_family,
+                "resolved_geometry_plan": self.resolved_geometry_plan,
+            }
+            active_conflicts = {
+                name: value
+                for name, value in conflicting_fields.items()
+                if value is not None
+            }
+            if active_conflicts:
+                raise ValueError(
+                    "HYPERBLOCK may not be combined with legacy geometry controls; "
+                    f"got {active_conflicts}"
+                )
+            if self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "HYPERBLOCK keeps LayerNorm and bias vectors conventional in v0; "
+                    "depth_compress_layer_norm_and_bias must be false"
+                )
+            resolved_hyperblock_plan = self.hyperblock_plan()
+            self.hyperblock_topology = resolved_hyperblock_plan.topology
+            self.hyperblock_compressor = resolved_hyperblock_plan.compressor_family
+            self.hyperblock_compressor_version = resolved_hyperblock_plan.compressor_version
+        else:
+            # vvv THOG DEPTH ignores every within-tensor order; normalize before validation and checkpoint identity are derived.
+            if self.model_type == "thog2_sheet":
+                selectors = resolve_compact_selectors(
+                    geometry_preset=self.geometry_preset,
+                    attention_geometry=self.attention_geometry,
+                    mlp_geometry=self.mlp_geometry,
+                    basis_family=self.basis_family,
+                )
+                if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                    self.base_row_order = 1
+                    self.mlp_channel_order = 1
+                    self.o_attn_d_model = 1
+                    self.o_attn_qkv_per_channel = 1
+                    self.o_attn_out_per_channel = 1
+                    self.o_mlp_d_model = 1
+                    self.o_mlp_hidden = 1
+                elif self.depth_compress_layer_norm_and_bias:
+                    raise ValueError(
+                        "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+                    )
             elif self.depth_compress_layer_norm_and_bias:
                 raise ValueError(
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                 )
-        elif self.depth_compress_layer_norm_and_bias:
-            raise ValueError(
-                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
-            )
+            # ^^^ THOG
         # ^^^ THOG
 
-        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        # vvv THOG preserve the exact pre-HYPERBLOCK positive-integer validation line for source history
+        # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        # ^^^ THOG
+        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
@@ -219,23 +289,26 @@ class TrainingConfig:
         validate_checkpoint_segment_size(self.checkpoint_segment_size)
         if self.n_embd % self.n_head != 0:
             raise ValueError(f"n_embd must be divisible by n_head; got {self.n_embd} and {self.n_head}")
-        if self.depth_order > self.n_layer:
-            raise ValueError("depth_order must not exceed n_layer")
-        if self.base_row_order > self.n_embd:
-            raise ValueError("base_row_order must not exceed n_embd")
-        if self.mlp_channel_order is not None and self.mlp_channel_order > 4 * self.n_embd:
-            raise ValueError("mlp_channel_order must not exceed 4*n_embd")
-        limits = {
-            "o_attn_d_model": self.n_embd,
-            "o_attn_qkv_per_channel": self.head_dim,
-            "o_attn_out_per_channel": self.head_dim,
-            "o_mlp_d_model": self.n_embd,
-            "o_mlp_hidden": 4 * self.n_embd,
-        }
-        for name, limit in limits.items():
-            value = getattr(self, name)
-            if value is not None and value > limit:
-                raise ValueError(f"{name} must not exceed {limit}")
+        # vvv THOG legacy geometry orders are inactive when HYPERBLOCK owns every covered matrix axis
+        if not self.hyperblock_enabled:
+            if self.depth_order > self.n_layer:
+                raise ValueError("depth_order must not exceed n_layer")
+            if self.base_row_order > self.n_embd:
+                raise ValueError("base_row_order must not exceed n_embd")
+            if self.mlp_channel_order is not None and self.mlp_channel_order > 4 * self.n_embd:
+                raise ValueError("mlp_channel_order must not exceed 4*n_embd")
+            limits = {
+                "o_attn_d_model": self.n_embd,
+                "o_attn_qkv_per_channel": self.head_dim,
+                "o_attn_out_per_channel": self.head_dim,
+                "o_mlp_d_model": self.n_embd,
+                "o_mlp_hidden": 4 * self.n_embd,
+            }
+            for name, limit in limits.items():
+                value = getattr(self, name)
+                if value is not None and value > limit:
+                    raise ValueError(f"{name} must not exceed {limit}")
+        # ^^^ THOG
         self.mlp_hidden_compressor = normalize_registered_basis_family(self.mlp_hidden_compressor)
         residual_init = self.residual_init_config()
         self.residual_init_depth_source = residual_init.depth_source
@@ -268,6 +341,11 @@ class TrainingConfig:
                 mlp_geometry=self.mlp_geometry,
                 basis_family=self.basis_family,
             )
+        elif self.hyperblock_enabled:
+            resolved_hyperblock_plan = self.hyperblock_plan()
+            self.hyperblock_topology = resolved_hyperblock_plan.topology
+            self.hyperblock_compressor = resolved_hyperblock_plan.compressor_family
+            self.hyperblock_compressor_version = resolved_hyperblock_plan.compressor_version
         else:
             # vvv THOG derive the parameterised lapped version before compact identity validation
             # vvv THOG preserve the established compact-identity error contract for unknown basis names
@@ -290,6 +368,35 @@ class TrainingConfig:
     @property
     def head_dim(self) -> int:
         return self.n_embd // self.n_head
+
+    # vvv THOG the v0 user flag resolves to the sole implemented topology while checkpoints retain the explicit subtype
+    @property
+    def hyperblock_enabled(self) -> bool:
+        return self.hyperblock_topology is not None
+
+    def hyperblock_plan(self) -> ResolvedHyperblockPlan:
+        if not self.hyperblock_enabled:
+            raise ValueError("HYPERBLOCK is not enabled")
+        return ResolvedHyperblockPlan(
+            n_layer=self.n_layer,
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            mlp_hidden_multiplier=self.hyperblock_mlp_hidden_multiplier,
+            orders=HyperblockOrders(
+                depth=self.hyperblock_depth_order,
+                d_model=self.hyperblock_d_model_order,
+                mlp_hidden=self.hyperblock_mlp_hidden_order,
+                attention_head=self.hyperblock_attention_head_order,
+                attention_head_channel=self.hyperblock_attention_head_channel_order,
+                common_family=self.hyperblock_common_family_order,
+                attention_family=self.hyperblock_attention_family_order,
+                mlp_family=self.hyperblock_mlp_family_order,
+            ),
+            compressor_family=self.hyperblock_compressor,
+            compressor_version=self.hyperblock_compressor_version,
+            topology=self.hyperblock_topology or HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+        )
+    # ^^^ THOG
 
     # vvv THOG derived layer-dropout quantities are configuration metadata, not independent knobs
     @property
@@ -343,29 +450,65 @@ class TrainingConfig:
             "bias": self.bias,
         }
         if self.model_type == "thog2_sheet":
-            arguments.update({
-                "depth_order": self.depth_order,
-                "base_row_order": self.base_row_order,
-                "mlp_channel_order": self.mlp_channel_order,
-                "o_attn_d_model": self.resolved_o_attn_d_model,
-                "o_attn_qkv_per_channel": self.resolved_o_attn_qkv_per_channel,
-                "o_attn_out_per_channel": self.resolved_o_attn_out_per_channel,
-                "o_mlp_d_model": self.resolved_o_mlp_d_model,
-                "o_mlp_hidden": self.resolved_o_mlp_hidden,
-                "mlp_hidden_group_size": self.mlp_hidden_group_size,
-                "mlp_hidden_compressor": self.mlp_hidden_compressor,
-                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
-                "basis_version": self.basis_version,
-                "geometry_preset": self.geometry_preset,
-                "attention_geometry": self.attention_geometry,
-                "mlp_geometry": self.mlp_geometry,
-                "basis_family": self.basis_family,
-            })
+            # vvv THOG HYPERBLOCK does not resolve or pass inactive legacy geometry orders
+            if self.hyperblock_enabled:
+                arguments.update({
+                    "depth_compress_layer_norm_and_bias": False,
+                    "hyperblock_topology": self.hyperblock_topology,
+                    "hyperblock_compressor": self.hyperblock_compressor,
+                    "hyperblock_compressor_version": self.hyperblock_compressor_version,
+                    "hyperblock_common_family_order": self.hyperblock_common_family_order,
+                    "hyperblock_attention_family_order": self.hyperblock_attention_family_order,
+                    "hyperblock_mlp_family_order": self.hyperblock_mlp_family_order,
+                    "hyperblock_depth_order": self.hyperblock_depth_order,
+                    "hyperblock_d_model_order": self.hyperblock_d_model_order,
+                    "hyperblock_mlp_hidden_order": self.hyperblock_mlp_hidden_order,
+                    "hyperblock_attention_head_order": self.hyperblock_attention_head_order,
+                    "hyperblock_attention_head_channel_order": self.hyperblock_attention_head_channel_order,
+                    "hyperblock_mlp_hidden_multiplier": self.hyperblock_mlp_hidden_multiplier,
+                    "hyperblock_residual_weight_std": self.residual_init_config().residual_std(
+                        model_type=self.model_type,
+                        n_layer=self.n_layer,
+                        depth_order=self.hyperblock_depth_order,
+                    ),
+                })
+            else:
+                arguments.update({
+                    "depth_order": self.depth_order,
+                    "base_row_order": self.base_row_order,
+                    "mlp_channel_order": self.mlp_channel_order,
+                    "o_attn_d_model": self.resolved_o_attn_d_model,
+                    "o_attn_qkv_per_channel": self.resolved_o_attn_qkv_per_channel,
+                    "o_attn_out_per_channel": self.resolved_o_attn_out_per_channel,
+                    "o_mlp_d_model": self.resolved_o_mlp_d_model,
+                    "o_mlp_hidden": self.resolved_o_mlp_hidden,
+                    "mlp_hidden_group_size": self.mlp_hidden_group_size,
+                    "mlp_hidden_compressor": self.mlp_hidden_compressor,
+                    # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history
+                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    # ^^^ THOG
+                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    "basis_version": self.basis_version,
+                    "geometry_preset": self.geometry_preset,
+                    "attention_geometry": self.attention_geometry,
+                    "mlp_geometry": self.mlp_geometry,
+                    "basis_family": self.basis_family,
+                })
+            # ^^^ THOG
         return arguments
 
     def compact_identity_metadata(self) -> Dict[str, Any]:
         if self.model_type == "dense":
             return conventional_identity_metadata(n_layer=self.n_layer, n_embd=self.n_embd, n_head=self.n_head)
+        if self.hyperblock_enabled:
+            return {
+                "model_type": self.model_type,
+                "hyperblock": self.hyperblock_plan().identity(),
+                "n_layer": self.n_layer,
+                "n_embd": self.n_embd,
+                "n_head": self.n_head,
+                "bias": self.bias,
+            }
         identity = compact_identity_metadata(
             n_layer=self.n_layer,
             n_embd=self.n_embd,
@@ -394,7 +537,7 @@ class TrainingConfig:
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added
     def compatibility_signature(self) -> Dict[str, Any]:
         values = asdict(self)
-        if self.model_type == "thog2_sheet":
+        if self.model_type == "thog2_sheet" and not self.hyperblock_enabled:
             values.update(
                 {
                     "o_attn_d_model": self.resolved_o_attn_d_model,

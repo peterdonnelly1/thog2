@@ -46,6 +46,24 @@ class ResumeAndForkCliCompatibilityTests(unittest.TestCase):
             f"lifecycle parser is missing preserved wrapper long options: {sorted(master_long_options - lifecycle_long_options)}",
         )
 
+    def test_direct_hyperblock_mlp_lifecycle_flags_are_boolean_optional(self) -> None:
+        parser = run_thog2_owt._lifecycle.build_parser()
+        positive = parser.parse_args(["--direct-factorised-hyperblock-mlp"])
+        negative = parser.parse_args(["--no-direct-factorised-hyperblock-mlp"])
+        self.assertIs(positive.direct_factorised_hyperblock_mlp, True)
+        self.assertIs(negative.direct_factorised_hyperblock_mlp, False)
+
+    def test_direct_hyperblock_mlp_lifecycle_flag_sets_environment(self) -> None:
+        parser = run_thog2_owt._lifecycle.build_parser()
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP", None)
+            arguments = parser.parse_args(["--direct-factorised-hyperblock-mlp"])
+            run_thog2_owt._lifecycle._configure_direct_factorised_hyperblock_mlp_environment(arguments)
+            self.assertEqual(os.environ["THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP"], "true")
+            arguments = parser.parse_args(["--no-direct-factorised-hyperblock-mlp"])
+            run_thog2_owt._lifecycle._configure_direct_factorised_hyperblock_mlp_environment(arguments)
+            self.assertEqual(os.environ["THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP"], "false")
+
     def test_established_eval_and_checkpoint_short_options_reach_lifecycle_parser(self) -> None:
         normalized = normalize_lifecycle_wrapper_argv(
             ["--resume", "260727-1934", "-e", "100", "-u50", "-k", "500"]

@@ -20,8 +20,19 @@ def _apply_sheet_residual_init_scaling(
     residual_std = config.residual_init_config().residual_std(
         model_type=config.model_type,
         n_layer=config.n_layer,
-        depth_order=config.depth_order,
+        depth_order=(
+            # vvv THOG preserve the pre-HYPERBLOCK residual-depth argument for source history
+            # depth_order=config.depth_order,
+            # ^^^ THOG
+            config.hyperblock_depth_order
+            if config.hyperblock_enabled
+            else config.depth_order
+        ),
     )
+    # vvv THOG HYPERBLOCK receives the resolved residual std before coefficient initialization; post-hoc family projection would leak when family order is reduced
+    if config.hyperblock_enabled:
+        return
+    # ^^^ THOG
     with torch.no_grad():
         for item in model.trajectory.metadata:
             if item.name not in MATRIX_RESIDUAL_FAMILIES:

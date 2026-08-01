@@ -5,7 +5,10 @@ import inspect
 import math
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Dict, List, Optional, Tuple
+# vvv THOG HYPERBLOCK layer bundles are passed as a typed matrix mapping
+# from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
+# ^^^ THOG
 
 import torch
 from torch import Tensor, nn
@@ -26,6 +29,16 @@ from .compact_identity import (
 )
 from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
+# vvv THOG coupled field machine HYPERBLOCK is an architecture-wide trajectory, separate from legacy BLOCK geometries
+from .hyperblock import (
+    HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+    CoupledFieldTrajectory,
+    FactorisedHyperblockMlpLayer,                                                                                                                        # <<< THOG typed compact UP/DOWN factor bundle
+    apply_factorised_hyperblock_mlp,                                                                                                                    # <<< THOG exact direct HYPERBLOCK MLP application
+    HyperblockOrders,
+    ResolvedHyperblockPlan,
+)
+# ^^^ THOG
 from .jpeg_like_v1_trajectory import JpegLikeV1Trajectory
 from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
@@ -84,11 +97,29 @@ class SheetGPTConfig:
     attention_geometry: Optional[str] = None
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
+    # vvv THOG fixed, non-breathing coupled-field HYPERBLOCK controls
+    hyperblock_topology: Optional[str] = None
+    hyperblock_compressor: str = "chebyshev"
+    hyperblock_compressor_version: str = "auto"
+    hyperblock_common_family_order: int = 6
+    hyperblock_attention_family_order: int = 4
+    hyperblock_mlp_family_order: int = 2
+    hyperblock_depth_order: int = 16
+    hyperblock_d_model_order: int = 16
+    hyperblock_mlp_hidden_order: int = 16
+    hyperblock_attention_head_order: int = 16
+    hyperblock_attention_head_channel_order: int = 16
+    hyperblock_mlp_hidden_multiplier: int = 4
+    hyperblock_residual_weight_std: Optional[float] = None
+    # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
     # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
     direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
+    # vvv THOG separate default-off experiment; legacy direct-factorised MLP behaviour remains untouched
+    direct_factorised_hyperblock_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP", False))
+    # ^^^ THOG
     vectorise_per_head_materialisation: bool = field(default_factory=lambda: _env_bool("THOG2_VECTORISE_PER_HEAD_MATERIALISATION", True))                    # <<< THOG default-on selectable batched head-aware materialisation
 
     def __post_init__(self) -> None:
@@ -109,6 +140,15 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        if self.hyperblock_residual_weight_std is not None and (
+            isinstance(self.hyperblock_residual_weight_std, bool)
+            or not isinstance(self.hyperblock_residual_weight_std, (int, float))
+            or self.hyperblock_residual_weight_std <= 0.0
+        ):
+            raise ValueError(
+                "hyperblock_residual_weight_std must be positive or None; "
+                f"got {self.hyperblock_residual_weight_std!r}"
+            )
         if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
             raise ValueError(
                 "depth_compress_layer_norm_and_bias must be bool; "
@@ -122,38 +162,104 @@ class SheetGPTConfig:
         #     raise ValueError(f"direct_thog_mlp_application must be bool; got {self.direct_thog_mlp_application!r}")
         if not isinstance(self.direct_factorised_mlp, bool):
             raise ValueError(f"direct_factorised_mlp must be bool; got {self.direct_factorised_mlp!r}")                                                    # <<< THOG validate renamed exact MLP application path
+        # vvv THOG validate and scope the independent HYPERBLOCK direct-application option
+        if not isinstance(self.direct_factorised_hyperblock_mlp, bool):
+            raise ValueError(
+                "direct_factorised_hyperblock_mlp must be bool; "
+                f"got {self.direct_factorised_hyperblock_mlp!r}"
+            )
+        if self.direct_factorised_hyperblock_mlp and not self.hyperblock_enabled:
+            raise ValueError(
+                "direct_factorised_hyperblock_mlp requires HYPERBLOCK"
+            )
+        # ^^^ THOG
         if not isinstance(self.vectorise_per_head_materialisation, bool):
             raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
 
-        # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
-        selectors = self.compact_selectors()
-        if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
-            raise ValueError(
-                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
-            )
-        if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
-            self.base_row_order = 1
-            self.mlp_channel_order = 1
-            self.o_attn_d_model = 1
-            self.o_attn_qkv_per_channel = 1
-            self.o_attn_out_per_channel = 1
-            self.o_mlp_d_model = 1
-            self.o_mlp_hidden = 1
+        # vvv THOG HYPERBLOCK owns all covered matrix axes and must not overlap legacy DEPTH/BLOCK selectors
+        if self.hyperblock_enabled:
+            conflicting_fields = {
+                "geometry_preset": self.geometry_preset,
+                "attention_geometry": self.attention_geometry,
+                "mlp_geometry": self.mlp_geometry,
+                "basis_family": self.basis_family,
+            }
+            active_conflicts = {
+                name: value
+                for name, value in conflicting_fields.items()
+                if value is not None
+            }
+            if active_conflicts:
+                raise ValueError(
+                    "HYPERBLOCK may not be combined with legacy geometry selectors; "
+                    f"got {active_conflicts}"
+                )
+            if self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "HYPERBLOCK keeps LayerNorm and bias vectors conventional in v0; "
+                    "depth_compress_layer_norm_and_bias must be false"
+                )
+            self.hyperblock_plan()
+        else:
+            # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
+            selectors = self.compact_selectors()
+            if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+                )
+            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                self.base_row_order = 1
+                self.mlp_channel_order = 1
+                self.o_attn_d_model = 1
+                self.o_attn_qkv_per_channel = 1
+                self.o_attn_out_per_channel = 1
+                self.o_mlp_d_model = 1
+                self.o_mlp_hidden = 1
+            # ^^^ THOG
+
+            geometry = self.sheet_geometry()
+            if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+                mlp_hidden_length = 4 * self.n_embd
+                if mlp_hidden_length % self.mlp_hidden_group_size != 0:
+                    raise ValueError(
+                        "4*d_model must be divisible by mlp_hidden_group_size; "
+                        f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
+                    )
+                if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
+                    raise ValueError(
+                        "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
+                        f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
+                    )
         # ^^^ THOG
 
-        geometry = self.sheet_geometry()
-        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
-            mlp_hidden_length = 4 * self.n_embd
-            if mlp_hidden_length % self.mlp_hidden_group_size != 0:
-                raise ValueError(
-                    "4*d_model must be divisible by mlp_hidden_group_size; "
-                    f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
-                )
-            if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
-                raise ValueError(
-                    "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
-                    f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
-                )
+    # vvv THOG HYPERBLOCK topology is resolved identity; the v0 CLI need only enable it
+    @property
+    def hyperblock_enabled(self) -> bool:
+        return self.hyperblock_topology is not None
+
+    def hyperblock_plan(self) -> ResolvedHyperblockPlan:
+        if not self.hyperblock_enabled:
+            raise ValueError("HYPERBLOCK is not enabled")
+        return ResolvedHyperblockPlan(
+            n_layer=self.n_layer,
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            mlp_hidden_multiplier=self.hyperblock_mlp_hidden_multiplier,
+            orders=HyperblockOrders(
+                depth=self.hyperblock_depth_order,
+                d_model=self.hyperblock_d_model_order,
+                mlp_hidden=self.hyperblock_mlp_hidden_order,
+                attention_head=self.hyperblock_attention_head_order,
+                attention_head_channel=self.hyperblock_attention_head_channel_order,
+                common_family=self.hyperblock_common_family_order,
+                attention_family=self.hyperblock_attention_family_order,
+                mlp_family=self.hyperblock_mlp_family_order,
+            ),
+            compressor_family=self.hyperblock_compressor,
+            compressor_version=self.hyperblock_compressor_version,
+            topology=self.hyperblock_topology or HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+        )
+    # ^^^ THOG
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -199,8 +305,24 @@ class SheetGPT(nn.Module):
                 "ln_f": ConventionalLayerNorm(config.n_embd, bias=config.bias),
             }
         )
-        selectors = config.compact_selectors()
-        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+        # vvv THOG preserve the pre-HYPERBLOCK trajectory-selection branch headers for source history
+        # elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+        # elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        # ^^^ THOG
+        # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged
+        if config.hyperblock_enabled:
+            self.trajectory = CoupledFieldTrajectory(
+                config.hyperblock_plan(),
+                bias=config.bias,
+                runtime_dtype=torch.float32,
+                residual_weight_std=config.hyperblock_residual_weight_std,
+            )
+            selectors = None
+        else:
+            selectors = config.compact_selectors()
+        # ^^^ THOG
+        if selectors is not None and selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
             self.trajectory = JpegLikeV1Trajectory(
                 config.sheet_geometry(),
                 mlp_hidden_group_size=config.mlp_hidden_group_size,
@@ -209,7 +331,7 @@ class SheetGPT(nn.Module):
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+        elif selectors is not None and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
             self.trajectory = BlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -219,14 +341,14 @@ class SheetGPT(nn.Module):
                 compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
                 vectorise_per_head_materialisation=config.vectorise_per_head_materialisation,                                                            # <<< THOG pass selectable head vectorisation into block trajectory
             )
-        elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
             self.trajectory = MlpBlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
             self.trajectory = DepthTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -234,7 +356,7 @@ class SheetGPT(nn.Module):
                 basis_family=selectors.basis_family,
                 depth_compress_layer_norm_and_bias=config.depth_compress_layer_norm_and_bias,                                                           # <<< THOG select conventional or pure-depth block vectors
             )
-        else:
+        elif selectors is not None:
             self.trajectory = SheetTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -269,10 +391,26 @@ class SheetGPT(nn.Module):
             del weight, bias
         return output
 
-    def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # vvv THOG preserve the pre-bundle attention signature for source history
+    # def _attention(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # ^^^ THOG
+    def _attention(
+        self,
+        inputs: Tensor,
+        layer_index: int,
+        layer_materializations: Optional[Mapping[str, Tensor]] = None,
+    ) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
+        # vvv THOG consume the already-batched HYPERBLOCK layer matrices before legacy materialisation paths
+        if layer_materializations is not None:
+            attention_weight = layer_materializations["attention_input_weight"]
+            attention_bias = self._optional_bias("attention_input_bias", layer_index)
+        # ^^^ THOG
+        # vvv THOG preserve the pre-bundle semantic-QKV branch header for source history
+        # if self.config.bypass_semantic_qkv_adapter:
+        # ^^^ THOG
         # vvv THOG selectable semantic-QKV adapter bypass for exact A/B timing comparisons
-        if self.config.bypass_semantic_qkv_adapter:
+        elif self.config.bypass_semantic_qkv_adapter:
             attention_weight = self.trajectory.materialize("attention_input_weight", layer_index)
             attention_bias = None
             if self.config.bias:
@@ -311,7 +449,14 @@ class SheetGPT(nn.Module):
         if self.config.fast_discard:
             del query, key, value
         attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
-        output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
+        # vvv THOG preserve the pre-bundle output-weight line and reuse the layer bundle when present
+        # output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
+        output_weight = (
+            self.trajectory.materialize("attention_output_weight", layer_index)
+            if layer_materializations is None
+            else layer_materializations["attention_output_weight"]
+        )
+        # ^^^ THOG
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
         if self.config.fast_discard:
@@ -346,13 +491,39 @@ class SheetGPT(nn.Module):
             output = output + bias
         return output
 
-    def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # vvv THOG preserve the pre-bundle MLP signature for source history
+    # def _mlp(self, inputs: Tensor, layer_index: int) -> Tensor:
+    # ^^^ THOG
+    # def _mlp(                                                                                                                                     # <<< THOG preserved pre-direct-HYPERBLOCK signature
+    #     self,
+    #     inputs: Tensor,
+    #     layer_index: int,
+    #     layer_materializations: Optional[Mapping[str, Tensor]] = None,
+    # ) -> Tensor:
+    def _mlp(
+        self,
+        inputs: Tensor,
+        layer_index: int,
+        layer_materializations: Optional[Mapping[str, Tensor]] = None,
+        hyperblock_mlp_factors: Optional[FactorisedHyperblockMlpLayer] = None,
+    ) -> Tensor:
         direct_application = (
             self.config.direct_factorised_mlp
             and self._supports_direct_factorised_mlp()
         )
         expansion_bias = self._optional_bias("mlp_expansion_bias", layer_index)
-        if direct_application:
+        # vvv THOG direct HYPERBLOCK expansion bypasses the dense [MLP_HIDDEN,D_MODEL] matrix
+        if hyperblock_mlp_factors is not None:
+            hidden = apply_factorised_hyperblock_mlp(
+                inputs,
+                hyperblock_mlp_factors,
+                family_index=0,
+                expansion=True,
+                bias=expansion_bias,
+            )
+        # if direct_application:
+        elif direct_application:
+        # ^^^ THOG
             hidden = self._direct_factorised_mlp_linear(
                 inputs,
                 "mlp_expansion_weight",
@@ -360,7 +531,14 @@ class SheetGPT(nn.Module):
                 expansion_bias,
             )
         else:
-            expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            # vvv THOG preserve the pre-bundle expansion materialisation and use the shared layer result for HYPERBLOCK
+            # expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
+            expansion_weight = (
+                self.trajectory.materialize("mlp_expansion_weight", layer_index)
+                if layer_materializations is None
+                else layer_materializations["mlp_expansion_weight"]
+            )
+            # ^^^ THOG
             hidden = F.linear(inputs, expansion_weight, expansion_bias)
             if self.config.fast_discard:
                 del expansion_weight
@@ -368,7 +546,18 @@ class SheetGPT(nn.Module):
             del expansion_bias
         hidden = F.gelu(hidden)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
-        if direct_application:
+        # vvv THOG direct HYPERBLOCK contraction bypasses the dense [D_MODEL,MLP_HIDDEN] matrix
+        if hyperblock_mlp_factors is not None:
+            output = apply_factorised_hyperblock_mlp(
+                hidden,
+                hyperblock_mlp_factors,
+                family_index=1,
+                expansion=False,
+                bias=contraction_bias,
+            )
+        # if direct_application:
+        elif direct_application:
+        # ^^^ THOG
             output = self._direct_factorised_mlp_linear(
                 hidden,
                 "mlp_contraction_weight",
@@ -376,7 +565,14 @@ class SheetGPT(nn.Module):
                 contraction_bias,
             )
         else:
-            contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            # vvv THOG preserve the pre-bundle contraction materialisation and use the shared layer result for HYPERBLOCK
+            # contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
+            contraction_weight = (
+                self.trajectory.materialize("mlp_contraction_weight", layer_index)
+                if layer_materializations is None
+                else layer_materializations["mlp_contraction_weight"]
+            )
+            # ^^^ THOG
             output = F.linear(hidden, contraction_weight, contraction_bias)
             if self.config.fast_discard:
                 del contraction_weight
@@ -389,20 +585,69 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
 
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
+        # vvv THOG preserve the pre-direct-option full HYPERBLOCK bundle for source history
+        # layer_materializations = (
+        #     self.trajectory.materialize_layer_matrices(layer_index)
+        #     if isinstance(self.trajectory, CoupledFieldTrajectory)
+        #     else None
+        # )
+        # ^^^ THOG
+        # vvv THOG the option keeps Q/K/V/O batched and carries only low-dimensional UP/DOWN factors into the MLP
+        layer_materializations = None
+        hyperblock_mlp_factors = None
+        if isinstance(self.trajectory, CoupledFieldTrajectory):
+            direct_hyperblock_mlp = self.config.direct_factorised_hyperblock_mlp
+            if direct_hyperblock_mlp:
+                layer_materializations = self.trajectory.materialize_layer_matrices(
+                    layer_index,
+                    include_mlp=False,
+                )
+                hyperblock_mlp_factors = self.trajectory.factorised_mlp_layer(
+                    layer_index
+                )
+            else:
+                layer_materializations = self.trajectory.materialize_layer_matrices(
+                    layer_index
+                )
+        # ^^^ THOG
         normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
-        attention_output = self._attention(normalized_attention, layer_index)
+        # vvv THOG preserve the pre-bundle attention call for source history
+        # attention_output = self._attention(normalized_attention, layer_index)
+        attention_output = self._attention(
+            normalized_attention,
+            layer_index,
+            layer_materializations,
+        )
+        # ^^^ THOG
         if self.config.fast_discard:
             del normalized_attention
         inputs = inputs + attention_output
         if self.config.fast_discard:
             del attention_output
         normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
-        mlp_output = self._mlp(normalized_mlp, layer_index)
+        # vvv THOG preserve the pre-bundle MLP call for source history
+        # mlp_output = self._mlp(normalized_mlp, layer_index)
+        # mlp_output = self._mlp(                                                                                                                   # <<< THOG preserved pre-factor-bundle call
+        #     normalized_mlp,
+        #     layer_index,
+        #     layer_materializations,
+        # )
+        mlp_output = self._mlp(
+            normalized_mlp,
+            layer_index,
+            layer_materializations,
+            hyperblock_mlp_factors,
+        )
+        # ^^^ THOG
         if self.config.fast_discard:
             del normalized_mlp
         output = inputs + mlp_output
         if self.config.fast_discard:
-            del inputs, mlp_output
+            # vvv THOG preserve the pre-bundle release line while also releasing the layer bundle
+            # del inputs, mlp_output
+            # del inputs, mlp_output, layer_materializations                                                                                            # <<< THOG preserved pre-factor-bundle release
+            del inputs, mlp_output, layer_materializations, hyperblock_mlp_factors                                                                      # <<< THOG release optional compact UP/DOWN factors
+            # ^^^ THOG
         return output
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
@@ -426,13 +671,17 @@ class SheetGPT(nn.Module):
             loss = None
         return logits, loss
 
+    # vvv THOG preserve the pre-HYPERBLOCK parameter-report return line for source history
+    # return {
+    # ^^^ THOG
+
     def parameter_report(self) -> Dict[str, object]:
         total_persistent = sum(parameter.numel() for parameter in self.parameters())
         sheet_coefficients = self.trajectory.sheet_parameter_count()
         conventional = total_persistent - sheet_coefficients
         dense_equivalent_repeated = self.trajectory.dense_equivalent_count()
         dense_equivalent_total = conventional + dense_equivalent_repeated
-        return {
+        report = {
             "persistent_parameters": total_persistent,
             "sheet_coefficients": sheet_coefficients,
             "conventional_non_sheet_parameters": conventional,
@@ -442,6 +691,14 @@ class SheetGPT(nn.Module):
             "matrix_dense_equivalent_parameters": self.trajectory.matrix_dense_equivalent_count(),
             "families": self.trajectory.family_report(),
         }
+        # vvv THOG expose the resolved HYPERBLOCK field identity without changing legacy report fields
+        hyperblock_report = getattr(self.trajectory, "hyperblock_report", None)
+        if callable(hyperblock_report):
+            # report["hyperblock"] = hyperblock_report()                                                                                               # <<< THOG preserved pre-execution-metadata report
+            report["hyperblock"] = hyperblock_report()
+            report["hyperblock"]["direct_factorised_mlp"] = self.config.direct_factorised_hyperblock_mlp                                           # <<< THOG record exact HYPERBLOCK MLP execution path
+        # ^^^ THOG
+        return report
 
     def get_num_params(self, non_embedding: bool = True) -> int:
         parameter_count = sum(parameter.numel() for parameter in self.parameters())
@@ -449,15 +706,30 @@ class SheetGPT(nn.Module):
             parameter_count -= self.transformer.wpe.weight.numel()
         return parameter_count
 
+    # vvv THOG preserve the pre-HYPERBLOCK optimizer-group lines for source history
+    # target[f"trajectory.coefficients.{family_name}"] = parameter
+    # sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
+    # if id(parameter) in sheet_parameter_ids:
+    # ^^^ THOG
+
     def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
         decay: Dict[str, nn.Parameter] = {}
         no_decay: Dict[str, nn.Parameter] = {}
+        semantic_parameter_ids = set()
+        coefficient_parameter_ids = {
+            id(parameter) for parameter in self.trajectory.coefficients.values()
+        }
         for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
+            semantic_parameter_ids.add(id(parameter))
             target = decay if metadata.weight_decay else no_decay
-            target[f"trajectory.coefficients.{family_name}"] = parameter
-        sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
+            container_name = (
+                "coefficients"
+                if id(parameter) in coefficient_parameter_ids
+                else "vector_parameters"
+            )
+            target[f"trajectory.{container_name}.{family_name}"] = parameter
         for name, parameter in self.named_parameters():
-            if id(parameter) in sheet_parameter_ids:
+            if id(parameter) in semantic_parameter_ids:
                 continue
             if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
                 target = no_decay
@@ -481,6 +753,7 @@ class SheetGPT(nn.Module):
         compact_coefficient_prefixes = (
             "trajectory.coefficients.",
             "trajectory.depth.coefficients.",
+            "trajectory.vector_parameters.",                                                                                                           # <<< THOG HYPERBLOCK conventional per-layer vectors remain inside the compact model state
         )
         for name, parameter in self.named_parameters():
             if name.startswith(compact_coefficient_prefixes):

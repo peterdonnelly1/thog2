@@ -149,6 +149,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--optimizer")
     parser.add_argument("--optimizer-momentum", type=float)
+    # vvv THOG keep the optional direct HYPERBLOCK MLP switch available through resume/fork lifecycle parsing
+    parser.add_argument(
+        "--direct-factorised-hyperblock-mlp",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    # ^^^ THOG
     return parser
 
 
@@ -1091,11 +1098,25 @@ def _verify_actual_world_size(context: Mapping[str, Any]) -> None:
         )
 
 
+# vvv THOG lifecycle mode applies the wrapper-only direct HYPERBLOCK MLP option before model construction
+def _configure_direct_factorised_hyperblock_mlp_environment(
+    arguments: argparse.Namespace,
+) -> None:
+    requested = vars(arguments)["direct_factorised_hyperblock_mlp"]
+    if requested is None:
+        return
+    os.environ["THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP"] = (
+        "true" if bool(requested) else "false"
+    )
+# ^^^ THOG
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     arguments = parser.parse_args(actual_argv)
     explicit = explicit_destinations(parser, actual_argv)
+    _configure_direct_factorised_hyperblock_mlp_environment(arguments)                                                                                      # <<< THOG apply lifecycle wrapper-only option before any context or model construction
     context = prepare_context(arguments, explicit)
     if context.get("early_exit"):
         return int(context["exit_code"])

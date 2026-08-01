@@ -200,10 +200,19 @@ class TrainingSheetGPT(SheetGPT):
         self,
         layer_indices: Tuple[int, ...],
     ) -> None:
+        # vvv THOG preserve the legacy direct-factorised predicate and extend only the retained warmup skip decision
+        # direct_application = (
+        #     self.config.direct_factorised_mlp
+        #     and self._supports_direct_factorised_mlp()
+        # )
         direct_application = (
-            self.config.direct_factorised_mlp
-            and self._supports_direct_factorised_mlp()
+            (
+                self.config.direct_factorised_mlp
+                and self._supports_direct_factorised_mlp()
+            )
+            or self.config.direct_factorised_hyperblock_mlp
         )
+        # ^^^ THOG
         for layer_index in layer_indices:
             if self.config.bypass_semantic_qkv_adapter:
                 self.trajectory.materialize("attention_input_weight", layer_index)
