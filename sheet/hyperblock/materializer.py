@@ -183,7 +183,7 @@ def _materialize_family_layer_modes(
         dims=([1], [0]),
     )
     return torch.tensordot(
-        depth_basis[layer_index].to(coefficients),
+        depth_basis[layer_index].to(family_expanded),
         family_expanded,
         dims=([0], [1]),
     )
