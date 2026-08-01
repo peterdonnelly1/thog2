@@ -183,11 +183,26 @@ def _run_one_update(
     monkeypatch: pytest.MonkeyPatch,
     *,
     fast_discard: bool,
-) -> Tuple[Dict[str, float], Dict[str, Tensor], Dict[str, object]]:
+    optimizer_name: str = "adamw",
+) -> Tuple[Dict[str, float], Dict[str, Tensor], Dict[str, object], Dict[str, Tensor]]:
     monkeypatch.setenv("THOG2_FAST_DISCARD", "true" if fast_discard else "false")
     monkeypatch.setenv("THOG2_TORCH_COMPILE", "false")
+    monkeypatch.setenv("THOG2_OPTIMIZER", optimizer_name)
+    monkeypatch.setenv("THOG2_OPTIMIZER_MOMENTUM", "0")
     tokens = torch.arange(128, dtype=torch.long).remainder(32)
     trainer = Stage4Trainer(_training_config(), tokens, tokens)
+    gradients: Dict[str, Tensor] = {}
+
+    def capture_gradients() -> None:
+        gradients.update(
+            {
+                name: parameter.grad.detach().clone()
+                for name, parameter in trainer.raw_model.named_parameters()
+                if parameter.grad is not None
+            }
+        )
+
+    trainer._before_optimizer_step = capture_gradients
     try:
         metrics = trainer.train_one_update()
         state = {
@@ -195,19 +210,31 @@ def _run_one_update(
             for name, value in trainer.raw_model.state_dict().items()
         }
         report = trainer.raw_model.update_retained_materialization_report()
-        return metrics, state, report
+        return metrics, state, report, gradients
     finally:
         trainer.close()
 
 
-def test_hyperblock_retained_and_ephemeral_updates_remain_numerically_close(
+def _assert_materialization_reports(
+    retained_report: Dict[str, object],
+    ephemeral_report: Dict[str, object],
+) -> None:
+    assert bool(retained_report["enabled"]) is True
+    assert bool(retained_report["active"]) is False
+    assert int(retained_report["retained_count"]) == 0
+    assert int(retained_report["materialization_count"]) > 0
+    assert bool(ephemeral_report["enabled"]) is False
+    assert int(ephemeral_report["retained_count"]) == 0
+
+
+def test_hyperblock_retained_and_ephemeral_gradients_agree_before_adamw_step(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    retained_metrics, retained_state, retained_report = _run_one_update(
+    retained_metrics, _, retained_report, retained_gradients = _run_one_update(
         monkeypatch,
         fast_discard=False,
     )
-    ephemeral_metrics, ephemeral_state, ephemeral_report = _run_one_update(
+    ephemeral_metrics, _, ephemeral_report, ephemeral_gradients = _run_one_update(
         monkeypatch,
         fast_discard=True,
     )
@@ -216,21 +243,46 @@ def test_hyperblock_retained_and_ephemeral_updates_remain_numerically_close(
         rel=0.0,
         abs=1.0e-7,
     )
-    assert retained_state.keys() == ephemeral_state.keys()
-    maximum_difference = max(
-        float((retained_state[name] - ephemeral_state[name]).abs().max().item())
-        for name in retained_state
+    assert retained_gradients.keys() == ephemeral_gradients.keys()
+    for name in retained_gradients:
+        torch.testing.assert_close(
+            retained_gradients[name],
+            ephemeral_gradients[name],
+            rtol=1.0e-5,
+            atol=1.0e-7,
+            msg=lambda message, parameter_name=name: f"{parameter_name}: {message}",
+        )
+    _assert_materialization_reports(retained_report, ephemeral_report)
+
+
+def test_hyperblock_retained_and_ephemeral_sgd_updates_agree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retained_metrics, retained_state, retained_report, _ = _run_one_update(
+        monkeypatch,
+        fast_discard=False,
+        optimizer_name="sgd",
     )
-    # Shared coefficients accumulate many cancelling contributions. The retained
-    # projection and direct autograd paths differ only in floating-point reduction
-    # order, but Adam's first normalized update magnifies near-zero sign changes.
-    assert maximum_difference < 5.0e-4
-    assert bool(retained_report["enabled"]) is True
-    assert bool(retained_report["active"]) is False
-    assert int(retained_report["retained_count"]) == 0
-    assert int(retained_report["materialization_count"]) > 0
-    assert bool(ephemeral_report["enabled"]) is False
-    assert int(ephemeral_report["retained_count"]) == 0
+    ephemeral_metrics, ephemeral_state, ephemeral_report, _ = _run_one_update(
+        monkeypatch,
+        fast_discard=True,
+        optimizer_name="sgd",
+    )
+    assert retained_metrics["training_loss"] == pytest.approx(
+        ephemeral_metrics["training_loss"],
+        rel=0.0,
+        abs=1.0e-7,
+    )
+    assert retained_state.keys() == ephemeral_state.keys()
+    for name in retained_state:
+        torch.testing.assert_close(
+            retained_state[name],
+            ephemeral_state[name],
+            rtol=0.0,
+            atol=1.0e-7,
+            msg=lambda message, parameter_name=name: f"{parameter_name}: {message}",
+        )
+    _assert_materialization_reports(retained_report, ephemeral_report)
 # ^^^ THOG
 
 # vvv THOG
