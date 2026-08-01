@@ -1,0 +1,45 @@
+name: Apply HYPERBLOCK implementation
+
+on:
+  push:
+    branches:
+      - COUPLED_FIELD_MACHINE_HYPERBLOCk
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: COUPLED_FIELD_MACHINE_HYPERBLOCk
+
+      - name: Reconstruct and verify implementation patch
+        shell: bash
+        run: |
+          cat .github/hyperblock_patch_part_*.txt \
+            | base64 -d \
+            | gzip -d \
+            > /tmp/hyperblock_implementation.patch
+          echo 'd66743e4096384f20430fe9c9c13bd1fe4c11b98c0b691e6adca5b8d6961074c  /tmp/hyperblock_implementation.patch' \
+            | sha256sum --check
+
+      - name: Apply implementation and remove transport files
+        shell: bash
+        run: |
+          git apply --index /tmp/hyperblock_implementation.patch
+          git rm .github/hyperblock_patch_part_*.txt
+          git rm .github/workflows/hyperblock_sync.yml
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Implement coupled field machine HYPERBLOCK'
+          git push origin HEAD:COUPLED_FIELD_MACHINE_HYPERBLOCk
