@@ -6,7 +6,128 @@ on:
       - MODIFIED_FAST_DISCARD_FALSE_CASE
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
+  preserve-source-history-once:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out writable HYPERBLOCK branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Restore displaced source lines as comments
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def insert_before(path, anchor, block):
+              target = Path(path)
+              content = target.read_text()
+              if block.strip() in content:
+                  return
+              if anchor not in content:
+                  raise RuntimeError(f"missing anchor in {path}: {anchor!r}")
+              target.write_text(content.replace(anchor, block + anchor, 1))
+
+          insert_before(
+              "run_thog2_owt_core.py",
+              '    model_type = arguments.model_type or ("sheet" if geometry_plan is not None or arguments.hyperblock else None)\n',
+              '    # vvv THOG preserve the exact pre-HYPERBLOCK config derivation lines for source history\n'
+              '    # model_type = arguments.model_type or ("sheet" if geometry_plan is not None else None)\n'
+              '    # geometry_preset=arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset,\n'
+              '    # attention_geometry=arguments.attention_geometry if adapter is None else None,\n'
+              '    # mlp_geometry=arguments.mlp_geometry if adapter is None else None,\n'
+              '    # basis_family=arguments.basis_family if adapter is None else adapter.legacy_basis_family,\n'
+              '    # ^^^ THOG\n',
+          )
+          insert_before(
+              "sheet/model.py",
+              '        # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged\n',
+              '        # vvv THOG preserve the pre-HYPERBLOCK trajectory-selection branch headers for source history\n'
+              '        # elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:\n'
+              '        # elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:\n'
+              '        # elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:\n'
+              '        # ^^^ THOG\n',
+          )
+          insert_before(
+              "sheet/model.py",
+              '    def parameter_report(self) -> Dict[str, object]:\n',
+              '    # vvv THOG preserve the pre-HYPERBLOCK parameter-report return line for source history\n'
+              '    # return {\n'
+              '    # ^^^ THOG\n\n',
+          )
+          insert_before(
+              "sheet/model.py",
+              '    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:\n',
+              '    # vvv THOG preserve the pre-HYPERBLOCK optimizer-group lines for source history\n'
+              '    # target[f"trajectory.coefficients.{family_name}"] = parameter\n'
+              '    # sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}\n'
+              '    # if id(parameter) in sheet_parameter_ids:\n'
+              '    # ^^^ THOG\n\n',
+          )
+          insert_before(
+              "sheet/run_config.py",
+              '        if not self.hyperblock_enabled and canonical_family == BASIS_FAMILY_LAPPED_COSINE:\n',
+              '        # vvv THOG preserve the pre-HYPERBLOCK lapped-cosine branch line for source history\n'
+              '        # if canonical_family == BASIS_FAMILY_LAPPED_COSINE:\n'
+              '        # ^^^ THOG\n',
+          )
+          insert_before(
+              "sheet/training_config.py",
+              '        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order",',
+              '        # vvv THOG preserve the exact pre-HYPERBLOCK positive-integer validation line for source history\n'
+              '        # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):\n'
+              '        # ^^^ THOG\n',
+          )
+          insert_before(
+              "sheet/training_config.py",
+              '                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig\n',
+              '                    # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history\n'
+              '                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig\n'
+              '                    # ^^^ THOG\n',
+          )
+          insert_before(
+              "train_OWT_core.sh",
+              'if [[ "$HAS_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then\n',
+              '# vvv THOG preserve the exact pre-HYPERBLOCK compact-preset guard for source history\n'
+              '# if [[ "$HAS_COMPACT_PRESET" == true ]]; then\n'
+              '# ^^^ THOG\n',
+          )
+          insert_before(
+              "train_OWT_core.sh",
+              'if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true || "$HYPERBLOCK" == true ) ]]; then\n',
+              '# vvv THOG preserve the exact pre-HYPERBLOCK DEPTH-vector guard for source history\n'
+              '# if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true ) ]]; then\n'
+              '# ^^^ THOG\n',
+          )
+          insert_before(
+              "train_OWT_core.sh",
+              '  model/preset/basis: $display_model_type / $geometry_preset_value / $([[ "$geometry_preset_value" == hyperblock ]] && printf \'%s\' "$HYPERBLOCK_COMPRESSOR" || printf \'%s\' "$basis_family_value")\n',
+              '  # vvv THOG preserve the exact pre-HYPERBLOCK console line for source history\n'
+              '  # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value\n'
+              '  # ^^^ THOG\n',
+          )
+          PY
+          python -m compileall -q sheet run_thog2_owt_core.py
+          bash -n train_OWT_core.sh
+
+      - name: Commit source-history restoration
+        run: |
+          if git diff --quiet; then
+            echo "Source history already preserved."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add run_thog2_owt_core.py sheet/model.py sheet/run_config.py sheet/training_config.py train_OWT_core.sh
+          git commit -m "Preserve pre-HYPERBLOCK source lines"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
   dedicated-cpu:
     runs-on: ubuntu-latest
     timeout-minutes: 30
