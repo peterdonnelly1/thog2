@@ -26,6 +26,14 @@ from .compact_identity import (
 )
 from .depth_trajectory import DepthTrajectory
 from .geometry import SheetGeometryConfig
+# vvv THOG coupled field machine HYPERBLOCK is an architecture-wide trajectory, separate from legacy BLOCK geometries
+from .hyperblock import (
+    HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+    CoupledFieldTrajectory,
+    HyperblockOrders,
+    ResolvedHyperblockPlan,
+)
+# ^^^ THOG
 from .jpeg_like_v1_trajectory import JpegLikeV1Trajectory
 from .mlp_block_trajectory import MlpBlockTrajectory
 from .semantic_materializer import LegacySheetColMaterializer
@@ -84,6 +92,20 @@ class SheetGPTConfig:
     attention_geometry: Optional[str] = None
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
+    # vvv THOG fixed, non-breathing coupled-field HYPERBLOCK controls
+    hyperblock_topology: Optional[str] = None
+    hyperblock_compressor: str = "chebyshev"
+    hyperblock_compressor_version: str = "auto"
+    hyperblock_common_family_order: int = 6
+    hyperblock_attention_family_order: int = 4
+    hyperblock_mlp_family_order: int = 2
+    hyperblock_depth_order: int = 16
+    hyperblock_d_model_order: int = 16
+    hyperblock_mlp_hidden_order: int = 16
+    hyperblock_attention_head_order: int = 16
+    hyperblock_attention_head_channel_order: int = 16
+    hyperblock_mlp_hidden_multiplier: int = 4
+    # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
@@ -125,35 +147,90 @@ class SheetGPTConfig:
         if not isinstance(self.vectorise_per_head_materialisation, bool):
             raise ValueError(f"vectorise_per_head_materialisation must be bool; got {self.vectorise_per_head_materialisation!r}")                          # <<< THOG validate selectable vectorised materialisation path
 
-        # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
-        selectors = self.compact_selectors()
-        if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
-            raise ValueError(
-                "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
-            )
-        if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
-            self.base_row_order = 1
-            self.mlp_channel_order = 1
-            self.o_attn_d_model = 1
-            self.o_attn_qkv_per_channel = 1
-            self.o_attn_out_per_channel = 1
-            self.o_mlp_d_model = 1
-            self.o_mlp_hidden = 1
+        # vvv THOG HYPERBLOCK owns all covered matrix axes and must not overlap legacy DEPTH/BLOCK selectors
+        if self.hyperblock_enabled:
+            conflicting_fields = {
+                "geometry_preset": self.geometry_preset,
+                "attention_geometry": self.attention_geometry,
+                "mlp_geometry": self.mlp_geometry,
+                "basis_family": self.basis_family,
+            }
+            active_conflicts = {
+                name: value
+                for name, value in conflicting_fields.items()
+                if value is not None
+            }
+            if active_conflicts:
+                raise ValueError(
+                    "HYPERBLOCK may not be combined with legacy geometry selectors; "
+                    f"got {active_conflicts}"
+                )
+            if self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "HYPERBLOCK keeps LayerNorm and bias vectors conventional in v0; "
+                    "depth_compress_layer_norm_and_bias must be false"
+                )
+            self.hyperblock_plan()
+        else:
+            # vvv THOG DEPTH is controlled only by P and the LayerNorm/bias participation switch; row/axis orders are semantically irrelevant.
+            selectors = self.compact_selectors()
+            if selectors.geometry_preset != GEOMETRY_PRESET_DEPTH and self.depth_compress_layer_norm_and_bias:
+                raise ValueError(
+                    "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
+                )
+            if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                self.base_row_order = 1
+                self.mlp_channel_order = 1
+                self.o_attn_d_model = 1
+                self.o_attn_qkv_per_channel = 1
+                self.o_attn_out_per_channel = 1
+                self.o_mlp_d_model = 1
+                self.o_mlp_hidden = 1
+            # ^^^ THOG
+
+            geometry = self.sheet_geometry()
+            if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+                mlp_hidden_length = 4 * self.n_embd
+                if mlp_hidden_length % self.mlp_hidden_group_size != 0:
+                    raise ValueError(
+                        "4*d_model must be divisible by mlp_hidden_group_size; "
+                        f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
+                    )
+                if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
+                    raise ValueError(
+                        "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
+                        f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
+                    )
         # ^^^ THOG
 
-        geometry = self.sheet_geometry()
-        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
-            mlp_hidden_length = 4 * self.n_embd
-            if mlp_hidden_length % self.mlp_hidden_group_size != 0:
-                raise ValueError(
-                    "4*d_model must be divisible by mlp_hidden_group_size; "
-                    f"got 4*d_model={mlp_hidden_length}, group_size={self.mlp_hidden_group_size}"
-                )
-            if geometry.resolved_o_mlp_hidden > self.mlp_hidden_group_size:
-                raise ValueError(
-                    "o_mlp_hidden/Y must not exceed mlp_hidden_group_size for JPEG_LIKE_V1; "
-                    f"got Y={geometry.resolved_o_mlp_hidden}, group_size={self.mlp_hidden_group_size}"
-                )
+    # vvv THOG HYPERBLOCK topology is resolved identity; the v0 CLI need only enable it
+    @property
+    def hyperblock_enabled(self) -> bool:
+        return self.hyperblock_topology is not None
+
+    def hyperblock_plan(self) -> ResolvedHyperblockPlan:
+        if not self.hyperblock_enabled:
+            raise ValueError("HYPERBLOCK is not enabled")
+        return ResolvedHyperblockPlan(
+            n_layer=self.n_layer,
+            n_embd=self.n_embd,
+            n_head=self.n_head,
+            mlp_hidden_multiplier=self.hyperblock_mlp_hidden_multiplier,
+            orders=HyperblockOrders(
+                depth=self.hyperblock_depth_order,
+                d_model=self.hyperblock_d_model_order,
+                mlp_hidden=self.hyperblock_mlp_hidden_order,
+                attention_head=self.hyperblock_attention_head_order,
+                attention_head_channel=self.hyperblock_attention_head_channel_order,
+                common_family=self.hyperblock_common_family_order,
+                attention_family=self.hyperblock_attention_family_order,
+                mlp_family=self.hyperblock_mlp_family_order,
+            ),
+            compressor_family=self.hyperblock_compressor,
+            compressor_version=self.hyperblock_compressor_version,
+            topology=self.hyperblock_topology or HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
+        )
+    # ^^^ THOG
 
     def sheet_geometry(self) -> SheetGeometryConfig:
         return SheetGeometryConfig(
@@ -199,8 +276,18 @@ class SheetGPT(nn.Module):
                 "ln_f": ConventionalLayerNorm(config.n_embd, bias=config.bias),
             }
         )
-        selectors = config.compact_selectors()
-        if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
+        # vvv THOG HYPERBLOCK is a separate trajectory and leaves every legacy selector path unchanged
+        if config.hyperblock_enabled:
+            self.trajectory = CoupledFieldTrajectory(
+                config.hyperblock_plan(),
+                bias=config.bias,
+                runtime_dtype=torch.float32,
+            )
+            selectors = None
+        else:
+            selectors = config.compact_selectors()
+        # ^^^ THOG
+        if selectors is not None and selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
             self.trajectory = JpegLikeV1Trajectory(
                 config.sheet_geometry(),
                 mlp_hidden_group_size=config.mlp_hidden_group_size,
@@ -209,7 +296,7 @@ class SheetGPT(nn.Module):
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
+        elif selectors is not None and selectors.attention_geometry == ATTENTION_GEOMETRY_HEAD_AWARE_BLOCK:
             self.trajectory = BlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -219,14 +306,14 @@ class SheetGPT(nn.Module):
                 compact_mlp=selectors.mlp_geometry == MLP_GEOMETRY_MLP_BLOCK,
                 vectorise_per_head_materialisation=config.vectorise_per_head_materialisation,                                                            # <<< THOG pass selectable head vectorisation into block trajectory
             )
-        elif selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
+        elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_MLP_BLOCK:
             self.trajectory = MlpBlockTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
             )
-        elif selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+        elif selectors is not None and selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
             self.trajectory = DepthTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -234,7 +321,7 @@ class SheetGPT(nn.Module):
                 basis_family=selectors.basis_family,
                 depth_compress_layer_norm_and_bias=config.depth_compress_layer_norm_and_bias,                                                           # <<< THOG select conventional or pure-depth block vectors
             )
-        else:
+        elif selectors is not None:
             self.trajectory = SheetTrajectory(
                 config.sheet_geometry(),
                 runtime_dtype=torch.float32,
@@ -432,7 +519,7 @@ class SheetGPT(nn.Module):
         conventional = total_persistent - sheet_coefficients
         dense_equivalent_repeated = self.trajectory.dense_equivalent_count()
         dense_equivalent_total = conventional + dense_equivalent_repeated
-        return {
+        report = {
             "persistent_parameters": total_persistent,
             "sheet_coefficients": sheet_coefficients,
             "conventional_non_sheet_parameters": conventional,
@@ -442,6 +529,12 @@ class SheetGPT(nn.Module):
             "matrix_dense_equivalent_parameters": self.trajectory.matrix_dense_equivalent_count(),
             "families": self.trajectory.family_report(),
         }
+        # vvv THOG expose the resolved HYPERBLOCK field identity without changing legacy report fields
+        hyperblock_report = getattr(self.trajectory, "hyperblock_report", None)
+        if callable(hyperblock_report):
+            report["hyperblock"] = hyperblock_report()
+        # ^^^ THOG
+        return report
 
     def get_num_params(self, non_embedding: bool = True) -> int:
         parameter_count = sum(parameter.numel() for parameter in self.parameters())
@@ -452,12 +545,21 @@ class SheetGPT(nn.Module):
     def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
         decay: Dict[str, nn.Parameter] = {}
         no_decay: Dict[str, nn.Parameter] = {}
+        semantic_parameter_ids = set()
+        coefficient_parameter_ids = {
+            id(parameter) for parameter in self.trajectory.coefficients.values()
+        }
         for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
+            semantic_parameter_ids.add(id(parameter))
             target = decay if metadata.weight_decay else no_decay
-            target[f"trajectory.coefficients.{family_name}"] = parameter
-        sheet_parameter_ids = {id(parameter) for parameter in self.trajectory.coefficients.values()}
+            container_name = (
+                "coefficients"
+                if id(parameter) in coefficient_parameter_ids
+                else "vector_parameters"
+            )
+            target[f"trajectory.{container_name}.{family_name}"] = parameter
         for name, parameter in self.named_parameters():
-            if id(parameter) in sheet_parameter_ids:
+            if id(parameter) in semantic_parameter_ids:
                 continue
             if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
                 target = no_decay
@@ -481,6 +583,7 @@ class SheetGPT(nn.Module):
         compact_coefficient_prefixes = (
             "trajectory.coefficients.",
             "trajectory.depth.coefficients.",
+            "trajectory.vector_parameters.",                                                                                                           # <<< THOG HYPERBLOCK conventional per-layer vectors remain inside the compact model state
         )
         for name, parameter in self.named_parameters():
             if name.startswith(compact_coefficient_prefixes):

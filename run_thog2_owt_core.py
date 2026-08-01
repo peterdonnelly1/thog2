@@ -20,6 +20,9 @@ from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DE
 from sheet.checkpoints import load_payload
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.geometry_registry import AXIS_MLP_HIDDEN, format_geometry_plan, resolve_geometry_plan
+# vvv THOG v0 exposes HYPERBLOCK as a Boolean mode while retaining explicit topology identity internally
+from sheet.hyperblock import HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE
+# ^^^ THOG
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
     DEFAULT_EXPERIMENT_PREFIX,
@@ -245,6 +248,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
     parser.add_argument("--basis-family", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
     parser.add_argument("--basis-version", default="auto")
+    # vvv THOG coupled field machine HYPERBLOCK controls; the topology is implicit while it is the sole implementation
+    parser.add_argument("--hyperblock", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--hyperblock-compressor", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
+    parser.add_argument("--hyperblock-compressor-version", default="auto")
+    parser.add_argument("--hyperblock-common-family-order", type=int, default=6)
+    parser.add_argument("--hyperblock-attention-family-order", type=int, default=4)
+    parser.add_argument("--hyperblock-mlp-family-order", type=int, default=2)
+    parser.add_argument("--hyperblock-depth-order", type=int, default=16)
+    parser.add_argument("--hyperblock-d-model-order", type=int, default=16)
+    parser.add_argument("--hyperblock-mlp-hidden-order", type=int, default=16)
+    parser.add_argument("--hyperblock-attention-head-order", type=int, default=16)
+    parser.add_argument("--hyperblock-attention-head-channel-order", type=int, default=16)
+    parser.add_argument("--hyperblock-mlp-hidden-multiplier", type=int, default=4)
+    # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
     parser.add_argument("--lapped-cosine-overlap-fraction", type=float, default=DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION)
@@ -319,6 +336,8 @@ def systematic_geometry_requested(arguments: argparse.Namespace) -> bool:
 
 
 def geometry_plan_from_arguments(arguments: argparse.Namespace):
+    if arguments.hyperblock and systematic_geometry_requested(arguments):
+        raise ValueError("--hyperblock cannot be combined with selector-based geometry controls")
     if not systematic_geometry_requested(arguments):
         return None
     if arguments.model_type == "dense":
@@ -351,9 +370,11 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
     geometry_plan = geometry_plan if geometry_plan is not None else geometry_plan_from_arguments(arguments)
     if geometry_plan is not None and not geometry_plan.materializer.implemented:
         raise ValueError(geometry_plan.materializer.message)
-    model_type = arguments.model_type or ("sheet" if geometry_plan is not None else None)
+    model_type = arguments.model_type or ("sheet" if geometry_plan is not None or arguments.hyperblock else None)
     if model_type is None:
         raise ValueError("--model-type is required for legacy runs; systematic geometry selections imply model_type='sheet'")
+    if arguments.hyperblock and model_type != "sheet":
+        raise ValueError("--hyperblock requires --model-type sheet or an omitted --model-type")
     adapter = None if geometry_plan is None else geometry_plan.materializer
     basis_version = arguments.basis_version if adapter is None else str(adapter.legacy_basis_version)
     selected_mlp_hidden_order = arguments.o_mlp_hidden
@@ -396,12 +417,26 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         mlp_hidden_group_size=arguments.mlp_hidden_group_size if adapter is None or adapter.legacy_mlp_hidden_group_size is None else adapter.legacy_mlp_hidden_group_size,
         mlp_hidden_compressor=arguments.mlp_hidden_compressor if adapter is None or adapter.legacy_mlp_hidden_compressor is None else adapter.legacy_mlp_hidden_compressor,
         depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                 # <<< THOG CLI vector mode
-        geometry_preset=arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset,
-        attention_geometry=arguments.attention_geometry if adapter is None else None,
-        mlp_geometry=arguments.mlp_geometry if adapter is None else None,
-        basis_family=arguments.basis_family if adapter is None else adapter.legacy_basis_family,
+        geometry_preset=None if arguments.hyperblock else (arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset),
+        attention_geometry=None if arguments.hyperblock else (arguments.attention_geometry if adapter is None else None),
+        mlp_geometry=None if arguments.hyperblock else (arguments.mlp_geometry if adapter is None else None),
+        basis_family=None if arguments.hyperblock else (arguments.basis_family if adapter is None else adapter.legacy_basis_family),
         basis_version=basis_version,
         resolved_geometry_plan=None if geometry_plan is None else geometry_plan.to_dict(),
+        # vvv THOG pass the sole v0 topology explicitly into resolved run identity
+        hyperblock_topology=HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE if arguments.hyperblock else None,
+        hyperblock_compressor=arguments.hyperblock_compressor,
+        hyperblock_compressor_version=arguments.hyperblock_compressor_version,
+        hyperblock_common_family_order=arguments.hyperblock_common_family_order,
+        hyperblock_attention_family_order=arguments.hyperblock_attention_family_order,
+        hyperblock_mlp_family_order=arguments.hyperblock_mlp_family_order,
+        hyperblock_depth_order=arguments.hyperblock_depth_order,
+        hyperblock_d_model_order=arguments.hyperblock_d_model_order,
+        hyperblock_mlp_hidden_order=arguments.hyperblock_mlp_hidden_order,
+        hyperblock_attention_head_order=arguments.hyperblock_attention_head_order,
+        hyperblock_attention_head_channel_order=arguments.hyperblock_attention_head_channel_order,
+        hyperblock_mlp_hidden_multiplier=arguments.hyperblock_mlp_hidden_multiplier,
+        # ^^^ THOG
         lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
         lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control
         attention_backend=arguments.attention_backend,
@@ -464,6 +499,15 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
         _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
+        hyperblock = report.get("hyperblock")
+        if isinstance(hyperblock, dict):
+            plan = hyperblock["plan"]
+            _print_model_option(
+                "HYPERBLOCK:",
+                f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x",
+            )
+        # ^^^ THOG
     print(flush=True)
 # ^^^ THOG
 

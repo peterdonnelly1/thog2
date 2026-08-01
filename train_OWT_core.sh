@@ -49,6 +49,20 @@ WANDB_ROOT="wandb"
 GEOMETRY_PRESET="depth"
 BASIS_FAMILY="chebyshev"
 BASIS_VERSION="auto"
+# vvv THOG coupled field machine HYPERBLOCK wrapper controls; long options avoid consuming the exhausted getopts alphabet
+HYPERBLOCK=false
+HYPERBLOCK_COMPRESSOR="chebyshev"
+HYPERBLOCK_COMPRESSOR_VERSION="auto"
+HYPERBLOCK_COMMON_FAMILY_ORDER=6
+HYPERBLOCK_ATTENTION_FAMILY_ORDER=4
+HYPERBLOCK_MLP_FAMILY_ORDER=2
+HYPERBLOCK_DEPTH_ORDER=16
+HYPERBLOCK_D_MODEL_ORDER=16
+HYPERBLOCK_MLP_HIDDEN_ORDER=16
+HYPERBLOCK_ATTENTION_HEAD_ORDER=16
+HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER=16
+HYPERBLOCK_MLP_HIDDEN_MULTIPLIER=4
+# ^^^ THOG
 LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
 LAPPED_COSINE_OVERLAP_FRACTION="0.5"                                                                                                                       # <<< THOG v1 fixed overlap
 MLP_HIDDEN_COMPRESSOR="${THOG2_MLP_HIDDEN_COMPRESSOR:-dct}"
@@ -150,6 +164,20 @@ Systematic geometry (repeat --select-element as needed):
   --option TARGET.PROPERTY=VALUE
   --explain-geometry
 
+HYPERBLOCK:
+  --hyperblock
+  --hyperblock-compressor NAME=${HYPERBLOCK_COMPRESSOR}
+  --hyperblock-compressor-version VERSION=${HYPERBLOCK_COMPRESSOR_VERSION}
+  --hyperblock-common-family-order N=${HYPERBLOCK_COMMON_FAMILY_ORDER}
+  --hyperblock-attention-family-order N=${HYPERBLOCK_ATTENTION_FAMILY_ORDER}
+  --hyperblock-mlp-family-order N=${HYPERBLOCK_MLP_FAMILY_ORDER}
+  --hyperblock-depth-order N=${HYPERBLOCK_DEPTH_ORDER}
+  --hyperblock-d-model-order N=${HYPERBLOCK_D_MODEL_ORDER}
+  --hyperblock-mlp-hidden-order N=${HYPERBLOCK_MLP_HIDDEN_ORDER}
+  --hyperblock-attention-head-order N=${HYPERBLOCK_ATTENTION_HEAD_ORDER}
+  --hyperblock-attention-head-channel-order N=${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}
+  --hyperblock-mlp-hidden-multiplier N=${HYPERBLOCK_MLP_HIDDEN_MULTIPLIER}
+
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
                                                     Chebyshev aliases: cheby | chebyshev_first_kind_qr
@@ -235,6 +263,52 @@ while (( $# > 0 )); do
       EXPLAIN_GEOMETRY=true
       shift
       ;;
+    # vvv THOG consume HYPERBLOCK long controls before getopts and build one collision-free canonical run
+    --hyperblock)
+      HYPERBLOCK=true
+      shift
+      ;;
+    --no-hyperblock)
+      HYPERBLOCK=false
+      shift
+      ;;
+    --hyperblock-compressor|--hyperblock-compressor-version|--hyperblock-common-family-order|--hyperblock-attention-family-order|--hyperblock-mlp-family-order|--hyperblock-depth-order|--hyperblock-d-model-order|--hyperblock-mlp-hidden-order|--hyperblock-attention-head-order|--hyperblock-attention-head-channel-order|--hyperblock-mlp-hidden-multiplier)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --hyperblock-compressor) HYPERBLOCK_COMPRESSOR="$2" ;;
+        --hyperblock-compressor-version) HYPERBLOCK_COMPRESSOR_VERSION="$2" ;;
+        --hyperblock-common-family-order) HYPERBLOCK_COMMON_FAMILY_ORDER="$2" ;;
+        --hyperblock-attention-family-order) HYPERBLOCK_ATTENTION_FAMILY_ORDER="$2" ;;
+        --hyperblock-mlp-family-order) HYPERBLOCK_MLP_FAMILY_ORDER="$2" ;;
+        --hyperblock-depth-order) HYPERBLOCK_DEPTH_ORDER="$2" ;;
+        --hyperblock-d-model-order) HYPERBLOCK_D_MODEL_ORDER="$2" ;;
+        --hyperblock-mlp-hidden-order) HYPERBLOCK_MLP_HIDDEN_ORDER="$2" ;;
+        --hyperblock-attention-head-order) HYPERBLOCK_ATTENTION_HEAD_ORDER="$2" ;;
+        --hyperblock-attention-head-channel-order) HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER="$2" ;;
+        --hyperblock-mlp-hidden-multiplier) HYPERBLOCK_MLP_HIDDEN_MULTIPLIER="$2" ;;
+      esac
+      shift 2
+      ;;
+    --hyperblock-compressor=*|--hyperblock-compressor-version=*|--hyperblock-common-family-order=*|--hyperblock-attention-family-order=*|--hyperblock-mlp-family-order=*|--hyperblock-depth-order=*|--hyperblock-d-model-order=*|--hyperblock-mlp-hidden-order=*|--hyperblock-attention-head-order=*|--hyperblock-attention-head-channel-order=*|--hyperblock-mlp-hidden-multiplier=*)
+      hyperblock_name="${1%%=*}"
+      hyperblock_value="${1#*=}"
+      case "$hyperblock_name" in
+        --hyperblock-compressor) HYPERBLOCK_COMPRESSOR="$hyperblock_value" ;;
+        --hyperblock-compressor-version) HYPERBLOCK_COMPRESSOR_VERSION="$hyperblock_value" ;;
+        --hyperblock-common-family-order) HYPERBLOCK_COMMON_FAMILY_ORDER="$hyperblock_value" ;;
+        --hyperblock-attention-family-order) HYPERBLOCK_ATTENTION_FAMILY_ORDER="$hyperblock_value" ;;
+        --hyperblock-mlp-family-order) HYPERBLOCK_MLP_FAMILY_ORDER="$hyperblock_value" ;;
+        --hyperblock-depth-order) HYPERBLOCK_DEPTH_ORDER="$hyperblock_value" ;;
+        --hyperblock-d-model-order) HYPERBLOCK_D_MODEL_ORDER="$hyperblock_value" ;;
+        --hyperblock-mlp-hidden-order) HYPERBLOCK_MLP_HIDDEN_ORDER="$hyperblock_value" ;;
+        --hyperblock-attention-head-order) HYPERBLOCK_ATTENTION_HEAD_ORDER="$hyperblock_value" ;;
+        --hyperblock-attention-head-channel-order) HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER="$hyperblock_value" ;;
+        --hyperblock-mlp-hidden-multiplier) HYPERBLOCK_MLP_HIDDEN_MULTIPLIER="$hyperblock_value" ;;
+      esac
+      unset hyperblock_name hyperblock_value
+      shift
+      ;;
+    # ^^^ THOG
     --depth-compress-layer-norm-and-bias)
       DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=true
       shift
@@ -451,6 +525,7 @@ parse_geometry_preset_values() {
       depth) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true ;;
       legacy_sheet_col|head_aware_block|mlp_block|full_block) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
       jpeg_like_v1) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true; HAS_JPEG_LIKE_PRESET=true ;;
+      hyperblock) PRESET_VALUES+=("$value"); HAS_COMPACT_PRESET=true; HAS_NON_DEPTH_COMPACT_PRESET=true ;;
       *) echo "Bad PRESET: $value" >&2; exit 2 ;;
     esac
   done
@@ -482,6 +557,16 @@ parse_basis_family_values() {
 }
 parse_o_depth_values "$O_DEPTH"
 parse_geometry_preset_values "$GEOMETRY_PRESET"
+# vvv THOG --hyperblock selects exactly one architecture-wide topology rather than joining the legacy preset grid
+if [[ "$HYPERBLOCK" == true ]]; then
+  PRESET_VALUES=(hyperblock)
+  BASIS_FAMILY="chebyshev"
+  HAS_DENSE_PRESET=false
+  HAS_COMPACT_PRESET=true
+  HAS_JPEG_LIKE_PRESET=false
+  HAS_NON_DEPTH_COMPACT_PRESET=true
+fi
+# ^^^ THOG
 parse_basis_family_values "$BASIS_FAMILY"                                                                                                                  # <<< THOG parse basis-family grid
 parse_mlp_hidden_compressor_values "$MLP_HIDDEN_COMPRESSOR"
 parse_mlp_hidden_group_size_values "$MLP_HIDDEN_GROUP_SIZE"
@@ -521,6 +606,9 @@ case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
 for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
+# vvv THOG fixed anisotropic HYPERBLOCK orders are validated before constructing any run
+for setting in "$HYPERBLOCK_COMMON_FAMILY_ORDER" "$HYPERBLOCK_ATTENTION_FAMILY_ORDER" "$HYPERBLOCK_MLP_FAMILY_ORDER" "$HYPERBLOCK_DEPTH_ORDER" "$HYPERBLOCK_D_MODEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER"; do validate_positive_uint "$setting" "HYPERBLOCK order"; done
+# ^^^ THOG
 if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
   for setting in "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN"; do validate_positive_uint "$setting" "non-DEPTH compact order"; done
 fi
@@ -545,10 +633,22 @@ validate_true_false "$DRY_RUN" "DRY_RUN"
 (( WARMUP_ITERS < STEPS )) || { echo "WARMUP_ITERS must be less than STEPS." >&2; exit 2; }
 (( N_EMBD % N_HEAD == 0 )) || { echo "N_EMBD must be divisible by N_HEAD." >&2; exit 2; }
 HEAD_DIM=$((N_EMBD / N_HEAD))
-if [[ "$HAS_COMPACT_PRESET" == true ]]; then
+# vvv THOG reject impossible HYPERBLOCK orders before invoking Python
+if [[ "$HYPERBLOCK" == true ]]; then
+  (( HYPERBLOCK_COMMON_FAMILY_ORDER <= 6 )) || { echo "HYPERBLOCK_COMMON_FAMILY_ORDER must not exceed 6." >&2; exit 2; }
+  (( HYPERBLOCK_ATTENTION_FAMILY_ORDER <= 4 )) || { echo "HYPERBLOCK_ATTENTION_FAMILY_ORDER must not exceed 4." >&2; exit 2; }
+  (( HYPERBLOCK_MLP_FAMILY_ORDER <= 2 )) || { echo "HYPERBLOCK_MLP_FAMILY_ORDER must not exceed 2." >&2; exit 2; }
+  (( HYPERBLOCK_DEPTH_ORDER <= N_LAYER )) || { echo "HYPERBLOCK_DEPTH_ORDER must not exceed N_LAYER." >&2; exit 2; }
+  (( HYPERBLOCK_D_MODEL_ORDER <= N_EMBD )) || { echo "HYPERBLOCK_D_MODEL_ORDER must not exceed N_EMBD." >&2; exit 2; }
+  (( HYPERBLOCK_MLP_HIDDEN_ORDER <= HYPERBLOCK_MLP_HIDDEN_MULTIPLIER * N_EMBD )) || { echo "HYPERBLOCK_MLP_HIDDEN_ORDER exceeds the physical MLP_HIDDEN length." >&2; exit 2; }
+  (( HYPERBLOCK_ATTENTION_HEAD_ORDER <= N_HEAD )) || { echo "HYPERBLOCK_ATTENTION_HEAD_ORDER must not exceed N_HEAD." >&2; exit 2; }
+  (( HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER <= HEAD_DIM )) || { echo "HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
+fi
+# ^^^ THOG
+if [[ "$HAS_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then
   for value in "${O_DEPTH_VALUES[@]}"; do (( value <= N_LAYER )) || { echo "O_DEPTH must not exceed N_LAYER: P=${value}, L=${N_LAYER}." >&2; exit 2; }; done
 fi
-if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
+if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true && "$HYPERBLOCK" == false ]]; then
   (( O_ATTN_D_MODEL <= N_EMBD )) || { echo "O_ATTN_D_MODEL must not exceed N_EMBD." >&2; exit 2; }
   (( O_ATTN_QKV_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_QKV_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
   (( O_ATTN_OUT_PER_CHANNEL <= HEAD_DIM )) || { echo "O_ATTN_OUT_PER_CHANNEL must not exceed N_EMBD/N_HEAD." >&2; exit 2; }
@@ -561,7 +661,7 @@ if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
     done
   fi
 fi
-if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true ) ]]; then
+if [[ "$DEPTH_COMPRESS_LAYER_NORM_AND_BIAS" == true && ( "$HAS_NON_DEPTH_COMPACT_PRESET" == true || "$HAS_DENSE_PRESET" == true || "$HYPERBLOCK" == true ) ]]; then
   echo "--depth-compress-layer-norm-and-bias may be used only when every selected preset is depth." >&2
   exit 2
 fi
@@ -640,6 +740,25 @@ run_grid_point() {
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
     orders_summary="n/a"
     compact_order_args=(--o-depth "$o_depth_value" --o-attn-d-model "$O_ATTN_D_MODEL" --o-attn-qkv-per-channel "$O_ATTN_QKV_PER_CHANNEL" --o-attn-out-per-channel "$O_ATTN_OUT_PER_CHANNEL" --o-mlp-d-model "$O_MLP_D_MODEL" --o-mlp-hidden "$O_MLP_HIDDEN")
+  elif [[ "$geometry_preset_value" == hyperblock ]]; then
+    run_model_type="sheet"; display_model_type="hyperblock"; preset_tag="HYPERBLOCK"; run_tag="HB_${HYPERBLOCK_COMPRESSOR^^}"
+    compact_args=(
+      --hyperblock
+      --hyperblock-compressor "$HYPERBLOCK_COMPRESSOR"
+      --hyperblock-compressor-version "$HYPERBLOCK_COMPRESSOR_VERSION"
+      --hyperblock-common-family-order "$HYPERBLOCK_COMMON_FAMILY_ORDER"
+      --hyperblock-attention-family-order "$HYPERBLOCK_ATTENTION_FAMILY_ORDER"
+      --hyperblock-mlp-family-order "$HYPERBLOCK_MLP_FAMILY_ORDER"
+      --hyperblock-depth-order "$HYPERBLOCK_DEPTH_ORDER"
+      --hyperblock-d-model-order "$HYPERBLOCK_D_MODEL_ORDER"
+      --hyperblock-mlp-hidden-order "$HYPERBLOCK_MLP_HIDDEN_ORDER"
+      --hyperblock-attention-head-order "$HYPERBLOCK_ATTENTION_HEAD_ORDER"
+      --hyperblock-attention-head-channel-order "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER"
+      --hyperblock-mlp-hidden-multiplier "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER"
+    )
+    compact_order_args=()
+    shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
+    orders_summary="HFC${HYPERBLOCK_COMMON_FAMILY_ORDER} HFA${HYPERBLOCK_ATTENTION_FAMILY_ORDER} HFM${HYPERBLOCK_MLP_FAMILY_ORDER} HL${HYPERBLOCK_DEPTH_ORDER} HD${HYPERBLOCK_D_MODEL_ORDER} HM${HYPERBLOCK_MLP_HIDDEN_ORDER} HH${HYPERBLOCK_ATTENTION_HEAD_ORDER} HC${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}"
   else
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
@@ -697,7 +816,7 @@ scruffy OWT train
   start time:         $start_time_friendly
   artifact:           $artifact_name
   experiment:         $EXPERIMENT_PREFIX
-  model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
+  model/preset/basis: $display_model_type / $geometry_preset_value / $([[ "$geometry_preset_value" == hyperblock ]] && printf '%s' "$HYPERBLOCK_COMPRESSOR" || printf '%s' "$basis_family_value")
   lapped cosine:      window=$LAPPED_COSINE_WINDOW_LENGTH overlap=$LAPPED_COSINE_OVERLAP_FRACTION
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE

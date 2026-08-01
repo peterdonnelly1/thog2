@@ -1,8 +1,8 @@
 # THOG2 Coupled Field Machine HYPERBLOCK
 
 **Concept, Implementation and Requirements Specification**  
-**Version 0.1 — 1 August 2026**  
-**Status: Proposed concept, implementation and requirements specification**
+**Version 0.2 — 1 August 2026**  
+**Status: Working implementation specification; updated to match the current branch**
 
 > **SCOPE**  
 > One architecture-wide coefficient system for the six large repeated Transformer-block matrix families; a common `WEIGHT_FAMILY × DEPTH × D_MODEL` field plus attention-specific and MLP-specific dimensions; fixed anisotropic tensor-product support; and a plug-in basis provider with Chebyshev as the first implementation.
@@ -32,7 +32,7 @@
 19. Risks, Failure Modes and Deferred Work
 Appendix A. Mathematical Notation
 Appendix B. Canonical Example Configuration
-Appendix C. Proposed Module Layout
+Appendix C. As-Built Module Layout
 
 ---
 
@@ -49,14 +49,14 @@ The operational weights do not form one ordinary rectangular tensor. Attention w
 
 Within each valid region, every retained tensor-product mode combination exists from the start. Gradient descent may therefore discover single-axis structure, diagonal structure and higher-order cross-axis relationships without a preselected list of special pairs. The v0 design intentionally avoids adaptive support so that the experiment tests the coupled field itself rather than a second algorithm that reallocates coefficient capacity during training.
 
-| Decision area | Version 0.1 position |
+| Decision area | Version 0.2 position |
 |---|---|
 | Covered weights | Q, K, V, ATTENTION_OUTPUT, MLP_UP and MLP_DOWN. |
 | Persistent parameters | One structured coefficient object with common, attention-unique and MLP-unique regions. |
-| Compressor | A plug-in separable axis-basis provider; `CHEBYSHEV@v1` is the first implementation. |
-| Coefficient support | Fixed and fully populated inside each valid tensor-product region; no breathing in v0. |
+| Compressor | The existing registered separable basis interface is reused through `RegisteredAxisBasisProvider`; Chebyshev is the first default and DCT already passes plug-in and end-to-end checkpoint tests. |
+| Coefficient support | Fixed and fully populated inside each valid tensor-product region; no breathing in v0. Family orders and numerical-axis orders are independently configurable. |
 | Existing DEPTH | Disabled for covered matrices. HYPERBLOCK owns the DEPTH dimension itself. |
-| Existing BLOCK | Preserved unchanged. HYPERBLOCK is a separate architecture-wide capability. |
+| Existing BLOCK | Preserved unchanged. HYPERBLOCK is a separate `CoupledFieldTrajectory` capability selected before the legacy trajectory switch. |
 | Excluded initially | Linear biases, LayerNorm parameters, token/position embeddings and tied LM head. |
 | Primary test | Whether a Transformer trained from scratch can organise all covered weights around one compact field coordinate system. |
 
@@ -194,7 +194,7 @@ Each physical index on an axis is assigned a fixed coordinate in `[-1,1]`. For a
 \xi_X(i)=\frac{2i}{N_X-1}-1.
 \]
 
-A singleton axis maps to zero. The family axis uses a fixed, checkpointed ordering and the same coordinate map. `CHEBYSHEV@v1` evaluates first-kind Chebyshev modes on these coordinates and may apply existing THOG2 normalization or QR stabilization. The implementation records the exact table identity used.
+A singleton axis maps to zero. The physical family labels and their order are fixed and checkpointed, but the three coefficient regions use their own family-domain basis tables: six positions for the common region, four for the attention extension and two for the MLP extension. This is now explicit in identity as `WEIGHT_FAMILY_COMMON`, `WEIGHT_FAMILY_ATTENTION` and `WEIGHT_FAMILY_MLP`. Each region is internally consistent; the branch bases are not claimed to be the same polynomial modes as the common-family basis. Chebyshev uses the existing THOG2 first-kind recurrence followed by deterministic reduced QR with positive diagonal. The field implementation does not contain a second Chebyshev algorithm.
 
 ## 5.2 Anisotropic retained orders
 
@@ -289,15 +289,17 @@ Without `C⁰`, the model has one attention field and one MLP field. They may us
 
 The common field does not force the families to be numerically similar. WEIGHT_FAMILY remains an axis, so the common field may vary across families. If little common structure exists, common coefficients may remain small while extensions carry most useful variation.
 
-## 6.3 Family coordinate identity
+## 6.3 Family coordinate identity and actual coupling
 
-`WEIGHT_FAMILY` is not an axis inside any one matrix. It is an axis of the architecture-wide field. The canonical v0 physical order is:
+The canonical physical family order is:
 
 ```text
 Q, K, V, ATTENTION_OUTPUT, MLP_UP, MLP_DOWN
 ```
 
-The ordering, coordinate map and retained orders are semantic checkpoint identity. Changing them changes the meaning of every coefficient.
+The common region uses that six-position domain. The attention extension uses `Q, K, V, ATTENTION_OUTPUT`; the MLP extension uses `MLP_UP, MLP_DOWN`. Each region obtains a basis table from the same registered provider, but over its own physical family count. This avoids null coefficient directions that would arise from storing six family modes in a branch evaluated at only four or two physical families.
+
+Family orders are now first-class anisotropic controls. Full orders `6/4/2` make each family-domain transform invertible and therefore impose no compression across family identity; they are the least presumptuous default. Reduced family orders create genuine cross-family compression and coupling. This distinction matters: with full family orders, the object still couples common and branch dimensions structurally, but it does not earn parameter savings from similarities among Q/K/V/O/UP/DOWN. A serious experimental grid should therefore include reduced `P_F0`, `P_FA` and `P_FM` values rather than calling the full-order case proof of cross-family compression.
 
 # 7. Cross-Axis Relationships and Diagonals
 
@@ -422,7 +424,7 @@ A separate subsystem protects working code paths. Dense, DEPTH, JPEG-like, CURVE
 
 | Subsystem | Reuse position |
 |---|---|
-| Basis registry and Chebyshev implementation | Reuse through an axis-basis provider adapter. Do not fork numerical basis code. |
+| Basis registry and Chebyshev implementation | Reused as built. `build_registered_basis()` supplies every axis table; materialisation remains topology-owned and basis-independent. |
 | Resolved configuration | Reuse serialization, validation and identity patterns; introduce `ResolvedHyperblockPlan`. |
 | Operational weight injection | Reuse the established mechanism substituting generated tensors for Linear weights. |
 | Fast discard false | Reuse materialize-once/project-once lifecycle, with one field-machine VJP. |
@@ -433,136 +435,151 @@ A separate subsystem protects working code paths. Dense, DEPTH, JPEG-like, CURVE
 
 When HYPERBLOCK is active, the six covered matrices must not simultaneously receive DEPTH, CURVE, SHEET, BLOCK or remainder parameterisation. Validation rejects overlap before model construction. Uncovered vectors and embeddings continue through existing paths.
 
+## 10.4 As-built branch status
+
+The current branch implements the architecture as a new `sheet/hyperblock/` package containing `plan.py`, `basis_provider.py`, `materializer.py` and `trajectory.py`. `SheetGPT` selects `CoupledFieldTrajectory` before entering the preserved legacy trajectory selection chain. Q/K/V/O/UP/DOWN are generated by HYPERBLOCK; LayerNorms and linear biases are conventional per-layer parameters in v0. Token/position embeddings, final LayerNorm and the tied LM head retain their existing paths.
+
+Two materialisers are retained deliberately. The reference path uses explicit `torch.einsum` equations that mirror the specification. The staged path uses mode products implemented with `torch.tensordot`. CPU tests require both paths to agree. The production per-family/layer route currently prioritizes correctness; it has not yet been optimized to reuse every common contraction across all six families.
+
 # 11. Field-Machine and Compressor Interfaces
 
-## 11.1 Proposed components
+## 11.1 As-built components
 
 | Component | Responsibility |
 |---|---|
-| `ResolvedHyperblockPlan` | Immutable canonical topology, family order, axis orders, compressor identity, coordinate maps, dtype policy and materialisation version. |
-| `HyperblockAxisSpec` | Axis name, physical length, retained order, coordinate map, basis options and validation. |
-| `HyperblockRegionSpec` | COMMON, ATTENTION and MLP region definitions, family subsets, axis lists and excluded constant support. |
-| `AxisBasisProvider` | One-dimensional basis construction, projection support, identity and diagnostics. |
-| `ChebyshevAxisBasisProvider` | First provider, adapting existing stabilized Chebyshev implementation. |
-| `CoupledFieldMachine` | Owns `C⁰`, `Cᴬ`, `Cᴹ`; materialises all covered weights and reports accounting. |
-| `HyperblockWeightRouter` | Maps semantic generated tensors to nanoGPT `c_attn`, `c_proj`, `c_fc` layouts. |
-| `HyperblockInitializer` | Projects ordinary nanoGPT target-space initialization into coupled coefficient spaces. |
+| `HyperblockOrders` | Retained common-family, attention-family, MLP-family, DEPTH, D_MODEL, MLP_HIDDEN, ATTENTION_HEAD and ATTENTION_HEAD_CHANNEL orders. |
+| `ResolvedHyperblockPlan` | Immutable physical sizes, coefficient shapes/counts, topology/provider/materialisation/initialization identity and validation. |
+| `AxisBasisProvider` | Minimal protocol for building one `[physical_length, retained_order]` table and describing provider identity. |
+| `RegisteredAxisBasisProvider` | Calls the existing THOG2 `build_registered_basis()` registry entry. |
+| `HyperblockBasisTables` | Builds all eight non-persistent fixed tables and exposes diagnostics. |
+| `materialize_regions_reference()` | Clear `einsum` implementation of the complete common, attention and MLP fields. |
+| `materialize_regions_staged()` | Basis-independent staged mode products using `torch.tensordot`. |
+| Per-family materialisers and routing functions | Generate one requested family/layer and orient it to current nanoGPT packed layouts. |
+| `CoupledFieldTrajectory` | Owns coefficients and conventional vectors, initializes them, satisfies the existing trajectory contract, reports accounting and integrates retained materialisation. |
 
-## 11.2 Plug-in basis-provider contract
+There are no separate `HyperblockAxisSpec`, `HyperblockRegionSpec`, `HyperblockWeightRouter` or `HyperblockInitializer` classes in the current implementation. Their proposed responsibilities proved small and stable enough to express in the resolved plan, basis-table owner, pure functions and trajectory without adding class ceremony.
 
-The topology must not call Chebyshev code directly. It asks a registered provider for a basis table for each axis. A separable provider returns `[physical_length, retained_order]`, plus stable projection and validation behavior.
+## 11.2 As-built plug-in basis-provider contract
+
+The topology does not call Chebyshev code directly. The current protocol is deliberately smaller than the original proposal:
 
 ```python
 class AxisBasisProvider(Protocol):
-    identity: BasisIdentity
+    family: str
+    version: str
 
-    def build_basis(
+    def build(
         self,
-        axis: HyperblockAxisSpec,
+        sample_count: int,
+        order: int,
         *,
-        device: torch.device,
-        dtype: torch.dtype,
+        runtime_dtype: torch.dtype,
+        device: torch.device | None = None,
     ) -> torch.Tensor: ...
 
-    def project(
-        self,
-        values: torch.Tensor,
-        axis: HyperblockAxisSpec,
-        *,
-        dimension: int,
-    ) -> torch.Tensor: ...
-
-    def validate(self, axis: HyperblockAxisSpec) -> list[Diagnostic]: ...
-    def describe(self, axis: HyperblockAxisSpec) -> Mapping[str, Any]: ...
+    def describe(self) -> Mapping[str, object]: ...
 ```
 
-The provider may use Chebyshev, DCT, Haar, lapped cosine or another separable basis. Compressor identity includes family, version and normalization. A basis change is checkpoint-incompatible unless an explicit migration transforms coefficients.
+Projection is not part of the provider contract because the registered bases used in v0 are orthonormal and materialisation needs only basis tables. Initialization uses transposed family-basis contractions inside `CoupledFieldTrajectory`. A future provider that is not orthonormal would require an explicit contract version and projection operator; it must not silently pretend compatibility with v1.
+
+The same field code has been tested with registered Chebyshev and DCT providers. Haar and lapped-cosine are registry-reachable in principle, but whole-model HYPERBLOCK tests for them have not yet been claimed.
 
 ## 11.3 Honest plug-and-play boundary
 
 The v0 boundary supports separable one-dimensional bases whose multidimensional field is formed by tensor products. A genuinely non-separable joint compressor does not fit this interface. It would require a region-level provider or a later field-machine version. The implementation must not pretend every future compressor is plug-compatible merely by sharing a name.
 
-## 11.4 Basis caching
+## 11.4 Basis lifetime
 
-Basis tables are fixed for a resolved plan and cached by device, dtype, physical length, retained order, provider version, coordinate map and options. They are buffers, not parameters. Tables with different coordinate maps or normalization must never share cache identity.
+Basis tables are fixed non-persistent module buffers. They are regenerated deterministically from the resolved provider family/version, physical lengths and retained orders when a model is constructed or a checkpoint is loaded. HYPERBLOCK adds no new global cache in v0. The underlying registry implementation remains free to reuse its existing cache behavior. Checkpoints therefore store coefficient tensors and basis identity, not redundant basis-table values.
 
 # 12. Configuration, CLI and Resolved Identity
 
-## 12.1 Proposed canonical controls
+## 12.1 As-built canonical controls
 
-```bash
---hyperblock coupled_field_machine
---hyperblock-compressor chebyshev@v1
---hyperblock-order WEIGHT_FAMILY_COMMON=6
---hyperblock-order WEIGHT_FAMILY_ATTENTION=4
---hyperblock-order WEIGHT_FAMILY_MLP=2
---hyperblock-order DEPTH=16
---hyperblock-order D_MODEL=16
---hyperblock-order MLP_HIDDEN=16
---hyperblock-order ATTENTION_HEAD=16
---hyperblock-order ATTENTION_HEAD_CHANNEL=16
---explain-hyperblock
+The public CLI uses a Boolean switch while only one topology exists. The resolved plan still records `coupled_field_machine` as the topology subtype.
+
+```text
+--hyperblock
+--hyperblock-compressor chebyshev
+--hyperblock-compressor-version auto
+--hyperblock-common-family-order 6
+--hyperblock-attention-family-order 4
+--hyperblock-mlp-family-order 2
+--hyperblock-depth-order 16
+--hyperblock-d-model-order 16
+--hyperblock-mlp-hidden-order 16
+--hyperblock-attention-head-order 16
+--hyperblock-attention-head-channel-order 16
+--hyperblock-mlp-hidden-multiplier 4
 ```
 
-Long-form names are recommended initially. Reusing P/Q/J/O/X/Y would be misleading because HYPERBLOCK shares one D_MODEL order across attention and MLP and one HEAD_CHANNEL order across Q/K/V/O.
+`--hyperblock coupled_field_machine` was the original proposed surface. It was not implemented because it exposes a choice that does not yet exist. If another topology is introduced, add an explicit topology option then; do not overload the compressor option.
 
 ## 12.2 Resolved plan fields
 
-| Field | Required content |
+| Field | As-built content |
 |---|---|
 | `schema_version` | Resolved plan format version. |
-| `topology` | `COUPLED_FIELD_MACHINE@v1` and region definitions. |
-| `covered_families` | Ordered list Q, K, V, O, UP, DOWN. |
-| `family_coordinates` | Exact coordinate assigned to every family. |
-| `axis_specs` | Physical lengths, retained orders, maps and basis options. |
-| `compressor` | Registered name, version and normalization identity. |
-| `coefficient_shapes` | Canonical shapes and excluded support for `C⁰`, `Cᴬ`, `Cᴹ`. |
-| `materialization_version` | Operational routing/orientation identity. |
-| `initialization_version` | Projection and target initialization identity. |
-| `dtype_policy` | Persistent, basis, contraction and operational dtypes. |
-| `compatibility` | Mutual exclusions and uncovered parameter paths. |
+| `topology` / `topology_version` | `coupled_field_machine` / `coupled_field_machine_v1`. |
+| `covered_families` | Ordered Q, K, V, ATTENTION_OUTPUT, MLP_UP, MLP_DOWN labels. |
+| `physical_axis_lengths` | Three family domains plus DEPTH, D_MODEL, MLP_HIDDEN, ATTENTION_HEAD and ATTENTION_HEAD_CHANNEL. |
+| `retained_axis_orders` | Independent retained order for all eight coefficient axes. |
+| `compressor_family` / `compressor_version` | Canonical registered basis identity. |
+| `coefficient_shapes` / `coefficient_counts` | Exact stored shapes and per-region/total scalar counts. |
+| `materialization_version` | `coupled_field_machine_materialization_v1`. |
+| `initialization_version` | `orthogonal_mode_variance_split_v1`. |
+| `family_coordinate_policy` | Current branch-local family-domain ordering policy. |
+| `support_policy` | Fixed full valid regions with duplicate constant branch modes omitted. |
+
+Runtime dtype is carried by the ordinary model/training configuration rather than duplicated inside the mathematical plan. Changing topology, provider identity, orders, physical sizes, materialisation or initialization version changes compatibility identity.
 
 ## 12.3 Example invocation
 
 ```bash
 ./train_OWT.sh \
-  -g HYPERBLOCK_CFM_16 \
-  --hyperblock coupled_field_machine \
-  --hyperblock-compressor chebyshev@v1 \
-  --hyperblock-order DEPTH=16 \
-  --hyperblock-order D_MODEL=16 \
-  --hyperblock-order MLP_HIDDEN=16 \
-  --hyperblock-order ATTENTION_HEAD=16 \
-  --hyperblock-order ATTENTION_HEAD_CHANNEL=16 \
-  -L 32 -H 16 -D 1024 -C 1024 \
-  --explain-hyperblock
+  --hyperblock \
+  --hyperblock-compressor chebyshev \
+  --hyperblock-common-family-order 6 \
+  --hyperblock-attention-family-order 4 \
+  --hyperblock-mlp-family-order 2 \
+  --hyperblock-depth-order 16 \
+  --hyperblock-d-model-order 16 \
+  --hyperblock-mlp-hidden-order 16 \
+  --hyperblock-attention-head-order 16 \
+  --hyperblock-attention-head-channel-order 16 \
+  --hyperblock-mlp-hidden-multiplier 4 \
+  -L 32 -H 16 -D 1024
 ```
 
-The resolved plan, not preset label or short option spelling, is authoritative for checkpoints, artifact names and reproducibility.
+The wrapper emits `HB_<compressor>` in the artifact identity and records family and numerical orders as `HFC/HFA/HFM/HL/HD/HM/HH/HC`. HYPERBLOCK is mutually exclusive with `--geometry-preset`, selector geometry and DEPTH vector compression.
 
 # 13. Initialization and Materialization
 
 ## 13.1 Coefficient storage
 
-Store only occupied regions. `c_common`, `c_attention` and `c_mlp` may be separate Parameters or entries in a ParameterDict, but serialize as one CoupledFieldMachine state. Do not allocate a zero-filled six-dimensional tensor.
+Only occupied support is stored. The implementation uses a `ParameterDict` with `common`, `attention` and `mlp`; it does not allocate a zero-filled six-dimensional tensor. The excluded constant unique-axis modes are restored as explicit zeros only while materialising.
 
-| Parameter | Canonical mode shape |
-|---|---|
-| `c_common` | `[P_F0, P_DEPTH, P_D_MODEL]` |
-| `c_attention` | `[P_FA, P_DEPTH, P_D_MODEL, P_HEAD, P_HEAD_CHANNEL]`, excluding or fixing to zero the `[HEAD=0, HEAD_CHANNEL=0]` plane |
-| `c_mlp` | `[P_FM, P_DEPTH, P_D_MODEL, P_MLP_HIDDEN]`, excluding or fixing to zero MLP_HIDDEN mode 0 |
+| Parameter | As-built stored shape | Mathematical meaning |
+|---|---|---|
+| `common` | `[P_F0, P_DEPTH, P_D_MODEL]` | Complete common tensor-product region. |
+| `attention` | `[P_FA, P_DEPTH, P_D_MODEL, P_HEAD*P_HEAD_CHANNEL-1]` | Flattened attention unique-mode plane with the doubly constant mode omitted. |
+| `mlp` | `[P_FM, P_DEPTH, P_D_MODEL, P_MLP_HIDDEN-1]` | MLP unique modes with hidden mode 0 omitted. |
 
-## 13.2 Target-space initialization
+The flattened storage is operational only. `_restore_attention_unique_modes()` and `_restore_mlp_unique_modes()` reconstruct the mathematical mode layouts before contraction.
 
-Naively sampling coefficients independently can produce badly scaled and correlated operational weights. Preferred initialization is target-space projection:
+## 13.2 As-built initialization
 
-1. Generate Q, K, V, O, MLP_UP and MLP_DOWN dense targets using current nanoGPT initialization, including residual-projection scaling where applicable.
-2. For each family, average the target over its unique dimensions: HEAD × HEAD_CHANNEL for attention or MLP_HIDDEN for MLP.
-3. Jointly project those six family/depth/D_MODEL means into the common basis to initialize `C⁰`.
-4. Broadcast reconstructed common field, subtract it from each target population, and project remaining attention and MLP residuals into branch bases.
-5. Discard temporary dense targets and report reconstruction error by family.
+The first implementation does not allocate temporary full dense Q/K/V/O/UP/DOWN targets and project them. That would be mathematically simple but memory-expensive at real scale. Instead it uses an analytic orthogonal-mode variance split:
 
-If basis tables are orthonormal, projection is a sequence of transposed basis contractions. Otherwise the provider supplies a stable least-squares or pseudoinverse projection. Initialization is deterministic under seed and versioned in identity.
+1. Start from nanoGPT target standard deviations: `0.02` for Q/K/V/MLP_UP and `0.02/sqrt(2L)` for ATTENTION_OUTPUT and MLP_DOWN, subject to the existing residual-initialization policy.
+2. Use the retained-to-physical energy of DEPTH and D_MODEL basis tables to calculate coefficient variance.
+3. Split each family's target variance between the common mode and its branch-unique modes so the average reconstructed physical variance equals the target.
+4. Sample branch-local physical-family coefficient arrays and project them through the transpose of the orthonormal family basis.
+5. Initialize LayerNorm weights to one and all covered biases to zero.
+
+For an attention family with `P_H P_C` retained unique-axis mode pairs, the common contribution receives `1/(P_H P_C)` of target variance and the attention extension receives the remaining fraction. The MLP split is analogous with `P_M`. This exactly accounts for the omitted constant branch mode in the average-energy calculation. CPU statistical tests verify ordinary and residual family standard deviations within ten percent on a moderate synthetic model.
+
+The initialization identity is `orthogonal_mode_variance_split_v1`. A future dense-target projection initializer would be a separate, checkpoint-visible initialization version rather than a silent change.
 
 ## 13.3 Materialisation contractions
 
@@ -616,7 +633,9 @@ First implement all contractions inside autograd. Loss gradients flow from each 
 
 ## 14.2 Fast discard false
 
-The optimized THOG2 path materialises generated operational weights once per optimizer update, detaches them for gradient-accumulation microsteps, then projects accumulated operational gradients once back to persistent parameters. CoupledFieldMachine integrates at this lifecycle boundary rather than materialising independently per layer or microstep.
+The optimized THOG2 path materialises generated operational weights once per optimizer update, detaches them for gradient-accumulation microsteps, then projects accumulated operational gradients once back to persistent parameters. `CoupledFieldTrajectory` integrates at this lifecycle boundary rather than retaining a second set of persistent dense weights.
+
+On the current CPU environment, retained and ephemeral HYPERBLOCK paths produce equal loss and coefficient gradients differing only at roughly `1e-8` to `4e-8`, but Adam's first normalized update can magnify near-zero cancellation/sign differences to about `3e-4` in coefficient state. The test therefore requires a bounded numerical difference rather than bitwise equality. The equivalent legacy fast-discard test also fails on the untouched branch base in this environment, so this is recorded as an environment-sensitive numerical issue, not silently labelled a HYPERBLOCK regression.
 
 The projection is the vector-Jacobian product of the common and branch contractions. Q/K/V/O gradients contribute to `c_attention` and `c_common`; MLP_UP/DOWN gradients contribute to `c_mlp` and `c_common`. Common projection sums both populations before DDP synchronization and optimizer update.
 
@@ -684,6 +703,8 @@ HYPERBLOCK
 6. Attention and MLP both contribute to `c_common`; the joint gradient equals the sum of separate contributions.
 7. Generated orientations reproduce expected nanoGPT QKV packing and MLP shapes.
 8. A mock second basis provider replaces Chebyshev without topology or router changes.
+
+As built, the local HYPERBLOCK suite contains 35 passing CPU tests. It includes exact reference-versus-staged comparisons, direct-sum support, family-order accounting, DCT substitution, weight routing, initialization statistics, retained projection, checkpoint regeneration, model forward/backward, optimizer grouping, CLI/wrapper propagation, a full-graph compile smoke and a DCT train-save-resume test.
 
 ## 16.2 Integration tests
 
@@ -854,10 +875,10 @@ HYPERBLOCK
 
 ## 19.3 Decision threshold
 
-Do not proceed directly from specification to a long GPU run. CPU reference evaluation, gradient tests, initialization reconstruction and explain accounting are mandatory gates. The first GPU smoke is structural. Only a stable short-run order sweep can justify a long comparison.
+Do not proceed directly from CPU implementation to a long GPU run. CPU reference evaluation, gradient tests, initialization statistics, checkpoint round trips and explain accounting are mandatory gates. The first GPU smoke is structural. Only a stable short-run order sweep can justify a long comparison.
 
 > **SPECIFICATION ENDPOINT**  
-> Version 0.1 stops at a fixed, separable, anisotropic coupled field over the six repeated block matrix families. It deliberately establishes one honest object, one plug-in boundary and one testable hypothesis before adaptive capacity or broader parameter coverage.
+> Version 0.2 records a fixed, separable, anisotropic coupled field over the six repeated block matrix families. It deliberately establishes one honest object, one plug-in boundary and one testable hypothesis before adaptive capacity or broader parameter coverage.
 
 ---
 
@@ -910,31 +931,28 @@ Do not proceed directly from specification to a long GPU run. CPU reference eval
 
 This configuration is an accounting and smoke-test reference, not a claim that order 16 is optimal on every axis. The first sweep varies D_MODEL, HEAD, HEAD_CHANNEL and MLP_HIDDEN independently while keeping DEPTH at the empirically useful starting point of 16.
 
-# Appendix C. Proposed Module Layout
+# Appendix C. As-Built Module Layout
 
 ```text
 sheet/hyperblock/
     __init__.py
     plan.py
-    topology.py
-    axis_basis.py
-    chebyshev_axis_basis.py
-    coupled_field_machine.py
-    initializer.py
+    basis_provider.py
     materializer.py
-    weight_router.py
-    diagnostics.py
+    trajectory.py
 
 tests/
-    test_hyperblock_plan.py
-    test_hyperblock_reference_materializer.py
-    test_hyperblock_gradients.py
-    test_hyperblock_initialization.py
-    test_hyperblock_checkpoint_identity.py
-    test_hyperblock_fast_discard.py
-    test_hyperblock_cpu_smoke.py
+    test_hyperblock_mathematical_core.py
+    test_hyperblock_trajectory.py
+    test_hyperblock_model_integration.py
+    test_hyperblock_run_config.py
+    test_hyperblock_wrapper.py
 ```
 
-Exact filenames may change, but topology, basis provider, coefficient ownership, initialization and nanoGPT routing should remain separate. The field machine must not become another monolithic trajectory class with compressor-specific branches embedded throughout it.
+The existing basis registry remains under `sheet/bases/`. HYPERBLOCK does not fork Chebyshev, DCT, Haar or lapped-cosine numerical implementations. The current GitHub workflow runs compile checks and the dedicated HYPERBLOCK CPU suite; broader regressions remain mandatory before merge.
 
-**SPECIFICATION END**
+---
+
+**SPECIFICATION ENDPOINT**
+
+Version 0.2 records the working implementation rather than only the original proposal. The central research question remains unchanged: can gradient descent train a useful Transformer inside one compact, fixed, anisotropic, coupled field? The implementation is now sufficient for CPU correctness experiments, but not yet sufficient evidence for merge or for a claim of useful GPU performance.

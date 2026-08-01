@@ -20,8 +20,18 @@ def _apply_sheet_residual_init_scaling(
     residual_std = config.residual_init_config().residual_std(
         model_type=config.model_type,
         n_layer=config.n_layer,
-        depth_order=config.depth_order,
+        depth_order=(
+            config.hyperblock_depth_order
+            if config.hyperblock_enabled
+            else config.depth_order
+        ),
     )
+    # vvv THOG HYPERBLOCK scales physical O and MLP_DOWN families through its coupled family bases
+    trajectory_scaler = getattr(model.trajectory, "apply_residual_init_scaling", None)
+    if callable(trajectory_scaler):
+        trajectory_scaler(residual_std)
+        return
+    # ^^^ THOG
     with torch.no_grad():
         for item in model.trajectory.metadata:
             if item.name not in MATRIX_RESIDUAL_FAMILIES:
