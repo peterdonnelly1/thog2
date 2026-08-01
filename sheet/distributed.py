@@ -5,7 +5,7 @@ import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 import torch
 import torch.distributed as dist
@@ -153,7 +153,17 @@ class DistributedContext:
     def is_primary(self) -> bool:
         return self.rank == 0
 
-    def wrap_model(self, model: nn.Module) -> nn.Module:
+    def wrap_model(
+        self,
+        model: nn.Module,
+        *,
+        find_unused_parameters: bool = False,
+    ) -> nn.Module:
+        if not isinstance(find_unused_parameters, bool):
+            raise TypeError(
+                "find_unused_parameters must be bool; "
+                f"got {find_unused_parameters!r}"
+            )
         if not self.active:
             return model
         if self.device.type == "cuda":
@@ -162,13 +172,25 @@ class DistributedContext:
                 device_ids=[self.local_rank],
                 output_device=self.local_rank,
                 broadcast_buffers=False,
-                find_unused_parameters=False,
+                find_unused_parameters=find_unused_parameters,
             )
         return DistributedDataParallel(
             model,
             broadcast_buffers=False,
-            find_unused_parameters=False,
+            find_unused_parameters=find_unused_parameters,
         )
+
+    # vvv THOG gradients projected outside the DDP forward graph require one explicit rank mean
+    def mean_gradients_(self, parameters: Iterable[nn.Parameter]) -> None:
+        if not self.active:
+            return
+        for parameter in parameters:
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            dist.all_reduce(gradient, op=dist.ReduceOp.SUM)
+            gradient.div_(self.world_size)
+    # ^^^ THOG
 
     def no_sync_context(self, model: nn.Module, *, synchronize: bool):
         if self.active and not synchronize:

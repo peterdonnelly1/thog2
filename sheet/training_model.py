@@ -14,6 +14,7 @@ from .checkpointing import (
     validate_checkpoint_segment_size,
 )
 from .model import SheetGPT, SheetGPTConfig
+from .update_retained_materializations import attach_update_retained_materializations
 
 
 # vvv THOG regional compilation uses the existing activation-checkpoint segmentation as the compilation region boundary
@@ -73,7 +74,7 @@ class TrainingDenseGPT(GPT):
         self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
     # ^^^ THOG
 
-    # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
+    # vvv THOG regional torch.compile keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
     def set_torch_compile_mode(self, mode: str) -> None:
         resolved_mode = _validate_torch_compile_mode(mode)
         if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
@@ -152,6 +153,12 @@ class TrainingSheetGPT(SheetGPT):
 
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__(config)
+        # vvv THOG fast_discard=false retains one operational materialisation per active layer and family for an optimiser update
+        self._update_retained_materializations = attach_update_retained_materializations(
+            self.trajectory,
+            enabled=not config.fast_discard,
+        )
+        # ^^^ THOG
         self.checkpoint_segment_size = 0
         # vvv THOG training-only sparse nominal layer selection; None preserves the original path
         self._active_layer_indices: Optional[Tuple[int, ...]] = None
@@ -170,12 +177,110 @@ class TrainingSheetGPT(SheetGPT):
     def set_checkpoint_segment_size(self, segment_size: int) -> None:
         self.checkpoint_segment_size = validate_checkpoint_segment_size(segment_size)
 
+    # vvv THOG explicit optimiser-update lifetime for non-fast-discard materialisations
+    def _optimizer_update_layer_indices(self) -> Tuple[int, ...]:
+        if self._active_layer_indices is None:
+            return tuple(range(self.config.n_layer))
+        return self._active_layer_indices
+
+    def _materialize_layer_norm_parameters_for_update(
+        self,
+        layer_indices: Tuple[int, ...],
+    ) -> None:
+        parameter = next(self.parameters())
+        with torch.autocast(device_type=parameter.device.type, enabled=False):
+            for layer_index in layer_indices:
+                self.trajectory.materialize_vector("ln_1_weight", layer_index)
+                self.trajectory.materialize_vector("ln_2_weight", layer_index)
+                if self.config.bias:
+                    self.trajectory.materialize_vector("ln_1_bias", layer_index)
+                    self.trajectory.materialize_vector("ln_2_bias", layer_index)
+
+    def _materialize_block_parameters_for_update(
+        self,
+        layer_indices: Tuple[int, ...],
+    ) -> None:
+        direct_application = (
+            self.config.direct_factorised_mlp
+            and self._supports_direct_factorised_mlp()
+        )
+        for layer_index in layer_indices:
+            if self.config.bypass_semantic_qkv_adapter:
+                self.trajectory.materialize("attention_input_weight", layer_index)
+                if self.config.bias:
+                    self.trajectory.materialize_vector(
+                        "attention_input_bias",
+                        layer_index,
+                    )
+            else:
+                self.semantic_materializer.reconstructed_attention_input_weight(
+                    layer_index
+                )
+                if self.config.bias:
+                    self.semantic_materializer.reconstructed_attention_input_bias(
+                        layer_index
+                    )
+            self.trajectory.materialize("attention_output_weight", layer_index)
+            if self.config.bias:
+                self.trajectory.materialize_vector(
+                    "attention_output_bias",
+                    layer_index,
+                )
+                self.trajectory.materialize_vector(
+                    "mlp_expansion_bias",
+                    layer_index,
+                )
+                self.trajectory.materialize_vector(
+                    "mlp_contraction_bias",
+                    layer_index,
+                )
+            if not direct_application:
+                self.trajectory.materialize("mlp_expansion_weight", layer_index)
+                self.trajectory.materialize("mlp_contraction_weight", layer_index)
+
+    def begin_optimizer_update(self) -> bool:
+        controller = self._update_retained_materializations
+        if not controller.begin():
+            return False
+        try:
+            if not torch.is_grad_enabled():
+                raise RuntimeError(
+                    "update-retained materialisations require gradient tracking"
+                )
+            layer_indices = self._optimizer_update_layer_indices()
+            self._materialize_layer_norm_parameters_for_update(layer_indices)
+            self._materialize_block_parameters_for_update(layer_indices)
+        except BaseException:
+            controller.end()
+            raise
+        return True
+
+    def finalize_optimizer_update(self) -> Tuple[Tensor, ...]:
+        return self._update_retained_materializations.finalize()
+
+    def end_optimizer_update(self) -> bool:
+        return self._update_retained_materializations.end()
+
+    def requires_find_unused_parameters(self) -> bool:
+        return self._update_retained_materializations.enabled
+
+    def update_retained_materialization_report(self) -> Dict[str, object]:
+        controller = self._update_retained_materializations
+        return {
+            "enabled": controller.enabled,
+            "active": controller.active,
+            "retained_count": controller.retained_count,
+            "request_count": controller.request_count,
+            "materialization_count": controller.materialization_count,
+        }
+    # ^^^ THOG
+
     # vvv THOG layer-dropout selection is external trainer state, not compact model state
     def set_active_layer_indices(self, layer_indices: Optional[Sequence[int]]) -> None:
         self._active_layer_indices = None if layer_indices is None else tuple(int(value) for value in layer_indices)
     # ^^^ THOG
 
-    # vvv THOG regional compilation keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
+    # vvv THOG regional torch.compile keeps the outer model, vocabulary head, loss, and checkpoint machinery eager
     def set_torch_compile_mode(self, mode: str) -> None:
         resolved_mode = _validate_torch_compile_mode(mode)
         if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:

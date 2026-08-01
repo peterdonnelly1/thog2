@@ -82,7 +82,20 @@ class Stage4Trainer(SharedTrainer):
             self.raw_model,
             config.model_type,
         )
-        self.model = self.distributed.wrap_model(_execution_model(self.raw_model))
+        # vvv THOG retained operational tensors disconnect compact parameters from the DDP forward graph until explicit gradient projection
+        find_unused_parameters = False
+        find_unused_requirement = getattr(
+            self.raw_model,
+            "requires_find_unused_parameters",
+            None,
+        )
+        if callable(find_unused_requirement):
+            find_unused_parameters = bool(find_unused_requirement())
+        self.model = self.distributed.wrap_model(
+            _execution_model(self.raw_model),
+            find_unused_parameters=find_unused_parameters,
+        )
+        # ^^^ THOG
         self.optimizer = build_optimizer(
             self.raw_model,
             weight_decay=config.weight_decay,

@@ -238,6 +238,31 @@ class TrainerStepMixin:
         }
     # ^^^ THOG
 
+    # vvv THOG fast_discard=false retains detached operational tensors and projects their accumulated gradients once per update
+    def _begin_optimizer_update_materializations(self) -> bool:
+        begin = getattr(self.raw_model, "begin_optimizer_update", None)
+        if not callable(begin):
+            return False
+        return bool(begin())
+
+    def _finalize_optimizer_update_materializations(self) -> None:
+        finalize = getattr(self.raw_model, "finalize_optimizer_update", None)
+        if not callable(finalize):
+            raise RuntimeError(
+                "model began update-retained materialisations without a finalize method"
+            )
+        projected_parameters = tuple(finalize())
+        self.distributed.mean_gradients_(projected_parameters)
+
+    def _end_optimizer_update_materializations(self) -> None:
+        end = getattr(self.raw_model, "end_optimizer_update", None)
+        if not callable(end):
+            raise RuntimeError(
+                "model began update-retained materialisations without an end method"
+            )
+        end()
+    # ^^^ THOG
+
     def train_one_update(self) -> Dict[str, Any]:
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
@@ -248,52 +273,60 @@ class TrainerStepMixin:
         total_loss = 0.0
         accumulation_steps = self.config.gradient_accumulation_steps
         microbatch_starts: List[Tuple[int, ...]] = []
-        for micro_step in range(accumulation_steps):
-            batch = self.batch_source.get_batch("train", device=self.device)
-            microbatch_starts.append(
-                tuple(int(value) for value in batch.starts)
-            )
-            self._record(
-                "microbatch",
-                micro_step=micro_step,
-                starts=batch.starts,
-            )
-            synchronize = micro_step == accumulation_steps - 1
-            with self.distributed.no_sync_context(
-                self.model,
-                synchronize=synchronize,
-            ):
-                with self.autocast_context():
-                    _, loss = self.model(batch.inputs, batch.targets)
-                    local_finite = loss is not None and bool(
-                        torch.isfinite(loss).item()
-                    )
-                    if not self.distributed.all_true(local_finite):
-                        loss_value = (
-                            float(
-                                loss.detach()
-                                .to(dtype=torch.float64)
-                                .item()
+        retained_materializations_active = self._begin_optimizer_update_materializations()                                                                  # <<< THOG activate update-lifetime materialisations only for fast_discard=false sheet models
+        try:
+            for micro_step in range(accumulation_steps):
+                batch = self.batch_source.get_batch("train", device=self.device)
+                microbatch_starts.append(
+                    tuple(int(value) for value in batch.starts)
+                )
+                self._record(
+                    "microbatch",
+                    micro_step=micro_step,
+                    starts=batch.starts,
+                )
+                synchronize = micro_step == accumulation_steps - 1
+                with self.distributed.no_sync_context(
+                    self.model,
+                    synchronize=synchronize,
+                ):
+                    with self.autocast_context():
+                        _, loss = self.model(batch.inputs, batch.targets)
+                        local_finite = loss is not None and bool(
+                            torch.isfinite(loss).item()
+                        )
+                        if not self.distributed.all_true(local_finite):
+                            loss_value = (
+                                float(
+                                    loss.detach()
+                                    .to(dtype=torch.float64)
+                                    .item()
+                                )
+                                if loss is not None
+                                else None
                             )
-                            if loss is not None
-                            else None
-                        )
-                        return self._handle_nonfinite_update(
-                            reason="loss",
-                            learning_rate=learning_rate,
-                            training_loss=loss_value,
-                            gradient_norm=None,
-                            micro_step=micro_step,
-                            microbatch_starts=microbatch_starts,
-                            scaler_unscaled=False,
-                        )
-                    if loss is None:
-                        raise RuntimeError(
-                            "model did not return a training loss"
-                        )
-                    scaled_loss = loss / accumulation_steps
-                total_loss += self.distributed.mean_float(loss.detach())
-                self.scaler.scale(scaled_loss).backward()
+                            return self._handle_nonfinite_update(
+                                reason="loss",
+                                learning_rate=learning_rate,
+                                training_loss=loss_value,
+                                gradient_norm=None,
+                                micro_step=micro_step,
+                                microbatch_starts=microbatch_starts,
+                                scaler_unscaled=False,
+                            )
+                        if loss is None:
+                            raise RuntimeError(
+                                "model did not return a training loss"
+                            )
+                        scaled_loss = loss / accumulation_steps
+                    total_loss += self.distributed.mean_float(loss.detach())
+                    self.scaler.scale(scaled_loss).backward()
+            if retained_materializations_active:
+                self._finalize_optimizer_update_materializations()                                                                                           # <<< THOG project scaled operational gradients before the standard scaler unscale
+                retained_materializations_active = False
+        finally:
+            if retained_materializations_active:
+                self._end_optimizer_update_materializations()                                                                                                # <<< THOG discard retained tensors on any failed or interrupted update
 
         self.scaler.unscale_(self.optimizer)
         if not self.distributed.all_true(

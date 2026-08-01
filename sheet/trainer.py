@@ -53,7 +53,20 @@ class SharedTrainer(
             self.raw_model,
             config.model_type,
         )
-        self.model = self.distributed.wrap_model(self.raw_model)
+        # vvv THOG retained operational tensors disconnect compact parameters from the DDP forward graph until explicit gradient projection
+        find_unused_parameters = False
+        find_unused_requirement = getattr(
+            self.raw_model,
+            "requires_find_unused_parameters",
+            None,
+        )
+        if callable(find_unused_requirement):
+            find_unused_parameters = bool(find_unused_requirement())
+        self.model = self.distributed.wrap_model(
+            self.raw_model,
+            find_unused_parameters=find_unused_parameters,
+        )
+        # ^^^ THOG
         self.optimizer = build_optimizer(
             self.raw_model,
             weight_decay=config.weight_decay,
@@ -104,6 +117,15 @@ class SharedTrainer(
                 parameter.numel() for parameter in self.raw_model.parameters()
             ),
         }
+
+    # vvv THOG pre-materialise retained operational tensors in the same autocast mode used by the microbatch forwards
+    def _begin_optimizer_update_materializations(self) -> bool:
+        begin = getattr(self.raw_model, "begin_optimizer_update", None)
+        if not callable(begin):
+            return False
+        with self.autocast_context():
+            return bool(begin())
+    # ^^^ THOG
 
     def close(self) -> None:
         self.distributed.close()
