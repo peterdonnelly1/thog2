@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MethodType
+# vvv THOG preserve the pre-bundle typing import for source history
+# from typing import Callable, Dict, Tuple
 from typing import Callable, Dict, Mapping, Optional, Tuple
+# ^^^ THOG
 
 import torch
 from torch import Tensor, nn
