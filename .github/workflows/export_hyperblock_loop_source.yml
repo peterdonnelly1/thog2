@@ -33,32 +33,7 @@ jobs:
         run: |
           cat .github/patch_parts/0* | base64 --decode | gzip --decompress > /tmp/hyperblock_loop_changes.patch
           echo 'b37eebe895b74e6e0334fa25056bcedd066cd22267157157b676ffff0eca3214  /tmp/hyperblock_loop_changes.patch' | sha256sum --check
-          cat > .github/workflows/export_hyperblock_loop_source.yml <<'EOF'
-          name: Export HYPERBLOCK loop source
-
-          on:
-            pull_request:
-              branches:
-                - COUPLED_FIELD_MACHINE_HYPERBLOCk
-
-          permissions:
-            contents: read
-
-          jobs:
-            export-source:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - name: Archive source
-                  run: |
-                    tar --exclude=.git -czf /tmp/thog2-source.tar.gz .
-                - uses: actions/upload-artifact@v4
-                  with:
-                    name: thog2-source-${{ github.sha }}
-                    path: /tmp/thog2-source.tar.gz
-                    retention-days: 1
-          EOF
-          sed -i 's/^          //' .github/workflows/export_hyperblock_loop_source.yml
+          git show 6c3f3c795bc69d4ca77032b8eff91bfd50eb393c:.github/workflows/export_hyperblock_loop_source.yml > .github/workflows/export_hyperblock_loop_source.yml
           git apply --check /tmp/hyperblock_loop_changes.patch
           git apply /tmp/hyperblock_loop_changes.patch
           rm -rf \
