@@ -25,7 +25,8 @@ def test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_d
     )
 
     assert line.startswith("T       2  00:03:16  tok/s=          63")
-    assert "\033[1;92mΔloss=  -0.123\033[0m" in line
+    assert "\033[1;38;2;0;255;0mΔloss=  -0.123\033[0m" in line
+    assert "\033[1;92m" not in line
     assert "updates=" not in line
     assert "cum time" not in line
     assert "run_id=" not in line
