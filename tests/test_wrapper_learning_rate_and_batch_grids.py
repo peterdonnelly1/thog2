@@ -99,5 +99,8 @@ if '--print-resolved-json' in args or '--dry-run' in args:
     for batch_size in (2, 4):
         for lr_code in (60, 70):
             assert f"b_{batch_size}_LR_{lr_code:02d}_" in completed.stdout
-            assert f"(LR_{lr_code})" in completed.stdout
+            # vvv THOG dry-run grid no longer emits the superseded shell-owned optimizer row
+            # assert f"(LR_{lr_code})" in completed.stdout
+            assert "  optimizer:" not in completed.stdout
+            # ^^^ THOG
 # ^^^ THOG
