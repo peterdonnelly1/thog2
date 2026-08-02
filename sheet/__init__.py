@@ -60,5 +60,6 @@ def _progress_elapsed_hh_mm_ss(value, completed_updates):
 
 
 _stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
-_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"
+# _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                               # <<< THOG preserve palette-dependent bright-green attempt
+_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
 # ^^^ THOG
