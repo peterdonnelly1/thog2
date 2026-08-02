@@ -8,7 +8,7 @@ from unittest import mock
 from sheet.stage6_trainer import Stage6Trainer, format_progress_line
 
 
-def test_training_console_row_uses_hhmm_after_step_one_and_colors_negative_delta_green() -> None:
+def test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green() -> None:
     line = format_progress_line(
         "OPTIMO",
         "optimizer_progress",
@@ -24,8 +24,8 @@ def test_training_console_row_uses_hhmm_after_step_one_and_colors_negative_delta
         },
     )
 
-    assert line.startswith("T       2  0003  tok/s=          63")
-    assert "\033[1;32mΔloss=  -0.123\033[0m" in line
+    assert line.startswith("T       2  00:03:16  tok/s=          63")
+    assert "\033[1;92mΔloss=  -0.123\033[0m" in line
     assert "updates=" not in line
     assert "cum time" not in line
     assert "run_id=" not in line
@@ -47,8 +47,37 @@ def test_step_one_console_row_keeps_elapsed_seconds() -> None:
             "training_loss_delta": "     n/a",
         },
     )
-    assert line.startswith("T       1   9s")
-    assert "0000" not in line
+    assert line.startswith("T       1        9s")
+    assert "00:00:09" not in line
+
+
+def test_step_one_seconds_field_aligns_following_columns_with_hh_mm_ss_rows() -> None:
+    common = {
+        "mean_step_seconds": " 4.7500",
+        "training_loss": "   6.0000",
+        "training_loss_delta": "  -0.125",
+    }
+    step_one = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     1",
+            "cumulative_training_seconds": "     5",
+            **common,
+        },
+    )
+    later = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     2",
+            "cumulative_training_seconds": "    65",
+            **common,
+        },
+    )
+    plain_step_one = re.sub(r"\x1b\[[0-9;]*m", "", step_one)
+    plain_later = re.sub(r"\x1b\[[0-9;]*m", "", later)
+    assert plain_step_one.index("Δstep=") == plain_later.index("Δstep=")
 
 
 def test_positive_delta_is_red_and_signed() -> None:
@@ -79,7 +108,7 @@ def test_validation_console_row_uses_bright_bold_yellow_for_validation_loss() ->
         },
     )
 
-    assert line.startswith("\033[33mV       2  0003  tok/s=          63")
+    assert line.startswith("\033[33mV       2  00:03:16  tok/s=          63")
     assert line.endswith("\033[0m")
     assert line.count("\033[1;93m") == 1
     assert "\033[1;93mvalidation loss=  10.7777\033[33m" in line
