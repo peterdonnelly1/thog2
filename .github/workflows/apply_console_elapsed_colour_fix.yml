@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - COUPLED_FIELD_MACHINE_HYPERBLOCk
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
 
 permissions:
   contents: write
