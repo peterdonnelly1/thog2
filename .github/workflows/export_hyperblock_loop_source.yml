@@ -38,8 +38,7 @@ jobs:
           git apply /tmp/hyperblock_loop_changes.patch
           rm -rf \
             .github/hyperblock_loop_changes.patch \
-            .github/patch_parts \
-            .github/workflows/apply_hyperblock_loop_changes.yml
+            .github/patch_parts
 
       - name: Validate source and targeted regressions
         run: |
@@ -53,6 +52,7 @@ jobs:
 
       - name: Commit and audit source history
         run: |
+          git restore --source=HEAD -- .github/workflows
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
