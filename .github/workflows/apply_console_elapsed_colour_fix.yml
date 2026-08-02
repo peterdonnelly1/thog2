@@ -1,0 +1,147 @@
+name: Apply console elapsed and colour fix
+
+on:
+  push:
+    branches:
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-push:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out enhancement branch
+        uses: actions/checkout@v4
+        with:
+          ref: HYPERBLOCK_LOOP_ENHANCEMENTS
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy torch pytest psutil tensorboard
+
+      - name: Apply requested console refinements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          trainer_path = Path('sheet/stage6_trainer.py')
+          trainer = trainer_path.read_text(encoding='utf-8')
+
+          old_colour = '_PROGRESS_LOSS_DECREASE_STYLE_START = "\\033[1;32m"'
+          new_colour = '# _PROGRESS_LOSS_DECREASE_STYLE_START = "\\033[1;32m"  # <<< THOG preserved superseded standard green\n_PROGRESS_LOSS_DECREASE_STYLE_START = "\\033[1;92m"  # <<< THOG use bright green for falling training loss'
+          assert old_colour in trainer
+          trainer = trainer.replace(old_colour, new_colour, 1)
+
+          old_elapsed = '''# vvv THOG step one remains immediately legible in seconds; all later elapsed values use compact HHMM
+# def _progress_elapsed_seconds(value: Any) -> str:
+#     return f"{value}s"
+def _progress_elapsed(value: Any, completed_updates: Any) -> str:
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    if int(str(completed_updates).strip()) == 1:
+        return f"{elapsed_seconds:2d}s"
+    elapsed_minutes = elapsed_seconds // 60
+    hours, minutes = divmod(elapsed_minutes, 60)
+    return f"{hours:02d}{minutes:02d}"
+# ^^^ THOG
+'''
+          new_elapsed = '''# vvv THOG step one remains immediately legible in seconds; all later elapsed values use fixed-width HH:MM:SS
+# def _progress_elapsed_seconds(value: Any) -> str:
+#     return f"{value}s"
+def _progress_elapsed(value: Any, completed_updates: Any) -> str:
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    if int(str(completed_updates).strip()) == 1:
+        return f"{elapsed_seconds:7d}s"
+    # elapsed_minutes = elapsed_seconds // 60
+    # hours, minutes = divmod(elapsed_minutes, 60)
+    # return f"{hours:02d}{minutes:02d}"
+    hours, remainder_seconds = divmod(elapsed_seconds, 60 * 60)
+    minutes, seconds = divmod(remainder_seconds, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+# ^^^ THOG
+'''
+          assert old_elapsed in trainer
+          trainer = trainer.replace(old_elapsed, new_elapsed, 1)
+          trainer_path.write_text(trainer, encoding='utf-8')
+
+          test_path = Path('tests/test_console_progress_pretty_rows.py')
+          tests = test_path.read_text(encoding='utf-8')
+          replacements = (
+              ('def test_training_console_row_uses_hhmm_after_step_one_and_colors_negative_delta_green() -> None:',
+               'def test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green() -> None:'),
+              ('assert line.startswith("T       2  0003  tok/s=          63")',
+               'assert line.startswith("T       2  00:03:16  tok/s=          63")'),
+              ('assert "\\033[1;32mΔloss=  -0.123\\033[0m" in line',
+               'assert "\\033[1;92mΔloss=  -0.123\\033[0m" in line'),
+              ('assert line.startswith("T       1   9s")',
+               'assert line.startswith("T       1        9s")'),
+              ('assert "0000" not in line',
+               'assert "00:00:09" not in line'),
+              ('assert line.startswith("\\033[33mV       2  0003  tok/s=          63")',
+               'assert line.startswith("\\033[33mV       2  00:03:16  tok/s=          63")'),
+          )
+          for old, new in replacements:
+              assert old in tests, old
+              tests = tests.replace(old, new, 1)
+
+          insertion_anchor = '''def test_positive_delta_is_red_and_signed() -> None:
+'''
+          alignment_test = '''def test_step_one_seconds_field_aligns_following_columns_with_hh_mm_ss_rows() -> None:
+    common = {
+        "mean_step_seconds": " 4.7500",
+        "training_loss": "   6.0000",
+        "training_loss_delta": "  -0.125",
+    }
+    step_one = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     1",
+            "cumulative_training_seconds": "     5",
+            **common,
+        },
+    )
+    later = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     2",
+            "cumulative_training_seconds": "    65",
+            **common,
+        },
+    )
+    plain_step_one = re.sub(r"\\x1b\\[[0-9;]*m", "", step_one)
+    plain_later = re.sub(r"\\x1b\\[[0-9;]*m", "", later)
+    assert plain_step_one.index("Δstep=") == plain_later.index("Δstep=")
+
+
+'''
+          assert insertion_anchor in tests
+          tests = tests.replace(insertion_anchor, alignment_test + insertion_anchor, 1)
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+
+      - name: Validate console changes
+        run: |
+          python -m compileall -q sheet/stage6_trainer.py tests/test_console_progress_pretty_rows.py tests/test_console_progress_layout.py
+          PYTHONPATH=. pytest -q \
+            tests/test_console_progress_pretty_rows.py \
+            tests/test_console_progress_layout.py
+
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sheet/stage6_trainer.py tests/test_console_progress_pretty_rows.py
+          git commit -m 'Refine progress elapsed time and loss colour'
+          git push origin HEAD:HYPERBLOCK_LOOP_ENHANCEMENTS
