@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from typing import Any, Dict, Optional
 
 from .basis import BASIS_VERSION
@@ -86,6 +87,8 @@ MODEL_COMPATIBILITY_FIELDS = (
     "hyperblock_attention_head_order",
     "hyperblock_attention_head_channel_order",
     "hyperblock_mlp_hidden_multiplier",
+    "hyperblock_loop_count",
+    "hyperblock_loop_decay",
     # ^^^ THOG
 )
 
@@ -136,6 +139,8 @@ class TrainingConfig:
     hyperblock_attention_head_order: int = 16
     hyperblock_attention_head_channel_order: int = 16
     hyperblock_mlp_hidden_multiplier: int = 4
+    hyperblock_loop_count: int = 1
+    hyperblock_loop_decay: float = 1.0
     # ^^^ THOG
     checkpoint_segment_size: int = 0
     batch_size: int = 4
@@ -246,10 +251,24 @@ class TrainingConfig:
         # vvv THOG preserve the exact pre-HYPERBLOCK positive-integer validation line for source history
         # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
         # ^^^ THOG
-        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+        for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "hyperblock_loop_count", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        # vvv THOG validate shared-factory recurrence independently of the HYPERBLOCK basis orders
+        if (
+            isinstance(self.hyperblock_loop_decay, bool)
+            or not isinstance(self.hyperblock_loop_decay, (int, float))
+            or not math.isfinite(float(self.hyperblock_loop_decay))
+            or not 0.0 < float(self.hyperblock_loop_decay) <= 1.0
+        ):
+            raise ValueError("hyperblock_loop_decay must be finite and in (0, 1]")
+        if not self.hyperblock_enabled and (
+            self.hyperblock_loop_count != 1
+            or float(self.hyperblock_loop_decay) != 1.0
+        ):
+            raise ValueError("HYPERBLOCK loop controls require HYPERBLOCK")
+        # ^^^ THOG
         optional_positive = (
             "mlp_channel_order",
             "o_attn_d_model",
@@ -466,6 +485,8 @@ class TrainingConfig:
                     "hyperblock_attention_head_order": self.hyperblock_attention_head_order,
                     "hyperblock_attention_head_channel_order": self.hyperblock_attention_head_channel_order,
                     "hyperblock_mlp_hidden_multiplier": self.hyperblock_mlp_hidden_multiplier,
+                    "hyperblock_loop_count": self.hyperblock_loop_count,
+                    "hyperblock_loop_decay": float(self.hyperblock_loop_decay),
                     "hyperblock_residual_weight_std": self.residual_init_config().residual_std(
                         model_type=self.model_type,
                         n_layer=self.n_layer,
@@ -504,6 +525,10 @@ class TrainingConfig:
             return {
                 "model_type": self.model_type,
                 "hyperblock": self.hyperblock_plan().identity(),
+                "hyperblock_loop": {
+                    "count": self.hyperblock_loop_count,
+                    "decay": float(self.hyperblock_loop_decay),
+                },
                 "n_layer": self.n_layer,
                 "n_embd": self.n_embd,
                 "n_head": self.n_head,
@@ -550,4 +575,7 @@ class TrainingConfig:
             )
         return {name: values[name] for name in MODEL_COMPATIBILITY_FIELDS}
     # ^^^ THOG
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
 # ^^^ THOG

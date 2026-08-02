@@ -66,6 +66,7 @@ _PROGRESS_FIELD_LABELS = {
     "mean_step_seconds": "Δstep",
     "consumed_tokens": "tokens",
     "training_loss": "training loss",
+    "training_loss_delta": "Δloss",
     "validation_loss": "validation loss",
     "learning_rate": "learning rate",
     "gradient_norm": "gradient norm",
@@ -74,6 +75,9 @@ _PROGRESS_LOSS_LABEL_WIDTH = len("validation loss")
 _PROGRESS_VALIDATION_ROW_STYLE_START = "\033[33m"
 _PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"
 _PROGRESS_VALIDATION_STYLE_END = "\033[0m"
+_PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;32m"
+_PROGRESS_LOSS_INCREASE_STYLE_START = "\033[1;31m"
+_PROGRESS_LOSS_DELTA_STYLE_END = "\033[0m"
 
 
 def _progress_timestamp() -> str:
@@ -88,8 +92,17 @@ def _progress_field(label: str, value: Any) -> str:
     return f"{label}={value}"
 
 
-def _progress_elapsed_seconds(value: Any) -> str:
-    return f"{value}s"
+# vvv THOG step one remains immediately legible in seconds; all later elapsed values use compact HHMM
+# def _progress_elapsed_seconds(value: Any) -> str:
+#     return f"{value}s"
+def _progress_elapsed(value: Any, completed_updates: Any) -> str:
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    if int(str(completed_updates).strip()) == 1:
+        return f"{elapsed_seconds:2d}s"
+    elapsed_minutes = elapsed_seconds // 60
+    hours, minutes = divmod(elapsed_minutes, 60)
+    return f"{hours:02d}{minutes:02d}"
+# ^^^ THOG
 
 
 def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> str:
@@ -102,6 +115,7 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
             "tok/s",
             "consumed_tokens",
             "training_loss",
+            "training_loss_delta",
             "learning_rate",
             "gradient_norm",
         )
@@ -135,7 +149,7 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
             fields.append(str(payload[key]))
             continue
         if key == "cumulative_training_seconds":
-            fields.append(_progress_elapsed_seconds(payload[key]))
+            fields.append(_progress_elapsed(payload[key], payload.get("completed_updates", 0)))
             continue
         label = _PROGRESS_FIELD_LABELS.get(key, key)
         field = _progress_field(label, payload[key])
@@ -144,6 +158,12 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
                 f"{_PROGRESS_VALIDATION_FIELD_STYLE_START}{field}"
                 f"{_PROGRESS_VALIDATION_ROW_STYLE_START}"
             )
+        elif key == "training_loss_delta":
+            delta_text = str(payload[key]).strip()
+            if delta_text.startswith("-"):
+                field = f"{_PROGRESS_LOSS_DECREASE_STYLE_START}{field}{_PROGRESS_LOSS_DELTA_STYLE_END}"
+            elif delta_text.startswith("+"):
+                field = f"{_PROGRESS_LOSS_INCREASE_STYLE_START}{field}{_PROGRESS_LOSS_DELTA_STYLE_END}"
         fields.append(field)
     line = "  ".join(fields)
     if event == "evaluation_completed":
@@ -171,6 +191,7 @@ class Stage6Trainer(Stage4Trainer):
         self._console_previous_training_seconds = 0.0
         self._console_exact_training_seconds = 0.0
         self._console_latest_mean_step_seconds: Optional[float] = None
+        self._console_previous_reported_training_loss: Optional[float] = None
         # ^^^ THOG
 
     def _synchronize(self) -> None:
@@ -203,6 +224,7 @@ class Stage6Trainer(Stage4Trainer):
             self._console_previous_training_seconds = 0.0
             self._console_exact_training_seconds = 0.0
             self._console_latest_mean_step_seconds = None
+            self._console_previous_reported_training_loss = None
             return values
 
         if "tok/s" in values:
@@ -213,6 +235,13 @@ class Stage6Trainer(Stage4Trainer):
         if event == "optimizer_progress":
             completed_updates = self._console_int(values["completed_updates"])
             training_seconds = self._console_exact_training_seconds
+            current_training_loss = self._console_float(values["training_loss"])
+            if getattr(self, "_console_previous_reported_training_loss", None) is None:
+                values["training_loss_delta"] = f"{'n/a':>8}"
+            else:
+                training_loss_delta = current_training_loss - self._console_previous_reported_training_loss
+                values["training_loss_delta"] = f"{training_loss_delta:+8.3f}"
+            self._console_previous_reported_training_loss = current_training_loss
             update_delta = completed_updates - self._console_previous_completed_updates
             if update_delta > 0:
                 second_delta = training_seconds - self._console_previous_training_seconds
@@ -229,7 +258,7 @@ class Stage6Trainer(Stage4Trainer):
     def _print_progress(self, run_id: str, event: str, **payload: Any) -> None:
         if not self.distributed.is_primary:
             return
-        values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
+        values = Stage6Trainer._prepare_console_progress_payload(self, event, payload)                                                                    # <<< THOG support direct unbound console tests while applying the active class policy
         print(format_progress_line(run_id, event, values), flush=True)                                                                                    # <<< THOG emit compact T/V progress without redundant per-row run_id
         if event == "run_started":
             print(flush=True)                                                                                                                            # <<< THOG separate startup summary from progress rows
@@ -484,4 +513,9 @@ class Stage6Trainer(Stage4Trainer):
 
 
 __all__ = ["Stage6Trainer", "format_progress_line", "trace_digest"]
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# return f"{value}s"
+# fields.append(_progress_elapsed_seconds(payload[key]))
+# values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
 # ^^^ THOG

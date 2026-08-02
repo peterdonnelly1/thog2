@@ -261,6 +261,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hyperblock-attention-head-order", type=int, default=16)
     parser.add_argument("--hyperblock-attention-head-channel-order", type=int, default=16)
     parser.add_argument("--hyperblock-mlp-hidden-multiplier", type=int, default=4)
+    parser.add_argument("--hyperblock-loop-count", type=int, default=1)
+    parser.add_argument("--hyperblock-loop-decay", type=float, default=1.0)
     # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
@@ -443,6 +445,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         hyperblock_attention_head_order=arguments.hyperblock_attention_head_order,
         hyperblock_attention_head_channel_order=arguments.hyperblock_attention_head_channel_order,
         hyperblock_mlp_hidden_multiplier=arguments.hyperblock_mlp_hidden_multiplier,
+        hyperblock_loop_count=arguments.hyperblock_loop_count,
+        hyperblock_loop_decay=arguments.hyperblock_loop_decay,
         # ^^^ THOG
         lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
         lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control
@@ -515,7 +519,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             plan = hyperblock["plan"]
             _print_model_option(
                 "HYPERBLOCK:",
-                f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x",
+                f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x  loops={hyperblock['loop_count']}  loop_decay={hyperblock['loop_decay']:.6g}",
             )
         # ^^^ THOG
     print(flush=True)
@@ -600,4 +604,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x",
 # ^^^ THOG

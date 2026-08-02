@@ -36,6 +36,10 @@ def test_hyperblock_wrapper_dry_run_propagates_fixed_field_controls() -> None:
             "2",
             "--hyperblock-attention-head-channel-order",
             "4",
+            "--hyperblock-loop-count",
+            "3",
+            "--hyperblock-loop-decay",
+            "0.8",
             "-g",
             "HB_SMOKE",
             "-n",
@@ -82,13 +86,18 @@ def test_hyperblock_wrapper_dry_run_propagates_fixed_field_controls() -> None:
         capture_output=True,
     )
     assert "hyperblock / hyperblock / chebyshev" in result.stdout
-    assert "HFC3 HFA2 HFM1 HL2 HD4 HM4 HH2 HC4" in result.stdout
+    assert "HFC3 HFA2 HFM1 HL2 HD4 HM4 HH2 HC4 loops=3 decay=0.8" in result.stdout
     assert "HB_chebyshev" in result.stdout
     assert "--hyperblock" in result.stdout
     assert "--hyperblock-common-family-order 3" in result.stdout
     assert "--hyperblock-attention-family-order 2" in result.stdout
     assert "--hyperblock-mlp-family-order 1" in result.stdout
     assert "--hyperblock-depth-order 2" in result.stdout
+    assert "--hyperblock-loop-count 3" in result.stdout
+    assert "--hyperblock-loop-decay 0.8" in result.stdout
+    assert "depth curves:" in result.stdout and "none" in result.stdout
+    assert "depth viewer:" not in result.stdout
+    assert "sample elements:" not in result.stdout
     assert "--geometry-preset" not in result.stdout.split("DRY RUN:", 1)[1]
 
 
@@ -105,4 +114,6 @@ def test_hyperblock_wrapper_help_and_bash_syntax() -> None:
     assert "HYPERBLOCK:" in result.stdout
     assert "--hyperblock-common-family-order" in result.stdout
     assert "--hyperblock-attention-head-channel-order" in result.stdout
+    assert "--hyperblock-loop-count" in result.stdout
+    assert "--hyperblock-loop-decay" in result.stdout
 # ^^^ THOG

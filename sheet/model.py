@@ -111,6 +111,8 @@ class SheetGPTConfig:
     hyperblock_attention_head_channel_order: int = 16
     hyperblock_mlp_hidden_multiplier: int = 4
     hyperblock_residual_weight_std: Optional[float] = None
+    hyperblock_loop_count: int = 1
+    hyperblock_loop_decay: float = 1.0
     # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
@@ -149,6 +151,30 @@ class SheetGPTConfig:
                 "hyperblock_residual_weight_std must be positive or None; "
                 f"got {self.hyperblock_residual_weight_std!r}"
             )
+        # vvv THOG shared HYPERBLOCK recurrence has one integer visit count and one exponential update-decay scalar
+        if isinstance(self.hyperblock_loop_count, bool) or not isinstance(self.hyperblock_loop_count, int) or self.hyperblock_loop_count <= 0:
+            raise ValueError(
+                "hyperblock_loop_count must be a positive integer; "
+                f"got {self.hyperblock_loop_count!r}"
+            )
+        if (
+            isinstance(self.hyperblock_loop_decay, bool)
+            or not isinstance(self.hyperblock_loop_decay, (int, float))
+            or not math.isfinite(float(self.hyperblock_loop_decay))
+            or not 0.0 < float(self.hyperblock_loop_decay) <= 1.0
+        ):
+            raise ValueError(
+                "hyperblock_loop_decay must be finite and in (0, 1]; "
+                f"got {self.hyperblock_loop_decay!r}"
+            )
+        if not self.hyperblock_enabled and (
+            self.hyperblock_loop_count != 1
+            or float(self.hyperblock_loop_decay) != 1.0
+        ):
+            raise ValueError(
+                "HYPERBLOCK loop controls require HYPERBLOCK"
+            )
+        # ^^^ THOG
         if not isinstance(self.depth_compress_layer_norm_and_bias, bool):
             raise ValueError(
                 "depth_compress_layer_norm_and_bias must be bool; "
@@ -584,18 +610,45 @@ class SheetGPT(nn.Module):
         return dropped
     # ^^^ THOG
 
+    # vvv THOG one physical HYPERBLOCK bundle can be revisited without rematerialising or changing its coordinate system
+    def _logical_block_once(
+        self,
+        inputs: Tensor,
+        layer_index: int,
+        layer_materializations: Optional[Mapping[str, Tensor]] = None,
+        hyperblock_mlp_factors: Optional[FactorisedHyperblockMlpLayer] = None,
+    ) -> Tensor:
+        normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
+        attention_output = self._attention(
+            normalized_attention,
+            layer_index,
+            layer_materializations,
+        )
+        if self.config.fast_discard:
+            del normalized_attention
+        attention_residual = inputs + attention_output
+        if self.config.fast_discard:
+            del attention_output
+        normalized_mlp = self._sheet_layer_norm(attention_residual, "ln_2_weight", "ln_2_bias", layer_index)
+        mlp_output = self._mlp(
+            normalized_mlp,
+            layer_index,
+            layer_materializations,
+            hyperblock_mlp_factors,
+        )
+        if self.config.fast_discard:
+            del normalized_mlp
+        output = attention_residual + mlp_output
+        if self.config.fast_discard:
+            del attention_residual, mlp_output
+        return output
+
+    # def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:                                                                              # <<< THOG preserved pre-loop block entry point
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
-        # vvv THOG preserve the pre-direct-option full HYPERBLOCK bundle for source history
-        # layer_materializations = (
-        #     self.trajectory.materialize_layer_matrices(layer_index)
-        #     if isinstance(self.trajectory, CoupledFieldTrajectory)
-        #     else None
-        # )
-        # ^^^ THOG
-        # vvv THOG the option keeps Q/K/V/O batched and carries only low-dimensional UP/DOWN factors into the MLP
         layer_materializations = None
         hyperblock_mlp_factors = None
-        if isinstance(self.trajectory, CoupledFieldTrajectory):
+        is_hyperblock = isinstance(self.trajectory, CoupledFieldTrajectory)
+        if is_hyperblock:
             direct_hyperblock_mlp = self.config.direct_factorised_hyperblock_mlp
             if direct_hyperblock_mlp:
                 layer_materializations = self.trajectory.materialize_layer_matrices(
@@ -609,46 +662,30 @@ class SheetGPT(nn.Module):
                 layer_materializations = self.trajectory.materialize_layer_matrices(
                     layer_index
                 )
-        # ^^^ THOG
-        normalized_attention = self._sheet_layer_norm(inputs, "ln_1_weight", "ln_1_bias", layer_index)
-        # vvv THOG preserve the pre-bundle attention call for source history
-        # attention_output = self._attention(normalized_attention, layer_index)
-        attention_output = self._attention(
-            normalized_attention,
-            layer_index,
-            layer_materializations,
-        )
-        # ^^^ THOG
+
+        loop_count = self.config.hyperblock_loop_count if is_hyperblock else 1
+        loop_decay = float(self.config.hyperblock_loop_decay)
+        for loop_index in range(loop_count):
+            loop_input = inputs
+            block_output = self._logical_block_once(
+                loop_input,
+                layer_index,
+                layer_materializations,
+                hyperblock_mlp_factors,
+            )
+            loop_gain = loop_decay ** loop_index
+            inputs = (
+                block_output
+                if loop_gain == 1.0
+                else loop_input + loop_gain * (block_output - loop_input)
+            )
+            if self.config.fast_discard:
+                del block_output, loop_input
+
         if self.config.fast_discard:
-            del normalized_attention
-        inputs = inputs + attention_output
-        if self.config.fast_discard:
-            del attention_output
-        normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
-        # vvv THOG preserve the pre-bundle MLP call for source history
-        # mlp_output = self._mlp(normalized_mlp, layer_index)
-        # mlp_output = self._mlp(                                                                                                                   # <<< THOG preserved pre-factor-bundle call
-        #     normalized_mlp,
-        #     layer_index,
-        #     layer_materializations,
-        # )
-        mlp_output = self._mlp(
-            normalized_mlp,
-            layer_index,
-            layer_materializations,
-            hyperblock_mlp_factors,
-        )
-        # ^^^ THOG
-        if self.config.fast_discard:
-            del normalized_mlp
-        output = inputs + mlp_output
-        if self.config.fast_discard:
-            # vvv THOG preserve the pre-bundle release line while also releasing the layer bundle
-            # del inputs, mlp_output
-            # del inputs, mlp_output, layer_materializations                                                                                            # <<< THOG preserved pre-factor-bundle release
-            del inputs, mlp_output, layer_materializations, hyperblock_mlp_factors                                                                      # <<< THOG release optional compact UP/DOWN factors
-            # ^^^ THOG
-        return output
+            del layer_materializations, hyperblock_mlp_factors
+        return inputs
+    # ^^^ THOG
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
@@ -697,6 +734,8 @@ class SheetGPT(nn.Module):
             # report["hyperblock"] = hyperblock_report()                                                                                               # <<< THOG preserved pre-execution-metadata report
             report["hyperblock"] = hyperblock_report()
             report["hyperblock"]["direct_factorised_mlp"] = self.config.direct_factorised_hyperblock_mlp                                           # <<< THOG record exact HYPERBLOCK MLP execution path
+            report["hyperblock"]["loop_count"] = self.config.hyperblock_loop_count
+            report["hyperblock"]["loop_decay"] = float(self.config.hyperblock_loop_decay)
         # ^^^ THOG
         return report
 
@@ -765,4 +804,11 @@ class SheetGPT(nn.Module):
 
 
 __all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# if isinstance(self.trajectory, CoupledFieldTrajectory):
+# inputs = inputs + attention_output
+# normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
+# output = inputs + mlp_output
+# del inputs, mlp_output, layer_materializations, hyperblock_mlp_factors                                                                      # <<< THOG release optional compact UP/DOWN factors
 # ^^^ THOG

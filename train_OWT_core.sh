@@ -62,6 +62,8 @@ HYPERBLOCK_MLP_HIDDEN_ORDER=16
 HYPERBLOCK_ATTENTION_HEAD_ORDER=16
 HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER=16
 HYPERBLOCK_MLP_HIDDEN_MULTIPLIER=4
+HYPERBLOCK_LOOP_COUNT=1
+HYPERBLOCK_LOOP_DECAY="1.0"
 # ^^^ THOG
 LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
 LAPPED_COSINE_OVERLAP_FRACTION="0.5"                                                                                                                       # <<< THOG v1 fixed overlap
@@ -178,6 +180,8 @@ HYPERBLOCK:
   --hyperblock-attention-head-order N=${HYPERBLOCK_ATTENTION_HEAD_ORDER}
   --hyperblock-attention-head-channel-order N=${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}
   --hyperblock-mlp-hidden-multiplier N=${HYPERBLOCK_MLP_HIDDEN_MULTIPLIER}
+  --hyperblock-loop-count N=${HYPERBLOCK_LOOP_COUNT}
+  --hyperblock-loop-decay VALUE=${HYPERBLOCK_LOOP_DECAY}  exponential update decay in (0,1]
   --direct-factorised-hyperblock-mlp               enable exact UP/DOWN application without dense MLP matrices
   --no-direct-factorised-hyperblock-mlp            explicit default
 
@@ -285,7 +289,7 @@ while (( $# > 0 )); do
       HYPERBLOCK=false
       shift
       ;;
-    --hyperblock-compressor|--hyperblock-compressor-version|--hyperblock-common-family-order|--hyperblock-attention-family-order|--hyperblock-mlp-family-order|--hyperblock-depth-order|--hyperblock-d-model-order|--hyperblock-mlp-hidden-order|--hyperblock-attention-head-order|--hyperblock-attention-head-channel-order|--hyperblock-mlp-hidden-multiplier)
+    --hyperblock-compressor|--hyperblock-compressor-version|--hyperblock-common-family-order|--hyperblock-attention-family-order|--hyperblock-mlp-family-order|--hyperblock-depth-order|--hyperblock-d-model-order|--hyperblock-mlp-hidden-order|--hyperblock-attention-head-order|--hyperblock-attention-head-channel-order|--hyperblock-mlp-hidden-multiplier|--hyperblock-loop-count|--hyperblock-loop-decay)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --hyperblock-compressor) HYPERBLOCK_COMPRESSOR="$2" ;;
@@ -299,10 +303,12 @@ while (( $# > 0 )); do
         --hyperblock-attention-head-order) HYPERBLOCK_ATTENTION_HEAD_ORDER="$2" ;;
         --hyperblock-attention-head-channel-order) HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER="$2" ;;
         --hyperblock-mlp-hidden-multiplier) HYPERBLOCK_MLP_HIDDEN_MULTIPLIER="$2" ;;
+        --hyperblock-loop-count) HYPERBLOCK_LOOP_COUNT="$2" ;;
+        --hyperblock-loop-decay) HYPERBLOCK_LOOP_DECAY="$2" ;;
       esac
       shift 2
       ;;
-    --hyperblock-compressor=*|--hyperblock-compressor-version=*|--hyperblock-common-family-order=*|--hyperblock-attention-family-order=*|--hyperblock-mlp-family-order=*|--hyperblock-depth-order=*|--hyperblock-d-model-order=*|--hyperblock-mlp-hidden-order=*|--hyperblock-attention-head-order=*|--hyperblock-attention-head-channel-order=*|--hyperblock-mlp-hidden-multiplier=*)
+    --hyperblock-compressor=*|--hyperblock-compressor-version=*|--hyperblock-common-family-order=*|--hyperblock-attention-family-order=*|--hyperblock-mlp-family-order=*|--hyperblock-depth-order=*|--hyperblock-d-model-order=*|--hyperblock-mlp-hidden-order=*|--hyperblock-attention-head-order=*|--hyperblock-attention-head-channel-order=*|--hyperblock-mlp-hidden-multiplier=*|--hyperblock-loop-count=*|--hyperblock-loop-decay=*)
       hyperblock_name="${1%%=*}"
       hyperblock_value="${1#*=}"
       case "$hyperblock_name" in
@@ -317,6 +323,8 @@ while (( $# > 0 )); do
         --hyperblock-attention-head-order) HYPERBLOCK_ATTENTION_HEAD_ORDER="$hyperblock_value" ;;
         --hyperblock-attention-head-channel-order) HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER="$hyperblock_value" ;;
         --hyperblock-mlp-hidden-multiplier) HYPERBLOCK_MLP_HIDDEN_MULTIPLIER="$hyperblock_value" ;;
+        --hyperblock-loop-count) HYPERBLOCK_LOOP_COUNT="$hyperblock_value" ;;
+        --hyperblock-loop-decay) HYPERBLOCK_LOOP_DECAY="$hyperblock_value" ;;
       esac
       unset hyperblock_name hyperblock_value
       shift
@@ -483,6 +491,14 @@ EXPERIMENT_PREFIX="${RUN_NAME:-NO_PREFIX}"                                      
 
 validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1; expected a positive integer." >&2; exit 2; }; }
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
+# vvv THOG HYPERBLOCK recurrence decay is one finite scalar in the closed upper interval
+validate_open_closed_unit_float() {
+  awk -v value="$1" 'BEGIN { numeric = value + 0; exit !(value != "" && numeric > 0.0 && numeric <= 1.0) }' || {
+    echo "Invalid $2: $1; expected a numeric value in (0, 1]." >&2
+    exit 2
+  }
+}
+# ^^^ THOG
 validate_true_false() { case "$1" in true|false) ;; *) echo "Invalid $2: $1; expected true or false." >&2; exit 2 ;; esac; }
 
 O_DEPTH_VALUES=()
@@ -620,7 +636,8 @@ case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
 for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
 # vvv THOG fixed anisotropic HYPERBLOCK orders are validated before constructing any run
-for setting in "$HYPERBLOCK_COMMON_FAMILY_ORDER" "$HYPERBLOCK_ATTENTION_FAMILY_ORDER" "$HYPERBLOCK_MLP_FAMILY_ORDER" "$HYPERBLOCK_DEPTH_ORDER" "$HYPERBLOCK_D_MODEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER"; do validate_positive_uint "$setting" "HYPERBLOCK order"; done
+for setting in "$HYPERBLOCK_COMMON_FAMILY_ORDER" "$HYPERBLOCK_ATTENTION_FAMILY_ORDER" "$HYPERBLOCK_MLP_FAMILY_ORDER" "$HYPERBLOCK_DEPTH_ORDER" "$HYPERBLOCK_D_MODEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER" "$HYPERBLOCK_LOOP_COUNT"; do validate_positive_uint "$setting" "HYPERBLOCK order or loop count"; done
+validate_open_closed_unit_float "$HYPERBLOCK_LOOP_DECAY" "HYPERBLOCK_LOOP_DECAY"
 # ^^^ THOG
 if [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == true ]]; then
   for setting in "$O_ATTN_D_MODEL" "$O_ATTN_QKV_PER_CHANNEL" "$O_ATTN_OUT_PER_CHANNEL" "$O_MLP_D_MODEL" "$O_MLP_HIDDEN"; do validate_positive_uint "$setting" "non-DEPTH compact order"; done
@@ -741,7 +758,7 @@ run_grid_point() {
   local mlp_hidden_group_size_value="$9"
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
-  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
+  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status depth_curve_console depth_curve_done
   local -a compact_args compact_order_args optional_args train_args command
 
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
@@ -776,10 +793,12 @@ run_grid_point() {
       --hyperblock-attention-head-order "$HYPERBLOCK_ATTENTION_HEAD_ORDER"
       --hyperblock-attention-head-channel-order "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER"
       --hyperblock-mlp-hidden-multiplier "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER"
+      --hyperblock-loop-count "$HYPERBLOCK_LOOP_COUNT"
+      --hyperblock-loop-decay "$HYPERBLOCK_LOOP_DECAY"
     )
     compact_order_args=()
     shape_summary="L${n_layer_value} H${n_head_value} D${n_embd_value} C${BLOCK_SIZE}"
-    orders_summary="HFC${HYPERBLOCK_COMMON_FAMILY_ORDER} HFA${HYPERBLOCK_ATTENTION_FAMILY_ORDER} HFM${HYPERBLOCK_MLP_FAMILY_ORDER} HL${HYPERBLOCK_DEPTH_ORDER} HD${HYPERBLOCK_D_MODEL_ORDER} HM${HYPERBLOCK_MLP_HIDDEN_ORDER} HH${HYPERBLOCK_ATTENTION_HEAD_ORDER} HC${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}"
+    orders_summary="HFC${HYPERBLOCK_COMMON_FAMILY_ORDER} HFA${HYPERBLOCK_ATTENTION_FAMILY_ORDER} HFM${HYPERBLOCK_MLP_FAMILY_ORDER} HL${HYPERBLOCK_DEPTH_ORDER} HD${HYPERBLOCK_D_MODEL_ORDER} HM${HYPERBLOCK_MLP_HIDDEN_ORDER} HH${HYPERBLOCK_ATTENTION_HEAD_ORDER} HC${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER} loops=${HYPERBLOCK_LOOP_COUNT} decay=${HYPERBLOCK_LOOP_DECAY}"
   else
     run_model_type="sheet"; display_model_type="spectral"; preset_tag="${geometry_preset_value^^}"
     [[ "$geometry_preset_value" == legacy_sheet_col ]] && preset_tag="SHEET_COL"
@@ -831,10 +850,23 @@ run_grid_point() {
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
   log_url="file://$(realpath -m "$log_path")"; viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"; serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
+  # vvv THOG inactive depth-curve diagnostics no longer advertise hypothetical renderer or viewer settings
+  if [[ "$DEPTH_CURVE_PLOTS" == none ]]; then
+    depth_curve_console="  depth curves:       none"
+    depth_curve_done=""
+  else
+    depth_curve_console="  depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
+  depth viewer:       $viewer_url
+  serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
+  served URL:         $serve_url"
+    depth_curve_done="  depth viewer URL:   $viewer_url"
+  fi
+  # ^^^ THOG
 
   # vvv THOG preserve the exact pre-HYPERBLOCK console line outside the emitted here-document
   # model/preset/basis: $display_model_type / $geometry_preset_value / $basis_family_value
   # ^^^ THOG
+  #   optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value  # <<< THOG aligned Python summary now owns this row
   cat <<EOF_RUN
 scruffy OWT train
   start time:         $start_time_friendly
@@ -851,11 +883,7 @@ scruffy OWT train
   direct factorised HYPERBLOCK MLP:           $DIRECT_FACTORISED_HYPERBLOCK_MLP
   vectorise per-head materialisation:     $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
-  depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
-  depth viewer:       $viewer_url
-  serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
-  served URL:         $serve_url
-  optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value
+$depth_curve_console
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              $shape_summary
   orders:             $orders_summary
@@ -874,7 +902,7 @@ scruffy OWT run finished
   status:             $run_status
   artifact:           $artifact_name
   log URL:            $log_url
-  depth viewer URL:   $viewer_url
+$depth_curve_done
 EOF_DONE
   return "$run_status"
 }
@@ -919,4 +947,15 @@ for geometry_preset_value in "${PRESET_VALUES[@]}"; do
     done
   fi
 done
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# --hyperblock-compressor|--hyperblock-compressor-version|--hyperblock-common-family-order|--hyperblock-attention-family-order|--hyperblock-mlp-family-order|--hyperblock-depth-order|--hyperblock-d-model-order|--hyperblock-mlp-hidden-order|--hyperblock-attention-head-order|--hyperblock-attention-head-channel-order|--hyperblock-mlp-hidden-multiplier)
+# --hyperblock-compressor=*|--hyperblock-compressor-version=*|--hyperblock-common-family-order=*|--hyperblock-attention-family-order=*|--hyperblock-mlp-family-order=*|--hyperblock-depth-order=*|--hyperblock-d-model-order=*|--hyperblock-mlp-hidden-order=*|--hyperblock-attention-head-order=*|--hyperblock-attention-head-channel-order=*|--hyperblock-mlp-hidden-multiplier=*)
+# for setting in "$HYPERBLOCK_COMMON_FAMILY_ORDER" "$HYPERBLOCK_ATTENTION_FAMILY_ORDER" "$HYPERBLOCK_MLP_FAMILY_ORDER" "$HYPERBLOCK_DEPTH_ORDER" "$HYPERBLOCK_D_MODEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER"; do validate_positive_uint "$setting" "HYPERBLOCK order"; done
+# local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status
+# orders_summary="HFC${HYPERBLOCK_COMMON_FAMILY_ORDER} HFA${HYPERBLOCK_ATTENTION_FAMILY_ORDER} HFM${HYPERBLOCK_MLP_FAMILY_ORDER} HL${HYPERBLOCK_DEPTH_ORDER} HD${HYPERBLOCK_D_MODEL_ORDER} HM${HYPERBLOCK_MLP_HIDDEN_ORDER} HH${HYPERBLOCK_ATTENTION_HEAD_ORDER} HC${HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER}"
+# depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
+# served URL:         $serve_url
+# optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value
+# depth viewer URL:   $viewer_url
 # ^^^ THOG
