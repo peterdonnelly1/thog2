@@ -46,7 +46,7 @@ __all__ = [
 ]
 # ^^^ THOG
 
-# vvv THOG centralise the console elapsed-field and falling-loss colour policy without changing training semantics
+# vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
 from . import stage6_trainer as _stage6_trainer
 
 
@@ -62,4 +62,6 @@ def _progress_elapsed_hh_mm_ss(value, completed_updates):
 _stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
 # _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                               # <<< THOG preserve palette-dependent bright-green attempt
 _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
+# _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
+_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
 # ^^^ THOG
