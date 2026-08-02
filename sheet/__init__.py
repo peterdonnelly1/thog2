@@ -45,3 +45,20 @@ __all__ = [
     "transformer_family_geometries", "validate_compatibility",
 ]
 # ^^^ THOG
+
+# vvv THOG centralise the console elapsed-field and falling-loss colour policy without changing training semantics
+from . import stage6_trainer as _stage6_trainer
+
+
+def _progress_elapsed_hh_mm_ss(value, completed_updates):
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    if int(str(completed_updates).strip()) == 1:
+        return f"{elapsed_seconds:7d}s"
+    hours, remainder_seconds = divmod(elapsed_seconds, 60 * 60)
+    minutes, seconds = divmod(remainder_seconds, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+_stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
+_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"
+# ^^^ THOG
