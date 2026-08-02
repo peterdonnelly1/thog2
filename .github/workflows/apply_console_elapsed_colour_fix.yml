@@ -1,9 +1,9 @@
 name: Apply console elapsed and colour fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - HYPERBLOCK_LOOP_ENHANCEMENTS
+      - COUPLED_FIELD_MACHINE_HYPERBLOCk
 
 permissions:
   contents: write
