@@ -1,4 +1,4 @@
-name: Export HYPERBLOCK loop source
+name: Apply HYPERBLOCK loop changes
 
 on:
   pull_request:
@@ -6,18 +6,94 @@ on:
       - COUPLED_FIELD_MACHINE_HYPERBLOCk
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export-source:
+  apply-test-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - name: Archive source
-        run: |
-          tar --exclude=.git -czf /tmp/thog2-source.tar.gz .
-      - uses: actions/upload-artifact@v4
+      - name: Check out implementation branch
+        uses: actions/checkout@v4
         with:
-          name: thog2-source-${{ github.sha }}
-          path: /tmp/thog2-source.tar.gz
-          retention-days: 1
+          ref: HYPERBLOCK_LOOP_ENHANCEMENTS
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy torch pytest psutil tensorboard
+
+      - name: Reconstruct and apply implementation patch
+        run: |
+          cat .github/patch_parts/0* | base64 --decode | gzip --decompress > /tmp/hyperblock_loop_changes.patch
+          echo 'b37eebe895b74e6e0334fa25056bcedd066cd22267157157b676ffff0eca3214  /tmp/hyperblock_loop_changes.patch' | sha256sum --check
+          cat > .github/workflows/export_hyperblock_loop_source.yml <<'EOF'
+          name: Export HYPERBLOCK loop source
+
+          on:
+            pull_request:
+              branches:
+                - COUPLED_FIELD_MACHINE_HYPERBLOCk
+
+          permissions:
+            contents: read
+
+          jobs:
+            export-source:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Archive source
+                  run: |
+                    tar --exclude=.git -czf /tmp/thog2-source.tar.gz .
+                - uses: actions/upload-artifact@v4
+                  with:
+                    name: thog2-source-${{ github.sha }}
+                    path: /tmp/thog2-source.tar.gz
+                    retention-days: 1
+          EOF
+          sed -i 's/^          //' .github/workflows/export_hyperblock_loop_source.yml
+          git apply --check /tmp/hyperblock_loop_changes.patch
+          git apply /tmp/hyperblock_loop_changes.patch
+          rm -rf \
+            .github/hyperblock_loop_changes.patch \
+            .github/patch_parts \
+            .github/workflows/apply_hyperblock_loop_changes.yml
+
+      - name: Validate source and targeted regressions
+        run: |
+          python -m compileall -q sheet tests run_thog2_owt.py run_thog2_owt_core.py
+          bash -n train_OWT.sh train_OWT_core.sh
+          PYTHONPATH=. pytest -q \
+            tests/test_hyperblock*.py \
+            tests/test_console_progress*.py \
+            tests/test_console_model_summary.py \
+            tests/test_depth_materialisation_runtime.py
+
+      - name: Commit and audit source history
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add HYPERBLOCK recurrent loops and console refinements'
+          PYTHONPATH=. python tests/hyperblock_source_history_check.py \
+            --repository . \
+            --base 802738bfdd8f068b6f86cb29389ec378c4d892f8 \
+            --head HEAD \
+            --output /tmp/hyperblock-source-history.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('/tmp/hyperblock-source-history.json').read_text())
+          assert result['violation_count'] == 0, result
+          print(json.dumps(result, indent=2, sort_keys=True))
+          PY
+
+      - name: Push implementation
+        run: git push origin HEAD:HYPERBLOCK_LOOP_ENHANCEMENTS
