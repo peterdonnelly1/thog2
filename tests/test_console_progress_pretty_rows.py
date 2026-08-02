@@ -95,7 +95,7 @@ def test_positive_delta_is_red_and_signed() -> None:
     assert "\033[1;31mΔloss=  +0.125\033[0m" in line
 
 
-def test_validation_console_row_uses_bright_bold_yellow_for_validation_loss() -> None:
+def test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss() -> None:
     line = format_progress_line(
         "OPTIMO",
         "evaluation_completed",
@@ -111,8 +111,9 @@ def test_validation_console_row_uses_bright_bold_yellow_for_validation_loss() ->
 
     assert line.startswith("\033[33mV       2  00:03:16  tok/s=          63")
     assert line.endswith("\033[0m")
-    assert line.count("\033[1;93m") == 1
-    assert "\033[1;93mvalidation loss=  10.7777\033[33m" in line
+    assert line.count("\033[1;38;2;255;255;0m") == 1
+    assert "\033[1;38;2;255;255;0mvalidation loss=  10.7777\033[33m" in line
+    assert "\033[1;93m" not in line
     assert "updates=" not in line
     assert "cum time" not in line
     assert "tokens=         24576" in line
