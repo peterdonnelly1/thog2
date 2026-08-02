@@ -66,9 +66,10 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertIn("tokens=999,999,999", line)
         self.assertIn("training loss  =   3.2000", line)
         self.assertIn(
-            "\033[1;93mvalidation loss=   3.1990\033[33m\033[0m",
+            "\033[1;38;2;255;255;0mvalidation loss=   3.1990\033[33m\033[0m",
             line,
         )
+        self.assertNotIn("\033[1;93m", line)
         self.assertNotIn("unchanging-run-id", line)
         self.assertEqual(len(re.findall(r"\033\[", line)), 4)
 
