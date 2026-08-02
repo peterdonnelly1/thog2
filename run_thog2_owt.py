@@ -40,7 +40,7 @@ def _print_complete_registry_help_if_requested() -> None:
         print("  THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false      semantic adapter bypass")
         print("  THOG2_DIRECT_FACTORISED_MLP=true|false             direct factorised MLP")
         print("  THOG2_VECTORISE_PER_HEAD_MATERIALISATION=true|false  vectorise per-head materialisation")
-        print("  --depth-materialisation-matmul true|false          DEPTH matrix materialisation; default true")
+        print("  --depth-materialisation-matmul true|false          DEPTH matrix materialisation; default false")
         print("  --materialisation-profiling true|false             pure DEPTH timing; default false")
     finally:
         sys.argv[:] = original_argv
@@ -62,8 +62,9 @@ from sheet.interactive_interrupt import (                                       
 from sheet.owt_lifecycle_cli import normalize_lifecycle_wrapper_argv                                                                                         # <<< THOG preserve the established train_OWT.sh CLI in enhanced lifecycle mode
 from sheet.run_naming import artifact_paths as _artifact_paths                                                                                              # <<< THOG lifecycle orchestration reuses the current artifact-path contract
 
-# vvv THOG matmul is now the default DEPTH matrix materialiser after the measured A/B win; profiling remains default-off
-os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "true")
+# vvv THOG default DEPTH materialisation returns to the reference path; matmul remains an explicit opt-in
+# os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "true")                                                                                     # <<< THOG preserved previous default-on matmul policy
+os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "false")
 import sheet.depth_materialisation_runtime as _depth_materialisation_runtime
 from sheet.depth_materialisation_runtime import install_depth_materialisation_runtime
 install_depth_materialisation_runtime()
@@ -155,6 +156,31 @@ def _optimisation_fields(config: Any, trainer: Any) -> list[str]:
     return fields
 
 
+# vvv THOG aligned optimizer and LR-policy summaries replace the optimizer factory's unaligned one-off print
+
+def _optimizer_summary(trainer: Any) -> str:
+    optimizer = trainer.optimizer
+    group = optimizer.param_groups[0]
+    name = str(group.get("thog2_optimizer_name", optimizer.__class__.__name__)).lower()
+    learning_rate = float(group["lr"])
+    if name == "adamw":
+        fused = bool(optimizer.defaults.get("fused", False))
+        betas = optimizer.defaults.get("betas", (0.9, 0.95))
+        return f"{name} (lr={learning_rate:.3e}, fused={fused}, betas={betas})"
+    if name in {"sgd", "sgd_nesterov"}:
+        return f"{name} (lr={learning_rate:.3e}, momentum={optimizer.defaults.get('momentum', 0):g}, nesterov={bool(optimizer.defaults.get('nesterov', False))})"
+    if name == "rmsprop":
+        return f"{name} (lr={learning_rate:.3e}, momentum={optimizer.defaults.get('momentum', 0):g}, alpha={optimizer.defaults.get('alpha', 0.99):g})"
+    return f"{name} (lr={learning_rate:.3e})"
+
+
+def _lr_decay_summary(config: Any, trainer: Any) -> str:
+    trainer_config = trainer.config
+    decay_type = "cosine" if bool(trainer_config.decay_learning_rate) else "constant"
+    decay_rate = float(config.min_lr) / float(config.learning_rate)
+    return f"{decay_type} (decay_rate={decay_rate:.6g}, min_lr={config.min_lr:.3e}, fully_decayed_step={trainer_config.decay_updates})"
+
+
 def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None:
     report = trainer.parameter_report
     persistent = int(report["persistent_parameters"])
@@ -163,7 +189,10 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
     compression = (dense_equivalent / persistent) if persistent else 0.0
     print("model parameters and options", flush=True)
     _core._print_model_option("parameters:", f"persistent={persistent:,}  sheet coefficients={sheet_coefficients:,}  dense equivalent={dense_equivalent:,}  dense/persistent={compression:.2f}x")
-    _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
+    # _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")  # <<< THOG preserved pre-alignment optimiser row
+    _core._print_model_option("optimiser:", _optimizer_summary(trainer))
+    _core._print_model_option("LR decay:", _lr_decay_summary(config, trainer))
+    _core._print_model_option("optimiser parms:", f"warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
     if int(config.max_wall_minutes) > 0:
         _core._print_model_option("wall time stop:", f"max_wall_minutes={config.max_wall_minutes}")
     _core._print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
@@ -172,6 +201,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
         _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
     _core._print_model_option("optimisations:", "  ".join(_optimisation_fields(config, trainer)))
     print(flush=True)
+# ^^^ THOG
 
 
 _core.print_model_parameters_and_options = _print_model_parameters_and_optimisations
@@ -182,7 +212,8 @@ from run_thog2_owt_core import *  # noqa: F401,F403                             
 
 # vvv THOG apply checkpoint-exit behaviour through one public trainer subclass used by fresh, resume and fork
 _BASE_OWT_TRAINER = _core.OwtTrainer
-_stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
+# _stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                           # <<< THOG preserved previous standard-yellow validation field
+_stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                                              # <<< THOG bold bright yellow validation-loss field
 
 # vvv THOG render progress timestamp as YYMMDD:HHMM and mean step seconds with four fixed-width decimals
 _stage6._progress_timestamp = lambda: _stage6.datetime.now().strftime("%y%m%d:%H%M")
@@ -461,4 +492,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# print("  --depth-materialisation-matmul true|false          DEPTH matrix materialisation; default true")
+# os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "true")
+# _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
+# _stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
 # ^^^ THOG

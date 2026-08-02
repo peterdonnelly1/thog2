@@ -8,7 +8,7 @@ from unittest import mock
 from sheet.stage6_trainer import Stage6Trainer, format_progress_line
 
 
-def test_training_console_row_puts_bare_update_first_and_bare_seconds_second() -> None:
+def test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green() -> None:
     line = format_progress_line(
         "OPTIMO",
         "optimizer_progress",
@@ -16,6 +16,7 @@ def test_training_console_row_puts_bare_update_first_and_bare_seconds_second() -
             "completed_updates": "     2",
             "consumed_tokens": "         24576",
             "training_loss": "  10.8831",
+            "training_loss_delta": "  -0.123",
             "gradient_norm": "   3.120",
             "learning_rate": " 5.714e-05",
             "cumulative_training_seconds": "   196",
@@ -23,18 +24,78 @@ def test_training_console_row_puts_bare_update_first_and_bare_seconds_second() -
         },
     )
 
-    assert line.startswith("T       2     196s  tok/s=          63")
+    assert line.startswith("T       2  00:03:16  tok/s=          63")
+    assert "\033[1;38;2;0;255;0mΔloss=  -0.123\033[0m" in line
+    assert "\033[1;92m" not in line
     assert "updates=" not in line
     assert "cum time" not in line
-    assert line.endswith("run_id=OPTIMO")
+    assert "run_id=" not in line
     assert "{" not in line
     assert "}" not in line
     assert '"' not in line
     assert line.index("learning rate=") < line.index("gradient norm=")
-    assert "cum tokens=         24576" in line
+    assert "tokens=         24576" in line
 
 
-def test_validation_console_row_is_entirely_bold_yellow_and_keeps_run_id_last() -> None:
+def test_step_one_console_row_keeps_elapsed_seconds() -> None:
+    line = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     1",
+            "cumulative_training_seconds": "     9",
+            "training_loss": "  10.8831",
+            "training_loss_delta": "     n/a",
+        },
+    )
+    assert line.startswith("T       1        9s")
+    assert "00:00:09" not in line
+
+
+def test_step_one_seconds_field_aligns_following_columns_with_hh_mm_ss_rows() -> None:
+    common = {
+        "mean_step_seconds": " 4.7500",
+        "training_loss": "   6.0000",
+        "training_loss_delta": "  -0.125",
+    }
+    step_one = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     1",
+            "cumulative_training_seconds": "     5",
+            **common,
+        },
+    )
+    later = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "     2",
+            "cumulative_training_seconds": "    65",
+            **common,
+        },
+    )
+    plain_step_one = re.sub(r"\x1b\[[0-9;]*m", "", step_one)
+    plain_later = re.sub(r"\x1b\[[0-9;]*m", "", later)
+    assert plain_step_one.index("Δstep=") == plain_later.index("Δstep=")
+
+
+def test_positive_delta_is_red_and_signed() -> None:
+    line = format_progress_line(
+        "OPTIMO",
+        "optimizer_progress",
+        {
+            "completed_updates": "    10",
+            "cumulative_training_seconds": "    87",
+            "training_loss": "   6.0000",
+            "training_loss_delta": "  +0.125",
+        },
+    )
+    assert "\033[1;31mΔloss=  +0.125\033[0m" in line
+
+
+def test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss() -> None:
     line = format_progress_line(
         "OPTIMO",
         "evaluation_completed",
@@ -48,14 +109,14 @@ def test_validation_console_row_is_entirely_bold_yellow_and_keeps_run_id_last() 
         },
     )
 
-    assert line.startswith("\033[1;33mV       2     196s  tok/s=          63")
-    assert line.endswith("run_id=OPTIMO\033[0m")
-    assert line.count("\033[1;33m") == 1
-    assert line.count("\033[0m") == 1
+    assert line.startswith("\033[33mV       2  00:03:16  tok/s=          63")
+    assert line.endswith("\033[0m")
+    assert line.count("\033[1;38;2;255;255;0m") == 1
+    assert "\033[1;38;2;255;255;0mvalidation loss=  10.7777\033[33m" in line
+    assert "\033[1;93m" not in line
     assert "updates=" not in line
     assert "cum time" not in line
-    assert "cum tokens=         24576" in line
-    assert "validation loss=  10.7777" in line
+    assert "tokens=         24576" in line
 
 
 def test_training_and_validation_loss_numerals_start_in_the_same_column() -> None:
@@ -79,7 +140,10 @@ def test_training_and_validation_loss_numerals_start_in_the_same_column() -> Non
 
 
 def test_run_started_console_output_is_followed_by_one_blank_line() -> None:
-    fake_trainer = SimpleNamespace(distributed=SimpleNamespace(is_primary=True))
+    fake_trainer = SimpleNamespace(
+        distributed=SimpleNamespace(is_primary=True),
+        state=SimpleNamespace(completed_updates=0),
+    )
     with mock.patch("builtins.print") as print_spy:
         Stage6Trainer._print_progress(
             fake_trainer,

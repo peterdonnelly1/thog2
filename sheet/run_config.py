@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -122,6 +123,8 @@ class OwtRunConfig:
     hyperblock_attention_head_order: int = 16
     hyperblock_attention_head_channel_order: int = 16
     hyperblock_mlp_hidden_multiplier: int = 4
+    hyperblock_loop_count: int = 1
+    hyperblock_loop_decay: float = 1.0
     # ^^^ THOG
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                              # <<< THOG locality control
     lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                      # <<< THOG overlap control
@@ -306,6 +309,7 @@ class OwtRunConfig:
             "hyperblock_attention_head_order",
             "hyperblock_attention_head_channel_order",
             "hyperblock_mlp_hidden_multiplier",
+            "hyperblock_loop_count",
             "checkpoint_segment_size",
             "artifact_name_limit",
         )
@@ -313,6 +317,21 @@ class OwtRunConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        # vvv THOG shared-factory loop controls are orthogonal to HYPERBLOCK basis geometry
+        if (
+            isinstance(self.hyperblock_loop_decay, bool)
+            or not isinstance(self.hyperblock_loop_decay, (int, float))
+            or not math.isfinite(float(self.hyperblock_loop_decay))
+            or not 0.0 < float(self.hyperblock_loop_decay) <= 1.0
+        ):
+            raise ValueError("hyperblock_loop_decay must be finite and in (0, 1]")
+        if not self.hyperblock_enabled and (
+            self.hyperblock_loop_count != 1
+            or float(self.hyperblock_loop_decay) != 1.0
+        ):
+            raise ValueError("HYPERBLOCK loop controls require HYPERBLOCK")
+        # ^^^ THOG
+
         for name in ("max_wall_minutes", "checkpoint_interval", "warmup_iters", "model_seed", "data_seed", "max_nonfinite_update_skips"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -454,6 +473,10 @@ class OwtRunConfig:
             return {
                 "model_type": self.model_type,
                 "hyperblock": self.hyperblock_plan().identity(),
+                "hyperblock_loop": {
+                    "count": self.hyperblock_loop_count,
+                    "decay": float(self.hyperblock_loop_decay),
+                },
                 "n_layer": self.n_layer,
                 "n_embd": self.n_embd,
                 "n_head": self.n_head,
@@ -518,11 +541,18 @@ class OwtRunConfig:
     def run_descriptor(self) -> str:
         geometry_fragment = self.compact_artifact_fragment() or "DENSE"
         host = normalize_component(self.host_label)
-        body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"
+        # body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"                                                                                  # <<< THOG preserved one-space descriptor separator
+        body = f"{host}_{self.experiment_prefix}___{geometry_fragment}"                                                                                 # <<< THOG three descriptor spaces after RUN_NAME
         return f"{self.run_start_label}_{body}" if self.run_start_label else body                                                                        # <<< THOG descriptor v2 places host immediately after timestamp when present
 
     def _learning_rate_code(self, value: float) -> int:
         return int(round(value / 1.0e-5))
+
+    # vvv THOG filename-safe compact scalar label for non-default HYPERBLOCK loop decay
+    @staticmethod
+    def _artifact_float(value: float) -> str:
+        return format(float(value), ".6g").replace("-", "m").replace(".", "p")
+    # ^^^ THOG
 
     def _order_label_for_axis(self, *, element: str, axis: str) -> str:
         if axis == "MLP_HIDDEN":
@@ -622,6 +652,13 @@ class OwtRunConfig:
                     f"HH_{self.hyperblock_attention_head_order}",
                     f"HC_{self.hyperblock_attention_head_channel_order}",
                 ]
+                # vvv THOG preserve baseline artifact names while naming only active recurrence experiments
+                if self.hyperblock_loop_count != 1 or float(self.hyperblock_loop_decay) != 1.0:
+                    order_fields.extend([
+                        f"HLC_{self.hyperblock_loop_count}",
+                        f"HLD_{self._artifact_float(self.hyperblock_loop_decay)}",
+                    ])
+                # ^^^ THOG
             elif self.resolved_geometry_plan is not None:
                 order_fields = self._resolved_order_fields(self.resolved_geometry_plan)
             else:
@@ -681,6 +718,8 @@ class OwtRunConfig:
                     "hyperblock_attention_head_order": self.hyperblock_attention_head_order,
                     "hyperblock_attention_head_channel_order": self.hyperblock_attention_head_channel_order,
                     "hyperblock_mlp_hidden_multiplier": self.hyperblock_mlp_hidden_multiplier,
+                    "hyperblock_loop_count": self.hyperblock_loop_count,
+                    "hyperblock_loop_decay": float(self.hyperblock_loop_decay),
                 }
             else:
                 sheet_kwargs = {
@@ -797,6 +836,8 @@ class OwtRunConfig:
                 "hyperblock_attention_head_order",
                 "hyperblock_attention_head_channel_order",
                 "hyperblock_mlp_hidden_multiplier",
+                "hyperblock_loop_count",
+                "hyperblock_loop_decay",
             ):
                 values.pop(name, None)
         else:
@@ -828,4 +869,7 @@ __all__ = [
     "OwtRunConfig",
     "PUBLIC_MODEL_TYPES",
 ]
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"
 # ^^^ THOG

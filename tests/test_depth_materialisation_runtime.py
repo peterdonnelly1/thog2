@@ -154,6 +154,7 @@ class DepthMaterialisationRuntimeTests(unittest.TestCase):
             "--depth-compress-layer-norm-and-bias",
             "--activation-checkpointing",
             "--depth-materialisation-matmul true|false",
+            "DEPTH matrix materialisation; default false",
             "--materialisation-profiling true|false",
             "THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false",
             "THOG2_DIRECT_FACTORISED_MLP=true|false",

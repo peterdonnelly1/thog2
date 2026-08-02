@@ -45,3 +45,23 @@ __all__ = [
     "transformer_family_geometries", "validate_compatibility",
 ]
 # ^^^ THOG
+
+# vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
+from . import stage6_trainer as _stage6_trainer
+
+
+def _progress_elapsed_hh_mm_ss(value, completed_updates):
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    if int(str(completed_updates).strip()) == 1:
+        return f"{elapsed_seconds:7d}s"
+    hours, remainder_seconds = divmod(elapsed_seconds, 60 * 60)
+    minutes, seconds = divmod(remainder_seconds, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+_stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
+# _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                               # <<< THOG preserve palette-dependent bright-green attempt
+_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
+# _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
+_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
+# ^^^ THOG

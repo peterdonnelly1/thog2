@@ -3,8 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# vvv THOG expose granular pure-DEPTH materialisation controls; matmul is default-on after the A/B win while profiling remains default-off
-THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"
+# vvv THOG expose granular pure-DEPTH materialisation controls; matmul and profiling are explicit default-off options
+# THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"                                                # <<< THOG preserved previous default-on policy
+THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
 THOG2_MATERIALISATION_PROFILING="${THOG2_MATERIALISATION_PROFILING:-false}"
 case "$THOG2_DEPTH_MATERIALISATION_MATMUL" in
   true|false) ;;
@@ -74,7 +75,7 @@ export THOG2_MATERIALISATION_PROFILING
 if [[ "$THOG2_DEPTH_MATERIALISATION_HELP" == true ]]; then
   printf '%s\n' \
     'DEPTH execution optimisation:' \
-    '  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true' \
+    '  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default false' \
     '' \
     'Profiling:' \
     '  --materialisation-profiling true|false      pure DEPTH timing; default false' \
@@ -236,4 +237,8 @@ cat() {
 
 # vvv THOG source rather than duplicate the established wrapper so its complete CLI remains authoritative
 source ./train_OWT_core.sh "$@"
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"
+# '  --depth-materialisation-matmul true|false   DEPTH matrix materialisation; default true' \
 # ^^^ THOG

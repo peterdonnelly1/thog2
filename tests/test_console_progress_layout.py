@@ -17,6 +17,7 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         trainer._console_previous_training_seconds = 0.0
         trainer._console_exact_training_seconds = 0.25
         trainer._console_latest_mean_step_seconds = None
+        trainer._console_previous_reported_training_loss = 3.3
 
         values = trainer._prepare_console_progress_payload(
             "optimizer_progress",
@@ -34,6 +35,7 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertEqual(values["mean_step_seconds"], "  0.0250")
         self.assertEqual(values["tok/s"], "  8189")
         self.assertEqual(values["consumed_tokens"], "999,999,999")
+        self.assertEqual(values["training_loss_delta"], "  -0.100")
         self.assertRegex(values["timestamp"], r"^\d{6}:\d{4}$")
 
     def test_validation_reuses_latest_step_mean_and_uses_two_level_yellow_emphasis(self) -> None:
@@ -64,9 +66,10 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertIn("tokens=999,999,999", line)
         self.assertIn("training loss  =   3.2000", line)
         self.assertIn(
-            "\033[1;33mvalidation loss=   3.1990\033[33m\033[0m",
+            "\033[1;38;2;255;255;0mvalidation loss=   3.1990\033[33m\033[0m",
             line,
         )
+        self.assertNotIn("\033[1;93m", line)
         self.assertNotIn("unchanging-run-id", line)
         self.assertEqual(len(re.findall(r"\033\[", line)), 4)
 

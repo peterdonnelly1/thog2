@@ -38,6 +38,10 @@ def _cli_arguments(*extra: str):
             "2",
             "--hyperblock-attention-head-channel-order",
             "4",
+            "--hyperblock-loop-count",
+            "3",
+            "--hyperblock-loop-decay",
+            "0.8",
             "--max-iters",
             "2",
             "--warmup-iters",
@@ -62,7 +66,11 @@ def test_hyperblock_cli_resolves_topology_and_training_config() -> None:
     assert config.hyperblock_attention_family_order == 2
     assert config.hyperblock_mlp_family_order == 1
     assert "HB_chebyshev" in config.artifact_name
-    assert "HFC_3_HFA_2_HFM_1_HL_2_HD_4_HM_4_HH_2_HC_4" in config.artifact_name
+    assert "HB_SMOKE" not in config.artifact_name
+    assert "___HB_chebyshev" in config.run_descriptor()
+    assert "HFC_3_HFA_2_HFM_1_HL_2_HD_4_HM_4_HH_2_HC_4_HLC_3_HLD_0p8" in config.artifact_name
+    assert config.hyperblock_loop_count == 3
+    assert config.hyperblock_loop_decay == pytest.approx(0.8)
     training = config.to_training_config(
         vocab_size=32,
         world_size=1,
@@ -70,6 +78,8 @@ def test_hyperblock_cli_resolves_topology_and_training_config() -> None:
     )
     assert training.hyperblock_enabled is True
     assert training.hyperblock_plan() == config.hyperblock_plan()
+    assert training.hyperblock_loop_count == 3
+    assert training.hyperblock_loop_decay == pytest.approx(0.8)
 
 
 def test_hyperblock_cli_implies_sheet_model_type() -> None:

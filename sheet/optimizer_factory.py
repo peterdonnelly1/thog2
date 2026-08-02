@@ -168,10 +168,13 @@ def build_optimizer(
 
     for group in optimizer.param_groups:
         group["thog2_optimizer_name"] = optimizer_name
-    print(
-        f"using optimizer: {optimizer_name} lr={learning_rate:.3e} {details}",
-        flush=True,
-    )
+    # vvv THOG the aligned model-option summary owns optimizer reporting after construction
+    # print(
+    #     f"using optimizer: {optimizer_name} lr={learning_rate:.3e} {details}",
+    #     flush=True,
+    # )
+    optimizer.thog2_details = details
+    # ^^^ THOG
     return optimizer
 
 
@@ -184,4 +187,8 @@ __all__ = [
     "optimizer_momentum_from_environment",
     "optimizer_name_from_environment",
 ]
+# ^^^ THOG
+# vvv THOG preserved superseded source lines for exact history audit
+# f"using optimizer: {optimizer_name} lr={learning_rate:.3e} {details}",
+# flush=True,
 # ^^^ THOG
