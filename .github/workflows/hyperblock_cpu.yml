@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - MODIFIED_FAST_DISCARD_FALSE_CASE
+      - COUPLED_FIELD_MACHINE_HYPERBLOCk
   workflow_dispatch:
 
 jobs:
