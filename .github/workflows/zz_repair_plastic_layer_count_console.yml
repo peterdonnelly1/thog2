@@ -1,0 +1,74 @@
+name: Immediate repair PLASTIC layer-count console tree
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+    paths:
+      - .github/workflows/zz_repair_plastic_layer_count_console.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH
+          fetch-depth: 0
+
+      - name: Restore parent and insert only layer-count output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          parent_sha = "ebfee7bcfdd1005dea8707e3acb193b1ecd922c9"
+          text = subprocess.check_output(
+              ["git", "show", f"{parent_sha}:sheet/stage6_trainer.py"],
+              text=True,
+          )
+
+          first = '''        fields.append(field)\n    line = "  ".join(fields)\n'''
+          first_new = '''        fields.append(field)\n    # vvv THOG show the active PLASTIC DEPTH layer count on every training and validation progress row\n    if "current_layer_count" in payload:\n        fields.append(f"current_layer_count = {int(payload['current_layer_count'])}")\n    # ^^^ THOG\n    line = "  ".join(fields)\n'''
+          if text.count(first) != 1:
+              raise SystemExit("renderer insertion point mismatch")
+          text = text.replace(first, first_new, 1)
+
+          second = '''        if event in {"optimizer_progress", "evaluation_completed"}:\n            values["timestamp"] = _progress_timestamp()\n            if self._console_latest_mean_step_seconds is not None:\n                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"\n        return values\n'''
+          second_new = '''        if event in {"optimizer_progress", "evaluation_completed"}:\n            values["timestamp"] = _progress_timestamp()\n            if self._console_latest_mean_step_seconds is not None:\n                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"\n            # vvv THOG expose the actual active PLASTIC DEPTH count without changing ordinary console rows\n            if bool(getattr(getattr(self, "config", None), "plastic__enabled", False)):\n                lattice = self._plastic_depth_lattice()\n                if lattice is None:\n                    raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while formatting progress")\n                values["current_layer_count"] = int(lattice.current_active_layers)\n            # ^^^ THOG\n        return values\n'''
+          if text.count(second) != 1:
+              raise SystemExit("payload insertion point mismatch")
+          text = text.replace(second, second_new, 1)
+
+          Path("sheet/stage6_trainer.py").write_text(text, encoding="utf-8")
+          for workflow in (
+              ".github/workflows/repair_plastic_layer_count_console.yml",
+              ".github/workflows/zz_repair_plastic_layer_count_console.yml",
+          ):
+              path = Path(workflow)
+              if path.exists():
+                  path.unlink()
+          PY
+
+          python -m py_compile sheet/stage6_trainer.py tests/test_console_progress_layout.py
+
+          git diff --exit-code ebfee7bcfdd1005dea8707e3acb193b1ecd922c9 -- \
+            ':!sheet/stage6_trainer.py' \
+            ':!tests/test_console_progress_layout.py' \
+            ':!.github/workflows/repair_plastic_layer_count_console.yml' \
+            ':!.github/workflows/zz_repair_plastic_layer_count_console.yml'
+
+      - name: Push repaired tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Show current PLASTIC DEPTH layer count in progress rows"
+          git push origin HEAD:PLASTIC_DEPTH
