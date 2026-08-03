@@ -8,7 +8,21 @@ from typing import Dict, Iterator, Optional, Tuple
 import torch
 from torch import Tensor, nn
 
-from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisCache, BasisOwner
+# vvv THOG preserve the original nanoGPT-derived import while extending it for continuous DEPTH evaluation
+# from .basis import BASIS_FAMILY_CHEBYSHEV, BASIS_VERSION, BasisCache, BasisOwner
+from .basis import (
+    BASIS_FAMILY_CHEBYSHEV,
+    BASIS_VERSION,
+    BasisCache,
+    BasisOwner,
+    chebyshev_first_kind_basis,
+    deterministic_reduced_qr,
+    differentiable_chebyshev_first_kind_basis,
+    normalized_coordinates,
+)
+# vvv THOG PLASTIC DEPTH maps learned public sample positions into the continuous Chebyshev field
+from .plastic_depth import PlasticDepthSamplingLattice, public_to_internal_depth
+# ^^^ THOG
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
 from .trajectory import build_family_metadata
@@ -70,6 +84,12 @@ class DepthTrajectory(nn.Module):
         basis_cache: Optional[BasisCache] = None,
         basis_family: str = BASIS_FAMILY_CHEBYSHEV,
         depth_compress_layer_norm_and_bias: Optional[bool] = None,
+        # vvv THOG optional PLASTIC DEPTH sampling geometry; omitted/false preserves the exact current path
+        plastic_enabled: bool = False,
+        plastic_initial_active_layers: Optional[int] = None,
+        plastic_sampling_initialisation: str = "equidistant",
+        plastic_seed: int = 1337,
+        # ^^^ THOG
     ) -> None:
         super().__init__()
         if depth_compress_layer_norm_and_bias is not None and not isinstance(depth_compress_layer_norm_and_bias, bool):
@@ -98,6 +118,45 @@ class DepthTrajectory(nn.Module):
             version=basis_version,
             basis_family=basis_family,
         )
+        # vvv THOG PLASTIC DEPTH retains the established QR coefficient coordinates while sampling them at learned real-valued positions
+        self.plastic_enabled = bool(plastic_enabled)
+        self.plastic_sampling: Optional[PlasticDepthSamplingLattice]
+        if self.plastic_enabled:
+            if basis_family != BASIS_FAMILY_CHEBYSHEV:
+                raise ValueError(
+                    "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH basis; "
+                    f"got {basis_family!r}"
+                )
+            active_layers = config.n_layer if plastic_initial_active_layers is None else plastic_initial_active_layers
+            self.plastic_sampling = PlasticDepthSamplingLattice(
+                config.n_layer,
+                initial_active_layers=active_layers,
+                initialisation=plastic_sampling_initialisation,
+                seed=plastic_seed,
+            )
+            reference_coordinates = normalized_coordinates(
+                config.n_layer,
+                dtype=torch.float64,
+                device="cpu",
+            )
+            reference_raw = chebyshev_first_kind_basis(
+                reference_coordinates,
+                config.depth_order,
+            )
+            _, reference_r = deterministic_reduced_qr(reference_raw)
+            self.register_buffer(
+                "plastic_depth_inverse_r",
+                torch.linalg.inv(reference_r),
+                persistent=False,
+            )
+        else:
+            self.plastic_sampling = None
+            self.register_buffer(
+                "plastic_depth_inverse_r",
+                torch.empty(0, dtype=torch.float64),
+                persistent=False,
+            )
+        # ^^^ THOG
         # vvv THOG row bases exist only for private legacy fallback users, never for the public DEPTH preset.
         self._row_basis_name_by_family: Dict[str, str] = {}
         if self.legacy_sheet_col_vectors:
@@ -182,6 +241,45 @@ class DepthTrajectory(nn.Module):
     def depth_basis(self) -> Tensor:
         return self.bases.depth_basis
 
+    # vvv THOG PLASTIC DEPTH evaluates one learned lattice rank in the original QR-stabilised coefficient coordinates
+    def _depth_row(self, layer_index: int, reference: Tensor) -> Tensor:
+        # depth_row = self.depth_basis[layer_index].to(
+        # depth_row = self.depth_basis[layer_index].to(coefficient)
+        # ^^^ THOG original fixed-index materialisation forms are preserved above; PLASTIC DEPTH centralises both in this helper
+        if not self.plastic_enabled:
+            return self.depth_basis[layer_index].to(
+                device=reference.device,
+                dtype=reference.dtype,
+            )
+        if self.plastic_sampling is None:
+            raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+        public_coordinate = self.plastic_sampling.public_coordinates()[layer_index : layer_index + 1]
+        internal_coordinate = public_to_internal_depth(public_coordinate).to(dtype=torch.float64)
+        raw = differentiable_chebyshev_first_kind_basis(
+            internal_coordinate,
+            self.config.depth_order,
+        )
+        row = raw @ self.plastic_depth_inverse_r.to(raw.device)
+        return row[0].to(device=reference.device, dtype=reference.dtype)
+
+    def active_layer_indices(self, active_layers: Optional[int] = None) -> Tuple[int, ...]:
+        if not self.plastic_enabled:
+            return tuple(range(self.config.n_layer))
+        if self.plastic_sampling is None:
+            raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+        return self.plastic_sampling.active_ranks(active_layers)
+
+    def set_active_layer_count(self, active_layers: int) -> None:
+        if not self.plastic_enabled or self.plastic_sampling is None:
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        self.plastic_sampling.set_active_layer_count(active_layers)
+
+    def plastic_depth_report(self) -> Optional[Dict[str, object]]:
+        if not self.plastic_enabled or self.plastic_sampling is None:
+            return None
+        return self.plastic_sampling.interval_report()
+    # ^^^ THOG
+
     def row_basis(self, name: str) -> Tensor:
         if not self.legacy_sheet_col_vectors:
             raise RuntimeError("public DEPTH owns no within-tensor row basis")
@@ -227,10 +325,7 @@ class DepthTrajectory(nn.Module):
 
     def _materialize_depth_parameter(self, name: str, layer_index: int) -> Tensor:
         coefficient = self.coefficients[name]
-        depth_row = self.depth_basis[layer_index].to(
-            device=coefficient.device,
-            dtype=coefficient.dtype,
-        )
+        depth_row = self._depth_row(layer_index, coefficient)
         generated = torch.einsum("p,rcp->rc", depth_row, coefficient)
         item = self.family_metadata(name)
         expected_shape = (item.output_rows, item.row_width)
@@ -243,10 +338,7 @@ class DepthTrajectory(nn.Module):
     def _materialize_legacy_vector(self, name: str, layer_index: int) -> Tensor:
         item = self.family_metadata(name)
         coefficient = self.coefficients[name]
-        depth_row = self.depth_basis[layer_index].to(
-            device=coefficient.device,
-            dtype=coefficient.dtype,
-        )
+        depth_row = self._depth_row(layer_index, coefficient)
         row_basis = self.row_basis(name).to(
             device=coefficient.device,
             dtype=coefficient.dtype,
@@ -325,11 +417,11 @@ class DepthTrajectory(nn.Module):
         parameter = self.coefficients[name]
         if representation == "depth_coefficients":
             coefficient = parameter[output_row, row_index]
-            depth_row = self.depth_basis[layer_index].to(coefficient)
+            depth_row = self._depth_row(layer_index, coefficient)
             return depth_row @ coefficient
         if representation == "legacy_sheet_col":
             coefficient = parameter[output_row]
-            depth_row = self.depth_basis[layer_index].to(coefficient)
+            depth_row = self._depth_row(layer_index, coefficient)
             row_value = self.row_basis(name)[row_index].to(coefficient)
             return depth_row @ coefficient @ row_value
         return parameter[layer_index, output_row, row_index]

@@ -63,7 +63,16 @@ class TrainerScheduleMixin:
         learning_rate = self.learning_rate_for_update(
             self.state.completed_updates
         )
+        # vvv THOG PLASTIC DEPTH geometry uses a persistent per-group LR multiplier and may remain frozen during ordinary warmup
+        # vvv THOG preserve the original single-rate assignment while allowing PE-owned learning-rate multipliers
+        # group["lr"] = learning_rate
         for group in self.optimizer.param_groups:
-            group["lr"] = learning_rate
+            multiplier = float(group.get("thog2_lr_multiplier", 1.0))
+            freeze_during_warmup = bool(group.get("thog2_freeze_during_warmup", False))
+            if freeze_during_warmup and self.state.completed_updates < self.config.warmup_updates:
+                group["lr"] = 0.0
+            else:
+                group["lr"] = learning_rate * multiplier
+        # ^^^ THOG
         return learning_rate
 # ^^^ THOG

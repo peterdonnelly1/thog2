@@ -41,6 +41,13 @@ from .hyperblock import (
 # ^^^ THOG
 from .jpeg_like_v1_trajectory import JpegLikeV1Trajectory
 from .mlp_block_trajectory import MlpBlockTrajectory
+# vvv THOG PLASTIC DEPTH owns learned real-valued DEPTH sampling geometry and discrete active-count state
+from .plastic_depth import (
+    resolve_plastic_depth_counts,
+    validate_plastic_layer_count_objective,
+    validate_plastic_sampling_initialisation,
+)
+# ^^^ THOG
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
 
@@ -114,6 +121,22 @@ class SheetGPTConfig:
     hyperblock_loop_count: int = 1
     hyperblock_loop_decay: float = 1.0
     # ^^^ THOG
+    # vvv THOG PLASTIC DEPTH controls preserve the existing DEPTH path exactly while disabled
+    plastic__enabled: bool = False
+    plastic__layers_to_sample: Optional[int] = None
+    plastic__do_learn_layer_count: bool = False
+    plastic__initial_layer_count: Optional[int] = None
+    plastic__max_permitted_layers: Optional[int] = None
+    plastic__layer_sampling_initialisation: str = "equidistant"
+    plastic__layer_count_objective: str = "lowest_loss"
+    plastic__layer_count_hold_updates: int = 100
+    plastic__layer_count_cost_weight: float = 0.0
+    plastic__layer_memory_budget_gib: Optional[float] = None
+    plastic__geometry_learning_rate_multiplier: float = 0.1
+    plastic__freeze_geometry_during_warmup: bool = True
+    plastic__sampling_seed: int = 1337
+    plastic__initial_active_layers: int = 0
+    # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
@@ -142,6 +165,86 @@ class SheetGPTConfig:
             raise ValueError(f"dropout must be in [0, 1); got {self.dropout!r}")
         if not isinstance(self.basis_version, str) or not self.basis_version.strip():
             raise ValueError("basis_version must be a non-empty string")
+        # vvv THOG resolve PLASTIC DEPTH persistent lattice size before constructing any trajectory geometry
+        if not isinstance(self.plastic__enabled, bool):
+            raise ValueError(f"plastic__enabled must be bool; got {self.plastic__enabled!r}")
+        if not isinstance(self.plastic__do_learn_layer_count, bool):
+            raise ValueError(
+                "plastic__do_learn_layer_count must be bool; "
+                f"got {self.plastic__do_learn_layer_count!r}"
+            )
+        if not isinstance(self.plastic__freeze_geometry_during_warmup, bool):
+            raise ValueError(
+                "plastic__freeze_geometry_during_warmup must be bool; "
+                f"got {self.plastic__freeze_geometry_during_warmup!r}"
+            )
+        if isinstance(self.plastic__sampling_seed, bool) or not isinstance(self.plastic__sampling_seed, int) or self.plastic__sampling_seed < 0:
+            raise ValueError(
+                "plastic__sampling_seed must be a non-negative integer; "
+                f"got {self.plastic__sampling_seed!r}"
+            )
+        resolved_plastic_counts = resolve_plastic_depth_counts(
+            n_layer=self.n_layer,
+            enabled=self.plastic__enabled,
+            layers_to_sample=self.plastic__layers_to_sample,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+            initial_layer_count=self.plastic__initial_layer_count,
+            max_permitted_layers=self.plastic__max_permitted_layers,
+        )
+        self.plastic__initial_active_layers = resolved_plastic_counts.initial_active_layers
+        if self.plastic__enabled:
+            self.n_layer = resolved_plastic_counts.maximum_layers
+        validate_plastic_sampling_initialisation(self.plastic__layer_sampling_initialisation)
+        validate_plastic_layer_count_objective(self.plastic__layer_count_objective)
+        if (
+            isinstance(self.plastic__layer_count_hold_updates, bool)
+            or not isinstance(self.plastic__layer_count_hold_updates, int)
+            or self.plastic__layer_count_hold_updates <= 0
+        ):
+            raise ValueError(
+                "plastic__layer_count_hold_updates must be a positive integer; "
+                f"got {self.plastic__layer_count_hold_updates!r}"
+            )
+        if (
+            isinstance(self.plastic__layer_count_cost_weight, bool)
+            or not isinstance(self.plastic__layer_count_cost_weight, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_cost_weight))
+            or float(self.plastic__layer_count_cost_weight) < 0.0
+        ):
+            raise ValueError(
+                "plastic__layer_count_cost_weight must be finite and non-negative; "
+                f"got {self.plastic__layer_count_cost_weight!r}"
+            )
+        if (
+            self.plastic__layer_memory_budget_gib is not None
+            and (
+                isinstance(self.plastic__layer_memory_budget_gib, bool)
+                or not isinstance(self.plastic__layer_memory_budget_gib, (int, float))
+                or not math.isfinite(float(self.plastic__layer_memory_budget_gib))
+                or float(self.plastic__layer_memory_budget_gib) <= 0.0
+            )
+        ):
+            raise ValueError(
+                "plastic__layer_memory_budget_gib must be finite and positive or None; "
+                f"got {self.plastic__layer_memory_budget_gib!r}"
+            )
+        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_memory_budget_gib is None:
+            raise ValueError(
+                "plastic__layer_memory_budget_gib is required for memory_budget"
+            )
+        if (
+            isinstance(self.plastic__geometry_learning_rate_multiplier, bool)
+            or not isinstance(self.plastic__geometry_learning_rate_multiplier, (int, float))
+            or not math.isfinite(float(self.plastic__geometry_learning_rate_multiplier))
+            or float(self.plastic__geometry_learning_rate_multiplier) < 0.0
+        ):
+            raise ValueError(
+                "plastic__geometry_learning_rate_multiplier must be finite and non-negative; "
+                f"got {self.plastic__geometry_learning_rate_multiplier!r}"
+            )
+        if self.plastic__enabled and self.hyperblock_enabled:
+            raise ValueError("PLASTIC DEPTH may not be combined with HYPERBLOCK")
+        # ^^^ THOG
         if self.hyperblock_residual_weight_std is not None and (
             isinstance(self.hyperblock_residual_weight_std, bool)
             or not isinstance(self.hyperblock_residual_weight_std, (int, float))
@@ -234,6 +337,13 @@ class SheetGPTConfig:
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                 )
             if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                # vvv THOG PLASTIC DEPTH v0.1 is defined only for the continuous Chebyshev DEPTH field
+                if self.plastic__enabled and selectors.basis_family != "chebyshev":
+                    raise ValueError(
+                        "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH compressor; "
+                        f"got {selectors.basis_family!r}"
+                    )
+                # ^^^ THOG
                 self.base_row_order = 1
                 self.mlp_channel_order = 1
                 self.o_attn_d_model = 1
@@ -243,6 +353,8 @@ class SheetGPTConfig:
                 self.o_mlp_hidden = 1
             # ^^^ THOG
 
+            if self.plastic__enabled and selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
+                raise ValueError("PLASTIC DEPTH requires geometry_preset='depth'")
             geometry = self.sheet_geometry()
             if selectors.mlp_geometry == MLP_GEOMETRY_JPEG_LIKE_V1:
                 mlp_hidden_length = 4 * self.n_embd
@@ -381,6 +493,12 @@ class SheetGPT(nn.Module):
                 basis_version=config.basis_version,
                 basis_family=selectors.basis_family,
                 depth_compress_layer_norm_and_bias=config.depth_compress_layer_norm_and_bias,                                                           # <<< THOG select conventional or pure-depth block vectors
+                # vvv THOG PLASTIC DEPTH adds a persistent trainable sampling lattice without changing DEPTH coefficients
+                plastic_enabled=config.plastic__enabled,
+                plastic_initial_active_layers=config.plastic__initial_active_layers,
+                plastic_sampling_initialisation=config.plastic__layer_sampling_initialisation,
+                plastic_seed=config.plastic__sampling_seed,
+                # ^^^ THOG
             )
         elif selectors is not None:
             self.trajectory = SheetTrajectory(
@@ -687,6 +805,30 @@ class SheetGPT(nn.Module):
         return inputs
     # ^^^ THOG
 
+    # vvv THOG PLASTIC DEPTH exposes its current sampled canonical-layer ranks without affecting any disabled path
+    @property
+    def plastic_depth_enabled(self) -> bool:
+        return bool(getattr(self.trajectory, "plastic_enabled", False))
+
+    def plastic_depth_active_layer_indices(self) -> Tuple[int, ...]:
+        active_layer_indices = getattr(self.trajectory, "active_layer_indices", None)
+        if self.plastic_depth_enabled and callable(active_layer_indices):
+            return tuple(int(value) for value in active_layer_indices())
+        return tuple(range(self.config.n_layer))
+
+    def set_plastic_depth_active_layer_count(self, active_layers: int) -> None:
+        setter = getattr(self.trajectory, "set_active_layer_count", None)
+        if not self.plastic_depth_enabled or not callable(setter):
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        setter(active_layers)
+
+    def plastic_depth_report(self) -> Optional[Dict[str, object]]:
+        report_builder = getattr(self.trajectory, "plastic_depth_report", None)
+        if not self.plastic_depth_enabled or not callable(report_builder):
+            return None
+        return report_builder()
+    # ^^^ THOG
+
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
@@ -697,8 +839,18 @@ class SheetGPT(nn.Module):
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
-        for layer_index in range(self.config.n_layer):
+        # vvv THOG PLASTIC DEPTH executes only the active ranks from its persistent learned sampling lattice
+        layer_indices = (
+            self.plastic_depth_active_layer_indices()
+            if self.plastic_depth_enabled
+            else range(self.config.n_layer)
+        )
+        # vvv THOG preserve the original fixed-depth traversal while allowing PLASTIC DEPTH active ranks
+        # for layer_index in range(self.config.n_layer):
+        for layer_index in layer_indices:
+        # ^^^ THOG
             hidden = self._logical_block(hidden, layer_index)
+        # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
         if targets is not None:
             logits = self.lm_head(hidden)
@@ -715,7 +867,15 @@ class SheetGPT(nn.Module):
     def parameter_report(self) -> Dict[str, object]:
         total_persistent = sum(parameter.numel() for parameter in self.parameters())
         sheet_coefficients = self.trajectory.sheet_parameter_count()
-        conventional = total_persistent - sheet_coefficients
+        # vvv THOG PLASTIC DEPTH geometry is compact PE state, neither a DEPTH coefficient nor a conventional GPT parameter
+        plastic_depth_parameters = sum(
+            parameter.numel()
+            for name, parameter in self.named_parameters()
+            if name.startswith("trajectory.plastic_sampling.")
+        )
+        # conventional = total_persistent - sheet_coefficients
+        conventional = total_persistent - sheet_coefficients - plastic_depth_parameters
+        # ^^^ THOG
         dense_equivalent_repeated = self.trajectory.dense_equivalent_count()
         dense_equivalent_total = conventional + dense_equivalent_repeated
         report = {
@@ -728,6 +888,12 @@ class SheetGPT(nn.Module):
             "matrix_dense_equivalent_parameters": self.trajectory.matrix_dense_equivalent_count(),
             "families": self.trajectory.family_report(),
         }
+        # vvv THOG expose PLASTIC DEPTH state separately from the unchanged sheet-coefficient count
+        plastic_depth_report = self.plastic_depth_report()
+        if plastic_depth_report is not None:
+            report["plastic_depth"] = plastic_depth_report
+            report["plastic_depth_parameters"] = plastic_depth_parameters
+        # ^^^ THOG
         # vvv THOG expose the resolved HYPERBLOCK field identity without changing legacy report fields
         hyperblock_report = getattr(self.trajectory, "hyperblock_report", None)
         if callable(hyperblock_report):
@@ -751,12 +917,20 @@ class SheetGPT(nn.Module):
     # if id(parameter) in sheet_parameter_ids:
     # ^^^ THOG
 
-    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
+    # vvv THOG preserve the original two-group signature while adding a dedicated PLASTIC DEPTH geometry group
+    # def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], Dict[str, object]]:
+    def optimizer_parameter_groups(self, weight_decay: float) -> Tuple[Dict[str, object], ...]:
         decay: Dict[str, nn.Parameter] = {}
         no_decay: Dict[str, nn.Parameter] = {}
+        geometry: Dict[str, nn.Parameter] = {}
         semantic_parameter_ids = set()
         coefficient_parameter_ids = {
             id(parameter) for parameter in self.trajectory.coefficients.values()
+        }
+        geometry_parameter_ids = {
+            id(parameter)
+            for name, parameter in self.named_parameters()
+            if name.startswith("trajectory.plastic_sampling.") and parameter.numel() > 0
         }
         for family_name, parameter, metadata in self.trajectory.named_semantic_parameters():
             semantic_parameter_ids.add(id(parameter))
@@ -770,6 +944,9 @@ class SheetGPT(nn.Module):
         for name, parameter in self.named_parameters():
             if id(parameter) in semantic_parameter_ids:
                 continue
+            if id(parameter) in geometry_parameter_ids:
+                geometry[name] = parameter
+                continue
             if name in {"transformer.wte.weight", "transformer.wpe.weight", "lm_head.weight"}:
                 target = no_decay
             elif parameter.ndim >= 2:
@@ -777,10 +954,26 @@ class SheetGPT(nn.Module):
             else:
                 target = no_decay
             target[name] = parameter
-        return (
+        # return (
+        groups = [
             {"params": list(decay.values()), "parameter_names": tuple(decay.keys()), "weight_decay": weight_decay},
             {"params": list(no_decay.values()), "parameter_names": tuple(no_decay.keys()), "weight_decay": 0.0},
-        )
+        ]
+        # vvv THOG PLASTIC DEPTH geometry receives a separate slower no-decay optimiser group only when enabled
+        if geometry:
+            groups.append(
+                {
+                    "params": list(geometry.values()),
+                    "parameter_names": tuple(geometry.keys()),
+                    "weight_decay": 0.0,
+                    "thog2_lr_multiplier": float(self.config.plastic__geometry_learning_rate_multiplier),
+                    "thog2_freeze_during_warmup": bool(self.config.plastic__freeze_geometry_during_warmup),
+                    "thog2_plastic_depth_geometry": True,
+                }
+            )
+        # ^^^ THOG
+        return tuple(groups)
+    # ^^^ THOG
 
     def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: Tuple[float, float], device_type: str) -> torch.optim.Optimizer:
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
@@ -793,6 +986,7 @@ class SheetGPT(nn.Module):
             "trajectory.coefficients.",
             "trajectory.depth.coefficients.",
             "trajectory.vector_parameters.",                                                                                                           # <<< THOG HYPERBLOCK conventional per-layer vectors remain inside the compact model state
+            "trajectory.plastic_sampling.",                                                                                                           # <<< THOG PLASTIC DEPTH lattice parameters are compact Plasticity Engine state
         )
         for name, parameter in self.named_parameters():
             if name.startswith(compact_coefficient_prefixes):

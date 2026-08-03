@@ -179,9 +179,14 @@ class TrainingSheetGPT(SheetGPT):
 
     # vvv THOG explicit optimiser-update lifetime for non-fast-discard materialisations
     def _optimizer_update_layer_indices(self) -> Tuple[int, ...]:
-        if self._active_layer_indices is None:
-            return tuple(range(self.config.n_layer))
-        return self._active_layer_indices
+        # if self._active_layer_indices is None:
+        if self._active_layer_indices is not None:
+            return self._active_layer_indices
+        # vvv THOG PLASTIC DEPTH active ranks apply to the complete optimiser update, including retained materialisations
+        if self.plastic_depth_enabled:
+            return self.plastic_depth_active_layer_indices()
+        # ^^^ THOG
+        return tuple(range(self.config.n_layer))
 
     def _materialize_layer_norm_parameters_for_update(
         self,
@@ -342,8 +347,19 @@ class TrainingSheetGPT(SheetGPT):
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
-        # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
-        layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
+        # vvv THOG PLASTIC DEPTH sampling is canonical in training, validation and generation; layer dropout remains training-only
+        if self._active_layer_indices is not None and self.training and torch.is_grad_enabled():
+            layer_indices: Optional[Tuple[int, ...]] = self._active_layer_indices
+        elif self.plastic_depth_enabled:
+            plastic_layer_indices = self.plastic_depth_active_layer_indices()
+            full_layer_indices = tuple(range(self.config.n_layer))
+            layer_indices = None if plastic_layer_indices == full_layer_indices else plastic_layer_indices
+        else:
+            layer_indices = None
+        if self._torch_compile_mode == "regional" and layer_indices is not None:
+            raise RuntimeError(
+                "regional torch.compile does not support a PLASTIC DEPTH active count below the persistent maximum"
+            )
         regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
         if layer_indices is None:
             hidden, self.last_execution_report = execute_logical_layers(
