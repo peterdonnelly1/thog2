@@ -1,9 +1,11 @@
 name: Apply PLASTIC DEPTH implementation
 
 on:
-  push:
+  pull_request:
     branches:
-      - PLASTIC_DEPTH
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+    types:
+      - synchronize
   workflow_dispatch:
 
 permissions:
@@ -11,13 +13,13 @@ permissions:
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Check out PLASTIC DEPTH
         uses: actions/checkout@v4
         with:
+          ref: PLASTIC_DEPTH
           fetch-depth: 0
 
       - name: Reconstruct verified patch
