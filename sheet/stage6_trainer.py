@@ -485,30 +485,41 @@ class Stage6Trainer(Stage4Trainer):
                 "evaluation_seconds": evaluation_seconds,
                 "checkpoint_seconds": checkpoint_seconds,
                 "wall_seconds": wall_seconds,
+                "max_wall_seconds": max_wall_seconds,
                 "tokens_per_training_second": final_session_consumed_tokens / training_seconds if training_seconds > 0.0 else 0.0,
             },
             "updates": update_rows,
             "evaluations": evaluation_rows,
-            "optimizer_batch_trace": optimizer_trace,
-            "optimizer_batch_trace_sha256": optimizer_trace_sha256,
-            "train_stream_trace": train_stream_trace,
-            "validation_trace": validation_trace,
-            "stream_trace_sha256": trace_digest({"train": train_stream_trace, "validation": validation_trace}),
+            "trace": {
+                "training_sha256": optimizer_trace_sha256,
+                "training_starts": optimizer_trace,
+                "optimizer_training_sha256": optimizer_trace_sha256,
+                "optimizer_training_starts": optimizer_trace,
+                "train_stream_sha256": trace_digest(train_stream_trace),
+                "train_stream_starts": train_stream_trace,
+                "validation_sha256": trace_digest(validation_trace),
+                "validation_starts": validation_trace,
+                "all_sha256": self.batch_source.trace_digest("all"),
+            },
+            "memory": self.memory_telemetry.report(),
             "gradient_diagnostics": self.gradient_diagnostics,
             "sheet_diagnostics": diagnostics,
-            "checkpoint": {
-                "path": str(checkpoint_path),
-                "bytes": checkpoint_path.stat().st_size,
-            },
+            "checkpoint": {"path": str(checkpoint_path), "bytes": checkpoint_path.stat().st_size},
         }
-        target.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+        finite_values = [training_seconds, evaluation_seconds, checkpoint_seconds, wall_seconds]
+        if not all(math.isfinite(value) and value >= 0.0 for value in finite_values):
+            raise FloatingPointError("non-finite Stage 6 timing evidence")
+        if self.distributed.is_primary:
+            target.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.distributed.barrier()
+        final_validation_loss = evaluation_rows[-1]["val"] if evaluation_rows else None
         self._print_progress(
             run_id,
             "run_completed",
             completed_updates=self.state.completed_updates,
             consumed_tokens=self.state.completed_updates * tokens_per_update,
             session_consumed_tokens=final_session_consumed_tokens,
-            final_validation_loss=evaluation_rows[-1]["val"] if evaluation_rows else None,
+            final_validation_loss=final_validation_loss,
             training_seconds=training_seconds,
             checkpoint_bytes=checkpoint_path.stat().st_size,
         )
@@ -517,10 +528,8 @@ class Stage6Trainer(Stage4Trainer):
 
 __all__ = ["Stage6Trainer", "format_progress_line", "trace_digest"]
 # ^^^ THOG
-
-# vvv THOG preserved previous console formatting before compact timestamped T/V rows
+# vvv THOG preserved superseded source lines for exact history audit
+# return f"{value}s"
+# fields.append(_progress_elapsed_seconds(payload[key]))
 # values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
-# print(format_progress_line(run_id, event, values), flush=True)                                                                                    # <<< THOG emit one explicit progress row per lifecycle event
-# if event == "run_started":
-#     print(flush=True)                                                                                                                            # <<< THOG separate startup summary from progress rows
 # ^^^ THOG
