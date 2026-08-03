@@ -5,11 +5,37 @@ set -euo pipefail
 cd "${THOG2_REPO_DIR:-$HOME/git/thog2}"
 
 data_dir="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
-python_bin="${THOG2_PYTHON:-.venv/bin/python}"
 attention_backend="${PLASTIC_SMOKE_BACKEND:-flash2}"
 dtype="${PLASTIC_SMOKE_DTYPE:-bfloat16}"
 memory_budget_gib="${PLASTIC_SMOKE_MEMORY_BUDGET_GIB:-15.0}"
 smoke_tag="$(date +%y%m%d-%H%M%S)"
+
+if [[ -n "${THOG2_PYTHON:-}" ]]; then
+  python_bin="$THOG2_PYTHON"
+elif command -v python >/dev/null 2>&1; then
+  python_bin="$(command -v python)"
+elif [[ -x .venv/bin/python ]]; then
+  python_bin=".venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  python_bin="$(command -v python3)"
+else
+  echo "ERROR: no Python interpreter found. Activate the THOG2 environment or set THOG2_PYTHON." >&2
+  exit 1
+fi
+
+if ! "$python_bin" -c 'import torch' >/dev/null 2>&1; then
+  echo "ERROR: $python_bin cannot import torch. Activate the THOG2 environment or set THOG2_PYTHON." >&2
+  exit 1
+fi
+
+echo "plastic smoke python:  $python_bin"
+echo "plastic smoke backend: $attention_backend"
+echo "plastic smoke dtype:   $dtype"
+echo "plastic smoke data:    $data_dir"
+
+if [[ "${PLASTIC_SMOKE_PREFLIGHT_ONLY:-false}" == "true" ]]; then
+  exit 0
+fi
 
 common_args=(
   --model-type sheet
