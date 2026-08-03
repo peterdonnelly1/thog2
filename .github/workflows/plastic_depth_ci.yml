@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   apply-reviewed-cache:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.sha == '7a82bd3b11315a1600499821cc8181e35e5cdf20'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
