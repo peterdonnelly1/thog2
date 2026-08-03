@@ -89,8 +89,6 @@ jobs:
             sheet/training_config.py \
             sheet/training_model.py \
             train_OWT_core.sh
-          git show 082b51d1aad6dbb74754e3415386a1ae79d11e46:.github/workflows/plastic_depth_ci.yml > .github/workflows/plastic_depth_ci.yml
-          git add .github/workflows/plastic_depth_ci.yml
           rm -f \
             sheet/plastic_depth.py \
             tests/plastic_depth_ddp_check.py \
@@ -103,8 +101,8 @@ jobs:
             tests/plastic_depth_ddp_worker.py \
             tests/test_plastic_depth.py \
             tests/test_plastic_depth_interfaces.py
-          git apply --binary --index /tmp/plastic_depth.patch
-          rm -f .plastic_depth_payload_* .plastic_depth_part_* .github/workflows/apply_plastic_depth.yml
+          git apply --binary --index --exclude=.github/workflows/plastic_depth_ci.yml /tmp/plastic_depth.patch
+          rm -f .plastic_depth_payload_* .plastic_depth_part_*
           git add -A
           git diff --cached --check
           test -f sheet/plastic_depth.py
@@ -112,7 +110,7 @@ jobs:
           test ! -e .plastic_depth_payload_000
           test ! -e .plastic_depth_payload_001
           test ! -e .plastic_depth_part_00
-          test ! -e .github/workflows/apply_plastic_depth.yml
+          test -f .github/workflows/apply_plastic_depth.yml
 
       - name: Commit exact implementation tree
         run: |
