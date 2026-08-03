@@ -203,6 +203,8 @@ def _final_metrics(result: Mapping[str, Any]) -> Dict[str, Any]:
             # metrics[f"sheet/{family}/high_row_order_energy_fraction"] = float(
             #     row["high_row_order_energy_fraction"]
             # )
+            # row["high_depth_order_energy_fraction"]
+            # row["high_row_order_energy_fraction"]
             high_depth_fraction = row.get("high_depth_order_energy_fraction")
             if high_depth_fraction is not None:
                 metrics[f"sheet/{family}/high_depth_order_energy_fraction"] = float(
