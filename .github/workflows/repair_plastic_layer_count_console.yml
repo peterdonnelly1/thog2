@@ -78,13 +78,8 @@ jobs:
             tests/test_console_progress_layout.py \
             tests/test_console_progress_pretty_rows.py \
             tests/test_plastic_depth.py
-          python tests/hyperblock_source_history_check.py \
-            --repository . \
-            --base 2cce91c7ff552850bf3184c4f80d1a3f4b6e71d8 \
-            --head HEAD \
-            --output /tmp/plastic-layer-count-source-history.json
 
-      - name: Commit clean repair
+      - name: Commit repaired tree locally
         shell: bash
         run: |
           set -euo pipefail
@@ -92,4 +87,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add sheet/stage6_trainer.py tests/test_console_progress_layout.py .github/workflows/repair_plastic_layer_count_console.yml
           git commit -m "Show current PLASTIC DEPTH layer count in progress rows"
+
+      - name: Audit exact committed source history
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tests/hyperblock_source_history_check.py \
+            --repository . \
+            --base 2cce91c7ff552850bf3184c4f80d1a3f4b6e71d8 \
+            --head HEAD \
+            --output /tmp/plastic-layer-count-source-history.json
+
+      - name: Push clean repair
+        shell: bash
+        run: |
+          set -euo pipefail
           git push origin HEAD:PLASTIC_DEPTH
