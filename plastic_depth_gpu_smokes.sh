@@ -2,7 +2,8 @@
 # vvv THOG
 set -euo pipefail
 
-cd "${THOG2_REPO_DIR:-$HOME/git/thog2}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${THOG2_REPO_DIR:-$script_dir}"
 
 data_dir="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 attention_backend="${PLASTIC_SMOKE_BACKEND:-flash2}"
