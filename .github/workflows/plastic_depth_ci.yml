@@ -1,6 +1,9 @@
 name: Plastic Depth CI
 
 on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
   pull_request:
     branches:
       - HYPERBLOCK_LOOP_ENHANCEMENTS
