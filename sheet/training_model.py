@@ -257,6 +257,10 @@ class TrainingSheetGPT(SheetGPT):
         if not controller.begin():
             return False
         try:
+            # vvv THOG retained PLASTIC DEPTH materialisations share one update-scoped differentiable basis
+            if self.plastic_depth_enabled:
+                self.trajectory.prepare_plastic_depth_basis_cache()
+            # ^^^ THOG
             if not torch.is_grad_enabled():
                 raise RuntimeError(
                     "update-retained materialisations require gradient tracking"
@@ -270,10 +274,20 @@ class TrainingSheetGPT(SheetGPT):
         return True
 
     def finalize_optimizer_update(self) -> Tuple[Tensor, ...]:
-        return self._update_retained_materializations.finalize()
+        # return self._update_retained_materializations.finalize()
+        try:
+            return self._update_retained_materializations.finalize()
+        finally:
+            if self.plastic_depth_enabled:
+                self.trajectory.clear_plastic_depth_basis_cache()
 
     def end_optimizer_update(self) -> bool:
-        return self._update_retained_materializations.end()
+        # return self._update_retained_materializations.end()
+        try:
+            return self._update_retained_materializations.end()
+        finally:
+            if self.plastic_depth_enabled:
+                self.trajectory.clear_plastic_depth_basis_cache()
 
     def requires_find_unused_parameters(self) -> bool:
         return self._update_retained_materializations.enabled
@@ -343,6 +357,10 @@ class TrainingSheetGPT(SheetGPT):
                 f"Cannot forward sequence of length {sequence_length}; "
                 f"block size is {self.config.block_size}"
             )
+        # vvv THOG fast-discard forwards own one basis each; retained-materialisation updates prepare one basis before all microbatches
+        if self.plastic_depth_enabled and not self._update_retained_materializations.active:
+            self.trajectory.prepare_plastic_depth_basis_cache()
+        # ^^^ THOG
         positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
@@ -393,6 +411,10 @@ class TrainingSheetGPT(SheetGPT):
         else:
             logits = self.lm_head(hidden[:, [-1], :])
             loss = None
+        # vvv THOG no-gradient evaluation and generation do not need to retain the forward-scoped PLASTIC DEPTH basis
+        if self.plastic_depth_enabled and not torch.is_grad_enabled():
+            self.trajectory.clear_plastic_depth_basis_cache()
+        # ^^^ THOG
         return logits, loss
 
     # vvv THOG
