@@ -1,0 +1,23 @@
+name: Plastic Depth CI
+
+on:
+  pull_request:
+    branches:
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+  workflow_dispatch:
+
+jobs:
+  export_source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+      - name: Package source
+        run: |
+          tar --exclude=.git -czf plastic_depth_source.tar.gz .
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-depth-source
+          path: plastic_depth_source.tar.gz
+          retention-days: 1
