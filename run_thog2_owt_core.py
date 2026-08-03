@@ -560,6 +560,12 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             "plastic samples:",
             ", ".join(f"{float(value):.3f}" for value in public_coordinates),
         )
+        full_coordinates = plastic_report.get("public_coordinates", ())
+        if tuple(full_coordinates) != tuple(public_coordinates):
+            _print_model_option(
+                "plastic full lattice:",
+                ", ".join(f"{float(value):.3f}" for value in full_coordinates),
+            )
     # ^^^ THOG
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config

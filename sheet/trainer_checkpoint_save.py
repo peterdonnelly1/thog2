@@ -31,7 +31,10 @@ class TrainerCheckpointSaveMixin:
             "optimizer_group_parameter_names": optimizer_group_names(self.optimizer),
             "trainer_state": asdict(self.state),
             "completed_updates": self.state.completed_updates,
-            "trainer_config": asdict(self.config),
+            # vvv THOG preserve the pre-PLASTIC checkpoint configuration serialization for source history
+            # "trainer_config": asdict(self.config),
+            "trainer_config": self.config.persistent_dict(),
+            # ^^^ THOG
             "batch_source": self.batch_source.state_dict(),
             "rng_state": capture_rng_state(),
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},

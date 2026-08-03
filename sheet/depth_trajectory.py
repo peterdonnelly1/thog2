@@ -87,6 +87,7 @@ class DepthTrajectory(nn.Module):
         # vvv THOG optional PLASTIC DEPTH sampling geometry; omitted/false preserves the exact current path
         plastic_enabled: bool = False,
         plastic_initial_active_layers: Optional[int] = None,
+        plastic_learn_layer_count: bool = False,
         plastic_sampling_initialisation: str = "equidistant",
         plastic_seed: int = 1337,
         # ^^^ THOG
@@ -133,6 +134,7 @@ class DepthTrajectory(nn.Module):
                 initial_active_layers=active_layers,
                 initialisation=plastic_sampling_initialisation,
                 seed=plastic_seed,
+                learn_layer_count=plastic_learn_layer_count,
             )
             reference_coordinates = normalized_coordinates(
                 config.n_layer,

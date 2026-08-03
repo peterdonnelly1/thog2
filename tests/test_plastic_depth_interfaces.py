@@ -66,6 +66,7 @@ def test_plastic_fixed_cli_resolves_and_preserves_public_identity() -> None:
     assert "PLN_6_PLM_6_PLI_random_PLO_lowest_loss" in config.artifact_name
     training = config.to_training_config(vocab_size=32, world_size=1, out_dir=Path("out-test"))
     assert training.n_layer == 6
+    assert config.compact_identity()["plastic_depth"]["maximum_layers"] == 6
     assert training.compact_identity_metadata()["plastic_depth"]["maximum_layers"] == 6
 
 
@@ -154,6 +155,39 @@ def test_disabled_artifact_descriptor_is_unchanged() -> None:
     )
     assert base.parameter_artifact_fragment() == explicit_disabled.parameter_artifact_fragment()
     assert base.compact_identity() == explicit_disabled.compact_identity()
+
+
+def test_disabled_persistent_surfaces_omit_plastic_fields() -> None:
+    config = OwtRunConfig(
+        model_type="sheet",
+        geometry_preset="depth",
+        basis_family="chebyshev",
+        n_layer=4,
+        n_head=2,
+        n_embd=8,
+        block_size=8,
+        o_depth=4,
+        max_iters=2,
+        warmup_iters=0,
+        activation_checkpointing=False,
+        device="cpu",
+        dtype="float32",
+        wandb_enabled=False,
+        wandb_mode="disabled",
+    )
+    training = config.to_training_config(
+        vocab_size=32,
+        world_size=1,
+        out_dir=Path("out-test"),
+    )
+    surfaces = (
+        config.persistent_dict(),
+        config.canonical_dict(world_size=1),
+        training.persistent_dict(),
+        training.model_arguments(),
+    )
+    for surface in surfaces:
+        assert not any(name.startswith("plastic__") for name in surface), surface
 
 
 def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:

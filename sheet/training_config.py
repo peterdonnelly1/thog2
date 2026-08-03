@@ -50,6 +50,24 @@ CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+# vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
+PLASTIC_TRAINING_CONFIG_FIELDS = (
+    "plastic__enabled",
+    "plastic__layers_to_sample",
+    "plastic__do_learn_layer_count",
+    "plastic__initial_layer_count",
+    "plastic__max_permitted_layers",
+    "plastic__layer_sampling_initialisation",
+    "plastic__layer_count_objective",
+    "plastic__layer_count_hold_updates",
+    "plastic__layer_count_cost_weight",
+    "plastic__layer_memory_budget_gib",
+    "plastic__geometry_learning_rate_multiplier",
+    "plastic__freeze_geometry_during_warmup",
+    "plastic__initial_active_layers",
+)
+# ^^^ THOG
+
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -570,6 +588,15 @@ class TrainingConfig:
     def residual_init_config(self) -> ResidualInitConfig:
         return ResidualInitConfig(policy=self.residual_init_policy, depth_source=self.residual_init_depth_source, depth_value=self.residual_init_depth_value)
 
+    # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
+    def persistent_dict(self) -> Dict[str, Any]:
+        values = asdict(self)
+        if not self.plastic__enabled:
+            for name in PLASTIC_TRAINING_CONFIG_FIELDS:
+                values.pop(name, None)
+        return values
+    # ^^^ THOG
+
     def model_arguments(self) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "block_size": self.block_size,
@@ -626,22 +653,25 @@ class TrainingConfig:
                     "attention_geometry": self.attention_geometry,
                     "mlp_geometry": self.mlp_geometry,
                     "basis_family": self.basis_family,
-                    # vvv THOG pass resolved PLASTIC DEPTH Plasticity Engine controls into SheetGPTConfig
-                    "plastic__enabled": self.plastic__enabled,
-                    "plastic__layers_to_sample": self.plastic__layers_to_sample,
-                    "plastic__do_learn_layer_count": self.plastic__do_learn_layer_count,
-                    "plastic__initial_layer_count": self.plastic__initial_layer_count,
-                    "plastic__max_permitted_layers": self.plastic__max_permitted_layers,
-                    "plastic__layer_sampling_initialisation": self.plastic__layer_sampling_initialisation,
-                    "plastic__layer_count_objective": self.plastic__layer_count_objective,
-                    "plastic__layer_count_hold_updates": self.plastic__layer_count_hold_updates,
-                    "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
-                    "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
-                    "plastic__geometry_learning_rate_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
-                    "plastic__freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
-                    "plastic__sampling_seed": self.model_seed,
-                    # ^^^ THOG
                 })
+                # vvv THOG disabled PLASTIC DEPTH passes no new model arguments; enabled runs carry the complete Plasticity Engine identity
+                if self.plastic__enabled:
+                    arguments.update({
+                        "plastic__enabled": True,
+                        "plastic__layers_to_sample": self.plastic__layers_to_sample,
+                        "plastic__do_learn_layer_count": self.plastic__do_learn_layer_count,
+                        "plastic__initial_layer_count": self.plastic__initial_layer_count,
+                        "plastic__max_permitted_layers": self.plastic__max_permitted_layers,
+                        "plastic__layer_sampling_initialisation": self.plastic__layer_sampling_initialisation,
+                        "plastic__layer_count_objective": self.plastic__layer_count_objective,
+                        "plastic__layer_count_hold_updates": self.plastic__layer_count_hold_updates,
+                        "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
+                        "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
+                        "plastic__geometry_learning_rate_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+                        "plastic__freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
+                        "plastic__sampling_seed": self.model_seed,
+                    })
+                # ^^^ THOG
             # ^^^ THOG
         return arguments
 

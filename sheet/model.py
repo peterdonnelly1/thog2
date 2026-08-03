@@ -496,6 +496,7 @@ class SheetGPT(nn.Module):
                 # vvv THOG PLASTIC DEPTH adds a persistent trainable sampling lattice without changing DEPTH coefficients
                 plastic_enabled=config.plastic__enabled,
                 plastic_initial_active_layers=config.plastic__initial_active_layers,
+                plastic_learn_layer_count=config.plastic__do_learn_layer_count,
                 plastic_sampling_initialisation=config.plastic__layer_sampling_initialisation,
                 plastic_seed=config.plastic__sampling_seed,
                 # ^^^ THOG

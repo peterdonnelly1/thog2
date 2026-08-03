@@ -145,6 +145,7 @@ class PlasticDepthSamplingLattice(nn.Module):
         initial_active_layers: int,
         initialisation: str,
         seed: int,
+        learn_layer_count: bool = True,
         epsilon: float = 1.0e-6,
     ) -> None:
         super().__init__()
@@ -158,8 +159,11 @@ class PlasticDepthSamplingLattice(nn.Module):
         validate_plastic_sampling_initialisation(initialisation)
         if not math.isfinite(epsilon) or epsilon <= 0.0:
             raise ValueError(f"epsilon must be finite and positive; got {epsilon!r}")
+        if not isinstance(learn_layer_count, bool):
+            raise ValueError(f"learn_layer_count must be bool; got {learn_layer_count!r}")
         self.maximum_layers = maximum_layers
         self.initialisation = initialisation
+        self.learn_layer_count = learn_layer_count
         self.epsilon = float(epsilon)
 
         if maximum_layers == 1:
@@ -176,39 +180,38 @@ class PlasticDepthSamplingLattice(nn.Module):
             self.public_coordinates().detach().to(dtype=torch.float64),
             persistent=True,
         )
-        self.register_buffer(
-            "active_layer_count",
-            torch.tensor(initial_active_layers, dtype=torch.long),
-            persistent=True,
-        )
-        self.register_buffer("last_count_decision_update", torch.tensor(-1, dtype=torch.long), persistent=True)
-        self.register_buffer("count_decision_number", torch.tensor(0, dtype=torch.long), persistent=True)
-        self.register_buffer("reference_training_time", torch.tensor(float("nan"), dtype=torch.float64), persistent=True)
-        self.register_buffer(
-            "training_time_ema",
-            torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
-            persistent=True,
-        )
-        self.register_buffer(
-            "training_time_observations",
-            torch.zeros(maximum_layers + 1, dtype=torch.long),
-            persistent=True,
-        )
-        # vvv THOG retain the count-independent optimiser-step component needed by relative training-wall-time probes
-        self.register_buffer("optimizer_step_time_ema", torch.tensor(float("nan"), dtype=torch.float64), persistent=True)
-        self.register_buffer("optimizer_step_time_observations", torch.tensor(0, dtype=torch.long), persistent=True)
-        # ^^^ THOG
-        # vvv THOG persist the latest representative training-memory probe for every candidate count
-        self.register_buffer(
-            "peak_allocated_gib",
-            torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
-            persistent=True,
-        )
-        self.register_buffer(
-            "peak_reserved_gib",
-            torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
-            persistent=True,
-        )
+        # vvv THOG fixed-count mode owns geometry only; discrete controller, timing and memory state exist only when count learning is enabled
+        if self.learn_layer_count:
+            self.register_buffer(
+                "active_layer_count",
+                torch.tensor(initial_active_layers, dtype=torch.long),
+                persistent=True,
+            )
+            self.register_buffer("last_count_decision_update", torch.tensor(-1, dtype=torch.long), persistent=True)
+            self.register_buffer("count_decision_number", torch.tensor(0, dtype=torch.long), persistent=True)
+            self.register_buffer("reference_training_time", torch.tensor(float("nan"), dtype=torch.float64), persistent=True)
+            self.register_buffer(
+                "training_time_ema",
+                torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
+                persistent=True,
+            )
+            self.register_buffer(
+                "training_time_observations",
+                torch.zeros(maximum_layers + 1, dtype=torch.long),
+                persistent=True,
+            )
+            self.register_buffer("optimizer_step_time_ema", torch.tensor(float("nan"), dtype=torch.float64), persistent=True)
+            self.register_buffer("optimizer_step_time_observations", torch.tensor(0, dtype=torch.long), persistent=True)
+            self.register_buffer(
+                "peak_allocated_gib",
+                torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
+                persistent=True,
+            )
+            self.register_buffer(
+                "peak_reserved_gib",
+                torch.full((maximum_layers + 1,), float("nan"), dtype=torch.float64),
+                persistent=True,
+            )
         # ^^^ THOG
 
     @staticmethod
@@ -235,8 +238,14 @@ class PlasticDepthSamplingLattice(nn.Module):
             dim=0,
         )
 
+    @property
+    def current_active_layers(self) -> int:
+        if not self.learn_layer_count:
+            return self.maximum_layers
+        return int(self.active_layer_count.item())
+
     def active_ranks(self, active_layers: Optional[int] = None) -> Tuple[int, ...]:
-        resolved_count = int(self.active_layer_count.item()) if active_layers is None else int(active_layers)
+        resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
         return evenly_distributed_active_ranks(self.maximum_layers, resolved_count)
 
     def active_public_coordinates(self, active_layers: Optional[int] = None) -> Tensor:
@@ -245,6 +254,8 @@ class PlasticDepthSamplingLattice(nn.Module):
         return self.public_coordinates().index_select(0, index)
 
     def set_active_layer_count(self, active_layers: int) -> None:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no layer-count controller")
         evenly_distributed_active_ranks(self.maximum_layers, active_layers)
         self.active_layer_count.fill_(active_layers)
 
@@ -257,7 +268,7 @@ class PlasticDepthSamplingLattice(nn.Module):
         movement = coordinates.to(dtype=torch.float64) - self.initial_public_coordinates.to(coordinates.device)
         return {
             "maximum_layers": self.maximum_layers,
-            "active_layers": int(self.active_layer_count.item()),
+            "active_layers": self.current_active_layers,
             "public_coordinates": tuple(float(value) for value in coordinates.detach().cpu().tolist()),
             "active_ranks": self.active_ranks(),
             "active_public_coordinates": tuple(
@@ -267,6 +278,7 @@ class PlasticDepthSamplingLattice(nn.Module):
             "maximum_interval": float(intervals.max().item()) if intervals.numel() else None,
             "mean_absolute_movement": float(movement.abs().mean().item()),
             "initialisation": self.initialisation,
+            "learn_layer_count": self.learn_layer_count,
             "version": PLASTIC_DEPTH_VERSION,
         }
 
@@ -278,6 +290,8 @@ class PlasticDepthSamplingLattice(nn.Module):
         smoothing: float = 0.9,
         update_reference: bool = False,
     ) -> None:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no training-time controller state")
         if not math.isfinite(elapsed_seconds) or elapsed_seconds <= 0.0:
             return
         if not 0.0 <= smoothing < 1.0:
@@ -290,6 +304,8 @@ class PlasticDepthSamplingLattice(nn.Module):
             self.reference_training_time.fill_(current)
 
     def record_optimizer_step_time(self, elapsed_seconds: float, *, smoothing: float = 0.9) -> None:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no optimiser-time controller state")
         if not math.isfinite(elapsed_seconds) or elapsed_seconds <= 0.0:
             return
         if not 0.0 <= smoothing < 1.0:
@@ -306,6 +322,8 @@ class PlasticDepthSamplingLattice(nn.Module):
         peak_allocated_gib: float,
         peak_reserved_gib: float,
     ) -> None:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no memory-probe controller state")
         if not math.isfinite(peak_allocated_gib) or peak_allocated_gib < 0.0:
             raise ValueError(f"peak_allocated_gib must be finite and non-negative; got {peak_allocated_gib!r}")
         if not math.isfinite(peak_reserved_gib) or peak_reserved_gib < 0.0:

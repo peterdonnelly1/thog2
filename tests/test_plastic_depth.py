@@ -119,6 +119,35 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         )
         self.assertEqual(single.public_coordinates().tolist(), [1.0])
 
+    def test_fixed_count_lattice_has_no_controller_state(self) -> None:
+        lattice = PlasticDepthSamplingLattice(
+            4,
+            initial_active_layers=4,
+            initialisation="equidistant",
+            seed=11,
+            learn_layer_count=False,
+        )
+        self.assertEqual(lattice.current_active_layers, 4)
+        self.assertEqual(
+            tuple(lattice.state_dict()),
+            ("raw_intervals", "initial_public_coordinates"),
+        )
+        for name in (
+            "active_layer_count",
+            "last_count_decision_update",
+            "count_decision_number",
+            "reference_training_time",
+            "training_time_ema",
+            "training_time_observations",
+            "optimizer_step_time_ema",
+            "optimizer_step_time_observations",
+            "peak_allocated_gib",
+            "peak_reserved_gib",
+        ):
+            self.assertFalse(hasattr(lattice, name), name)
+        with self.assertRaisesRegex(RuntimeError, "no layer-count controller"):
+            lattice.set_active_layer_count(3)
+
     def test_random_initialisation_is_ordered_reproducible_and_seeded(self) -> None:
         first = PlasticDepthSamplingLattice(8, initial_active_layers=5, initialisation="random", seed=7)
         repeated = PlasticDepthSamplingLattice(8, initial_active_layers=5, initialisation="random", seed=7)
@@ -229,7 +258,14 @@ class PlasticDepthModelTests(unittest.TestCase):
         self.assertEqual(geometry["parameter_names"], ("trajectory.plastic_sampling.raw_intervals",))
 
     def test_full_active_count_uses_full_execution_and_lower_count_uses_subset(self) -> None:
-        model = SheetGPT(plastic_sheet_config())
+        model = SheetGPT(
+            plastic_sheet_config(
+                plastic__layers_to_sample=None,
+                plastic__do_learn_layer_count=True,
+                plastic__initial_layer_count=4,
+                plastic__max_permitted_layers=4,
+            )
+        )
         self.assertEqual(model.plastic_depth_active_layer_indices(), (0, 1, 2, 3))
         model.set_plastic_depth_active_layer_count(2)
         self.assertEqual(model.plastic_depth_active_layer_indices(), (0, 3))
@@ -268,6 +304,9 @@ class PlasticDepthModelTests(unittest.TestCase):
         try:
             metrics = trainer.train_one_update()
             self.assertEqual(metrics["plastic_active_layers"], 3.0)
+            self.assertIn("plastic_coefficient_gradient_norm", metrics)
+            self.assertIn("plastic_geometry_gradient_norm", metrics)
+            self.assertEqual(len(metrics["plastic_full_public_coordinates"]), 3)
             report = trainer.raw_model.update_retained_materialization_report()
             self.assertTrue(report["enabled"])
             self.assertFalse(report["active"])
@@ -325,6 +364,65 @@ class PlasticDepthModelTests(unittest.TestCase):
 
 
 class PlasticDepthControllerTests(unittest.TestCase):
+    def test_fixed_count_checkpoint_contains_geometry_without_controller_buffers(self) -> None:
+        train_tokens, validation_tokens = token_splits()
+        trainer = SharedTrainer(plastic_training_config(), train_tokens, validation_tokens)
+        try:
+            payload = trainer.checkpoint_payload()
+            keys = tuple(
+                name
+                for name in payload["model"]
+                if name.startswith("trajectory.plastic_sampling.")
+            )
+            self.assertEqual(
+                keys,
+                (
+                    "trajectory.plastic_sampling.raw_intervals",
+                    "trajectory.plastic_sampling.initial_public_coordinates",
+                ),
+            )
+        finally:
+            trainer.close()
+
+    def test_controller_resource_probes_repeat_identical_rng(self) -> None:
+        train_tokens, validation_tokens = token_splits()
+        trainer = SharedTrainer(
+            plastic_training_config(
+                plastic__layers_to_sample=None,
+                plastic__do_learn_layer_count=True,
+                plastic__initial_layer_count=2,
+                plastic__max_permitted_layers=4,
+                plastic__layer_count_hold_updates=1,
+                plastic__layer_count_objective="relative_training_wall_time",
+                plastic__layer_count_cost_weight=0.1,
+                eval_batches=1,
+            ),
+            train_tokens,
+            validation_tokens,
+        )
+        try:
+            trainer.state.completed_updates = 1
+            lattice = trainer.raw_model.trajectory.plastic_sampling
+            lattice.reference_training_time.fill_(1.0)
+            random_state = torch.get_rng_state().clone()
+            draws = []
+
+            def timing_probe(active_layers, batches):
+                draws.append(float(torch.rand(()).item()))
+                return float(active_layers)
+
+            with patch.object(trainer, "_plastic_depth_candidate_loss", return_value=1.0), patch.object(
+                trainer,
+                "_plastic_depth_candidate_training_time",
+                side_effect=timing_probe,
+            ):
+                trainer._prepare_plastic_depth_for_update()
+            self.assertEqual(len(draws), 6)
+            self.assertTrue(all(value == draws[0] for value in draws))
+            torch.testing.assert_close(torch.get_rng_state(), random_state, rtol=0.0, atol=0.0)
+        finally:
+            trainer.close()
+
     def test_objectives_and_lower_count_tie_break(self) -> None:
         measurements = (
             PlasticDepthCandidateMeasurement(3, 2.0, training_time=3.0, peak_allocated_gib=3.0),
@@ -432,6 +530,8 @@ class PlasticDepthControllerTests(unittest.TestCase):
             finally:
                 trainer.close()
             payload = load_payload(source_path)
+            self.assertFalse(any(name.startswith("plastic__") for name in payload["trainer_config"]))
+            self.assertFalse(any(name.startswith("plastic__") for name in payload["model_args"]))
             for name in plastic_fields:
                 payload["trainer_config"].pop(name, None)
                 payload["compatibility_signature"].pop(name, None)

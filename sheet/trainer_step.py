@@ -164,8 +164,13 @@ class TrainerStepMixin:
                     self._end_optimizer_update_materializations()
                 self.optimizer.zero_grad(set_to_none=True)
 
+        # vvv THOG warmup and measured memory probes start from the same RNG state so candidate count alone changes the result
+        cpu_rng_state = torch.get_rng_state()
+        cuda_rng_state = torch.cuda.get_rng_state(self.device)
         try:
             run_probe()
+            torch.set_rng_state(cpu_rng_state)
+            torch.cuda.set_rng_state(cuda_rng_state, self.device)
             torch.cuda.reset_peak_memory_stats(self.device)
             run_probe()
             local_allocated = torch.tensor(
@@ -197,7 +202,7 @@ class TrainerStepMixin:
             return
         if int(lattice.last_count_decision_update.item()) == completed_updates:
             return
-        current = int(lattice.active_layer_count.item())
+        current = lattice.current_active_layers
         reference_time = float(lattice.reference_training_time.item())
         if (
             self.config.plastic__layer_count_objective == "relative_training_wall_time"
@@ -220,6 +225,14 @@ class TrainerStepMixin:
         self.model.eval()
         measurements = []
         selected_installed = False
+
+        # vvv THOG every resource candidate starts from identical training RNG without perturbing the subsequent real update
+        def restore_probe_rng() -> None:
+            torch.set_rng_state(cpu_rng_state)
+            if cuda_rng_state is not None:
+                torch.cuda.set_rng_state(cuda_rng_state, self.device)
+        # ^^^ THOG
+
         try:
             for candidate in candidates:
                 validation_loss = self._plastic_depth_candidate_loss(candidate, batches)
@@ -228,11 +241,14 @@ class TrainerStepMixin:
                     self.config.plastic__layer_count_objective == "relative_training_wall_time"
                     and not math.isfinite(observed_time)
                 ):
+                    restore_probe_rng()
                     self._plastic_depth_candidate_training_time(candidate, batches)
+                    restore_probe_rng()
                     observed_time = self._plastic_depth_candidate_training_time(candidate, batches)
                 peak_allocated_gib = None
                 peak_reserved_gib = None
                 if self.config.plastic__layer_count_objective == "memory_budget":
+                    restore_probe_rng()
                     peak_allocated_gib, peak_reserved_gib = self._plastic_depth_candidate_memory(
                         candidate, batches[0]
                     )
@@ -632,6 +648,7 @@ class TrainerStepMixin:
 
         # vvv THOG capture PLASTIC DEPTH lattice gradient health before the optimiser clears gradients
         plastic_geometry_gradient_norm = 0.0
+        plastic_coefficient_gradient_norm = 0.0
         if self.config.plastic__enabled:
             lattice = self._plastic_depth_lattice()
             if lattice is None:
@@ -639,6 +656,13 @@ class TrainerStepMixin:
             geometry_gradient = lattice.raw_intervals.grad
             if geometry_gradient is not None:
                 plastic_geometry_gradient_norm = float(geometry_gradient.detach().norm().item())
+            # vvv THOG report the DEPTH coefficient gradient separately from the learned sampling-geometry gradient
+            coefficient_squared_norm = 0.0
+            for parameter in self.raw_model.trajectory.coefficients.values():
+                if parameter.grad is not None:
+                    coefficient_squared_norm += float(parameter.grad.detach().float().square().sum().item())
+            plastic_coefficient_gradient_norm = math.sqrt(coefficient_squared_norm)
+            # ^^^ THOG
         # ^^^ THOG
         # vvv THOG isolate the count-independent optimiser component for relative training-wall-time candidate probes
         if self.config.plastic__enabled:
@@ -682,24 +706,29 @@ class TrainerStepMixin:
                     device=self.device,
                 )
             )
-            active_layers = int(lattice.active_layer_count.item())
+            active_layers = lattice.current_active_layers
             update_reference = (
                 active_layers == self.config.plastic__initial_active_layers
                 and self.state.completed_updates >= self.config.warmup_updates
             )
-            lattice.record_training_time(
-                active_layers,
-                training_only_seconds,
-                update_reference=update_reference,
-            )
-            lattice.record_optimizer_step_time(optimizer_step_seconds)
+            # vvv THOG fixed-count PLASTIC DEPTH reports timing without creating or checkpointing dormant controller statistics
+            if self.config.plastic__do_learn_layer_count:
+                lattice.record_training_time(
+                    active_layers,
+                    training_only_seconds,
+                    update_reference=update_reference,
+                )
+                lattice.record_optimizer_step_time(optimizer_step_seconds)
+            # ^^^ THOG
             interval_report = lattice.interval_report()
             plastic_metrics = {
                 "plastic_active_layers": float(active_layers),
                 "plastic_training_only_seconds": float(training_only_seconds),
                 "plastic_optimizer_step_seconds": float(optimizer_step_seconds),
                 "plastic_geometry_gradient_norm": plastic_geometry_gradient_norm,
+                "plastic_coefficient_gradient_norm": plastic_coefficient_gradient_norm,
                 "plastic_public_coordinates": interval_report["active_public_coordinates"],
+                "plastic_full_public_coordinates": interval_report["public_coordinates"],
                 "plastic_minimum_interval": interval_report["minimum_interval"],
                 "plastic_maximum_interval": interval_report["maximum_interval"],
                 "plastic_mean_absolute_movement": interval_report["mean_absolute_movement"],

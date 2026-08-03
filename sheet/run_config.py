@@ -56,6 +56,24 @@ from .training_config import ROW_ORDER_SCALING_RULE, TrainingConfig
 
 
 PUBLIC_MODEL_TYPES = ("dense", "sheet")
+# vvv THOG omit dormant PLASTIC DEPTH controls from disabled-run canonical and lifecycle metadata
+PLASTIC_RUN_CONFIG_FIELDS = (
+    "plastic__enabled",
+    "plastic__layers_to_sample",
+    "plastic__do_learn_layer_count",
+    "plastic__initial_layer_count",
+    "plastic__max_permitted_layers",
+    "plastic__layer_sampling_initialisation",
+    "plastic__layer_count_objective",
+    "plastic__layer_count_hold_updates",
+    "plastic__layer_count_cost_weight",
+    "plastic__layer_memory_budget_gib",
+    "plastic__geometry_learning_rate_multiplier",
+    "plastic__freeze_geometry_during_warmup",
+    "plastic__initial_active_layers",
+)
+# ^^^ THOG
+
 INTERNAL_MODEL_TYPES = {"dense": "dense", "sheet": "thog2_sheet"}
 DEFAULT_O_ATTN_D_MODEL = 64
 DEFAULT_O_ATTN_QKV_PER_CHANNEL = 6
@@ -596,6 +614,22 @@ class OwtRunConfig:
         )
         if self.resolved_geometry_plan is not None:
             identity["resolved_geometry_plan"] = self.resolved_geometry_plan
+        # vvv THOG include complete enabled PLASTIC DEPTH capability identity in run manifests as well as checkpoints
+        if self.plastic__enabled:
+            identity["plastic_depth"] = {
+                "version": PLASTIC_DEPTH_VERSION,
+                "maximum_layers": self.n_layer,
+                "initial_active_layers": self.plastic__initial_active_layers,
+                "learn_layer_count": self.plastic__do_learn_layer_count,
+                "sampling_initialisation": self.plastic__layer_sampling_initialisation,
+                "count_objective": self.plastic__layer_count_objective,
+                "count_hold_updates": self.plastic__layer_count_hold_updates,
+                "count_cost_weight": float(self.plastic__layer_count_cost_weight),
+                "memory_budget_gib": self.plastic__layer_memory_budget_gib,
+                "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+                "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
+            }
+        # ^^^ THOG
         return identity
 
     def _selector_fragment(self, selector: str) -> str:
@@ -931,8 +965,17 @@ class OwtRunConfig:
             out_dir=str(out_dir),
         )
 
-    def canonical_dict(self, *, world_size: int) -> Dict[str, Any]:
+    # vvv THOG persistent disabled-run metadata excludes all dormant PLASTIC DEPTH controls
+    def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        if not self.plastic__enabled:
+            for name in PLASTIC_RUN_CONFIG_FIELDS:
+                values.pop(name, None)
+        return values
+    # ^^^ THOG
+
+    def canonical_dict(self, *, world_size: int) -> Dict[str, Any]:
+        values = self.persistent_dict()
         if self.model_type == "dense":
             for name in (
                 "o_depth",

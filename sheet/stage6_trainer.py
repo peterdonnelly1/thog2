@@ -447,7 +447,10 @@ class Stage6Trainer(Stage4Trainer):
             "run_id": run_id,
             "protocol_sha256": protocol_sha256,
             "dataset": dataset,
-            "training_config": asdict(self.config),
+            # vvv THOG preserve the pre-PLASTIC result configuration serialization for source history
+            # "training_config": asdict(self.config),
+            "training_config": self.config.persistent_dict(),
+            # ^^^ THOG
             "parameter_report": self.parameter_report,
             "distributed": self.distributed.report(),
             "hardware": {
