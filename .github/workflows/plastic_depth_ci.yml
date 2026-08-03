@@ -1,26 +1,10 @@
-name: Plastic Depth CI
+name: Plastic Depth Bootstrap
 
 on:
-  push:
-    branches:
-      - PLASTIC_DEPTH
-  pull_request:
-    branches:
-      - HYPERBLOCK_LOOP_ENHANCEMENTS
   workflow_dispatch:
 
 jobs:
-  export_source:
+  idle:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out branch
-        uses: actions/checkout@v4
-      - name: Package source
-        run: |
-          tar --exclude=.git -czf /tmp/plastic_depth_source.tar.gz .
-      - name: Upload source
-        uses: actions/upload-artifact@v4
-        with:
-          name: plastic-depth-source
-          path: /tmp/plastic_depth_source.tar.gz
-          retention-days: 1
+      - run: echo bootstrap disabled during payload publication
