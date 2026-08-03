@@ -73,6 +73,70 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertNotIn("unchanging-run-id", line)
         self.assertEqual(len(re.findall(r"\033\[", line)), 4)
 
+    # vvv THOG show current layer count only on PLASTIC DEPTH training and validation rows
+    def test_current_layer_count_is_appended_only_when_plastic_is_enabled(self) -> None:
+        trainer = object.__new__(Stage6Trainer)
+        trainer.state = SimpleNamespace(completed_updates=8)
+        trainer._console_previous_completed_updates = 8
+        trainer._console_previous_training_seconds = 7.0
+        trainer._console_exact_training_seconds = 7.0
+        trainer._console_latest_mean_step_seconds = 0.875
+        trainer._console_previous_reported_training_loss = 10.1
+        trainer._plastic_depth_lattice = lambda: SimpleNamespace(current_active_layers=4)
+
+        base_payload = {
+            "completed_updates": "     8",
+            "cumulative_training_seconds": "     7",
+            "tok/s": "        2300",
+            "consumed_tokens": "          16384",
+            "training_loss": "  10.0000",
+            "learning_rate": " 1.000e-05",
+            "gradient_norm": "   2.000",
+        }
+
+        trainer.config = SimpleNamespace(plastic__enabled=False)
+        ordinary_values = trainer._prepare_console_progress_payload(
+            "optimizer_progress",
+            base_payload,
+        )
+        ordinary_line = format_progress_line(
+            "ordinary",
+            "optimizer_progress",
+            ordinary_values,
+        )
+        self.assertNotIn("current_layer_count", ordinary_line)
+
+        trainer.config = SimpleNamespace(plastic__enabled=True)
+        lattice = SimpleNamespace(current_active_layers=6)
+        trainer._plastic_depth_lattice = lambda: lattice
+        plastic_training_values = trainer._prepare_console_progress_payload(
+            "optimizer_progress",
+            base_payload,
+        )
+        plastic_training_line = format_progress_line(
+            "plastic",
+            "optimizer_progress",
+            plastic_training_values,
+        )
+        self.assertTrue(plastic_training_line.endswith("current_layer_count = 6"))
+
+        lattice.current_active_layers = 5
+        plastic_validation_values = trainer._prepare_console_progress_payload(
+            "evaluation_completed",
+            {
+                **base_payload,
+                "validation_loss": "   9.9000",
+            },
+        )
+        plastic_validation_line = format_progress_line(
+            "plastic",
+            "evaluation_completed",
+            plastic_validation_values,
+        )
+        self.assertIn("current_layer_count = 5", plastic_validation_line)
+        self.assertTrue(plastic_validation_line.endswith("current_layer_count = 5\033[0m"))
+    # ^^^ THOG
+
     # vvv THOG keep semantic-QKV bypass reporting for non-DEPTH geometries while suppressing it for DEPTH
     def test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting(self) -> None:
         model_config = SimpleNamespace(
