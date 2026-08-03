@@ -17,10 +17,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Package source
         run: |
-          tar --exclude=.git -czf plastic_depth_source.tar.gz .
+          tar --exclude=.git -czf /tmp/plastic_depth_source.tar.gz .
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
           name: plastic-depth-source
-          path: plastic_depth_source.tar.gz
+          path: /tmp/plastic_depth_source.tar.gz
           retention-days: 1
