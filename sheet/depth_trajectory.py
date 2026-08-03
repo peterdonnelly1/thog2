@@ -159,6 +159,10 @@ class DepthTrajectory(nn.Module):
                 persistent=False,
             )
         # ^^^ THOG
+        # vvv THOG cache one differentiable PLASTIC DEPTH basis per forward and retain it through checkpoint recomputation
+        self._plastic_depth_basis_cache: Optional[Tensor] = None
+        self._plastic_depth_runtime_basis_cache: Dict[Tuple[torch.device, torch.dtype], Tensor] = {}
+        # ^^^ THOG
         # vvv THOG row bases exist only for private legacy fallback users, never for the public DEPTH preset.
         self._row_basis_name_by_family: Dict[str, str] = {}
         if self.legacy_sheet_col_vectors:
@@ -243,6 +247,45 @@ class DepthTrajectory(nn.Module):
     def depth_basis(self) -> Tensor:
         return self.bases.depth_basis
 
+    # vvv THOG build one full differentiable PLASTIC DEPTH basis per model forward instead of once per family materialisation
+    def prepare_plastic_depth_basis_cache(self) -> None:
+        if not self.plastic_enabled:
+            return
+        if self.plastic_sampling is None:
+            raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+        public_coordinates = self.plastic_sampling.public_coordinates()
+        internal_coordinates = public_to_internal_depth(public_coordinates).to(dtype=torch.float64)
+        raw_basis = differentiable_chebyshev_first_kind_basis(
+            internal_coordinates,
+            self.config.depth_order,
+        )
+        basis = raw_basis @ self.plastic_depth_inverse_r.to(raw_basis.device)
+        self._plastic_depth_basis_cache = basis
+        self._plastic_depth_runtime_basis_cache.clear()
+        if basis.requires_grad:
+            def clear_consumed_cache(gradient: Tensor, *, expected_basis: Tensor = basis) -> Tensor:
+                if self._plastic_depth_basis_cache is expected_basis:
+                    self.clear_plastic_depth_basis_cache()
+                return gradient
+
+            basis.register_hook(clear_consumed_cache)
+
+    def clear_plastic_depth_basis_cache(self) -> None:
+        self._plastic_depth_basis_cache = None
+        self._plastic_depth_runtime_basis_cache.clear()
+
+    def _cached_plastic_depth_basis(self, reference: Tensor) -> Optional[Tensor]:
+        basis = self._plastic_depth_basis_cache
+        if basis is None:
+            return None
+        key = (reference.device, reference.dtype)
+        runtime_basis = self._plastic_depth_runtime_basis_cache.get(key)
+        if runtime_basis is None:
+            runtime_basis = basis.to(device=reference.device, dtype=reference.dtype)
+            self._plastic_depth_runtime_basis_cache[key] = runtime_basis
+        return runtime_basis
+    # ^^^ THOG
+
     # vvv THOG PLASTIC DEPTH evaluates one learned lattice rank in the original QR-stabilised coefficient coordinates
     def _depth_row(self, layer_index: int, reference: Tensor) -> Tensor:
         # depth_row = self.depth_basis[layer_index].to(
@@ -255,6 +298,11 @@ class DepthTrajectory(nn.Module):
             )
         if self.plastic_sampling is None:
             raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+        # vvv THOG reuse the forward-scoped basis during ordinary execution and activation-checkpoint recomputation
+        cached_basis = self._cached_plastic_depth_basis(reference)
+        if cached_basis is not None:
+            return cached_basis[layer_index]
+        # ^^^ THOG
         public_coordinate = self.plastic_sampling.public_coordinates()[layer_index : layer_index + 1]
         internal_coordinate = public_to_internal_depth(public_coordinate).to(dtype=torch.float64)
         raw = differentiable_chebyshev_first_kind_basis(
