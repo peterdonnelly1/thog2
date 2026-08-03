@@ -1,0 +1,61 @@
+# vvv THOG
+name: Apply telemetry source-history fix
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'Apply staged telemetry source-history fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify and apply patch
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "aa0223b9cc63f80d596bf5360bcd4ea0a74d140a"
+          echo "514023918ce3fc63af29d35d04f93efc04d45b03397ffb0780e963cbfaca0cfb  .github/source_history_fix.patch" | sha256sum --check
+          git apply --check .github/source_history_fix.patch
+          git apply .github/source_history_fix.patch
+          rm .github/source_history_fix.patch
+          rm .github/workflows/apply_source_history_fix.yml
+
+      - name: Create clean commit
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sheet/wandb_telemetry.py
+          git add -u .github
+          git commit -m "Preserve telemetry source history"
+
+      - name: Validate source history and targeted tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pytest numpy
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+          python -m compileall -q sheet/wandb_telemetry.py tests/test_sheet_stage6_wandb.py
+          python tests/hyperblock_source_history_check.py \
+            --repository . \
+            --base 2cce91c7ff552850bf3184c4f80d1a3f4b6e71d8 \
+            --head HEAD
+          pytest -q tests/test_sheet_stage6_wandb.py tests/test_resume_and_diagnostics_regressions.py
+
+      - name: Push clean fix
+        run: git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
