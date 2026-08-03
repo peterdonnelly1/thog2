@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sheet.wandb_telemetry import WandbTelemetry
+# from sheet.wandb_telemetry import WandbTelemetry
+from sheet.wandb_telemetry import WandbTelemetry, _final_metrics
 
 
 class FakeRun:
@@ -131,7 +132,55 @@ class WandbTelemetryTests(unittest.TestCase):
         )
         self.assertTrue(module.run.finished)
 
-    def test_s6_37_disabled_telemetry_is_a_noop(self) -> None:
+    # vvv THOG unsupported coefficient order-axis diagnostics remain absent from final telemetry rather than crashing completed runs
+    def test_s6_37_final_metrics_omit_unsupported_order_axis_diagnostics(self) -> None:
+        metrics = _final_metrics({
+            "budget": {"completed_updates": 8, "consumed_tokens": 16384},
+            "parameter_report": {
+                "persistent_parameters": 100,
+                "dense_equivalent_total_parameters": 1000,
+            },
+            "checkpoint": {"bytes": 4096},
+            "timing": {
+                "training_seconds": 7.0,
+                "tokens_per_training_second": 2260.0,
+            },
+            "sheet_diagnostics": {
+                "coefficient_utilization": {
+                    "depth_vector_example": {
+                        "coefficient_rms": 0.1,
+                        "high_depth_order_energy_fraction": None,
+                        "high_row_order_energy_fraction": None,
+                    },
+                    "spectral_example": {
+                        "coefficient_rms": 0.2,
+                        "high_depth_order_energy_fraction": 0.01,
+                        "high_row_order_energy_fraction": 0.25,
+                    },
+                },
+                "compact_state_violations": [],
+            },
+        })
+
+        self.assertNotIn(
+            "sheet/depth_vector_example/high_depth_order_energy_fraction",
+            metrics,
+        )
+        self.assertNotIn(
+            "sheet/depth_vector_example/high_row_order_energy_fraction",
+            metrics,
+        )
+        self.assertEqual(
+            metrics["sheet/spectral_example/high_depth_order_energy_fraction"],
+            0.01,
+        )
+        self.assertEqual(
+            metrics["sheet/spectral_example/high_row_order_energy_fraction"],
+            0.25,
+        )
+    # ^^^ THOG
+
+    def test_s6_38_disabled_telemetry_is_a_noop(self) -> None:
         telemetry = WandbTelemetry(
             enabled=False,
             project="thog",
