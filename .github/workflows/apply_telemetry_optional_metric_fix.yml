@@ -1,0 +1,66 @@
+# vvv THOG
+name: Apply telemetry optional-metric fix
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message == 'Apply staged telemetry optional-metric fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify and apply patch
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "9025d521f9953b092ecb256aecd0e271cafd4521"
+          echo "f67ef7c2ab1412fbcd9af0a4883f09a56cd7fdfe919daa329343461bd7e1806e  .github/telemetry_optional_metric_fix.patch" | sha256sum --check
+          git apply --check .github/telemetry_optional_metric_fix.patch
+          git apply .github/telemetry_optional_metric_fix.patch
+          rm .github/telemetry_optional_metric_fix.patch
+          rm .github/workflows/apply_telemetry_optional_metric_fix.yml
+
+      - name: Install targeted test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet pytest numpy
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Validate targeted telemetry fix
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python -m compileall -q sheet/wandb_telemetry.py tests/test_sheet_stage6_wandb.py
+          pytest -q \
+            tests/test_sheet_stage6_wandb.py \
+            tests/test_resume_and_diagnostics_regressions.py \
+            tests/test_stage6_telemetry_discovery.py \
+            tests/test_sheet_stage6_diagnostics.py \
+            tests/test_stage6_diagnostics.py \
+            tests/test_hyperblock_stage6_diagnostics.py \
+            tests/test_sheet_stage4_summary.py
+
+      - name: Commit clean fix
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add sheet/wandb_telemetry.py tests/test_sheet_stage6_wandb.py
+          git add -u .github
+          git commit -m "Fix optional diagnostics telemetry"
+          git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
