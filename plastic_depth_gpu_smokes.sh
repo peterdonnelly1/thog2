@@ -3,9 +3,9 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-cd "${THOG2_REPO_DIR:-$script_dir}"
+repo_dir="${THOG2_REPO_DIR:-$script_dir}"
+cd "$repo_dir"
 
-data_dir="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 attention_backend="${PLASTIC_SMOKE_BACKEND:-flash2}"
 dtype="${PLASTIC_SMOKE_DTYPE:-bfloat16}"
 memory_budget_gib="${PLASTIC_SMOKE_MEMORY_BUDGET_GIB:-15.0}"
@@ -29,6 +29,74 @@ if ! "$python_bin" -c 'import torch' >/dev/null 2>&1; then
   exit 1
 fi
 
+is_owt_data_dir() {
+  local candidate="$1"
+  [[ -f "$candidate/train.bin" && -f "$candidate/val.bin" ]]
+}
+
+resolve_owt_data_dir() {
+  local candidate resolved train_file
+  local -a candidates=()
+  local -a discovered=()
+
+  if [[ -n "${THOG2_OWT_DATA_DIR:-}" ]]; then
+    if is_owt_data_dir "$THOG2_OWT_DATA_DIR"; then
+      readlink -f -- "$THOG2_OWT_DATA_DIR"
+      return 0
+    fi
+    echo "ERROR: THOG2_OWT_DATA_DIR does not contain train.bin and val.bin: $THOG2_OWT_DATA_DIR" >&2
+    return 1
+  fi
+
+  candidates+=(
+    "$repo_dir/data/openwebtext"
+    "$repo_dir/../thog/data/openwebtext"
+    "$HOME/git/thog/data/openwebtext"
+    "$HOME/git/thog2/data/openwebtext"
+    "$HOME/data/openwebtext"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if is_owt_data_dir "$candidate"; then
+      readlink -f -- "$candidate"
+      return 0
+    fi
+  done
+
+  if [[ -d "$HOME/git" ]]; then
+    while IFS= read -r -d '' train_file; do
+      candidate="${train_file%/train.bin}"
+      if is_owt_data_dir "$candidate"; then
+        resolved="$(readlink -f -- "$candidate")"
+        if [[ ! " ${discovered[*]-} " =~ " $resolved " ]]; then
+          discovered+=("$resolved")
+        fi
+      fi
+    done < <(find "$HOME/git" -maxdepth 7 -type f -name train.bin -print0 2>/dev/null)
+  fi
+
+  if (( ${#discovered[@]} == 1 )); then
+    printf '%s\n' "${discovered[0]}"
+    return 0
+  fi
+
+  if (( ${#discovered[@]} > 1 )); then
+    echo "ERROR: multiple OpenWebText datasets found; set THOG2_OWT_DATA_DIR explicitly:" >&2
+    printf '  %s\n' "${discovered[@]}" >&2
+    return 1
+  fi
+
+  echo "ERROR: could not find an OpenWebText directory containing train.bin and val.bin." >&2
+  echo "Set THOG2_OWT_DATA_DIR explicitly, for example:" >&2
+  echo "  THOG2_OWT_DATA_DIR=/path/to/openwebtext ./plastic_depth_gpu_smokes.sh" >&2
+  echo "To locate candidates:" >&2
+  echo "  find \"$HOME/git\" -maxdepth 7 -type f \\( -name train.bin -o -name val.bin \\) -print" >&2
+  return 1
+}
+
+data_dir="$(resolve_owt_data_dir)"
+
+echo "plastic smoke repo:    $repo_dir"
 echo "plastic smoke python:  $python_bin"
 echo "plastic smoke backend: $attention_backend"
 echo "plastic smoke dtype:   $dtype"
