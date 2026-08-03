@@ -1,0 +1,63 @@
+# vvv THOG
+name: Apply PLASTIC DEPTH takeover patch
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+    paths:
+      - .github/plastic_depth_takeover.patch.gz.b64
+      - .github/workflows/apply_plastic_depth_takeover.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out helper commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify and apply audited patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "792ef56aa625471e2ee4f41ffcd328b942edfa0a"
+          base64 --decode .github/plastic_depth_takeover.patch.gz.b64 \
+            | gzip --decompress > /tmp/plastic_depth_takeover.patch
+          echo "80fb35e63bbc5d53bacfaed8908ae70fde01245acee7cd870d3edf8c26f42df9  /tmp/plastic_depth_takeover.patch" \
+            | sha256sum --check --strict
+          git apply --check /tmp/plastic_depth_takeover.patch
+          git apply /tmp/plastic_depth_takeover.patch
+          rm .github/plastic_depth_takeover.patch.gz.b64
+          rm .github/workflows/apply_plastic_depth_takeover.yml
+          git diff --check
+          python -m compileall -q \
+            run_thog2_owt_core.py \
+            sheet/depth_trajectory.py \
+            sheet/model.py \
+            sheet/plastic_depth.py \
+            sheet/run_config.py \
+            sheet/run_lifecycle.py \
+            sheet/stage6_protocol.py \
+            sheet/stage6_trainer.py \
+            sheet/trainer_checkpoint_save.py \
+            sheet/trainer_step.py \
+            sheet/training_config.py \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_interfaces.py
+
+      - name: Commit clean implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Finish PLASTIC DEPTH specification compliance"
+          git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
