@@ -1,0 +1,95 @@
+name: Repair PLASTIC layer-count console change
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+    paths:
+      - .github/workflows/repair_plastic_layer_count_console.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore exact parent and add only intended console blocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          parent_sha = "ebfee7bcfdd1005dea8707e3acb193b1ecd922c9"
+          path = Path("sheet/stage6_trainer.py")
+          text = subprocess.check_output(
+              ["git", "show", f"{parent_sha}:sheet/stage6_trainer.py"],
+              text=True,
+          )
+
+          render_needle = '''        fields.append(field)\n    line = "  ".join(fields)\n'''
+          render_replacement = '''        fields.append(field)\n    # vvv THOG show the active PLASTIC DEPTH layer count on every training and validation progress row\n    if "current_layer_count" in payload:\n        fields.append(f"current_layer_count = {int(payload['current_layer_count'])}")\n    # ^^^ THOG\n    line = "  ".join(fields)\n'''
+          if text.count(render_needle) != 1:
+              raise RuntimeError("unexpected progress renderer source")
+          text = text.replace(render_needle, render_replacement, 1)
+
+          payload_needle = '''        if event in {"optimizer_progress", "evaluation_completed"}:\n            values["timestamp"] = _progress_timestamp()\n            if self._console_latest_mean_step_seconds is not None:\n                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"\n        return values\n'''
+          payload_replacement = '''        if event in {"optimizer_progress", "evaluation_completed"}:\n            values["timestamp"] = _progress_timestamp()\n            if self._console_latest_mean_step_seconds is not None:\n                values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"\n            # vvv THOG expose the actual active PLASTIC DEPTH count without changing ordinary console rows\n            if bool(getattr(getattr(self, "config", None), "plastic__enabled", False)):\n                lattice = self._plastic_depth_lattice()\n                if lattice is None:\n                    raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while formatting progress")\n                values["current_layer_count"] = int(lattice.current_active_layers)\n            # ^^^ THOG\n        return values\n'''
+          if text.count(payload_needle) != 1:
+              raise RuntimeError("unexpected progress payload source")
+          text = text.replace(payload_needle, payload_replacement, 1)
+
+          if text.count('current_layer_count = {int(payload[\'current_layer_count\'])}') != 1:
+              raise RuntimeError("renderer insertion count mismatch")
+          if text.count('values["current_layer_count"] = int(lattice.current_active_layers)') != 1:
+              raise RuntimeError("payload insertion count mismatch")
+
+          path.write_text(text, encoding="utf-8")
+          Path(".github/workflows/repair_plastic_layer_count_console.yml").unlink()
+          PY
+
+      - name: Install CPU test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Validate repaired source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile sheet/stage6_trainer.py tests/test_console_progress_layout.py
+          PYTHONPATH=. pytest -q \
+            tests/test_console_progress_layout.py \
+            tests/test_console_progress_pretty_rows.py \
+            tests/test_plastic_depth.py
+          python tests/hyperblock_source_history_check.py \
+            --repository . \
+            --base 2cce91c7ff552850bf3184c4f80d1a3f4b6e71d8 \
+            --head HEAD \
+            --output /tmp/plastic-layer-count-source-history.json
+
+      - name: Commit clean repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sheet/stage6_trainer.py tests/test_console_progress_layout.py .github/workflows/repair_plastic_layer_count_console.yml
+          git commit -m "Show current PLASTIC DEPTH layer count in progress rows"
+          git push origin HEAD:PLASTIC_DEPTH
