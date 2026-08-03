@@ -1,10 +1,174 @@
-name: Plastic Depth Bootstrap
+# vvv THOG
+name: PLASTIC DEPTH validation
 
 on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+  pull_request:
+    branches:
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  idle:
+  focused-cpu:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - run: echo bootstrap disabled during payload publication
+      - name: Check out PLASTIC DEPTH
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Compile Python and validate shell syntax
+        run: |
+          set -euo pipefail
+          python -m compileall -q run_thog2_owt.py run_thog2_owt_core.py sheet tests
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh
+
+      - name: Run two-rank PLASTIC DEPTH DDP synchronization test
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tests/plastic_depth_ddp_check.py > plastic-depth-ddp-evidence.json
+
+      - name: Run focused PLASTIC DEPTH tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q tests/test_plastic_depth.py tests/test_plastic_depth_interfaces.py
+
+      - name: Run affected CPU regression suites
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_stage2_basis_kernel.py \
+            tests/test_stage7_dct_basis_kernel.py \
+            tests/test_haar_basis_kernel.py \
+            tests/test_lapped_cosine_basis_kernel.py \
+            tests/test_depth_materialisation_runtime.py \
+            tests/test_depth_layer_norm_bias_modes.py \
+            tests/test_stage4_depth_materialization.py \
+            tests/test_stage3_semantic_materialization.py \
+            tests/test_stage3b_model_semantic_attention.py \
+            tests/test_sheet_stage2.py \
+            tests/test_picton_attention_boundary.py \
+            tests/test_sheet_stage3_resume.py \
+            tests/test_sheet_stage4_checkpointing.py \
+            tests/test_sheet_stage4_restore.py \
+            tests/test_sheet_stage4_state.py \
+            tests/test_stage4b_training_factory_cleanup.py \
+            tests/test_sheet_stage5_batch_sharding.py \
+            tests/test_sheet_stage5_failures.py \
+            tests/test_sheet_stage5_target_geometry.py \
+            tests/test_stage5_mlp_block_materialization.py \
+            tests/test_stage5b_full_block_materialization.py \
+            tests/test_modified_fast_discard_false_distributed.py \
+            tests/test_sheet_stage6_controls.py \
+            tests/test_sheet_stage6_dense_checkpointing.py \
+            tests/test_sheet_stage6_restart.py \
+            tests/test_sheet_stage6_run_config.py \
+            tests/test_sheet_stage6_trainer.py \
+            tests/test_resume_identity_and_throughput.py \
+            tests/test_resume_and_diagnostics_regressions.py \
+            tests/test_resume_and_fork_cpu_integration.py \
+            tests/test_torch_compile_runtime.py \
+            tests/test_hyperblock_looping.py \
+            tests/test_hyperblock_run_config.py \
+            tests/test_hyperblock_wrapper.py
+
+      - name: Package validated source
+        run: tar --exclude=.git -czf /tmp/plastic_depth_source.tar.gz .
+
+      - name: Upload focused evidence and source
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-depth-focused-${{ github.sha }}
+          path: |
+            plastic-depth-ddp-evidence.json
+            /tmp/plastic_depth_source.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  head-versus-base-regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          fetch-depth: 0
+
+      - name: Check out exact base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install regression dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Audit preserved source history
+        run: |
+          python head/tests/hyperblock_source_history_check.py \
+            --repository head \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --head ${{ github.event.pull_request.head.sha }} \
+            --output plastic-depth-source-history.json
+
+      - name: Compare legacy tests against exact base
+        run: |
+          python head/tests/hyperblock_regression_compare.py \
+            --head head \
+            --base base \
+            --output plastic-depth-regression-comparison.json \
+            --timeout-seconds 240
+
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-depth-regression-${{ github.event.pull_request.head.sha }}
+          path: |
+            plastic-depth-source-history.json
+            plastic-depth-regression-comparison.json
+          retention-days: 14
+# ^^^ THOG
