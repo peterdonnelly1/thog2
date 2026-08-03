@@ -44,7 +44,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m compileall -q run_thog2_owt.py run_thog2_owt_core.py sheet tests
-          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh plastic_depth_gpu_smokes.sh
+          env -u THOG2_PYTHON PLASTIC_SMOKE_PREFLIGHT_ONLY=true ./plastic_depth_gpu_smokes.sh
 
       - name: Run two-rank PLASTIC DEPTH DDP synchronization test
         env:
