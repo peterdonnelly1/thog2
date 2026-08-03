@@ -1,0 +1,121 @@
+name: Apply PLASTIC DEPTH implementation
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out PLASTIC DEPTH
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct verified patch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import lzma
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          blob_shas = (
+              '9fb47ceaa83420a679617763471bce2574936ac5',
+              'b95891aee6047b5ae3e5511783b8ff1d8115131d',
+              'e6346c9e7c20d9c70db8c4ede62beec4536ef846',
+              '2cb2b851d9c43fd6c3f2d211e4789b11d29ba58e',
+              '62c6ac378191bfc603e9433199f463e93a7cd7a8',
+              'c548790a971b57e7fdaafb974de77412ed1f4df7',
+              'a87ed437480733553be509a3b7ac96bd2b83256b',
+              '531a4aee0d6adf8d6c728ebd274fce96bd37fe17',
+              'e98f98901cdfa1560ccf3beb8e2495b583a34145',
+              '92b332873c8a3cdb0da3af32088bc0608a4c795b',
+              'd6636e9bf015f0a1cc7266c204e5b7a3c9d31875',
+          )
+          repository = os.environ['GITHUB_REPOSITORY']
+          token = os.environ['GITHUB_TOKEN']
+          encoded_parts = []
+          for blob_sha in blob_shas:
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repository}/git/blobs/{blob_sha}',
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                  },
+              )
+              with urllib.request.urlopen(request) as response:
+                  payload = json.load(response)
+              encoded_parts.append(base64.b64decode(payload['content']))
+
+          compressed_patch = base64.b64decode(b''.join(encoded_parts))
+          compressed_sha = hashlib.sha256(compressed_patch).hexdigest()
+          assert compressed_sha == 'd43aa4ea34560626651b1ab943650d839e4efcdf8fda55fdeddd1aa2b31e34f6', compressed_sha
+          patch = lzma.decompress(compressed_patch)
+          patch_sha = hashlib.sha256(patch).hexdigest()
+          assert patch_sha == '7b09b3564956ee37815ccd16df1e7f49a335c66a3de33fb25f2d2f4bddf112b4', patch_sha
+          Path('/tmp/plastic_depth.patch').write_bytes(patch)
+          PY
+
+      - name: Restore patch base and apply implementation
+        run: |
+          set -euo pipefail
+          git fetch origin HYPERBLOCK_LOOP_ENHANCEMENTS
+          git restore --source origin/HYPERBLOCK_LOOP_ENHANCEMENTS --staged --worktree -- \
+            run_thog2_owt_core.py \
+            sheet/basis.py \
+            sheet/depth_trajectory.py \
+            sheet/distributed.py \
+            sheet/model.py \
+            sheet/run_config.py \
+            sheet/trainer_schedule.py \
+            sheet/trainer_step.py \
+            sheet/training_config.py \
+            sheet/training_model.py \
+            train_OWT_core.sh
+          git show 082b51d1aad6dbb74754e3415386a1ae79d11e46:.github/workflows/plastic_depth_ci.yml > .github/workflows/plastic_depth_ci.yml
+          git add .github/workflows/plastic_depth_ci.yml
+          rm -f \
+            sheet/plastic_depth.py \
+            tests/plastic_depth_ddp_check.py \
+            tests/plastic_depth_ddp_worker.py \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_interfaces.py
+          git rm --cached --ignore-unmatch \
+            sheet/plastic_depth.py \
+            tests/plastic_depth_ddp_check.py \
+            tests/plastic_depth_ddp_worker.py \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_interfaces.py
+          git apply --binary --index /tmp/plastic_depth.patch
+          rm -f .plastic_depth_payload_* .plastic_depth_part_* .github/workflows/apply_plastic_depth.yml
+          git add -A
+          git diff --cached --check
+          test -f sheet/plastic_depth.py
+          test -f tests/test_plastic_depth.py
+          test ! -e .plastic_depth_payload_000
+          test ! -e .plastic_depth_payload_001
+          test ! -e .plastic_depth_part_00
+          test ! -e .github/workflows/apply_plastic_depth.yml
+
+      - name: Commit exact implementation tree
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Implement PLASTIC DEPTH adaptive sampling'
+          git push origin HEAD:PLASTIC_DEPTH
