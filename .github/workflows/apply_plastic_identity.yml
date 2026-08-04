@@ -1,0 +1,149 @@
+# vvv THOG temporary gated applier for the tested PLASTIC public identity phase
+name: Apply verified PLASTIC public identity
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_IDENTITY_RECOVERY
+    paths:
+      - .github/workflows/apply_plastic_identity.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plastic-identity-applier
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact PLASTIC DEPTH target
+        uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH
+          fetch-depth: 0
+          clean: false
+
+      - name: Check out verified identity payload
+        uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH_IDENTITY_RECOVERY
+          path: recovery_payload
+          fetch-depth: 1
+
+      - name: Verify exact target head
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "2eb3e644e3355d315235a47f8af3f1e4d4f8c942"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Decode, verify and apply identity phase
+        run: |
+          set -euo pipefail
+          base64 --decode recovery_payload/docs/plastic_identity.patch.gz.b64 | gzip --decompress > /tmp/plastic_identity.patch
+          echo 'f2c6e5d8e1c4bccebcbadbf3fcac8aa2fbc82c3a731f6e8c366eb7c112e17835  /tmp/plastic_identity.patch' | sha256sum --check --strict
+          git apply --check /tmp/plastic_identity.patch
+          git apply /tmp/plastic_identity.patch
+          rm -rf recovery_payload
+          git diff --check
+
+      - name: Compile and validate shell syntax
+        run: |
+          set -euo pipefail
+          python -m compileall -q run_thog2_owt.py run_thog2_owt_core.py sheet tests
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh plastic_depth_gpu_smokes.sh
+
+      - name: Run focused identity and PLASTIC gate
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_gauge.py \
+            tests/test_plastic_depth_optimizer.py \
+            tests/test_plastic_depth_inline_probe.py \
+            tests/test_plastic_depth_controller.py \
+            tests/test_plastic_depth_cuda.py \
+            tests/test_plastic_depth_basis_cache.py \
+            tests/test_plastic_depth_interfaces.py \
+            tests/test_sheet_stage6_trainer.py \
+            tests/test_sheet_stage6_wandb.py \
+            tests/test_sheet_stage6_run_config.py \
+            tests/test_sheet_stage6_restart.py \
+            tests/test_sheet_stage4_checkpointing.py \
+            tests/test_sheet_stage4_restore.py \
+            tests/test_sheet_stage4_state.py \
+            tests/test_layer_dropout_descriptor_v21.py
+
+      - name: Run affected DEPTH regression gate
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_stage2_basis_kernel.py \
+            tests/test_stage7_dct_basis_kernel.py \
+            tests/test_haar_basis_kernel.py \
+            tests/test_lapped_cosine_basis_kernel.py \
+            tests/test_depth_materialisation_runtime.py \
+            tests/test_depth_layer_norm_bias_modes.py \
+            tests/test_stage4_depth_materialization.py \
+            tests/test_stage3_semantic_materialization.py \
+            tests/test_stage3b_model_semantic_attention.py \
+            tests/test_sheet_stage2.py \
+            tests/test_picton_attention_boundary.py \
+            tests/test_sheet_stage3_resume.py \
+            tests/test_stage4b_training_factory_cleanup.py \
+            tests/test_sheet_stage5_batch_sharding.py \
+            tests/test_sheet_stage5_failures.py \
+            tests/test_sheet_stage5_target_geometry.py \
+            tests/test_stage5_mlp_block_materialization.py \
+            tests/test_stage5b_full_block_materialization.py \
+            tests/test_modified_fast_discard_false_distributed.py \
+            tests/test_sheet_stage6_controls.py \
+            tests/test_sheet_stage6_dense_checkpointing.py \
+            tests/test_resume_identity_and_throughput.py \
+            tests/test_resume_and_diagnostics_regressions.py \
+            tests/test_resume_and_fork_cpu_integration.py \
+            tests/test_torch_compile_runtime.py \
+            tests/test_hyperblock_looping.py \
+            tests/test_hyperblock_run_config.py \
+            tests/test_hyperblock_wrapper.py
+
+      - name: Run two-rank CPU DDP gate
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tests/plastic_depth_ddp_check.py
+
+      - name: Commit, audit and publish tested phase
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'Canonicalize PLASTIC identity and dynamic depth naming'
+          python tests/hyperblock_source_history_check.py \
+            --repository . \
+            --base origin/HYPERBLOCK_LOOP_ENHANCEMENTS \
+            --head HEAD \
+            --output /tmp/plastic-depth-source-history.json
+          git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
