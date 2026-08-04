@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-05 00:08 AEST
+Last updated: 2026-08-05 00:14 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this phase: `1b93a5bea7ee5cfb161d13b84df9b39b7d1b5760`
+- Current verified branch head before this log update: `1c90e5001d51412d546a3843e93c2b3418d46dc0`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -99,13 +99,11 @@ The original staged transport payload at `6b0b759c` was corrupt after the first 
 - THOG source-history audit passed with zero violations
 - direct integration proves failed updates do not checkpoint evidence and count changes at updates 1 and 6 under the default five-update brake
 
-Commit `f334a024` is the clean MAD/brake phase commit. Its bot-authored push could not start an ordinary follow-on workflow, so this log-only descendant deliberately retriggers the authoritative hosted head-versus-base comparison.
+Commit `f334a024` is the clean MAD/brake phase commit. Ordinary hosted CI on descendant `1b93a5be` passed focused CPU, affected regressions, two-rank DDP, source-history audit and exact head-versus-base comparison.
 
 ### CUDA reserve and recoverable upward-probe phase
 
 The phase introduces `plastic__cuda_allocator_reserve_gib`, default 0.5 GiB. It is persistent execution configuration but deliberately does not yet alter the public artifact-name fragment. The reserve is CUDA-only; CPU execution follows the established inline-probe code path exactly.
-
-Local validation before publication:
 
 - 132 focused PLASTIC/gauge/optimizer/inline/controller/CUDA/interface/trainer/checkpoint tests passed
 - 141 affected CPU regression tests passed
@@ -114,6 +112,8 @@ Local validation before publication:
 - direct tests cover reserve allocation/OOM, distributed preflight rejection, local upward OOM, successful-local/failed-remote rejection, cleanup, and successful N+1 gradient equivalence
 - Python compile, shell syntax and `git diff --check` passed
 - THOG source-history audit passed with zero violations
+
+Hosted recovery runners repeated all phase gates and published clean commit `1c90e500`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
 
 ## Remaining revised implementation
 
@@ -141,7 +141,7 @@ Complete the public PLASTIC control and artifact-identity phase. Use `plastic__.
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify the published CUDA-reserve phase commit or a documented descendant.
+2. Fetch `PLASTIC_DEPTH` and verify `1c90e500` or a documented descendant.
 3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.
