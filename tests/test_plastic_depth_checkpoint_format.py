@@ -18,6 +18,7 @@ from sheet.checkpoints import (
 from sheet.compact_state import model_from_compact_state
 from sheet.plastic_depth import PLASTIC_DEPTH_VERSION
 from sheet.trainer import SharedTrainer
+from run_thog2_owt_core import validate_resume_controls
 from tests.stage3_test_support import stage3_config, token_splits
 from tests.test_plastic_depth import plastic_training_config
 
@@ -125,6 +126,29 @@ def test_unknown_or_inconsistent_format_discriminator_is_rejected() -> None:
     payload["compact_identity"]["plastic_depth"]["version"] = PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION
     with pytest.raises(ValueError, match="format discriminator and compact identity version disagree"):
         validate_plastic_depth_checkpoint_format(payload)
+
+
+def test_enabled_checkpoint_rejects_explicitly_disabled_canonical_identity() -> None:
+    config = _learned_plastic_config()
+    payload = _checkpoint_payload(config)
+    payload["compact_identity"]["plastic_depth"]["plastic__enabled"] = False
+    with pytest.raises(ValueError, match="enabled trainer state disagrees with compact identity"):
+        validate_plastic_depth_checkpoint_format(payload)
+    with pytest.raises(ValueError, match="enabled trainer state disagrees with compact identity"):
+        validate_compatibility(payload, config)
+
+
+def test_resume_control_preflight_rejects_before_training_config() -> None:
+    config = _learned_plastic_config()
+    payload = _checkpoint_payload(config)
+    payload.pop("plastic_depth_checkpoint_format_version")
+    payload["compact_identity"]["plastic_depth"]["version"] = PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION
+    payload["trainer_config"]["obsolete_v01_only_field"] = "must never reach TrainingConfig"
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = save_payload(payload, Path(directory) / "unsafe-v01-controls.pt")
+        with pytest.raises(ValueError, match="phantom-lattice chart cannot be converted safely"):
+            validate_resume_controls(path, config)
 
 
 def test_retired_short_v03_checkpoint_resumes_end_to_end() -> None:
