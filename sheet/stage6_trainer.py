@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -92,6 +92,33 @@ def _progress_field(label: str, value: Any) -> str:
     return f"{label}={value}"
 
 
+# vvv THOG transition-only PLASTIC scalar samples use compact UI precision without polluting ordinary progress rows
+def _format_plastic_sampled_value(value: Any) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    magnitude = abs(numeric)
+    if magnitude != 0.0 and (magnitude < 0.01 or magnitude >= 1000.0):
+        return f"{numeric:.2e}"
+    return f"{numeric:.2f}"
+
+
+def _optimizer_progress_due(
+    *,
+    completed_updates: int,
+    max_updates: int,
+    log_interval: int,
+    sampled_values: Optional[Tuple[float, ...]],
+) -> bool:
+    return (
+        completed_updates == 1
+        or completed_updates == max_updates
+        or completed_updates % log_interval == 0
+        or sampled_values is not None
+    )
+# ^^^ THOG
+
+
 # vvv THOG step one remains immediately legible in seconds; all later elapsed values use compact HHMM
 # def _progress_elapsed_seconds(value: Any) -> str:
 #     return f"{value}s"
@@ -168,6 +195,14 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
     # vvv THOG show the active PLASTIC DEPTH layer count on every training and validation progress row
     if "current_layer_count" in payload:
         fields.append(f"current_layer_count = {int(payload['current_layer_count'])}")
+    # ^^^ THOG
+    # vvv THOG append one post-transition generated-scalar sample field to the optimizer row only
+    if event == "optimizer_progress" and "sampled_values" in payload:
+        sampled_values = ", ".join(
+            _format_plastic_sampled_value(value)
+            for value in payload["sampled_values"]
+        )
+        fields.append(f"sampled_values = [{sampled_values}]")
     # ^^^ THOG
     line = "  ".join(fields)
     if event == "evaluation_completed":
@@ -264,6 +299,19 @@ class Stage6Trainer(Stage4Trainer):
                 values["current_layer_count"] = int(lattice.current_active_layers)
             # ^^^ THOG
         return values
+    # ^^^ THOG
+
+    # vvv THOG sampled transition values are transient console state and are consumed exactly once
+    def _consume_plastic_depth_console_sampled_values(self) -> Optional[Tuple[float, ...]]:
+        sampled_values = getattr(
+            self,
+            "_plastic_depth_pending_console_sampled_values",
+            None,
+        )
+        self._plastic_depth_pending_console_sampled_values = None
+        if sampled_values is None:
+            return None
+        return tuple(float(value) for value in sampled_values)
     # ^^^ THOG
 
     def _print_progress(self, run_id: str, event: str, **payload: Any) -> None:
@@ -398,19 +446,44 @@ class Stage6Trainer(Stage4Trainer):
                     "session_consumed_tokens": current_session_consumed_tokens,
                 }
             )
-            report_update = completed_updates == 1 or completed_updates == self.config.max_updates or completed_updates % self.config.log_interval == 0
+            # report_update = completed_updates == 1 or completed_updates == self.config.max_updates or completed_updates % self.config.log_interval == 0
+            # vvv THOG count transitions force their ordinary optimizer row and consume sampled values without creating another line
+            sampled_values = self._consume_plastic_depth_console_sampled_values()
+            report_update = _optimizer_progress_due(
+                completed_updates=completed_updates,
+                max_updates=self.config.max_updates,
+                log_interval=self.config.log_interval,
+                sampled_values=sampled_values,
+            )
             if report_update:
+                # self._print_progress(
+                #     run_id,
+                #     "optimizer_progress",
+                #     completed_updates=completed_updates,
+                #     consumed_tokens=completed_updates * tokens_per_update,
+                #     session_consumed_tokens=current_session_consumed_tokens,
+                #     training_loss=metrics["training_loss"],
+                #     learning_rate=metrics["learning_rate"],
+                #     gradient_norm=metrics["gradient_norm"],
+                #     cumulative_training_seconds=training_seconds,
+                # )
+                progress_payload = {
+                    "completed_updates": completed_updates,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                    "session_consumed_tokens": current_session_consumed_tokens,
+                    "training_loss": metrics["training_loss"],
+                    "learning_rate": metrics["learning_rate"],
+                    "gradient_norm": metrics["gradient_norm"],
+                    "cumulative_training_seconds": training_seconds,
+                }
+                if sampled_values is not None:
+                    progress_payload["sampled_values"] = sampled_values
                 self._print_progress(
                     run_id,
                     "optimizer_progress",
-                    completed_updates=completed_updates,
-                    consumed_tokens=completed_updates * tokens_per_update,
-                    session_consumed_tokens=current_session_consumed_tokens,
-                    training_loss=metrics["training_loss"],
-                    learning_rate=metrics["learning_rate"],
-                    gradient_norm=metrics["gradient_norm"],
-                    cumulative_training_seconds=training_seconds,
+                    **progress_payload,
                 )
+            # ^^^ THOG
             if self.config.eval_interval > 0 and completed_updates % self.config.eval_interval == 0:
                 evaluation_seconds = self._record_evaluation(
                     run_id=run_id,
@@ -532,4 +605,12 @@ __all__ = ["Stage6Trainer", "format_progress_line", "trace_digest"]
 # return f"{value}s"
 # fields.append(_progress_elapsed_seconds(payload[key]))
 # values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
+# ^^^ THOG
+
+# vvv THOG exact retired progress-call lines preserved for source-history audit
+# from typing import Any, Dict, List, Optional, Union
+# training_loss=metrics["training_loss"],
+# learning_rate=metrics["learning_rate"],
+# gradient_norm=metrics["gradient_norm"],
+# cumulative_training_seconds=training_seconds,
 # ^^^ THOG

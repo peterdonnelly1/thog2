@@ -82,6 +82,7 @@ def test_prefix_checkpoints_reject_nonfinal_maximum() -> None:
 # ^^^ THOG
 
 from sheet.plastic_depth_inline import PlasticDepthInlineProbeRequest
+from sheet.semantic_materializer import ATTENTION_QUERY_WEIGHT
 from sheet.training_model import TrainingSheetGPT
 from tests.test_plastic_depth import plastic_sheet_config, plastic_training_config
 
@@ -345,6 +346,33 @@ def test_trainer_commits_count_only_after_stock_adamw_step() -> None:
         assert decision["selected_active_layers"] == 4
         assert decision["transition"]["adamw_state_migration_mode"] in {"transform", "reset"}
         assert decision["transition"]["new_active_layers"] == 4
+        # vvv THOG the transition sample is post-gauge, scalar-only, transient, and absent from persistent metrics
+        sampled_values = trainer._plastic_depth_pending_console_sampled_values
+        assert sampled_values is not None
+        assert len(sampled_values) == 4
+        expected_values = tuple(
+            float(
+                trainer.raw_model.semantic_materializer.direct_matrix_value(
+                    ATTENTION_QUERY_WEIGHT,
+                    layer_index,
+                    0,
+                    0,
+                )
+                .detach()
+                .to(dtype=torch.float64)
+                .item()
+            )
+            for layer_index in range(4)
+        )
+        torch.testing.assert_close(
+            torch.tensor(sampled_values, dtype=torch.float64),
+            torch.tensor(expected_values, dtype=torch.float64),
+            rtol=0.0,
+            atol=0.0,
+        )
+        assert "plastic_sampled_values" not in metrics
+        assert "sampled_values" not in metrics
+        # ^^^ THOG
     finally:
         trainer.close()
 

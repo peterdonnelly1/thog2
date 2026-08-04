@@ -17,6 +17,7 @@ from .plastic_depth import (
 )
 from .plastic_depth_cuda import PlasticDepthCudaAllocatorReserve
 from .plastic_depth_inline import PlasticDepthInlineProbeRequest
+from .semantic_materializer import ATTENTION_QUERY_WEIGHT                                                                                                  # <<< THOG fixed generated scalar family for transition-only gauge visibility
 # vvv THOG PLASTIC DEPTH robust paired-score gate separates evidence collection from post-step state commit
 from .plastic_depth_controller import choose_plastic_depth_count_with_mad
 # ^^^ THOG
@@ -519,6 +520,28 @@ class TrainerStepMixin:
         )
         # ^^^ THOG
 
+    # vvv THOG sample one fixed generated attention-query scalar across the active post-transition chart
+    @torch.no_grad()
+    def _plastic_depth_transition_sampled_values(self) -> Tuple[float, ...]:
+        lattice = self._plastic_depth_lattice()
+        if lattice is None:
+            raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while sampling transition values")
+        return tuple(
+            float(
+                self.raw_model.semantic_materializer.direct_matrix_value(
+                    ATTENTION_QUERY_WEIGHT,
+                    layer_index,
+                    0,
+                    0,
+                )
+                .detach()
+                .to(dtype=torch.float64)
+                .item()
+            )
+            for layer_index in range(int(lattice.current_active_layers))
+        )
+    # ^^^ THOG
+
     def _commit_plastic_depth_inline_update(
         self,
         context: Optional[Dict[str, Any]],
@@ -806,6 +829,9 @@ class TrainerStepMixin:
     # ^^^ THOG
 
     def train_one_update(self) -> Dict[str, Any]:
+        # vvv THOG stale transition samples never survive into another optimizer attempt
+        self._plastic_depth_pending_console_sampled_values = None
+        # ^^^ THOG
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
         # vvv THOG PLASTIC DEPTH v0.3 selects from one shared first-microstep chain; the old external separate-forward controller is retained but no longer called
@@ -975,7 +1001,10 @@ class TrainerStepMixin:
         self.scaler.step(self.optimizer)
         self.scaler.update()
         # vvv THOG commit the selected count only after the stock AdamW step, then re-express model and coefficient state before the next forward
-        self._commit_plastic_depth_inline_update(plastic_inline_context)
+        # self._commit_plastic_depth_inline_update(plastic_inline_context)
+        plastic_transition_report = self._commit_plastic_depth_inline_update(plastic_inline_context)                                                        # <<< THOG retain only transient knowledge that a successful count transition occurred
+        if plastic_transition_report:
+            self._plastic_depth_pending_console_sampled_values = self._plastic_depth_transition_sampled_values()                                           # <<< THOG sample after the atomic re-gauge so the visible values test the committed chart
         if plastic_inline_context is not None:
             self._clear_plastic_depth_inline_update()
         # ^^^ THOG
