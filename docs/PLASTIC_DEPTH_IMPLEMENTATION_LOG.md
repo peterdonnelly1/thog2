@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-05 00:14 AEST
+Last updated: 2026-08-05 00:27 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `1c90e5001d51412d546a3843e93c2b3418d46dc0`
+- Current verified branch head before this log update: `5b7ae45c7e6a8c918464f9153dd71ed45fd7dffd`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -54,6 +54,12 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - [x] CUDA OOM in the N+1 layer or detached probe head becomes an infeasible candidate rather than a failed update
 - [x] N+1 feasibility synchronized across ranks; any-rank failure discards N+1 everywhere
 - [x] Exact non-CUDA shared-prefix path remains unchanged
+- [x] New persisted PLASTIC identity surfaces use exact canonical `plastic__...` control names
+- [x] Internal `plastic__sampling_seed` remains unexposed and absent from public identity
+- [x] Retired short PLASTIC identity aliases remain semantically checkpoint-compatible
+- [x] `_L_dyn_` is emitted only for learned-count PLASTIC runs
+- [x] Fixed-count PLASTIC and disabled runs retain numeric `_L_<count>_` identity
+- [x] Descriptor post-processing accepts both numeric and dynamic PLASTIC layer identity
 
 ## Validation evidence
 
@@ -113,13 +119,25 @@ The phase introduces `plastic__cuda_allocator_reserve_gib`, default 0.5 GiB. It 
 - Python compile, shell syntax and `git diff --check` passed
 - THOG source-history audit passed with zero violations
 
-Hosted recovery runners repeated all phase gates and published clean commit `1c90e500`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
+Hosted recovery runners repeated all phase gates and published clean commit `1c90e500`. Ordinary hosted CI on descendant `2eb3e644` passed focused CPU, affected regressions, two-rank DDP, source-history audit and exact head-versus-base comparison.
+
+### Canonical public identity and dynamic layer naming phase
+
+- 138 focused PLASTIC/gauge/optimizer/inline/controller/CUDA/interface/trainer/checkpoint/identity tests passed
+- 141 affected CPU regression tests passed
+- 200 parameterised subtests passed
+- two-rank CPU DDP passed with zero model-state and optimizer-state divergence
+- Python compile, shell syntax and `git diff --check` passed
+- THOG source-history audit passed with zero violations
+- direct identity tests prove fixed PLASTIC remains numeric, learned PLASTIC uses `L_dyn`, disabled runs are unchanged, internal sampling seed is absent, and retired checkpoint aliases compare semantically
+
+Hosted recovery runners repeated all phase gates and published clean commit `5b7ae45c`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
 
 ## Remaining revised implementation
 
 - [x] MAD significance gate and five-update count brake
 - [x] Universal VRAM reserve and recoverable upward-probe fallback
-- [ ] Uniform public `plastic__` controls and `_L_dyn_` identity
+- [x] Uniform public `plastic__` controls and `_L_dyn_` identity
 - [ ] Sampled-value transition diagnostic
 - [ ] Checkpoint versioning and rejection of ambiguous v0.1 geometry
 - [ ] Broad head-versus-base regression and final hosted CI
@@ -128,7 +146,7 @@ Hosted recovery runners repeated all phase gates and published clean commit `1c9
 
 ## Current exact task
 
-Complete the public PLASTIC control and artifact-identity phase. Use `plastic__...` uniformly in configuration and persisted surfaces, remove remaining obsolete public spellings without changing disabled runs, and emit `_L_dyn_` only when layer-count learning is enabled. Fixed-count PLASTIC runs must retain their numeric active layer count in artifact identity. Keep sampled-value console formatting and checkpoint-version rejection for their later dedicated phases.
+Implement the transition-only sampled-value console diagnostic. After a successful PLASTIC count transition, sample the agreed fixed generated scalar across the active layer positions and append one `sampled_values = [...]` field to that optimizer progress row only. Use two decimal places normally and scientific notation when needed. Force the transition row to print even when it is not on the ordinary logging interval, but do not emit an extra standalone line or repeat the values on later training or validation rows. Preserve non-PLASTIC and no-transition console output exactly. Do not yet change checkpoint-version rejection semantics.
 
 ## Known issues to carry forward
 
@@ -141,7 +159,7 @@ Complete the public PLASTIC control and artifact-identity phase. Use `plastic__.
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `1c90e500` or a documented descendant.
+2. Fetch `PLASTIC_DEPTH` and verify `5b7ae45c` or a documented descendant.
 3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.
