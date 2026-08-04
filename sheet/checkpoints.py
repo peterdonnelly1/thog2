@@ -171,6 +171,20 @@ def validate_plastic_depth_checkpoint_format(payload: Mapping[str, Any]) -> None
     identity_version = identity.get("version") if isinstance(identity, Mapping) else None
     format_version = payload.get("plastic_depth_checkpoint_format_version")
 
+    # vvv THOG canonical v0.3 identity must not contradict the enabled trainer state; retired short aliases omit this field
+    if (
+        isinstance(identity, Mapping)
+        and "plastic__enabled" in identity
+        and identity.get("plastic__enabled") is not True
+    ):
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                "enabled trainer state disagrees with compact identity "
+                f"plastic__enabled={identity.get('plastic__enabled')!r}"
+            )
+        )
+    # ^^^ THOG
+
     if format_version is not None:
         if format_version != PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION:
             raise ValueError(

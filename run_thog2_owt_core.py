@@ -17,7 +17,10 @@ import torch
 from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
 from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
-from sheet.checkpoints import load_payload
+# from sheet.checkpoints import load_payload
+# vvv THOG resume-control preflight uses the same PLASTIC geometry-format guard as full trainer resume
+from sheet.checkpoints import load_payload, validate_plastic_depth_checkpoint_format
+# ^^^ THOG
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.geometry_registry import AXIS_MLP_HIDDEN, format_geometry_plan, resolve_geometry_plan
 # vvv THOG v0 exposes HYPERBLOCK as a Boolean mode while retaining explicit topology identity internally
@@ -192,6 +195,9 @@ def validate_dataset(dataset_dir: Path, block_size: int) -> Dict[str, Any]:
 
 def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) -> None:
     payload = load_payload(checkpoint_path)
+    # vvv THOG reject v0.1 or ambiguous PLASTIC geometry before reconstructing stored controls
+    validate_plastic_depth_checkpoint_format(payload)
+    # ^^^ THOG
     if "trainer_config" not in payload:
         return
     stored = TrainingConfig(**payload["trainer_config"])
