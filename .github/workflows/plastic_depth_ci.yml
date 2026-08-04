@@ -122,6 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           rm docs/plastic_checkpoint_format.patch.gz.b64
+          rm -f docs/plastic_checkpoint_format.trigger
           rm .github/workflows/apply_plastic_checkpoint_format.yml
           git add -A
           git diff --cached --check
