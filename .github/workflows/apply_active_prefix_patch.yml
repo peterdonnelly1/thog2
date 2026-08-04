@@ -1,4 +1,5 @@
 # vvv THOG temporary gated applier for the tested active-prefix phase
+# Triggered after the workflow existed on PLASTIC_DEPTH.
 name: Apply tested PLASTIC active-prefix phase
 
 on:
