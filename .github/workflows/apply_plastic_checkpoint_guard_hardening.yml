@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 --decode docs/plastic_checkpoint_guard_followup.patch.gz.b64 | gzip --decompress > /tmp/plastic_checkpoint_guard_followup.patch
-          echo 'bce34b3dc7ac0ccbcc06f94ba334493d14e4d386081ffe52b596d3d9eabc5aba  /tmp/plastic_checkpoint_guard_followup.patch' | sha256sum --check --strict
+          echo '0d1e874cc811b992a8202fe3997e260ca55a87a543d5f5d66ee71beb8d1c4001  /tmp/plastic_checkpoint_guard_followup.patch' | sha256sum --check --strict
           git apply --check /tmp/plastic_checkpoint_guard_followup.patch
           git apply /tmp/plastic_checkpoint_guard_followup.patch
           git diff --check
