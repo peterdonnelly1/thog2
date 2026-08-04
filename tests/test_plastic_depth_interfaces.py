@@ -223,6 +223,8 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
             "2.5",
             "--plastic-layer-count-cost-weight",
             "0.2",
+            "--plastic-cuda-allocator-reserve-gib",
+            "0.75",
             "--plastic-geometry-learning-rate-multiplier",
             "0.15",
             "--no-plastic-freeze-geometry-during-warmup",
@@ -289,6 +291,7 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
         "--plastic-layer-count-probe-noise-min-observations 4",
         "--plastic-layer-count-probe-noise-lambda 2.5",
         "--plastic-layer-count-cost-weight 0.2",
+        "--plastic-cuda-allocator-reserve-gib 0.75",
         "--plastic-geometry-learning-rate-multiplier 0.15",
         "--no-plastic-freeze-geometry-during-warmup",
     ):
@@ -311,6 +314,7 @@ def test_wrapper_help_and_shell_syntax_cover_plastic_depth() -> None:
     assert "--plastic-layer-count-objective" in result.stdout
     assert "--plastic-layer-count-update-brake" in result.stdout
     assert "--plastic-layer-count-probe-noise-window" in result.stdout
+    assert "--plastic-cuda-allocator-reserve-gib" in result.stdout
 
 
 def test_memory_budget_rejects_cpu_execution() -> None:
@@ -330,4 +334,54 @@ def test_memory_budget_rejects_cpu_execution() -> None:
         )
 
 
+# ^^^ THOG
+
+# vvv THOG CUDA reserve is persistent execution configuration but deliberately not yet an artifact-name component
+def test_cuda_allocator_reserve_cli_propagates_without_changing_artifact_identity() -> None:
+    default_config = config_from_arguments(
+        _plastic_cli(
+            "--plastic-do-learn-layer-count",
+            "--plastic-initial-layer-count",
+            "2",
+            "--plastic-max-permitted-layers",
+            "4",
+        )
+    )
+    configured = config_from_arguments(
+        _plastic_cli(
+            "--plastic-do-learn-layer-count",
+            "--plastic-initial-layer-count",
+            "2",
+            "--plastic-max-permitted-layers",
+            "4",
+            "--plastic-cuda-allocator-reserve-gib",
+            "0.75",
+        )
+    )
+    assert default_config.plastic__cuda_allocator_reserve_gib == pytest.approx(0.5)
+    assert configured.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert default_config.artifact_name == configured.artifact_name
+    training = configured.to_training_config(
+        vocab_size=32,
+        world_size=1,
+        out_dir=Path("out-test"),
+    )
+    assert training.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert configured.compact_identity()["plastic_depth"]["cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.compact_identity_metadata()["plastic_depth"]["cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+
+
+def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
+    with pytest.raises(ValueError, match="cuda_allocator_reserve"):
+        config_from_arguments(
+            _plastic_cli(
+                "--plastic-do-learn-layer-count",
+                "--plastic-initial-layer-count",
+                "2",
+                "--plastic-max-permitted-layers",
+                "4",
+                "--plastic-cuda-allocator-reserve-gib",
+                "-0.1",
+            )
+        )
 # ^^^ THOG

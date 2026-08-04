@@ -461,3 +461,124 @@ def test_five_update_brake_collects_evidence_and_enforces_spacing() -> None:
 # ^^^ THOG
 
 # ^^^ THOG
+
+# vvv THOG recoverable adjacent N+1 model execution preserves lower candidates after local or distributed CUDA infeasibility
+def test_recoverable_upward_oom_preserves_lower_candidates() -> None:
+    torch.manual_seed(815)
+    model = _plastic_training_model()
+    indices = torch.arange(8, dtype=torch.long).view(1, 8) % model.config.vocab_size
+    targets = (indices + 1) % model.config.vocab_size
+    original = model._logical_block
+    calls = []
+    prepared = []
+    synchronized = []
+    observed = {}
+
+    def fail_upward(hidden: torch.Tensor, layer_index: int) -> torch.Tensor:
+        calls.append(layer_index)
+        if layer_index == 3:
+            raise RuntimeError("CUDA out of memory in recoverable N+1 layer")
+        return original(hidden, layer_index)
+
+    def synchronize(local_feasible: bool) -> bool:
+        synchronized.append(local_feasible)
+        return False
+
+    def select(candidates):
+        observed["counts"] = tuple(count for count, _ in candidates)
+        return 3
+
+    model._logical_block = fail_upward
+    request = PlasticDepthInlineProbeRequest(
+        candidate_counts=(2, 3, 4),
+        sampled_token_indices=torch.tensor([0, 2, 5, 7], dtype=torch.long),
+        selector=select,
+        recoverable_upward_count=4,
+        prepare_recoverable_upward=lambda: prepared.append(True),
+        synchronize_recoverable_upward=synchronize,
+    )
+    _, loss = model(indices, targets, plastic_depth_probe_request=request)
+
+    assert loss is not None
+    assert calls == [0, 1, 2, 3]
+    assert prepared == [True]
+    assert synchronized == [False]
+    assert observed["counts"] == (2, 3)
+    assert model.last_execution_report.logical_layers == 3
+    assert model.last_plastic_depth_inline_probe_report.candidate_counts == (2, 3)
+
+
+def test_distributed_upward_rejection_discards_successful_local_candidate() -> None:
+    torch.manual_seed(816)
+    model = _plastic_training_model(checkpoint_segment_size=2)
+    indices = torch.arange(8, dtype=torch.long).view(1, 8) % model.config.vocab_size
+    targets = (indices + 1) % model.config.vocab_size
+    observed = {}
+
+    def select(candidates):
+        observed["counts"] = tuple(count for count, _ in candidates)
+        return 3
+
+    request = PlasticDepthInlineProbeRequest(
+        candidate_counts=(2, 3, 4),
+        sampled_token_indices=None,
+        selector=select,
+        recoverable_upward_count=4,
+        prepare_recoverable_upward=lambda: None,
+        synchronize_recoverable_upward=lambda local_feasible: False,
+    )
+    _, loss = model(indices, targets, plastic_depth_probe_request=request)
+
+    assert loss is not None
+    assert observed["counts"] == (2, 3)
+    assert model.last_execution_report.logical_layers == 3
+    assert model.last_plastic_depth_inline_probe_report.candidate_counts == (2, 3)
+# ^^^ THOG
+
+# vvv THOG successful recoverable N+1 remains selectable and preserves the direct-prefix gradient
+def test_recoverable_upward_success_matches_direct_prefix_gradient() -> None:
+    torch.manual_seed(817)
+    inline = _plastic_training_model(checkpoint_segment_size=2)
+    direct = _plastic_training_model(checkpoint_segment_size=2)
+    direct.load_state_dict(inline.state_dict())
+    indices = torch.arange(16, dtype=torch.long).view(2, 8) % inline.config.vocab_size
+    targets = (indices + 3) % inline.config.vocab_size
+    prepared = []
+    synchronized = []
+    request = PlasticDepthInlineProbeRequest(
+        candidate_counts=(2, 3, 4),
+        sampled_token_indices=torch.tensor([0, 3, 7, 8, 12, 15], dtype=torch.long),
+        selector=lambda candidates: 4,
+        recoverable_upward_count=4,
+        prepare_recoverable_upward=lambda: prepared.append(True),
+        synchronize_recoverable_upward=lambda local_feasible: synchronized.append(local_feasible) or local_feasible,
+    )
+
+    inline_logits, inline_loss = inline(indices, targets, plastic_depth_probe_request=request)
+    direct_logits, direct_loss = direct(indices, targets, plastic_depth_active_layers_override=4)
+    assert inline_loss is not None and direct_loss is not None
+    inline_loss.backward()
+    direct_loss.backward()
+
+    assert prepared == [True]
+    assert synchronized == [True]
+    assert inline.last_execution_report.logical_layers == 4
+    assert inline.last_plastic_depth_inline_probe_report.candidate_counts == (2, 3, 4)
+    torch.testing.assert_close(inline_logits, direct_logits, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(inline_loss, direct_loss, rtol=0.0, atol=0.0)
+    inline_gradients = _gradient_snapshot(inline)
+    direct_gradients = _gradient_snapshot(direct)
+    for name in inline_gradients:
+        inline_gradient = inline_gradients[name]
+        direct_gradient = direct_gradients[name]
+        if inline_gradient is None or direct_gradient is None:
+            assert inline_gradient is None and direct_gradient is None, name
+        else:
+            torch.testing.assert_close(
+                inline_gradient,
+                direct_gradient,
+                rtol=2.0e-6,
+                atol=2.0e-7,
+                msg=name,
+            )
+# ^^^ THOG

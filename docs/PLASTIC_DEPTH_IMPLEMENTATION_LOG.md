@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 23:42 AEST
+Last updated: 2026-08-05 00:08 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `f334a02487f7b548989efc5ef21df07e48a0eb20`
+- Current verified branch head before this phase: `1b93a5bea7ee5cfb161d13b84df9b39b7d1b5760`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -47,6 +47,13 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - [x] Five-update count-change brake replacing the obsolete periodic hold controller
 - [x] Evidence and count-change spacing checkpointed only after successful AdamW/model transition commit
 - [x] Failed/non-finite updates discard transient evidence without mutating persistent controller state
+- [x] Universal CUDA allocator reserve acquired before every learned-count upward probe
+- [x] Reserve acquisition feasibility synchronized across ranks before model execution
+- [x] Failed reserve preflight removes only N+1 while preserving N and N-1
+- [x] Safety reserve released immediately before the single adjacent N+1 layer attempt
+- [x] CUDA OOM in the N+1 layer or detached probe head becomes an infeasible candidate rather than a failed update
+- [x] N+1 feasibility synchronized across ranks; any-rank failure discards N+1 everywhere
+- [x] Exact non-CUDA shared-prefix path remains unchanged
 
 ## Validation evidence
 
@@ -94,10 +101,24 @@ The original staged transport payload at `6b0b759c` was corrupt after the first 
 
 Commit `f334a024` is the clean MAD/brake phase commit. Its bot-authored push could not start an ordinary follow-on workflow, so this log-only descendant deliberately retriggers the authoritative hosted head-versus-base comparison.
 
+### CUDA reserve and recoverable upward-probe phase
+
+The phase introduces `plastic__cuda_allocator_reserve_gib`, default 0.5 GiB. It is persistent execution configuration but deliberately does not yet alter the public artifact-name fragment. The reserve is CUDA-only; CPU execution follows the established inline-probe code path exactly.
+
+Local validation before publication:
+
+- 132 focused PLASTIC/gauge/optimizer/inline/controller/CUDA/interface/trainer/checkpoint tests passed
+- 141 affected CPU regression tests passed
+- 200 parameterised subtests passed
+- two-rank CPU DDP passed with zero model-state and optimizer-state divergence
+- direct tests cover reserve allocation/OOM, distributed preflight rejection, local upward OOM, successful-local/failed-remote rejection, cleanup, and successful N+1 gradient equivalence
+- Python compile, shell syntax and `git diff --check` passed
+- THOG source-history audit passed with zero violations
+
 ## Remaining revised implementation
 
 - [x] MAD significance gate and five-update count brake
-- [ ] Universal VRAM reserve and recoverable upward-probe fallback
+- [x] Universal VRAM reserve and recoverable upward-probe fallback
 - [ ] Uniform public `plastic__` controls and `_L_dyn_` identity
 - [ ] Sampled-value transition diagnostic
 - [ ] Checkpoint versioning and rejection of ambiguous v0.1 geometry
@@ -107,7 +128,7 @@ Commit `f334a024` is the clean MAD/brake phase commit. Its bot-authored push cou
 
 ## Current exact task
 
-Implement the universal CUDA allocator reserve and recoverable upward-probe fallback. Reserve the configured safety margin before learned-count probing, preflight N+1 feasibility without adding a separate timed model probe, synchronize the feasibility decision across ranks, and treat an upward-probe allocation failure as an infeasible N+1 candidate rather than a fatal update. Preserve N and N-1 evaluation and the exact non-CUDA path. Do not yet change public artifact identity, sampled-value UI, or checkpoint-version rejection semantics.
+Complete the public PLASTIC control and artifact-identity phase. Use `plastic__...` uniformly in configuration and persisted surfaces, remove remaining obsolete public spellings without changing disabled runs, and emit `_L_dyn_` only when layer-count learning is enabled. Fixed-count PLASTIC runs must retain their numeric active layer count in artifact identity. Keep sampled-value console formatting and checkpoint-version rejection for their later dedicated phases.
 
 ## Known issues to carry forward
 
@@ -115,12 +136,12 @@ Implement the universal CUDA allocator reserve and recoverable upward-probe fall
 - Re-gauge preparation may temporarily duplicate coefficient storage.
 - Count-dependent residual-addition scaling remains a separate architecture question.
 - Old globally normalised phantom-lattice checkpoints are geometrically ambiguous.
-- Upward-probe OOM recovery and DDP feasibility remain pending.
+- Selected N+1 head/backward OOM after feasibility selection remains fatal; only the detached upward probe is recoverable.
 
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `f334a024` or a documented descendant.
+2. Fetch `PLASTIC_DEPTH` and verify the published CUDA-reserve phase commit or a documented descendant.
 3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.

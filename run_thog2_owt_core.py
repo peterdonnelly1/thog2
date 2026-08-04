@@ -284,6 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
     parser.add_argument("--plastic-layer-count-cost-weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
     parser.add_argument("--plastic-layer-memory-budget-gib", dest="plastic__layer_memory_budget_gib", type=float)
+    parser.add_argument("--plastic-cuda-allocator-reserve-gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
     parser.add_argument("--plastic-geometry-learning-rate-multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
     parser.add_argument("--plastic-freeze-geometry-during-warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
     # ^^^ THOG
@@ -485,6 +486,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
+        plastic__cuda_allocator_reserve_gib=arguments.plastic__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
         # ^^^ THOG

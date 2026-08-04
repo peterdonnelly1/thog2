@@ -9,6 +9,8 @@ from torch import Tensor
 
 
 PlasticDepthCandidateSelector = Callable[[Tuple[Tuple[int, Tensor], ...]], int]
+PlasticDepthUpwardPreparation = Callable[[], None]
+PlasticDepthUpwardFeasibilitySynchronizer = Callable[[bool], bool]
 
 
 @dataclass(frozen=True)
@@ -16,6 +18,11 @@ class PlasticDepthInlineProbeRequest:
     candidate_counts: Tuple[int, ...]
     sampled_token_indices: Optional[Tensor]
     selector: PlasticDepthCandidateSelector
+    # vvv THOG optional CUDA-only split permits one recoverable N+1 layer while leaving the established path exact
+    recoverable_upward_count: Optional[int] = None
+    prepare_recoverable_upward: Optional[PlasticDepthUpwardPreparation] = None
+    synchronize_recoverable_upward: Optional[PlasticDepthUpwardFeasibilitySynchronizer] = None
+    # ^^^ THOG
 
     def validate(self, *, maximum_count: int) -> None:
         if not self.candidate_counts:
@@ -30,6 +37,19 @@ class PlasticDepthInlineProbeRequest:
                     f"counts={self.candidate_counts}, maximum_count={maximum_count}"
                 )
             previous = count
+        # vvv THOG a recoverable upward candidate is always the final adjacent prefix and requires both lifecycle callbacks
+        callbacks = (self.prepare_recoverable_upward, self.synchronize_recoverable_upward)
+        if self.recoverable_upward_count is None:
+            if any(callback is not None for callback in callbacks):
+                raise ValueError("PLASTIC DEPTH upward callbacks require recoverable_upward_count")
+        else:
+            if self.recoverable_upward_count != self.candidate_counts[-1]:
+                raise ValueError("recoverable_upward_count must be the final candidate count")
+            if len(self.candidate_counts) < 2 or self.recoverable_upward_count != self.candidate_counts[-2] + 1:
+                raise ValueError("recoverable_upward_count must extend the lower prefix by exactly one layer")
+            if any(callback is None for callback in callbacks):
+                raise ValueError("recoverable_upward_count requires preparation and synchronization callbacks")
+        # ^^^ THOG
         if self.sampled_token_indices is not None:
             if self.sampled_token_indices.ndim != 1:
                 raise ValueError("sampled_token_indices must be one-dimensional")
@@ -50,6 +70,8 @@ class PlasticDepthInlineProbeReport:
 
 __all__ = [
     "PlasticDepthCandidateSelector",
+    "PlasticDepthUpwardFeasibilitySynchronizer",
+    "PlasticDepthUpwardPreparation",
     "PlasticDepthInlineProbeReport",
     "PlasticDepthInlineProbeRequest",
 ]

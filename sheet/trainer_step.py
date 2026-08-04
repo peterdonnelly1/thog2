@@ -15,6 +15,7 @@ from .plastic_depth import (
     PlasticDepthCandidateMeasurement,
     choose_plastic_depth_candidate,
 )
+from .plastic_depth_cuda import PlasticDepthCudaAllocatorReserve
 from .plastic_depth_inline import PlasticDepthInlineProbeRequest
 # vvv THOG PLASTIC DEPTH robust paired-score gate separates evidence collection from post-step state commit
 from .plastic_depth_controller import choose_plastic_depth_count_with_mad
@@ -328,6 +329,25 @@ class TrainerStepMixin:
         )
         if not candidates:
             raise RuntimeError("PLASTIC DEPTH inline probe resolved no candidate counts")
+        # vvv THOG CUDA learned-count updates reserve a universal safety buffer and globally preflight only the adjacent N+1 candidate
+        recoverable_upward_count: Optional[int] = None
+        allocator_reserve: Optional[PlasticDepthCudaAllocatorReserve] = None
+        upward_preflight_feasible: Optional[bool] = None
+        proposed_upward_count = current + 1
+        if self.device.type == "cuda" and proposed_upward_count in candidates:
+            allocator_reserve = PlasticDepthCudaAllocatorReserve(
+                device=self.device,
+                reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
+            )
+            local_preflight_feasible = allocator_reserve.acquire()
+            upward_preflight_feasible = self.distributed.all_true(local_preflight_feasible)
+            if upward_preflight_feasible:
+                recoverable_upward_count = proposed_upward_count
+            else:
+                allocator_reserve.release(empty_cache=True)
+                allocator_reserve = None
+                candidates = tuple(count for count in candidates if count != proposed_upward_count)
+        # ^^^ THOG
         setter = getattr(self.raw_model, "set_plastic_depth_update_layer_count", None)
         if not callable(setter):
             raise RuntimeError("PLASTIC DEPTH training model lacks update-prefix control")
@@ -340,11 +360,25 @@ class TrainerStepMixin:
             "paired_evidence": None,
             "decision": None,
             "sampled_token_count": None,
+            # vvv THOG transient CUDA reserve state is deliberately outside checkpoints and is always released by update cleanup
+            "cuda_allocator_reserve": allocator_reserve,
+            "recoverable_upward_count": recoverable_upward_count,
+            "upward_preflight_feasible": upward_preflight_feasible,
+            "upward_candidate_feasible": upward_preflight_feasible,
+            # ^^^ THOG
         }
         self._plastic_depth_inline_update_context = context
         return context
 
     def _clear_plastic_depth_inline_update(self) -> None:
+        # vvv THOG every successful, failed and non-finite update releases any unspent CUDA safety reserve
+        context = getattr(self, "_plastic_depth_inline_update_context", None)
+        if context is not None:
+            reserve = context.get("cuda_allocator_reserve")
+            reserve_release = getattr(reserve, "release", None)
+            if callable(reserve_release):
+                reserve_release()
+        # ^^^ THOG
         clearer = getattr(self.raw_model, "clear_plastic_depth_update_layer_count", None)
         if callable(clearer):
             clearer()
@@ -378,7 +412,18 @@ class TrainerStepMixin:
         context["sampled_token_count"] = int(sampled_token_indices.numel())
 
         def select(candidates: Tuple[Tuple[int, torch.Tensor], ...]) -> int:
-            if tuple(count for count, _ in candidates) != context["candidate_counts"]:
+            # if tuple(count for count, _ in candidates) != context["candidate_counts"]:
+            actual_counts = tuple(count for count, _ in candidates)
+            expected_counts = tuple(context["candidate_counts"])
+            recoverable_upward_count = context.get("recoverable_upward_count")
+            upward_was_rejected = (
+                recoverable_upward_count is not None
+                and context.get("upward_candidate_feasible") is False
+                and actual_counts == tuple(
+                    count for count in expected_counts if count != recoverable_upward_count
+                )
+            )
+            if actual_counts != expected_counts and not upward_was_rejected:
                 raise RuntimeError("PLASTIC DEPTH inline model returned unexpected candidates")
             measurements = []
             for count, local_loss in candidates:
@@ -444,11 +489,35 @@ class TrainerStepMixin:
             context["decision"] = decision
             return selected_count
 
+        # vvv THOG CUDA callbacks release the reserve exactly before N+1 and synchronize OOM feasibility before selection
+        recoverable_upward_count = context.get("recoverable_upward_count")
+
+        def prepare_recoverable_upward() -> None:
+            reserve = context.get("cuda_allocator_reserve")
+            reserve_release = getattr(reserve, "release", None)
+            if callable(reserve_release):
+                reserve_release()
+
+        def synchronize_recoverable_upward(local_feasible: bool) -> bool:
+            globally_feasible = self.distributed.all_true(bool(local_feasible))
+            context["upward_candidate_feasible"] = globally_feasible
+            if not globally_feasible and self.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return globally_feasible
+
         return PlasticDepthInlineProbeRequest(
             candidate_counts=context["candidate_counts"],
             sampled_token_indices=sampled_token_indices,
             selector=select,
+            recoverable_upward_count=recoverable_upward_count,
+            prepare_recoverable_upward=(
+                prepare_recoverable_upward if recoverable_upward_count is not None else None
+            ),
+            synchronize_recoverable_upward=(
+                synchronize_recoverable_upward if recoverable_upward_count is not None else None
+            ),
         )
+        # ^^^ THOG
 
     def _commit_plastic_depth_inline_update(
         self,

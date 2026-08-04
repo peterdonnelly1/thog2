@@ -15,6 +15,7 @@ from .checkpointing import (
     validate_checkpoint_segment_size,
 )
 from .model import SheetGPT, SheetGPTConfig
+from .plastic_depth_cuda import is_cuda_out_of_memory
 from .plastic_depth_inline import (
     PlasticDepthInlineProbeReport,
     PlasticDepthInlineProbeRequest,
@@ -97,6 +98,90 @@ class TrainingDenseGPT(GPT):
 
     def _logical_block(self, hidden: Tensor, layer_index: int) -> Tensor:
         return self.transformer.h[layer_index](hidden)
+
+    # vvv THOG CUDA learned-count probing executes N-1/N first, then treats only the adjacent N+1 allocation as recoverable
+    def _plastic_depth_recoverable_probe_candidates(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        request: PlasticDepthInlineProbeRequest,
+    ) -> Tuple[Dict[int, Tensor], Tuple[Tuple[int, Tensor], ...], CheckpointExecutionReport]:
+        upward_count = request.recoverable_upward_count
+        prepare_upward = request.prepare_recoverable_upward
+        synchronize_upward = request.synchronize_recoverable_upward
+        if upward_count is None or prepare_upward is None or synchronize_upward is None:
+            raise RuntimeError("PLASTIC DEPTH recoverable probe request is incomplete")
+        lower_counts = tuple(count for count in request.candidate_counts if count != upward_count)
+        if not lower_counts or upward_count != lower_counts[-1] + 1:
+            raise RuntimeError("PLASTIC DEPTH recoverable N+1 candidate is not adjacent to the lower prefix")
+        lower_checkpoints, lower_report = execute_logical_layer_checkpoints(
+            hidden,
+            n_layer=self.config.n_layer,
+            segment_size=self.checkpoint_segment_size,
+            logical_block=self._logical_block,
+            training=self.training,
+            layer_indices=tuple(range(lower_counts[-1])),
+            checkpoint_counts=lower_counts,
+        )
+        checkpoint_by_count = dict(lower_checkpoints)
+        candidate_losses = []
+        with torch.no_grad():
+            for count in lower_counts:
+                candidate_loss = self._plastic_depth_candidate_head_loss(
+                    checkpoint_by_count[count],
+                    targets,
+                    request.sampled_token_indices,
+                )
+                candidate_losses.append((count, candidate_loss.detach()))
+
+        prepare_upward()
+        upward_hidden: Optional[Tensor] = None
+        upward_loss: Optional[Tensor] = None
+        upward_report: Optional[CheckpointExecutionReport] = None
+        local_feasible = True
+        try:
+            upward_hidden, upward_report = execute_logical_layers(
+                checkpoint_by_count[lower_counts[-1]],
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=(upward_count - 1,),
+            )
+            with torch.no_grad():
+                upward_loss = self._plastic_depth_candidate_head_loss(
+                    upward_hidden,
+                    targets,
+                    request.sampled_token_indices,
+                ).detach()
+        except BaseException as error:
+            if not is_cuda_out_of_memory(error):
+                raise
+            local_feasible = False
+            upward_hidden = None
+            upward_loss = None
+            upward_report = None
+            if hidden.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        globally_feasible = bool(synchronize_upward(local_feasible))
+        if globally_feasible:
+            if upward_hidden is None or upward_loss is None or upward_report is None:
+                raise RuntimeError("distributed PLASTIC DEPTH feasibility accepted a missing local N+1 candidate")
+            checkpoint_by_count[upward_count] = upward_hidden
+            candidate_losses.append((upward_count, upward_loss))
+            execution_report = CheckpointExecutionReport(
+                checkpointing_used=lower_report.checkpointing_used or upward_report.checkpointing_used,
+                checkpoint_segments=lower_report.checkpoint_segments + upward_report.checkpoint_segments,
+                logical_layers=lower_report.logical_layers + upward_report.logical_layers,
+                segment_size=lower_report.segment_size,
+            )
+        else:
+            upward_hidden = None
+            upward_loss = None
+            execution_report = lower_report
+        return checkpoint_by_count, tuple(candidate_losses), execution_report
+    # ^^^ THOG
 
     def forward(
         self,
@@ -398,6 +483,90 @@ class TrainingSheetGPT(SheetGPT):
         logits = self.lm_head(flattened_hidden)
         return F.cross_entropy(logits, flattened_targets, ignore_index=-1)
 
+    # vvv THOG CUDA learned-count probing executes N-1/N first, then treats only the adjacent N+1 allocation as recoverable
+    def _plastic_depth_recoverable_probe_candidates(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        request: PlasticDepthInlineProbeRequest,
+    ) -> Tuple[Dict[int, Tensor], Tuple[Tuple[int, Tensor], ...], CheckpointExecutionReport]:
+        upward_count = request.recoverable_upward_count
+        prepare_upward = request.prepare_recoverable_upward
+        synchronize_upward = request.synchronize_recoverable_upward
+        if upward_count is None or prepare_upward is None or synchronize_upward is None:
+            raise RuntimeError("PLASTIC DEPTH recoverable probe request is incomplete")
+        lower_counts = tuple(count for count in request.candidate_counts if count != upward_count)
+        if not lower_counts or upward_count != lower_counts[-1] + 1:
+            raise RuntimeError("PLASTIC DEPTH recoverable N+1 candidate is not adjacent to the lower prefix")
+        lower_checkpoints, lower_report = execute_logical_layer_checkpoints(
+            hidden,
+            n_layer=self.config.n_layer,
+            segment_size=self.checkpoint_segment_size,
+            logical_block=self._logical_block,
+            training=self.training,
+            layer_indices=tuple(range(lower_counts[-1])),
+            checkpoint_counts=lower_counts,
+        )
+        checkpoint_by_count = dict(lower_checkpoints)
+        candidate_losses = []
+        with torch.no_grad():
+            for count in lower_counts:
+                candidate_loss = self._plastic_depth_candidate_head_loss(
+                    checkpoint_by_count[count],
+                    targets,
+                    request.sampled_token_indices,
+                )
+                candidate_losses.append((count, candidate_loss.detach()))
+
+        prepare_upward()
+        upward_hidden: Optional[Tensor] = None
+        upward_loss: Optional[Tensor] = None
+        upward_report: Optional[CheckpointExecutionReport] = None
+        local_feasible = True
+        try:
+            upward_hidden, upward_report = execute_logical_layers(
+                checkpoint_by_count[lower_counts[-1]],
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=(upward_count - 1,),
+            )
+            with torch.no_grad():
+                upward_loss = self._plastic_depth_candidate_head_loss(
+                    upward_hidden,
+                    targets,
+                    request.sampled_token_indices,
+                ).detach()
+        except BaseException as error:
+            if not is_cuda_out_of_memory(error):
+                raise
+            local_feasible = False
+            upward_hidden = None
+            upward_loss = None
+            upward_report = None
+            if hidden.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        globally_feasible = bool(synchronize_upward(local_feasible))
+        if globally_feasible:
+            if upward_hidden is None or upward_loss is None or upward_report is None:
+                raise RuntimeError("distributed PLASTIC DEPTH feasibility accepted a missing local N+1 candidate")
+            checkpoint_by_count[upward_count] = upward_hidden
+            candidate_losses.append((upward_count, upward_loss))
+            execution_report = CheckpointExecutionReport(
+                checkpointing_used=lower_report.checkpointing_used or upward_report.checkpointing_used,
+                checkpoint_segments=lower_report.checkpoint_segments + upward_report.checkpoint_segments,
+                logical_layers=lower_report.logical_layers + upward_report.logical_layers,
+                segment_size=lower_report.segment_size,
+            )
+        else:
+            upward_hidden = None
+            upward_loss = None
+            execution_report = lower_report
+        return checkpoint_by_count, tuple(candidate_losses), execution_report
+    # ^^^ THOG
+
     def forward(
         self,
         idx: Tensor,
@@ -438,26 +607,38 @@ class TrainingSheetGPT(SheetGPT):
             if self._torch_compile_mode == "regional":
                 raise RuntimeError("regional torch.compile does not support PLASTIC DEPTH inline probing")
             plastic_depth_probe_request.validate(maximum_count=self.config.n_layer)
-            maximum_count = plastic_depth_probe_request.candidate_counts[-1]
-            checkpoints, self.last_execution_report = execute_logical_layer_checkpoints(
-                hidden,
-                n_layer=self.config.n_layer,
-                segment_size=self.checkpoint_segment_size,
-                logical_block=self._logical_block,
-                training=self.training,
-                layer_indices=tuple(range(maximum_count)),
-                checkpoint_counts=plastic_depth_probe_request.candidate_counts,
-            )
-            checkpoint_by_count = dict(checkpoints)
-            candidate_losses = []
-            with torch.no_grad():
-                for count in plastic_depth_probe_request.candidate_counts:
-                    candidate_loss = self._plastic_depth_candidate_head_loss(
-                        checkpoint_by_count[count],
+            # vvv THOG preserve the exact established path unless the trainer explicitly supplies CUDA N+1 recovery coordination
+            if plastic_depth_probe_request.recoverable_upward_count is None:
+                maximum_count = plastic_depth_probe_request.candidate_counts[-1]
+                checkpoints, self.last_execution_report = execute_logical_layer_checkpoints(
+                    hidden,
+                    n_layer=self.config.n_layer,
+                    segment_size=self.checkpoint_segment_size,
+                    logical_block=self._logical_block,
+                    training=self.training,
+                    layer_indices=tuple(range(maximum_count)),
+                    checkpoint_counts=plastic_depth_probe_request.candidate_counts,
+                )
+                checkpoint_by_count = dict(checkpoints)
+                candidate_losses = []
+                with torch.no_grad():
+                    for count in plastic_depth_probe_request.candidate_counts:
+                        candidate_loss = self._plastic_depth_candidate_head_loss(
+                            checkpoint_by_count[count],
+                            targets,
+                            plastic_depth_probe_request.sampled_token_indices,
+                        )
+                        candidate_losses.append((count, candidate_loss.detach()))
+            else:
+                checkpoint_by_count, candidate_losses, self.last_execution_report = (
+                    self._plastic_depth_recoverable_probe_candidates(
+                        hidden,
                         targets,
-                        plastic_depth_probe_request.sampled_token_indices,
+                        plastic_depth_probe_request,
                     )
-                    candidate_losses.append((count, candidate_loss.detach()))
+                )
+                checkpoints = tuple(checkpoint_by_count.items())
+            # ^^^ THOG
             selected_count = int(
                 plastic_depth_probe_request.selector(tuple(candidate_losses))
             )
@@ -474,7 +655,8 @@ class TrainingSheetGPT(SheetGPT):
                 else int(plastic_depth_probe_request.sampled_token_indices.numel())
             )
             self.last_plastic_depth_inline_probe_report = PlasticDepthInlineProbeReport(
-                candidate_counts=plastic_depth_probe_request.candidate_counts,
+                # candidate_counts=plastic_depth_probe_request.candidate_counts,
+                candidate_counts=tuple(count for count, _ in candidate_losses),
                 local_candidate_losses=local_losses,
                 selected_count=selected_count,
                 sampled_token_count=sampled_count,
