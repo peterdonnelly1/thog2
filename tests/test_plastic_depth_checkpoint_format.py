@@ -151,6 +151,24 @@ def test_resume_control_preflight_rejects_before_training_config() -> None:
             validate_resume_controls(path, config)
 
 
+
+def test_disabled_trainer_with_plastic_metadata_is_rejected_before_model_construction() -> None:
+    payload = _checkpoint_payload(_learned_plastic_config())
+    payload["trainer_config"]["plastic__enabled"] = False
+    payload["model"] = {"invalid": "must never reach load_state_dict"}
+    with pytest.raises(ValueError, match="disabled trainer state contains PLASTIC checkpoint metadata"):
+        validate_plastic_depth_checkpoint_format(payload)
+    with pytest.raises(ValueError, match="disabled trainer state contains PLASTIC checkpoint metadata"):
+        model_from_compact_state(payload)
+
+
+def test_disabled_trainer_with_format_only_is_rejected() -> None:
+    payload = _checkpoint_payload(_learned_plastic_config())
+    payload["trainer_config"]["plastic__enabled"] = False
+    payload["compact_identity"].pop("plastic_depth")
+    with pytest.raises(ValueError, match="disabled trainer state contains PLASTIC checkpoint metadata"):
+        validate_plastic_depth_checkpoint_format(payload)
+
 def test_retired_short_v03_checkpoint_resumes_end_to_end() -> None:
     train_tokens, validation_tokens = token_splits()
     config = _learned_plastic_config()
