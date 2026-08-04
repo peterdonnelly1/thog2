@@ -46,7 +46,11 @@ jobs:
         run: |
           set -euo pipefail
           cat docs/active_prefix_payload/part_*.txt > /tmp/active_prefix.patch.gz.b64
-          base64 --decode /tmp/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch
+          if ! base64 --decode /tmp/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch; then
+            echo 'chunked payload is corrupt; validating the retained single-file payload' >&2
+            rm -f /tmp/active_prefix.patch
+            base64 --decode docs/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch
+          fi
           echo '0d5661590aeeefe02931e9a009aab7c62d0d662c99e8202a0fab340be60b5a9b  /tmp/active_prefix.patch' | sha256sum --check --strict
           git apply --check /tmp/active_prefix.patch
           git apply /tmp/active_prefix.patch
