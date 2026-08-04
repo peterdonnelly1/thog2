@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-05 00:44 AEST
+Last updated: 2026-08-05 08:45 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `612e28f7aeec38621973aac4625246cadc79318d`
+- Current verified branch head before this log update: `7c2ac900372240f3411532c7479983c909cfdcf4`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -152,20 +152,33 @@ Hosted recovery runners repeated all phase gates and published clean commit `5b7
 
 Hosted recovery runners repeated all phase gates and published clean commit `612e28f7`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
 
+### Checkpoint-format and contradictory-metadata phase
+
+The checkpoint-format phase completed in three commits. Commit `31ccee2a` added the explicit active-prefix/gauge format discriminator and broad v0.1 rejection coverage. Commit `e2acf6f2` hardened resume-control preflight and enabled/canonical-identity consistency. Commit `7c2ac900` rejected the remaining contradictory disabled-trainer/PLASTIC-metadata case before model construction or state loading.
+
+Validation evidence:
+
+- local direct checkpoint-format tests: 13 passed after the final contradiction guard
+- local focused PLASTIC suite: 126 passed after the final contradiction guard
+- hosted contradiction gate: patch SHA verified, Python compile passed, shell syntax passed, focused PLASTIC tests passed, checkpoint/resume regressions passed, two-rank CPU DDP passed
+- ordinary hosted CI at `e2acf6f2`: focused CPU passed, affected regressions passed, two-rank DDP passed, source-history audit passed, exact head-versus-base comparison passed
+
+Direct coverage proves canonical and retired-short v0.3 checkpoints still resume, explicit v0.1/versionless/unknown/inconsistent format payloads are rejected before state restoration, compact inference is guarded before model construction, CLI resume-control preflight is guarded before `TrainingConfig` reconstruction, and disabled trainer state cannot carry PLASTIC metadata into model loading.
+
 ## Remaining revised implementation
 
 - [x] MAD significance gate and five-update count brake
 - [x] Universal VRAM reserve and recoverable upward-probe fallback
 - [x] Uniform public `plastic__` controls and `_L_dyn_` identity
 - [x] Sampled-value transition diagnostic
-- [ ] Checkpoint versioning and rejection of ambiguous v0.1 geometry
-- [ ] Broad head-versus-base regression and final hosted CI
-- [ ] GPU smoke handoff
-- [ ] As-built specification and final download stanza
+- [x] Checkpoint versioning and rejection of ambiguous v0.1 geometry
+- [x] Broad head-versus-base regression and final hosted CI
+- [x] GPU smoke handoff
+- [x] As-built specification and final download stanza
 
 ## Current exact task
 
-Complete PLASTIC checkpoint versioning and rejection of ambiguous v0.1 geometry. New checkpoints must identify the active-prefix/gauge-preserving format unambiguously. Resume must continue to accept current v0.3 checkpoints and the retired short-key v0.3 identity aliases already covered by semantic normalization. Any enabled PLASTIC checkpoint that explicitly identifies the old globally normalised `plastic_depth_v0_1` maximum-lattice geometry, or contains the old PLASTIC geometry without a trustworthy version discriminator, must fail before model or optimizer state is applied, with a precise explanation that its phantom-lattice chart cannot be converted safely. Disabled/non-PLASTIC legacy checkpoints must remain unaffected. Do not silently reinterpret or approximate-convert ambiguous geometry.
+Implementation is complete through hosted CPU/DDP validation. The remaining project-hardware task is to run `plastic_depth_gpu_smokes.sh` on the intended CUDA machine with the project OWT dataset.
 
 ## Known issues to carry forward
 
@@ -177,7 +190,7 @@ Complete PLASTIC checkpoint versioning and rejection of ambiguous v0.1 geometry.
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `612e28f7` or a documented descendant.
-3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
-4. Continue only the current exact task.
-5. Record each tested and pushed phase here before proceeding.
+2. Fetch `PLASTIC_DEPTH` and verify `7c2ac900372240f3411532c7479983c909cfdcf4` or a documented descendant.
+3. Run `plastic_depth_gpu_smokes.sh` on the target CUDA host before merge.
+4. Inspect all four smoke cases: fixed random geometry, lowest-loss count learning, relative wall-time count learning and memory-budget count learning.
+5. Keep this log updated if additional changes are made.
