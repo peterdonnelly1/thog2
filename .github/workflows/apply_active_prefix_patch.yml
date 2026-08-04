@@ -42,10 +42,12 @@ jobs:
           python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
           python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Decode and verify patch
+      - name: Reassemble, verify and apply patch
         run: |
           set -euo pipefail
-          base64 --decode docs/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch
+          cat docs/active_prefix_payload/part_*.txt > /tmp/active_prefix.patch.gz.b64
+          base64 --decode /tmp/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch
+          echo '0d5661590aeeefe02931e9a009aab7c62d0d662c99e8202a0fab340be60b5a9b  /tmp/active_prefix.patch' | sha256sum --check --strict
           git apply --check /tmp/active_prefix.patch
           git apply /tmp/active_prefix.patch
           git diff --check
@@ -118,7 +120,8 @@ jobs:
       - name: Commit tested phase and restore normal CI
         run: |
           set -euo pipefail
-          rm docs/active_prefix.patch.gz.b64
+          rm -rf docs/active_prefix_payload
+          rm -f docs/active_prefix.patch.gz.b64
           rm .github/workflows/apply_active_prefix_patch.yml
           git checkout f0792bac63ffae8230881efb8e01da243af87a47 -- .github/workflows/plastic_depth_ci.yml
           git add -A
