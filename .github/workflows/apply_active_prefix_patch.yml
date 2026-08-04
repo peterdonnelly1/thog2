@@ -1,0 +1,127 @@
+# vvv THOG temporary gated applier for the tested active-prefix phase
+name: Apply tested PLASTIC active-prefix phase
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+    paths:
+      - .github/workflows/apply_active_prefix_patch.yml
+      - docs/active_prefix.patch.gz.b64
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plastic-active-prefix-applier
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH
+          fetch-depth: 0
+          clean: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Decode and verify patch
+        run: |
+          set -euo pipefail
+          base64 --decode docs/active_prefix.patch.gz.b64 | gzip --decompress > /tmp/active_prefix.patch
+          git apply --check /tmp/active_prefix.patch
+          git apply /tmp/active_prefix.patch
+          git diff --check
+
+      - name: Compile and validate shell syntax
+        run: |
+          set -euo pipefail
+          python -m compileall -q run_thog2_owt.py run_thog2_owt_core.py sheet tests
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh plastic_depth_gpu_smokes.sh
+
+      - name: Run focused active-prefix tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_gauge.py \
+            tests/test_plastic_depth_basis_cache.py \
+            tests/test_plastic_depth_interfaces.py
+
+      - name: Run affected DEPTH regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_stage2_basis_kernel.py \
+            tests/test_stage7_dct_basis_kernel.py \
+            tests/test_haar_basis_kernel.py \
+            tests/test_lapped_cosine_basis_kernel.py \
+            tests/test_depth_materialisation_runtime.py \
+            tests/test_depth_layer_norm_bias_modes.py \
+            tests/test_stage4_depth_materialization.py \
+            tests/test_stage3_semantic_materialization.py \
+            tests/test_stage3b_model_semantic_attention.py \
+            tests/test_sheet_stage2.py \
+            tests/test_picton_attention_boundary.py \
+            tests/test_sheet_stage3_resume.py \
+            tests/test_sheet_stage4_checkpointing.py \
+            tests/test_sheet_stage4_restore.py \
+            tests/test_sheet_stage4_state.py \
+            tests/test_stage4b_training_factory_cleanup.py \
+            tests/test_sheet_stage5_batch_sharding.py \
+            tests/test_sheet_stage5_failures.py \
+            tests/test_sheet_stage5_target_geometry.py \
+            tests/test_stage5_mlp_block_materialization.py \
+            tests/test_stage5b_full_block_materialization.py \
+            tests/test_modified_fast_discard_false_distributed.py \
+            tests/test_sheet_stage6_controls.py \
+            tests/test_sheet_stage6_dense_checkpointing.py \
+            tests/test_sheet_stage6_restart.py \
+            tests/test_sheet_stage6_run_config.py \
+            tests/test_sheet_stage6_trainer.py \
+            tests/test_resume_identity_and_throughput.py \
+            tests/test_resume_and_diagnostics_regressions.py \
+            tests/test_resume_and_fork_cpu_integration.py \
+            tests/test_torch_compile_runtime.py \
+            tests/test_hyperblock_looping.py \
+            tests/test_hyperblock_run_config.py \
+            tests/test_hyperblock_wrapper.py
+
+      - name: Run two-rank CPU DDP check
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tests/plastic_depth_ddp_check.py
+
+      - name: Commit tested phase and remove temporary transport files
+        run: |
+          set -euo pipefail
+          rm docs/active_prefix.patch.gz.b64
+          rm .github/workflows/apply_active_prefix_patch.yml
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'Replace PLASTIC maximum lattice with active-prefix geometry'
+          git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
