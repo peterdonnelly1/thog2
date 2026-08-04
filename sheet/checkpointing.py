@@ -167,4 +167,82 @@ def execute_logical_layers(
         segment_size=segment_size,
     )
     # ^^^ THOG
+
+
+# vvv THOG PLASTIC DEPTH exposes selected prefix checkpoints without replaying the shared transformer chain
+def execute_logical_layer_checkpoints(
+    hidden: Tensor,
+    *,
+    n_layer: int,
+    segment_size: int,
+    logical_block: LogicalBlock,
+    training: bool,
+    layer_indices: Sequence[int],
+    checkpoint_counts: Sequence[int],
+) -> Tuple[Tuple[Tuple[int, Tensor], ...], CheckpointExecutionReport]:
+    validate_checkpoint_segment_size(segment_size)
+    active_layer_indices = _validate_layer_indices(layer_indices, n_layer)
+    counts = tuple(int(value) for value in checkpoint_counts)
+    if not counts:
+        raise ValueError("checkpoint_counts must not be empty")
+    previous = 0
+    for count in counts:
+        if count <= previous or count > len(active_layer_indices):
+            raise ValueError(
+                "checkpoint_counts must be strictly increasing and bounded by the active prefix; "
+                f"counts={counts}, active_count={len(active_layer_indices)}"
+            )
+        previous = count
+    if counts[-1] != len(active_layer_indices):
+        raise ValueError(
+            "the final checkpoint count must equal the executed prefix length; "
+            f"final={counts[-1]}, active_count={len(active_layer_indices)}"
+        )
+
+    use_checkpointing = training and torch.is_grad_enabled() and segment_size > 0
+    outputs = []
+    checkpoint_segments = 0
+    position = 0
+    count_set = set(counts)
+    while position < len(active_layer_indices):
+        if use_checkpointing:
+            regular_end = min(position + segment_size, len(active_layer_indices))
+            candidate_boundaries = [count for count in counts if position < count <= regular_end]
+            end = min(candidate_boundaries) if candidate_boundaries else regular_end
+        else:
+            end = position + 1
+        segment_indices = active_layer_indices[position:end]
+
+        def run_segment(
+            segment_input: Tensor,
+            *,
+            nominal_indices: Tuple[int, ...] = segment_indices,
+        ) -> Tensor:
+            segment_output = segment_input
+            for layer_index in nominal_indices:
+                segment_output = logical_block(segment_output, layer_index)
+            return segment_output
+
+        if use_checkpointing:
+            hidden = checkpoint(
+                run_segment,
+                hidden,
+                use_reentrant=False,
+                preserve_rng_state=True,
+            )
+            checkpoint_segments += 1
+        else:
+            hidden = run_segment(hidden)
+        position = end
+        if position in count_set:
+            outputs.append((position, hidden))
+
+    return tuple(outputs), CheckpointExecutionReport(
+        checkpointing_used=use_checkpointing,
+        checkpoint_segments=checkpoint_segments,
+        logical_layers=len(active_layer_indices),
+        segment_size=segment_size,
+    )
+# ^^^ THOG
+
 # ^^^ THOG

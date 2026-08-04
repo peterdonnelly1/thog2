@@ -15,6 +15,11 @@ from .plastic_depth import (
     PlasticDepthCandidateMeasurement,
     choose_plastic_depth_candidate,
 )
+from .plastic_depth_inline import PlasticDepthInlineProbeRequest
+from .plastic_depth_optimizer import (
+    commit_plastic_depth_adamw_transition,
+    prepare_plastic_depth_adamw_transition,
+)
 # ^^^ THOG
 
 
@@ -302,6 +307,171 @@ class TrainerStepMixin:
             self.model.train(was_training)
     # ^^^ THOG
 
+    # vvv THOG PLASTIC DEPTH v0.3 probes one shared first-microstep chain every learned-count update
+    def _begin_plastic_depth_inline_update(self) -> Optional[Dict[str, Any]]:
+        if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
+            return None
+        lattice = self._plastic_depth_lattice()
+        if lattice is None:
+            raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
+        current = lattice.current_active_layers
+        candidates = tuple(
+            value
+            for value in (current - 1, current, current + 1)
+            if 1 <= value <= lattice.maximum_layers
+        )
+        if not candidates:
+            raise RuntimeError("PLASTIC DEPTH inline probe resolved no candidate counts")
+        setter = getattr(self.raw_model, "set_plastic_depth_update_layer_count", None)
+        if not callable(setter):
+            raise RuntimeError("PLASTIC DEPTH training model lacks update-prefix control")
+        setter(max(candidates))
+        context: Dict[str, Any] = {
+            "current_count": current,
+            "candidate_counts": candidates,
+            "selected_count": None,
+            "score_report": None,
+            "sampled_token_count": None,
+        }
+        self._plastic_depth_inline_update_context = context
+        return context
+
+    def _clear_plastic_depth_inline_update(self) -> None:
+        clearer = getattr(self.raw_model, "clear_plastic_depth_update_layer_count", None)
+        if callable(clearer):
+            clearer()
+        self._plastic_depth_inline_update_context = None
+
+    def _plastic_depth_sampled_token_indices(self, targets: torch.Tensor) -> torch.Tensor:
+        flattened = targets.reshape(-1)
+        valid = torch.nonzero(flattened != -1, as_tuple=False).flatten()
+        if valid.numel() == 0:
+            raise RuntimeError("PLASTIC DEPTH inline probe found no non-ignored target tokens")
+        sample_count = min(256, int(valid.numel()))
+        generator = torch.Generator(device="cpu")
+        seed = (
+            int(self.config.model_seed)
+            + 1_000_003 * int(self.state.completed_updates)
+            + 97_409 * int(self.distributed.rank)
+        )
+        generator.manual_seed(seed)
+        positions = torch.randperm(int(valid.numel()), generator=generator)[:sample_count]
+        return valid.index_select(0, positions.to(device=valid.device))
+
+    def _plastic_depth_inline_probe_request(
+        self,
+        targets: torch.Tensor,
+        context: Dict[str, Any],
+    ) -> PlasticDepthInlineProbeRequest:
+        lattice = self._plastic_depth_lattice()
+        if lattice is None:
+            raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
+        sampled_token_indices = self._plastic_depth_sampled_token_indices(targets)
+        context["sampled_token_count"] = int(sampled_token_indices.numel())
+
+        def select(candidates: Tuple[Tuple[int, torch.Tensor], ...]) -> int:
+            if tuple(count for count, _ in candidates) != context["candidate_counts"]:
+                raise RuntimeError("PLASTIC DEPTH inline model returned unexpected candidates")
+            measurements = []
+            for count, local_loss in candidates:
+                paired_loss = self.distributed.mean_float(local_loss)
+                observed_time = float(lattice.training_time_ema[count].item())
+                peak_allocated = float(lattice.peak_allocated_gib[count].item())
+                peak_reserved = float(lattice.peak_reserved_gib[count].item())
+                measurements.append(
+                    PlasticDepthCandidateMeasurement(
+                        active_layers=count,
+                        validation_loss=paired_loss,
+                        training_time=observed_time if math.isfinite(observed_time) else None,
+                        peak_allocated_gib=peak_allocated if math.isfinite(peak_allocated) else None,
+                        peak_reserved_gib=peak_reserved if math.isfinite(peak_reserved) else None,
+                    )
+                )
+            reference_time = float(lattice.reference_training_time.item())
+            try:
+                selected, score_report = choose_plastic_depth_candidate(
+                    measurements,
+                    objective=self.config.plastic__layer_count_objective,
+                    maximum_layers=lattice.maximum_layers,
+                    cost_weight=float(self.config.plastic__layer_count_cost_weight),
+                    reference_training_time=reference_time if math.isfinite(reference_time) else None,
+                    memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
+                )
+                selected_count = int(selected.active_layers)
+            except RuntimeError as error:
+                selected_count = int(context["current_count"])
+                score_report = tuple(
+                    {
+                        "active_layers": measurement.active_layers,
+                        "validation_loss": measurement.validation_loss,
+                        "training_time": measurement.training_time,
+                        "peak_allocated_gib": measurement.peak_allocated_gib,
+                        "peak_reserved_gib": measurement.peak_reserved_gib,
+                        "feasible": measurement.active_layers == selected_count,
+                        "score": measurement.validation_loss if measurement.active_layers == selected_count else float("inf"),
+                        "fallback_reason": str(error),
+                    }
+                    for measurement in measurements
+                )
+            self.distributed.assert_identical_object(
+                selected_count,
+                "PLASTIC DEPTH inline selected layer count",
+            )
+            context["selected_count"] = selected_count
+            context["score_report"] = score_report
+            return selected_count
+
+        return PlasticDepthInlineProbeRequest(
+            candidate_counts=context["candidate_counts"],
+            sampled_token_indices=sampled_token_indices,
+            selector=select,
+        )
+
+    def _commit_plastic_depth_inline_update(
+        self,
+        context: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if context is None:
+            return {}
+        selected = context.get("selected_count")
+        if selected is None:
+            raise RuntimeError("PLASTIC DEPTH inline update completed without a selected count")
+        selected_count = int(selected)
+        current_count = int(context["current_count"])
+        transition_report: Dict[str, Any] = {}
+        if selected_count != current_count:
+            model_transition = self.raw_model.prepare_plastic_depth_count_transition(
+                selected_count
+            )
+            adamw_transition = prepare_plastic_depth_adamw_transition(
+                self.raw_model,
+                self.optimizer,
+                model_transition,
+            )
+            transition_report = commit_plastic_depth_adamw_transition(
+                self.raw_model,
+                self.optimizer,
+                adamw_transition,
+            )
+        lattice = self._plastic_depth_lattice()
+        if lattice is None:
+            raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
+        decision_update = int(self.state.completed_updates) + 1
+        lattice.last_count_decision_update.fill_(decision_update)
+        lattice.count_decision_number.add_(1)
+        self._record(
+            "plastic_depth_count_decision",
+            previous_active_layers=current_count,
+            selected_active_layers=selected_count,
+            candidates=context["score_report"],
+            objective=self.config.plastic__layer_count_objective,
+            sampled_token_count=context["sampled_token_count"],
+            public_coordinates=lattice.interval_report()["active_public_coordinates"],
+            transition=transition_report,
+        )
+        return transition_report
+    # ^^^ THOG
+
     # vvv THOG one selection per resample bucket; all-active runs return before sampler construction
     def _prepare_layer_dropout_for_update(self) -> None:
         if not self.config.layer_dropout_enabled:
@@ -385,6 +555,9 @@ class TrainerStepMixin:
         if scaler_unscaled:
             self.scaler.update()
         self.optimizer.zero_grad(set_to_none=True)
+        # vvv THOG failed updates never leave a transient PLASTIC DEPTH execution prefix installed
+        self._clear_plastic_depth_inline_update()
+        # ^^^ THOG
 
     def _nonfinite_update_payload(
         self,
@@ -527,10 +700,11 @@ class TrainerStepMixin:
     def train_one_update(self) -> Dict[str, Any]:
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
-        # vvv THOG PLASTIC DEPTH count decisions are excluded from normal training-only timing and precede the fixed microstep count
-        self._prepare_plastic_depth_for_update()
+        # vvv THOG PLASTIC DEPTH v0.3 selects from one shared first-microstep chain; the old external separate-forward controller is retained but no longer called
+        # self._prepare_plastic_depth_for_update()
         self.model.train()
         self._prepare_layer_dropout_for_update()                                                                                                            # <<< THOG one active nominal set for the complete optimizer update
+        plastic_inline_context = self._begin_plastic_depth_inline_update()
         # ^^^ THOG
         learning_rate = self._set_learning_rate()
         self.optimizer.zero_grad(set_to_none=True)
@@ -571,7 +745,29 @@ class TrainerStepMixin:
                     synchronize=synchronize,
                 ):
                     with self.autocast_context():
-                        _, loss = self.model(batch.inputs, batch.targets)
+                        if plastic_inline_context is not None and micro_step == 0:
+                            probe_request = self._plastic_depth_inline_probe_request(
+                                batch.targets,
+                                plastic_inline_context,
+                            )
+                            _, loss = self.model(
+                                batch.inputs,
+                                batch.targets,
+                                plastic_depth_probe_request=probe_request,
+                            )
+                        elif plastic_inline_context is not None:
+                            selected_count = plastic_inline_context.get("selected_count")
+                            if selected_count is None:
+                                raise RuntimeError(
+                                    "PLASTIC DEPTH first microstep did not select a layer count"
+                                )
+                            _, loss = self.model(
+                                batch.inputs,
+                                batch.targets,
+                                plastic_depth_active_layers_override=int(selected_count),
+                            )
+                        else:
+                            _, loss = self.model(batch.inputs, batch.targets)
                         local_finite = loss is not None and bool(
                             torch.isfinite(loss).item()
                         )
@@ -670,6 +866,11 @@ class TrainerStepMixin:
         plastic_optimizer_started = time.perf_counter() if self.config.plastic__enabled else None
         self.scaler.step(self.optimizer)
         self.scaler.update()
+        # vvv THOG commit the selected count only after the stock AdamW step, then re-express model and coefficient state before the next forward
+        self._commit_plastic_depth_inline_update(plastic_inline_context)
+        if plastic_inline_context is not None:
+            self._clear_plastic_depth_inline_update()
+        # ^^^ THOG
         plastic_optimizer_step_seconds_local = None
         if self.config.plastic__enabled:
             self._plastic_depth_device_synchronize()
