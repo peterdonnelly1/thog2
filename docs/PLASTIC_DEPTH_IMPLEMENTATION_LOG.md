@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 14:32 AEST
+Last updated: 2026-08-04 16:08 AEST
 
 ## Repository state
 
@@ -8,109 +8,97 @@ Last updated: 2026-08-04 14:32 AEST
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft, base `HYPERBLOCK_LOOP_ENHANCEMENTS`
 - Baseline head: `97612234648848e0666b009bdc15ee6aaa2f2560`
-- Latest completed phase commit: `cc787d1d72ab5a8d618e0a7a21486e8cdb539fbf`
+- Local implementation commit: `dedf942` (`Implement adaptive PLASTIC DEPTH controller and gauge transitions`)
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
 ## Baseline validation
 
-Focused command:
+Focused baseline result: 48 passed, 2 unrelated pre-existing ANSI-yellow console failures. Do not treat those two failures as PLASTIC regressions.
+
+## Completed implementation
+
+- Exact float64 affine Chebyshev change-of-chart kernel; no interpolation/Vandermonde approximation.
+- Active-prefix geometry with N active points plus one derived N+1 point; inactive capacity cannot influence active coordinates, basis rows, gradients or output.
+- Fixed QR reference count independent of maximum capacity:
+  - learned: `max(depth_order, initial_active_count + 1)`
+  - fixed: `max(depth_order, fixed_active_count)`
+- Shared first-microstep N-1/N/N+1 transformer chain with detached candidate heads and one selected grad-bearing head.
+- Selected count used for all remaining accumulation microsteps.
+- Add/subtract commit and exact coefficient re-expression after stock AdamW steps.
+- Stock AdamW moment migration:
+  - first moment: inverse-transpose covector transform;
+  - diagonal second moment: squared-transform approximation;
+  - logged full-state reset fallback for non-finite/singular/ill-conditioned transforms.
+- Newly activated conventional and geometry slots are initialised/reset before use.
+- Paired MAD significance controller, per-count/per-direction history, minimum observations, lambda threshold and five-update brake.
+- Online affine count-to-update-time model over timing EMAs; no extra timed probes.
+- Universal CUDA allocator reserve plus upward precheck and rank-synchronised OOM fallback.
+- Exact public `plastic__...` CLI/config names; internal sampling seed is not exposed.
+- `_L_dyn_` only for learned count; fixed-count artifacts retain numeric L.
+- Transition-only sampled scalar UI, two decimal places/scientific notation when required.
+- Startup report and scalar W&B/TensorBoard diagnostics.
+- Ambiguous v0.1 phantom-lattice checkpoints are rejected explicitly.
+- GPU smoke script updated for fixed, lowest-loss, relative-wall-time and memory-budget modes.
+
+## Current test evidence
 
 ```bash
 pytest -q \
   tests/test_plastic_depth.py \
+  tests/test_plastic_depth_gauge.py \
   tests/test_plastic_depth_basis_cache.py \
   tests/test_plastic_depth_interfaces.py \
   tests/test_sheet_stage6_trainer.py \
   tests/test_sheet_stage6_wandb.py \
-  tests/test_console_progress_layout.py \
-  tests/test_console_progress_pretty_rows.py
+  tests/test_console_model_summary.py \
+  tests/test_console_progress_layout.py::ConsoleProgressLayoutTests::test_sampled_values_are_emitted_once_after_a_plastic_transition
+# 98 passed
 ```
 
-Result: 48 passed, 2 failed.
-
-The two failures are pre-existing and unrelated to PLASTIC DEPTH. They expect explicit RGB yellow (`\033[1;38;2;255;255;0m`) while the directly imported console formatter uses palette-dependent bright yellow (`\033[1;93m`). Do not treat them as regressions from this work.
-
-## Completed phase evidence
-
-### P2: pure gauge transform
-
-Commits:
-
-- `7eb74f4458d0ca81d4f5e0ab30c6c932308dfb6a` — gauge-preserving Chebyshev chart transform
-- `cc787d1d72ab5a8d618e0a7a21486e8cdb539fbf` — property and stored-dtype tests
-
-Implementation:
-
-- `sheet/plastic_depth_gauge.py`
-- Exact affine composition is built in ordinary Chebyshev coefficient space by recurrence.
-- The result is converted into the fixed QR-stabilised THOG coefficient coordinates.
-- No Vandermonde/interpolation approximation is used.
-
-Tests:
+Static checks:
 
 ```bash
-pytest -q tests/test_plastic_depth_gauge.py
-# 33 passed
-
-pytest -q \
-  tests/test_plastic_depth_gauge.py \
-  tests/test_plastic_depth.py \
-  tests/test_plastic_depth_basis_cache.py \
-  tests/test_plastic_depth_interfaces.py \
-  tests/test_sheet_stage6_trainer.py \
-  tests/test_sheet_stage6_wandb.py
-# 72 passed
+git diff --check
+python -m compileall -q sheet run_thog2_owt.py run_thog2_owt_core.py
+bash -n train_OWT.sh train_OWT_core.sh plastic_depth_gpu_smokes.sh
 ```
 
-## Non-negotiable invariants
-
-- `plastic__max_permitted_layers` is only a count ceiling/allocation capacity.
-- Learned-count mode owns N active points plus one derived N+1 probe point.
-- Inactive capacity slots cannot influence active coordinates or output.
-- Count movement is exactly N-1, N or N+1.
-- Add/subtract chart changes must preserve the generated field before the next optimiser update.
-- Stay performs no controller-induced remap; ordinary geometry gradients remain active.
-- PyTorch AdamW remains the optimiser. Re-expressed coefficient parameter state is reset rather than reimplementing AdamW.
-- Existing non-plastic paths must remain unchanged.
+All passed at local commit `dedf942`.
 
 ## Phase checklist
 
-- [x] P0: baseline head and focused tests recorded
-- [x] P0: durable implementation log created
-- [ ] P1: uniform `plastic__` configuration/UI names and `_L_dyn_` artifact identity
-- [x] P2: pure float64 Chebyshev affine re-expression kernel and property tests
-- [ ] P3: active-prefix geometry replacing the phantom maximum lattice
-- [ ] P4: atomic model-family re-gauge with verification diagnostics
-- [ ] P5: targeted stock-AdamW state reset on committed re-gauge
-- [ ] P6: shared inline N-1/N/N+1 first-microstep probe
-- [ ] P7: robust MAD threshold, five-update brake, objectives and universal VRAM reserve
-- [ ] P8: checkpoint schema, sampled-value console diagnostic and W&B fields
-- [ ] P9: staged/full CPU regressions and hosted CI
-- [ ] P10: GPU smoke commands and final handoff
-- [ ] Update specification with as-built deviations
+- [x] P0: baseline and durable log
+- [x] P1: uniform public names and artifact identity
+- [x] P2: exact gauge kernel and property tests
+- [x] P3: active-prefix geometry and capacity invariance
+- [x] P4: atomic model-family re-gauge and diagnostics
+- [x] P5: stock-AdamW moment migration with fallback
+- [x] P6: shared inline N-1/N/N+1 probe
+- [x] P7: MAD gate, brake, objectives, timing model and VRAM reserve
+- [x] P8: checkpoint, console, startup and telemetry surfaces
+- [ ] P9: broad/full CPU regressions and hosted CI
+- [ ] P10: GPU smoke handoff and final download stanza
+- [ ] Update requirements specification with as-built details and limitations
 
 ## Current exact task
 
-Implement P3: replace maximum-lattice geometry with active-prefix gaps plus one derived N+1 probe point. Prove that inactive storage slots cannot affect active coordinates, basis rows or outputs. Do not yet connect count transitions to coefficient re-expression.
+Run broad/full CPU regression suites. Classify every failure against the recorded baseline, fix only genuine regressions, then push the implementation to `PLASTIC_DEPTH` and run hosted CI.
 
-## Work-in-progress files
+## Known issues and limitations to retain in the as-built specification
 
-- `sheet/plastic_depth.py`
-- `tests/test_plastic_depth.py`
-- likely interface tests that currently assert evenly distributed maximum-lattice ranks
-
-## Known unresolved decisions
-
-- Runtime re-gauge cannot mutate coefficient parameters before backward through a graph that used the old parameterisation. The likely safe implementation is to select the count for the current optimiser update, train using the frozen old chart, and atomically commit/re-gauge after `optimizer.step()` for the next update. This needs explicit integration tests and an as-built specification note.
-- Old v0.1 PLASTIC DEPTH checkpoint migration may be ambiguous. Prefer an explicit rejection over silent reinterpretation unless a deterministic conversion is proven.
-- Repeated re-gauges must be stress-tested for accumulated stored-dtype error.
-- Count-dependent residual-depth scaling remains a separate architectural limitation and is not part of the gauge transform.
+- AdamW diagonal second-moment migration is necessarily approximate because diagonal state cannot represent covariance induced by coefficient mixing. Stock PyTorch AdamW is not reimplemented.
+- Extremely ill-conditioned gauge transforms use a logged moment-state reset fallback.
+- Upward OOM is recoverable only before backward collectives; later selected-head/backward OOM remains fatal.
+- Re-gauge preparation temporarily holds transformed coefficient copies and may create a memory spike.
+- Regional `torch.compile` is not supported by inline learned-count probing.
+- Count-dependent residual-addition scaling remains a separate architecture question.
+- v0.1 globally normalised phantom-lattice checkpoints cannot be converted safely and are rejected.
 
 ## Takeover instructions
 
-1. Read this file and the v0.3 requirements specification.
-2. Fetch `PLASTIC_DEPTH` and confirm the current branch head.
-3. Run the focused tests above and compare failures with the recorded baseline.
-4. Continue only the single task named under **Current exact task**.
-5. After each phase, update this file with commits, tests, failures and the next exact task.
+1. Fetch `PLASTIC_DEPTH` and read this file plus the v0.3 requirements specification.
+2. Confirm whether local/remote includes implementation commit `dedf942` or its pushed GitHub equivalent.
+3. Run the focused command above first.
+4. Continue only the **Current exact task**.
+5. Update this file after every stable phase with commit IDs, commands, results and the next exact task.
