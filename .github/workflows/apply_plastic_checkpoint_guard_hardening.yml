@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           base64 --decode docs/plastic_checkpoint_guard_followup.patch.gz.b64 | gzip --decompress > /tmp/plastic_checkpoint_guard_followup.patch
-          echo '0d1e874cc811b992a8202fe3997e260ca55a87a543d5f5d66ee71beb8d1c4001  /tmp/plastic_checkpoint_guard_followup.patch' | sha256sum --check --strict
+          echo '8b693ca97b7f87195d20eee7c25199de629198aa85eb9f502709db0399fbf126  /tmp/plastic_checkpoint_guard_followup.patch' | sha256sum --check --strict
           git apply --check /tmp/plastic_checkpoint_guard_followup.patch
           git apply /tmp/plastic_checkpoint_guard_followup.patch
           git diff --check
@@ -127,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           git rm docs/plastic_checkpoint_guard_followup.patch.gz.b64
-          git add sheet/checkpoints.py tests/test_plastic_depth_checkpoint_format.py
+          git add run_thog2_owt_core.py sheet/checkpoints.py tests/test_plastic_depth_checkpoint_format.py
           git diff --cached --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
