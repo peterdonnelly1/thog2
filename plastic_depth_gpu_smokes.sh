@@ -102,7 +102,10 @@ echo '=== 2/4 learned count, lowest loss ==='
   --plastic-max-permitted-layers 12 \
   --plastic-layer-sampling-initialisation equidistant \
   --plastic-layer-count-objective lowest_loss \
-  --plastic-layer-count-hold-updates 2
+  --plastic-layer-count-update-brake 2 \
+  --plastic-layer-count-probe-noise-window 8 \
+  --plastic-layer-count-probe-noise-min-observations 1 \
+  --plastic-layer-count-probe-noise-lambda 0
 
 echo '=== 3/4 learned count, relative training wall time ==='
 "$python_bin" run_thog2_owt.py \
@@ -114,7 +117,10 @@ echo '=== 3/4 learned count, relative training wall time ==='
   --plastic-max-permitted-layers 12 \
   --plastic-layer-sampling-initialisation equidistant \
   --plastic-layer-count-objective relative_training_wall_time \
-  --plastic-layer-count-hold-updates 2 \
+  --plastic-layer-count-update-brake 2 \
+  --plastic-layer-count-probe-noise-window 8 \
+  --plastic-layer-count-probe-noise-min-observations 1 \
+  --plastic-layer-count-probe-noise-lambda 0 \
   --plastic-layer-count-cost-weight 0.02
 
 echo '=== 4/4 learned count, memory budget ==='
@@ -127,6 +133,14 @@ echo '=== 4/4 learned count, memory budget ==='
   --plastic-max-permitted-layers 12 \
   --plastic-layer-sampling-initialisation equidistant \
   --plastic-layer-count-objective memory_budget \
-  --plastic-layer-count-hold-updates 2 \
+  --plastic-layer-count-update-brake 2 \
+  --plastic-layer-count-probe-noise-window 8 \
+  --plastic-layer-count-probe-noise-min-observations 1 \
+  --plastic-layer-count-probe-noise-lambda 0 \
   --plastic-layer-memory-budget-gib "$memory_budget_gib"
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# --plastic-layer-count-hold-updates 2
+# --plastic-layer-count-hold-updates 2 \
 # ^^^ THOG

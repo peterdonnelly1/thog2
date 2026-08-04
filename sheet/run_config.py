@@ -65,7 +65,10 @@ PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__max_permitted_layers",
     "plastic__layer_sampling_initialisation",
     "plastic__layer_count_objective",
-    "plastic__layer_count_hold_updates",
+    "plastic__layer_count_update_brake",
+    "plastic__layer_count_probe_noise_window",
+    "plastic__layer_count_probe_noise_min_observations",
+    "plastic__layer_count_probe_noise_lambda",
     "plastic__layer_count_cost_weight",
     "plastic__layer_memory_budget_gib",
     "plastic__geometry_learning_rate_multiplier",
@@ -160,7 +163,10 @@ class OwtRunConfig:
     plastic__max_permitted_layers: Optional[int] = None
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
-    plastic__layer_count_hold_updates: int = 100
+    plastic__layer_count_update_brake: int = 5
+    plastic__layer_count_probe_noise_window: int = 50
+    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
     plastic__geometry_learning_rate_multiplier: float = 0.1
@@ -248,11 +254,35 @@ class OwtRunConfig:
         validate_plastic_sampling_initialisation(self.plastic__layer_sampling_initialisation)
         validate_plastic_layer_count_objective(self.plastic__layer_count_objective)
         if (
-            isinstance(self.plastic__layer_count_hold_updates, bool)
-            or not isinstance(self.plastic__layer_count_hold_updates, int)
-            or self.plastic__layer_count_hold_updates <= 0
+            isinstance(self.plastic__layer_count_update_brake, bool)
+            or not isinstance(self.plastic__layer_count_update_brake, int)
+            or self.plastic__layer_count_update_brake < 0
         ):
-            raise ValueError("plastic__layer_count_hold_updates must be a positive integer")
+            raise ValueError("plastic__layer_count_update_brake must be a non-negative integer")
+        # vvv THOG PLASTIC DEPTH robust paired-score gate controls
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_window, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
+            or self.plastic__layer_count_probe_noise_window < 1
+        ):
+            raise ValueError("plastic__layer_count_probe_noise_window must be a positive integer")
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
+            or self.plastic__layer_count_probe_noise_min_observations < 1
+            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]"
+            )
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_lambda, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_probe_noise_lambda))
+            or float(self.plastic__layer_count_probe_noise_lambda) < 0.0
+        ):
+            raise ValueError("plastic__layer_count_probe_noise_lambda must be finite and non-negative")
+        # ^^^ THOG
         if (
             isinstance(self.plastic__layer_count_cost_weight, bool)
             or not isinstance(self.plastic__layer_count_cost_weight, (int, float))
@@ -623,7 +653,10 @@ class OwtRunConfig:
                 "learn_layer_count": self.plastic__do_learn_layer_count,
                 "sampling_initialisation": self.plastic__layer_sampling_initialisation,
                 "count_objective": self.plastic__layer_count_objective,
-                "count_hold_updates": self.plastic__layer_count_hold_updates,
+                "count_update_brake": self.plastic__layer_count_update_brake,
+                "probe_noise_window": self.plastic__layer_count_probe_noise_window,
+                "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+                "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
                 "count_cost_weight": float(self.plastic__layer_count_cost_weight),
                 "memory_budget_gib": self.plastic__layer_memory_budget_gib,
                 "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
@@ -774,7 +807,12 @@ class OwtRunConfig:
                 f"PLO_{self.plastic__layer_count_objective}",
             ]
             if self.plastic__do_learn_layer_count:
-                plastic_fields.append(f"PLH_{self.plastic__layer_count_hold_updates}")
+                plastic_fields.extend([
+                    f"PLB_{self.plastic__layer_count_update_brake}",
+                    f"PLNW_{self.plastic__layer_count_probe_noise_window}",
+                    f"PLNM_{self.plastic__layer_count_probe_noise_min_observations}",
+                    f"PLNL_{self._learning_rate_code(float(self.plastic__layer_count_probe_noise_lambda))}",
+                ])
             if float(self.plastic__layer_count_cost_weight) != 0.0:
                 plastic_fields.append(f"PLW_{self._artifact_float(self.plastic__layer_count_cost_weight)}")
             if self.plastic__layer_memory_budget_gib is not None:
@@ -932,7 +970,10 @@ class OwtRunConfig:
             plastic__max_permitted_layers=self.plastic__max_permitted_layers,
             plastic__layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
             plastic__layer_count_objective=self.plastic__layer_count_objective,
-            plastic__layer_count_hold_updates=self.plastic__layer_count_hold_updates,
+            plastic__layer_count_update_brake=self.plastic__layer_count_update_brake,
+            plastic__layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
+            plastic__layer_count_probe_noise_min_observations=self.plastic__layer_count_probe_noise_min_observations,
+            plastic__layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
             plastic__layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
             plastic__layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
@@ -1013,7 +1054,7 @@ class OwtRunConfig:
                 "plastic__max_permitted_layers",
                 "plastic__layer_sampling_initialisation",
                 "plastic__layer_count_objective",
-                "plastic__layer_count_hold_updates",
+                "plastic__layer_count_update_brake",
                 "plastic__layer_count_cost_weight",
                 "plastic__layer_memory_budget_gib",
                 "plastic__geometry_learning_rate_multiplier",
@@ -1053,4 +1094,16 @@ __all__ = [
 # ^^^ THOG
 # vvv THOG preserved superseded source lines for exact history audit
 # body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# "plastic__layer_count_hold_updates",
+# plastic__layer_count_hold_updates: int = 100
+# isinstance(self.plastic__layer_count_hold_updates, bool)
+# or not isinstance(self.plastic__layer_count_hold_updates, int)
+# or self.plastic__layer_count_hold_updates <= 0
+# raise ValueError("plastic__layer_count_hold_updates must be a positive integer")
+# "count_hold_updates": self.plastic__layer_count_hold_updates,
+# plastic_fields.append(f"PLH_{self.plastic__layer_count_hold_updates}")
+# plastic__layer_count_hold_updates=self.plastic__layer_count_hold_updates,
 # ^^^ THOG

@@ -536,7 +536,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
         finally:
             trainer.close()
 
-    def test_controller_resource_probes_repeat_identical_rng(self) -> None:
+    def test_obsolete_external_controller_does_not_probe_or_consume_rng(self) -> None:
         train_tokens, validation_tokens = token_splits()
         trainer = SharedTrainer(
             plastic_training_config(
@@ -544,7 +544,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
                 plastic__do_learn_layer_count=True,
                 plastic__initial_layer_count=2,
                 plastic__max_permitted_layers=4,
-                plastic__layer_count_hold_updates=1,
+                plastic__layer_count_update_brake=0,
                 plastic__layer_count_objective="relative_training_wall_time",
                 plastic__layer_count_cost_weight=0.1,
                 eval_batches=1,
@@ -569,8 +569,9 @@ class PlasticDepthControllerTests(unittest.TestCase):
                 side_effect=timing_probe,
             ):
                 trainer._prepare_plastic_depth_for_update()
-            self.assertEqual(len(draws), 6)
-            self.assertTrue(all(value == draws[0] for value in draws))
+            self.assertEqual(draws, [])
+            self.assertEqual(int(lattice.active_layer_count.item()), 2)
+            self.assertEqual(int(lattice.count_decision_number.item()), 0)
             torch.testing.assert_close(torch.get_rng_state(), random_state, rtol=0.0, atol=0.0)
         finally:
             trainer.close()
@@ -637,7 +638,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
                 plastic__do_learn_layer_count=True,
                 plastic__initial_layer_count=2,
                 plastic__max_permitted_layers=4,
-                plastic__layer_count_hold_updates=1,
+                plastic__layer_count_update_brake=0,
                 eval_batches=1,
             ),
             train_tokens,
@@ -667,7 +668,10 @@ class PlasticDepthControllerTests(unittest.TestCase):
             "plastic__max_permitted_layers",
             "plastic__layer_sampling_initialisation",
             "plastic__layer_count_objective",
-            "plastic__layer_count_hold_updates",
+            "plastic__layer_count_update_brake",
+            "plastic__layer_count_probe_noise_window",
+            "plastic__layer_count_probe_noise_min_observations",
+            "plastic__layer_count_probe_noise_lambda",
             "plastic__layer_count_cost_weight",
             "plastic__layer_memory_budget_gib",
             "plastic__geometry_learning_rate_multiplier",
@@ -698,32 +702,50 @@ class PlasticDepthControllerTests(unittest.TestCase):
             finally:
                 resumed.close()
 
-    def test_count_controller_can_move_down_and_up(self) -> None:
+    def test_inline_count_controller_can_move_down_and_up(self) -> None:
         train_tokens, validation_tokens = token_splits()
-        for expected_count, loss_rule in (
-            (1, lambda active_layers: float(active_layers)),
-            (3, lambda active_layers: float(-active_layers)),
-        ):
+        for expected_count in (1, 3):
             trainer = SharedTrainer(
                 plastic_training_config(
                     plastic__layers_to_sample=None,
                     plastic__do_learn_layer_count=True,
                     plastic__initial_layer_count=2,
                     plastic__max_permitted_layers=4,
-                    plastic__layer_count_hold_updates=1,
+                    plastic__layer_count_update_brake=0,
+                    plastic__layer_count_probe_noise_window=8,
+                    plastic__layer_count_probe_noise_min_observations=1,
+                    plastic__layer_count_probe_noise_lambda=0.0,
+                    gradient_accumulation_steps=1,
                     eval_batches=1,
                 ),
                 train_tokens,
                 validation_tokens,
             )
+
+            def choose(measurements, **_kwargs):
+                measurements = tuple(measurements)
+                selected = next(
+                    measurement
+                    for measurement in measurements
+                    if measurement.active_layers == expected_count
+                )
+                report = tuple(
+                    {
+                        "active_layers": measurement.active_layers,
+                        "validation_loss": measurement.validation_loss,
+                        "feasible": True,
+                        "score": 0.0 if measurement.active_layers == expected_count else 1.0,
+                    }
+                    for measurement in measurements
+                )
+                return selected, report
+
             try:
-                trainer.state.completed_updates = 1
-                with patch.object(
-                    trainer,
-                    "_plastic_depth_candidate_loss",
-                    side_effect=lambda active_layers, batches: loss_rule(active_layers),
+                with patch(
+                    "sheet.trainer_step.choose_plastic_depth_candidate",
+                    side_effect=choose,
                 ):
-                    trainer._prepare_plastic_depth_for_update()
+                    trainer.train_one_update()
                 lattice = trainer.raw_model.trajectory.plastic_sampling
                 self.assertEqual(int(lattice.active_layer_count.item()), expected_count)
                 self.assertEqual(int(lattice.count_decision_number.item()), 1)
@@ -739,7 +761,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
                     plastic__do_learn_layer_count=True,
                     plastic__initial_layer_count=2,
                     plastic__max_permitted_layers=4,
-                    plastic__layer_count_hold_updates=1,
+                    plastic__layer_count_update_brake=0,
                     eval_batches=1,
                 ),
                 train_tokens,
@@ -749,6 +771,14 @@ class PlasticDepthControllerTests(unittest.TestCase):
             path = trainer.save_checkpoint(Path(directory) / "ckpt.pt")
             resumed = SharedTrainer.from_checkpoint(path, train_tokens, validation_tokens)
             try:
+                self.assertEqual(
+                    resumed.state.plastic_depth_probe_histories,
+                    trainer.state.plastic_depth_probe_histories,
+                )
+                self.assertEqual(
+                    resumed.state.plastic_depth_last_count_change_update,
+                    trainer.state.plastic_depth_last_count_change_update,
+                )
                 for name, value in trainer.raw_model.state_dict().items():
                     torch.testing.assert_close(
                         value,

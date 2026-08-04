@@ -82,8 +82,14 @@ def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
             "layer_efficiency",
             "--plastic-layer-count-cost-weight",
             "0.25",
-            "--plastic-layer-count-hold-updates",
+            "--plastic-layer-count-update-brake",
             "50",
+            "--plastic-layer-count-probe-noise-window",
+            "20",
+            "--plastic-layer-count-probe-noise-min-observations",
+            "4",
+            "--plastic-layer-count-probe-noise-lambda",
+            "2.5",
         )
     )
     assert config.n_layer == 7
@@ -91,7 +97,7 @@ def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
     assert config.plastic__do_learn_layer_count is True
     assert config.plastic__layer_count_objective == "layer_efficiency"
     assert "PLN_2_PLM_7" in config.artifact_name
-    assert "PLH_50" in config.artifact_name
+    assert "PLB_50_PLNW_20_PLNM_4_PLNL_250000" in config.artifact_name
 
 
 def test_plastic_capability_guards_are_explicit() -> None:
@@ -207,8 +213,14 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
             "random",
             "--plastic-layer-count-objective",
             "layer_efficiency",
-            "--plastic-layer-count-hold-updates",
+            "--plastic-layer-count-update-brake",
             "25",
+            "--plastic-layer-count-probe-noise-window",
+            "20",
+            "--plastic-layer-count-probe-noise-min-observations",
+            "4",
+            "--plastic-layer-count-probe-noise-lambda",
+            "2.5",
             "--plastic-layer-count-cost-weight",
             "0.2",
             "--plastic-geometry-learning-rate-multiplier",
@@ -272,7 +284,10 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
         "--plastic-max-permitted-layers 4",
         "--plastic-layer-sampling-initialisation random",
         "--plastic-layer-count-objective layer_efficiency",
-        "--plastic-layer-count-hold-updates 25",
+        "--plastic-layer-count-update-brake 25",
+        "--plastic-layer-count-probe-noise-window 20",
+        "--plastic-layer-count-probe-noise-min-observations 4",
+        "--plastic-layer-count-probe-noise-lambda 2.5",
         "--plastic-layer-count-cost-weight 0.2",
         "--plastic-geometry-learning-rate-multiplier 0.15",
         "--no-plastic-freeze-geometry-during-warmup",
@@ -294,6 +309,8 @@ def test_wrapper_help_and_shell_syntax_cover_plastic_depth() -> None:
     assert "--plastic-layers-to-sample" in result.stdout
     assert "--plastic-do-learn-layer-count" in result.stdout
     assert "--plastic-layer-count-objective" in result.stdout
+    assert "--plastic-layer-count-update-brake" in result.stdout
+    assert "--plastic-layer-count-probe-noise-window" in result.stdout
 
 
 def test_memory_budget_rejects_cpu_execution() -> None:

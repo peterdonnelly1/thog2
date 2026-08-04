@@ -16,6 +16,9 @@ from .plastic_depth import (
     choose_plastic_depth_candidate,
 )
 from .plastic_depth_inline import PlasticDepthInlineProbeRequest
+# vvv THOG PLASTIC DEPTH robust paired-score gate separates evidence collection from post-step state commit
+from .plastic_depth_controller import choose_plastic_depth_count_with_mad
+# ^^^ THOG
 from .plastic_depth_optimizer import (
     commit_plastic_depth_adamw_transition,
     prepare_plastic_depth_adamw_transition,
@@ -196,13 +199,16 @@ class TrainerStepMixin:
         return allocated, reserved
 
     def _prepare_plastic_depth_for_update(self) -> None:
+        # vvv THOG superseded external multi-forward controller retained only for source history; inline probing now owns every learned-count update
+        return
+        # ^^^ THOG
         if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
             return
         lattice = self._plastic_depth_lattice()
         if lattice is None:
             raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
         completed_updates = self.state.completed_updates
-        hold_updates = self.config.plastic__layer_count_hold_updates
+        hold_updates = max(1, self.config.plastic__layer_count_update_brake)
         if completed_updates == 0 or completed_updates % hold_updates != 0:
             return
         if int(lattice.last_count_decision_update.item()) == completed_updates:
@@ -331,6 +337,8 @@ class TrainerStepMixin:
             "candidate_counts": candidates,
             "selected_count": None,
             "score_report": None,
+            "paired_evidence": None,
+            "decision": None,
             "sampled_token_count": None,
         }
         self._plastic_depth_inline_update_context = context
@@ -389,7 +397,7 @@ class TrainerStepMixin:
                 )
             reference_time = float(lattice.reference_training_time.item())
             try:
-                selected, score_report = choose_plastic_depth_candidate(
+                _selected, score_report = choose_plastic_depth_candidate(
                     measurements,
                     objective=self.config.plastic__layer_count_objective,
                     maximum_layers=lattice.maximum_layers,
@@ -397,9 +405,8 @@ class TrainerStepMixin:
                     reference_training_time=reference_time if math.isfinite(reference_time) else None,
                     memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
                 )
-                selected_count = int(selected.active_layers)
             except RuntimeError as error:
-                selected_count = int(context["current_count"])
+                current_count = int(context["current_count"])
                 score_report = tuple(
                     {
                         "active_layers": measurement.active_layers,
@@ -407,18 +414,34 @@ class TrainerStepMixin:
                         "training_time": measurement.training_time,
                         "peak_allocated_gib": measurement.peak_allocated_gib,
                         "peak_reserved_gib": measurement.peak_reserved_gib,
-                        "feasible": measurement.active_layers == selected_count,
-                        "score": measurement.validation_loss if measurement.active_layers == selected_count else float("inf"),
+                        "feasible": measurement.active_layers == current_count,
+                        "score": measurement.validation_loss if measurement.active_layers == current_count else float("inf"),
                         "fallback_reason": str(error),
                     }
                     for measurement in measurements
                 )
+            # vvv THOG collect one paired N-1/N+1 observation every successful-update attempt without mutating checkpoint state before AdamW succeeds
+            decision = choose_plastic_depth_count_with_mad(
+                current_count=int(context["current_count"]),
+                score_report=score_report,
+                histories=self.state.plastic_depth_probe_histories,
+                noise_window=self.config.plastic__layer_count_probe_noise_window,
+                minimum_observations=self.config.plastic__layer_count_probe_noise_min_observations,
+                noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
+                update_number=int(self.state.completed_updates) + 1,
+                last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
+                update_brake=self.config.plastic__layer_count_update_brake,
+            )
+            selected_count = int(decision.selected_count)
+            # ^^^ THOG
             self.distributed.assert_identical_object(
                 selected_count,
                 "PLASTIC DEPTH inline selected layer count",
             )
             context["selected_count"] = selected_count
-            context["score_report"] = score_report
+            context["score_report"] = tuple(dict(item) for item in score_report)
+            context["paired_evidence"] = decision.report()
+            context["decision"] = decision
             return selected_count
 
         return PlasticDepthInlineProbeRequest(
@@ -434,10 +457,16 @@ class TrainerStepMixin:
         if context is None:
             return {}
         selected = context.get("selected_count")
-        if selected is None:
-            raise RuntimeError("PLASTIC DEPTH inline update completed without a selected count")
+        decision = context.get("decision")
+        if selected is None or decision is None:
+            raise RuntimeError("PLASTIC DEPTH inline update completed without a robust count decision")
         selected_count = int(selected)
         current_count = int(context["current_count"])
+        if selected_count != int(decision.selected_count):
+            raise RuntimeError("PLASTIC DEPTH inline context and robust decision disagree")
+        decision_update = int(self.state.completed_updates) + 1
+        if decision_update != int(decision.update_number):
+            raise RuntimeError("PLASTIC DEPTH robust decision is stale at commit time")
         transition_report: Dict[str, Any] = {}
         if selected_count != current_count:
             model_transition = self.raw_model.prepare_plastic_depth_count_transition(
@@ -456,7 +485,14 @@ class TrainerStepMixin:
         lattice = self._plastic_depth_lattice()
         if lattice is None:
             raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
-        decision_update = int(self.state.completed_updates) + 1
+        # vvv THOG checkpoint paired histories only after the stock AdamW step and any atomic model/state re-gauge have succeeded
+        self.state.plastic_depth_probe_histories = {
+            key: [float(value) for value in values]
+            for key, values in decision.histories.items()
+        }
+        if selected_count != current_count:
+            self.state.plastic_depth_last_count_change_update = decision_update
+        # ^^^ THOG
         lattice.last_count_decision_update.fill_(decision_update)
         lattice.count_decision_number.add_(1)
         self._record(
@@ -464,6 +500,9 @@ class TrainerStepMixin:
             previous_active_layers=current_count,
             selected_active_layers=selected_count,
             candidates=context["score_report"],
+            paired_evidence=context["paired_evidence"],
+            brake_active=bool(decision.brake_active),
+            last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
             objective=self.config.plastic__layer_count_objective,
             sampled_token_count=context["sampled_token_count"],
             public_coordinates=lattice.interval_report()["active_public_coordinates"],
@@ -953,4 +992,15 @@ class TrainerStepMixin:
         metrics.update(plastic_metrics)
         self._record("optimizer_step_completed", **metrics)
         return metrics
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# hold_updates = self.config.plastic__layer_count_hold_updates
+# selected_count = int(selected.active_layers)
+# selected_count = int(context["current_count"])
+# "feasible": measurement.active_layers == selected_count,
+# "score": measurement.validation_loss if measurement.active_layers == selected_count else float("inf"),
+# context["score_report"] = score_report
+# if selected is None:
+# raise RuntimeError("PLASTIC DEPTH inline update completed without a selected count")
 # ^^^ THOG

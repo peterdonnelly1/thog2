@@ -73,7 +73,10 @@ PLASTIC_INITIAL_LAYER_COUNT=""
 PLASTIC_MAX_PERMITTED_LAYERS=""
 PLASTIC_LAYER_SAMPLING_INITIALISATION="equidistant"
 PLASTIC_LAYER_COUNT_OBJECTIVE="lowest_loss"
-PLASTIC_LAYER_COUNT_HOLD_UPDATES=100
+PLASTIC_LAYER_COUNT_UPDATE_BRAKE=5
+PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW=50
+PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS=5
+PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="3.0"
 PLASTIC_LAYER_COUNT_COST_WEIGHT="0.0"
 PLASTIC_LAYER_MEMORY_BUDGET_GIB=""
 PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="0.1"
@@ -207,7 +210,10 @@ PLASTIC DEPTH:
   --plastic-max-permitted-layers N                  required for learned count
   --plastic-layer-sampling-initialisation equidistant|random
   --plastic-layer-count-objective lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget
-  --plastic-layer-count-hold-updates N=${PLASTIC_LAYER_COUNT_HOLD_UPDATES}
+  --plastic-layer-count-update-brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}
+  --plastic-layer-count-probe-noise-window N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW}
+  --plastic-layer-count-probe-noise-min-observations N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS}
+  --plastic-layer-count-probe-noise-lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
   --plastic-layer-count-cost-weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
   --plastic-layer-memory-budget-gib VALUE
   --plastic-geometry-learning-rate-multiplier VALUE=${PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER}
@@ -365,7 +371,7 @@ while (( $# > 0 )); do
     --no-plastic-do-learn-layer-count) PLASTIC_DO_LEARN_LAYER_COUNT=false; shift ;;
     --plastic-freeze-geometry-during-warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true; shift ;;
     --no-plastic-freeze-geometry-during-warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=false; shift ;;
-    --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-hold-updates|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-geometry-learning-rate-multiplier)
+    --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-update-brake|--plastic-layer-count-probe-noise-window|--plastic-layer-count-probe-noise-min-observations|--plastic-layer-count-probe-noise-lambda|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-geometry-learning-rate-multiplier)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --plastic-layers-to-sample) PLASTIC_LAYERS_TO_SAMPLE="$2" ;;
@@ -373,14 +379,17 @@ while (( $# > 0 )); do
         --plastic-max-permitted-layers) PLASTIC_MAX_PERMITTED_LAYERS="$2" ;;
         --plastic-layer-sampling-initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$2" ;;
         --plastic-layer-count-objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$2" ;;
-        --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$2" ;;
+        --plastic-layer-count-update-brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$2" ;;
+        --plastic-layer-count-probe-noise-window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$2" ;;
+        --plastic-layer-count-probe-noise-min-observations) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$2" ;;
+        --plastic-layer-count-probe-noise-lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$2" ;;
         --plastic-layer-count-cost-weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$2" ;;
         --plastic-layer-memory-budget-gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$2" ;;
         --plastic-geometry-learning-rate-multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$2" ;;
       esac
       shift 2
       ;;
-    --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-hold-updates=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-geometry-learning-rate-multiplier=*)
+    --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-update-brake=*|--plastic-layer-count-probe-noise-window=*|--plastic-layer-count-probe-noise-min-observations=*|--plastic-layer-count-probe-noise-lambda=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-geometry-learning-rate-multiplier=*)
       plastic_name="${1%%=*}"; plastic_value="${1#*=}"
       case "$plastic_name" in
         --plastic-layers-to-sample) PLASTIC_LAYERS_TO_SAMPLE="$plastic_value" ;;
@@ -388,7 +397,10 @@ while (( $# > 0 )); do
         --plastic-max-permitted-layers) PLASTIC_MAX_PERMITTED_LAYERS="$plastic_value" ;;
         --plastic-layer-sampling-initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$plastic_value" ;;
         --plastic-layer-count-objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$plastic_value" ;;
-        --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$plastic_value" ;;
+        --plastic-layer-count-update-brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-min-observations) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$plastic_value" ;;
         --plastic-layer-count-cost-weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$plastic_value" ;;
         --plastic-layer-memory-budget-gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$plastic_value" ;;
         --plastic-geometry-learning-rate-multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$plastic_value" ;;
@@ -681,7 +693,10 @@ validate_true_false "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" "PLASTIC_FREEZE_GEO
 [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || validate_positive_uint "$PLASTIC_LAYERS_TO_SAMPLE" "PLASTIC_LAYERS_TO_SAMPLE"
 [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_INITIAL_LAYER_COUNT" "PLASTIC_INITIAL_LAYER_COUNT"
 [[ -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || validate_positive_uint "$PLASTIC_MAX_PERMITTED_LAYERS" "PLASTIC_MAX_PERMITTED_LAYERS"
-validate_positive_uint "$PLASTIC_LAYER_COUNT_HOLD_UPDATES" "PLASTIC_LAYER_COUNT_HOLD_UPDATES"
+validate_nonnegative_uint "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE" "PLASTIC_LAYER_COUNT_UPDATE_BRAKE"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW" "PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS" "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS"
+(( PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS <= PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW )) || { echo "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS must not exceed PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW." >&2; exit 2; }
 case "$PLASTIC_LAYER_SAMPLING_INITIALISATION" in equidistant|random) ;; *) echo "PLASTIC_LAYER_SAMPLING_INITIALISATION must be equidistant or random." >&2; exit 2 ;; esac
 case "$PLASTIC_LAYER_COUNT_OBJECTIVE" in lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget) ;; *) echo "Bad PLASTIC_LAYER_COUNT_OBJECTIVE: $PLASTIC_LAYER_COUNT_OBJECTIVE" >&2; exit 2 ;; esac
 if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
@@ -863,7 +878,10 @@ run_grid_point() {
     [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] && optional_args+=(--plastic-max-permitted-layers "$PLASTIC_MAX_PERMITTED_LAYERS")
     optional_args+=(--plastic-layer-sampling-initialisation "$PLASTIC_LAYER_SAMPLING_INITIALISATION")
     optional_args+=(--plastic-layer-count-objective "$PLASTIC_LAYER_COUNT_OBJECTIVE")
-    optional_args+=(--plastic-layer-count-hold-updates "$PLASTIC_LAYER_COUNT_HOLD_UPDATES")
+    optional_args+=(--plastic-layer-count-update-brake "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE")
+    optional_args+=(--plastic-layer-count-probe-noise-window "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW")
+    optional_args+=(--plastic-layer-count-probe-noise-min-observations "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS")
+    optional_args+=(--plastic-layer-count-probe-noise-lambda "$PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA")
     optional_args+=(--plastic-layer-count-cost-weight "$PLASTIC_LAYER_COUNT_COST_WEIGHT")
     [[ -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] && optional_args+=(--plastic-layer-memory-budget-gib "$PLASTIC_LAYER_MEMORY_BUDGET_GIB")
     optional_args+=(--plastic-geometry-learning-rate-multiplier "$PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER")
@@ -1065,4 +1083,15 @@ done
 # served URL:         $serve_url
 # optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value
 # depth viewer URL:   $viewer_url
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# PLASTIC_LAYER_COUNT_HOLD_UPDATES=100
+# --plastic-layer-count-hold-updates N=${PLASTIC_LAYER_COUNT_HOLD_UPDATES}
+# --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-hold-updates|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-geometry-learning-rate-multiplier)
+# --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$2" ;;
+# --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-hold-updates=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-geometry-learning-rate-multiplier=*)
+# --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$plastic_value" ;;
+# validate_positive_uint "$PLASTIC_LAYER_COUNT_HOLD_UPDATES" "PLASTIC_LAYER_COUNT_HOLD_UPDATES"
+# optional_args+=(--plastic-layer-count-hold-updates "$PLASTIC_LAYER_COUNT_HOLD_UPDATES")
 # ^^^ THOG

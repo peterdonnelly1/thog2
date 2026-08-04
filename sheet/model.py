@@ -129,7 +129,10 @@ class SheetGPTConfig:
     plastic__max_permitted_layers: Optional[int] = None
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
-    plastic__layer_count_hold_updates: int = 100
+    plastic__layer_count_update_brake: int = 5
+    plastic__layer_count_probe_noise_window: int = 50
+    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
     plastic__geometry_learning_rate_multiplier: float = 0.1
@@ -197,14 +200,45 @@ class SheetGPTConfig:
         validate_plastic_sampling_initialisation(self.plastic__layer_sampling_initialisation)
         validate_plastic_layer_count_objective(self.plastic__layer_count_objective)
         if (
-            isinstance(self.plastic__layer_count_hold_updates, bool)
-            or not isinstance(self.plastic__layer_count_hold_updates, int)
-            or self.plastic__layer_count_hold_updates <= 0
+            isinstance(self.plastic__layer_count_update_brake, bool)
+            or not isinstance(self.plastic__layer_count_update_brake, int)
+            or self.plastic__layer_count_update_brake < 0
         ):
             raise ValueError(
-                "plastic__layer_count_hold_updates must be a positive integer; "
-                f"got {self.plastic__layer_count_hold_updates!r}"
+                "plastic__layer_count_update_brake must be a non-negative integer; "
+                f"got {self.plastic__layer_count_update_brake!r}"
             )
+        # vvv THOG PLASTIC DEPTH robust paired-score gate controls
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_window, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
+            or self.plastic__layer_count_probe_noise_window < 1
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_window must be a positive integer; "
+                f"got {self.plastic__layer_count_probe_noise_window!r}"
+            )
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
+            or self.plastic__layer_count_probe_noise_min_observations < 1
+            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]; "
+                f"got {self.plastic__layer_count_probe_noise_min_observations!r}"
+            )
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_lambda, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_probe_noise_lambda))
+            or float(self.plastic__layer_count_probe_noise_lambda) < 0.0
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_lambda must be finite and non-negative; "
+                f"got {self.plastic__layer_count_probe_noise_lambda!r}"
+            )
+        # ^^^ THOG
         if (
             isinstance(self.plastic__layer_count_cost_weight, bool)
             or not isinstance(self.plastic__layer_count_cost_weight, (int, float))
@@ -1028,4 +1062,13 @@ __all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
 # normalized_mlp = self._sheet_layer_norm(inputs, "ln_2_weight", "ln_2_bias", layer_index)
 # output = inputs + mlp_output
 # del inputs, mlp_output, layer_materializations, hyperblock_mlp_factors                                                                      # <<< THOG release optional compact UP/DOWN factors
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# plastic__layer_count_hold_updates: int = 100
+# isinstance(self.plastic__layer_count_hold_updates, bool)
+# or not isinstance(self.plastic__layer_count_hold_updates, int)
+# or self.plastic__layer_count_hold_updates <= 0
+# "plastic__layer_count_hold_updates must be a positive integer; "
+# f"got {self.plastic__layer_count_hold_updates!r}"
 # ^^^ THOG

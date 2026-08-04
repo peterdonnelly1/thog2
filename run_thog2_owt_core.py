@@ -278,7 +278,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic-max-permitted-layers", dest="plastic__max_permitted_layers", type=int)
     parser.add_argument("--plastic-layer-sampling-initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
     parser.add_argument("--plastic-layer-count-objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
-    parser.add_argument("--plastic-layer-count-hold-updates", dest="plastic__layer_count_hold_updates", type=int, default=100)
+    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)
+    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
+    parser.add_argument("--plastic-layer-count-probe-noise-min-observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
+    parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
     parser.add_argument("--plastic-layer-count-cost-weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
     parser.add_argument("--plastic-layer-memory-budget-gib", dest="plastic__layer_memory_budget_gib", type=float)
     parser.add_argument("--plastic-geometry-learning-rate-multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
@@ -476,7 +479,10 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__max_permitted_layers=arguments.plastic__max_permitted_layers,
         plastic__layer_sampling_initialisation=arguments.plastic__layer_sampling_initialisation,
         plastic__layer_count_objective=arguments.plastic__layer_count_objective,
-        plastic__layer_count_hold_updates=arguments.plastic__layer_count_hold_updates,
+        plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,
+        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,
+        plastic__layer_count_probe_noise_min_observations=arguments.plastic__layer_count_probe_noise_min_observations,
+        plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
@@ -553,7 +559,10 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         _print_model_option("plastic sampling:", config.plastic__layer_sampling_initialisation)
         _print_model_option(
             "plastic objective:",
-            f"{config.plastic__layer_count_objective}  hold_updates={config.plastic__layer_count_hold_updates}",
+            f"{config.plastic__layer_count_objective}  update_brake={config.plastic__layer_count_update_brake}  "
+            f"noise_window={config.plastic__layer_count_probe_noise_window}  "
+            f"min_observations={config.plastic__layer_count_probe_noise_min_observations}  "
+            f"lambda={float(config.plastic__layer_count_probe_noise_lambda):g}",
         )
         public_coordinates = plastic_report.get("active_public_coordinates", ())
         _print_model_option(
@@ -667,4 +676,10 @@ if __name__ == "__main__":
 # ^^^ THOG
 # vvv THOG preserved superseded source lines for exact history audit
 # f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x",
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# parser.add_argument("--plastic-layer-count-hold-updates", dest="plastic__layer_count_hold_updates", type=int, default=100)
+# plastic__layer_count_hold_updates=arguments.plastic__layer_count_hold_updates,
+# f"{config.plastic__layer_count_objective}  hold_updates={config.plastic__layer_count_hold_updates}",
 # ^^^ THOG

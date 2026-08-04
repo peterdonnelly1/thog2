@@ -224,6 +224,10 @@ def _learned_trainer(**overrides) -> SharedTrainer:
         plastic__initial_layer_count=3,
         plastic__max_permitted_layers=5,
         plastic__layer_count_objective="lowest_loss",
+        plastic__layer_count_update_brake=0,
+        plastic__layer_count_probe_noise_window=8,
+        plastic__layer_count_probe_noise_min_observations=1,
+        plastic__layer_count_probe_noise_lambda=0.0,
         n_layer=5,
         depth_order=4,
         gradient_accumulation_steps=3,
@@ -248,7 +252,9 @@ def _select_count(active_layers: int):
                 "active_layers": measurement.active_layers,
                 "validation_loss": measurement.validation_loss,
                 "feasible": True,
-                "score": measurement.validation_loss,
+                # vvv THOG force the requested robust-count outcome independently of stochastic model loss
+                "score": 0.0 if measurement.active_layers == active_layers else 1.0,
+                # ^^^ THOG
             }
             for measurement in measurements
         )
@@ -386,4 +392,72 @@ def test_fast_discard_false_retains_maximum_candidate_prefix() -> None:
         assert trainer.raw_model._plastic_depth_update_layer_count is None
     finally:
         trainer.close()
+
+# vvv THOG robust paired-evidence integration and update-brake coverage
+def test_failed_update_discards_uncommitted_paired_evidence() -> None:
+    trainer = _learned_trainer(
+        gradient_accumulation_steps=1,
+        nonfinite_update_policy="skip",
+        max_nonfinite_update_skips=1,
+    )
+    try:
+        with patch(
+            "sheet.trainer_step.choose_plastic_depth_candidate",
+            side_effect=_select_count(4),
+        ), patch.object(trainer, "_local_gradients_are_finite", return_value=False):
+            metrics = trainer.train_one_update()
+
+        assert metrics["skipped_update"] == 1.0
+        assert trainer.state.completed_updates == 0
+        assert trainer.state.plastic_depth_probe_histories == {}
+        assert trainer.state.plastic_depth_last_count_change_update == -1
+        assert trainer._plastic_depth_inline_update_context is None
+        assert trainer.raw_model.trajectory.plastic_sampling.current_active_layers == 3
+    finally:
+        trainer.close()
+
+
+def test_five_update_brake_collects_evidence_and_enforces_spacing() -> None:
+    trainer = _learned_trainer(
+        gradient_accumulation_steps=1,
+        max_updates=6,
+        plastic__layer_count_update_brake=5,
+    )
+    try:
+        with patch(
+            "sheet.trainer_step.choose_plastic_depth_candidate",
+            side_effect=_select_count(4),
+        ):
+            trainer.train_one_update()
+        assert trainer.raw_model.trajectory.plastic_sampling.current_active_layers == 4
+        assert trainer.state.plastic_depth_last_count_change_update == 1
+
+        for expected_update in range(2, 6):
+            with patch(
+                "sheet.trainer_step.choose_plastic_depth_candidate",
+                side_effect=_select_count(3),
+            ):
+                trainer.train_one_update()
+            assert trainer.state.completed_updates == expected_update
+            assert trainer.raw_model.trajectory.plastic_sampling.current_active_layers == 4
+            assert len(trainer.state.plastic_depth_probe_histories["4:-1"]) == expected_update - 1
+            decision = [
+                event.payload
+                for event in trainer.events
+                if event.name == "plastic_depth_count_decision"
+            ][-1]
+            assert decision["brake_active"] is True
+
+        with patch(
+            "sheet.trainer_step.choose_plastic_depth_candidate",
+            side_effect=_select_count(3),
+        ):
+            trainer.train_one_update()
+        assert trainer.state.completed_updates == 6
+        assert trainer.raw_model.trajectory.plastic_sampling.current_active_layers == 3
+        assert trainer.state.plastic_depth_last_count_change_update == 6
+    finally:
+        trainer.close()
+# ^^^ THOG
+
 # ^^^ THOG

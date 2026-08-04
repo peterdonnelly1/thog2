@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 22:22 AEST
+Last updated: 2026-08-04 23:28 AEST
 
 ## Critical correction retained
 
@@ -41,6 +41,12 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - [x] Persistent count and gauge remain unchanged through forward/backward and stock AdamW step
 - [x] Atomic model/gauge/AdamW transition commits only after the successful optimizer step
 - [x] Activation-checkpoint and retained-materialisation paths covered directly
+- [x] Paired per-count/per-direction inline score histories collected on every successful optimizer update
+- [x] Robust MAD significance gate with configurable window, minimum observations, lambda and positive zero-MAD floor
+- [x] Deterministic standardized-improvement selection with exact ties preferring the lower count
+- [x] Five-update count-change brake replacing the obsolete periodic hold controller
+- [x] Evidence and count-change spacing checkpointed only after successful AdamW/model transition commit
+- [x] Failed/non-finite updates discard transient evidence without mutating persistent controller state
 
 ## Validation evidence
 
@@ -74,11 +80,23 @@ The gated applier verified the complete five-file patch and ran before committin
 
 Direct coverage proves first-microstep-only probing, shared maximum-prefix execution, deterministic sampled positions, selected-prefix reuse, post-step-only count commit, retained-materialisation support and scalar-only metrics.
 
-This log commit retriggers ordinary hosted validation for the exact post-inline branch head.
+### MAD gate and update-brake takeover phase
+
+The original staged transport payload at `6b0b759c` was corrupt after the first six files. The phase was recovered from its intact controller/config fragments, completed against the authoritative task, and validated locally before direct commit.
+
+- 122 focused PLASTIC/gauge/optimizer/inline/controller/interface/trainer/checkpoint tests passed
+- 141 affected CPU regression tests passed
+- 200 parameterised subtests passed
+- two-rank CPU DDP passed with zero model-state and optimizer-state divergence
+- Python compile, shell syntax and `git diff --check` passed
+- THOG source-history audit passed with zero violations
+- direct integration proves failed updates do not checkpoint evidence and count changes at updates 1 and 6 under the default five-update brake
+
+Hosted head-versus-base CI remains the authoritative broad regression gate for the committed phase.
 
 ## Remaining revised implementation
 
-- [ ] MAD significance gate and five-update count brake
+- [x] MAD significance gate and five-update count brake
 - [ ] Universal VRAM reserve and recoverable upward-probe fallback
 - [ ] Uniform public `plastic__` controls and `_L_dyn_` identity
 - [ ] Sampled-value transition diagnostic
@@ -89,7 +107,7 @@ This log commit retriggers ordinary hosted validation for the exact post-inline 
 
 ## Current exact task
 
-Implement paired robust significance gating over the inline candidate scores and replace the old periodic `plastic__layer_count_hold_updates` semantics with `plastic__layer_count_update_brake`, default 5. Probe and collect evidence on every optimizer update. A count transition may commit only when the paired N-1 or N+1 score improvement exceeds the configured MAD-derived threshold and the minimum update spacing has elapsed. Preserve per-count/per-direction histories, minimum observations, zero-MAD floor and deterministic tie handling. Do not add CUDA OOM recovery in this phase.
+Implement the universal CUDA allocator reserve and recoverable upward-probe fallback. Reserve the configured safety margin before learned-count probing, preflight N+1 feasibility without adding a separate timed model probe, synchronize the feasibility decision across ranks, and treat an upward-probe allocation failure as an infeasible N+1 candidate rather than a fatal update. Preserve N and N-1 evaluation and the exact non-CUDA path. Do not yet change public artifact identity, sampled-value UI, or checkpoint-version rejection semantics.
 
 ## Known issues to carry forward
 
