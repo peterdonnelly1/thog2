@@ -149,6 +149,58 @@ def apply_depth_coefficient_transform(
     return transformed.movedim(-1, resolved_axis)
 
 
+
+# vvv THOG chunked stored-dtype transform avoids a whole-parameter float64 temporary
+def apply_depth_coefficient_transform_chunked(
+    coefficients: Tensor,
+    transform: Tensor,
+    *,
+    depth_axis: int = -1,
+    output_dtype: Optional[torch.dtype] = None,
+    maximum_series_per_chunk: int = 65536,
+) -> Tensor:
+    _validate_square_float64_matrix("transform", transform)
+    if not coefficients.is_floating_point():
+        raise ValueError(
+            f"coefficients must use a floating dtype; got {coefficients.dtype}"
+        )
+    if isinstance(maximum_series_per_chunk, bool) or maximum_series_per_chunk <= 0:
+        raise ValueError(
+            "maximum_series_per_chunk must be a positive integer; "
+            f"got {maximum_series_per_chunk!r}"
+        )
+    resolved_axis = depth_axis if depth_axis >= 0 else coefficients.ndim + depth_axis
+    if resolved_axis < 0 or resolved_axis >= coefficients.ndim:
+        raise ValueError(
+            f"depth_axis {depth_axis} is invalid for shape {tuple(coefficients.shape)}"
+        )
+    order = int(transform.shape[0])
+    if coefficients.shape[resolved_axis] != order:
+        raise ValueError(
+            "coefficient depth axis must match transform order; "
+            f"got shape={tuple(coefficients.shape)}, depth_axis={depth_axis}, "
+            f"order={order}"
+        )
+
+    target_dtype = coefficients.dtype if output_dtype is None else output_dtype
+    moved = coefficients.movedim(resolved_axis, -1)
+    flattened = moved.reshape(-1, order)
+    transformed_flattened = torch.empty(
+        flattened.shape,
+        dtype=target_dtype,
+        device=coefficients.device,
+    )
+    runtime_transform = transform.to(device=coefficients.device, dtype=torch.float64)
+    for start in range(0, flattened.shape[0], maximum_series_per_chunk):
+        stop = min(start + maximum_series_per_chunk, flattened.shape[0])
+        transformed = (
+            flattened[start:stop].to(dtype=torch.float64)
+            @ runtime_transform.transpose(0, 1)
+        )
+        transformed_flattened[start:stop].copy_(transformed.to(dtype=target_dtype))
+    return transformed_flattened.reshape(moved.shape).movedim(-1, resolved_axis)
+# ^^^ THOG
+
 def gauge_error(reference: Tensor, candidate: Tensor) -> PlasticDepthGaugeError:
     if reference.shape != candidate.shape:
         raise ValueError(
@@ -172,6 +224,7 @@ def gauge_error(reference: Tensor, candidate: Tensor) -> PlasticDepthGaugeError:
 __all__ = [
     "PlasticDepthGaugeError",
     "apply_depth_coefficient_transform",
+    "apply_depth_coefficient_transform_chunked",
     "chebyshev_gauss_nodes",
     "gauge_error",
     "stabilized_chebyshev_affine_change_of_chart",

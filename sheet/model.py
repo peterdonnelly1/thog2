@@ -828,6 +828,28 @@ class SheetGPT(nn.Module):
         if not self.plastic_depth_enabled or not callable(report_builder):
             return None
         return report_builder()
+
+    # vvv THOG model-level atomic transition API; trainer integration follows only after optimiser-state policy is tested
+    def prepare_plastic_depth_count_transition(self, active_layers: int):
+        preparer = getattr(
+            self.trajectory,
+            "prepare_plastic_depth_count_transition",
+            None,
+        )
+        if not self.plastic_depth_enabled or not callable(preparer):
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        return preparer(active_layers)
+
+    def commit_plastic_depth_count_transition(self, transition) -> Dict[str, object]:
+        committer = getattr(
+            self.trajectory,
+            "commit_plastic_depth_count_transition",
+            None,
+        )
+        if not self.plastic_depth_enabled or not callable(committer):
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        return committer(transition)
+    # ^^^ THOG
     # ^^^ THOG
 
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:

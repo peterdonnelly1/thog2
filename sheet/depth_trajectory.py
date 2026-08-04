@@ -21,7 +21,15 @@ from .basis import (
     normalized_coordinates,
 )
 # vvv THOG PLASTIC DEPTH maps learned public sample positions into the continuous Chebyshev field
-from .plastic_depth import PlasticDepthSamplingLattice, public_to_internal_depth
+from .plastic_depth import (
+    PlasticDepthGeometryTransition,
+    PlasticDepthSamplingLattice,
+    public_to_internal_depth,
+)
+from .plastic_depth_gauge import (
+    apply_depth_coefficient_transform_chunked,
+    stabilized_chebyshev_affine_change_of_chart,
+)
 # ^^^ THOG
 from .geometry import SheetGeometryConfig
 from .semantic_materializer import ATTENTION_KEY_WEIGHT, ATTENTION_OUTPUT_WEIGHT, ATTENTION_QUERY_WEIGHT, ATTENTION_VALUE_WEIGHT, LEGACY_ATTENTION_INPUT_WEIGHT, MLP_CONTRACTION_WEIGHT, MLP_EXPANSION_WEIGHT
@@ -38,6 +46,29 @@ DEPTH_MATRIX_FAMILIES = (
 )
 
 
+# vvv THOG model-wide prepared transition keeps the old model untouched until verification passes
+@dataclass(frozen=True)
+class PlasticDepthCoefficientReplacement:
+    name: str
+    depth_axis: int
+    source_version: int
+    transformed: Tensor
+
+
+@dataclass(frozen=True)
+class PlasticDepthModelTransition:
+    geometry: PlasticDepthGeometryTransition
+    transform: Tensor
+    replacements: Tuple[PlasticDepthCoefficientReplacement, ...]
+    verification_coordinate_count: int
+    maximum_absolute_error: float
+    maximum_relative_error: float
+    absolute_tolerance: float
+    relative_tolerance: float
+    condition_number: float
+
+
+# ^^^ THOG
 @dataclass(frozen=True)
 class DepthFamilyMetadata:
     name: str
@@ -344,6 +375,235 @@ class DepthTrajectory(nn.Module):
         if not self.plastic_enabled or self.plastic_sampling is None:
             return None
         return self.plastic_sampling.interval_report()
+
+    # vvv THOG exact model-wide chart re-expression is prepared and verified before commit
+    @staticmethod
+    def _plastic_gauge_tolerances(dtype: torch.dtype) -> Tuple[float, float]:
+        if dtype == torch.float64:
+            return 2.0e-10, 2.0e-10
+        if dtype == torch.float32:
+            return 2.0e-5, 2.0e-5
+        if dtype == torch.float16:
+            return 5.0e-3, 5.0e-3
+        if dtype == torch.bfloat16:
+            return 2.0e-2, 2.0e-2
+        raise ValueError(f"unsupported PLASTIC DEPTH coefficient dtype {dtype}")
+
+    def _plastic_generated_depth_axis(
+        self,
+        item: DepthFamilyMetadata,
+    ) -> Optional[int]:
+        representation = self._representation(item)
+        if representation == "depth_coefficients":
+            return -1
+        if representation == "legacy_sheet_col":
+            return 1
+        return None
+
+    def _verify_plastic_depth_replacement(
+        self,
+        *,
+        source: Tensor,
+        candidate: Tensor,
+        depth_axis: int,
+        old_basis: Tensor,
+        new_basis: Tensor,
+        absolute_tolerance: float,
+        relative_tolerance: float,
+        maximum_series_per_chunk: int,
+    ) -> Tuple[float, float]:
+        resolved_axis = depth_axis if depth_axis >= 0 else source.ndim + depth_axis
+        source_flat = source.detach().movedim(resolved_axis, -1).reshape(
+            -1,
+            self.config.depth_order,
+        )
+        candidate_flat = candidate.detach().movedim(resolved_axis, -1).reshape(
+            -1,
+            self.config.depth_order,
+        )
+        maximum_absolute_error = 0.0
+        maximum_relative_error = 0.0
+        epsilon = torch.finfo(torch.float64).eps
+        for start in range(0, source_flat.shape[0], maximum_series_per_chunk):
+            stop = min(start + maximum_series_per_chunk, source_flat.shape[0])
+            source_chunk = source_flat[start:stop].to(dtype=torch.float64)
+            candidate_chunk = candidate_flat[start:stop].to(dtype=torch.float64)
+            old_values = old_basis @ source_chunk.transpose(0, 1)
+            new_values = new_basis @ candidate_chunk.transpose(0, 1)
+            difference = torch.abs(new_values - old_values)
+            if difference.numel() == 0:
+                continue
+            local_absolute = float(difference.max().item())
+            denominator = torch.clamp(torch.abs(old_values), min=epsilon)
+            local_relative = float((difference / denominator).max().item())
+            maximum_absolute_error = max(maximum_absolute_error, local_absolute)
+            maximum_relative_error = max(maximum_relative_error, local_relative)
+            allowed = absolute_tolerance + relative_tolerance * torch.abs(old_values)
+            if not bool((difference <= allowed).all().item()):
+                raise RuntimeError(
+                    "PLASTIC DEPTH gauge verification failed; "
+                    f"max_abs={local_absolute:.6e}, max_rel={local_relative:.6e}, "
+                    f"atol={absolute_tolerance:.6e}, rtol={relative_tolerance:.6e}"
+                )
+        return maximum_absolute_error, maximum_relative_error
+
+    def prepare_plastic_depth_count_transition(
+        self,
+        new_active_layers: int,
+        *,
+        maximum_series_per_chunk: int = 65536,
+    ) -> PlasticDepthModelTransition:
+        if not self.plastic_enabled or self.plastic_sampling is None:
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        geometry = self.plastic_sampling.prepare_count_transition(new_active_layers)
+        if geometry.new_active_layers == geometry.previous_active_layers:
+            raise ValueError("model-wide PLASTIC DEPTH re-gauge requires a count change")
+
+        transform = stabilized_chebyshev_affine_change_of_chart(
+            self.plastic_depth_inverse_r.to(dtype=torch.float64),
+            old_from_new_scale=geometry.old_from_new_scale,
+            old_from_new_shift=geometry.old_from_new_shift,
+        )
+        condition_number = float(torch.linalg.cond(transform).item())
+        if not math.isfinite(condition_number):
+            raise RuntimeError("PLASTIC DEPTH gauge transform is singular or non-finite")
+
+        new_public = self.plastic_sampling._public_coordinates_from_raw(
+            geometry.new_active_layers,
+            include_probe=(
+                self.plastic_sampling.learn_layer_count
+                and geometry.new_active_layers < self.plastic_sampling.maximum_layers
+            ),
+            raw_intervals=geometry.proposed_raw_intervals,
+        )
+        new_internal = public_to_internal_depth(new_public).to(dtype=torch.float64)
+        interior = torch.tensor(
+            [-0.75, -0.25, 0.0, 0.25, 0.75],
+            dtype=torch.float64,
+            device=new_internal.device,
+        )
+        verification_new = torch.unique(torch.cat((new_internal, interior)), sorted=True)
+        verification_old = (
+            geometry.old_from_new_scale * verification_new
+            + geometry.old_from_new_shift
+        )
+        inverse_r = self.plastic_depth_inverse_r.to(
+            device=verification_new.device,
+            dtype=torch.float64,
+        )
+        old_basis = (
+            chebyshev_first_kind_basis(verification_old, self.config.depth_order)
+            @ inverse_r
+        )
+        new_basis = (
+            chebyshev_first_kind_basis(verification_new, self.config.depth_order)
+            @ inverse_r
+        )
+
+        replacements = []
+        maximum_absolute_error = 0.0
+        maximum_relative_error = 0.0
+        absolute_tolerance = 0.0
+        relative_tolerance = 0.0
+        for item in self.metadata:
+            depth_axis = self._plastic_generated_depth_axis(item)
+            if depth_axis is None:
+                continue
+            parameter = self.coefficients[item.name]
+            family_atol, family_rtol = self._plastic_gauge_tolerances(parameter.dtype)
+            transformed = apply_depth_coefficient_transform_chunked(
+                parameter.detach(),
+                transform,
+                depth_axis=depth_axis,
+                output_dtype=parameter.dtype,
+                maximum_series_per_chunk=maximum_series_per_chunk,
+            )
+            family_absolute, family_relative = self._verify_plastic_depth_replacement(
+                source=parameter,
+                candidate=transformed,
+                depth_axis=depth_axis,
+                old_basis=old_basis.to(parameter.device),
+                new_basis=new_basis.to(parameter.device),
+                absolute_tolerance=family_atol,
+                relative_tolerance=family_rtol,
+                maximum_series_per_chunk=maximum_series_per_chunk,
+            )
+            replacements.append(
+                PlasticDepthCoefficientReplacement(
+                    name=item.name,
+                    depth_axis=depth_axis,
+                    source_version=int(parameter._version),
+                    transformed=transformed,
+                )
+            )
+            maximum_absolute_error = max(maximum_absolute_error, family_absolute)
+            maximum_relative_error = max(maximum_relative_error, family_relative)
+            absolute_tolerance = max(absolute_tolerance, family_atol)
+            relative_tolerance = max(relative_tolerance, family_rtol)
+
+        return PlasticDepthModelTransition(
+            geometry=geometry,
+            transform=transform,
+            replacements=tuple(replacements),
+            verification_coordinate_count=int(verification_new.numel()),
+            maximum_absolute_error=maximum_absolute_error,
+            maximum_relative_error=maximum_relative_error,
+            absolute_tolerance=absolute_tolerance,
+            relative_tolerance=relative_tolerance,
+            condition_number=condition_number,
+        )
+
+    def commit_plastic_depth_count_transition(
+        self,
+        transition: PlasticDepthModelTransition,
+    ) -> Dict[str, object]:
+        if self.plastic_sampling is None:
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        if self.plastic_sampling.current_active_layers != transition.geometry.previous_active_layers:
+            raise RuntimeError("PLASTIC DEPTH count changed after transition preparation")
+        if not torch.equal(
+            self.plastic_sampling.raw_intervals.detach(),
+            transition.geometry.expected_raw_intervals.to(
+                self.plastic_sampling.raw_intervals.device
+            ),
+        ):
+            raise RuntimeError("PLASTIC DEPTH geometry changed after transition preparation")
+        for replacement in transition.replacements:
+            parameter = self.coefficients[replacement.name]
+            if int(parameter._version) != replacement.source_version:
+                raise RuntimeError(
+                    "PLASTIC DEPTH coefficient changed after transition preparation; "
+                    f"family={replacement.name}"
+                )
+            if (
+                replacement.transformed.shape != parameter.shape
+                or replacement.transformed.dtype != parameter.dtype
+                or replacement.transformed.device != parameter.device
+            ):
+                raise RuntimeError(
+                    "PLASTIC DEPTH prepared replacement is incompatible with parameter; "
+                    f"family={replacement.name}"
+                )
+
+        with torch.no_grad():
+            for replacement in transition.replacements:
+                self.coefficients[replacement.name].copy_(replacement.transformed)
+            self.plastic_sampling.commit_count_transition(transition.geometry)
+        self.clear_plastic_depth_basis_cache()
+        return {
+            "previous_active_layers": transition.geometry.previous_active_layers,
+            "new_active_layers": transition.geometry.new_active_layers,
+            "old_from_new_scale": transition.geometry.old_from_new_scale,
+            "old_from_new_shift": transition.geometry.old_from_new_shift,
+            "verification_coordinate_count": transition.verification_coordinate_count,
+            "maximum_absolute_error": transition.maximum_absolute_error,
+            "maximum_relative_error": transition.maximum_relative_error,
+            "absolute_tolerance": transition.absolute_tolerance,
+            "relative_tolerance": transition.relative_tolerance,
+            "condition_number": transition.condition_number,
+            "transformed_family_count": len(transition.replacements),
+        }
+    # ^^^ THOG
     # ^^^ THOG
 
     def row_basis(self, name: str) -> Tensor:

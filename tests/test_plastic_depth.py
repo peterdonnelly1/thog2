@@ -204,15 +204,15 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         )
         before = lattice.public_coordinates().detach().clone()
         with torch.no_grad():
-            lattice.raw_intervals[3:].copy_(torch.linspace(-100.0, 100.0, 4))
+            lattice.raw_intervals[4:].copy_(torch.linspace(-100.0, 100.0, 3))
         after = lattice.public_coordinates()
 
         torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
         after.square().sum().backward()
         self.assertIsNotNone(lattice.raw_intervals.grad)
         torch.testing.assert_close(
-            lattice.raw_intervals.grad[3:],
-            torch.zeros_like(lattice.raw_intervals.grad[3:]),
+            lattice.raw_intervals.grad[4:],
+            torch.zeros_like(lattice.raw_intervals.grad[4:]),
             rtol=0.0,
             atol=0.0,
         )
@@ -325,11 +325,89 @@ class PlasticDepthModelTests(unittest.TestCase):
         indices = torch.arange(8, dtype=torch.long).view(1, 8) % 32
         with torch.no_grad():
             before, _ = model(indices)
-            model.trajectory.plastic_sampling.raw_intervals[3:].copy_(
-                torch.linspace(-100.0, 100.0, 4)
+            model.trajectory.plastic_sampling.raw_intervals[4:].copy_(
+                torch.linspace(-100.0, 100.0, 3)
             )
             after, _ = model(indices)
         torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
+
+    def test_atomic_add_and_subtract_regauge_preserve_all_generated_families(self) -> None:
+        torch.manual_seed(4102)
+        model = SheetGPT(
+            plastic_sheet_config(
+                n_layer=5,
+                depth_order=4,
+                plastic__layers_to_sample=None,
+                plastic__do_learn_layer_count=True,
+                plastic__initial_layer_count=3,
+                plastic__max_permitted_layers=5,
+                plastic__layer_sampling_initialisation="random",
+            )
+        )
+        trajectory = model.trajectory
+        with torch.no_grad():
+            for item in trajectory.metadata:
+                if trajectory._plastic_generated_depth_axis(item) is not None:
+                    trajectory.coefficients[item.name].normal_(mean=0.0, std=0.02)
+
+        def generated_snapshot(indices):
+            return {
+                (item.name, index): trajectory.materialize(item.name, index).detach().clone()
+                for item in trajectory.metadata
+                if trajectory._plastic_generated_depth_axis(item) is not None
+                for index in indices
+            }
+
+        before_add = generated_snapshot(range(4))
+        coefficient_before = {
+            name: parameter.detach().clone()
+            for name, parameter in trajectory.coefficients.items()
+        }
+        add = model.prepare_plastic_depth_count_transition(4)
+        self.assertEqual(trajectory.plastic_sampling.current_active_layers, 3)
+        for name, expected in coefficient_before.items():
+            torch.testing.assert_close(trajectory.coefficients[name], expected, rtol=0.0, atol=0.0)
+        add_report = model.commit_plastic_depth_count_transition(add)
+        self.assertEqual(trajectory.plastic_sampling.current_active_layers, 4)
+        self.assertGreater(add_report["transformed_family_count"], 0)
+        self.assertLessEqual(
+            add_report["maximum_absolute_error"],
+            add_report["absolute_tolerance"] + 1.0e-12,
+        )
+        after_add = generated_snapshot(range(4))
+        for key, expected in before_add.items():
+            torch.testing.assert_close(after_add[key], expected, rtol=3.0e-5, atol=3.0e-6)
+
+        before_subtract = generated_snapshot(range(4))
+        subtract = model.prepare_plastic_depth_count_transition(3)
+        subtract_report = model.commit_plastic_depth_count_transition(subtract)
+        self.assertEqual(trajectory.plastic_sampling.current_active_layers, 3)
+        self.assertLessEqual(
+            subtract_report["maximum_absolute_error"],
+            subtract_report["absolute_tolerance"] + 1.0e-12,
+        )
+        after_subtract = generated_snapshot(range(4))
+        for key, expected in before_subtract.items():
+            torch.testing.assert_close(after_subtract[key], expected, rtol=3.0e-5, atol=3.0e-6)
+
+    def test_atomic_regauge_rejects_stale_coefficients_without_changing_count(self) -> None:
+        model = SheetGPT(
+            plastic_sheet_config(
+                n_layer=5,
+                depth_order=4,
+                plastic__layers_to_sample=None,
+                plastic__do_learn_layer_count=True,
+                plastic__initial_layer_count=3,
+                plastic__max_permitted_layers=5,
+            )
+        )
+        transition = model.prepare_plastic_depth_count_transition(4)
+        first_name = transition.replacements[0].name
+        with torch.no_grad():
+            model.trajectory.coefficients[first_name].add_(1.0e-4)
+        with self.assertRaisesRegex(RuntimeError, "coefficient changed"):
+            model.commit_plastic_depth_count_transition(transition)
+        self.assertEqual(model.trajectory.plastic_sampling.current_active_layers, 3)
 
     def test_full_active_count_uses_full_execution_and_lower_count_uses_subset(self) -> None:
         model = SheetGPT(

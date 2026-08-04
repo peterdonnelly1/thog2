@@ -27,6 +27,18 @@ class ResolvedPlasticDepthCounts:
     fixed_active_layers: Optional[int]
 
 
+# vvv THOG v0.3 discrete geometry transition prepared before any model state mutates
+@dataclass(frozen=True)
+class PlasticDepthGeometryTransition:
+    previous_active_layers: int
+    new_active_layers: int
+    old_from_new_scale: float
+    old_from_new_shift: float
+    expected_raw_intervals: Tensor
+    proposed_raw_intervals: Tensor
+
+
+# ^^^ THOG
 def resolve_plastic_depth_counts(
     *,
     n_layer: int,
@@ -178,6 +190,12 @@ class PlasticDepthSamplingLattice(nn.Module):
             raw_intervals[:active_interval_count] = self._inverse_softplus(
                 positive_intervals
             ).to(dtype=torch.float32)
+        # vvv THOG learned-count mode owns one explicit dormant probe gap after the active prefix
+        if learn_layer_count and initial_active_layers < maximum_layers:
+            probe_index = initial_active_layers - 1
+            if probe_index > 0:
+                raw_intervals[probe_index].copy_(raw_intervals[probe_index - 1])
+        # ^^^ THOG
         self.raw_intervals = nn.Parameter(raw_intervals)
         self.register_buffer(
             "initial_public_coordinates",
@@ -227,6 +245,22 @@ class PlasticDepthSamplingLattice(nn.Module):
         return values + torch.log(-torch.expm1(-values))
 
     # vvv THOG v0.3 constructs coordinates from only the active prefix; inactive capacity is mathematically inert
+    def _positive_prefix(
+        self,
+        interval_count: int,
+        *,
+        raw_intervals: Optional[Tensor] = None,
+    ) -> Tensor:
+        source = self.raw_intervals if raw_intervals is None else raw_intervals
+        if interval_count < 0 or interval_count > source.numel():
+            raise ValueError(
+                "interval_count must lie within allocated capacity; "
+                f"got interval_count={interval_count}, capacity={source.numel()}"
+            )
+        if interval_count == 0:
+            return source[:0]
+        return F.softplus(source[:interval_count]) + self.epsilon
+
     def positive_intervals(self, active_layers: Optional[int] = None) -> Tensor:
         resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
         if resolved_count < 1 or resolved_count > self.maximum_layers:
@@ -234,10 +268,45 @@ class PlasticDepthSamplingLattice(nn.Module):
                 "active_layers must lie in [1, maximum_layers]; "
                 f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
             )
-        active_interval_count = max(0, resolved_count - 1)
-        if active_interval_count == 0:
-            return self.raw_intervals[:0]
-        return F.softplus(self.raw_intervals[:active_interval_count]) + self.epsilon
+        return self._positive_prefix(max(0, resolved_count - 1))
+
+    def _public_coordinates_from_raw(
+        self,
+        active_layers: int,
+        *,
+        include_probe: bool,
+        raw_intervals: Tensor,
+    ) -> Tensor:
+        resolved_count = int(active_layers)
+        if resolved_count < 1 or resolved_count > self.maximum_layers:
+            raise ValueError(
+                "active_layers must lie in [1, maximum_layers]; "
+                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+            )
+        resolved_include_probe = bool(include_probe) and resolved_count < self.maximum_layers
+        if resolved_count == 1:
+            if resolved_include_probe:
+                return raw_intervals.new_tensor([1.0, 100.0])
+            return raw_intervals.new_tensor([50.5])
+
+        active_intervals = self._positive_prefix(
+            resolved_count - 1,
+            raw_intervals=raw_intervals,
+        )
+        cumulative = torch.cat(
+            (active_intervals.new_zeros(1), torch.cumsum(active_intervals, dim=0))
+        )
+        if resolved_include_probe:
+            probe_gap = self._positive_prefix(
+                resolved_count,
+                raw_intervals=raw_intervals,
+            )[-1]
+            span = active_intervals.sum() + probe_gap
+            active = 1.0 + 99.0 * cumulative / span
+            return torch.cat((active, active.new_tensor([100.0])))
+
+        span = active_intervals.sum()
+        return 1.0 + 99.0 * cumulative / span
 
     def public_coordinates(
         self,
@@ -246,30 +315,85 @@ class PlasticDepthSamplingLattice(nn.Module):
         include_probe: Optional[bool] = None,
     ) -> Tensor:
         resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
+        resolved_include_probe = self.learn_layer_count if include_probe is None else bool(include_probe)
+        return self._public_coordinates_from_raw(
+            resolved_count,
+            include_probe=resolved_include_probe,
+            raw_intervals=self.raw_intervals,
+        )
+
+    def _chart_span(self, active_layers: int, *, raw_intervals: Tensor) -> Tensor:
+        interval_count = (
+            active_layers
+            if self.learn_layer_count and active_layers < self.maximum_layers
+            else max(0, active_layers - 1)
+        )
+        if interval_count == 0:
+            return raw_intervals.new_tensor(1.0)
+        return self._positive_prefix(
+            interval_count,
+            raw_intervals=raw_intervals,
+        ).sum()
+
+    def prepare_count_transition(
+        self,
+        new_active_layers: int,
+    ) -> PlasticDepthGeometryTransition:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no layer-count controller transition")
+        previous_count = self.current_active_layers
+        resolved_count = int(new_active_layers)
         if resolved_count < 1 or resolved_count > self.maximum_layers:
             raise ValueError(
-                "active_layers must lie in [1, maximum_layers]; "
-                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+                "new_active_layers must lie in [1, maximum_layers]; "
+                f"got new_active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
             )
-        resolved_include_probe = self.learn_layer_count if include_probe is None else bool(include_probe)
-        if resolved_include_probe and resolved_count >= self.maximum_layers:
-            resolved_include_probe = False
+        if abs(resolved_count - previous_count) > 1:
+            raise ValueError(
+                "PLASTIC DEPTH count transitions are limited to one layer; "
+                f"got previous={previous_count}, new={resolved_count}"
+            )
 
-        if resolved_count == 1:
-            if resolved_include_probe:
-                return self.raw_intervals.new_tensor([1.0, 100.0])
-            return self.raw_intervals.new_tensor([50.5])
+        expected = self.raw_intervals.detach().clone()
+        proposed = expected.clone()
+        if resolved_count == previous_count + 1 and resolved_count < self.maximum_layers:
+            new_probe_index = resolved_count - 1
+            previous_probe_index = new_probe_index - 1
+            proposed[new_probe_index].copy_(proposed[previous_probe_index])
 
-        intervals = self.positive_intervals(resolved_count)
-        cumulative = torch.cat((intervals.new_zeros(1), torch.cumsum(intervals, dim=0)))
-        if resolved_include_probe:
-            probe_gap = intervals[-1:]
-            span = intervals.sum() + probe_gap[0]
-            active = 1.0 + 99.0 * cumulative / span
-            return torch.cat((active, active.new_tensor([100.0])))
+        old_span = self._chart_span(previous_count, raw_intervals=expected)
+        new_span = self._chart_span(resolved_count, raw_intervals=proposed)
+        scale = float((new_span / old_span).item())
+        shift = scale - 1.0
+        return PlasticDepthGeometryTransition(
+            previous_active_layers=previous_count,
+            new_active_layers=resolved_count,
+            old_from_new_scale=scale,
+            old_from_new_shift=shift,
+            expected_raw_intervals=expected,
+            proposed_raw_intervals=proposed,
+        )
 
-        span = intervals.sum()
-        return 1.0 + 99.0 * cumulative / span
+    def commit_count_transition(
+        self,
+        transition: PlasticDepthGeometryTransition,
+    ) -> None:
+        if self.current_active_layers != transition.previous_active_layers:
+            raise RuntimeError(
+                "PLASTIC DEPTH geometry changed after transition preparation; "
+                f"expected count {transition.previous_active_layers}, "
+                f"found {self.current_active_layers}"
+            )
+        if not torch.equal(
+            self.raw_intervals.detach(),
+            transition.expected_raw_intervals.to(self.raw_intervals.device),
+        ):
+            raise RuntimeError("PLASTIC DEPTH geometry changed after transition preparation")
+        with torch.no_grad():
+            self.raw_intervals.copy_(
+                transition.proposed_raw_intervals.to(self.raw_intervals)
+            )
+            self.active_layer_count.fill_(transition.new_active_layers)
     # ^^^ THOG
 
     @property
@@ -302,6 +426,7 @@ class PlasticDepthSamplingLattice(nn.Module):
         return self.public_coordinates()[-1:]
 
     def set_active_layer_count(self, active_layers: int) -> None:
+        # vvv THOG low-level controller/probe compatibility path; model commits use atomic re-gauge instead
         if not self.learn_layer_count:
             raise RuntimeError("fixed-count PLASTIC DEPTH has no layer-count controller")
         resolved_count = int(active_layers)
@@ -311,12 +436,17 @@ class PlasticDepthSamplingLattice(nn.Module):
                 f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
             )
         previous_count = self.current_active_layers
-        if resolved_count == previous_count + 1 and previous_count >= 2:
+        if resolved_count > previous_count:
             with torch.no_grad():
-                self.raw_intervals[previous_count - 1].copy_(
-                    self.raw_intervals[previous_count - 2]
-                )
+                for count in range(previous_count + 1, resolved_count + 1):
+                    if count < self.maximum_layers:
+                        new_probe_index = count - 1
+                        previous_probe_index = new_probe_index - 1
+                        self.raw_intervals[new_probe_index].copy_(
+                            self.raw_intervals[previous_probe_index]
+                        )
         self.active_layer_count.fill_(resolved_count)
+        # ^^^ THOG
     # ^^^ THOG
 
     def interval_report(self) -> Dict[str, object]:
