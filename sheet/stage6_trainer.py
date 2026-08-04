@@ -103,6 +103,13 @@ def _format_plastic_sampled_value(value: Any) -> str:
     return f"{numeric:.2f}"
 
 
+def _format_depth_sample_point(value: Any) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    return f"{numeric:.1f}"
+
+
 def _optimizer_progress_due(
     *,
     completed_updates: int,
@@ -204,6 +211,14 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         )
         fields.append(f"sampled_values = [{sampled_values}]")
     # ^^^ THOG
+    # vvv THOG append active public DEPTH sample points last so learned geometry movement is visible without opening plots
+    if "depth_sample_points" in payload:
+        depth_sample_points = ", ".join(
+            _format_depth_sample_point(value)
+            for value in payload["depth_sample_points"]
+        )
+        fields.append(f"depth_samples = [{depth_sample_points}]")
+    # ^^^ THOG
     line = "  ".join(fields)
     if event == "evaluation_completed":
         return (
@@ -291,12 +306,21 @@ class Stage6Trainer(Stage4Trainer):
             values["timestamp"] = _progress_timestamp()
             if self._console_latest_mean_step_seconds is not None:
                 values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"
-            # vvv THOG expose the actual active PLASTIC DEPTH count without changing ordinary console rows
+            # vvv THOG expose the actual active PLASTIC DEPTH count and public sample coordinates without changing ordinary console rows
             if bool(getattr(getattr(self, "config", None), "plastic__enabled", False)):
                 lattice = self._plastic_depth_lattice()
                 if lattice is None:
                     raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while formatting progress")
                 values["current_layer_count"] = int(lattice.current_active_layers)
+                with torch.no_grad():
+                    active_coordinates = (
+                        lattice.active_public_coordinates()
+                        .detach()
+                        .to(device="cpu", dtype=torch.float64)
+                    )
+                values["depth_sample_points"] = tuple(
+                    float(value) for value in active_coordinates.tolist()
+                )
             # ^^^ THOG
         return values
     # ^^^ THOG
