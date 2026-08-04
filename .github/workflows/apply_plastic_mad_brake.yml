@@ -2,11 +2,13 @@
 name: Apply tested PLASTIC MAD brake phase
 
 on:
-  push:
+  pull_request:
     branches:
-      - PLASTIC_DEPTH
-    paths:
-      - .github/workflows/apply_plastic_mad_brake.yml
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+    types:
+      - synchronize
+      - reopened
+      - ready_for_review
 
 permissions:
   contents: write
@@ -17,6 +19,7 @@ concurrency:
 
 jobs:
   apply-test-commit:
+    if: github.event.pull_request.head.ref == 'PLASTIC_DEPTH'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
