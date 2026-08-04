@@ -1,0 +1,88 @@
+# vvv THOG temporary gated applier for tested PLASTIC DEPTH AdamW-state phase
+name: Apply tested PLASTIC AdamW-state phase
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH
+    paths:
+      - .github/workflows/apply_plastic_optimizer_state.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plastic-adamw-state-applier
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH
+          fetch-depth: 0
+          clean: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Reassemble, verify and apply patch
+        run: |
+          set -euo pipefail
+          cat docs/plastic_optimizer_payload/part_* > /tmp/plastic_optimizer.patch.gz.b64
+          base64 --decode /tmp/plastic_optimizer.patch.gz.b64 | gzip --decompress > /tmp/plastic_optimizer.patch
+          echo 'f1e14a08b0fd01b58831feb0a405358e61409aba802d8f5d3ccc76d3eaa1d29a  /tmp/plastic_optimizer.patch' | sha256sum --check --strict
+          git apply --check /tmp/plastic_optimizer.patch
+          git apply /tmp/plastic_optimizer.patch
+          git diff --check
+      - name: Compile and validate shell syntax
+        run: |
+          set -euo pipefail
+          python -m compileall -q run_thog2_owt.py run_thog2_owt_core.py sheet tests
+          bash -n train_OWT.sh train_OWT_core.sh resume_and_fork_OWT.sh plastic_depth_gpu_smokes.sh
+      - name: Run focused PLASTIC and AdamW-state tests
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_gauge.py \
+            tests/test_plastic_depth_optimizer.py \
+            tests/test_plastic_depth_basis_cache.py \
+            tests/test_plastic_depth_interfaces.py \
+            tests/test_sheet_stage6_trainer.py \
+            tests/test_sheet_stage6_wandb.py \
+            tests/test_sheet_stage6_run_config.py \
+            tests/test_sheet_stage6_restart.py \
+            tests/test_sheet_stage4_checkpointing.py \
+            tests/test_sheet_stage4_restore.py \
+            tests/test_sheet_stage4_state.py
+      - name: Run two-rank CPU DDP check
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python tests/plastic_depth_ddp_check.py
+      - name: Commit tested phase and clean transport files
+        run: |
+          set -euo pipefail
+          rm -rf docs/plastic_optimizer_payload
+          rm .github/workflows/apply_plastic_optimizer_state.yml
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'Add PLASTIC DEPTH AdamW state migration'
+          git push origin HEAD:PLASTIC_DEPTH
+# ^^^ THOG
