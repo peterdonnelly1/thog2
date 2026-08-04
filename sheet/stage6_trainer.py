@@ -103,6 +103,15 @@ def _format_plastic_sampled_value(value: Any) -> str:
     return f"{numeric:.2f}"
 
 
+def _format_plastic_probe_loss(value: Any) -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    return f"{numeric:.3f}"
+
+
 def _format_depth_sample_point(value: Any) -> str:
     numeric = float(value)
     if not math.isfinite(numeric):
@@ -211,13 +220,21 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         )
         fields.append(f"sampled_values = [{sampled_values}]")
     # ^^^ THOG
+    # vvv THOG show learned-count probe losses immediately before the active public layer-index ruler
+    if "plastic_probe_losses" in payload:
+        plastic_probe_losses = ", ".join(
+            _format_plastic_probe_loss(value)
+            for value in payload["plastic_probe_losses"]
+        )
+        fields.append(f"probe_losses = [{plastic_probe_losses}]")
+    # ^^^ THOG
     # vvv THOG append active public DEPTH sample points last so learned geometry movement is visible without opening plots
     if "depth_sample_points" in payload:
         depth_sample_points = ", ".join(
             _format_depth_sample_point(value)
             for value in payload["depth_sample_points"]
         )
-        fields.append(f"depth_samples = [{depth_sample_points}]")
+        fields.append(f"layer indices = [{depth_sample_points}]")
     # ^^^ THOG
     line = "  ".join(fields)
     if event == "evaluation_completed":
@@ -271,6 +288,34 @@ class Stage6Trainer(Stage4Trainer):
     def _console_float(value: Any) -> float:
         return float(str(value).strip())
 
+    # vvv THOG recover the most recent inline-probe validation-loss triplet in N-1/N/N+1 order for console-only display
+    def _latest_plastic_probe_losses(self) -> Optional[Tuple[Optional[float], Optional[float], Optional[float]]]:
+        if not bool(getattr(getattr(self, "config", None), "plastic__do_learn_layer_count", False)):
+            return None
+        for event in reversed(self.events):
+            if event.name != "plastic_depth_count_decision":
+                continue
+            payload = event.payload
+            if "previous_active_layers" not in payload:
+                return None
+            current_count = int(payload["previous_active_layers"])
+            losses_by_count: Dict[int, float] = {}
+            for item in payload.get("candidates", ()):
+                try:
+                    count = int(item["active_layers"])
+                    loss = item["validation_loss"]
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if loss is None:
+                    continue
+                losses_by_count[count] = float(loss)
+            return tuple(
+                losses_by_count.get(current_count + offset)
+                for offset in (-1, 0, 1)
+            )
+        return None
+    # ^^^ THOG
+
     def _prepare_console_progress_payload(self, event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         values = dict(payload)
         if event == "run_started":
@@ -306,12 +351,15 @@ class Stage6Trainer(Stage4Trainer):
             values["timestamp"] = _progress_timestamp()
             if self._console_latest_mean_step_seconds is not None:
                 values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"
-            # vvv THOG expose the actual active PLASTIC DEPTH count and public sample coordinates without changing ordinary console rows
+            # vvv THOG expose the actual active PLASTIC DEPTH count, probe losses and public sample coordinates without changing ordinary console rows
             if bool(getattr(getattr(self, "config", None), "plastic__enabled", False)):
                 lattice = self._plastic_depth_lattice()
                 if lattice is None:
                     raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while formatting progress")
                 values["current_layer_count"] = int(lattice.current_active_layers)
+                probe_losses = self._latest_plastic_probe_losses()
+                if probe_losses is not None:
+                    values["plastic_probe_losses"] = probe_losses
                 with torch.no_grad():
                     active_coordinates = (
                         lattice.active_public_coordinates()
