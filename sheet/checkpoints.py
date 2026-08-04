@@ -164,12 +164,32 @@ def _unsafe_plastic_depth_checkpoint_message(detail: str) -> str:
 
 
 def validate_plastic_depth_checkpoint_format(payload: Mapping[str, Any]) -> None:
-    if not _plastic_depth_checkpoint_is_enabled(payload):
+    identity = _plastic_depth_checkpoint_identity(payload)
+    format_version = payload.get("plastic_depth_checkpoint_format_version")
+    trainer_config = payload.get("trainer_config")
+    trainer_plastic_enabled = (
+        trainer_config.get("plastic__enabled")
+        if isinstance(trainer_config, Mapping)
+        else None
+    )
+    # vvv THOG disabled trainer state must not carry active PLASTIC checkpoint metadata into model construction
+    if trainer_plastic_enabled is False:
+        if isinstance(identity, Mapping) or format_version is not None:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    "disabled trainer state contains PLASTIC checkpoint metadata"
+                )
+            )
+        return
+    # ^^^ THOG
+    if (
+        trainer_plastic_enabled is not True
+        and not isinstance(identity, Mapping)
+        and format_version is None
+    ):
         return
 
-    identity = _plastic_depth_checkpoint_identity(payload)
     identity_version = identity.get("version") if isinstance(identity, Mapping) else None
-    format_version = payload.get("plastic_depth_checkpoint_format_version")
 
     # vvv THOG canonical v0.3 identity must not contradict the enabled trainer state; retired short aliases omit this field
     if (
