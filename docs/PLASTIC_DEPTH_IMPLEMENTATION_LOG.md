@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 23:28 AEST
+Last updated: 2026-08-04 23:42 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `855ea5f209a0554c4b2a128dcc0914e81d2d5ba6`
+- Current verified branch head before this log update: `f334a02487f7b548989efc5ef21df07e48a0eb20`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -82,7 +82,7 @@ Direct coverage proves first-microstep-only probing, shared maximum-prefix execu
 
 ### MAD gate and update-brake takeover phase
 
-The original staged transport payload at `6b0b759c` was corrupt after the first six files. The phase was recovered from its intact controller/config fragments, completed against the authoritative task, and validated locally before direct commit.
+The original staged transport payload at `6b0b759c` was corrupt after the first six files. The phase was recovered from its intact controller/config fragments, completed against the authoritative task, validated locally, then reassembled as an exact SHA-256-gated recovery patch. Hosted runners repeated the focused, affected, DDP and source-history gates before committing `f334a024`.
 
 - 122 focused PLASTIC/gauge/optimizer/inline/controller/interface/trainer/checkpoint tests passed
 - 141 affected CPU regression tests passed
@@ -92,7 +92,7 @@ The original staged transport payload at `6b0b759c` was corrupt after the first 
 - THOG source-history audit passed with zero violations
 - direct integration proves failed updates do not checkpoint evidence and count changes at updates 1 and 6 under the default five-update brake
 
-Hosted head-versus-base CI remains the authoritative broad regression gate for the committed phase.
+Commit `f334a024` is the clean MAD/brake phase commit. Its bot-authored push could not start an ordinary follow-on workflow, so this log-only descendant deliberately retriggers the authoritative hosted head-versus-base comparison.
 
 ## Remaining revised implementation
 
@@ -120,7 +120,7 @@ Implement the universal CUDA allocator reserve and recoverable upward-probe fall
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `855ea5f2` or a documented descendant.
+2. Fetch `PLASTIC_DEPTH` and verify `f334a024` or a documented descendant.
 3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.
