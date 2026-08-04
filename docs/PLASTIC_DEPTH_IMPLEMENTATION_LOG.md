@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 14:20 AEST
+Last updated: 2026-08-04 14:32 AEST
 
 ## Repository state
 
@@ -8,6 +8,7 @@ Last updated: 2026-08-04 14:20 AEST
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft, base `HYPERBLOCK_LOOP_ENHANCEMENTS`
 - Baseline head: `97612234648848e0666b009bdc15ee6aaa2f2560`
+- Latest completed phase commit: `cc787d1d72ab5a8d618e0a7a21486e8cdb539fbf`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -30,6 +31,38 @@ Result: 48 passed, 2 failed.
 
 The two failures are pre-existing and unrelated to PLASTIC DEPTH. They expect explicit RGB yellow (`\033[1;38;2;255;255;0m`) while the directly imported console formatter uses palette-dependent bright yellow (`\033[1;93m`). Do not treat them as regressions from this work.
 
+## Completed phase evidence
+
+### P2: pure gauge transform
+
+Commits:
+
+- `7eb74f4458d0ca81d4f5e0ab30c6c932308dfb6a` — gauge-preserving Chebyshev chart transform
+- `cc787d1d72ab5a8d618e0a7a21486e8cdb539fbf` — property and stored-dtype tests
+
+Implementation:
+
+- `sheet/plastic_depth_gauge.py`
+- Exact affine composition is built in ordinary Chebyshev coefficient space by recurrence.
+- The result is converted into the fixed QR-stabilised THOG coefficient coordinates.
+- No Vandermonde/interpolation approximation is used.
+
+Tests:
+
+```bash
+pytest -q tests/test_plastic_depth_gauge.py
+# 33 passed
+
+pytest -q \
+  tests/test_plastic_depth_gauge.py \
+  tests/test_plastic_depth.py \
+  tests/test_plastic_depth_basis_cache.py \
+  tests/test_plastic_depth_interfaces.py \
+  tests/test_sheet_stage6_trainer.py \
+  tests/test_sheet_stage6_wandb.py
+# 72 passed
+```
+
 ## Non-negotiable invariants
 
 - `plastic__max_permitted_layers` is only a count ceiling/allocation capacity.
@@ -46,7 +79,7 @@ The two failures are pre-existing and unrelated to PLASTIC DEPTH. They expect ex
 - [x] P0: baseline head and focused tests recorded
 - [x] P0: durable implementation log created
 - [ ] P1: uniform `plastic__` configuration/UI names and `_L_dyn_` artifact identity
-- [ ] P2: pure float64 Chebyshev affine re-expression kernel and property tests
+- [x] P2: pure float64 Chebyshev affine re-expression kernel and property tests
 - [ ] P3: active-prefix geometry replacing the phantom maximum lattice
 - [ ] P4: atomic model-family re-gauge with verification diagnostics
 - [ ] P5: targeted stock-AdamW state reset on committed re-gauge
@@ -59,14 +92,17 @@ The two failures are pre-existing and unrelated to PLASTIC DEPTH. They expect ex
 
 ## Current exact task
 
-Implement P2 first: a standalone float64 Chebyshev coefficient change-of-chart kernel plus exhaustive CPU property tests. Do not modify runtime count transitions until this gate passes.
+Implement P3: replace maximum-lattice geometry with active-prefix gaps plus one derived N+1 probe point. Prove that inactive storage slots cannot affect active coordinates, basis rows or outputs. Do not yet connect count transitions to coefficient re-expression.
 
 ## Work-in-progress files
 
-None yet.
+- `sheet/plastic_depth.py`
+- `tests/test_plastic_depth.py`
+- likely interface tests that currently assert evenly distributed maximum-lattice ranks
 
 ## Known unresolved decisions
 
+- Runtime re-gauge cannot mutate coefficient parameters before backward through a graph that used the old parameterisation. The likely safe implementation is to select the count for the current optimiser update, train using the frozen old chart, and atomically commit/re-gauge after `optimizer.step()` for the next update. This needs explicit integration tests and an as-built specification note.
 - Old v0.1 PLASTIC DEPTH checkpoint migration may be ambiguous. Prefer an explicit rejection over silent reinterpretation unless a deterministic conversion is proven.
 - Repeated re-gauges must be stress-tested for accumulated stored-dtype error.
 - Count-dependent residual-depth scaling remains a separate architectural limitation and is not part of the gauge transform.
