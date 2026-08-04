@@ -128,17 +128,15 @@ jobs:
           set -euo pipefail
           python tests/plastic_depth_ddp_check.py
 
-      - name: Commit tested source and remove transport files
+      - name: Commit tested source without workflow mutations
         run: |
           set -euo pipefail
+          git checkout HEAD -- .github/workflows/plastic_depth_ci.yml
           rm docs/plastic_checkpoint_format.patch.gz.b64
           rm docs/plastic_checkpoint_guard_followup.patch.gz.b64
           rm docs/plastic_checkpoint_format.trigger
           rm docs/plastic_checkpoint_format_final.trigger
-          rm .github/workflows/apply_plastic_checkpoint_format.yml
-          rm .github/workflows/apply_plastic_checkpoint_format_final.yml
-          rm .github/workflows/apply_plastic_checkpoint_format_pr.yml
-          git add -A
+          git add -A -- . ':(exclude).github/workflows/**'
           git diff --cached --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
