@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 
-PLASTIC_DEPTH_VERSION = "plastic_depth_v0_1"
+PLASTIC_DEPTH_VERSION = "plastic_depth_v0_3"
 PLASTIC_LAYER_SAMPLING_INITIALISATIONS = ("equidistant", "random")
 PLASTIC_LAYER_COUNT_OBJECTIVES = (
     "lowest_loss",
@@ -166,20 +166,28 @@ class PlasticDepthSamplingLattice(nn.Module):
         self.learn_layer_count = learn_layer_count
         self.epsilon = float(epsilon)
 
-        if maximum_layers == 1:
-            raw_intervals = torch.empty(0, dtype=torch.float32)
-        elif initialisation == "equidistant":
-            raw_intervals = torch.zeros(maximum_layers - 1, dtype=torch.float32)
-        else:
+        # vvv THOG v0.3 preallocates capacity but initialises only the active-prefix geometry
+        raw_intervals = torch.zeros(max(0, maximum_layers - 1), dtype=torch.float32)
+        active_interval_count = max(0, initial_active_layers - 1)
+        if initialisation == "random" and active_interval_count > 0:
             generator = torch.Generator(device="cpu").manual_seed(seed)
-            positive_intervals = torch.rand(maximum_layers - 1, generator=generator, dtype=torch.float64) + 0.25
-            raw_intervals = self._inverse_softplus(positive_intervals).to(dtype=torch.float32)
+            positive_intervals = (
+                torch.rand(active_interval_count, generator=generator, dtype=torch.float64)
+                + 0.25
+            )
+            raw_intervals[:active_interval_count] = self._inverse_softplus(
+                positive_intervals
+            ).to(dtype=torch.float32)
         self.raw_intervals = nn.Parameter(raw_intervals)
         self.register_buffer(
             "initial_public_coordinates",
-            self.public_coordinates().detach().to(dtype=torch.float64),
+            self.public_coordinates(
+                initial_active_layers,
+                include_probe=learn_layer_count,
+            ).detach().to(dtype=torch.float64),
             persistent=True,
         )
+        # ^^^ THOG
         # vvv THOG fixed-count mode owns geometry only; discrete controller, timing and memory state exist only when count learning is enabled
         if self.learn_layer_count:
             self.register_buffer(
@@ -218,25 +226,51 @@ class PlasticDepthSamplingLattice(nn.Module):
     def _inverse_softplus(values: Tensor) -> Tensor:
         return values + torch.log(-torch.expm1(-values))
 
-    def positive_intervals(self) -> Tensor:
-        if self.maximum_layers == 1:
-            return self.raw_intervals
-        return F.softplus(self.raw_intervals) + self.epsilon
+    # vvv THOG v0.3 constructs coordinates from only the active prefix; inactive capacity is mathematically inert
+    def positive_intervals(self, active_layers: Optional[int] = None) -> Tensor:
+        resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
+        if resolved_count < 1 or resolved_count > self.maximum_layers:
+            raise ValueError(
+                "active_layers must lie in [1, maximum_layers]; "
+                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+            )
+        active_interval_count = max(0, resolved_count - 1)
+        if active_interval_count == 0:
+            return self.raw_intervals[:0]
+        return F.softplus(self.raw_intervals[:active_interval_count]) + self.epsilon
 
-    def public_coordinates(self) -> Tensor:
-        if self.maximum_layers == 1:
-            return torch.ones(1, dtype=self.raw_intervals.dtype, device=self.raw_intervals.device)
-        intervals = self.positive_intervals()
-        cumulative = torch.cumsum(intervals, dim=0)
-        interior = 1.0 + 99.0 * cumulative[:-1] / intervals.sum()
-        return torch.cat(
-            (
-                interior.new_tensor([1.0]),
-                interior,
-                interior.new_tensor([100.0]),
-            ),
-            dim=0,
-        )
+    def public_coordinates(
+        self,
+        active_layers: Optional[int] = None,
+        *,
+        include_probe: Optional[bool] = None,
+    ) -> Tensor:
+        resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
+        if resolved_count < 1 or resolved_count > self.maximum_layers:
+            raise ValueError(
+                "active_layers must lie in [1, maximum_layers]; "
+                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+            )
+        resolved_include_probe = self.learn_layer_count if include_probe is None else bool(include_probe)
+        if resolved_include_probe and resolved_count >= self.maximum_layers:
+            resolved_include_probe = False
+
+        if resolved_count == 1:
+            if resolved_include_probe:
+                return self.raw_intervals.new_tensor([1.0, 100.0])
+            return self.raw_intervals.new_tensor([50.5])
+
+        intervals = self.positive_intervals(resolved_count)
+        cumulative = torch.cat((intervals.new_zeros(1), torch.cumsum(intervals, dim=0)))
+        if resolved_include_probe:
+            probe_gap = intervals[-1:]
+            span = intervals.sum() + probe_gap[0]
+            active = 1.0 + 99.0 * cumulative / span
+            return torch.cat((active, active.new_tensor([100.0])))
+
+        span = intervals.sum()
+        return 1.0 + 99.0 * cumulative / span
+    # ^^^ THOG
 
     @property
     def current_active_layers(self) -> int:
@@ -244,39 +278,75 @@ class PlasticDepthSamplingLattice(nn.Module):
             return self.maximum_layers
         return int(self.active_layer_count.item())
 
+    # vvv THOG v0.3 executes contiguous active-prefix slots rather than ranks spread across maximum capacity
     def active_ranks(self, active_layers: Optional[int] = None) -> Tuple[int, ...]:
         resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
-        return evenly_distributed_active_ranks(self.maximum_layers, resolved_count)
+        if resolved_count < 1 or resolved_count > self.maximum_layers:
+            raise ValueError(
+                "active_layers must lie in [1, maximum_layers]; "
+                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+            )
+        return tuple(range(resolved_count))
 
     def active_public_coordinates(self, active_layers: Optional[int] = None) -> Tensor:
-        ranks = self.active_ranks(active_layers)
-        index = torch.tensor(ranks, dtype=torch.long, device=self.raw_intervals.device)
-        return self.public_coordinates().index_select(0, index)
+        resolved_count = self.current_active_layers if active_layers is None else int(active_layers)
+        if resolved_count == self.current_active_layers:
+            return self.public_coordinates()[:resolved_count]
+        return self.public_coordinates(resolved_count, include_probe=False)
+
+    def probe_public_coordinate(self) -> Tensor:
+        if not self.learn_layer_count:
+            raise RuntimeError("fixed-count PLASTIC DEPTH has no N+1 probe coordinate")
+        if self.current_active_layers >= self.maximum_layers:
+            raise RuntimeError("PLASTIC DEPTH is already at maximum active layers")
+        return self.public_coordinates()[-1:]
 
     def set_active_layer_count(self, active_layers: int) -> None:
         if not self.learn_layer_count:
             raise RuntimeError("fixed-count PLASTIC DEPTH has no layer-count controller")
-        evenly_distributed_active_ranks(self.maximum_layers, active_layers)
-        self.active_layer_count.fill_(active_layers)
+        resolved_count = int(active_layers)
+        if resolved_count < 1 or resolved_count > self.maximum_layers:
+            raise ValueError(
+                "active_layers must lie in [1, maximum_layers]; "
+                f"got active_layers={resolved_count}, maximum_layers={self.maximum_layers}"
+            )
+        previous_count = self.current_active_layers
+        if resolved_count == previous_count + 1 and previous_count >= 2:
+            with torch.no_grad():
+                self.raw_intervals[previous_count - 1].copy_(
+                    self.raw_intervals[previous_count - 2]
+                )
+        self.active_layer_count.fill_(resolved_count)
+    # ^^^ THOG
 
     def interval_report(self) -> Dict[str, object]:
         coordinates = self.public_coordinates()
-        if coordinates.numel() <= 1:
-            intervals = coordinates.new_empty(0)
+        active_coordinates = coordinates[: self.current_active_layers]
+        if active_coordinates.numel() <= 1:
+            intervals = active_coordinates.new_empty(0)
         else:
-            intervals = coordinates[1:] - coordinates[:-1]
-        movement = coordinates.to(dtype=torch.float64) - self.initial_public_coordinates.to(coordinates.device)
+            intervals = active_coordinates[1:] - active_coordinates[:-1]
+        initial = self.initial_public_coordinates.to(coordinates.device)
+        comparable = min(int(initial.numel()), int(coordinates.numel()))
+        movement = (
+            coordinates[:comparable].to(dtype=torch.float64) - initial[:comparable]
+        )
         return {
             "maximum_layers": self.maximum_layers,
             "active_layers": self.current_active_layers,
             "public_coordinates": tuple(float(value) for value in coordinates.detach().cpu().tolist()),
             "active_ranks": self.active_ranks(),
             "active_public_coordinates": tuple(
-                float(value) for value in self.active_public_coordinates().detach().cpu().tolist()
+                float(value) for value in active_coordinates.detach().cpu().tolist()
+            ),
+            "probe_public_coordinate": (
+                float(coordinates[-1].detach().cpu().item())
+                if self.learn_layer_count and coordinates.numel() > self.current_active_layers
+                else None
             ),
             "minimum_interval": float(intervals.min().item()) if intervals.numel() else None,
             "maximum_interval": float(intervals.max().item()) if intervals.numel() else None,
-            "mean_absolute_movement": float(movement.abs().mean().item()),
+            "mean_absolute_movement": float(movement.abs().mean().item()) if movement.numel() else 0.0,
             "initialisation": self.initialisation,
             "learn_layer_count": self.learn_layer_count,
             "version": PLASTIC_DEPTH_VERSION,

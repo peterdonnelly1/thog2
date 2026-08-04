@@ -125,7 +125,7 @@ class DepthTrajectory(nn.Module):
         if self.plastic_enabled:
             if basis_family != BASIS_FAMILY_CHEBYSHEV:
                 raise ValueError(
-                    "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH basis; "
+                    "PLASTIC DEPTH v0.3 requires the Chebyshev DEPTH basis; "
                     f"got {basis_family!r}"
                 )
             active_layers = config.n_layer if plastic_initial_active_layers is None else plastic_initial_active_layers
@@ -136,8 +136,13 @@ class DepthTrajectory(nn.Module):
                 seed=plastic_seed,
                 learn_layer_count=plastic_learn_layer_count,
             )
+            # vvv THOG v0.3 fixes coefficient coordinates at construction without giving maximum capacity geometric meaning
+            reference_sample_count = max(
+                config.depth_order,
+                active_layers + (1 if plastic_learn_layer_count else 0),
+            )
             reference_coordinates = normalized_coordinates(
-                config.n_layer,
+                reference_sample_count,
                 dtype=torch.float64,
                 device="cpu",
             )
@@ -151,11 +156,22 @@ class DepthTrajectory(nn.Module):
                 torch.linalg.inv(reference_r),
                 persistent=False,
             )
+            self.register_buffer(
+                "plastic_depth_reference_sample_count",
+                torch.tensor(reference_sample_count, dtype=torch.long),
+                persistent=True,
+            )
+            # ^^^ THOG
         else:
             self.plastic_sampling = None
             self.register_buffer(
                 "plastic_depth_inverse_r",
                 torch.empty(0, dtype=torch.float64),
+                persistent=False,
+            )
+            self.register_buffer(
+                "plastic_depth_reference_sample_count",
+                torch.tensor(0, dtype=torch.long),
                 persistent=False,
             )
         # ^^^ THOG

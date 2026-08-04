@@ -117,7 +117,7 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
             initialisation="equidistant",
             seed=11,
         )
-        self.assertEqual(single.public_coordinates().tolist(), [1.0])
+        self.assertEqual(single.public_coordinates().tolist(), [50.5])
 
     def test_fixed_count_lattice_has_no_controller_state(self) -> None:
         lattice = PlasticDepthSamplingLattice(
@@ -164,6 +164,58 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         self.assertEqual(evenly_distributed_active_ranks(8, 2), (0, 7))
         self.assertEqual(evenly_distributed_active_ranks(8, 4), (0, 2, 5, 7))
         self.assertEqual(evenly_distributed_active_ranks(8, 8), tuple(range(8)))
+
+    def test_learned_count_owns_active_prefix_plus_one_probe(self) -> None:
+        lattice = PlasticDepthSamplingLattice(
+            8,
+            initial_active_layers=4,
+            initialisation="equidistant",
+            seed=11,
+            learn_layer_count=True,
+        )
+
+        torch.testing.assert_close(
+            lattice.public_coordinates(),
+            torch.tensor([1.0, 25.75, 50.5, 75.25, 100.0]),
+            rtol=0.0,
+            atol=2.0e-5,
+        )
+        self.assertEqual(lattice.active_ranks(), (0, 1, 2, 3))
+        torch.testing.assert_close(
+            lattice.active_public_coordinates(),
+            lattice.public_coordinates()[:4],
+            rtol=0.0,
+            atol=0.0,
+        )
+        torch.testing.assert_close(
+            lattice.probe_public_coordinate(),
+            torch.tensor([100.0]),
+            rtol=0.0,
+            atol=0.0,
+        )
+
+    def test_inactive_capacity_cannot_move_active_prefix_or_receive_gradient(self) -> None:
+        lattice = PlasticDepthSamplingLattice(
+            8,
+            initial_active_layers=4,
+            initialisation="random",
+            seed=17,
+            learn_layer_count=True,
+        )
+        before = lattice.public_coordinates().detach().clone()
+        with torch.no_grad():
+            lattice.raw_intervals[3:].copy_(torch.linspace(-100.0, 100.0, 4))
+        after = lattice.public_coordinates()
+
+        torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
+        after.square().sum().backward()
+        self.assertIsNotNone(lattice.raw_intervals.grad)
+        torch.testing.assert_close(
+            lattice.raw_intervals.grad[3:],
+            torch.zeros_like(lattice.raw_intervals.grad[3:]),
+            rtol=0.0,
+            atol=0.0,
+        )
 
     def test_arbitrary_chebyshev_sampling_preserves_reference_basis(self) -> None:
         coordinates = normalized_coordinates(6, dtype=torch.float64)
@@ -257,6 +309,28 @@ class PlasticDepthModelTests(unittest.TestCase):
         self.assertTrue(geometry["thog2_freeze_during_warmup"])
         self.assertEqual(geometry["parameter_names"], ("trajectory.plastic_sampling.raw_intervals",))
 
+    def test_inactive_capacity_cannot_change_model_output(self) -> None:
+        torch.manual_seed(1357)
+        model = SheetGPT(
+            plastic_sheet_config(
+                n_layer=8,
+                depth_order=4,
+                plastic__layers_to_sample=None,
+                plastic__do_learn_layer_count=True,
+                plastic__initial_layer_count=4,
+                plastic__max_permitted_layers=8,
+            )
+        )
+        model.eval()
+        indices = torch.arange(8, dtype=torch.long).view(1, 8) % 32
+        with torch.no_grad():
+            before, _ = model(indices)
+            model.trajectory.plastic_sampling.raw_intervals[3:].copy_(
+                torch.linspace(-100.0, 100.0, 4)
+            )
+            after, _ = model(indices)
+        torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
+
     def test_full_active_count_uses_full_execution_and_lower_count_uses_subset(self) -> None:
         model = SheetGPT(
             plastic_sheet_config(
@@ -268,7 +342,7 @@ class PlasticDepthModelTests(unittest.TestCase):
         )
         self.assertEqual(model.plastic_depth_active_layer_indices(), (0, 1, 2, 3))
         model.set_plastic_depth_active_layer_count(2)
-        self.assertEqual(model.plastic_depth_active_layer_indices(), (0, 3))
+        self.assertEqual(model.plastic_depth_active_layer_indices(), (0, 1))
 
     def test_geometry_learning_rate_multiplier_and_warmup_freeze(self) -> None:
         train_tokens, validation_tokens = token_splits()
