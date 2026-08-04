@@ -27,6 +27,52 @@ class ResolvedPlasticDepthCounts:
     fixed_active_layers: Optional[int]
 
 
+# vvv THOG new persisted identities use the exact canonical public control spellings; the sampling seed remains internal
+
+def plastic_depth_identity_metadata(
+    *,
+    layers_to_sample: Optional[int],
+    do_learn_layer_count: bool,
+    initial_layer_count: Optional[int],
+    max_permitted_layers: Optional[int],
+    layer_sampling_initialisation: str,
+    layer_count_objective: str,
+    layer_count_update_brake: int,
+    layer_count_probe_noise_window: int,
+    layer_count_probe_noise_min_observations: int,
+    layer_count_probe_noise_lambda: float,
+    layer_count_cost_weight: float,
+    layer_memory_budget_gib: Optional[float],
+    cuda_allocator_reserve_gib: float,
+    geometry_learning_rate_multiplier: float,
+    freeze_geometry_during_warmup: bool,
+    initial_active_layers: int,
+) -> Dict[str, object]:
+    return {
+        "version": PLASTIC_DEPTH_VERSION,
+        "plastic__enabled": True,
+        "plastic__layers_to_sample": layers_to_sample,
+        "plastic__do_learn_layer_count": bool(do_learn_layer_count),
+        "plastic__initial_layer_count": initial_layer_count,
+        "plastic__max_permitted_layers": max_permitted_layers,
+        "plastic__layer_sampling_initialisation": layer_sampling_initialisation,
+        "plastic__layer_count_objective": layer_count_objective,
+        "plastic__layer_count_update_brake": int(layer_count_update_brake),
+        "plastic__layer_count_probe_noise_window": int(layer_count_probe_noise_window),
+        "plastic__layer_count_probe_noise_min_observations": int(layer_count_probe_noise_min_observations),
+        "plastic__layer_count_probe_noise_lambda": float(layer_count_probe_noise_lambda),
+        "plastic__layer_count_cost_weight": float(layer_count_cost_weight),
+        "plastic__layer_memory_budget_gib": layer_memory_budget_gib,
+        "plastic__cuda_allocator_reserve_gib": float(cuda_allocator_reserve_gib),
+        "plastic__geometry_learning_rate_multiplier": float(geometry_learning_rate_multiplier),
+        "plastic__freeze_geometry_during_warmup": bool(freeze_geometry_during_warmup),
+        "plastic__initial_active_layers": int(initial_active_layers),
+    }
+
+
+# ^^^ THOG
+
+
 # vvv THOG v0.3 discrete geometry transition prepared before any model state mutates
 @dataclass(frozen=True)
 class PlasticDepthGeometryTransition:
@@ -610,6 +656,7 @@ def choose_plastic_depth_candidate(
 
 __all__ = [
     "PLASTIC_DEPTH_VERSION",
+    "plastic_depth_identity_metadata",
     "PLASTIC_LAYER_COUNT_OBJECTIVES",
     "PLASTIC_LAYER_SAMPLING_INITIALISATIONS",
     "PlasticDepthCandidateMeasurement",

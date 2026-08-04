@@ -77,6 +77,35 @@ def _semantic_compatibility_value(name: str, value: Any) -> Any:
     return value
 
 
+# vvv THOG canonical public spellings are provenance; checkpoint compatibility compares the resolved PLASTIC semantics
+
+def _semantic_plastic_depth_identity(value: Any, *, maximum_layers: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    if "plastic__enabled" not in value:
+        return value
+    return {
+        "version": value.get("version"),
+        "maximum_layers": maximum_layers,
+        "initial_active_layers": value.get("plastic__initial_active_layers"),
+        "learn_layer_count": value.get("plastic__do_learn_layer_count"),
+        "sampling_initialisation": value.get("plastic__layer_sampling_initialisation"),
+        "count_objective": value.get("plastic__layer_count_objective"),
+        "count_update_brake": value.get("plastic__layer_count_update_brake"),
+        "probe_noise_window": value.get("plastic__layer_count_probe_noise_window"),
+        "probe_noise_min_observations": value.get("plastic__layer_count_probe_noise_min_observations"),
+        "probe_noise_lambda": value.get("plastic__layer_count_probe_noise_lambda"),
+        "count_cost_weight": value.get("plastic__layer_count_cost_weight"),
+        "memory_budget_gib": value.get("plastic__layer_memory_budget_gib"),
+        "cuda_allocator_reserve_gib": value.get("plastic__cuda_allocator_reserve_gib"),
+        "geometry_lr_multiplier": value.get("plastic__geometry_learning_rate_multiplier"),
+        "freeze_geometry_during_warmup": value.get("plastic__freeze_geometry_during_warmup"),
+    }
+
+
+# ^^^ THOG
+
+
 def _semantic_compact_identity(value: Any) -> Any:
     if not isinstance(value, Mapping):
         return value
@@ -85,6 +114,14 @@ def _semantic_compact_identity(value: Any) -> Any:
         normalized["resolved_geometry_plan"] = _semantic_geometry_plan(
             normalized["resolved_geometry_plan"]
         )
+    # vvv THOG accept checkpoints written with the retired short PLASTIC aliases while all new writes use plastic__ names
+    if "plastic_depth" in normalized:
+        # normalized["plastic_depth"] = normalized["plastic_depth"]
+        normalized["plastic_depth"] = _semantic_plastic_depth_identity(
+            normalized["plastic_depth"],
+            maximum_layers=normalized.get("n_layer"),
+        )
+    # ^^^ THOG
     return normalized
 # ^^^ THOG
 

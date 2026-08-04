@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from run_thog2_owt_core import build_parser, config_from_arguments
+from sheet.checkpoints import _semantic_compact_identity
 from sheet.run_config import OwtRunConfig
 
 
@@ -63,11 +64,17 @@ def test_plastic_fixed_cli_resolves_and_preserves_public_identity() -> None:
     assert config.plastic__layer_sampling_initialisation == "random"
     assert config.plastic__geometry_learning_rate_multiplier == pytest.approx(0.2)
     assert config.plastic__freeze_geometry_during_warmup is False
+    assert "_L_6__" in config.parameter_artifact_fragment()
+    assert "_L_dyn__" not in config.parameter_artifact_fragment()
     assert "PLN_6_PLM_6_PLI_random_PLO_lowest_loss" in config.artifact_name
     training = config.to_training_config(vocab_size=32, world_size=1, out_dir=Path("out-test"))
     assert training.n_layer == 6
-    assert config.compact_identity()["plastic_depth"]["maximum_layers"] == 6
-    assert training.compact_identity_metadata()["plastic_depth"]["maximum_layers"] == 6
+    run_identity = config.compact_identity()["plastic_depth"]
+    training_identity = training.compact_identity_metadata()["plastic_depth"]
+    assert run_identity["plastic__layers_to_sample"] == 6
+    assert run_identity["plastic__initial_active_layers"] == 6
+    assert training_identity["plastic__layers_to_sample"] == 6
+    assert training_identity["plastic__initial_active_layers"] == 6
 
 
 def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
@@ -96,6 +103,8 @@ def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
     assert config.plastic__initial_active_layers == 2
     assert config.plastic__do_learn_layer_count is True
     assert config.plastic__layer_count_objective == "layer_efficiency"
+    assert "_L_dyn__" in config.parameter_artifact_fragment()
+    assert "_L_7__" not in config.parameter_artifact_fragment()
     assert "PLN_2_PLM_7" in config.artifact_name
     assert "PLB_50_PLNW_20_PLNM_4_PLNL_250000" in config.artifact_name
 
@@ -367,8 +376,8 @@ def test_cuda_allocator_reserve_cli_propagates_without_changing_artifact_identit
         out_dir=Path("out-test"),
     )
     assert training.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
-    assert configured.compact_identity()["plastic_depth"]["cuda_allocator_reserve_gib"] == pytest.approx(0.75)
-    assert training.compact_identity_metadata()["plastic_depth"]["cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert configured.compact_identity()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.compact_identity_metadata()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
 
 
 def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
@@ -384,4 +393,123 @@ def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
                 "-0.1",
             )
         )
+# ^^^ THOG
+
+
+# vvv THOG canonical public-control and dynamic artifact identity coverage
+
+def test_persisted_plastic_identity_uses_only_canonical_public_control_names() -> None:
+    config = config_from_arguments(
+        _plastic_cli(
+            "--plastic-do-learn-layer-count",
+            "--plastic-initial-layer-count",
+            "2",
+            "--plastic-max-permitted-layers",
+            "7",
+            "--plastic-layer-sampling-initialisation",
+            "random",
+            "--plastic-layer-count-objective",
+            "relative_training_wall_time",
+            "--plastic-layer-count-update-brake",
+            "11",
+            "--plastic-layer-count-probe-noise-window",
+            "19",
+            "--plastic-layer-count-probe-noise-min-observations",
+            "3",
+            "--plastic-layer-count-probe-noise-lambda",
+            "1.5",
+            "--plastic-layer-count-cost-weight",
+            "0.2",
+            "--plastic-cuda-allocator-reserve-gib",
+            "0.75",
+            "--plastic-geometry-learning-rate-multiplier",
+            "0.25",
+            "--no-plastic-freeze-geometry-during-warmup",
+        )
+    )
+    training = config.to_training_config(vocab_size=32, world_size=1, out_dir=Path("out-test"))
+    identities = (
+        config.compact_identity()["plastic_depth"],
+        training.compact_identity_metadata()["plastic_depth"],
+    )
+    obsolete_names = {
+        "maximum_layers",
+        "initial_active_layers",
+        "learn_layer_count",
+        "sampling_initialisation",
+        "count_objective",
+        "count_update_brake",
+        "probe_noise_window",
+        "probe_noise_min_observations",
+        "probe_noise_lambda",
+        "count_cost_weight",
+        "memory_budget_gib",
+        "cuda_allocator_reserve_gib",
+        "geometry_lr_multiplier",
+        "freeze_geometry_during_warmup",
+    }
+    for identity in identities:
+        assert set(identity).isdisjoint(obsolete_names)
+        assert identity["version"] == "plastic_depth_v0_3"
+        public_names = set(identity) - {"version", "plastic__initial_active_layers"}
+        assert public_names
+        assert all(name.startswith("plastic__") for name in public_names)
+        assert "plastic__sampling_seed" not in identity
+        assert identity["plastic__do_learn_layer_count"] is True
+        assert identity["plastic__initial_layer_count"] == 2
+        assert identity["plastic__max_permitted_layers"] == 7
+
+
+def test_retired_short_identity_aliases_remain_checkpoint_compatible() -> None:
+    config = config_from_arguments(
+        _plastic_cli(
+            "--plastic-do-learn-layer-count",
+            "--plastic-initial-layer-count",
+            "2",
+            "--plastic-max-permitted-layers",
+            "7",
+            "--plastic-layer-count-update-brake",
+            "11",
+            "--plastic-layer-count-probe-noise-window",
+            "19",
+            "--plastic-layer-count-probe-noise-min-observations",
+            "3",
+            "--plastic-layer-count-probe-noise-lambda",
+            "1.5",
+            "--plastic-layer-count-cost-weight",
+            "0.2",
+            "--plastic-cuda-allocator-reserve-gib",
+            "0.75",
+            "--plastic-geometry-learning-rate-multiplier",
+            "0.25",
+            "--no-plastic-freeze-geometry-during-warmup",
+        )
+    )
+    canonical = config.compact_identity()
+    retired = dict(canonical)
+    retired["plastic_depth"] = {
+        "version": "plastic_depth_v0_3",
+        "maximum_layers": 7,
+        "initial_active_layers": 2,
+        "learn_layer_count": True,
+        "sampling_initialisation": "equidistant",
+        "count_objective": "lowest_loss",
+        "count_update_brake": 11,
+        "probe_noise_window": 19,
+        "probe_noise_min_observations": 3,
+        "probe_noise_lambda": 1.5,
+        "count_cost_weight": 0.2,
+        "memory_budget_gib": None,
+        "cuda_allocator_reserve_gib": 0.75,
+        "geometry_lr_multiplier": 0.25,
+        "freeze_geometry_during_warmup": False,
+    }
+    assert _semantic_compact_identity(retired) == _semantic_compact_identity(canonical)
+
+
+def test_obsolete_hold_control_and_internal_sampling_seed_are_not_public_cli_options() -> None:
+    help_text = build_parser().format_help()
+    assert "--plastic-layer-count-hold-updates" not in help_text
+    assert "--plastic-sampling-seed" not in help_text
+    assert "--plastic__sampling_seed" not in help_text
 # ^^^ THOG

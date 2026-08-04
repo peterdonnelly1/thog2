@@ -39,6 +39,7 @@ from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_
 # vvv THOG PLASTIC DEPTH configuration resolves a fixed persistent lattice and optional discrete active-count controller
 from .plastic_depth import (
     PLASTIC_DEPTH_VERSION,
+    plastic_depth_identity_metadata,
     resolve_plastic_depth_counts,
     validate_plastic_layer_count_objective,
     validate_plastic_sampling_initialisation,
@@ -770,23 +771,43 @@ class TrainingConfig:
             identity["resolved_geometry_plan"] = self.resolved_geometry_plan
         # vvv THOG PLASTIC DEPTH identity is explicit while disabled identity remains byte-for-byte unchanged
         if self.plastic__enabled:
-            identity["plastic_depth"] = {
-                "version": PLASTIC_DEPTH_VERSION,
-                "maximum_layers": self.n_layer,
-                "initial_active_layers": self.plastic__initial_active_layers,
-                "learn_layer_count": self.plastic__do_learn_layer_count,
-                "sampling_initialisation": self.plastic__layer_sampling_initialisation,
-                "count_objective": self.plastic__layer_count_objective,
-                "count_update_brake": self.plastic__layer_count_update_brake,
-                "probe_noise_window": self.plastic__layer_count_probe_noise_window,
-                "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
-                "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
-                "count_cost_weight": float(self.plastic__layer_count_cost_weight),
-                "memory_budget_gib": self.plastic__layer_memory_budget_gib,
-                "cuda_allocator_reserve_gib": float(self.plastic__cuda_allocator_reserve_gib),
-                "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
-                "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
-            }
+            # identity["plastic_depth"] = {
+            #     "version": PLASTIC_DEPTH_VERSION,
+            #     "maximum_layers": self.n_layer,
+            #     "initial_active_layers": self.plastic__initial_active_layers,
+            #     "learn_layer_count": self.plastic__do_learn_layer_count,
+            #     "sampling_initialisation": self.plastic__layer_sampling_initialisation,
+            #     "count_objective": self.plastic__layer_count_objective,
+            #     "count_update_brake": self.plastic__layer_count_update_brake,
+            #     "probe_noise_window": self.plastic__layer_count_probe_noise_window,
+            #     "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+            #     "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
+            #     "count_cost_weight": float(self.plastic__layer_count_cost_weight),
+            #     "memory_budget_gib": self.plastic__layer_memory_budget_gib,
+            #     "cuda_allocator_reserve_gib": float(self.plastic__cuda_allocator_reserve_gib),
+            #     "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+            #     "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
+            # }
+            # vvv THOG persist every exposed control under its exact canonical plastic__ name
+            identity["plastic_depth"] = plastic_depth_identity_metadata(
+                layers_to_sample=self.plastic__layers_to_sample,
+                do_learn_layer_count=self.plastic__do_learn_layer_count,
+                initial_layer_count=self.plastic__initial_layer_count,
+                max_permitted_layers=self.plastic__max_permitted_layers,
+                layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
+                layer_count_objective=self.plastic__layer_count_objective,
+                layer_count_update_brake=self.plastic__layer_count_update_brake,
+                layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
+                layer_count_probe_noise_min_observations=self.plastic__layer_count_probe_noise_min_observations,
+                layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
+                layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
+                layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
+                cuda_allocator_reserve_gib=float(self.plastic__cuda_allocator_reserve_gib),
+                geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
+                freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
+                initial_active_layers=self.plastic__initial_active_layers,
+            )
+            # ^^^ THOG
         # ^^^ THOG
         return identity
 
@@ -821,4 +842,21 @@ class TrainingConfig:
 # f"got {self.plastic__layer_count_hold_updates!r}"
 # "plastic__layer_count_hold_updates": self.plastic__layer_count_hold_updates,
 # "count_hold_updates": self.plastic__layer_count_hold_updates,
+# ^^^ THOG
+
+# vvv THOG retired short PLASTIC identity aliases preserved for source history
+# "version": PLASTIC_DEPTH_VERSION,
+# "maximum_layers": self.n_layer,
+# "initial_active_layers": self.plastic__initial_active_layers,
+# "learn_layer_count": self.plastic__do_learn_layer_count,
+# "sampling_initialisation": self.plastic__layer_sampling_initialisation,
+# "count_objective": self.plastic__layer_count_objective,
+# "count_update_brake": self.plastic__layer_count_update_brake,
+# "probe_noise_window": self.plastic__layer_count_probe_noise_window,
+# "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+# "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
+# "count_cost_weight": float(self.plastic__layer_count_cost_weight),
+# "memory_budget_gib": self.plastic__layer_memory_budget_gib,
+# "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+# "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
 # ^^^ THOG
