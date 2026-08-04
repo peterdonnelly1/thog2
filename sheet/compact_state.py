@@ -5,6 +5,7 @@ from typing import Any, Mapping, Tuple
 
 import torch
 
+# from .checkpoints import strip_compiled_prefix
 # vvv THOG inference must reject unsafe PLASTIC geometry before model construction or state application
 from .checkpoints import strip_compiled_prefix, validate_plastic_depth_checkpoint_format
 # ^^^ THOG
