@@ -1,14 +1,14 @@
 # vvv THOG temporary gated applier for the tested active-prefix phase
-# Triggered after the workflow existed on PLASTIC_DEPTH.
 name: Apply tested PLASTIC active-prefix phase
 
 on:
-  push:
+  pull_request:
     branches:
-      - PLASTIC_DEPTH
-    paths:
-      - .github/workflows/apply_active_prefix_patch.yml
-      - docs/active_prefix.patch.gz.b64
+      - HYPERBLOCK_LOOP_ENHANCEMENTS
+    types:
+      - synchronize
+      - reopened
+      - ready_for_review
 
 permissions:
   contents: write
@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   apply-test-commit:
+    if: github.event.pull_request.head.ref == 'PLASTIC_DEPTH'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -114,11 +115,12 @@ jobs:
           set -euo pipefail
           python tests/plastic_depth_ddp_check.py
 
-      - name: Commit tested phase and remove temporary transport files
+      - name: Commit tested phase and restore normal CI
         run: |
           set -euo pipefail
           rm docs/active_prefix.patch.gz.b64
           rm .github/workflows/apply_active_prefix_patch.yml
+          git checkout f0792bac63ffae8230881efb8e01da243af87a47 -- .github/workflows/plastic_depth_ci.yml
           git add -A
           git diff --cached --check
           git config user.name github-actions[bot]
