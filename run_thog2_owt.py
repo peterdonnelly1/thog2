@@ -120,7 +120,7 @@ _depth_materialisation_runtime._materialisation_interval_field = _materialisatio
 _stage6.format_progress_line = _format_progress_line_with_materialisation_last
 # ^^^ THOG
 
-# vvv THOG expose only optimisation controls that can affect the selected geometry and suppress inactive optional-run rows
+# vvv THOG restore the full startup report and give PLASTIC DEPTH its own untruncated hyper-parameter section
 def _depth_matrix_fallback(trajectory: Any) -> Optional[DepthTrajectory]:
     if isinstance(trajectory, DepthTrajectory):
         return trajectory
@@ -131,32 +131,6 @@ def _depth_matrix_fallback(trajectory: Any) -> Optional[DepthTrajectory]:
         return nested
     return None
 
-
-def _optimisation_fields(config: Any, trainer: Any) -> list[str]:
-    fields: list[str] = []
-    if config.model_type == "sheet":
-        model = trainer.raw_model
-        model_config = model.config
-        trajectory = getattr(model, "trajectory", None)
-        fields.append(f"fast_discard={model_config.fast_discard}")
-        if config.geometry_preset != _core.GEOMETRY_PRESET_DEPTH:                                                                                             # <<< THOG suppress semantic-QKV bypass reporting only for DEPTH geometry
-            fields.append(f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}")
-        if hasattr(trajectory, "vectorise_per_head_materialisation"):
-            fields.append(f"vectorise_per_head={model_config.vectorise_per_head_materialisation}")
-        if model._supports_direct_factorised_mlp():
-            fields.append(f"direct_factorised_mlp={model_config.direct_factorised_mlp}")
-        fields.append(f"activation_checkpointing={config.activation_checkpointing}")
-        if isinstance(trajectory, DepthTrajectory):
-            fields.append(f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
-        depth_fallback = _depth_matrix_fallback(trajectory)
-        if depth_fallback is not None:
-            fields.append(f"depth_materialisation_matmul={bool(depth_fallback.depth_materialisation_matmul)}")
-        return fields
-    fields.append(f"activation_checkpointing={config.activation_checkpointing}")
-    return fields
-
-
-# vvv THOG aligned optimizer and LR-policy summaries replace the optimizer factory's unaligned one-off print
 
 def _optimizer_summary(trainer: Any) -> str:
     optimizer = trainer.optimizer
@@ -181,6 +155,56 @@ def _lr_decay_summary(config: Any, trainer: Any) -> str:
     return f"{decay_type} (decay_rate={decay_rate:.6g}, min_lr={config.min_lr:.3e}, fully_decayed_step={trainer_config.decay_updates})"
 
 
+def _startup_bool(value: Any) -> str:
+    return "true" if bool(value) else "false"
+
+
+def _startup_optional(value: Any) -> str:
+    return "None" if value is None else str(value)
+
+
+def _startup_float(value: Any) -> str:
+    return "None" if value is None else f"{float(value):g}"
+
+
+def _startup_public_indices(values: Any) -> str:
+    return ", ".join(f"{float(value):.1f}" for value in values)
+
+
+def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
+    if not bool(config.plastic__enabled):
+        return
+    report = trainer.parameter_report.get("plastic_depth", {})
+    current_layers = int(report.get("active_layers", config.plastic__initial_active_layers))
+    public_coordinates = tuple(report.get("active_public_coordinates", ()))
+    full_coordinates = tuple(report.get("public_coordinates", ()))
+    print("plastic", flush=True)
+    _core._print_model_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
+    _core._print_model_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
+    _core._print_model_option("current active layers:", f"{current_layers}/{config.n_layer}")
+    _core._print_model_option("plastic__layers_to_sample:", _startup_optional(config.plastic__layers_to_sample))
+    _core._print_model_option("plastic__do_learn_layer_count:", _startup_bool(config.plastic__do_learn_layer_count))
+    _core._print_model_option("plastic__initial_layer_count:", _startup_optional(config.plastic__initial_layer_count))
+    _core._print_model_option("plastic__initial_active_layers:", str(config.plastic__initial_active_layers))
+    _core._print_model_option("plastic__max_permitted_layers:", _startup_optional(config.plastic__max_permitted_layers))
+    _core._print_model_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
+    _core._print_model_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
+    _core._print_model_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
+    _core._print_model_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))
+    _core._print_model_option("plastic__layer_count_probe_noise_min_observations:", str(config.plastic__layer_count_probe_noise_min_observations))
+    _core._print_model_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
+    _core._print_model_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
+    _core._print_model_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
+    _core._print_model_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))
+    _core._print_model_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
+    _core._print_model_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
+    if public_coordinates:
+        _core._print_model_option("initial layer indices:", _startup_public_indices(public_coordinates))
+    if full_coordinates and full_coordinates != public_coordinates:
+        _core._print_model_option("capacity layer indices:", _startup_public_indices(full_coordinates))
+    print(flush=True)
+
+
 def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None:
     report = trainer.parameter_report
     persistent = int(report["persistent_parameters"])
@@ -193,14 +217,37 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
     _core._print_model_option("optimiser:", _optimizer_summary(trainer))
     _core._print_model_option("LR decay:", _lr_decay_summary(config, trainer))
     _core._print_model_option("optimiser parms:", f"warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
-    if int(config.max_wall_minutes) > 0:
-        _core._print_model_option("wall time stop:", f"max_wall_minutes={config.max_wall_minutes}")
+    _core._print_model_option("wall stop:", f"max_wall_minutes={config.max_wall_minutes}")
     _core._print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
     _core._print_model_option("batches:", f"micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}")
-    if config.layer_dropout_enabled:
-        _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
-    _core._print_model_option("optimisations:", "  ".join(_optimisation_fields(config, trainer)))
+    _core._print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
+    if config.model_type == "sheet":
+        model = trainer.raw_model
+        model_config = model.config
+        trajectory = getattr(model, "trajectory", None)
+        depth_fallback = _depth_matrix_fallback(trajectory)
+        depth_materialisation_matmul = None if depth_fallback is None else bool(depth_fallback.depth_materialisation_matmul)
+        _core._print_model_option(
+            "execution:",
+            f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  "
+            f"vectorise_per_head={getattr(model_config, 'vectorise_per_head_materialisation', False)}  "
+            f"direct_factorised_mlp={getattr(model_config, 'direct_factorised_mlp', False)}  "
+            f"direct_factorised_hyperblock_mlp={getattr(model_config, 'direct_factorised_hyperblock_mlp', False)}  "
+            f"activation_checkpointing={config.activation_checkpointing}  "
+            f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}  "
+            f"depth_materialisation_matmul={depth_materialisation_matmul}",
+        )
+        hyperblock = report.get("hyperblock")
+        if isinstance(hyperblock, dict):
+            plan = hyperblock["plan"]
+            _core._print_model_option(
+                "HYPERBLOCK:",
+                f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  "
+                f"coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x  "
+                f"loops={hyperblock['loop_count']}  loop_decay={hyperblock['loop_decay']:.6g}",
+            )
     print(flush=True)
+    _print_plastic_depth_section(config, trainer)
 # ^^^ THOG
 
 
