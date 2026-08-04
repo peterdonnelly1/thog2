@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-04 21:42 AEST
+Last updated: 2026-08-04 21:57 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `de57d61ff6961ae2f330c07618f5d212ea24ab1a`
+- Current verified branch head before this log update: `e0d0a3fb80ced2b2c636c3bc3fb80d7ceb778282`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -30,13 +30,16 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - [x] Every generated coefficient family transformed and field-verified before commit
 - [x] Geometry and coefficient version checks prevent stale prepared transitions from committing
 - [x] Gauge preparation remains non-mutating; count/coefficients change only in the commit operation
+- [x] Stock PyTorch AdamW coefficient-state migration without reimplementing AdamW
+- [x] First moments transformed with the inverse-transpose covector rule
+- [x] Diagonal second moments and optional AMSGrad maxima transformed with the squared-covector approximation
+- [x] Step counters retained and included in stale-state detection
+- [x] Non-finite and ill-conditioned migrations select a logged zero-moment reset fallback before model mutation
 
 ## Validation evidence
 
 ### Active-prefix checkpoint `b7231c2`
 
-- payload SHA verification and `git apply --check`: passed
-- Python compile and shell syntax: passed
 - focused PLASTIC/gauge/interface/cache tests: 69 passed
 - affected CPU regression tests: 160 passed
 - parameterised subtests: 200 passed
@@ -44,19 +47,23 @@ The earlier log incorrectly described an unpushed local implementation as comple
 
 ### Atomic gauge-transition checkpoint `de57d61f`
 
-The gated applier that produced the commit ran, before committing:
+The gated applier verified patch SHA, compile/shell syntax, focused and affected tests, and two-rank CPU DDP before commit.
 
-- patch SHA verification and `git apply --check`
+### AdamW-state checkpoint `e0d0a3fb`
+
+The gated applier verified the patch SHA and ran before committing:
+
 - Python compile and shell syntax
-- focused PLASTIC/gauge/interface/cache tests
-- affected DEPTH and trainer regressions
-- two-rank CPU DDP check
+- 103 focused/affected CPU tests
+- 10 direct AdamW-state tests within that set
+- two-rank CPU DDP with zero model-state and optimiser-state divergence
 
-Ordinary branch CI is being retriggered by this log commit so the exact post-transition head receives a normal validation artifact.
+Direct coverage includes transformed first/second moments, AMSGrad, retained steps, uninitialised state, unaffected-state identity, stale-state aborts, non-AdamW rejection, reset fallback and a subsequent unmodified stock AdamW step.
+
+This log commit retriggers ordinary hosted validation for the exact post-AdamW branch head.
 
 ## Remaining revised implementation
 
-- [ ] Stock AdamW state migration with logged reset fallback
 - [ ] Shared inline N-1/N/N+1 first-microstep probe
 - [ ] MAD significance gate and five-update count brake
 - [ ] Universal VRAM reserve and recoverable upward-probe fallback
@@ -69,7 +76,7 @@ Ordinary branch CI is being retriggered by this log commit so the exact post-tra
 
 ## Current exact task
 
-Integrate the atomic model transition with stock PyTorch AdamW state. Transform coefficient first moments with the inverse-transpose covector rule, approximate diagonal second moments with the elementwise-squared inverse-transpose rule, retain step counters, and use a logged affected-state reset fallback for non-finite, singular, ill-conditioned or verification-failing migration. Do not reimplement AdamW and do not enable runtime count transitions until this policy passes direct tests.
+Replace the external separate-forward layer-count controller with a shared first-microstep transformer chain that evaluates exactly N-1, N and N+1 depth checkpoints on the same examples and sampled token positions. Candidate heads are detached/no-grad; after selection, run one normal grad-bearing head from the selected hidden state and backpropagate through only the selected prefix. Use the selected count for all remaining accumulation microsteps. Do not yet add the MAD gate or count brake beyond the minimum plumbing required for deterministic selection.
 
 ## Known issues to carry forward
 
@@ -77,12 +84,12 @@ Integrate the atomic model transition with stock PyTorch AdamW state. Transform 
 - Re-gauge preparation may temporarily duplicate coefficient storage.
 - Count-dependent residual-addition scaling remains a separate architecture question.
 - Old globally normalised phantom-lattice checkpoints are geometrically ambiguous.
-- A failed optimiser-state migration must not roll back or approximate the already verified coefficient transform silently; it must select and log the defined reset fallback before atomic commit.
+- Upward-probe OOM recovery and DDP feasibility are separate from the core shared-chain implementation and remain pending.
 
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `de57d61f` or a documented descendant.
-3. Run the focused PLASTIC/gauge/interface/cache command before new work.
+2. Fetch `PLASTIC_DEPTH` and verify `e0d0a3fb` or a documented descendant.
+3. Run the focused PLASTIC/gauge/optimizer/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.
