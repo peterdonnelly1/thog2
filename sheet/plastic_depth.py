@@ -11,6 +11,10 @@ from torch.nn import functional as F
 
 
 PLASTIC_DEPTH_VERSION = "plastic_depth_v0_3"
+# vvv THOG checkpoint geometry discriminator separates active-prefix/gauge semantics from the unsafe v0.1 phantom lattice
+PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION = "plastic_depth_active_prefix_gauge_v1"
+PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION = "plastic_depth_v0_1"
+# ^^^ THOG
 PLASTIC_LAYER_SAMPLING_INITIALISATIONS = ("equidistant", "random")
 PLASTIC_LAYER_COUNT_OBJECTIVES = (
     "lowest_loss",
@@ -656,6 +660,10 @@ def choose_plastic_depth_candidate(
 
 __all__ = [
     "PLASTIC_DEPTH_VERSION",
+    # vvv THOG export checkpoint-format compatibility constants
+    "PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION",
+    "PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION",
+    # ^^^ THOG
     "plastic_depth_identity_metadata",
     "PLASTIC_LAYER_COUNT_OBJECTIVES",
     "PLASTIC_LAYER_SAMPLING_INITIALISATIONS",
