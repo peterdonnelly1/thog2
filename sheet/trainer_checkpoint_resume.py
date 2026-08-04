@@ -7,13 +7,16 @@ from typing import Any, Dict, Mapping, Optional, Union
 
 from torch import Tensor
 
+# vvv THOG import the pre-state PLASTIC checkpoint-format guard with the existing checkpoint primitives
 from .checkpoints import (
     load_payload,
     optimizer_group_names,
     restore_rng_state,
     strip_compiled_prefix,
     validate_compatibility,
+    validate_plastic_depth_checkpoint_format,
 )
+# ^^^ THOG
 from .compact_identity import (
     BASIS_FAMILY_CHEBYSHEV,
     GEOMETRY_PRESET_LEGACY_SHEET_COL,
@@ -262,6 +265,9 @@ class TrainerCheckpointResumeMixin:
                 f"{CHECKPOINT_SCHEMA_VERSION}, got {payload.get('schema_version')!r}"
             )
 
+        # vvv THOG reject ambiguous or v0.1 PLASTIC geometry before TrainingConfig, model, or optimizer restoration
+        validate_plastic_depth_checkpoint_format(payload)
+        # ^^^ THOG
         checkpoint_config = TrainingConfig(**payload["trainer_config"])
         if expected_config is not None:
             validate_compatibility(payload, expected_config)

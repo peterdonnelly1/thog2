@@ -10,6 +10,14 @@ import torch
 from torch import Tensor
 
 from .model import SheetGPT
+# vvv THOG checkpoint-format guard constants
+from .plastic_depth import PLASTIC_DEPTH_VERSION
+
+# vvv THOG checkpoint geometry discriminator separates active-prefix/gauge semantics from the unsafe v0.1 phantom lattice
+PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION = "plastic_depth_active_prefix_gauge_v1"
+PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION = "plastic_depth_v0_1"
+# ^^^ THOG
+# ^^^ THOG
 from .training_config import (
     CHECKPOINT_SCHEMA_VERSION,
     MODEL_COMPATIBILITY_FIELDS,
@@ -126,12 +134,91 @@ def _semantic_compact_identity(value: Any) -> Any:
 # ^^^ THOG
 
 
+
+# vvv THOG reject semantically unsafe PLASTIC geometry before constructing a trainer or applying model/optimizer state
+
+def _plastic_depth_checkpoint_identity(payload: Mapping[str, Any]) -> Any:
+    compact_identity = payload.get("compact_identity")
+    if not isinstance(compact_identity, Mapping):
+        return None
+    return compact_identity.get("plastic_depth")
+
+
+def _plastic_depth_checkpoint_is_enabled(payload: Mapping[str, Any]) -> bool:
+    trainer_config = payload.get("trainer_config")
+    if isinstance(trainer_config, Mapping):
+        enabled = trainer_config.get("plastic__enabled")
+        if enabled is False:
+            return False
+        if enabled is True:
+            return True
+    return isinstance(_plastic_depth_checkpoint_identity(payload), Mapping)
+
+
+def _unsafe_plastic_depth_checkpoint_message(detail: str) -> str:
+    return (
+        "unsafe PLASTIC DEPTH checkpoint geometry: "
+        f"{detail}; the old globally normalised phantom-lattice chart cannot "
+        "be converted safely to active-prefix gauge-preserving geometry"
+    )
+
+
+def validate_plastic_depth_checkpoint_format(payload: Mapping[str, Any]) -> None:
+    if not _plastic_depth_checkpoint_is_enabled(payload):
+        return
+
+    identity = _plastic_depth_checkpoint_identity(payload)
+    identity_version = identity.get("version") if isinstance(identity, Mapping) else None
+    format_version = payload.get("plastic_depth_checkpoint_format_version")
+
+    if format_version is not None:
+        if format_version != PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    f"unsupported format discriminator {format_version!r}"
+                )
+            )
+        if identity_version != PLASTIC_DEPTH_VERSION:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    "format discriminator and compact identity version disagree "
+                    f"({format_version!r} versus {identity_version!r})"
+                )
+            )
+        return
+
+    if identity_version == PLASTIC_DEPTH_VERSION:
+        return
+    if identity_version == PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION:
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                f"explicit legacy version {identity_version!r}"
+            )
+        )
+    if identity_version is None:
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                "enabled PLASTIC state has no trustworthy version discriminator"
+            )
+        )
+    raise ValueError(
+        _unsafe_plastic_depth_checkpoint_message(
+            f"unsupported compact identity version {identity_version!r}"
+        )
+    )
+
+
+# ^^^ THOG
+
 def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig) -> None:
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
         raise ValueError(
             f"checkpoint schema_version mismatch: expected {CHECKPOINT_SCHEMA_VERSION}, "
             f"got {payload.get('schema_version')!r}"
         )
+    # vvv THOG direct compatibility callers receive the same pre-state PLASTIC format guard as full resume
+    validate_plastic_depth_checkpoint_format(payload)
+    # ^^^ THOG
     checkpoint_signature = payload.get("compatibility_signature", {})
     expected_signature = expected.compatibility_signature()
     mismatches = []
