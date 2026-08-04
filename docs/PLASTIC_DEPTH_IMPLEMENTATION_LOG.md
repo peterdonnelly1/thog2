@@ -1,6 +1,6 @@
 # PLASTIC DEPTH implementation log
 
-Last updated: 2026-08-05 00:27 AEST
+Last updated: 2026-08-05 00:44 AEST
 
 ## Critical correction retained
 
@@ -12,7 +12,7 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - Working branch: `PLASTIC_DEPTH`
 - Pull request: #29, draft
 - Base: `HYPERBLOCK_LOOP_ENHANCEMENTS`
-- Current verified branch head before this log update: `5b7ae45c7e6a8c918464f9153dd71ed45fd7dffd`
+- Current verified branch head before this log update: `612e28f7aeec38621973aac4625246cadc79318d`
 - Requirements target: PLASTIC DEPTH specification v0.3
 - Implementation plan: THOG2 PLASTIC DEPTH Implementation and Testing Plan v0.1
 
@@ -60,6 +60,11 @@ The earlier log incorrectly described an unpushed local implementation as comple
 - [x] `_L_dyn_` is emitted only for learned-count PLASTIC runs
 - [x] Fixed-count PLASTIC and disabled runs retain numeric `_L_<count>_` identity
 - [x] Descriptor post-processing accepts both numeric and dynamic PLASTIC layer identity
+- [x] Successful count transitions sample generated `attention_query_weight[0,0]` across the committed active chart
+- [x] Sampled values remain transient console state and never enter metrics, telemetry or checkpoints
+- [x] Transition optimizer rows are forced without an extra standalone line
+- [x] Samples are emitted once only and never repeated on later training or validation rows
+- [x] UI formatting uses two decimals normally and scientific notation when magnitude requires it
 
 ## Validation evidence
 
@@ -131,14 +136,28 @@ Hosted recovery runners repeated all phase gates and published clean commit `1c9
 - THOG source-history audit passed with zero violations
 - direct identity tests prove fixed PLASTIC remains numeric, learned PLASTIC uses `L_dyn`, disabled runs are unchanged, internal sampling seed is absent, and retired checkpoint aliases compare semantically
 
-Hosted recovery runners repeated all phase gates and published clean commit `5b7ae45c`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
+Hosted recovery runners repeated all phase gates and published clean commit `5b7ae45c`. Ordinary hosted CI on descendant `e29b6491` passed focused CPU, affected regressions, two-rank DDP, source-history audit and exact head-versus-base comparison.
+
+### Transition-only sampled-value diagnostic phase
+
+- 139 focused PLASTIC/gauge/optimizer/inline/controller/CUDA/interface/trainer/checkpoint/identity/console tests passed
+- 141 affected CPU regression tests passed
+- 200 parameterised subtests passed
+- two-rank CPU DDP passed with zero model-state and optimizer-state divergence
+- direct integration proves samples are computed after the atomic chart transition and match direct semantic materialisation exactly
+- direct console tests prove a non-interval transition forces one ordinary optimizer row, consumes samples once, formats compactly, and does not repeat them on validation
+- metrics and checkpoint surfaces remain unchanged
+- Python compile, shell syntax and `git diff --check` passed
+- THOG source-history audit passed with zero violations
+
+Hosted recovery runners repeated all phase gates and published clean commit `612e28f7`. This log-only descendant triggers ordinary hosted head-versus-base validation for the published tree.
 
 ## Remaining revised implementation
 
 - [x] MAD significance gate and five-update count brake
 - [x] Universal VRAM reserve and recoverable upward-probe fallback
 - [x] Uniform public `plastic__` controls and `_L_dyn_` identity
-- [ ] Sampled-value transition diagnostic
+- [x] Sampled-value transition diagnostic
 - [ ] Checkpoint versioning and rejection of ambiguous v0.1 geometry
 - [ ] Broad head-versus-base regression and final hosted CI
 - [ ] GPU smoke handoff
@@ -146,20 +165,19 @@ Hosted recovery runners repeated all phase gates and published clean commit `5b7
 
 ## Current exact task
 
-Implement the transition-only sampled-value console diagnostic. After a successful PLASTIC count transition, sample the agreed fixed generated scalar across the active layer positions and append one `sampled_values = [...]` field to that optimizer progress row only. Use two decimal places normally and scientific notation when needed. Force the transition row to print even when it is not on the ordinary logging interval, but do not emit an extra standalone line or repeat the values on later training or validation rows. Preserve non-PLASTIC and no-transition console output exactly. Do not yet change checkpoint-version rejection semantics.
+Complete PLASTIC checkpoint versioning and rejection of ambiguous v0.1 geometry. New checkpoints must identify the active-prefix/gauge-preserving format unambiguously. Resume must continue to accept current v0.3 checkpoints and the retired short-key v0.3 identity aliases already covered by semantic normalization. Any enabled PLASTIC checkpoint that explicitly identifies the old globally normalised `plastic_depth_v0_1` maximum-lattice geometry, or contains the old PLASTIC geometry without a trustworthy version discriminator, must fail before model or optimizer state is applied, with a precise explanation that its phantom-lattice chart cannot be converted safely. Disabled/non-PLASTIC legacy checkpoints must remain unaffected. Do not silently reinterpret or approximate-convert ambiguous geometry.
 
 ## Known issues to carry forward
 
 - AdamW diagonal second-moment state cannot exactly represent covariance introduced by coefficient mixing.
 - Re-gauge preparation may temporarily duplicate coefficient storage.
 - Count-dependent residual-addition scaling remains a separate architecture question.
-- Old globally normalised phantom-lattice checkpoints are geometrically ambiguous.
 - Selected N+1 head/backward OOM after feasibility selection remains fatal; only the detached upward probe is recoverable.
 
 ## Takeover instructions
 
 1. Treat this file as authoritative.
-2. Fetch `PLASTIC_DEPTH` and verify `5b7ae45c` or a documented descendant.
+2. Fetch `PLASTIC_DEPTH` and verify `612e28f7` or a documented descendant.
 3. Run the focused PLASTIC/gauge/optimizer/inline/interface/cache command before new work.
 4. Continue only the current exact task.
 5. Record each tested and pushed phase here before proceeding.
