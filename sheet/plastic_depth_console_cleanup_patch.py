@@ -10,7 +10,6 @@ from . import stage6_trainer as _stage6
 
 
 _GREEN = "\033[1;38;2;0;255;0m"
-_RED = "\033[1;31m"
 _RESET = "\033[0m"
 
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
@@ -21,8 +20,6 @@ def _colour_probe_loss(value: str, relation: Optional[float]) -> str:
         return value
     if relation > 0.0:
         return f"{_GREEN}{value}{_RESET}"
-    if relation < 0.0:
-        return f"{_RED}{value}{_RESET}"
     return value
 
 
@@ -65,18 +62,29 @@ def _strip_loss_gain(line: str) -> str:
     )
 
 
+def _strip_sampled_values(line: str) -> str:
+    return re.sub(
+        r"\s+sampled_values = \[[^\]]*\]",
+        "",
+        line,
+    )
+
+
 def _format_progress_line_with_plastic_console_cleanup(run_id: str, event: str, payload: dict[str, Any]) -> str:
     line = _ORIGINAL_FORMAT_PROGRESS_LINE(run_id, event, payload)
     line = _strip_loss_gain(line)
+    line = _strip_sampled_values(line)
     line = line.replace("current_layer_count =", "layers =")
-    line = line.replace("\tlayer indices =", "\tsample_pos_100 =")
-    line = line.replace("  layer indices =", "  sample_pos_100 =")
+    line = line.replace("\tlayer indices =", "\tsample_layer =")
+    line = line.replace("  layer indices =", "  sample_layer =")
+    line = line.replace("\tsample_pos_100 =", "\tsample_layer =")
+    line = line.replace("  sample_pos_100 =", "  sample_layer =")
     line = re.sub(
         r"probe_losses \[(?P<label>[^\]]+)\] = \[(?P<body>[^\]]+)\]",
         _colour_probe_losses,
         line,
     )
-    return line
+    return line.rstrip()
 
 
 _stage6.format_progress_line = _format_progress_line_with_plastic_console_cleanup
