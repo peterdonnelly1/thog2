@@ -3,6 +3,40 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# vvv THOG accept underscore-form long options directly in the canonical wrapper while preserving established hyphen aliases
+THOG2_UNDERSCORE_NORMALIZED_ARGS=()
+while (( $# > 0 )); do
+  case "$1" in
+    --plastic_layer_count_probe_interval|--plastic-layer-count-probe-interval)
+      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
+      export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2"
+      shift 2
+      ;;
+    --plastic_layer_count_probe_interval=*|--plastic-layer-count-probe-interval=*)
+      export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="${1#*=}"
+      shift
+      ;;
+    --*=*)
+      THOG2_UNDERSCORE_NAME="${1%%=*}"
+      THOG2_UNDERSCORE_VALUE="${1#*=}"
+      THOG2_UNDERSCORE_NAME="${THOG2_UNDERSCORE_NAME//_/-}"
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${THOG2_UNDERSCORE_NAME}=${THOG2_UNDERSCORE_VALUE}")
+      shift
+      ;;
+    --*)
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${1//_/-}")
+      shift
+      ;;
+    *)
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${THOG2_UNDERSCORE_NORMALIZED_ARGS[@]}"
+unset THOG2_UNDERSCORE_NORMALIZED_ARGS THOG2_UNDERSCORE_NAME THOG2_UNDERSCORE_VALUE
+# ^^^ THOG
+
 # vvv THOG expose granular pure-DEPTH materialisation controls; matmul and profiling are explicit default-off options
 # THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"                                                # <<< THOG preserved previous default-on policy
 THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
