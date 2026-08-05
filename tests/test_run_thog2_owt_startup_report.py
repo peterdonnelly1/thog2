@@ -103,7 +103,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     initial_row = next(line for line in rows if "initial layer indices:" in line)
     capacity_row = next(line for line in rows if "capacity layer indices:" in line)
     assert min_observation_row.endswith("   6")
-    assert initial_row.endswith("  1.0,  15.1,  29.3,  43.4")
-    assert capacity_row.endswith("  1.0,  15.1,  29.3,  43.4,  57.6")
+    assert initial_row.endswith("1.0,  15.1,  29.3,  43.4")
+    assert capacity_row.endswith("1.0,  15.1,  29.3,  43.4,  57.6")
     assert initial_row.index("1.0") == capacity_row.index("1.0")
 # ^^^ THOG
