@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Iterable, List, Optional, Sequence, Tuple
+import sys
+from typing import List, Optional, Sequence
 
 
 _PROBE_INTERVAL_ENVIRONMENT_KEY = "THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL"
@@ -55,10 +56,9 @@ def _extract_probe_interval(arguments: Sequence[str]) -> List[str]:
     return remaining
 
 
-def _normalise_arguments(arguments: Optional[Sequence[str]]) -> Optional[List[str]]:
-    if arguments is None:
-        return None
-    return _extract_probe_interval(list(arguments))
+def _normalise_arguments(arguments: Optional[Sequence[str]]) -> List[str]:
+    source = sys.argv[1:] if arguments is None else list(arguments)
+    return _extract_probe_interval(source)
 
 
 def _parse_args_with_underscore_aliases(self: argparse.ArgumentParser, args: Optional[Sequence[str]] = None, namespace=None):
