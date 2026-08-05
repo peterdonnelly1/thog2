@@ -258,6 +258,8 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__layer_sampling_initialisation:",
     "plastic__layer_count_objective:",
     "plastic__layer_count_update_brake:",
+    "plastic__layer_count_probe_radius:",
+    "plastic__layer_count_max_step:",
     "plastic__layer_count_probe_noise_window:",
     "plastic__layer_count_probe_noise_min_observations:",
     "plastic__layer_count_probe_noise_lambda:",
@@ -283,6 +285,8 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     current_layers = int(report.get("active_layers", config.plastic__initial_active_layers))
     public_coordinates = tuple(report.get("active_sample_layer_coordinates", report.get("active_public_coordinates", ())))
     full_coordinates = tuple(report.get("sample_layer_coordinates", report.get("public_coordinates", ())))
+    probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))
+    max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
     _print_plastic_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
@@ -295,6 +299,8 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
     _print_plastic_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
     _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
+    _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))
+    _print_plastic_option("plastic__layer_count_max_step:", str(max_step))
     _print_plastic_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))
     _print_plastic_option("plastic__layer_count_probe_noise_min_observations:", str(config.plastic__layer_count_probe_noise_min_observations))
     _print_plastic_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
