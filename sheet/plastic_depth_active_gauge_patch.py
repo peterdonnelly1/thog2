@@ -77,14 +77,36 @@ def _prepare_plastic_depth_count_transition_active_prefix(
     if geometry.new_active_layers == geometry.previous_active_layers:
         raise ValueError("model-wide PLASTIC DEPTH re-gauge requires a count change")
 
-    transform = stabilized_chebyshev_affine_change_of_chart(
-        self.plastic_depth_inverse_r.to(dtype=torch.float64),
-        old_from_new_scale=geometry.old_from_new_scale,
-        old_from_new_shift=geometry.old_from_new_shift,
-    )
-    condition_number = float(torch.linalg.cond(transform).item())
-    if not math.isfinite(condition_number):
-        raise RuntimeError("PLASTIC DEPTH gauge transform is singular or non-finite")
+    # transform = stabilized_chebyshev_affine_change_of_chart(
+    #     self.plastic_depth_inverse_r.to(dtype=torch.float64),
+    #     old_from_new_scale=geometry.old_from_new_scale,
+    #     old_from_new_shift=geometry.old_from_new_shift,
+    # )
+    # condition_number = float(torch.linalg.cond(transform).item())
+    # if not math.isfinite(condition_number):
+    #     raise RuntimeError("PLASTIC DEPTH gauge transform is singular or non-finite")
+    # vvv THOG keep the tiny QR chart solve and condition estimate off CUDA; any control-plane linalg failure degrades to geometry-only rather than killing training
+    try:
+        inverse_r_cpu = self.plastic_depth_inverse_r.detach().to(
+            device="cpu",
+            dtype=torch.float64,
+        )
+        transform_cpu = stabilized_chebyshev_affine_change_of_chart(
+            inverse_r_cpu,
+            old_from_new_scale=geometry.old_from_new_scale,
+            old_from_new_shift=geometry.old_from_new_shift,
+        )
+        condition_number = float(torch.linalg.cond(transform_cpu).item())
+        if not math.isfinite(condition_number):
+            raise RuntimeError("PLASTIC DEPTH gauge transform is singular or non-finite")
+        transform = transform_cpu.to(device=self.plastic_depth_inverse_r.device)
+    except RuntimeError:
+        return _geometry_only_plastic_depth_transition(
+            self,
+            geometry,
+            verification_coordinate_count=int(geometry.new_active_layers),
+        )
+    # ^^^ THOG
 
     verification_new = _active_prefix_verification_coordinates(self, geometry)
     verification_old = (
