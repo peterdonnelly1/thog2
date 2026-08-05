@@ -5,7 +5,7 @@ from sheet.model import SheetGPTConfig
 from sheet.training_model import TrainingSheetGPT
 
 
-def test_learned_count_growth_verifies_active_prefix_not_dormant_probe() -> None:
+def test_learned_count_growth_verifies_only_active_prefix_samples() -> None:
     model = TrainingSheetGPT(
         SheetGPTConfig(
             block_size=8,
@@ -32,5 +32,5 @@ def test_learned_count_growth_verifies_active_prefix_not_dormant_probe() -> None
 
     assert transition.geometry.previous_active_layers == 2
     assert transition.geometry.new_active_layers == 3
-    assert transition.verification_coordinate_count >= 3
+    assert transition.verification_coordinate_count == 3
 # ^^^ THOG
