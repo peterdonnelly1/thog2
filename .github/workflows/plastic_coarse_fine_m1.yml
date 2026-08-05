@@ -27,6 +27,37 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Repair M1 transformation anchor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_plastic_coarse_fine_m1.py')
+          text = path.read_text(encoding='utf-8')
+          old = """    replace_once(
+                  path,
+                  '    \"plastic__layer_count_update_brake\",\\n',
+                  '    \"plastic__layer_count_update_brake\",\\n'
+                  '    \"plastic__layer_count_probe_interval\",\\n'
+                  '    \"plastic__layer_count_probe_radius\",\\n'
+                  '    \"plastic__layer_count_max_step\",\\n',
+              )
+          """
+          new = """    replace_once(
+                  path,
+                  '    \"plastic__layer_count_update_brake\",\\n'
+                  '    \"plastic__layer_count_probe_noise_window\",\\n',
+                  '    \"plastic__layer_count_update_brake\",\\n'
+                  '    \"plastic__layer_count_probe_interval\",\\n'
+                  '    \"plastic__layer_count_probe_radius\",\\n'
+                  '    \"plastic__layer_count_max_step\",\\n'
+                  '    \"plastic__layer_count_probe_noise_window\",\\n',
+              )
+          """
+          if old not in text:
+              raise SystemExit('M1 anchor repair target not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply M1 source integration when absent
         run: |
           if ! grep -q 'plastic__coarse_phase: str = "disabled"' sheet/training_config.py; then
@@ -67,6 +98,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
+            tools/apply_plastic_coarse_fine_m1.py \
             sheet/plastic_depth.py \
             sheet/training_config.py \
             sheet/run_config.py \
