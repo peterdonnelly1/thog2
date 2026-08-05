@@ -31,6 +31,38 @@ _lookahead.PlasticDepthCudaAllocatorReserve = _cuda_reserve_proxy
 # ^^^ THOG
 
 
+# vvv THOG learned-count growth has exactly one pre-made dormant probe; wider radius is a shrink-lookahead only
+def _single_probe_growth_counts(
+    current: int,
+    maximum: int,
+    radius: int,
+    max_step: int,
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    if int(max_step) != 1:
+        raise ValueError("PLASTIC DEPTH count transitions currently require --plastic-layer-count-max-step 1")
+    decision_counts = {int(current)}
+    execution_counts = {int(current)}
+    if int(current) - int(radius) >= 1:
+        decision_counts.add(int(current) - int(radius))
+        execution_counts.add(int(current) - 1)
+    if int(current) < int(maximum):
+        decision_counts.add(int(current) + 1)
+        execution_counts.add(int(current) + 1)
+    return tuple(sorted(decision_counts)), tuple(sorted(execution_counts))
+
+
+def _config_max_step(config: Any) -> int:
+    resolved = int(getattr(config, "plastic__layer_count_max_step", 1))
+    if resolved != 1:
+        raise ValueError("PLASTIC DEPTH count transitions currently require plastic__layer_count_max_step=1")
+    return 1
+
+
+_lookahead._lookahead_counts = _single_probe_growth_counts
+_lookahead._config_max_step = _config_max_step
+# ^^^ THOG
+
+
 def _history_key(current_count: int, offset: int) -> str:
     if offset == 0:
         raise ValueError("PLASTIC DEPTH history offset must be non-zero")
@@ -102,9 +134,9 @@ def choose_plastic_depth_count_with_exact_radius(
         raise ValueError("update_number must be positive")
     if update_brake < 0:
         raise ValueError("update_brake must be non-negative")
-    if isinstance(max_step, bool) or int(max_step) < 1:
-        raise ValueError("max_step must be a positive integer")
-    resolved_max_step = int(max_step)
+    if int(max_step) != 1:
+        raise ValueError("PLASTIC DEPTH count transitions currently require max_step=1")
+    resolved_max_step = 1
 
     score_by_count = _finite_score_by_count(score_report)
     current_score = score_by_count.get(current_count)
