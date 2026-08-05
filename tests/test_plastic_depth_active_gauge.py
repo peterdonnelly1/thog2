@@ -31,6 +31,13 @@ def _model() -> TrainingSheetGPT:
     )
 
 
+def _active_layer_count(model: TrainingSheetGPT) -> int:
+    lattice = model.trajectory.plastic_sampling
+    if lattice is None:
+        raise AssertionError("test model unexpectedly has no PLASTIC lattice")
+    return int(lattice.current_active_layers)
+
+
 def test_learned_count_growth_verifies_only_active_prefix_samples() -> None:
     model = _model()
 
@@ -51,7 +58,7 @@ def test_unstable_learned_count_growth_falls_back_to_geometry_only_transition() 
     transition = model.prepare_plastic_depth_count_transition(3)
     report = model.commit_plastic_depth_count_transition(transition)
 
-    assert model.plastic_depth_active_layer_count() == 3
+    assert _active_layer_count(model) == 3
     assert report["transformed_family_count"] in {0, 6}
     if report["transformed_family_count"] == 0:
         assert torch.isnan(torch.tensor(report["maximum_absolute_error"]))
