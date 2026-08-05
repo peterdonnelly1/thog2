@@ -17,15 +17,18 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 
+from . import depth_trajectory as _depth_trajectory
 from . import plastic_depth as _plastic_depth
 from . import plastic_depth_controller as _controller
 from . import plastic_depth_lookahead_patch as _lookahead
 from . import stage6_trainer as _stage6
 from . import trainer_step as _trainer_step
+from .basis import chebyshev_first_kind_basis, deterministic_reduced_qr, normalized_coordinates
 
 
 _FIXED_TIMING_FRACTION = 0.20
 _ORIGINAL_CHOOSE_CANDIDATE = _plastic_depth.choose_plastic_depth_candidate
+_ORIGINAL_DEPTH_TRAJECTORY_INIT = _depth_trajectory.DepthTrajectory.__init__
 _ORIGINAL_LATTICE_INIT = _plastic_depth.PlasticDepthSamplingLattice.__init__
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 
@@ -210,6 +213,28 @@ def _init_absolute_ruler(self: Any, *args: Any, **kwargs: Any) -> None:
 
 
 _plastic_depth.PlasticDepthSamplingLattice.__init__ = _init_absolute_ruler
+
+
+def _init_depth_trajectory_absolute(self: Any, *args: Any, **kwargs: Any) -> None:
+    _ORIGINAL_DEPTH_TRAJECTORY_INIT(self, *args, **kwargs)
+    if not bool(getattr(self, "plastic_enabled", False)) or self.plastic_sampling is None:
+        return
+    reference_sample_count = max(int(self.config.depth_order), int(self.config.n_layer))
+    reference_coordinates = normalized_coordinates(
+        reference_sample_count,
+        dtype=torch.float64,
+        device="cpu",
+    )
+    reference_raw = chebyshev_first_kind_basis(reference_coordinates, int(self.config.depth_order))
+    _, reference_r = deterministic_reduced_qr(reference_raw)
+    self._buffers["plastic_depth_inverse_r"] = torch.linalg.inv(reference_r)
+    self._buffers["plastic_depth_reference_sample_count"] = torch.tensor(
+        reference_sample_count,
+        dtype=torch.long,
+    )
+
+
+_depth_trajectory.DepthTrajectory.__init__ = _init_depth_trajectory_absolute
 
 
 # vvv THOG restore full exact-radius candidate semantics now that the future samples are real fixed-capacity coordinates
