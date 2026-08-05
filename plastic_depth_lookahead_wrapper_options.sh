@@ -1,0 +1,79 @@
+#!/bin/bash
+
+# vvv THOG
+# First-class canonical train_OWT.sh controls for PLASTIC DEPTH exact lookahead.
+# The public underscore spellings are normalized by train_OWT.sh before this
+# helper runs; established hyphen spellings remain accepted aliases.
+THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
+THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
+THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
+THOG2_PLASTIC_LOOKAHEAD_HELP=false
+THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR=false
+
+while (( $# > 0 )); do
+  if [[ "$THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR" == true ]]; then
+    THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1")
+    shift
+    continue
+  fi
+  case "$1" in
+    --plastic-layer-count-probe-radius)
+      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
+      THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2"
+      shift 2
+      ;;
+    --plastic-layer-count-probe-radius=*)
+      THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${1#*=}"
+      shift
+      ;;
+    --plastic-layer-count-max-step)
+      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
+      THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="$2"
+      shift 2
+      ;;
+    --plastic-layer-count-max-step=*)
+      THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      THOG2_PLASTIC_LOOKAHEAD_HELP=true
+      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+    --)
+      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("--")
+      THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR=true
+      shift
+      ;;
+    *)
+      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"
+unset THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR
+
+[[ "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" =~ ^[1-9][0-9]*$ ]] || {
+  echo "Invalid plastic_layer_count_probe_radius: $THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS; expected a positive integer." >&2
+  exit 2
+}
+[[ "$THOG2_PLASTIC_LAYER_COUNT_MAX_STEP" =~ ^[1-9][0-9]*$ ]] || {
+  echo "Invalid plastic_layer_count_max_step: $THOG2_PLASTIC_LAYER_COUNT_MAX_STEP; expected a positive integer." >&2
+  exit 2
+}
+
+export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
+export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP
+
+if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
+  printf '%s\n' \
+    'PLASTIC DEPTH lookahead:' \
+    "  --plastic_layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}   exact decision lookahead radius" \
+    "  --plastic_layer_count_max_step N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}      maximum committed count change per decision" \
+    '  Hyphenated aliases remain accepted.' \
+    ''
+fi
+unset THOG2_PLASTIC_LOOKAHEAD_HELP
+# ^^^ THOG
