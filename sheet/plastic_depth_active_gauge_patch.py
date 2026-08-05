@@ -19,7 +19,7 @@ from .plastic_depth_gauge import (
 )
 
 
-# vvv THOG learned-count grow transitions must verify the semantic active prefix, not the new dormant probe or out-of-chart interior points
+# vvv THOG learned-count transitions verify only realised active samples, not the dormant probe or synthetic interior chart points
 def _active_prefix_verification_coordinates(
     trajectory: DepthTrajectory,
     geometry: Any,
@@ -36,18 +36,7 @@ def _active_prefix_verification_coordinates(
     )
     active_public = public_coordinates[: geometry.new_active_layers]
     active_internal = public_to_internal_depth(active_public).to(dtype=torch.float64)
-    if active_internal.numel() <= 1:
-        return active_internal
-    active_min = float(active_internal[0].item())
-    active_max = float(active_internal[-1].item())
-    interior = torch.linspace(
-        active_min,
-        active_max,
-        5,
-        dtype=torch.float64,
-        device=active_internal.device,
-    )
-    return torch.unique(torch.cat((active_internal, interior)), sorted=True)
+    return torch.unique(active_internal, sorted=True)
 
 
 def _prepare_plastic_depth_count_transition_active_prefix(
