@@ -77,3 +77,7 @@ from . import plastic_depth_lookahead_patch as _plastic_depth_lookahead_patch
 # vvv THOG preserve existing test patchability while exact-radius lookahead remains a surgical overlay
 from . import plastic_depth_lookahead_fix_patch as _plastic_depth_lookahead_fix_patch
 # ^^^ THOG
+
+# vvv THOG finalise PLASTIC console labels, suppress loss-gain clutter and colour candidate probe losses
+from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_cleanup_patch
+# ^^^ THOG
