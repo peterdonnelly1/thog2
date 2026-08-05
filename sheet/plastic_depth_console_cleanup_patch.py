@@ -36,7 +36,9 @@ def _colour_probe_loss(value: str, relation: Optional[float]) -> str:
     return value
 
 
-def _colour_probe_losses(match: re.Match[str]) -> str:
+# def _colour_probe_losses(match: re.Match[str]) -> str:                                                                                                  # <<< THOG preserve absolute-edge probe rendering before delta display
+# vvv THOG preserve the superseded absolute-edge probe renderer for source history
+def _colour_probe_losses_absolute_legacy(match: re.Match[str]) -> str:
     label = match.group("label")
     body = match.group("body")
     values = [item for item in body.split(",")]
@@ -65,6 +67,47 @@ def _colour_probe_losses(match: re.Match[str]) -> str:
         for value, relation in zip(values, relations)
     ]
     return f"probe_losses [{label}] = [{','.join(coloured)}]"
+# ^^^ THOG
+
+
+# vvv THOG display L-1 and L+1 as candidate-minus-current deltas while retaining the absolute current-L loss
+def _format_probe_delta(value: Optional[float]) -> str:
+    if value is None:
+        return f"{'-':>7}"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>7}"
+    return f"{numeric:+7.3f}"
+
+
+def _colour_probe_losses(match: re.Match[str]) -> str:
+    label = match.group("label")
+    body = match.group("body")
+    values = [item for item in body.split(",")]
+    if len(values) != 3:
+        return f"probe_losses [{label}] = [{body}]"
+    numeric_values = []
+    for item in values:
+        text = item.strip()
+        if text == "-":
+            numeric_values.append(None)
+            continue
+        try:
+            numeric_values.append(float(text))
+        except ValueError:
+            numeric_values.append(None)
+    current = numeric_values[1]
+    if current is None:
+        return f"probe_losses [{label}] = [{body}]"
+    left_delta = None if numeric_values[0] is None else numeric_values[0] - current
+    right_delta = None if numeric_values[2] is None else numeric_values[2] - current
+    rendered = (
+        _colour_probe_loss(_format_probe_delta(left_delta), left_delta),
+        values[1],
+        _colour_probe_loss(_format_probe_delta(right_delta), right_delta),
+    )
+    return f"probe_losses [{label}] = [{','.join(rendered)}]"
+# ^^^ THOG
 
 
 def _colour_positive_score(value: str) -> str:
