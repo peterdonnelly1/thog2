@@ -158,6 +158,18 @@ def _materialisation_interval_field_five_decimals(trainer: Any) -> Optional[str]
     return f"{mean:.5f}±{standard_deviation:.5f}s/layer"
 
 
+def _move_sampled_values_to_progress_tail(line: str) -> str:
+    marker = "  sampled_values = ["
+    start = line.find(marker)
+    if start < 0:
+        return line
+    stop = line.find("]", start)
+    if stop < 0:
+        return line
+    field = line[start : stop + 1]
+    return f"{line[:start].rstrip()}{line[stop + 1:]}{field}"
+
+
 def _format_progress_line_with_materialisation_last(run_id: str, event: str, payload: Any) -> str:
     line = _plastic_progress_tail_tabs(
         _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT(run_id, event, payload)
@@ -167,10 +179,10 @@ def _format_progress_line_with_materialisation_last(run_id: str, event: str, pay
         line = line.replace("\tlayer indices = ", f"{change_z_field}\tlayer indices = ", 1)
     elif change_z_field is not None:
         line = f"{line}{change_z_field}"
-    if event != "optimizer_progress" or "materialisation_penalty" not in payload:
-        return line
-    field = f"  materialisation penalty={payload['materialisation_penalty']}"
-    return f"{line.replace(field, '')}{field}"
+    if event == "optimizer_progress" and "materialisation_penalty" in payload:
+        field = f"  materialisation penalty={payload['materialisation_penalty']}"
+        line = f"{line.replace(field, '')}{field}"
+    return _move_sampled_values_to_progress_tail(line)
 
 
 _depth_materialisation_runtime._materialisation_interval_field = _materialisation_interval_field_five_decimals
