@@ -65,3 +65,7 @@ _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"    
 # _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
 _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
 # ^^^ THOG
+
+# vvv THOG install active-prefix PLASTIC gauge verification after DEPTH trajectory classes are loaded
+from . import plastic_depth_active_gauge_patch as _plastic_depth_active_gauge_patch
+# ^^^ THOG
