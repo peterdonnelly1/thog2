@@ -266,8 +266,8 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__cuda_allocator_reserve_gib:",
     "plastic__geometry_learning_rate_multiplier:",
     "plastic__freeze_geometry_during_warmup:",
-    "initial layer indices:",
-    "capacity layer indices:",
+    "active sample_layer:",
+    "capacity sample_layer:",
 )
 _PLASTIC_STARTUP_LABEL_WIDTH = max(len(label) for label in _PLASTIC_STARTUP_LABELS) + 3
 
@@ -281,8 +281,8 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
         return
     report = trainer.parameter_report.get("plastic_depth", {})
     current_layers = int(report.get("active_layers", config.plastic__initial_active_layers))
-    public_coordinates = tuple(report.get("active_public_coordinates", ()))
-    full_coordinates = tuple(report.get("public_coordinates", ()))
+    public_coordinates = tuple(report.get("active_sample_layer_coordinates", report.get("active_public_coordinates", ())))
+    full_coordinates = tuple(report.get("sample_layer_coordinates", report.get("public_coordinates", ())))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
     _print_plastic_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
@@ -304,9 +304,9 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
     _print_plastic_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
     if public_coordinates:
-        _print_plastic_option("initial layer indices:", _startup_public_indices(public_coordinates))
+        _print_plastic_option("active sample_layer:", _startup_public_indices(public_coordinates))
     if full_coordinates and full_coordinates != public_coordinates:
-        _print_plastic_option("capacity layer indices:", _startup_public_indices(full_coordinates))
+        _print_plastic_option("capacity sample_layer:", _startup_public_indices(full_coordinates))
     print(flush=True)
 
 
@@ -676,4 +676,6 @@ if __name__ == "__main__":
 # os.environ.setdefault("THOG2_DEPTH_MATERIALISATION_MATMUL", "true")
 # _core._print_model_option("optimiser:", f"lr={config.learning_rate:.3e}  min_lr={config.min_lr:.3e}  warmup={config.warmup_iters}  weight_decay={config.weight_decay:g}  grad_clip={config.grad_clip:g}")
 # _stage6._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;33m"                                                                                              # <<< THOG use terminal-portable bold yellow for the validation-loss field
+# _print_plastic_option("initial layer indices:", _startup_public_indices(public_coordinates))                                                                 # <<< THOG preserve old relative-ruler startup label before absolute sample-layer ruler
+# _print_plastic_option("capacity layer indices:", _startup_public_indices(full_coordinates))                                                                  # <<< THOG preserve old relative-ruler startup label before absolute sample-layer ruler
 # ^^^ THOG
