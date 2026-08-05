@@ -78,6 +78,10 @@ from . import plastic_depth_lookahead_patch as _plastic_depth_lookahead_patch
 from . import plastic_depth_lookahead_fix_patch as _plastic_depth_lookahead_fix_patch
 # ^^^ THOG
 
+# vvv THOG replace relative N+1 learned-count geometry with a fixed max-capacity absolute depth ruler
+from . import plastic_depth_absolute_ruler_patch as _plastic_depth_absolute_ruler_patch
+# ^^^ THOG
+
 # vvv THOG finalise PLASTIC console labels, suppress loss-gain clutter and colour candidate probe losses
 from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_cleanup_patch
 # ^^^ THOG
