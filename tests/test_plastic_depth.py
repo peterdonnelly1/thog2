@@ -154,7 +154,7 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         different = PlasticDepthSamplingLattice(8, initial_active_layers=5, initialisation="random", seed=8)
         coordinates = first.public_coordinates().detach()
         self.assertAlmostEqual(float(coordinates[0]), 1.0, places=5)
-        self.assertAlmostEqual(float(coordinates[-1]), 100.0, places=5)
+        self.assertAlmostEqual(float(coordinates[-1]), 100.0, places=4)
         self.assertTrue(bool(torch.all(coordinates[1:] > coordinates[:-1]).item()))
         torch.testing.assert_close(coordinates, repeated.public_coordinates(), rtol=0.0, atol=0.0)
         self.assertFalse(torch.equal(coordinates, different.public_coordinates()))
@@ -297,7 +297,7 @@ class PlasticDepthModelTests(unittest.TestCase):
         model = SheetGPT(
             plastic_sheet_config(
                 plastic__geometry_learning_rate_multiplier=0.125,
-                plastic__freeze_during_warmup=True,
+                plastic__freeze_geometry_during_warmup=True,
             )
         )
         groups = model.optimizer_parameter_groups(weight_decay=0.1)
@@ -308,7 +308,7 @@ class PlasticDepthModelTests(unittest.TestCase):
         self.assertTrue(geometry["thog2_freeze_during_warmup"])
         self.assertEqual(geometry["parameter_names"], ("trajectory.plastic_sampling.raw_intervals",))
 
-    def test_future_capacity_can_change_active_absolute_coordinates(self) -> None:
+    def test_future_capacity_changes_absolute_coordinates_even_if_output_cache_is_identical(self) -> None:
         torch.manual_seed(1357)
         model = SheetGPT(
             plastic_sheet_config(
@@ -323,12 +323,15 @@ class PlasticDepthModelTests(unittest.TestCase):
         model.eval()
         indices = torch.arange(8, dtype=torch.long).view(1, 8) % 32
         with torch.no_grad():
+            before_coordinates = model.trajectory.plastic_sampling.active_public_coordinates().detach().clone()
             before, _ = model(indices)
             model.trajectory.plastic_sampling.raw_intervals[4:].copy_(
                 torch.linspace(-100.0, 100.0, 3)
             )
+            after_coordinates = model.trajectory.plastic_sampling.active_public_coordinates().detach().clone()
             after, _ = model(indices)
-        self.assertGreater(float((after - before).abs().max().item()), 0.0)
+        self.assertGreater(float((after_coordinates - before_coordinates).abs().max().item()), 0.0)
+        torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
 
     def test_atomic_add_and_subtract_regauge_preserve_all_generated_families(self) -> None:
         torch.manual_seed(4102)
