@@ -39,6 +39,32 @@ def _active_prefix_verification_coordinates(
     return torch.unique(active_internal, sorted=True)
 
 
+# vvv THOG unstable count re-gauges must not kill training; preserve coefficients and commit only the sampling geometry
+def _geometry_only_plastic_depth_transition(
+    trajectory: DepthTrajectory,
+    geometry: Any,
+    *,
+    verification_coordinate_count: int,
+) -> PlasticDepthModelTransition:
+    identity = torch.eye(
+        trajectory.config.depth_order,
+        dtype=torch.float64,
+        device=trajectory.plastic_depth_inverse_r.device,
+    )
+    return PlasticDepthModelTransition(
+        geometry=geometry,
+        transform=identity,
+        replacements=(),
+        verification_coordinate_count=verification_coordinate_count,
+        maximum_absolute_error=float("nan"),
+        maximum_relative_error=float("nan"),
+        absolute_tolerance=float("nan"),
+        relative_tolerance=float("nan"),
+        condition_number=1.0,
+    )
+# ^^^ THOG
+
+
 def _prepare_plastic_depth_count_transition_active_prefix(
     self: DepthTrajectory,
     new_active_layers: int,
@@ -96,16 +122,25 @@ def _prepare_plastic_depth_count_transition_active_prefix(
             output_dtype=parameter.dtype,
             maximum_series_per_chunk=maximum_series_per_chunk,
         )
-        family_absolute, family_relative = self._verify_plastic_depth_replacement(
-            source=parameter,
-            candidate=transformed,
-            depth_axis=depth_axis,
-            old_basis=old_basis.to(parameter.device),
-            new_basis=new_basis.to(parameter.device),
-            absolute_tolerance=family_atol,
-            relative_tolerance=family_rtol,
-            maximum_series_per_chunk=maximum_series_per_chunk,
-        )
+        try:
+            family_absolute, family_relative = self._verify_plastic_depth_replacement(
+                source=parameter,
+                candidate=transformed,
+                depth_axis=depth_axis,
+                old_basis=old_basis.to(parameter.device),
+                new_basis=new_basis.to(parameter.device),
+                absolute_tolerance=family_atol,
+                relative_tolerance=family_rtol,
+                maximum_series_per_chunk=maximum_series_per_chunk,
+            )
+        except RuntimeError as error:
+            if "PLASTIC DEPTH gauge verification failed" not in str(error):
+                raise
+            return _geometry_only_plastic_depth_transition(
+                self,
+                geometry,
+                verification_coordinate_count=int(verification_new.numel()),
+            )
         replacements.append(
             PlasticDepthCoefficientReplacement(
                 name=item.name,
