@@ -101,3 +101,7 @@ from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_clea
 # vvv THOG let learned-count runs probe periodically instead of paying the L-1/L/L+1 inline-probe tax every optimizer update
 from . import plastic_depth_probe_interval_patch as _plastic_depth_probe_interval_patch
 # ^^^ THOG
+
+# vvv THOG require robust history agreement and learn wall-time only from uncontaminated non-probe updates
+from . import plastic_depth_controller_stability_patch as _plastic_depth_controller_stability_patch
+# ^^^ THOG
