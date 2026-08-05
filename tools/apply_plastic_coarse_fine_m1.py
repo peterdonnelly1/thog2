@@ -28,11 +28,13 @@ def insert_plastic_field_names(path: str, tuple_name: str) -> None:
     )
     replace_once(
         path,
-        '    "plastic__layer_count_update_brake",\n',
+        '    "plastic__layer_count_update_brake",\n'
+        '    "plastic__layer_count_probe_noise_window",\n',
         '    "plastic__layer_count_update_brake",\n'
         '    "plastic__layer_count_probe_interval",\n'
         '    "plastic__layer_count_probe_radius",\n'
-        '    "plastic__layer_count_max_step",\n',
+        '    "plastic__layer_count_max_step",\n'
+        '    "plastic__layer_count_probe_noise_window",\n',
     )
 
 

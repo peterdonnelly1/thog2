@@ -236,12 +236,10 @@ def resolve_plastic_probe_interval(
         )
     if not enabled or not do_learn_layer_count:
         return None
-    if update_brake < 1:
-        raise ValueError(
-            "plastic__layer_count_probe_interval must be supplied when "
-            "plastic__layer_count_update_brake is zero"
-        )
-    return update_brake
+    if update_brake < 0:
+        raise ValueError("plastic__layer_count_update_brake must be non-negative")
+    # Version 0.3 used brake=0 to mean every update; preserve that exact path.
+    return max(1, update_brake)
 
 
 def validate_plastic_fine_count_controls(

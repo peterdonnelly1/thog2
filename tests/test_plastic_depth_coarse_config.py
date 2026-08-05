@@ -131,14 +131,13 @@ def test_probe_interval_defaults_to_update_brake_only_for_learned_count() -> Non
     ) is None
 
 
-def test_probe_interval_requires_explicit_value_when_brake_is_zero() -> None:
-    with pytest.raises(ValueError, match="must be supplied"):
-        resolve_plastic_probe_interval(
-            probe_interval=None,
-            update_brake=0,
-            enabled=True,
-            do_learn_layer_count=True,
-        )
+def test_probe_interval_preserves_legacy_every_update_when_brake_is_zero() -> None:
+    assert resolve_plastic_probe_interval(
+        probe_interval=None,
+        update_brake=0,
+        enabled=True,
+        do_learn_layer_count=True,
+    ) == 1
 
 
 def test_fine_radius_and_max_step_are_positive() -> None:

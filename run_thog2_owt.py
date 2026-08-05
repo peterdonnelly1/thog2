@@ -248,6 +248,12 @@ def _startup_public_indices(values: Any) -> str:
 
 _PLASTIC_STARTUP_LABELS = (
     "plastic__enabled:",
+    "plastic__coarse_phase:",
+    "plastic__phase_1_n_steps:",
+    "plastic__phase_1_starting_layer_count:",
+    "plastic__phase_1__number_of_trials:",
+    "plastic__phase_1_evaluation_steps_count:",
+    "coarse candidate layers:",
     "resolved count mode:",
     "current active layers:",
     "plastic__layers_to_sample:",
@@ -258,6 +264,7 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__layer_sampling_initialisation:",
     "plastic__layer_count_objective:",
     "plastic__layer_count_update_brake:",
+    "plastic__layer_count_probe_interval:",
     "plastic__layer_count_probe_radius:",
     "plastic__layer_count_max_step:",
     "plastic__layer_count_probe_noise_window:",
@@ -285,10 +292,34 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     current_layers = int(report.get("active_layers", config.plastic__initial_active_layers))
     public_coordinates = tuple(report.get("active_sample_layer_coordinates", report.get("active_public_coordinates", ())))
     full_coordinates = tuple(report.get("sample_layer_coordinates", report.get("public_coordinates", ())))
+    probe_interval = getattr(config, "plastic__layer_count_probe_interval", None)
     probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))
     max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
+    coarse_phase = str(getattr(config, "plastic__coarse_phase", "disabled"))
+    phase_1_n_steps = getattr(config, "plastic__phase_1_n_steps", None)
+    phase_1_starting_layer_count = getattr(config, "plastic__phase_1_starting_layer_count", None)
+    phase_1_number_of_trials = getattr(config, "plastic__phase_1__number_of_trials", None)
+    phase_1_evaluation_steps_count = getattr(config, "plastic__phase_1_evaluation_steps_count", None)
+    _print_plastic_option("plastic__coarse_phase:", coarse_phase)
+    _print_plastic_option("plastic__phase_1_n_steps:", _startup_optional(phase_1_n_steps))
+    _print_plastic_option("plastic__phase_1_starting_layer_count:", _startup_optional(phase_1_starting_layer_count))
+    _print_plastic_option("plastic__phase_1__number_of_trials:", _startup_optional(phase_1_number_of_trials))
+    _print_plastic_option("plastic__phase_1_evaluation_steps_count:", _startup_optional(phase_1_evaluation_steps_count))
+    if coarse_phase == "enabled":
+        from sheet.plastic_depth_coarse import resolve_plastic_coarse_config
+        coarse = resolve_plastic_coarse_config(
+            coarse_phase=coarse_phase,
+            plastic_enabled=config.plastic__enabled,
+            do_learn_layer_count=config.plastic__do_learn_layer_count,
+            n_steps=phase_1_n_steps,
+            starting_layer_count=phase_1_starting_layer_count,
+            number_of_trials=phase_1_number_of_trials,
+            evaluation_steps_count=phase_1_evaluation_steps_count,
+            max_permitted_layers=config.plastic__max_permitted_layers,
+        )
+        _print_plastic_option("coarse candidate layers:", ", ".join(str(value) for value in coarse.candidate_layers))
     _print_plastic_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
     _print_plastic_option("current active layers:", f"{current_layers}/{config.n_layer}")
     _print_plastic_option("plastic__layers_to_sample:", _startup_optional(config.plastic__layers_to_sample))
@@ -299,6 +330,7 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
     _print_plastic_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
     _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
+    _print_plastic_option("plastic__layer_count_probe_interval:", _startup_optional(probe_interval))
     _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))
     _print_plastic_option("plastic__layer_count_max_step:", str(max_step))
     _print_plastic_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))

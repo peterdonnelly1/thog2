@@ -106,6 +106,14 @@ _ARGUMENT_TO_CONFIG = {
     "bias": "bias",
     "model_seed": "model_seed",
     "data_seed": "data_seed",
+    "plastic__coarse_phase": "plastic__coarse_phase",
+    "plastic__phase_1_n_steps": "plastic__phase_1_n_steps",
+    "plastic__phase_1_starting_layer_count": "plastic__phase_1_starting_layer_count",
+    "plastic__phase_1__number_of_trials": "plastic__phase_1__number_of_trials",
+    "plastic__phase_1_evaluation_steps_count": "plastic__phase_1_evaluation_steps_count",
+    "plastic__layer_count_probe_interval": "plastic__layer_count_probe_interval",
+    "plastic__layer_count_probe_radius": "plastic__layer_count_probe_radius",
+    "plastic__layer_count_max_step": "plastic__layer_count_max_step",
     "artifact_name_limit": "artifact_name_limit",
 }
 

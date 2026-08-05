@@ -46,6 +46,13 @@ from .plastic_depth import (
     validate_plastic_sampling_initialisation,
 )
 # ^^^ THOG
+# vvv THOG PLASTIC COARSE/FINE lifecycle configuration and candidate resolution
+from .plastic_depth_coarse import (
+    resolve_plastic_coarse_config,
+    resolve_plastic_probe_interval,
+    validate_plastic_fine_count_controls,
+)
+# ^^^ THOG
 from .residual_init import (
     DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE,
     DEFAULT_RESIDUAL_INIT_DEPTH_VALUE,
@@ -60,6 +67,11 @@ PUBLIC_MODEL_TYPES = ("dense", "sheet")
 # vvv THOG omit dormant PLASTIC DEPTH controls from disabled-run canonical and lifecycle metadata
 PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__enabled",
+    "plastic__coarse_phase",
+    "plastic__phase_1_n_steps",
+    "plastic__phase_1_starting_layer_count",
+    "plastic__phase_1__number_of_trials",
+    "plastic__phase_1_evaluation_steps_count",
     "plastic__layers_to_sample",
     "plastic__do_learn_layer_count",
     "plastic__initial_layer_count",
@@ -67,6 +79,9 @@ PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__layer_sampling_initialisation",
     "plastic__layer_count_objective",
     "plastic__layer_count_update_brake",
+    "plastic__layer_count_probe_interval",
+    "plastic__layer_count_probe_radius",
+    "plastic__layer_count_max_step",
     "plastic__layer_count_probe_noise_window",
     "plastic__layer_count_probe_noise_min_observations",
     "plastic__layer_count_probe_noise_lambda",
@@ -159,6 +174,11 @@ class OwtRunConfig:
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH public run controls
     plastic__enabled: bool = False
+    plastic__coarse_phase: str = "disabled"
+    plastic__phase_1_n_steps: Optional[int] = None
+    plastic__phase_1_starting_layer_count: Optional[int] = None
+    plastic__phase_1__number_of_trials: Optional[int] = None
+    plastic__phase_1_evaluation_steps_count: Optional[int] = None
     plastic__layers_to_sample: Optional[int] = None
     plastic__do_learn_layer_count: bool = False
     plastic__initial_layer_count: Optional[int] = None
@@ -166,6 +186,9 @@ class OwtRunConfig:
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
+    plastic__layer_count_probe_interval: Optional[int] = None
+    plastic__layer_count_probe_radius: int = 1
+    plastic__layer_count_max_step: int = 1
     plastic__layer_count_probe_noise_window: int = 50
     plastic__layer_count_probe_noise_min_observations: int = 5
     plastic__layer_count_probe_noise_lambda: float = 3.0
@@ -243,12 +266,40 @@ class OwtRunConfig:
             raise ValueError("plastic__do_learn_layer_count must be bool")
         if not isinstance(self.plastic__freeze_geometry_during_warmup, bool):
             raise ValueError("plastic__freeze_geometry_during_warmup must be bool")
+        # vvv THOG resolve one-shot COARSE scheduling and canonical FINE lookahead controls before active-count construction
+        resolved_coarse = resolve_plastic_coarse_config(
+            coarse_phase=self.plastic__coarse_phase,
+            plastic_enabled=self.plastic__enabled,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+            n_steps=self.plastic__phase_1_n_steps,
+            starting_layer_count=self.plastic__phase_1_starting_layer_count,
+            number_of_trials=self.plastic__phase_1__number_of_trials,
+            evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
+            max_permitted_layers=self.plastic__max_permitted_layers,
+        )
+        resolved_probe_interval = resolve_plastic_probe_interval(
+            probe_interval=self.plastic__layer_count_probe_interval,
+            update_brake=self.plastic__layer_count_update_brake,
+            enabled=self.plastic__enabled,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+        )
+        object.__setattr__(self, "plastic__layer_count_probe_interval", resolved_probe_interval)
+        validate_plastic_fine_count_controls(
+            probe_radius=self.plastic__layer_count_probe_radius,
+            max_step=self.plastic__layer_count_max_step,
+        )
+        initial_layer_count_for_resolution = (
+            resolved_coarse.candidate_layers[0]
+            if resolved_coarse.enabled
+            else self.plastic__initial_layer_count
+        )
+        # ^^^ THOG
         resolved_plastic_counts = resolve_plastic_depth_counts(
             n_layer=self.n_layer,
             enabled=self.plastic__enabled,
             layers_to_sample=self.plastic__layers_to_sample,
             do_learn_layer_count=self.plastic__do_learn_layer_count,
-            initial_layer_count=self.plastic__initial_layer_count,
+            initial_layer_count=initial_layer_count_for_resolution,
             max_permitted_layers=self.plastic__max_permitted_layers,
         )
         object.__setattr__(self, "plastic__initial_active_layers", resolved_plastic_counts.initial_active_layers)
@@ -677,6 +728,14 @@ class OwtRunConfig:
             # }
             # vvv THOG persist every exposed control under its exact canonical plastic__ name
             identity["plastic_depth"] = plastic_depth_identity_metadata(
+                coarse_phase=self.plastic__coarse_phase,
+                phase_1_n_steps=self.plastic__phase_1_n_steps,
+                phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
+                phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,
+                phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
+                layer_count_probe_interval=self.plastic__layer_count_probe_interval,
+                layer_count_probe_radius=self.plastic__layer_count_probe_radius,
+                layer_count_max_step=self.plastic__layer_count_max_step,
                 layers_to_sample=self.plastic__layers_to_sample,
                 do_learn_layer_count=self.plastic__do_learn_layer_count,
                 initial_layer_count=self.plastic__initial_layer_count,
@@ -843,8 +902,18 @@ class OwtRunConfig:
                 f"PLI_{self.plastic__layer_sampling_initialisation}",
                 f"PLO_{self.plastic__layer_count_objective}",
             ]
+            if self.plastic__coarse_phase == "enabled":
+                plastic_fields.extend([
+                    f"PLC_{self.plastic__phase_1_starting_layer_count}",
+                    f"PLCS_{self.plastic__phase_1_n_steps}",
+                    f"PLCT_{self.plastic__phase_1__number_of_trials}",
+                    f"PLCE_{self.plastic__phase_1_evaluation_steps_count}",
+                ])
             if self.plastic__do_learn_layer_count:
                 plastic_fields.extend([
+                    f"PLPI_{self.plastic__layer_count_probe_interval}",
+                    f"PLPR_{self.plastic__layer_count_probe_radius}",
+                    f"PLMS_{self.plastic__layer_count_max_step}",
                     f"PLB_{self.plastic__layer_count_update_brake}",
                     f"PLNW_{self.plastic__layer_count_probe_noise_window}",
                     f"PLNM_{self.plastic__layer_count_probe_noise_min_observations}",
@@ -1001,6 +1070,11 @@ class OwtRunConfig:
             gradient_accumulation_steps=self.local_gradient_accumulation_steps(world_size),
             # vvv THOG pass complete PLASTIC DEPTH Plasticity Engine identity into the shared trainer
             plastic__enabled=self.plastic__enabled,
+            plastic__coarse_phase=self.plastic__coarse_phase,
+            plastic__phase_1_n_steps=self.plastic__phase_1_n_steps,
+            plastic__phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
+            plastic__phase_1__number_of_trials=self.plastic__phase_1__number_of_trials,
+            plastic__phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
             plastic__layers_to_sample=self.plastic__layers_to_sample,
             plastic__do_learn_layer_count=self.plastic__do_learn_layer_count,
             plastic__initial_layer_count=self.plastic__initial_layer_count,
@@ -1008,6 +1082,9 @@ class OwtRunConfig:
             plastic__layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
             plastic__layer_count_objective=self.plastic__layer_count_objective,
             plastic__layer_count_update_brake=self.plastic__layer_count_update_brake,
+            plastic__layer_count_probe_interval=self.plastic__layer_count_probe_interval,
+            plastic__layer_count_probe_radius=self.plastic__layer_count_probe_radius,
+            plastic__layer_count_max_step=self.plastic__layer_count_max_step,
             plastic__layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
             plastic__layer_count_probe_noise_min_observations=self.plastic__layer_count_probe_noise_min_observations,
             plastic__layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),

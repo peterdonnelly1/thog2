@@ -278,6 +278,11 @@ def build_parser() -> argparse.ArgumentParser:
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH public controls map directly to the canonical double-underscore configuration fields
     parser.add_argument("--plastic-enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic-coarse-phase", dest="plastic__coarse_phase", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--plastic-phase-1-n-steps", dest="plastic__phase_1_n_steps", type=int)
+    parser.add_argument("--plastic-phase-1-starting-layer-count", dest="plastic__phase_1_starting_layer_count", type=int)
+    parser.add_argument("--plastic-phase-1-number-of-trials", dest="plastic__phase_1__number_of_trials", type=int)
+    parser.add_argument("--plastic-phase-1-evaluation-steps-count", dest="plastic__phase_1_evaluation_steps_count", type=int)
     parser.add_argument("--plastic-layers-to-sample", dest="plastic__layers_to_sample", type=int)
     parser.add_argument("--plastic-do-learn-layer-count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--plastic-initial-layer-count", dest="plastic__initial_layer_count", type=int)
@@ -285,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic-layer-sampling-initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
     parser.add_argument("--plastic-layer-count-objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
     parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)
+    parser.add_argument("--plastic-layer-count-probe-interval", dest="plastic__layer_count_probe_interval", type=int)
+    parser.add_argument("--plastic-layer-count-probe-radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
+    parser.add_argument("--plastic-layer-count-max-step", dest="plastic__layer_count_max_step", type=int, default=1)
     parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
     parser.add_argument("--plastic-layer-count-probe-noise-min-observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
     parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
@@ -480,6 +488,11 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         # ^^^ THOG
         # vvv THOG pass PLASTIC DEPTH CLI controls into resolved run identity
         plastic__enabled=arguments.plastic__enabled,
+        plastic__coarse_phase=arguments.plastic__coarse_phase,
+        plastic__phase_1_n_steps=arguments.plastic__phase_1_n_steps,
+        plastic__phase_1_starting_layer_count=arguments.plastic__phase_1_starting_layer_count,
+        plastic__phase_1__number_of_trials=arguments.plastic__phase_1__number_of_trials,
+        plastic__phase_1_evaluation_steps_count=arguments.plastic__phase_1_evaluation_steps_count,
         plastic__layers_to_sample=arguments.plastic__layers_to_sample,
         plastic__do_learn_layer_count=arguments.plastic__do_learn_layer_count,
         plastic__initial_layer_count=arguments.plastic__initial_layer_count,
@@ -487,6 +500,9 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_sampling_initialisation=arguments.plastic__layer_sampling_initialisation,
         plastic__layer_count_objective=arguments.plastic__layer_count_objective,
         plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,
+        plastic__layer_count_probe_interval=arguments.plastic__layer_count_probe_interval,
+        plastic__layer_count_probe_radius=arguments.plastic__layer_count_probe_radius,
+        plastic__layer_count_max_step=arguments.plastic__layer_count_max_step,
         plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,
         plastic__layer_count_probe_noise_min_observations=arguments.plastic__layer_count_probe_noise_min_observations,
         plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
