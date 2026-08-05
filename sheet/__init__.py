@@ -73,3 +73,7 @@ from . import plastic_depth_active_gauge_patch as _plastic_depth_active_gauge_pa
 # vvv THOG install exact-radius PLASTIC count lookahead and dynamic probe console labels
 from . import plastic_depth_lookahead_patch as _plastic_depth_lookahead_patch
 # ^^^ THOG
+
+# vvv THOG preserve existing test patchability while exact-radius lookahead remains a surgical overlay
+from . import plastic_depth_lookahead_fix_patch as _plastic_depth_lookahead_fix_patch
+# ^^^ THOG
