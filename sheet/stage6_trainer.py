@@ -112,6 +112,18 @@ def _format_plastic_probe_loss(value: Any) -> str:
     return f"{numeric:.3f}"
 
 
+def _format_plastic_loss_gain(value: Any) -> str:
+    if value is None:
+        return f"{'-':>8}"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>8}"
+    magnitude = abs(numeric)
+    if magnitude != 0.0 and (magnitude < 0.001 or magnitude >= 1000.0):
+        return f"{numeric:+8.2e}"
+    return f"{numeric:+8.3f}"
+
+
 def _format_depth_sample_point(value: Any) -> str:
     numeric = float(value)
     if not math.isfinite(numeric):
@@ -220,13 +232,25 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
         )
         fields.append(f"sampled_values = [{sampled_values}]")
     # ^^^ THOG
-    # vvv THOG show learned-count probe losses immediately before the active public layer-index ruler
+    # vvv THOG show learned-count probe losses and raw lowest-loss improvement before the active public layer-index ruler
     if "plastic_probe_losses" in payload:
+        losses = tuple(payload["plastic_probe_losses"])
         plastic_probe_losses = ", ".join(
             _format_plastic_probe_loss(value)
-            for value in payload["plastic_probe_losses"]
+            for value in losses
         )
         fields.append(f"probe_losses = [{plastic_probe_losses}]")
+        if len(losses) == 3:
+            current_loss = losses[1]
+            loss_gains = tuple(
+                None if current_loss is None or candidate_loss is None else float(current_loss) - float(candidate_loss)
+                for candidate_loss in (losses[0], losses[2])
+            )
+            formatted_loss_gains = ", ".join(
+                _format_plastic_loss_gain(value)
+                for value in loss_gains
+            )
+            fields.append(f"loss_gain [L-1, L+1] = [{formatted_loss_gains}]")
     # ^^^ THOG
     # vvv THOG append active public DEPTH sample points last so learned geometry movement is visible without opening plots
     if "depth_sample_points" in payload:
