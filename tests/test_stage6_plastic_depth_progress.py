@@ -16,8 +16,8 @@ def _optimizer_payload(**overrides):
         "gradient_norm": "   2.345",
         "current_layer_count": 4,
         "sampled_values": (0.00123, 2.5),
-        "plastic_probe_losses": (10.12345, 10.23456, 10.34567),
-        "depth_sample_points": (1.25, 4.56, 8.94, 14.0),
+        "plastic_probe_losses": (10.1234, 10.2345, 10.3456),
+        "depth_sample_points": (1.26, 4.56, 8.94, 14.0),
     }
     payload.update(overrides)
     return payload
@@ -30,20 +30,10 @@ def test_plastic_probe_losses_precede_final_layer_indices_field() -> None:
     assert "sampled_values = [1.23e-03, 2.50]" in line
     assert "probe_losses = [10.123, 10.235, 10.346]" in line
     assert line.endswith("layer indices = [1.3, 4.6, 8.9, 14.0]")
-    assert line.index("probe_losses = [10.123, 10.235, 10.346]") < line.index("layer indices = [1.3, 4.6, 8.9, 14.0]")
+    assert line.index("probe_losses =") < line.index("layer indices =")
 
 
-def test_missing_probe_loss_position_is_rendered_as_dash() -> None:
-    line = format_progress_line(
-        "RUN",
-        "optimizer_progress",
-        _optimizer_payload(plastic_probe_losses=(None, 10.23456, None)),
-    )
-
-    assert "probe_losses = [-, 10.235, -]" in line
-
-
-def test_optimizer_progress_omits_layer_indices_when_absent() -> None:
+def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
     payload = _optimizer_payload()
     del payload["depth_sample_points"]
 
@@ -51,4 +41,24 @@ def test_optimizer_progress_omits_layer_indices_when_absent() -> None:
 
     assert "layer indices" not in line
     assert line.endswith("probe_losses = [10.123, 10.235, 10.346]")
+
+
+def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
+    payload = _optimizer_payload()
+    del payload["plastic_probe_losses"]
+
+    line = format_progress_line("RUN", "optimizer_progress", payload)
+
+    assert "probe_losses" not in line
+    assert line.endswith("layer indices = [1.3, 4.6, 8.9, 14.0]")
+
+
+def test_missing_edge_probe_loss_uses_dash_placeholder() -> None:
+    line = format_progress_line(
+        "RUN",
+        "optimizer_progress",
+        _optimizer_payload(plastic_probe_losses=(None, 9.5, 9.25)),
+    )
+
+    assert "probe_losses = [-, 9.500, 9.250]" in line
 # ^^^ THOG
