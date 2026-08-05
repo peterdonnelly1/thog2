@@ -53,9 +53,10 @@ jobs:
                   '    \"plastic__layer_count_probe_noise_window\",\\n',
               )
           """
-          if old not in text:
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          elif '"plastic__layer_count_probe_interval"' not in text:
               raise SystemExit('M1 anchor repair target not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Apply M1 source integration when absent
@@ -81,14 +82,16 @@ jobs:
             run_thog2_owt.py \
             run_thog2_lifecycle.py
 
-      - name: Run M1 and affected tests
+      - name: Record actual test inventory
+        run: find tests -maxdepth 1 -type f -name 'test_*.py' -printf '%f\n' | sort
+
+      - name: Run M1 and affected PLASTIC tests
+        shell: bash
         run: |
-          python -m pytest -q \
-            tests/test_plastic_depth_coarse_config.py \
-            tests/test_training_config.py \
-            tests/test_plastic_depth_startup_lookahead_ui.py \
-            tests/test_plastic_depth_wrapper_options.py \
-            tests/test_run_thog2_owt.py
+          shopt -s nullglob
+          test_files=(tests/test_plastic_depth*.py)
+          (( ${#test_files[@]} > 0 )) || { echo 'No PLASTIC test files found' >&2; exit 2; }
+          python -m pytest -q "${test_files[@]}"
 
       - name: Commit M1 when source changed
         run: |
