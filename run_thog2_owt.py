@@ -94,6 +94,34 @@ _geometry_registry._format_field = _format_geometry_field_aligned
 _core._print_model_option = _print_model_option_aligned
 # ^^^ THOG
 
+# vvv THOG fixed-width PLASTIC progress tail columns keep probe losses and public layer coordinates readable as counts move
+def _plastic_progress_probe_loss(value: Any) -> str:
+    if value is None:
+        return f"{'-':>7}"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>7}"
+    return f"{numeric:7.3f}"
+
+
+def _plastic_progress_layer_index(value: Any) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>5}"
+    return f"{numeric:5.1f}"
+
+
+def _plastic_progress_tail_tabs(line: str) -> str:
+    return (
+        line.replace("  probe_losses = ", "\tprobe_losses = ")
+        .replace("  layer indices = ", "\tlayer indices = ")
+    )
+
+
+_stage6._format_plastic_probe_loss = _plastic_progress_probe_loss
+_stage6._format_depth_sample_point = _plastic_progress_layer_index
+# ^^^ THOG
+
 # vvv THOG keep materialisation timing at five decimals and place the optional penalty at the absolute end of each progress row
 _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT = _stage6.format_progress_line
 
@@ -109,7 +137,9 @@ def _materialisation_interval_field_five_decimals(trainer: Any) -> Optional[str]
 
 
 def _format_progress_line_with_materialisation_last(run_id: str, event: str, payload: Any) -> str:
-    line = _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT(run_id, event, payload)
+    line = _plastic_progress_tail_tabs(
+        _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT(run_id, event, payload)
+    )
     if event != "optimizer_progress" or "materialisation_penalty" not in payload:
         return line
     field = f"  materialisation penalty={payload['materialisation_penalty']}"
@@ -171,6 +201,13 @@ def _startup_public_indices(values: Any) -> str:
     return ", ".join(f"{float(value):.1f}" for value in values)
 
 
+_PLASTIC_STARTUP_LABEL_WIDTH = len("plastic__freeze_geometry_during_warmup:") + 3
+
+
+def _print_plastic_option(label: str, value: str) -> None:
+    print(f"  {label:<{_PLASTIC_STARTUP_LABEL_WIDTH}}{value}", flush=True)
+
+
 def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     if not bool(config.plastic__enabled):
         return
@@ -179,29 +216,29 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     public_coordinates = tuple(report.get("active_public_coordinates", ()))
     full_coordinates = tuple(report.get("public_coordinates", ()))
     print("plastic", flush=True)
-    _core._print_model_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
-    _core._print_model_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
-    _core._print_model_option("current active layers:", f"{current_layers}/{config.n_layer}")
-    _core._print_model_option("plastic__layers_to_sample:", _startup_optional(config.plastic__layers_to_sample))
-    _core._print_model_option("plastic__do_learn_layer_count:", _startup_bool(config.plastic__do_learn_layer_count))
-    _core._print_model_option("plastic__initial_layer_count:", _startup_optional(config.plastic__initial_layer_count))
-    _core._print_model_option("plastic__initial_active_layers:", str(config.plastic__initial_active_layers))
-    _core._print_model_option("plastic__max_permitted_layers:", _startup_optional(config.plastic__max_permitted_layers))
-    _core._print_model_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
-    _core._print_model_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
-    _core._print_model_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
-    _core._print_model_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))
-    _core._print_model_option("plastic__layer_count_probe_noise_min_observations:", str(config.plastic__layer_count_probe_noise_min_observations))
-    _core._print_model_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
-    _core._print_model_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
-    _core._print_model_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
-    _core._print_model_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))
-    _core._print_model_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
-    _core._print_model_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
+    _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
+    _print_plastic_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
+    _print_plastic_option("current active layers:", f"{current_layers}/{config.n_layer}")
+    _print_plastic_option("plastic__layers_to_sample:", _startup_optional(config.plastic__layers_to_sample))
+    _print_plastic_option("plastic__do_learn_layer_count:", _startup_bool(config.plastic__do_learn_layer_count))
+    _print_plastic_option("plastic__initial_layer_count:", _startup_optional(config.plastic__initial_layer_count))
+    _print_plastic_option("plastic__initial_active_layers:", str(config.plastic__initial_active_layers))
+    _print_plastic_option("plastic__max_permitted_layers:", _startup_optional(config.plastic__max_permitted_layers))
+    _print_plastic_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
+    _print_plastic_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
+    _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
+    _print_plastic_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))
+    _print_plastic_option("plastic__layer_count_probe_noise_min_observations:", str(config.plastic__layer_count_probe_noise_min_observations))
+    _print_plastic_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
+    _print_plastic_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
+    _print_plastic_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
+    _print_plastic_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))
+    _print_plastic_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
+    _print_plastic_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
     if public_coordinates:
-        _core._print_model_option("initial layer indices:", _startup_public_indices(public_coordinates))
+        _print_plastic_option("initial layer indices:", _startup_public_indices(public_coordinates))
     if full_coordinates and full_coordinates != public_coordinates:
-        _core._print_model_option("capacity layer indices:", _startup_public_indices(full_coordinates))
+        _print_plastic_option("capacity layer indices:", _startup_public_indices(full_coordinates))
     print(flush=True)
 
 
