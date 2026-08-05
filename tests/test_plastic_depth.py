@@ -153,8 +153,8 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         repeated = PlasticDepthSamplingLattice(8, initial_active_layers=5, initialisation="random", seed=7)
         different = PlasticDepthSamplingLattice(8, initial_active_layers=5, initialisation="random", seed=8)
         coordinates = first.public_coordinates().detach()
-        self.assertEqual(float(coordinates[0]), 1.0)
-        self.assertEqual(float(coordinates[-1]), 100.0)
+        self.assertAlmostEqual(float(coordinates[0]), 1.0, places=5)
+        self.assertAlmostEqual(float(coordinates[-1]), 100.0, places=5)
         self.assertTrue(bool(torch.all(coordinates[1:] > coordinates[:-1]).item()))
         torch.testing.assert_close(coordinates, repeated.public_coordinates(), rtol=0.0, atol=0.0)
         self.assertFalse(torch.equal(coordinates, different.public_coordinates()))
@@ -165,7 +165,7 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         self.assertEqual(evenly_distributed_active_ranks(8, 4), (0, 2, 5, 7))
         self.assertEqual(evenly_distributed_active_ranks(8, 8), tuple(range(8)))
 
-    def test_learned_count_owns_active_prefix_plus_one_probe(self) -> None:
+    def test_learned_count_owns_fixed_capacity_absolute_ruler(self) -> None:
         lattice = PlasticDepthSamplingLattice(
             8,
             initial_active_layers=4,
@@ -176,7 +176,7 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
 
         torch.testing.assert_close(
             lattice.public_coordinates(),
-            torch.tensor([1.0, 25.75, 50.5, 75.25, 100.0]),
+            torch.linspace(1.0, 100.0, 8),
             rtol=0.0,
             atol=2.0e-5,
         )
@@ -189,12 +189,16 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
         )
         torch.testing.assert_close(
             lattice.probe_public_coordinate(),
-            torch.tensor([100.0]),
+            lattice.public_coordinates()[4:5],
             rtol=0.0,
             atol=0.0,
         )
+        report = lattice.interval_report()
+        self.assertEqual(report["active_sample_layer_coordinates"], (1.0, 2.0, 3.0, 4.0))
+        self.assertEqual(report["sample_layer_coordinates"], (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0))
+        self.assertEqual(report["probe_sample_layer_coordinate"], 5.0)
 
-    def test_inactive_capacity_cannot_move_active_prefix_or_receive_gradient(self) -> None:
+    def test_future_capacity_is_part_of_absolute_ruler_and_receives_gradient(self) -> None:
         lattice = PlasticDepthSamplingLattice(
             8,
             initial_active_layers=4,
@@ -207,15 +211,10 @@ class PlasticDepthPrimitiveTests(unittest.TestCase):
             lattice.raw_intervals[4:].copy_(torch.linspace(-100.0, 100.0, 3))
         after = lattice.public_coordinates()
 
-        torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
+        self.assertGreater(float((after - before).abs().max().item()), 0.0)
         after.square().sum().backward()
         self.assertIsNotNone(lattice.raw_intervals.grad)
-        torch.testing.assert_close(
-            lattice.raw_intervals.grad[4:],
-            torch.zeros_like(lattice.raw_intervals.grad[4:]),
-            rtol=0.0,
-            atol=0.0,
-        )
+        self.assertGreater(float(lattice.raw_intervals.grad[4:].abs().sum().item()), 0.0)
 
     def test_arbitrary_chebyshev_sampling_preserves_reference_basis(self) -> None:
         coordinates = normalized_coordinates(6, dtype=torch.float64)
@@ -298,7 +297,7 @@ class PlasticDepthModelTests(unittest.TestCase):
         model = SheetGPT(
             plastic_sheet_config(
                 plastic__geometry_learning_rate_multiplier=0.125,
-                plastic__freeze_geometry_during_warmup=True,
+                plastic__freeze_during_warmup=True,
             )
         )
         groups = model.optimizer_parameter_groups(weight_decay=0.1)
@@ -309,7 +308,7 @@ class PlasticDepthModelTests(unittest.TestCase):
         self.assertTrue(geometry["thog2_freeze_during_warmup"])
         self.assertEqual(geometry["parameter_names"], ("trajectory.plastic_sampling.raw_intervals",))
 
-    def test_inactive_capacity_cannot_change_model_output(self) -> None:
+    def test_future_capacity_can_change_active_absolute_coordinates(self) -> None:
         torch.manual_seed(1357)
         model = SheetGPT(
             plastic_sheet_config(
@@ -329,7 +328,7 @@ class PlasticDepthModelTests(unittest.TestCase):
                 torch.linspace(-100.0, 100.0, 3)
             )
             after, _ = model(indices)
-        torch.testing.assert_close(after, before, rtol=0.0, atol=0.0)
+        self.assertGreater(float((after - before).abs().max().item()), 0.0)
 
     def test_atomic_add_and_subtract_regauge_preserve_all_generated_families(self) -> None:
         torch.manual_seed(4102)
