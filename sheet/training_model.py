@@ -10,10 +10,16 @@ from torch.nn import functional as F
 from model import GPT
 from .checkpointing import (
     CheckpointExecutionReport,
+    execute_logical_layer_checkpoints,
     execute_logical_layers,
     validate_checkpoint_segment_size,
 )
 from .model import SheetGPT, SheetGPTConfig
+from .plastic_depth_cuda import is_cuda_out_of_memory
+from .plastic_depth_inline import (
+    PlasticDepthInlineProbeReport,
+    PlasticDepthInlineProbeRequest,
+)
 from .update_retained_materializations import attach_update_retained_materializations
 
 
@@ -92,6 +98,90 @@ class TrainingDenseGPT(GPT):
 
     def _logical_block(self, hidden: Tensor, layer_index: int) -> Tensor:
         return self.transformer.h[layer_index](hidden)
+
+    # vvv THOG CUDA learned-count probing executes N-1/N first, then treats only the adjacent N+1 allocation as recoverable
+    def _plastic_depth_recoverable_probe_candidates(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        request: PlasticDepthInlineProbeRequest,
+    ) -> Tuple[Dict[int, Tensor], Tuple[Tuple[int, Tensor], ...], CheckpointExecutionReport]:
+        upward_count = request.recoverable_upward_count
+        prepare_upward = request.prepare_recoverable_upward
+        synchronize_upward = request.synchronize_recoverable_upward
+        if upward_count is None or prepare_upward is None or synchronize_upward is None:
+            raise RuntimeError("PLASTIC DEPTH recoverable probe request is incomplete")
+        lower_counts = tuple(count for count in request.candidate_counts if count != upward_count)
+        if not lower_counts or upward_count != lower_counts[-1] + 1:
+            raise RuntimeError("PLASTIC DEPTH recoverable N+1 candidate is not adjacent to the lower prefix")
+        lower_checkpoints, lower_report = execute_logical_layer_checkpoints(
+            hidden,
+            n_layer=self.config.n_layer,
+            segment_size=self.checkpoint_segment_size,
+            logical_block=self._logical_block,
+            training=self.training,
+            layer_indices=tuple(range(lower_counts[-1])),
+            checkpoint_counts=lower_counts,
+        )
+        checkpoint_by_count = dict(lower_checkpoints)
+        candidate_losses = []
+        with torch.no_grad():
+            for count in lower_counts:
+                candidate_loss = self._plastic_depth_candidate_head_loss(
+                    checkpoint_by_count[count],
+                    targets,
+                    request.sampled_token_indices,
+                )
+                candidate_losses.append((count, candidate_loss.detach()))
+
+        prepare_upward()
+        upward_hidden: Optional[Tensor] = None
+        upward_loss: Optional[Tensor] = None
+        upward_report: Optional[CheckpointExecutionReport] = None
+        local_feasible = True
+        try:
+            upward_hidden, upward_report = execute_logical_layers(
+                checkpoint_by_count[lower_counts[-1]],
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=(upward_count - 1,),
+            )
+            with torch.no_grad():
+                upward_loss = self._plastic_depth_candidate_head_loss(
+                    upward_hidden,
+                    targets,
+                    request.sampled_token_indices,
+                ).detach()
+        except BaseException as error:
+            if not is_cuda_out_of_memory(error):
+                raise
+            local_feasible = False
+            upward_hidden = None
+            upward_loss = None
+            upward_report = None
+            if hidden.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        globally_feasible = bool(synchronize_upward(local_feasible))
+        if globally_feasible:
+            if upward_hidden is None or upward_loss is None or upward_report is None:
+                raise RuntimeError("distributed PLASTIC DEPTH feasibility accepted a missing local N+1 candidate")
+            checkpoint_by_count[upward_count] = upward_hidden
+            candidate_losses.append((upward_count, upward_loss))
+            execution_report = CheckpointExecutionReport(
+                checkpointing_used=lower_report.checkpointing_used or upward_report.checkpointing_used,
+                checkpoint_segments=lower_report.checkpoint_segments + upward_report.checkpoint_segments,
+                logical_layers=lower_report.logical_layers + upward_report.logical_layers,
+                segment_size=lower_report.segment_size,
+            )
+        else:
+            upward_hidden = None
+            upward_loss = None
+            execution_report = lower_report
+        return checkpoint_by_count, tuple(candidate_losses), execution_report
+    # ^^^ THOG
 
     def forward(
         self,
@@ -173,15 +263,48 @@ class TrainingSheetGPT(SheetGPT):
             logical_layers=config.n_layer,
             segment_size=0,
         )
+        # vvv THOG PLASTIC DEPTH inline probing may pre-materialise one larger prefix for a complete optimiser update
+        self._plastic_depth_update_layer_count: Optional[int] = None
+        self.last_plastic_depth_inline_probe_report: Optional[PlasticDepthInlineProbeReport] = None
+        # ^^^ THOG
 
     def set_checkpoint_segment_size(self, segment_size: int) -> None:
         self.checkpoint_segment_size = validate_checkpoint_segment_size(segment_size)
 
     # vvv THOG explicit optimiser-update lifetime for non-fast-discard materialisations
     def _optimizer_update_layer_indices(self) -> Tuple[int, ...]:
-        if self._active_layer_indices is None:
-            return tuple(range(self.config.n_layer))
-        return self._active_layer_indices
+        # if self._active_layer_indices is None:
+        if self._active_layer_indices is not None:
+            return self._active_layer_indices
+        # vvv THOG PLASTIC DEPTH active ranks apply to the complete optimiser update, including retained materialisations
+        if self.plastic_depth_enabled:
+            if self._plastic_depth_update_layer_count is not None:
+                return tuple(range(self._plastic_depth_update_layer_count))
+            return self.plastic_depth_active_layer_indices()
+        # ^^^ THOG
+        return tuple(range(self.config.n_layer))
+
+    # vvv THOG transient execution capacity is update-scoped and never checkpointed
+    def set_plastic_depth_update_layer_count(self, active_layers: Optional[int]) -> None:
+        if active_layers is None:
+            self._plastic_depth_update_layer_count = None
+            return
+        if not self.plastic_depth_enabled:
+            raise RuntimeError("PLASTIC DEPTH is not enabled")
+        lattice = self.trajectory.plastic_sampling
+        if lattice is None:
+            raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+        resolved_count = int(active_layers)
+        if resolved_count < 1 or resolved_count > lattice.maximum_layers:
+            raise ValueError(
+                "PLASTIC DEPTH update layer count must lie within allocated capacity; "
+                f"got active_layers={resolved_count}, maximum_layers={lattice.maximum_layers}"
+            )
+        self._plastic_depth_update_layer_count = resolved_count
+
+    def clear_plastic_depth_update_layer_count(self) -> None:
+        self._plastic_depth_update_layer_count = None
+    # ^^^ THOG
 
     def _materialize_layer_norm_parameters_for_update(
         self,
@@ -252,6 +375,10 @@ class TrainingSheetGPT(SheetGPT):
         if not controller.begin():
             return False
         try:
+            # vvv THOG retained PLASTIC DEPTH materialisations share one update-scoped differentiable basis
+            if self.plastic_depth_enabled:
+                self.trajectory.prepare_plastic_depth_basis_cache()
+            # ^^^ THOG
             if not torch.is_grad_enabled():
                 raise RuntimeError(
                     "update-retained materialisations require gradient tracking"
@@ -265,10 +392,20 @@ class TrainingSheetGPT(SheetGPT):
         return True
 
     def finalize_optimizer_update(self) -> Tuple[Tensor, ...]:
-        return self._update_retained_materializations.finalize()
+        # return self._update_retained_materializations.finalize()
+        try:
+            return self._update_retained_materializations.finalize()
+        finally:
+            if self.plastic_depth_enabled:
+                self.trajectory.clear_plastic_depth_basis_cache()
 
     def end_optimizer_update(self) -> bool:
-        return self._update_retained_materializations.end()
+        # return self._update_retained_materializations.end()
+        try:
+            return self._update_retained_materializations.end()
+        finally:
+            if self.plastic_depth_enabled:
+                self.trajectory.clear_plastic_depth_basis_cache()
 
     def requires_find_unused_parameters(self) -> bool:
         return self._update_retained_materializations.enabled
@@ -325,10 +462,118 @@ class TrainingSheetGPT(SheetGPT):
                 1.0e-5,
             )
 
+    # vvv THOG PLASTIC DEPTH evaluates detached candidate heads at shared prefix checkpoints, then one selected grad-bearing head
+    def _plastic_depth_candidate_head_loss(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        sampled_token_indices: Optional[Tensor],
+    ) -> Tensor:
+        normalized = self.transformer.ln_f(hidden.detach())
+        flattened_hidden = normalized.reshape(-1, normalized.shape[-1])
+        flattened_targets = targets.reshape(-1)
+        if sampled_token_indices is not None:
+            indices = sampled_token_indices.to(device=flattened_hidden.device)
+            if indices.numel() == 0:
+                raise ValueError("PLASTIC DEPTH sampled probe requires at least one token")
+            if int(indices.min().item()) < 0 or int(indices.max().item()) >= flattened_targets.numel():
+                raise ValueError("PLASTIC DEPTH sampled token index is out of range")
+            flattened_hidden = flattened_hidden.index_select(0, indices)
+            flattened_targets = flattened_targets.index_select(0, indices)
+        logits = self.lm_head(flattened_hidden)
+        return F.cross_entropy(logits, flattened_targets, ignore_index=-1)
+
+    # vvv THOG CUDA learned-count probing executes N-1/N first, then treats only the adjacent N+1 allocation as recoverable
+    def _plastic_depth_recoverable_probe_candidates(
+        self,
+        hidden: Tensor,
+        targets: Tensor,
+        request: PlasticDepthInlineProbeRequest,
+    ) -> Tuple[Dict[int, Tensor], Tuple[Tuple[int, Tensor], ...], CheckpointExecutionReport]:
+        upward_count = request.recoverable_upward_count
+        prepare_upward = request.prepare_recoverable_upward
+        synchronize_upward = request.synchronize_recoverable_upward
+        if upward_count is None or prepare_upward is None or synchronize_upward is None:
+            raise RuntimeError("PLASTIC DEPTH recoverable probe request is incomplete")
+        lower_counts = tuple(count for count in request.candidate_counts if count != upward_count)
+        if not lower_counts or upward_count != lower_counts[-1] + 1:
+            raise RuntimeError("PLASTIC DEPTH recoverable N+1 candidate is not adjacent to the lower prefix")
+        lower_checkpoints, lower_report = execute_logical_layer_checkpoints(
+            hidden,
+            n_layer=self.config.n_layer,
+            segment_size=self.checkpoint_segment_size,
+            logical_block=self._logical_block,
+            training=self.training,
+            layer_indices=tuple(range(lower_counts[-1])),
+            checkpoint_counts=lower_counts,
+        )
+        checkpoint_by_count = dict(lower_checkpoints)
+        candidate_losses = []
+        with torch.no_grad():
+            for count in lower_counts:
+                candidate_loss = self._plastic_depth_candidate_head_loss(
+                    checkpoint_by_count[count],
+                    targets,
+                    request.sampled_token_indices,
+                )
+                candidate_losses.append((count, candidate_loss.detach()))
+
+        prepare_upward()
+        upward_hidden: Optional[Tensor] = None
+        upward_loss: Optional[Tensor] = None
+        upward_report: Optional[CheckpointExecutionReport] = None
+        local_feasible = True
+        try:
+            upward_hidden, upward_report = execute_logical_layers(
+                checkpoint_by_count[lower_counts[-1]],
+                n_layer=self.config.n_layer,
+                segment_size=self.checkpoint_segment_size,
+                logical_block=self._logical_block,
+                training=self.training,
+                layer_indices=(upward_count - 1,),
+            )
+            with torch.no_grad():
+                upward_loss = self._plastic_depth_candidate_head_loss(
+                    upward_hidden,
+                    targets,
+                    request.sampled_token_indices,
+                ).detach()
+        except BaseException as error:
+            if not is_cuda_out_of_memory(error):
+                raise
+            local_feasible = False
+            upward_hidden = None
+            upward_loss = None
+            upward_report = None
+            if hidden.device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        globally_feasible = bool(synchronize_upward(local_feasible))
+        if globally_feasible:
+            if upward_hidden is None or upward_loss is None or upward_report is None:
+                raise RuntimeError("distributed PLASTIC DEPTH feasibility accepted a missing local N+1 candidate")
+            checkpoint_by_count[upward_count] = upward_hidden
+            candidate_losses.append((upward_count, upward_loss))
+            execution_report = CheckpointExecutionReport(
+                checkpointing_used=lower_report.checkpointing_used or upward_report.checkpointing_used,
+                checkpoint_segments=lower_report.checkpoint_segments + upward_report.checkpoint_segments,
+                logical_layers=lower_report.logical_layers + upward_report.logical_layers,
+                segment_size=lower_report.segment_size,
+            )
+        else:
+            upward_hidden = None
+            upward_loss = None
+            execution_report = lower_report
+        return checkpoint_by_count, tuple(candidate_losses), execution_report
+    # ^^^ THOG
+
     def forward(
         self,
         idx: Tensor,
         targets: Optional[Tensor] = None,
+        *,
+        plastic_depth_probe_request: Optional[PlasticDepthInlineProbeRequest] = None,
+        plastic_depth_active_layers_override: Optional[int] = None,
     ) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
@@ -338,35 +583,134 @@ class TrainingSheetGPT(SheetGPT):
                 f"Cannot forward sequence of length {sequence_length}; "
                 f"block size is {self.config.block_size}"
             )
+        if plastic_depth_probe_request is not None and plastic_depth_active_layers_override is not None:
+            raise ValueError("PLASTIC DEPTH probe and active-layer override are mutually exclusive")
+        if (plastic_depth_probe_request is not None or plastic_depth_active_layers_override is not None) and not self.plastic_depth_enabled:
+            raise RuntimeError("PLASTIC DEPTH execution controls require PLASTIC DEPTH")
+        if plastic_depth_probe_request is not None and targets is None:
+            raise ValueError("PLASTIC DEPTH inline probing requires targets")
+        if self._active_layer_indices is not None and plastic_depth_probe_request is not None:
+            raise RuntimeError("PLASTIC DEPTH inline probing cannot be combined with layer dropout")
+
+        # vvv THOG fast-discard forwards own one basis each; retained-materialisation updates prepare one basis before all microbatches
+        if self.plastic_depth_enabled and not self._update_retained_materializations.active:
+            self.trajectory.prepare_plastic_depth_basis_cache()
+        # ^^^ THOG
         positions = torch.arange(sequence_length, dtype=torch.long, device=idx.device)
         token_embeddings = self.transformer.wte(idx)
         position_embeddings = self.transformer.wpe(positions)
         hidden = self.transformer.drop(token_embeddings + position_embeddings)
-        # vvv THOG evaluation/generation and the all-active case take the unchanged executor call
-        layer_indices = self._active_layer_indices if self.training and torch.is_grad_enabled() else None
-        regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
-        if layer_indices is None:
-            hidden, self.last_execution_report = execute_logical_layers(
-                hidden,
-                n_layer=self.config.n_layer,
-                segment_size=self.checkpoint_segment_size,
-                logical_block=self._logical_block,
-                training=self.training,
-                regional_segment_runner_factory=regional_segment_runner_factory,
-            )
-        else:
-            hidden, self.last_execution_report = execute_logical_layers(
-                hidden,
-                n_layer=self.config.n_layer,
-                segment_size=self.checkpoint_segment_size,
-                logical_block=self._logical_block,
-                training=self.training,
-                layer_indices=layer_indices,
-                regional_segment_runner_factory=regional_segment_runner_factory,
-            )
-        # ^^^ THOG
-        hidden = self.transformer.ln_f(hidden)
 
+        if plastic_depth_probe_request is not None:
+            if not self.training or not torch.is_grad_enabled():
+                raise RuntimeError("PLASTIC DEPTH inline probing requires a grad-enabled training forward")
+            if self._torch_compile_mode == "regional":
+                raise RuntimeError("regional torch.compile does not support PLASTIC DEPTH inline probing")
+            plastic_depth_probe_request.validate(maximum_count=self.config.n_layer)
+            # vvv THOG preserve the exact established path unless the trainer explicitly supplies CUDA N+1 recovery coordination
+            if plastic_depth_probe_request.recoverable_upward_count is None:
+                maximum_count = plastic_depth_probe_request.candidate_counts[-1]
+                checkpoints, self.last_execution_report = execute_logical_layer_checkpoints(
+                    hidden,
+                    n_layer=self.config.n_layer,
+                    segment_size=self.checkpoint_segment_size,
+                    logical_block=self._logical_block,
+                    training=self.training,
+                    layer_indices=tuple(range(maximum_count)),
+                    checkpoint_counts=plastic_depth_probe_request.candidate_counts,
+                )
+                checkpoint_by_count = dict(checkpoints)
+                candidate_losses = []
+                with torch.no_grad():
+                    for count in plastic_depth_probe_request.candidate_counts:
+                        candidate_loss = self._plastic_depth_candidate_head_loss(
+                            checkpoint_by_count[count],
+                            targets,
+                            plastic_depth_probe_request.sampled_token_indices,
+                        )
+                        candidate_losses.append((count, candidate_loss.detach()))
+            else:
+                checkpoint_by_count, candidate_losses, self.last_execution_report = (
+                    self._plastic_depth_recoverable_probe_candidates(
+                        hidden,
+                        targets,
+                        plastic_depth_probe_request,
+                    )
+                )
+                checkpoints = tuple(checkpoint_by_count.items())
+            # ^^^ THOG
+            selected_count = int(
+                plastic_depth_probe_request.selector(tuple(candidate_losses))
+            )
+            if selected_count not in checkpoint_by_count:
+                raise RuntimeError(
+                    "PLASTIC DEPTH inline selector returned a non-candidate count; "
+                    f"selected={selected_count}, candidates={plastic_depth_probe_request.candidate_counts}"
+                )
+            hidden = checkpoint_by_count[selected_count]
+            local_losses = tuple(float(loss.item()) for _, loss in candidate_losses)
+            sampled_count = (
+                int(targets.numel())
+                if plastic_depth_probe_request.sampled_token_indices is None
+                else int(plastic_depth_probe_request.sampled_token_indices.numel())
+            )
+            self.last_plastic_depth_inline_probe_report = PlasticDepthInlineProbeReport(
+                # candidate_counts=plastic_depth_probe_request.candidate_counts,
+                candidate_counts=tuple(count for count, _ in candidate_losses),
+                local_candidate_losses=local_losses,
+                selected_count=selected_count,
+                sampled_token_count=sampled_count,
+            )
+            del checkpoint_by_count, checkpoints, candidate_losses
+        else:
+            self.last_plastic_depth_inline_probe_report = None
+            # vvv THOG PLASTIC DEPTH sampling is canonical in training, validation and generation; layer dropout remains training-only
+            if plastic_depth_active_layers_override is not None:
+                lattice = self.trajectory.plastic_sampling
+                if lattice is None:
+                    raise RuntimeError("enabled PLASTIC DEPTH has no sampling lattice")
+                resolved_override = int(plastic_depth_active_layers_override)
+                if resolved_override < 1 or resolved_override > lattice.maximum_layers:
+                    raise ValueError(
+                        "PLASTIC DEPTH active-layer override must lie within allocated capacity; "
+                        f"got active_layers={resolved_override}, maximum_layers={lattice.maximum_layers}"
+                    )
+                layer_indices: Optional[Tuple[int, ...]] = tuple(range(resolved_override))
+            elif self._active_layer_indices is not None and self.training and torch.is_grad_enabled():
+                layer_indices = self._active_layer_indices
+            elif self.plastic_depth_enabled:
+                plastic_layer_indices = self.plastic_depth_active_layer_indices()
+                full_layer_indices = tuple(range(self.config.n_layer))
+                layer_indices = None if plastic_layer_indices == full_layer_indices else plastic_layer_indices
+            else:
+                layer_indices = None
+            if self._torch_compile_mode == "regional" and layer_indices is not None:
+                raise RuntimeError(
+                    "regional torch.compile does not support a PLASTIC DEPTH active count below the persistent maximum"
+                )
+            regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
+            if layer_indices is None:
+                hidden, self.last_execution_report = execute_logical_layers(
+                    hidden,
+                    n_layer=self.config.n_layer,
+                    segment_size=self.checkpoint_segment_size,
+                    logical_block=self._logical_block,
+                    training=self.training,
+                    regional_segment_runner_factory=regional_segment_runner_factory,
+                )
+            else:
+                hidden, self.last_execution_report = execute_logical_layers(
+                    hidden,
+                    n_layer=self.config.n_layer,
+                    segment_size=self.checkpoint_segment_size,
+                    logical_block=self._logical_block,
+                    training=self.training,
+                    layer_indices=layer_indices,
+                    regional_segment_runner_factory=regional_segment_runner_factory,
+                )
+            # ^^^ THOG
+
+        hidden = self.transformer.ln_f(hidden)
         if targets is not None:
             logits = self.lm_head(hidden)
             loss = F.cross_entropy(
@@ -377,7 +721,12 @@ class TrainingSheetGPT(SheetGPT):
         else:
             logits = self.lm_head(hidden[:, [-1], :])
             loss = None
+        # vvv THOG no-gradient evaluation and generation do not need to retain the forward-scoped PLASTIC DEPTH basis
+        if self.plastic_depth_enabled and not torch.is_grad_enabled():
+            self.trajectory.clear_plastic_depth_basis_cache()
+        # ^^^ THOG
         return logits, loss
+    # ^^^ THOG
 
     # vvv THOG
     @torch.no_grad()

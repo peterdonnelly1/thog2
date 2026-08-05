@@ -227,6 +227,23 @@ def coefficient_utilization_report(model: TrainingSheetGPT) -> Dict[str, Dict[st
     return rows
 
 
+# vvv THOG learned-count PLASTIC diagnostics must sample executable active-prefix slots, not dormant maximum-capacity slots
+
+def _default_generated_weight_layers(model: TrainingSheetGPT) -> Tuple[int, ...]:
+    if bool(getattr(model, "plastic_depth_enabled", False)):
+        active_layers = tuple(int(index) for index in model.plastic_depth_active_layer_indices())
+        if active_layers:
+            return (
+                active_layers[0],
+                active_layers[len(active_layers) // 2],
+                active_layers[-1],
+            )
+    return (0, model.config.n_layer // 2, model.config.n_layer - 1)
+
+
+# ^^^ THOG
+
+
 @torch.no_grad()
 def generated_weight_report(
     model: TrainingSheetGPT,
@@ -235,7 +252,8 @@ def generated_weight_report(
     families: Optional[Iterable[str]] = None,
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     if layer_indices is None:
-        layer_indices = (0, model.config.n_layer // 2, model.config.n_layer - 1)
+        # layer_indices = (0, model.config.n_layer // 2, model.config.n_layer - 1)
+        layer_indices = _default_generated_weight_layers(model)
     layers = tuple(dict.fromkeys(int(index) for index in layer_indices))
     if any(index < 0 or index >= model.config.n_layer for index in layers):
         raise IndexError("generated-weight diagnostic layer is out of range")

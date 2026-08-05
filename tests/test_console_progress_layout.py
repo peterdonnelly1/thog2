@@ -6,7 +6,11 @@ import unittest
 from types import SimpleNamespace
 
 import run_thog2_owt  # noqa: F401  # <<< THOG apply the public terminal-colour and progress-format policy before formatting rows
-from sheet.stage6_trainer import Stage6Trainer, format_progress_line
+from sheet.stage6_trainer import (
+    Stage6Trainer,
+    _optimizer_progress_due,
+    format_progress_line,
+)
 
 
 class ConsoleProgressLayoutTests(unittest.TestCase):
@@ -72,6 +76,138 @@ class ConsoleProgressLayoutTests(unittest.TestCase):
         self.assertNotIn("\033[1;93m", line)
         self.assertNotIn("unchanging-run-id", line)
         self.assertEqual(len(re.findall(r"\033\[", line)), 4)
+
+    # vvv THOG show current layer count only on PLASTIC DEPTH training and validation rows
+    def test_current_layer_count_is_appended_only_when_plastic_is_enabled(self) -> None:
+        trainer = object.__new__(Stage6Trainer)
+        trainer.state = SimpleNamespace(completed_updates=8)
+        trainer._console_previous_completed_updates = 8
+        trainer._console_previous_training_seconds = 7.0
+        trainer._console_exact_training_seconds = 7.0
+        trainer._console_latest_mean_step_seconds = 0.875
+        trainer._console_previous_reported_training_loss = 10.1
+        trainer._plastic_depth_lattice = lambda: SimpleNamespace(current_active_layers=4)
+
+        base_payload = {
+            "completed_updates": "     8",
+            "cumulative_training_seconds": "     7",
+            "tok/s": "        2300",
+            "consumed_tokens": "          16384",
+            "training_loss": "  10.0000",
+            "learning_rate": " 1.000e-05",
+            "gradient_norm": "   2.000",
+        }
+
+        trainer.config = SimpleNamespace(plastic__enabled=False)
+        ordinary_values = trainer._prepare_console_progress_payload(
+            "optimizer_progress",
+            base_payload,
+        )
+        ordinary_line = format_progress_line(
+            "ordinary",
+            "optimizer_progress",
+            ordinary_values,
+        )
+        self.assertNotIn("current_layer_count", ordinary_line)
+
+        trainer.config = SimpleNamespace(plastic__enabled=True)
+        lattice = SimpleNamespace(current_active_layers=6)
+        trainer._plastic_depth_lattice = lambda: lattice
+        plastic_training_values = trainer._prepare_console_progress_payload(
+            "optimizer_progress",
+            base_payload,
+        )
+        plastic_training_line = format_progress_line(
+            "plastic",
+            "optimizer_progress",
+            plastic_training_values,
+        )
+        self.assertTrue(plastic_training_line.endswith("current_layer_count = 6"))
+
+        lattice.current_active_layers = 5
+        plastic_validation_values = trainer._prepare_console_progress_payload(
+            "evaluation_completed",
+            {
+                **base_payload,
+                "validation_loss": "   9.9000",
+            },
+        )
+        plastic_validation_line = format_progress_line(
+            "plastic",
+            "evaluation_completed",
+            plastic_validation_values,
+        )
+        self.assertIn("current_layer_count = 5", plastic_validation_line)
+        self.assertTrue(plastic_validation_line.endswith("current_layer_count = 5\033[0m"))
+    # ^^^ THOG
+
+    # vvv THOG sampled generated values appear once on the forced transition optimizer row only
+    def test_sampled_values_are_emitted_once_after_a_plastic_transition(self) -> None:
+        trainer = object.__new__(Stage6Trainer)
+        trainer.state = SimpleNamespace(completed_updates=11)
+        trainer.config = SimpleNamespace(plastic__enabled=True)
+        trainer._console_previous_completed_updates = 10
+        trainer._console_previous_training_seconds = 10.0
+        trainer._console_exact_training_seconds = 11.0
+        trainer._console_latest_mean_step_seconds = 1.0
+        trainer._console_previous_reported_training_loss = 4.1
+        trainer._plastic_depth_lattice = lambda: SimpleNamespace(current_active_layers=4)
+        trainer._plastic_depth_pending_console_sampled_values = (
+            1.234,
+            0.00456,
+            -1200.0,
+            0.0,
+        )
+
+        sampled_values = trainer._consume_plastic_depth_console_sampled_values()
+        self.assertEqual(sampled_values, (1.234, 0.00456, -1200.0, 0.0))
+        self.assertIsNone(trainer._consume_plastic_depth_console_sampled_values())
+        self.assertTrue(
+            _optimizer_progress_due(
+                completed_updates=11,
+                max_updates=100,
+                log_interval=10,
+                sampled_values=sampled_values,
+            )
+        )
+        self.assertFalse(
+            _optimizer_progress_due(
+                completed_updates=11,
+                max_updates=100,
+                log_interval=10,
+                sampled_values=None,
+            )
+        )
+
+        values = trainer._prepare_console_progress_payload(
+            "optimizer_progress",
+            {
+                "completed_updates": 11,
+                "cumulative_training_seconds": 11,
+                "training_loss": 4.0,
+                "learning_rate": 1.0e-4,
+                "gradient_norm": 1.5,
+                "sampled_values": sampled_values,
+            },
+        )
+        line = format_progress_line("plastic", "optimizer_progress", values)
+        self.assertTrue(
+            line.endswith(
+                "current_layer_count = 4  "
+                "sampled_values = [1.23, 4.56e-03, -1.20e+03, 0.00]"
+            )
+        )
+
+        validation_line = format_progress_line(
+            "plastic",
+            "evaluation_completed",
+            {
+                **values,
+                "validation_loss": 3.9,
+            },
+        )
+        self.assertNotIn("sampled_values", validation_line)
+    # ^^^ THOG
 
     # vvv THOG keep semantic-QKV bypass reporting for non-DEPTH geometries while suppressing it for DEPTH
     def test_semantic_qkv_bypass_is_suppressed_only_for_depth_reporting(self) -> None:

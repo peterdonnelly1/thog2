@@ -196,12 +196,26 @@ def _final_metrics(result: Mapping[str, Any]) -> Dict[str, Any]:
     if diagnostics is not None:
         for family, row in diagnostics["coefficient_utilization"].items():
             metrics[f"sheet/{family}/coefficient_rms"] = float(row["coefficient_rms"])
-            metrics[f"sheet/{family}/high_depth_order_energy_fraction"] = float(
-                row["high_depth_order_energy_fraction"]
-            )
-            metrics[f"sheet/{family}/high_row_order_energy_fraction"] = float(
-                row["high_row_order_energy_fraction"]
-            )
+            # vvv THOG omit unsupported optional order-axis diagnostics instead of coercing None after a completed run
+            # metrics[f"sheet/{family}/high_depth_order_energy_fraction"] = float(
+            #     row["high_depth_order_energy_fraction"]
+            # )
+            # metrics[f"sheet/{family}/high_row_order_energy_fraction"] = float(
+            #     row["high_row_order_energy_fraction"]
+            # )
+            # row["high_depth_order_energy_fraction"]
+            # row["high_row_order_energy_fraction"]
+            high_depth_fraction = row.get("high_depth_order_energy_fraction")
+            if high_depth_fraction is not None:
+                metrics[f"sheet/{family}/high_depth_order_energy_fraction"] = float(
+                    high_depth_fraction
+                )
+            high_row_fraction = row.get("high_row_order_energy_fraction")
+            if high_row_fraction is not None:
+                metrics[f"sheet/{family}/high_row_order_energy_fraction"] = float(
+                    high_row_fraction
+                )
+            # ^^^ THOG
         metrics["sheet/compact_state_violation_count"] = len(
             diagnostics["compact_state_violations"]
         )

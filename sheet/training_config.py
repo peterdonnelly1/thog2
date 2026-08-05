@@ -36,12 +36,43 @@ from .hyperblock import (
 )
 # ^^^ THOG
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
+# vvv THOG PLASTIC DEPTH configuration resolves a fixed persistent lattice and optional discrete active-count controller
+from .plastic_depth import (
+    PLASTIC_DEPTH_VERSION,
+    plastic_depth_identity_metadata,
+    resolve_plastic_depth_counts,
+    validate_plastic_layer_count_objective,
+    validate_plastic_sampling_initialisation,
+)
+# ^^^ THOG
 
 
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+# vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
+PLASTIC_TRAINING_CONFIG_FIELDS = (
+    "plastic__enabled",
+    "plastic__layers_to_sample",
+    "plastic__do_learn_layer_count",
+    "plastic__initial_layer_count",
+    "plastic__max_permitted_layers",
+    "plastic__layer_sampling_initialisation",
+    "plastic__layer_count_objective",
+    "plastic__layer_count_update_brake",
+    "plastic__layer_count_probe_noise_window",
+    "plastic__layer_count_probe_noise_min_observations",
+    "plastic__layer_count_probe_noise_lambda",
+    "plastic__layer_count_cost_weight",
+    "plastic__layer_memory_budget_gib",
+    "plastic__cuda_allocator_reserve_gib",
+    "plastic__geometry_learning_rate_multiplier",
+    "plastic__freeze_geometry_during_warmup",
+    "plastic__initial_active_layers",
+)
+# ^^^ THOG
+
 MODEL_COMPATIBILITY_FIELDS = (
     "model_type",
     "block_size",
@@ -89,6 +120,8 @@ MODEL_COMPATIBILITY_FIELDS = (
     "hyperblock_mlp_hidden_multiplier",
     "hyperblock_loop_count",
     "hyperblock_loop_decay",
+    # ^^^ THOG
+    # vvv THOG PLASTIC DEPTH compatibility is carried by compact_identity so pre-feature schema-2 checkpoints remain resumable
     # ^^^ THOG
 )
 
@@ -142,6 +175,25 @@ class TrainingConfig:
     hyperblock_loop_count: int = 1
     hyperblock_loop_decay: float = 1.0
     # ^^^ THOG
+    # vvv THOG PLASTIC DEPTH controls; disabled is the exact established path
+    plastic__enabled: bool = False
+    plastic__layers_to_sample: Optional[int] = None
+    plastic__do_learn_layer_count: bool = False
+    plastic__initial_layer_count: Optional[int] = None
+    plastic__max_permitted_layers: Optional[int] = None
+    plastic__layer_sampling_initialisation: str = "equidistant"
+    plastic__layer_count_objective: str = "lowest_loss"
+    plastic__layer_count_update_brake: int = 5
+    plastic__layer_count_probe_noise_window: int = 50
+    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_probe_noise_lambda: float = 3.0
+    plastic__layer_count_cost_weight: float = 0.0
+    plastic__layer_memory_budget_gib: Optional[float] = None
+    plastic__cuda_allocator_reserve_gib: float = 0.5
+    plastic__geometry_learning_rate_multiplier: float = 0.1
+    plastic__freeze_geometry_during_warmup: bool = True
+    plastic__initial_active_layers: int = 0
+    # ^^^ THOG
     checkpoint_segment_size: int = 0
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
@@ -190,6 +242,127 @@ class TrainingConfig:
                 f"got {self.depth_compress_layer_norm_and_bias!r}"
             )
 
+        # vvv THOG resolve PLASTIC DEPTH before selector and n_layer-dependent validation
+        if not isinstance(self.plastic__enabled, bool):
+            raise ValueError(f"plastic__enabled must be bool; got {self.plastic__enabled!r}")
+        if not isinstance(self.plastic__do_learn_layer_count, bool):
+            raise ValueError(
+                "plastic__do_learn_layer_count must be bool; "
+                f"got {self.plastic__do_learn_layer_count!r}"
+            )
+        if not isinstance(self.plastic__freeze_geometry_during_warmup, bool):
+            raise ValueError(
+                "plastic__freeze_geometry_during_warmup must be bool; "
+                f"got {self.plastic__freeze_geometry_during_warmup!r}"
+            )
+        resolved_plastic_counts = resolve_plastic_depth_counts(
+            n_layer=self.n_layer,
+            enabled=self.plastic__enabled,
+            layers_to_sample=self.plastic__layers_to_sample,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+            initial_layer_count=self.plastic__initial_layer_count,
+            max_permitted_layers=self.plastic__max_permitted_layers,
+        )
+        self.plastic__initial_active_layers = resolved_plastic_counts.initial_active_layers
+        if self.plastic__enabled:
+            self.n_layer = resolved_plastic_counts.maximum_layers
+        validate_plastic_sampling_initialisation(self.plastic__layer_sampling_initialisation)
+        validate_plastic_layer_count_objective(self.plastic__layer_count_objective)
+        if (
+            isinstance(self.plastic__layer_count_update_brake, bool)
+            or not isinstance(self.plastic__layer_count_update_brake, int)
+            or self.plastic__layer_count_update_brake < 0
+        ):
+            raise ValueError(
+                "plastic__layer_count_update_brake must be a non-negative integer; "
+                f"got {self.plastic__layer_count_update_brake!r}"
+            )
+        # vvv THOG PLASTIC DEPTH robust paired-score gate controls
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_window, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
+            or self.plastic__layer_count_probe_noise_window < 1
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_window must be a positive integer; "
+                f"got {self.plastic__layer_count_probe_noise_window!r}"
+            )
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
+            or self.plastic__layer_count_probe_noise_min_observations < 1
+            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]; "
+                f"got {self.plastic__layer_count_probe_noise_min_observations!r}"
+            )
+        if (
+            isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
+            or not isinstance(self.plastic__layer_count_probe_noise_lambda, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_probe_noise_lambda))
+            or float(self.plastic__layer_count_probe_noise_lambda) < 0.0
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe_noise_lambda must be finite and non-negative; "
+                f"got {self.plastic__layer_count_probe_noise_lambda!r}"
+            )
+        # ^^^ THOG
+        if (
+            isinstance(self.plastic__layer_count_cost_weight, bool)
+            or not isinstance(self.plastic__layer_count_cost_weight, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_cost_weight))
+            or float(self.plastic__layer_count_cost_weight) < 0.0
+        ):
+            raise ValueError(
+                "plastic__layer_count_cost_weight must be finite and non-negative; "
+                f"got {self.plastic__layer_count_cost_weight!r}"
+            )
+        if (
+            self.plastic__layer_memory_budget_gib is not None
+            and (
+                isinstance(self.plastic__layer_memory_budget_gib, bool)
+                or not isinstance(self.plastic__layer_memory_budget_gib, (int, float))
+                or not math.isfinite(float(self.plastic__layer_memory_budget_gib))
+                or float(self.plastic__layer_memory_budget_gib) <= 0.0
+            )
+        ):
+            raise ValueError(
+                "plastic__layer_memory_budget_gib must be finite and positive or None; "
+                f"got {self.plastic__layer_memory_budget_gib!r}"
+            )
+        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_memory_budget_gib is None:
+            raise ValueError("plastic__layer_memory_budget_gib is required for memory_budget")
+        # vvv THOG universal CUDA safety reserve is execution state, configured in GiB and allowed to be explicitly disabled with zero
+        if (
+            isinstance(self.plastic__cuda_allocator_reserve_gib, bool)
+            or not isinstance(self.plastic__cuda_allocator_reserve_gib, (int, float))
+            or not math.isfinite(float(self.plastic__cuda_allocator_reserve_gib))
+            or float(self.plastic__cuda_allocator_reserve_gib) < 0.0
+        ):
+            raise ValueError(
+                "plastic__cuda_allocator_reserve_gib must be finite and non-negative; "
+                f"got {self.plastic__cuda_allocator_reserve_gib!r}"
+            )
+        # ^^^ THOG
+        if self.plastic__enabled and self.plastic__layer_count_objective == "memory_budget" and not self.device.startswith("cuda"):
+            raise ValueError("PLASTIC DEPTH memory_budget requires a CUDA device")
+        if (
+            isinstance(self.plastic__geometry_learning_rate_multiplier, bool)
+            or not isinstance(self.plastic__geometry_learning_rate_multiplier, (int, float))
+            or not math.isfinite(float(self.plastic__geometry_learning_rate_multiplier))
+            or float(self.plastic__geometry_learning_rate_multiplier) < 0.0
+        ):
+            raise ValueError(
+                "plastic__geometry_learning_rate_multiplier must be finite and non-negative; "
+                f"got {self.plastic__geometry_learning_rate_multiplier!r}"
+            )
+        if self.plastic__enabled and self.model_type != "thog2_sheet":
+            raise ValueError("PLASTIC DEPTH requires model_type='thog2_sheet'")
+        if self.plastic__enabled and self.hyperblock_enabled:
+            raise ValueError("PLASTIC DEPTH may not be combined with HYPERBLOCK")
+        # ^^^ THOG
+
         # vvv THOG HYPERBLOCK and legacy selector geometries are mutually exclusive persistent parameterisations
         if self.hyperblock_enabled:
             if self.model_type != "thog2_sheet":
@@ -230,6 +403,11 @@ class TrainingConfig:
                     basis_family=self.basis_family,
                 )
                 if selectors.geometry_preset == GEOMETRY_PRESET_DEPTH:
+                    if self.plastic__enabled and selectors.basis_family != "chebyshev":
+                        raise ValueError(
+                            "PLASTIC DEPTH v0.1 requires the Chebyshev DEPTH compressor; "
+                            f"got {selectors.basis_family!r}"
+                        )
                     self.base_row_order = 1
                     self.mlp_channel_order = 1
                     self.o_attn_d_model = 1
@@ -241,6 +419,8 @@ class TrainingConfig:
                     raise ValueError(
                         "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
                     )
+                if self.plastic__enabled and selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
+                    raise ValueError("PLASTIC DEPTH requires geometry_preset='depth'")
             elif self.depth_compress_layer_norm_and_bias:
                 raise ValueError(
                     "depth_compress_layer_norm_and_bias may be enabled only for geometry_preset='depth'"
@@ -304,6 +484,8 @@ class TrainingConfig:
                 "layer_dropout_active_per_stratum must not exceed layer_dropout_stratum_size; "
                 f"got active={self.layer_dropout_active_per_stratum}, stratum_size={self.layer_dropout_stratum_size}"
             )
+        if self.plastic__enabled and self.layer_dropout_active_per_stratum < self.layer_dropout_stratum_size:
+            raise ValueError("PLASTIC DEPTH v0.1 may not be combined with layer dropout")
         # ^^^ THOG
         validate_checkpoint_segment_size(self.checkpoint_segment_size)
         if self.n_embd % self.n_head != 0:
@@ -458,6 +640,15 @@ class TrainingConfig:
     def residual_init_config(self) -> ResidualInitConfig:
         return ResidualInitConfig(policy=self.residual_init_policy, depth_source=self.residual_init_depth_source, depth_value=self.residual_init_depth_value)
 
+    # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
+    def persistent_dict(self) -> Dict[str, Any]:
+        values = asdict(self)
+        if not self.plastic__enabled:
+            for name in PLASTIC_TRAINING_CONFIG_FIELDS:
+                values.pop(name, None)
+        return values
+    # ^^^ THOG
+
     def model_arguments(self) -> Dict[str, Any]:
         arguments: Dict[str, Any] = {
             "block_size": self.block_size,
@@ -515,6 +706,27 @@ class TrainingConfig:
                     "mlp_geometry": self.mlp_geometry,
                     "basis_family": self.basis_family,
                 })
+                # vvv THOG disabled PLASTIC DEPTH passes no new model arguments; enabled runs carry the complete Plasticity Engine identity
+                if self.plastic__enabled:
+                    arguments.update({
+                        "plastic__enabled": True,
+                        "plastic__layers_to_sample": self.plastic__layers_to_sample,
+                        "plastic__do_learn_layer_count": self.plastic__do_learn_layer_count,
+                        "plastic__initial_layer_count": self.plastic__initial_layer_count,
+                        "plastic__max_permitted_layers": self.plastic__max_permitted_layers,
+                        "plastic__layer_sampling_initialisation": self.plastic__layer_sampling_initialisation,
+                        "plastic__layer_count_objective": self.plastic__layer_count_objective,
+                        "plastic__layer_count_update_brake": self.plastic__layer_count_update_brake,
+                        "plastic__layer_count_probe_noise_window": self.plastic__layer_count_probe_noise_window,
+                        "plastic__layer_count_probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+                        "plastic__layer_count_probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
+                        "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
+                        "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
+                        "plastic__geometry_learning_rate_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+                        "plastic__freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
+                        "plastic__sampling_seed": self.model_seed,
+                    })
+                # ^^^ THOG
             # ^^^ THOG
         return arguments
 
@@ -557,6 +769,46 @@ class TrainingConfig:
         )
         if self.resolved_geometry_plan is not None:
             identity["resolved_geometry_plan"] = self.resolved_geometry_plan
+        # vvv THOG PLASTIC DEPTH identity is explicit while disabled identity remains byte-for-byte unchanged
+        if self.plastic__enabled:
+            # identity["plastic_depth"] = {
+            #     "version": PLASTIC_DEPTH_VERSION,
+            #     "maximum_layers": self.n_layer,
+            #     "initial_active_layers": self.plastic__initial_active_layers,
+            #     "learn_layer_count": self.plastic__do_learn_layer_count,
+            #     "sampling_initialisation": self.plastic__layer_sampling_initialisation,
+            #     "count_objective": self.plastic__layer_count_objective,
+            #     "count_update_brake": self.plastic__layer_count_update_brake,
+            #     "probe_noise_window": self.plastic__layer_count_probe_noise_window,
+            #     "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+            #     "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
+            #     "count_cost_weight": float(self.plastic__layer_count_cost_weight),
+            #     "memory_budget_gib": self.plastic__layer_memory_budget_gib,
+            #     "cuda_allocator_reserve_gib": float(self.plastic__cuda_allocator_reserve_gib),
+            #     "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+            #     "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
+            # }
+            # vvv THOG persist every exposed control under its exact canonical plastic__ name
+            identity["plastic_depth"] = plastic_depth_identity_metadata(
+                layers_to_sample=self.plastic__layers_to_sample,
+                do_learn_layer_count=self.plastic__do_learn_layer_count,
+                initial_layer_count=self.plastic__initial_layer_count,
+                max_permitted_layers=self.plastic__max_permitted_layers,
+                layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
+                layer_count_objective=self.plastic__layer_count_objective,
+                layer_count_update_brake=self.plastic__layer_count_update_brake,
+                layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
+                layer_count_probe_noise_min_observations=self.plastic__layer_count_probe_noise_min_observations,
+                layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
+                layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
+                layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
+                cuda_allocator_reserve_gib=float(self.plastic__cuda_allocator_reserve_gib),
+                geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
+                freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
+                initial_active_layers=self.plastic__initial_active_layers,
+            )
+            # ^^^ THOG
+        # ^^^ THOG
         return identity
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added
@@ -578,4 +830,33 @@ class TrainingConfig:
 # ^^^ THOG
 # vvv THOG preserved superseded source lines for exact history audit
 # for name in ("block_size", "vocab_size", "n_layer", "n_head", "n_embd", "depth_order", "base_row_order", "mlp_hidden_group_size", "hyperblock_common_family_order", "hyperblock_attention_family_order", "hyperblock_mlp_family_order", "hyperblock_depth_order", "hyperblock_d_model_order", "hyperblock_mlp_hidden_order", "hyperblock_attention_head_order", "hyperblock_attention_head_channel_order", "hyperblock_mlp_hidden_multiplier", "batch_size", "gradient_accumulation_steps", "layer_dropout_resample_steps", "max_updates", "decay_updates", "eval_batches", "log_interval"):
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# "plastic__layer_count_hold_updates",
+# plastic__layer_count_hold_updates: int = 100
+# isinstance(self.plastic__layer_count_hold_updates, bool)
+# or not isinstance(self.plastic__layer_count_hold_updates, int)
+# or self.plastic__layer_count_hold_updates <= 0
+# "plastic__layer_count_hold_updates must be a positive integer; "
+# f"got {self.plastic__layer_count_hold_updates!r}"
+# "plastic__layer_count_hold_updates": self.plastic__layer_count_hold_updates,
+# "count_hold_updates": self.plastic__layer_count_hold_updates,
+# ^^^ THOG
+
+# vvv THOG retired short PLASTIC identity aliases preserved for source history
+# "version": PLASTIC_DEPTH_VERSION,
+# "maximum_layers": self.n_layer,
+# "initial_active_layers": self.plastic__initial_active_layers,
+# "learn_layer_count": self.plastic__do_learn_layer_count,
+# "sampling_initialisation": self.plastic__layer_sampling_initialisation,
+# "count_objective": self.plastic__layer_count_objective,
+# "count_update_brake": self.plastic__layer_count_update_brake,
+# "probe_noise_window": self.plastic__layer_count_probe_noise_window,
+# "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+# "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
+# "count_cost_weight": float(self.plastic__layer_count_cost_weight),
+# "memory_budget_gib": self.plastic__layer_memory_budget_gib,
+# "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
+# "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
 # ^^^ THOG

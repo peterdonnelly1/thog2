@@ -214,6 +214,14 @@ class DistributedContext:
         reduced = self.mean_tensor(value.to(dtype=torch.float64))
         return float(reduced.item())
 
+    # vvv THOG PLASTIC DEPTH hard resource constraints use the worst rank rather than the mean
+    def max_float(self, value: Tensor) -> float:
+        result = value.detach().to(dtype=torch.float64).clone()
+        if self.active:
+            dist.all_reduce(result, op=dist.ReduceOp.MAX)
+        return float(result.item())
+    # ^^^ THOG
+
     def all_true(self, condition: bool) -> bool:
         flag = torch.tensor(
             1 if condition else 0,

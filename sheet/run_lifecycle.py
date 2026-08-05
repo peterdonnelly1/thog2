@@ -10,6 +10,13 @@ from typing import Any, Dict, Mapping, Optional
 
 
 LIFECYCLE_SCHEMA_VERSION = 2
+
+
+# vvv THOG use feature-aware persistent configuration so disabled PLASTIC DEPTH leaves lifecycle metadata unchanged
+def _persistent_run_config(config: Any) -> Dict[str, Any]:
+    persistent = getattr(config, "persistent_dict", None)
+    return persistent() if callable(persistent) else asdict(config)
+# ^^^ THOG
 _START_LABEL_PATTERN = re.compile(r"^\d{6}-\d{4}$")
 
 
@@ -90,7 +97,10 @@ def _base_lifecycle(
         "parent_completed_updates": None,
         "parent_wandb_run_id": None,
         "lineage": [],
-        "run_config": asdict(config),
+        # vvv THOG preserve the pre-PLASTIC lifecycle configuration serialization for source history
+        # "run_config": asdict(config),
+        "run_config": _persistent_run_config(config),
+        # ^^^ THOG
         "checkpoint_path": str(paths["checkpoint_path"]),
         "log_path": str(paths["log_path"]),
         "result_path": str(paths["result_path"]),
@@ -155,7 +165,10 @@ def resume_lifecycle(
     lifecycle = dict(parent)
     lifecycle["creation_mode"] = "resume"
     lifecycle["session_id"] = _new_session_id()                                                                                                         # <<< THOG wrapper preflight resolves the same session identity later persisted by execution
-    lifecycle["run_config"] = asdict(config)
+    # vvv THOG preserve the pre-PLASTIC resume configuration serialization for source history
+    # lifecycle["run_config"] = asdict(config)
+    lifecycle["run_config"] = _persistent_run_config(config)
+    # ^^^ THOG
     lifecycle["instrumentation_backend"] = instrumentation_backend
     lifecycle["resume_starting_completed_updates"] = int(starting_completed_updates)
     lifecycle["target_updates"] = int(target_updates)
@@ -221,7 +234,10 @@ def fork_lifecycle(
         "parent_completed_updates": int(parent_completed_updates),
         "parent_wandb_run_id": parent_wandb_run_id,                                                                                                     # <<< THOG child metadata exposes immediate W&B ancestry separately from child identity
         "lineage": parent_lineage + [parent_record],
-        "run_config": asdict(config),
+        # vvv THOG preserve the pre-PLASTIC lifecycle configuration serialization for source history
+        # "run_config": asdict(config),
+        "run_config": _persistent_run_config(config),
+        # ^^^ THOG
         "checkpoint_path": str(paths["checkpoint_path"]),
         "log_path": str(paths["log_path"]),
         "result_path": str(paths["result_path"]),

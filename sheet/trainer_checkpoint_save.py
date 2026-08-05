@@ -12,6 +12,9 @@ from .checkpoints import (
     optimizer_group_names,
     save_payload,
 )
+# vvv THOG explicit PLASTIC checkpoint-format identity
+from .checkpoints import PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION
+# ^^^ THOG
 from .training_config import CHECKPOINT_SCHEMA_VERSION
 
 
@@ -24,6 +27,13 @@ class TrainerCheckpointSaveMixin:
             "model_args": self.config.model_arguments(),
             "compatibility_signature": self.config.compatibility_signature(),
             "compact_identity": compact_identity,
+            # vvv THOG enabled PLASTIC checkpoints state their active-prefix/gauge format independently of mutable identity aliases
+            **(
+                {"plastic_depth_checkpoint_format_version": PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION}
+                if self.config.plastic__enabled
+                else {}
+            ),
+            # ^^^ THOG
             "basis_version": self.config.basis_version,
             "row_order_scaling_rule": self.config.row_order_scaling_rule,
             "model": compact_model_state(self.raw_model, self.config.model_type),
@@ -31,7 +41,10 @@ class TrainerCheckpointSaveMixin:
             "optimizer_group_parameter_names": optimizer_group_names(self.optimizer),
             "trainer_state": asdict(self.state),
             "completed_updates": self.state.completed_updates,
-            "trainer_config": asdict(self.config),
+            # vvv THOG preserve the pre-PLASTIC checkpoint configuration serialization for source history
+            # "trainer_config": asdict(self.config),
+            "trainer_config": self.config.persistent_dict(),
+            # ^^^ THOG
             "batch_source": self.batch_source.state_dict(),
             "rng_state": capture_rng_state(),
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},

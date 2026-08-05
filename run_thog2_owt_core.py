@@ -17,11 +17,20 @@ import torch
 from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
 from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
-from sheet.checkpoints import load_payload
+# from sheet.checkpoints import load_payload
+# vvv THOG resume-control preflight uses the same PLASTIC geometry-format guard as full trainer resume
+from sheet.checkpoints import load_payload, validate_plastic_depth_checkpoint_format
+# ^^^ THOG
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
 from sheet.geometry_registry import AXIS_MLP_HIDDEN, format_geometry_plan, resolve_geometry_plan
 # vvv THOG v0 exposes HYPERBLOCK as a Boolean mode while retaining explicit topology identity internally
 from sheet.hyperblock import HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE
+# ^^^ THOG
+# vvv THOG PLASTIC DEPTH categorical CLI choices
+from sheet.plastic_depth import (
+    PLASTIC_LAYER_COUNT_OBJECTIVES,
+    PLASTIC_LAYER_SAMPLING_INITIALISATIONS,
+)
 # ^^^ THOG
 from sheet.residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, RESIDUAL_INIT_DEPTH_SOURCES, RESIDUAL_INIT_POLICIES
 from sheet.run_config import (
@@ -186,6 +195,9 @@ def validate_dataset(dataset_dir: Path, block_size: int) -> Dict[str, Any]:
 
 def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) -> None:
     payload = load_payload(checkpoint_path)
+    # vvv THOG reject v0.1 or ambiguous PLASTIC geometry before reconstructing stored controls
+    validate_plastic_depth_checkpoint_format(payload)
+    # ^^^ THOG
     if "trainer_config" not in payload:
         return
     stored = TrainingConfig(**payload["trainer_config"])
@@ -263,6 +275,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hyperblock-mlp-hidden-multiplier", type=int, default=4)
     parser.add_argument("--hyperblock-loop-count", type=int, default=1)
     parser.add_argument("--hyperblock-loop-decay", type=float, default=1.0)
+    # ^^^ THOG
+    # vvv THOG PLASTIC DEPTH public controls map directly to the canonical double-underscore configuration fields
+    parser.add_argument("--plastic-enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic-layers-to-sample", dest="plastic__layers_to_sample", type=int)
+    parser.add_argument("--plastic-do-learn-layer-count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic-initial-layer-count", dest="plastic__initial_layer_count", type=int)
+    parser.add_argument("--plastic-max-permitted-layers", dest="plastic__max_permitted_layers", type=int)
+    parser.add_argument("--plastic-layer-sampling-initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
+    parser.add_argument("--plastic-layer-count-objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
+    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)
+    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
+    parser.add_argument("--plastic-layer-count-probe-noise-min-observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
+    parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
+    parser.add_argument("--plastic-layer-count-cost-weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
+    parser.add_argument("--plastic-layer-memory-budget-gib", dest="plastic__layer_memory_budget_gib", type=float)
+    parser.add_argument("--plastic-cuda-allocator-reserve-gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
+    parser.add_argument("--plastic-geometry-learning-rate-multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
+    parser.add_argument("--plastic-freeze-geometry-during-warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
     # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
@@ -448,6 +478,24 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         hyperblock_loop_count=arguments.hyperblock_loop_count,
         hyperblock_loop_decay=arguments.hyperblock_loop_decay,
         # ^^^ THOG
+        # vvv THOG pass PLASTIC DEPTH CLI controls into resolved run identity
+        plastic__enabled=arguments.plastic__enabled,
+        plastic__layers_to_sample=arguments.plastic__layers_to_sample,
+        plastic__do_learn_layer_count=arguments.plastic__do_learn_layer_count,
+        plastic__initial_layer_count=arguments.plastic__initial_layer_count,
+        plastic__max_permitted_layers=arguments.plastic__max_permitted_layers,
+        plastic__layer_sampling_initialisation=arguments.plastic__layer_sampling_initialisation,
+        plastic__layer_count_objective=arguments.plastic__layer_count_objective,
+        plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,
+        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,
+        plastic__layer_count_probe_noise_min_observations=arguments.plastic__layer_count_probe_noise_min_observations,
+        plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
+        plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
+        plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
+        plastic__cuda_allocator_reserve_gib=arguments.plastic__cuda_allocator_reserve_gib,
+        plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
+        plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
+        # ^^^ THOG
         lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
         lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control
         attention_backend=arguments.attention_backend,
@@ -507,6 +555,35 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
     _print_model_option("non-finite:", f"policy={config.nonfinite_update_policy}  max_skips={config.max_nonfinite_update_skips}")
     _print_model_option("batches:", f"micro={config.batch_size}  accumulation={config.gradient_accumulation_steps}  tokens/update={config.tokens_per_iter():,}")
     _print_model_option("layer dropout:", f"strata={config.layer_dropout_n_strata}  stratum_size={config.layer_dropout_stratum_size}  active/stratum={config.layer_dropout_active_per_stratum}  active_layers={config.n_active_layers}/{config.n_layer}  resample_steps={config.layer_dropout_resample_steps}")
+    # vvv THOG PLASTIC DEPTH startup report makes resolved count authority and public sample coordinates explicit
+    if config.plastic__enabled:
+        plastic_report = report.get("plastic_depth", {})
+        count_mode = "learned" if config.plastic__do_learn_layer_count else "fixed"
+        _print_model_option("plastic depth:", "enabled")
+        _print_model_option(
+            "plastic layer count:",
+            f"{count_mode}  initial={config.plastic__initial_active_layers}  current={plastic_report.get('active_layers')}  max={config.n_layer}",
+        )
+        _print_model_option("plastic sampling:", config.plastic__layer_sampling_initialisation)
+        _print_model_option(
+            "plastic objective:",
+            f"{config.plastic__layer_count_objective}  update_brake={config.plastic__layer_count_update_brake}  "
+            f"noise_window={config.plastic__layer_count_probe_noise_window}  "
+            f"min_observations={config.plastic__layer_count_probe_noise_min_observations}  "
+            f"lambda={float(config.plastic__layer_count_probe_noise_lambda):g}",
+        )
+        public_coordinates = plastic_report.get("active_public_coordinates", ())
+        _print_model_option(
+            "plastic samples:",
+            ", ".join(f"{float(value):.3f}" for value in public_coordinates),
+        )
+        full_coordinates = plastic_report.get("public_coordinates", ())
+        if tuple(full_coordinates) != tuple(public_coordinates):
+            _print_model_option(
+                "plastic full lattice:",
+                ", ".join(f"{float(value):.3f}" for value in full_coordinates),
+            )
+    # ^^^ THOG
     if config.model_type == "sheet":
         model_config = trainer.raw_model.config
         # vvv THOG preserve the pre-HYPERBLOCK-direct execution row exactly for source history
@@ -607,4 +684,10 @@ if __name__ == "__main__":
 # ^^^ THOG
 # vvv THOG preserved superseded source lines for exact history audit
 # f"topology={plan['topology']}  compressor={plan['compressor_family']}@{plan['compressor_version']}  coefficients={plan['coefficient_counts']['total']:,}  matrix_dense/coefficient={hyperblock['compression_ratio']:.2f}x",
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# parser.add_argument("--plastic-layer-count-hold-updates", dest="plastic__layer_count_hold_updates", type=int, default=100)
+# plastic__layer_count_hold_updates=arguments.plastic__layer_count_hold_updates,
+# f"{config.plastic__layer_count_objective}  hold_updates={config.plastic__layer_count_hold_updates}",
 # ^^^ THOG

@@ -299,7 +299,10 @@ def protocol_manifest(
                 ),
                 "checkpoint_segment_size": spec.checkpoint_segment_size,
                 "out_dir": str(run_dir),
-                "training_config": asdict(config),
+                # vvv THOG preserve the pre-PLASTIC protocol configuration serialization for source history
+                # "training_config": asdict(config),
+                "training_config": config.persistent_dict(),
+                # ^^^ THOG
                 "logical_control_signature": signature,
             }
         )

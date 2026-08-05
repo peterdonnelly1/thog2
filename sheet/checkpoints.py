@@ -10,6 +10,14 @@ import torch
 from torch import Tensor
 
 from .model import SheetGPT
+# vvv THOG checkpoint-format guard constants
+from .plastic_depth import PLASTIC_DEPTH_VERSION
+
+# vvv THOG checkpoint geometry discriminator separates active-prefix/gauge semantics from the unsafe v0.1 phantom lattice
+PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION = "plastic_depth_active_prefix_gauge_v1"
+PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION = "plastic_depth_v0_1"
+# ^^^ THOG
+# ^^^ THOG
 from .training_config import (
     CHECKPOINT_SCHEMA_VERSION,
     MODEL_COMPATIBILITY_FIELDS,
@@ -77,6 +85,35 @@ def _semantic_compatibility_value(name: str, value: Any) -> Any:
     return value
 
 
+# vvv THOG canonical public spellings are provenance; checkpoint compatibility compares the resolved PLASTIC semantics
+
+def _semantic_plastic_depth_identity(value: Any, *, maximum_layers: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    if "plastic__enabled" not in value:
+        return value
+    return {
+        "version": value.get("version"),
+        "maximum_layers": maximum_layers,
+        "initial_active_layers": value.get("plastic__initial_active_layers"),
+        "learn_layer_count": value.get("plastic__do_learn_layer_count"),
+        "sampling_initialisation": value.get("plastic__layer_sampling_initialisation"),
+        "count_objective": value.get("plastic__layer_count_objective"),
+        "count_update_brake": value.get("plastic__layer_count_update_brake"),
+        "probe_noise_window": value.get("plastic__layer_count_probe_noise_window"),
+        "probe_noise_min_observations": value.get("plastic__layer_count_probe_noise_min_observations"),
+        "probe_noise_lambda": value.get("plastic__layer_count_probe_noise_lambda"),
+        "count_cost_weight": value.get("plastic__layer_count_cost_weight"),
+        "memory_budget_gib": value.get("plastic__layer_memory_budget_gib"),
+        "cuda_allocator_reserve_gib": value.get("plastic__cuda_allocator_reserve_gib"),
+        "geometry_lr_multiplier": value.get("plastic__geometry_learning_rate_multiplier"),
+        "freeze_geometry_during_warmup": value.get("plastic__freeze_geometry_during_warmup"),
+    }
+
+
+# ^^^ THOG
+
+
 def _semantic_compact_identity(value: Any) -> Any:
     if not isinstance(value, Mapping):
         return value
@@ -85,9 +122,127 @@ def _semantic_compact_identity(value: Any) -> Any:
         normalized["resolved_geometry_plan"] = _semantic_geometry_plan(
             normalized["resolved_geometry_plan"]
         )
+    # vvv THOG accept checkpoints written with the retired short PLASTIC aliases while all new writes use plastic__ names
+    if "plastic_depth" in normalized:
+        # normalized["plastic_depth"] = normalized["plastic_depth"]
+        normalized["plastic_depth"] = _semantic_plastic_depth_identity(
+            normalized["plastic_depth"],
+            maximum_layers=normalized.get("n_layer"),
+        )
+    # ^^^ THOG
     return normalized
 # ^^^ THOG
 
+
+
+# vvv THOG reject semantically unsafe PLASTIC geometry before constructing a trainer or applying model/optimizer state
+
+def _plastic_depth_checkpoint_identity(payload: Mapping[str, Any]) -> Any:
+    compact_identity = payload.get("compact_identity")
+    if not isinstance(compact_identity, Mapping):
+        return None
+    return compact_identity.get("plastic_depth")
+
+
+def _plastic_depth_checkpoint_is_enabled(payload: Mapping[str, Any]) -> bool:
+    trainer_config = payload.get("trainer_config")
+    if isinstance(trainer_config, Mapping):
+        enabled = trainer_config.get("plastic__enabled")
+        if enabled is False:
+            return False
+        if enabled is True:
+            return True
+    return isinstance(_plastic_depth_checkpoint_identity(payload), Mapping)
+
+
+def _unsafe_plastic_depth_checkpoint_message(detail: str) -> str:
+    return (
+        "unsafe PLASTIC DEPTH checkpoint geometry: "
+        f"{detail}; the old globally normalised phantom-lattice chart cannot "
+        "be converted safely to active-prefix gauge-preserving geometry"
+    )
+
+
+def validate_plastic_depth_checkpoint_format(payload: Mapping[str, Any]) -> None:
+    identity = _plastic_depth_checkpoint_identity(payload)
+    format_version = payload.get("plastic_depth_checkpoint_format_version")
+    trainer_config = payload.get("trainer_config")
+    trainer_plastic_enabled = (
+        trainer_config.get("plastic__enabled")
+        if isinstance(trainer_config, Mapping)
+        else None
+    )
+    # vvv THOG disabled trainer state must not carry active PLASTIC checkpoint metadata into model construction
+    if trainer_plastic_enabled is False:
+        if isinstance(identity, Mapping) or format_version is not None:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    "disabled trainer state contains PLASTIC checkpoint metadata"
+                )
+            )
+        return
+    # ^^^ THOG
+    if (
+        trainer_plastic_enabled is not True
+        and not isinstance(identity, Mapping)
+        and format_version is None
+    ):
+        return
+
+    identity_version = identity.get("version") if isinstance(identity, Mapping) else None
+
+    # vvv THOG canonical v0.3 identity must not contradict the enabled trainer state; retired short aliases omit this field
+    if (
+        isinstance(identity, Mapping)
+        and "plastic__enabled" in identity
+        and identity.get("plastic__enabled") is not True
+    ):
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                "enabled trainer state disagrees with compact identity "
+                f"plastic__enabled={identity.get('plastic__enabled')!r}"
+            )
+        )
+    # ^^^ THOG
+
+    if format_version is not None:
+        if format_version != PLASTIC_DEPTH_CHECKPOINT_FORMAT_VERSION:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    f"unsupported format discriminator {format_version!r}"
+                )
+            )
+        if identity_version != PLASTIC_DEPTH_VERSION:
+            raise ValueError(
+                _unsafe_plastic_depth_checkpoint_message(
+                    "format discriminator and compact identity version disagree "
+                    f"({format_version!r} versus {identity_version!r})"
+                )
+            )
+        return
+
+    if identity_version == PLASTIC_DEPTH_VERSION:
+        return
+    if identity_version == PLASTIC_DEPTH_LEGACY_PHANTOM_VERSION:
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                f"explicit legacy version {identity_version!r}"
+            )
+        )
+    if identity_version is None:
+        raise ValueError(
+            _unsafe_plastic_depth_checkpoint_message(
+                "enabled PLASTIC state has no trustworthy version discriminator"
+            )
+        )
+    raise ValueError(
+        _unsafe_plastic_depth_checkpoint_message(
+            f"unsupported compact identity version {identity_version!r}"
+        )
+    )
+
+
+# ^^^ THOG
 
 def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig) -> None:
     if payload.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
@@ -95,6 +250,9 @@ def validate_compatibility(payload: Mapping[str, Any], expected: TrainingConfig)
             f"checkpoint schema_version mismatch: expected {CHECKPOINT_SCHEMA_VERSION}, "
             f"got {payload.get('schema_version')!r}"
         )
+    # vvv THOG direct compatibility callers receive the same pre-state PLASTIC format guard as full resume
+    validate_plastic_depth_checkpoint_format(payload)
+    # ^^^ THOG
     checkpoint_signature = payload.get("compatibility_signature", {})
     expected_signature = expected.compatibility_signature()
     mismatches = []

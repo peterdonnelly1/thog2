@@ -23,7 +23,8 @@ _COMPACT_TIMESTAMP_PATTERN = re.compile(r"^\d{6}_\d{4}$")
 
 # vvv THOG descriptor v2.1 relocates active layer-dropout identity beside canonical L while preserving all-active names
 _LAYER_DROPOUT_V20_PATTERN = re.compile(r"_LDs_(?P<stratum>\d+)_LDa_(?P<active>\d+)_LDr_(?P<interval>\d+)(?=__)")
-_LAYER_COUNT_SECTION_END_PATTERN = re.compile(r"(?P<layer>_L_\d+)(?=__)")
+# _LAYER_COUNT_SECTION_END_PATTERN = re.compile(r"(?P<layer>_L_\d+)(?=__)")
+_LAYER_COUNT_SECTION_END_PATTERN = re.compile(r"(?P<layer>_L_(?:\d+|dyn))(?=__)")                                                     # <<< THOG descriptor post-processing accepts learned PLASTIC dynamic depth
 
 
 def _descriptor_v21_layer_dropout(value: str) -> str:

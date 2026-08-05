@@ -1,0 +1,790 @@
+PLASTIC DEPTH REQUIREMENTS SPECIFICATION
+
+THOG2
+
+Plastic DEPTH
+
+Coarse-to-fine layer-count discovery
+
+with adaptive learned sampling geometry
+
+VERSION | DATE          | STATUS                                
+--------+---------------+---------------------------------------
+0.4     | 6 August 2026 | Proposed implementation-ready revision
+
+SCOPE
+
+Add an optional one-shot COARSE phase that compares deterministic, fresh step-zero fixed-geometry trials at doubling layer counts; select the FINE starting count under any supported goal; pause for operator review; then start the normal adaptive FINE run from a new step zero with periodic full-radius probing and fully auditable count changes.
+
+IMPLEMENTATION BRANCH / PLASTIC_DEPTH, branched from HYPERBLOCK_LOOP_ENHANCEMENTS. Version 0.4 supersedes Version 0.3's every-update N-1/N/N+1 and gauge re-expression design. It records the fixed-capacity absolute depth ruler, periodic full-radius FINE probing, and the new one-shot COARSE discovery phase while retaining disabled-path regression requirements.
+
+THOG2 architecture enhancement
+
+Contents
+
+This contents page is intentionally static so that page references remain reliable in exported and headless-rendered copies.
+
+1. Executive Summary                                      | 3 
+2. Scope, Terms and Governing Decisions                    | 3 
+3. Fixed-Capacity DEPTH Ruler and Sampling Geometry        | 4 
+4. Two-Phase Training Lifecycle                            | 5 
+5. COARSE Phase: Deterministic Fixed-Geometry Trials       | 5 
+6. COARSE Evaluation, Goal Scoring and Selection           | 6 
+7. COARSE Reporting, Review Pause and Operator Control     | 7 
+8. FINE Phase: Periodic Full-Radius Probing                | 8 
+9. FINE Objectives and Robust Count Decision               | 8 
+10. FINE Count Transition and Decision Audit               | 9 
+11. Runtime Cost, VRAM and Geometry Learning               | 10
+12. Configuration and Resolution                           | 10
+13. Training, Checkpoint, Resume and Instrumentation       | 12
+14. Diagnostics and Required Implementation Work           | 12
+15. Requirements and Acceptance Criteria                   | 13
+16. Known Issues and Limitations                            | 15
+17. Acceptance Scenarios and Out of Scope                  | 16
+Appendix A. Resolved Examples                               | 17
+Appendix B. Implementation Sequence and Migration           | 18
+
+Document purpose
+
+This document is an implementation requirements specification, not a research claim. It defines the target design after the August 2026 PLASTIC DEPTH controller experiments. Version 0.4 distinguishes global starting-count discovery from local adaptive count control and makes both phases inspectable and reproducible.
+
+1. Executive Summary
+
+CORE DECISION / PLASTIC DEPTH shall optionally begin with a one-shot COARSE search. Each candidate count is trained in a fresh, deterministic mini-run from visible step zero with fixed sampling geometry and no PLASTIC learning. All trial state is discarded. Only the measurements and selected count survive. After a 900-second review pause, FINE starts again from step zero at the selected count and uses periodic full-radius local probes with max-step-limited transitions.
+
+The COARSE phase exists because a conservative local controller cannot be expected to discover a globally useful layer count from an arbitrary starting count. The FINE phase remains responsible for local adaptation once a defensible starting region has been found.
+
+The two phases share the configured goal catalogue, model, data, optimizer, maximum capacity, sampling initialisation, cost controls and memory controls. Phase-specific controls are deliberately minimal.
+
+Decision area     | Version 0.4 position                                                                           
+------------------+------------------------------------------------------------------------------------------------
+COARSE enablement | plastic__coarse_phase = enabled | disabled; no negative-form flag.                            
+COARSE candidates | S, 2S, 4S, ... for plastic__phase_1__number_of_trials trials.                                 
+Trial state       | Every trial is a fresh step-zero run; nothing trained survives the trial.                     
+Trial plasticity  | Fixed count, fixed sampling geometry, no probes, no geometry learning.                        
+COARSE evaluation | Mean validation loss over the final K identical validation batches.                          
+Selection         | Use the configured goal; the selected count must be one of the measured v1 candidates.        
+Review pause      | 900-second live countdown; Ctrl-F starts FINE immediately.                                    
+FINE probing      | At selected probe updates, evaluate every valid integer count in the configured radius.       
+FINE movement     | The winning probe count sets direction; committed movement is limited by max_step.            
+Traceability      | Every actual FINE count change records all goal inputs, robust statistics and reasons.         
+
+2. Scope, Terms and Governing Decisions
+
+2.1 Scope
+
+This specification covers the optional COARSE search, deterministic mini-run reset semantics, goal-consistent trial evaluation, operator review pause, FINE full-radius probing, robust local decision logic, count-transition audit, configuration, checkpoint identity, diagnostics, acceptance criteria and regression requirements. It remains limited to THOG2 Chebyshev DEPTH.
+
+2.2 Terms
+
+Term               | Definition                                                                                                          
+-------------------+---------------------------------------------------------------------------------------------------------------------
+Maximum capacity M | plastic__max_permitted_layers; the fixed ordered depth-ruler capacity and hard upper active-count bound.            
+Active count N     | Number of prefix layer samples executed by the current model.                                                       
+COARSE phase       | One-shot set of fixed-count, fixed-geometry fresh mini-runs used only to select the FINE starting count.             
+COARSE trial       | A deterministic training run beginning at local step 0 for one candidate count.                                    
+FINE phase         | The normal training run beginning at step 0 after COARSE; geometry and count learning operate here.                 
+Probe update       | A selected FINE optimizer update on which all valid counts in [N-R, N+R] are evaluated.                             
+Probe radius R     | Maximum count distance evaluated in FINE; every intermediate integer is included.                                 
+Maximum step S     | Maximum number of layers by which an accepted FINE decision may alter N.                                           
+Goal               | One of lowest_loss, layer_efficiency, relative_training_wall_time or memory_budget.                                
+Decision audit     | Durable structured and human-readable record explaining an actual FINE count change.                              
+
+2.3 Governing decisions
+
+COARSE is optional and runs at most once. Version 0.4 has no automatic return to COARSE.
+
+A COARSE trial starts from a newly constructed step-zero state, not from the end of another trial and not from a retained winning trial.
+
+All COARSE trials use the same model seed, data seed, optimizer schedule, training examples and validation-batch order.
+
+COARSE fixes the capacity geometry and active count; it performs no count probes and no geometry learning.
+
+Only trial measurements, goal calculations and the selected count survive COARSE.
+
+FINE starts from a new step zero. No model, optimizer or scheduler state trained during COARSE is retained.
+
+FINE probes every valid integer count in the radius; endpoint-only probing is prohibited.
+
+FINE count movement is local and max-step limited even when a more distant probe count wins.
+
+Every actual FINE count transition must be fully explainable from retained calculations.
+
+3. Fixed-Capacity DEPTH Ruler and Sampling Geometry
+
+3.1 Continuous DEPTH field
+
+The existing fixed-order Chebyshev coefficient tensors continue to generate the continuous canonical Transformer-block weight field. Changing the active sample count does not add coefficient modes and does not change DEPTH order P.
+
+W(z) = sum(k=0..P-1) C_k T_k(z)
+
+3.2 Absolute capacity ruler
+
+Learned-count PLASTIC DEPTH owns one ordered maximum-capacity ruler containing M potential sample positions over the stable internal chart. Public sample_layer values map these positions to 1..M. The active model executes the first N positions. Increasing N reveals the next dormant position; decreasing N hides only the tail. Surviving positions are not remapped merely because N changes.
+
+NO SURVIVOR REMAP / A count transition changes active-prefix membership only. It shall not rescale or re-gauge the surviving sampling coordinates and shall not transform the Chebyshev coefficient tensors as a side effect of changing N.
+
+3.3 Geometry initialisation and learning
+
+The capacity geometry is initialised once per fresh run using plastic__layer_sampling_initialisation. Equidistant initialisation gives the natural ordered ruler. Random initialisation is deterministic from the run seed. In COARSE, this geometry remains fixed. In FINE, ordinary backpropagation may move the ordered geometry after any configured warmup freeze.
+
+3.4 Nested COARSE comparability
+
+All COARSE trials use the same maximum capacity M and the same freshly initialised capacity ruler. A trial at count N executes the first N samples of that same deterministic ruler. This makes trial counts nested and ensures that COARSE measures the same geometry policy that FINE will use when it starts at the selected count.
+
+3.5 Fixed-count PLASTIC outside COARSE
+
+When PLASTIC DEPTH count learning is disabled outside the two-phase lifecycle, the existing fixed-count behaviour remains supported. COARSE itself requires learned-count mode because its output is the initial count for FINE.
+
+4. Two-Phase Training Lifecycle
+
+LIFECYCLE INVARIANT / Both COARSE trials and FINE display a local step zero. COARSE step numbers belong only to the current mini-run. FINE begins a new authoritative training timeline at step zero after all COARSE work has been discarded.
+
+COARSE enabled:
+  build deterministic fresh trial at step 0
+  run fixed geometry/count mini-run
+  evaluate final K validation batches
+  discard complete trial state
+  repeat for all doubling candidates
+  select winner using configured goal
+  show aligned report and 900-second review pause
+  build fresh FINE state at step 0 using selected count
+  run adaptive FINE training
+
+COARSE disabled:
+  build FINE state directly at step 0 using plastic__initial_layer_count
+
+4.1 What survives the phase boundary
+
+State                                  | Survives into FINE?                                                  
+---------------------------------------+----------------------------------------------------------------------
+Selected layer count                   | Yes.                                                                 
+Trial measurements and goal calculations | Yes, as diagnostics and checkpoint metadata.                       
+Model parameters trained during a trial | No.                                                                  
+Optimizer, scheduler or scaler state from a trial | No.                                                        
+Trial RNG and data position             | No; FINE is recreated at the original step-zero state.              
+Trial geometry movement                 | None exists; geometry is fixed.                                      
+Trial count-controller state            | None exists; controller is disabled.                                
+
+4.2 Phase labels
+
+Console, logs, W&B and checkpoint metadata shall explicitly label COARSE and FINE. Repeated COARSE local step values must not be confused with the authoritative FINE global training step.
+
+5. COARSE Phase: Deterministic Fixed-Geometry Trials
+
+5.1 Candidate generation
+
+Let S be plastic__phase_1_starting_layer_count and T be plastic__phase_1__number_of_trials. Trial i, zero-indexed, uses:
+
+candidate_layers[i] = S * 2**i
+for i = 0 .. T-1
+
+For S=4 and T=4, the candidate counts are exactly 4, 8, 16 and 32. Version 0.4 does not insert the maximum automatically, interpolate a winner or run bracket-refinement trials. Every generated count must be within [1, plastic__max_permitted_layers], otherwise configuration fails before any trial starts.
+
+5.2 Fresh step-zero reset
+
+Each trial shall reconstruct a new training state from the same configured seeds and settings. It shall not restore a checkpoint produced by another trial. The following must be reset deterministically:
+
+compact model parameters and conventional parameters;
+
+optimizer, scheduler, AMP/scaler and gradient state;
+
+Python, NumPy, PyTorch CPU and device RNG state;
+
+training-data sampler/order and local data position;
+
+validation-data sampler/order and local data position;
+
+capacity sampling geometry and active-prefix count;
+
+instrumentation step namespace for the new trial.
+
+5.3 Trial training semantics
+
+Mechanism         | COARSE requirement                                                    
+------------------+------------------------------------------------------------------------
+Local step        | Starts visibly at 0 for every trial.                                   
+Training length   | Exactly plastic__phase_1_n_steps optimizer steps unless interrupted or failed.
+Active count      | Fixed at the candidate count.                                          
+Sampling geometry | Fixed for the complete trial.                                          
+Geometry gradients | Disabled; no optimizer updates to geometry.                           
+Count controller  | Not constructed or disabled with no history.                           
+Candidate probes  | None.                                                                  
+Goal              | Configured goal is evaluated only from final trial measurements.       
+
+5.4 Compact trial header
+
+PLASTIC COARSE - trial 2/4
+  layers:       8
+  training:     500 steps, starting at step 0
+  evaluation:   validation mean over final 10 batches
+  goal:         relative_training_wall_time
+  geometry:     fixed equidistant
+
+The header shall remain deliberately small. COARSE progress rows use a distinct C prefix and show local step zero before the first optimizer update.
+
+6. COARSE Evaluation, Goal Scoring and Selection
+
+6.1 Final validation batches
+
+After the mini-run completes, evaluate exactly plastic__phase_1_evaluation_steps_count validation batches. These are the final K batches of the trial and the same deterministic validation batches, in the same order, are used for every candidate count. The trial loss is their arithmetic mean; standard deviation is retained as a diagnostic.
+
+REQUIRED WORDING / The report header shall say: validation mean over final K batches. It shall not say identical batches, even though deterministic reset ensures that they are identical across trials.
+
+6.2 Goal-specific inputs
+
+Goal                        | COARSE measurement and score                                                                     
+----------------------------+--------------------------------------------------------------------------------------------------
+lowest_loss                 | loss_score = mean validation loss.                                                               
+layer_efficiency            | efficiency_score = mean validation loss + cost_weight * N / M.                                  
+relative_training_wall_time | wall_time_score = mean validation loss + cost_weight * training_elapsed(N) / reference_training_elapsed.
+memory_budget               | Reject trials whose peak allocated GiB exceeds plastic__layer_memory_budget_gib; among within-budget trials, budget_loss_score = mean validation loss.
+
+For relative_training_wall_time, the first COARSE trial is the reference training-time anchor. Trial timing excludes startup, compilation setup, final validation, reporting and the review pause. The elapsed value used by the goal must be printed.
+
+6.3 Selection rule
+
+Select the successful candidate with the lowest goal-specific score. Exact score ties prefer fewer layers. For memory_budget, a trial outside the budget is not selectable. If every trial fails or every trial is outside the required budget, the run stops before FINE with a clear error and the complete report remains available.
+
+6.4 Version 0.4 selection boundary
+
+The selected FINE starting count must be one of the measured COARSE candidate counts. A future COARSE v2 may use the measured shape to propose and confirm intermediate counts, but interpolation without a confirming mini-run is explicitly out of scope for this revision.
+
+7. COARSE Reporting, Review Pause and Operator Control
+
+7.1 Aligned result report
+
+The report header contains the common trial count, training-step count, final validation-batch count and goal. Because the step count is common, it shall not be repeated as a table column. Numerical fields use fixed widths so columns align vertically.
+
+PLASTIC COARSE RESULTS
+4 trials x 500 training steps
+validation mean over final 10 batches
+goal: relative_training_wall_time
+
+trial | layers | elapsed_s | sec/step | tok/s | mean_val | val_std | peak_GiB | wall_time_score
+------+--------+-----------+----------+-------+----------+---------+----------+----------------
+1     | 4      | 412.38    | 0.82476  | 89412 | 4.9127   | 0.0182  | 8.34     | 4.9146
+2     | 8      | 468.91    | 0.93782  | 78620 | 4.7315   | 0.0161  | 9.11     | 4.7352
+3     | 16     | 581.44    | 1.16288  | 63399 | 4.6482   | 0.0147  | 10.67    | 4.6557  <<< WINNER
+4     | 32     | 806.72    | 1.61344  | 45688 | 4.6619   | 0.0153  | 13.82    | 4.6769
+
+The final objective column heading is goal-specific: loss_score, efficiency_score, wall_time_score or budget_loss_score. memory_budget additionally shows within_budget. A generic feasible column is prohibited. Failed trials use status=failed and are excluded from selection.
+
+7.2 Winner highlighting
+
+The complete winner row, including the <<< WINNER suffix, shall be bold bright green in the terminal. Plain-text logs retain the suffix without relying on colour.
+
+7.3 Review pause
+
+After the report, pause for exactly 900 seconds before constructing FINE. Display a single live countdown line, updated once per second:
+
+Phase 2 starts automatically in 900 seconds.
+Press Ctrl-F to start FINE now.
+Ctrl-G retains checkpoint-and-exit behaviour.
+Ctrl-C retains interrupt behaviour.
+
+7.4 Keyboard polling
+
+Poll the controlling terminal /dev/tty non-blockingly throughout the pause, even when stdin or stdout is redirected.
+
+The Ctrl-F byte 0x06 starts FINE immediately at any point in the countdown.
+
+Ctrl-C and Ctrl-G retain their existing meanings and must not be intercepted as ordinary input.
+
+Temporarily adjusted terminal settings must be restored in a finally block.
+
+The log records pause start and its final disposition, not 900 countdown lines.
+
+Without a controlling terminal, wait normally for the 900-second timeout and continue automatically.
+
+7.5 FINE reset after the pause
+
+When the pause expires or Ctrl-F is pressed, discard all trial model state, reconstruct the same original step-zero training state, set the selected active count, initialise the fixed-capacity geometry afresh, enable FINE policies and print the ordinary FINE startup report. The first authoritative training row is FINE step 0/1 according to the existing progress convention.
+
+8. FINE Phase: Periodic Full-Radius Probing
+
+8.1 Probe cadence
+
+FINE performs ordinary training on non-probe updates. Count candidates are evaluated only on selected probe updates. plastic__layer_count_probe_interval controls the cadence; when unset it resolves to plastic__layer_count_update_brake. Update 1 is a probe update, followed by exact interval boundaries.
+
+8.2 Entire radius
+
+For current count N and radius R, evaluate every valid integer count in the inclusive range [N-R, N+R], clipped to [1, M]. The current count is included. Endpoint-only probing is prohibited.
+
+N = 31, R = 2
+probe counts = 29, 30, 31, 32, 33
+labels       = L-2, L-1, L, L+1, L+2
+
+8.3 Max-step-limited commit
+
+The best qualifying probe count determines the desired direction and distance. The committed count is limited by plastic__layer_count_max_step:
+
+committed_count = N + clip(winning_probe_count - N, -max_step, +max_step)
+
+Thus radius=3 and max_step=1 evaluate seven counts but permit only a one-layer transition. winning_probe_count and committed_count must be reported separately.
+
+8.4 Shared probe examples
+
+All counts in one probe update use the same examples and the same selected token positions. Candidate comparisons are paired. Only the committed/current path supplies the ordinary gradient-bearing training loss. Probe-only work does not contaminate the clean update-time model.
+
+8.5 Boundary behaviour
+
+Counts below 1, above M, above a universal allocator reserve or above a memory-budget goal are omitted or marked unavailable with an explicit reason. The current count must remain evaluable; otherwise the update fails clearly rather than silently selecting a different count.
+
+9. FINE Objectives and Robust Count Decision
+
+9.1 Goal catalogue
+
+Goal                        | FINE candidate score                                                                                  
+----------------------------+-------------------------------------------------------------------------------------------------------
+lowest_loss                 | Probe loss.                                                                                           
+layer_efficiency            | Probe loss + cost_weight * K / M.                                                                    
+relative_training_wall_time | Probe loss + cost_weight * predicted_update_time(K) / reference_training_time.                        
+memory_budget               | Reject candidates above the configured peak-allocated budget; among valid candidates use probe loss.     
+
+9.2 Paired evidence
+
+For each non-current candidate K, record the paired goal-score difference:
+
+d_K = goal_score(K) - goal_score(N)
+
+Negative values favour K. Histories are keyed by current count and candidate offset and are reset when a count transition changes N.
+
+9.3 Robust statistics
+
+median_K = median(d_K history)
+MAD_K    = median(abs(d_K - median_K))
+sigma_K  = max(1.4826 * MAD_K, numerical_floor)
+z_score  = -median_K / sigma_K
+
+9.4 Qualification rule
+
+A candidate qualifies only when all of the following are true:
+
+the history has at least plastic__layer_count_probe_noise_min_observations values;
+
+median_K < -plastic__layer_count_probe_noise_lambda * sigma_K;
+
+the newest paired difference is negative;
+
+a strict majority of retained observations are negative;
+
+the update brake is inactive;
+
+the candidate is within count, memory and allocator bounds.
+
+Among qualifying candidates, choose the largest z_score. Exact ties prefer fewer layers. If no candidate qualifies, remain at N.
+
+9.5 Display semantics
+
+Before the minimum observation count is reached, z_score is displayed as unavailable. Probe progress rows show the current-count absolute probe loss and signed candidate-minus-current deltas for every other count. Positive deltas retain bold green semantics because they mean the candidate is worse than the current count.
+
+10. FINE Count Transition and Decision Audit
+
+10.1 Durable change event
+
+Whenever committed_count differs from N, emit one durable count-change record to the plain-text log, structured event stream, W&B and checkpoint metadata. The record shall contain enough information for a user to reconstruct the decision without reading source code.
+
+10.2 Required summary fields
+
+update number, previous count, winning probe count and committed count;
+
+goal, radius, max_step, probe interval, update brake and brake state;
+
+noise window, minimum observations, lambda and numerical floor;
+
+timing-reference state and memory/allocator constraints;
+
+explicit statement when max_step limited the winning probe movement;
+
+plain-language reason for acceptance and reasons other candidates failed.
+
+10.3 Candidate calculation table
+
+The human-readable audit table uses fixed-width columns and includes every probed count, not only the winner:
+
+count  probe_loss  delta_loss  sec/step  timing_source  goal_score  paired_diff
+median  MAD  sigma  z_score  observations  favourable  threshold  status
+
+For memory_budget, include peak allocated/reserved GiB and within_budget. The objective score column heading shall be goal-specific; z_score is retained as the robust decision heading rather than a generic objective label.
+
+10.4 Example reason
+
+reason:
+  count 29 had the lowest wall_time_score and passed the robust-history rule;
+  13/16 observations favoured it, latest evidence was favourable, z_score=+3.01;
+  the committed transition was limited from desired 31 -> 29 to 31 -> 30 by max_step=1.
+
+10.5 Count membership change
+
+A committed change modifies only active-prefix membership. Growth reveals the next existing capacity sample; shrink hides the tail. Surviving sample positions and coefficients are not re-gauged or remapped. Count-controller histories for the old current count are archived in the decision event and the new current-count history begins empty.
+
+11. Runtime Cost, VRAM and Geometry Learning
+
+11.1 Probe overhead
+
+Full-radius probing is intentionally more expensive than the previous endpoint-only probe, but it occurs only at selected intervals. Runtime diagnostics must separate ordinary update time from probe overhead, transition overhead, validation, checkpointing and instrumentation.
+
+11.2 Timing model
+
+relative_training_wall_time uses clean ordinary-update observations by active count. Probe and transition updates are excluded. With at least two observed counts, fit or robustly infer a local count-time slope. With only one observed count, use the documented single-anchor fallback. Every candidate audit records whether time was observed, fitted or imputed.
+
+11.3 Universal CUDA allocator reserve
+
+plastic__cuda_allocator_reserve_gib is a headroom guard, not an upfront allocation. Before upward or wide-radius probes, confirm that the candidate can respect this reserve. Infeasible candidates are reported and omitted without terminating a valid current-count update.
+
+11.4 memory_budget goal
+
+plastic__layer_memory_budget_gib is a stricter goal-specific limit based on peak allocated GiB. Peak reserved GiB is always reported but does not determine within_budget in Version 0.4.
+
+11.5 Geometry learning
+
+COARSE geometry is frozen unconditionally. FINE geometry is an ordinary trainable model parameter group with plastic__geometry_learning_rate_multiplier and optional warmup freeze. Count stays and count changes do not mechanically freeze or remap the geometry. The startup report must distinguish the frozen COARSE policy from the FINE geometry policy.
+
+11.6 Conventional per-layer parameters
+
+Where layer-specific parameters are not DEPTH-compressed, capacity slots may be preallocated. Dormant slots must not receive ordinary gradients while inactive. Activation of a previously dormant slot uses the established deterministic initialization/reset policy and is recorded in the count-change audit.
+
+12. Configuration and Resolution
+
+12.1 Canonical public controls
+
+Every public PLASTIC DEPTH identifier uses the exact plastic__ prefix in configuration, UI, startup summaries, checkpoint metadata and CLI. plastic__coarse_phase accepts enabled or disabled. No --no-plastic__coarse_phase form is provided.
+
+Parameter                                            | Default                      | Required meaning
+-----------------------------------------------------+------------------------------+-----------------
+plastic__enabled                                     | false                        | Enable PLASTIC DEPTH; disabled preserves the established path.
+plastic__coarse_phase                                | disabled                     | Enable or disable the one-shot COARSE phase.
+plastic__phase_1_n_steps                             | required when COARSE enabled | Optimizer steps in each COARSE mini-run.
+plastic__phase_1_starting_layer_count                | required when COARSE enabled | First doubling candidate S.
+plastic__phase_1__number_of_trials                   | required when COARSE enabled | Number T of doubling trials.
+plastic__phase_1_evaluation_steps_count              | required when COARSE enabled | Final validation batches averaged per trial.
+plastic__layers_to_sample                            | n_layer                      | Fixed active count when learned count is disabled.
+plastic__do_learn_layer_count                        | false                        | Enable the FINE discrete count controller.
+plastic__initial_layer_count                         | n_layer                      | FINE initial count when COARSE is disabled; superseded by the COARSE winner when enabled.
+plastic__max_permitted_layers                        | required when learning       | Maximum capacity M and hard active-count bound.
+plastic__layer_sampling_initialisation               | equidistant                  | Capacity-ruler initialisation: equidistant or random.
+plastic__layer_count_objective                       | lowest_loss                  | Goal shared by COARSE and FINE.
+plastic__layer_count_update_brake                    | 5                            | Minimum completed updates after a FINE count change.
+plastic__layer_count_probe_interval                  | update_brake                 | FINE probe cadence; update 1 and interval boundaries.
+plastic__layer_count_probe_radius                    | 1                            | FINE full integer probe radius.
+plastic__layer_count_max_step                        | 1                            | Maximum committed FINE count movement.
+plastic__layer_count_probe_noise_window              | 50                           | Recent paired differences retained per candidate offset.
+plastic__layer_count_probe_noise_min_observations    | 5                            | Minimum evidence before movement.
+plastic__layer_count_probe_noise_lambda              | 3.0                          | Robust median/MAD threshold.
+plastic__layer_count_cost_weight                     | 0.0                          | Penalty strength for layer_efficiency or relative_training_wall_time.
+plastic__layer_memory_budget_gib                     | unset                        | Required by memory_budget.
+plastic__cuda_allocator_reserve_gib                  | 0.5                          | Universal device headroom guard.
+plastic__geometry_learning_rate_multiplier           | 0.1                          | FINE geometry optimizer-group LR multiplier.
+plastic__freeze_geometry_during_warmup               | true                         | Freeze FINE geometry during ordinary LR warmup.
+plastic__sampling_seed                               | derived internally           | Internal deterministic geometry/probe seed; not separately exposed.
+
+12.2 Validation rules
+
+plastic__coarse_phase accepts only enabled or disabled.
+
+COARSE enabled requires plastic__enabled=true and plastic__do_learn_layer_count=true.
+
+All four plastic__phase_1_* controls are required and positive when COARSE is enabled.
+
+Every generated doubling candidate must be at most plastic__max_permitted_layers.
+
+plastic__phase_1_evaluation_steps_count must be positive.
+
+plastic__layer_count_probe_interval, radius and max_step must be positive.
+
+plastic__layer_count_probe_noise_min_observations must lie within the noise window.
+
+memory_budget requires plastic__layer_memory_budget_gib.
+
+COARSE disabled leaves all Phase 1 controls inactive and uses plastic__initial_layer_count for FINE.
+
+12.3 Startup report
+
+plastic
+  plastic__coarse_phase:                           enabled
+  plastic__phase_1_n_steps:                        500
+  plastic__phase_1_starting_layer_count:           4
+  plastic__phase_1__number_of_trials:              4
+  plastic__phase_1_evaluation_steps_count:         10
+  coarse candidate layers:                         4, 8, 16, 32
+  plastic__layer_count_probe_interval:             10
+  plastic__layer_count_probe_radius:               2
+  plastic__layer_count_max_step:                   1
+
+12.4 Artifact and checkpoint identity
+
+Learned-count runs retain _L_dyn_ artifact identity. COARSE controls, candidate list, completed-trial measurements, selected count and phase state are checkpoint-authoritative. The run name may summarize COARSE settings, but the complete canonical configuration must remain in metadata and startup output.
+
+13. Training, Checkpoint, Resume and Instrumentation
+
+13.1 Optimizer and scheduler lifetime
+
+Every COARSE trial creates and discards its own optimizer and scheduler. FINE creates a new optimizer and scheduler at step zero. No optimizer moment, learning-rate progress or scaler state from COARSE may leak into FINE.
+
+13.2 Checkpoint during COARSE
+
+Ctrl-G retains checkpoint-and-exit behaviour during a mini-run. The checkpoint records the phase, trial index, local trial step, exact current mini-run state and measurements from completed trials. Resume continues that exact mini-run. This temporary resumability does not alter the rule that trial-trained state is discarded after the trial result is recorded.
+
+13.3 Checkpoint during review pause
+
+A checkpoint during the review pause records all COARSE results, selected count and remaining pause state. Resume returns to the review pause with Ctrl-F available and automatic timeout preserved. FINE has not yet started and remains at authoritative step zero.
+
+13.4 Checkpoint during FINE
+
+FINE checkpoints persist active count, capacity geometry, robust histories, brake state, timing observations, memory observations, last full decision audit, selected COARSE count and the immutable COARSE result table.
+
+13.5 W&B and metric steps
+
+COARSE repeated local steps must not collide. Log each trial under an explicit phase/trial namespace with fields such as coarse/trial_index, coarse/trial_step and coarse/layers. FINE uses the ordinary authoritative training step beginning at zero. The console may show C rows for COARSE and T/V rows for FINE.
+
+13.6 Interrupt behaviour
+
+Input                    | Required behaviour
+-------------------------+-------------------
+Ctrl-F during review pause | Start FINE immediately.
+Ctrl-G                   | Checkpoint at the next safe boundary and exit according to the established policy.
+Ctrl-C                   | Retain the established interrupt/discard behaviour.
+Pause timeout            | Start FINE automatically after 900 seconds.
+
+14. Diagnostics and Required Implementation Work
+
+14.1 Required COARSE diagnostics
+
+Diagnostic       | Required content
+-----------------+-----------------
+Trial header     | Trial i/T, count, local step zero, n_steps, final K batches, goal and fixed geometry policy.
+Progress         | Distinct C prefix, local trial step, elapsed, throughput, loss and active count.
+Final evaluation | All K batch losses, mean and standard deviation.
+Runtime          | Training-only elapsed, seconds/update and tokens/second.
+Memory           | Peak allocated and reserved GiB.
+Goal             | All score components and goal-specific final score.
+Result report    | Fixed aligned columns, status, goal-specific objective heading and green winner row.
+Pause            | Countdown, Ctrl-F instruction, timeout/manual continuation disposition.
+
+14.2 Required FINE diagnostics
+
+Diagnostic | Required content
+-----------+-----------------
+Probe row  | All counts in full radius, current absolute loss, signed deltas and z_score values when ready.
+Noise state | Median, MAD, sigma, latest sign, favourable count, observations, threshold and pass/fail.
+Timing     | Observed/fitted/imputed time and clean timing anchors.
+Memory     | Peak allocated/reserved, allocator reserve and within_budget when relevant.
+Brake      | Last change update, remaining brake updates and active marker.
+Count change | Complete fixed-width audit and human-readable reason.
+Geometry   | Active sample_layer values and movement; no survivor remap.
+
+14.3 Required implementation work
+
+Work item                  | Required result
+---------------------------+-----------------
+Lifecycle state machine    | COARSE_TRIALS -> COARSE_REPORT -> REVIEW_PAUSE -> FINE, or direct FINE.
+Fresh-state factory        | Deterministically recreate model, optimizer, RNG, data and capacity geometry at step zero.
+COARSE runner              | Run fixed-count/fixed-geometry mini-runs and discard state after measurement.
+Goal evaluator             | Apply every existing goal to actual COARSE measurements.
+Aligned report             | Goal-specific columns and terminal green winner.
+TTY pause controller       | Live countdown and non-blocking Ctrl-F polling with safe terminal restoration.
+Full-radius FINE probe     | Evaluate every integer count in radius, not endpoints only.
+Robust multi-offset controller | Maintain histories and apply median/MAD/latest/majority rule.
+Decision audit             | Persist all calculations and reasons for every actual count change.
+Checkpoint schema          | Exact resume in trial, pause and FINE states.
+Tests                      | Determinism, data identity, state discard, goals, TTY, radius, audit, checkpoint, DDP, CPU/GPU and disabled regression.
+
+14.4 Source-change discipline
+
+All modifications to inherited nanoGPT lines follow the project marking rule: trailing # <<< THOG at exactly column 156 with a clarifying explanation, or # vvv THOG and # ^^^ THOG around larger inserted or commented blocks. Existing inherited nanoGPT lines are commented out rather than deleted.
+
+15. Requirements and Acceptance Criteria
+
+ID      | Requirement
+--------+------------
+PD4-001 | PLASTIC DEPTH shall remain disabled by default and preserve the established path exactly when disabled.
+PD4-002 | plastic__coarse_phase shall accept enabled or disabled and shall not expose a negative-form option.
+PD4-003 | COARSE enabled shall require learned-count PLASTIC DEPTH and valid Phase 1 controls.
+PD4-004 | COARSE candidate i shall equal starting_layer_count * 2**i.
+PD4-005 | Every generated COARSE candidate shall lie within [1, max_permitted_layers].
+PD4-006 | Every COARSE trial shall visibly begin at local step zero.
+PD4-007 | Every COARSE trial shall recreate deterministic model, optimizer, RNG, data-order and geometry state.
+PD4-008 | All COARSE trials shall see the same training examples and validation batches in the same order.
+PD4-009 | COARSE active count shall remain fixed for the complete mini-run.
+PD4-010 | COARSE geometry shall remain fixed and shall receive no optimizer updates.
+PD4-011 | COARSE shall perform no layer-count probes and retain no count-controller history.
+PD4-012 | Each COARSE trial shall run exactly phase_1_n_steps unless interrupted or failed.
+PD4-013 | Each trial score shall use the validation mean over final phase_1_evaluation_steps_count batches.
+PD4-014 | Every supported goal shall be available in COARSE and FINE.
+PD4-015 | COARSE relative wall-time scoring shall use measured training-only elapsed time.
+PD4-016 | COARSE memory_budget shall use peak allocated GiB and report within_budget rather than generic feasible.
+PD4-017 | The Version 0.4 COARSE winner shall be one of the measured candidate counts.
+PD4-018 | All trained mini-run state shall be discarded after its measurements are recorded.
+PD4-019 | FINE shall start from a newly constructed authoritative step-zero state.
+PD4-020 | The COARSE result table shall use aligned fixed-width numerical columns and a goal-specific score heading.
+PD4-021 | The complete winner row shall be highlighted bold bright green and retain a plain-text winner marker.
+PD4-022 | The COARSE report header shall state the common step count and validation mean over final K batches.
+PD4-023 | The review pause shall last 900 seconds unless Ctrl-F starts FINE earlier.
+PD4-024 | The pause shall poll /dev/tty non-blockingly so Ctrl-F works with redirected stdin/stdout.
+PD4-025 | Ctrl-C and Ctrl-G shall retain their established meanings during COARSE and the pause.
+PD4-026 | Terminal settings changed for polling shall always be restored.
+PD4-027 | FINE probe cadence shall be periodic and ordinary non-probe updates shall not pay candidate-forward cost.
+PD4-028 | A FINE probe shall evaluate every valid integer count in the configured radius.
+PD4-029 | Endpoint-only radius probing shall not be accepted as conformant.
+PD4-030 | All candidate counts in one probe shall use identical examples and token positions.
+PD4-031 | The winning probe count and committed count shall be distinct reported fields.
+PD4-032 | A committed FINE count movement shall not exceed plastic__layer_count_max_step.
+PD4-033 | Robust histories shall be keyed by current count and candidate offset.
+PD4-034 | Movement shall require minimum observations, median/MAD threshold, favourable latest evidence and a strict favourable majority.
+PD4-035 | The update brake shall prevent another commit while probes and evidence collection continue.
+PD4-036 | Probe and transition updates shall be excluded from clean training-time observations.
+PD4-037 | All goals shall obey count bounds and the universal CUDA allocator reserve.
+PD4-038 | memory_budget shall remain a stricter goal-specific allocated-memory limit.
+PD4-039 | A count transition shall change active-prefix membership without remapping surviving sample positions.
+PD4-040 | COARSE geometry shall use the same deterministic capacity-ruler policy that FINE recreates.
+PD4-041 | Every actual FINE count change shall emit a durable decision audit containing all candidate calculations.
+PD4-042 | The audit shall include probe loss, loss delta, goal score, timing source, paired difference, median, MAD, sigma, z_score, observation counts and status.
+PD4-043 | The audit shall explain max_step limitation and the human-readable reason for the transition.
+PD4-044 | Checkpoints shall resume exactly inside a COARSE trial, during the review pause and during FINE.
+PD4-045 | COARSE repeated local steps shall use non-colliding instrumentation namespaces.
+PD4-046 | FINE authoritative training metrics shall begin at step zero after COARSE.
+PD4-047 | Startup output shall show all COARSE controls, generated candidates, radius and max_step.
+PD4-048 | The exact public parameter name shall be plastic__phase_1__number_of_trials.
+PD4-049 | Version 0.4 shall not automatically re-enter COARSE after FINE begins.
+PD4-050 | Disabled-path CPU and GPU regression shall remain the primary compatibility gate.
+
+16. Known Issues and Limitations
+
+Issue or limitation                               | Current position
+--------------------------------------------------+-----------------
+COARSE is expensive                              | Total setup cost is number_of_trials times n_steps plus final validation and the fixed review pause. This is deliberate search cost, not free instrumentation.
+Short mini-runs may rank counts poorly            | A count that starts fast may not remain best later. Version 0.4 trades search cost against predictive horizon.
+No intermediate confirmation in v1               | The winner must be measured. Interpolated or bracket-refined counts are reserved for a future COARSE revision.
+Goal calibration remains empirical                | cost_weight can dominate too weakly or strongly. The verbose report exists so the user can inspect raw components.
+Relative timing can be noisy                      | Compilation, thermal state and contention can differ between sequential trials. Training-only timing and deterministic order reduce but do not remove this risk.
+Sequential trial order may bias hardware state    | Later trials may run at different temperature or clocks. Future work may randomise or repeat order; Version 0.4 retains simple doubling order.
+Random geometry comparison is nested but count-dependent | The same capacity seed is used, but candidate prefixes expose different portions of the ruler.
+Full-radius probing costs more                    | The selected interval must be large enough that exploration does not erase FINE throughput advantages.
+Local FINE decisions remain path-dependent        | COARSE improves the starting point but does not prove that later local adaptation finds a global optimum.
+No automatic re-COARSE                           | Version 0.4 deliberately runs COARSE only once. Any intermediate global diagnostic is future work.
+TTY portability                                  | Ctrl-F polling depends on a controlling terminal. Headless jobs necessarily use timeout continuation.
+Checkpoint complexity                            | Exact resume now spans transient COARSE trial state, pause state and FINE state.
+W&B step semantics                               | Repeated local trial steps require explicit metric definitions to avoid backend step-order rejection.
+
+17. Acceptance Scenarios and Out of Scope
+
+17.1 Acceptance scenarios
+
+Scenario             | Pass condition
+---------------------+---------------
+Disabled regression  | No COARSE state, FINE controller or changed numerical path appears when PLASTIC is disabled.
+Candidate generation | S=4 and T=4 resolves exactly to 4, 8, 16, 32.
+Step-zero identity   | Two trials at the same count reproduce parameters, data order and losses exactly within deterministic backend limits.
+State discard        | Changing a discarded trial parameter cannot affect the subsequent FINE initial state.
+Fixed COARSE geometry | Geometry values and optimizer state remain unchanged throughout a trial.
+Final-batch evaluation | Every trial evaluates the same final K validation batches and reports mean/std.
+All goals            | Each goal selects the expected synthetic winner from controlled measurements.
+Memory budget        | Outside-budget rows show within_budget=no and cannot win.
+Green winner         | Terminal output highlights the complete winning row and plain logs retain <<< WINNER.
+Ctrl-F               | Pressing Ctrl-F at any countdown second starts FINE immediately.
+Timeout              | No input starts FINE automatically after 900 seconds.
+Full radius          | N=31, R=2 evaluates exactly 29, 30, 31, 32, 33.
+Max step             | A winning count 29 with N=31 and max_step=1 commits count 30.
+Robust rejection     | Noisy or minority evidence cannot move count.
+Decision audit       | An accepted transition reproduces all calculations and textual reason.
+Resume               | Trial, pause and FINE checkpoints reproduce the next action exactly.
+DDP                  | Every rank uses the same candidate set, goal aggregate, winner and committed count.
+
+17.2 Explicitly out of scope
+
+Intermediate-count interpolation or bracket refinement without additional confirming trials.
+
+Automatic repetition of COARSE after FINE begins.
+
+Input-dependent sample positions or input-dependent layer count.
+
+Differentiable discrete-count gates, straight-through estimators or reinforcement learning.
+
+Changing Chebyshev order as part of count search.
+
+Arbitrary insertion/deletion locations; active execution remains an ordered prefix.
+
+Support for DCT, Haar, lapped cosine, recurrence generators or HYPERBLOCK in this revision.
+
+Appendix A. Resolved Examples
+
+A.1 Four-trial COARSE search
+
+plastic__coarse_phase=enabled
+plastic__phase_1_n_steps=500
+plastic__phase_1_starting_layer_count=4
+plastic__phase_1__number_of_trials=4
+plastic__phase_1_evaluation_steps_count=10
+plastic__max_permitted_layers=64
+
+resolved candidates = [4, 8, 16, 32]
+
+Each trial starts at local step zero with the same deterministic capacity geometry and data order. After each trial, validation mean over final 10 batches is recorded and all trained state is discarded.
+
+A.2 COARSE to FINE boundary
+
+COARSE winner = 16 layers
+review pause  = 900 seconds
+Ctrl-F        = continue immediately
+FINE start    = new step 0, active count 16
+
+A.3 Full-radius FINE decision
+
+current count = 16
+radius        = 3
+probe counts  = [13, 14, 15, 16, 17, 18, 19]
+max_step      = 1
+winner        = 19
+commit        = 17
+
+A.4 Goal-specific report headings
+
+Goal                        | Report heading
+----------------------------+---------------
+lowest_loss                 | loss_score
+layer_efficiency            | efficiency_score
+relative_training_wall_time | wall_time_score
+memory_budget               | budget_loss_score plus within_budget
+FINE robust decision        | z_score
+
+A.5 Pause log
+
+plastic_coarse_pause_started selected_layers=16 timeout_seconds=900
+plastic_coarse_pause_completed reason=ctrl_f elapsed_seconds=137
+
+Appendix B. Implementation Sequence and Migration
+
+B.1 Recommended implementation order
+
+1.  Add canonical configuration fields and validation, including the exact name plastic__phase_1__number_of_trials.
+
+2.  Create a deterministic fresh-state factory that can reconstruct trial and FINE step-zero states.
+
+3.  Implement COARSE candidate generation and fixed-count/fixed-geometry trial execution without count-controller construction.
+
+4.  Implement final K-batch evaluation and all goal-specific COARSE score calculations.
+
+5.  Implement aligned reporting, green winner highlighting and retained structured measurements.
+
+6.  Implement the 900-second /dev/tty countdown and Ctrl-F continuation with robust terminal restoration.
+
+7.  Replace endpoint-only FINE radius probing with every valid integer count in the radius.
+
+8.  Generalise robust histories and decision selection to all candidate offsets.
+
+9.  Implement the complete durable FINE count-change audit.
+
+10.  Extend checkpoint schema and exact resume for COARSE trial, pause and FINE states.
+
+11.  Add W&B metric definitions for repeated COARSE local steps and authoritative FINE steps.
+
+12.  Run focused deterministic CPU tests, TTY pseudo-terminal tests, DDP tests, affected regressions and single-/multi-GPU smokes.
+
+B.2 Version migration
+
+Version 0.4 changes controller and lifecycle semantics. Existing Version 0.3 checkpoints may resume only through an explicit compatibility path that preserves their existing FINE state and treats COARSE as already completed/disabled. They shall not silently restart COARSE or reinterpret historical endpoint-only evidence as full-radius evidence.
+
+B.3 Future COARSE v2 idea
+
+Retain, but do not implement in Version 0.4, the possibility of examining the broad doubling results, identifying a promising bracket, running one or more intermediate candidate mini-runs from the same step-zero state, and selecting only after those candidates have been measured.

@@ -46,6 +46,10 @@ __all__ = [
 ]
 # ^^^ THOG
 
+# vvv THOG accept underscore long-option aliases wherever argparse owns the CLI, while preserving all existing hyphen spellings
+from . import argparse_underscore_alias_patch as _argparse_underscore_alias_patch
+# ^^^ THOG
+
 # vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
 from . import stage6_trainer as _stage6_trainer
 
@@ -64,4 +68,44 @@ _stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
 _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
 # _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
 _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
+# ^^^ THOG
+
+# vvv THOG install active-prefix PLASTIC gauge verification after DEPTH trajectory classes are loaded
+from . import plastic_depth_active_gauge_patch as _plastic_depth_active_gauge_patch
+# ^^^ THOG
+
+# vvv THOG install exact-radius PLASTIC count lookahead and dynamic probe console labels
+from . import plastic_depth_lookahead_patch as _plastic_depth_lookahead_patch
+# ^^^ THOG
+
+# vvv THOG preserve existing test patchability while exact-radius lookahead remains a surgical overlay
+from . import plastic_depth_lookahead_fix_patch as _plastic_depth_lookahead_fix_patch
+# ^^^ THOG
+
+# vvv THOG replace relative N+1 learned-count geometry with a fixed max-capacity absolute depth ruler
+from . import plastic_depth_absolute_ruler_patch as _plastic_depth_absolute_ruler_patch
+# ^^^ THOG
+
+# vvv THOG stabilise absolute-ruler endpoint and sample-layer display rounding
+from . import plastic_depth_absolute_numeric_patch as _plastic_depth_absolute_numeric_patch
+# ^^^ THOG
+
+# vvv THOG restore dynamic selector patchability after absolute-ruler default selector installation
+from . import plastic_depth_absolute_patchability_patch as _plastic_depth_absolute_patchability_patch
+# ^^^ THOG
+
+# vvv THOG finalise PLASTIC console labels, suppress loss-gain clutter and colour candidate probe losses
+from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_cleanup_patch
+# ^^^ THOG
+
+# vvv THOG let learned-count runs probe periodically instead of paying the L-1/L/L+1 inline-probe tax every optimizer update
+from . import plastic_depth_probe_interval_patch as _plastic_depth_probe_interval_patch
+# ^^^ THOG
+
+# vvv THOG require robust history agreement and learn wall-time only from uncontaminated non-probe updates
+from . import plastic_depth_controller_stability_patch as _plastic_depth_controller_stability_patch
+# ^^^ THOG
+
+# vvv THOG align PLASTIC validation suffixes, suppress stale probe fields and expose active count brakes
+from . import plastic_depth_console_minor_patch as _plastic_depth_console_minor_patch
 # ^^^ THOG

@@ -65,6 +65,24 @@ HYPERBLOCK_MLP_HIDDEN_MULTIPLIER=4
 HYPERBLOCK_LOOP_COUNT=1
 HYPERBLOCK_LOOP_DECAY="1.0"
 # ^^^ THOG
+# vvv THOG PLASTIC DEPTH wrapper defaults preserve the established fixed DEPTH path
+PLASTIC_ENABLED=false
+PLASTIC_LAYERS_TO_SAMPLE=""
+PLASTIC_DO_LEARN_LAYER_COUNT=false
+PLASTIC_INITIAL_LAYER_COUNT=""
+PLASTIC_MAX_PERMITTED_LAYERS=""
+PLASTIC_LAYER_SAMPLING_INITIALISATION="equidistant"
+PLASTIC_LAYER_COUNT_OBJECTIVE="lowest_loss"
+PLASTIC_LAYER_COUNT_UPDATE_BRAKE=5
+PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW=50
+PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS=5
+PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="3.0"
+PLASTIC_LAYER_COUNT_COST_WEIGHT="0.0"
+PLASTIC_LAYER_MEMORY_BUDGET_GIB=""
+PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="0.5"
+PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="0.1"
+PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true
+# ^^^ THOG
 LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
 LAPPED_COSINE_OVERLAP_FRACTION="0.5"                                                                                                                       # <<< THOG v1 fixed overlap
 MLP_HIDDEN_COMPRESSOR="${THOG2_MLP_HIDDEN_COMPRESSOR:-dct}"
@@ -184,6 +202,24 @@ HYPERBLOCK:
   --hyperblock-loop-decay VALUE=${HYPERBLOCK_LOOP_DECAY}  exponential update decay in (0,1]
   --direct-factorised-hyperblock-mlp               enable exact UP/DOWN application without dense MLP matrices
   --no-direct-factorised-hyperblock-mlp            explicit default
+
+PLASTIC DEPTH:
+  --plastic-enabled | --no-plastic-enabled
+  --plastic-layers-to-sample N                      fixed active count; defaults to N_LAYER
+  --plastic-do-learn-layer-count | --no-plastic-do-learn-layer-count
+  --plastic-initial-layer-count N                   initial learned count; defaults to N_LAYER
+  --plastic-max-permitted-layers N                  required for learned count
+  --plastic-layer-sampling-initialisation equidistant|random
+  --plastic-layer-count-objective lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget
+  --plastic-layer-count-update-brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}
+  --plastic-layer-count-probe-noise-window N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW}
+  --plastic-layer-count-probe-noise-min-observations N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS}
+  --plastic-layer-count-probe-noise-lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
+  --plastic-layer-count-cost-weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
+  --plastic-layer-memory-budget-gib VALUE
+  --plastic-cuda-allocator-reserve-gib VALUE=${PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB}
+  --plastic-geometry-learning-rate-multiplier VALUE=${PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER}
+  --plastic-freeze-geometry-during-warmup | --no-plastic-freeze-geometry-during-warmup
 
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
@@ -327,6 +363,55 @@ while (( $# > 0 )); do
         --hyperblock-loop-decay) HYPERBLOCK_LOOP_DECAY="$hyperblock_value" ;;
       esac
       unset hyperblock_name hyperblock_value
+      shift
+      ;;
+    # ^^^ THOG
+    # vvv THOG consume PLASTIC DEPTH controls before getopts and emit one canonical Python configuration
+    --plastic-enabled) PLASTIC_ENABLED=true; shift ;;
+    --no-plastic-enabled) PLASTIC_ENABLED=false; shift ;;
+    --plastic-do-learn-layer-count) PLASTIC_DO_LEARN_LAYER_COUNT=true; shift ;;
+    --no-plastic-do-learn-layer-count) PLASTIC_DO_LEARN_LAYER_COUNT=false; shift ;;
+    --plastic-freeze-geometry-during-warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true; shift ;;
+    --no-plastic-freeze-geometry-during-warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=false; shift ;;
+    # --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-update-brake|--plastic-layer-count-probe-noise-window|--plastic-layer-count-probe-noise-min-observations|--plastic-layer-count-probe-noise-lambda|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-geometry-learning-rate-multiplier)
+    --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-update-brake|--plastic-layer-count-probe-noise-window|--plastic-layer-count-probe-noise-min-observations|--plastic-layer-count-probe-noise-lambda|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-cuda-allocator-reserve-gib|--plastic-geometry-learning-rate-multiplier)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --plastic-layers-to-sample) PLASTIC_LAYERS_TO_SAMPLE="$2" ;;
+        --plastic-initial-layer-count) PLASTIC_INITIAL_LAYER_COUNT="$2" ;;
+        --plastic-max-permitted-layers) PLASTIC_MAX_PERMITTED_LAYERS="$2" ;;
+        --plastic-layer-sampling-initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$2" ;;
+        --plastic-layer-count-objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$2" ;;
+        --plastic-layer-count-update-brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$2" ;;
+        --plastic-layer-count-probe-noise-window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$2" ;;
+        --plastic-layer-count-probe-noise-min-observations) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$2" ;;
+        --plastic-layer-count-probe-noise-lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$2" ;;
+        --plastic-layer-count-cost-weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$2" ;;
+        --plastic-layer-memory-budget-gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$2" ;;
+        --plastic-cuda-allocator-reserve-gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$2" ;;
+        --plastic-geometry-learning-rate-multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$2" ;;
+      esac
+      shift 2
+      ;;
+    # --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-update-brake=*|--plastic-layer-count-probe-noise-window=*|--plastic-layer-count-probe-noise-min-observations=*|--plastic-layer-count-probe-noise-lambda=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-geometry-learning-rate-multiplier=*)
+    --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-update-brake=*|--plastic-layer-count-probe-noise-window=*|--plastic-layer-count-probe-noise-min-observations=*|--plastic-layer-count-probe-noise-lambda=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-cuda-allocator-reserve-gib=*|--plastic-geometry-learning-rate-multiplier=*)
+      plastic_name="${1%%=*}"; plastic_value="${1#*=}"
+      case "$plastic_name" in
+        --plastic-layers-to-sample) PLASTIC_LAYERS_TO_SAMPLE="$plastic_value" ;;
+        --plastic-initial-layer-count) PLASTIC_INITIAL_LAYER_COUNT="$plastic_value" ;;
+        --plastic-max-permitted-layers) PLASTIC_MAX_PERMITTED_LAYERS="$plastic_value" ;;
+        --plastic-layer-sampling-initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$plastic_value" ;;
+        --plastic-layer-count-objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$plastic_value" ;;
+        --plastic-layer-count-update-brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-min-observations) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$plastic_value" ;;
+        --plastic-layer-count-probe-noise-lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$plastic_value" ;;
+        --plastic-layer-count-cost-weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$plastic_value" ;;
+        --plastic-layer-memory-budget-gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$plastic_value" ;;
+        --plastic-cuda-allocator-reserve-gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$plastic_value" ;;
+        --plastic-geometry-learning-rate-multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$plastic_value" ;;
+      esac
+      unset plastic_name plastic_value
       shift
       ;;
     # ^^^ THOG
@@ -491,6 +576,14 @@ EXPERIMENT_PREFIX="${RUN_NAME:-NO_PREFIX}"                                      
 
 validate_positive_uint() { [[ "$1" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid $2: $1; expected a positive integer." >&2; exit 2; }; }
 validate_nonnegative_uint() { [[ "$1" =~ ^[0-9]+$ ]] || { echo "Invalid $2: $1; expected a non-negative integer." >&2; exit 2; }; }
+# vvv THOG PLASTIC DEPTH CUDA reserve accepts any finite non-negative scalar GiB value
+validate_nonnegative_number() {
+  awk -v value="$1" 'BEGIN { numeric = value + 0; exit !(value != "" && numeric >= 0.0 && numeric == numeric && numeric < 1.0e100) }' || {
+    echo "Invalid $2: $1; expected a finite non-negative number." >&2
+    exit 2
+  }
+}
+# ^^^ THOG
 # vvv THOG HYPERBLOCK recurrence decay is one finite scalar in the closed upper interval
 validate_open_closed_unit_float() {
   awk -v value="$1" 'BEGIN { numeric = value + 0; exit !(value != "" && numeric > 0.0 && numeric <= 1.0) }' || {
@@ -606,6 +699,33 @@ validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                               
 [[ -z "$LAYER_DROPOUT_STRATUM_SIZE" ]] || validate_positive_uint "$LAYER_DROPOUT_STRATUM_SIZE" "STRATUM_SIZE"
 [[ -z "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] || validate_positive_uint "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" "N_ACTIVE_PER_STRATUM"
 validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_STEPS"
+# ^^^ THOG
+# vvv THOG validate PLASTIC DEPTH wrapper controls before runner construction
+validate_true_false "$PLASTIC_ENABLED" "PLASTIC_ENABLED"
+validate_true_false "$PLASTIC_DO_LEARN_LAYER_COUNT" "PLASTIC_DO_LEARN_LAYER_COUNT"
+validate_true_false "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" "PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP"
+[[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || validate_positive_uint "$PLASTIC_LAYERS_TO_SAMPLE" "PLASTIC_LAYERS_TO_SAMPLE"
+[[ -z "$PLASTIC_INITIAL_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_INITIAL_LAYER_COUNT" "PLASTIC_INITIAL_LAYER_COUNT"
+[[ -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || validate_positive_uint "$PLASTIC_MAX_PERMITTED_LAYERS" "PLASTIC_MAX_PERMITTED_LAYERS"
+validate_nonnegative_uint "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE" "PLASTIC_LAYER_COUNT_UPDATE_BRAKE"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW" "PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS" "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS"
+(( PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS <= PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW )) || { echo "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS must not exceed PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW." >&2; exit 2; }
+case "$PLASTIC_LAYER_SAMPLING_INITIALISATION" in equidistant|random) ;; *) echo "PLASTIC_LAYER_SAMPLING_INITIALISATION must be equidistant or random." >&2; exit 2 ;; esac
+case "$PLASTIC_LAYER_COUNT_OBJECTIVE" in lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget) ;; *) echo "Bad PLASTIC_LAYER_COUNT_OBJECTIVE: $PLASTIC_LAYER_COUNT_OBJECTIVE" >&2; exit 2 ;; esac
+if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
+  [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || { echo "--plastic-layers-to-sample conflicts with learned layer count." >&2; exit 2; }
+  [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "--plastic-max-permitted-layers is required for learned layer count." >&2; exit 2; }
+else
+  [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" && -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "initial/max layer count controls require --plastic-do-learn-layer-count." >&2; exit 2; }
+fi
+[[ "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic-layer-memory-budget-gib." >&2; exit 2; }
+validate_nonnegative_number "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB" "PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB"
+if [[ "$PLASTIC_ENABLED" == true ]]; then
+  [[ "$HYPERBLOCK" == false ]] || { echo "PLASTIC DEPTH may not be combined with HYPERBLOCK." >&2; exit 2; }
+  [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false ]] || { echo "PLASTIC DEPTH requires every selected preset to be depth." >&2; exit 2; }
+  [[ "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" == "" || "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" == "${LAYER_DROPOUT_STRATUM_SIZE:-$N_LAYER}" ]] || { echo "PLASTIC DEPTH v0.1 may not be combined with layer dropout." >&2; exit 2; }
+fi
 # ^^^ THOG
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
@@ -764,6 +884,26 @@ run_grid_point() {
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
   optional_args=(); compact_args=(); compact_order_args=()
+  # vvv THOG PLASTIC DEPTH is emitted only on its selected DEPTH run and otherwise introduces no argument or naming changes
+  if [[ "$PLASTIC_ENABLED" == true ]]; then
+    optional_args+=(--plastic-enabled)
+    [[ -n "$PLASTIC_LAYERS_TO_SAMPLE" ]] && optional_args+=(--plastic-layers-to-sample "$PLASTIC_LAYERS_TO_SAMPLE")
+    if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then optional_args+=(--plastic-do-learn-layer-count); else optional_args+=(--no-plastic-do-learn-layer-count); fi
+    [[ -n "$PLASTIC_INITIAL_LAYER_COUNT" ]] && optional_args+=(--plastic-initial-layer-count "$PLASTIC_INITIAL_LAYER_COUNT")
+    [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] && optional_args+=(--plastic-max-permitted-layers "$PLASTIC_MAX_PERMITTED_LAYERS")
+    optional_args+=(--plastic-layer-sampling-initialisation "$PLASTIC_LAYER_SAMPLING_INITIALISATION")
+    optional_args+=(--plastic-layer-count-objective "$PLASTIC_LAYER_COUNT_OBJECTIVE")
+    optional_args+=(--plastic-layer-count-update-brake "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE")
+    optional_args+=(--plastic-layer-count-probe-noise-window "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW")
+    optional_args+=(--plastic-layer-count-probe-noise-min-observations "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS")
+    optional_args+=(--plastic-layer-count-probe-noise-lambda "$PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA")
+    optional_args+=(--plastic-layer-count-cost-weight "$PLASTIC_LAYER_COUNT_COST_WEIGHT")
+    [[ -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] && optional_args+=(--plastic-layer-memory-budget-gib "$PLASTIC_LAYER_MEMORY_BUDGET_GIB")
+    optional_args+=(--plastic-cuda-allocator-reserve-gib "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB")
+    optional_args+=(--plastic-geometry-learning-rate-multiplier "$PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER")
+    if [[ "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" == true ]]; then optional_args+=(--plastic-freeze-geometry-during-warmup); else optional_args+=(--no-plastic-freeze-geometry-during-warmup); fi
+  fi
+  # ^^^ THOG
   # vvv THOG layer dropout is architecture-level and therefore applies to dense and compact runs alike
   [[ -n "$LAYER_DROPOUT_STRATUM_SIZE" ]] && optional_args+=(--layer-dropout-stratum-size "$LAYER_DROPOUT_STRATUM_SIZE")
   [[ -n "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] && optional_args+=(--layer-dropout-active-per-stratum "$LAYER_DROPOUT_ACTIVE_PER_STRATUM")
@@ -883,6 +1023,7 @@ scruffy OWT train
   direct factorised HYPERBLOCK MLP:           $DIRECT_FACTORISED_HYPERBLOCK_MLP
   vectorise per-head materialisation:     $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
+  plastic depth:      enabled=$PLASTIC_ENABLED fixed=${PLASTIC_LAYERS_TO_SAMPLE:-N_LAYER} learn_count=$PLASTIC_DO_LEARN_LAYER_COUNT initial=${PLASTIC_INITIAL_LAYER_COUNT:-N_LAYER} max=${PLASTIC_MAX_PERMITTED_LAYERS:-N_LAYER} init=$PLASTIC_LAYER_SAMPLING_INITIALISATION objective=$PLASTIC_LAYER_COUNT_OBJECTIVE
 $depth_curve_console
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              $shape_summary
@@ -958,4 +1099,15 @@ done
 # served URL:         $serve_url
 # optimizer:          $OPTIMIZER  momentum=$OPTIMIZER_MOMENTUM  lr=$learning_rate_value (LR_$learning_rate_code) min_lr=$min_lr_value
 # depth viewer URL:   $viewer_url
+# ^^^ THOG
+
+# vvv THOG retired PLASTIC DEPTH hold-controller source preserved for history audit
+# PLASTIC_LAYER_COUNT_HOLD_UPDATES=100
+# --plastic-layer-count-hold-updates N=${PLASTIC_LAYER_COUNT_HOLD_UPDATES}
+# --plastic-layers-to-sample|--plastic-initial-layer-count|--plastic-max-permitted-layers|--plastic-layer-sampling-initialisation|--plastic-layer-count-objective|--plastic-layer-count-hold-updates|--plastic-layer-count-cost-weight|--plastic-layer-memory-budget-gib|--plastic-geometry-learning-rate-multiplier)
+# --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$2" ;;
+# --plastic-layers-to-sample=*|--plastic-initial-layer-count=*|--plastic-max-permitted-layers=*|--plastic-layer-sampling-initialisation=*|--plastic-layer-count-objective=*|--plastic-layer-count-hold-updates=*|--plastic-layer-count-cost-weight=*|--plastic-layer-memory-budget-gib=*|--plastic-geometry-learning-rate-multiplier=*)
+# --plastic-layer-count-hold-updates) PLASTIC_LAYER_COUNT_HOLD_UPDATES="$plastic_value" ;;
+# validate_positive_uint "$PLASTIC_LAYER_COUNT_HOLD_UPDATES" "PLASTIC_LAYER_COUNT_HOLD_UPDATES"
+# optional_args+=(--plastic-layer-count-hold-updates "$PLASTIC_LAYER_COUNT_HOLD_UPDATES")
 # ^^^ THOG

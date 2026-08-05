@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -92,6 +92,61 @@ def _progress_field(label: str, value: Any) -> str:
     return f"{label}={value}"
 
 
+# vvv THOG transition-only PLASTIC scalar samples use compact UI precision without polluting ordinary progress rows
+def _format_plastic_sampled_value(value: Any) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    magnitude = abs(numeric)
+    if magnitude != 0.0 and (magnitude < 0.01 or magnitude >= 1000.0):
+        return f"{numeric:.2e}"
+    return f"{numeric:.2f}"
+
+
+def _format_plastic_probe_loss(value: Any) -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    return f"{numeric:.3f}"
+
+
+def _format_plastic_loss_gain(value: Any) -> str:
+    if value is None:
+        return f"{'-':>8}"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>8}"
+    magnitude = abs(numeric)
+    if magnitude != 0.0 and (magnitude < 0.001 or magnitude >= 1000.0):
+        return f"{numeric:+8.2e}"
+    return f"{numeric:+8.3f}"
+
+
+def _format_depth_sample_point(value: Any) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(numeric)
+    return f"{numeric:.1f}"
+
+
+def _optimizer_progress_due(
+    *,
+    completed_updates: int,
+    max_updates: int,
+    log_interval: int,
+    sampled_values: Optional[Tuple[float, ...]],
+) -> bool:
+    return (
+        completed_updates == 1
+        or completed_updates == max_updates
+        or completed_updates % log_interval == 0
+        or sampled_values is not None
+    )
+# ^^^ THOG
+
+
 # vvv THOG step one remains immediately legible in seconds; all later elapsed values use compact HHMM
 # def _progress_elapsed_seconds(value: Any) -> str:
 #     return f"{value}s"
@@ -165,6 +220,46 @@ def format_progress_line(run_id: str, event: str, payload: Dict[str, Any]) -> st
             elif delta_text.startswith("+"):
                 field = f"{_PROGRESS_LOSS_INCREASE_STYLE_START}{field}{_PROGRESS_LOSS_DELTA_STYLE_END}"
         fields.append(field)
+    # vvv THOG show the active PLASTIC DEPTH layer count on every training and validation progress row
+    if "current_layer_count" in payload:
+        fields.append(f"current_layer_count = {int(payload['current_layer_count'])}")
+    # ^^^ THOG
+    # vvv THOG append one post-transition generated-scalar sample field to the optimizer row only
+    if event == "optimizer_progress" and "sampled_values" in payload:
+        sampled_values = ", ".join(
+            _format_plastic_sampled_value(value)
+            for value in payload["sampled_values"]
+        )
+        fields.append(f"sampled_values = [{sampled_values}]")
+    # ^^^ THOG
+    # vvv THOG show learned-count probe losses and raw lowest-loss improvement before the active public layer-index ruler
+    if "plastic_probe_losses" in payload:
+        losses = tuple(payload["plastic_probe_losses"])
+        plastic_probe_losses = ", ".join(
+            _format_plastic_probe_loss(value)
+            for value in losses
+        )
+        fields.append(f"probe_losses = [{plastic_probe_losses}]")
+        if len(losses) == 3:
+            current_loss = losses[1]
+            loss_gains = tuple(
+                None if current_loss is None or candidate_loss is None else float(current_loss) - float(candidate_loss)
+                for candidate_loss in (losses[0], losses[2])
+            )
+            formatted_loss_gains = ", ".join(
+                _format_plastic_loss_gain(value)
+                for value in loss_gains
+            )
+            fields.append(f"loss_gain [L-1, L+1] = [{formatted_loss_gains}]")
+    # ^^^ THOG
+    # vvv THOG append active public DEPTH sample points last so learned geometry movement is visible without opening plots
+    if "depth_sample_points" in payload:
+        depth_sample_points = ", ".join(
+            _format_depth_sample_point(value)
+            for value in payload["depth_sample_points"]
+        )
+        fields.append(f"layer indices = [{depth_sample_points}]")
+    # ^^^ THOG
     line = "  ".join(fields)
     if event == "evaluation_completed":
         return (
@@ -217,6 +312,34 @@ class Stage6Trainer(Stage4Trainer):
     def _console_float(value: Any) -> float:
         return float(str(value).strip())
 
+    # vvv THOG recover the most recent inline-probe validation-loss triplet in N-1/N/N+1 order for console-only display
+    def _latest_plastic_probe_losses(self) -> Optional[Tuple[Optional[float], Optional[float], Optional[float]]]:
+        if not bool(getattr(getattr(self, "config", None), "plastic__do_learn_layer_count", False)):
+            return None
+        for event in reversed(self.events):
+            if event.name != "plastic_depth_count_decision":
+                continue
+            payload = event.payload
+            if "previous_active_layers" not in payload:
+                return None
+            current_count = int(payload["previous_active_layers"])
+            losses_by_count: Dict[int, float] = {}
+            for item in payload.get("candidates", ()):
+                try:
+                    count = int(item["active_layers"])
+                    loss = item["validation_loss"]
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if loss is None:
+                    continue
+                losses_by_count[count] = float(loss)
+            return tuple(
+                losses_by_count.get(current_count + offset)
+                for offset in (-1, 0, 1)
+            )
+        return None
+    # ^^^ THOG
+
     def _prepare_console_progress_payload(self, event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         values = dict(payload)
         if event == "run_started":
@@ -252,7 +375,39 @@ class Stage6Trainer(Stage4Trainer):
             values["timestamp"] = _progress_timestamp()
             if self._console_latest_mean_step_seconds is not None:
                 values["mean_step_seconds"] = f"{self._console_latest_mean_step_seconds:6.2f}"
+            # vvv THOG expose the actual active PLASTIC DEPTH count, probe losses and public sample coordinates without changing ordinary console rows
+            if bool(getattr(getattr(self, "config", None), "plastic__enabled", False)):
+                lattice = self._plastic_depth_lattice()
+                if lattice is None:
+                    raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent while formatting progress")
+                values["current_layer_count"] = int(lattice.current_active_layers)
+                probe_losses = self._latest_plastic_probe_losses()
+                if probe_losses is not None:
+                    values["plastic_probe_losses"] = probe_losses
+                with torch.no_grad():
+                    active_coordinates = (
+                        lattice.active_public_coordinates()
+                        .detach()
+                        .to(device="cpu", dtype=torch.float64)
+                    )
+                values["depth_sample_points"] = tuple(
+                    float(value) for value in active_coordinates.tolist()
+                )
+            # ^^^ THOG
         return values
+    # ^^^ THOG
+
+    # vvv THOG sampled transition values are transient console state and are consumed exactly once
+    def _consume_plastic_depth_console_sampled_values(self) -> Optional[Tuple[float, ...]]:
+        sampled_values = getattr(
+            self,
+            "_plastic_depth_pending_console_sampled_values",
+            None,
+        )
+        self._plastic_depth_pending_console_sampled_values = None
+        if sampled_values is None:
+            return None
+        return tuple(float(value) for value in sampled_values)
     # ^^^ THOG
 
     def _print_progress(self, run_id: str, event: str, **payload: Any) -> None:
@@ -387,19 +542,44 @@ class Stage6Trainer(Stage4Trainer):
                     "session_consumed_tokens": current_session_consumed_tokens,
                 }
             )
-            report_update = completed_updates == 1 or completed_updates == self.config.max_updates or completed_updates % self.config.log_interval == 0
+            # report_update = completed_updates == 1 or completed_updates == self.config.max_updates or completed_updates % self.config.log_interval == 0
+            # vvv THOG count transitions force their ordinary optimizer row and consume sampled values without creating another line
+            sampled_values = self._consume_plastic_depth_console_sampled_values()
+            report_update = _optimizer_progress_due(
+                completed_updates=completed_updates,
+                max_updates=self.config.max_updates,
+                log_interval=self.config.log_interval,
+                sampled_values=sampled_values,
+            )
             if report_update:
+                # self._print_progress(
+                #     run_id,
+                #     "optimizer_progress",
+                #     completed_updates=completed_updates,
+                #     consumed_tokens=completed_updates * tokens_per_update,
+                #     session_consumed_tokens=current_session_consumed_tokens,
+                #     training_loss=metrics["training_loss"],
+                #     learning_rate=metrics["learning_rate"],
+                #     gradient_norm=metrics["gradient_norm"],
+                #     cumulative_training_seconds=training_seconds,
+                # )
+                progress_payload = {
+                    "completed_updates": completed_updates,
+                    "consumed_tokens": completed_updates * tokens_per_update,
+                    "session_consumed_tokens": current_session_consumed_tokens,
+                    "training_loss": metrics["training_loss"],
+                    "learning_rate": metrics["learning_rate"],
+                    "gradient_norm": metrics["gradient_norm"],
+                    "cumulative_training_seconds": training_seconds,
+                }
+                if sampled_values is not None:
+                    progress_payload["sampled_values"] = sampled_values
                 self._print_progress(
                     run_id,
                     "optimizer_progress",
-                    completed_updates=completed_updates,
-                    consumed_tokens=completed_updates * tokens_per_update,
-                    session_consumed_tokens=current_session_consumed_tokens,
-                    training_loss=metrics["training_loss"],
-                    learning_rate=metrics["learning_rate"],
-                    gradient_norm=metrics["gradient_norm"],
-                    cumulative_training_seconds=training_seconds,
+                    **progress_payload,
                 )
+            # ^^^ THOG
             if self.config.eval_interval > 0 and completed_updates % self.config.eval_interval == 0:
                 evaluation_seconds = self._record_evaluation(
                     run_id=run_id,
@@ -447,7 +627,10 @@ class Stage6Trainer(Stage4Trainer):
             "run_id": run_id,
             "protocol_sha256": protocol_sha256,
             "dataset": dataset,
-            "training_config": asdict(self.config),
+            # vvv THOG preserve the pre-PLASTIC result configuration serialization for source history
+            # "training_config": asdict(self.config),
+            "training_config": self.config.persistent_dict(),
+            # ^^^ THOG
             "parameter_report": self.parameter_report,
             "distributed": self.distributed.report(),
             "hardware": {
@@ -518,4 +701,12 @@ __all__ = ["Stage6Trainer", "format_progress_line", "trace_digest"]
 # return f"{value}s"
 # fields.append(_progress_elapsed_seconds(payload[key]))
 # values = self._prepare_console_progress_payload(event, payload)                                                                                   # <<< THOG add timestamp, exact mean step duration and compact number formatting before rendering
+# ^^^ THOG
+
+# vvv THOG exact retired progress-call lines preserved for source-history audit
+# from typing import Any, Dict, List, Optional, Union
+# training_loss=metrics["training_loss"],
+# learning_rate=metrics["learning_rate"],
+# gradient_norm=metrics["gradient_norm"],
+# cumulative_training_seconds=training_seconds,
 # ^^^ THOG

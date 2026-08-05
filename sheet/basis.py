@@ -55,6 +55,29 @@ def chebyshev_first_kind_basis(coordinates: Tensor, order: int) -> Tensor:
     return chebyshev_raw_basis(coordinates, order)
 
 
+# vvv THOG PLASTIC DEPTH needs an autograd-safe recurrence because learned coordinates participate in repeated backward graphs
+def differentiable_chebyshev_first_kind_basis(coordinates: Tensor, order: int) -> Tensor:
+    _validate_positive_integer("order", order)
+    if coordinates.ndim != 1:
+        raise ValueError(
+            "coordinates must be one-dimensional; "
+            f"got shape {tuple(coordinates.shape)}"
+        )
+    if coordinates.numel() == 0:
+        raise ValueError("coordinates must contain at least one sample")
+    if not coordinates.is_floating_point():
+        raise ValueError(
+            f"coordinates must use a floating dtype; got {coordinates.dtype}"
+        )
+    terms = [torch.ones_like(coordinates)]
+    if order > 1:
+        terms.append(coordinates)
+    for _ in range(2, order):
+        terms.append(2.0 * coordinates * terms[-1] - terms[-2])
+    return torch.stack(terms, dim=1)
+# ^^^ THOG
+
+
 def deterministic_reduced_qr(raw_basis: Tensor) -> Tuple[Tensor, Tensor]:
     """Return reduced QR with a positive diagonal in R.
 
@@ -70,6 +93,50 @@ def build_stabilized_basis(sample_count: int, order: int, *, runtime_dtype: torc
 
     kernel = get_basis_kernel(basis_family)
     return kernel.build(sample_count, order, runtime_dtype=runtime_dtype, device=device, version=version)
+
+
+# vvv THOG PLASTIC DEPTH evaluates the existing QR-stabilised Chebyshev coefficient coordinates at arbitrary real-valued DEPTH positions
+def stabilized_chebyshev_basis_at_coordinates(
+    coordinates: Tensor,
+    *,
+    reference_sample_count: int,
+    order: int,
+    runtime_dtype: Optional[torch.dtype] = None,
+    version: str = BASIS_VERSION,
+) -> Tensor:
+    if coordinates.ndim != 1:
+        raise ValueError(
+            "coordinates must be one-dimensional; "
+            f"got shape {tuple(coordinates.shape)}"
+        )
+    _validate_positive_integer("reference_sample_count", reference_sample_count)
+    _validate_positive_integer("order", order)
+    if order > reference_sample_count:
+        raise ValueError(
+            "order must not exceed reference_sample_count; "
+            f"got order={order}, reference_sample_count={reference_sample_count}"
+        )
+    if version != BASIS_VERSION:
+        raise ValueError(
+            "arbitrary-coordinate DEPTH currently requires the canonical "
+            f"Chebyshev basis version {BASIS_VERSION!r}; got {version!r}"
+        )
+    target_dtype = coordinates.dtype if runtime_dtype is None else runtime_dtype
+    _validate_floating_dtype(target_dtype)
+    reference_coordinates = normalized_coordinates(
+        reference_sample_count,
+        dtype=torch.float64,
+        device="cpu",
+    )
+    reference_raw = chebyshev_first_kind_basis(reference_coordinates, order)
+    _, reference_r = deterministic_reduced_qr(reference_raw)
+    inverse_r = torch.linalg.inv(reference_r).to(
+        device=coordinates.device,
+        dtype=coordinates.dtype,
+    )
+    raw = differentiable_chebyshev_first_kind_basis(coordinates, order)
+    return (raw @ inverse_r).to(dtype=target_dtype)
+# ^^^ THOG
 
 
 @dataclass(frozen=True)
