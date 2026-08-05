@@ -82,6 +82,10 @@ from . import plastic_depth_lookahead_fix_patch as _plastic_depth_lookahead_fix_
 from . import plastic_depth_absolute_ruler_patch as _plastic_depth_absolute_ruler_patch
 # ^^^ THOG
 
+# vvv THOG restore dynamic selector patchability after absolute-ruler default selector installation
+from . import plastic_depth_absolute_patchability_patch as _plastic_depth_absolute_patchability_patch
+# ^^^ THOG
+
 # vvv THOG finalise PLASTIC console labels, suppress loss-gain clutter and colour candidate probe losses
 from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_cleanup_patch
 # ^^^ THOG
