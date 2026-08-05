@@ -93,3 +93,7 @@ from . import plastic_depth_absolute_patchability_patch as _plastic_depth_absolu
 # vvv THOG finalise PLASTIC console labels, suppress loss-gain clutter and colour candidate probe losses
 from . import plastic_depth_console_cleanup_patch as _plastic_depth_console_cleanup_patch
 # ^^^ THOG
+
+# vvv THOG let learned-count runs probe periodically instead of paying the L-1/L/L+1 inline-probe tax every optimizer update
+from . import plastic_depth_probe_interval_patch as _plastic_depth_probe_interval_patch
+# ^^^ THOG
