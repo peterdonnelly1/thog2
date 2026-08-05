@@ -106,11 +106,14 @@ def _plastic_progress_probe_loss(value: Any) -> str:
 
 def _plastic_progress_change_z(value: Any) -> str:
     if value is None:
-        return f"{'-':>7}"
+        return f"{'-':>9}"
     numeric = float(value)
     if not math.isfinite(numeric):
-        return f"{str(numeric):>7}"
-    return f"{numeric:+7.2f}"
+        return f"{str(numeric):>9}"
+    magnitude = abs(numeric)
+    if magnitude != 0.0 and (magnitude < 0.01 or magnitude >= 1000.0):
+        return f"{numeric:+9.2e}"
+    return f"{numeric:+9.2f}"
 
 
 def _plastic_progress_layer_index(value: Any) -> str:
@@ -222,7 +225,13 @@ def _startup_float(value: Any) -> str:
 
 
 def _startup_public_indices(values: Any) -> str:
-    return ", ".join(f"{float(value):5.1f}" for value in values)
+    resolved = tuple(float(value) for value in values)
+    if not resolved:
+        return ""
+    head, *tail = resolved
+    items = [f"{head:.1f}"]
+    items.extend(f"{value:5.1f}" for value in tail)
+    return ", ".join(items)
 
 
 _PLASTIC_STARTUP_LABELS = (
