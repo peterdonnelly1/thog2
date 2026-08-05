@@ -1,0 +1,68 @@
+name: Apply PLASTIC COARSE FINE M1
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - .github/workflows/plastic_coarse_fine_m1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply_m1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply M1 source integration
+        run: python tools/apply_plastic_coarse_fine_m1.py
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Compile changed Python
+        run: |
+          python -m py_compile \
+            sheet/plastic_depth.py \
+            sheet/plastic_depth_coarse.py \
+            sheet/training_config.py \
+            sheet/run_config.py \
+            run_thog2_owt_core.py \
+            run_thog2_owt.py \
+            run_thog2_lifecycle.py
+
+      - name: Run M1 and affected tests
+        run: |
+          python -m pytest -q \
+            tests/test_plastic_depth_coarse_config.py \
+            tests/test_training_config.py \
+            tests/test_plastic_depth_startup_lookahead_ui.py \
+            tests/test_plastic_depth_wrapper_options.py \
+            tests/test_run_thog2_owt.py
+
+      - name: Commit M1
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            sheet/plastic_depth.py \
+            sheet/training_config.py \
+            sheet/run_config.py \
+            run_thog2_owt_core.py \
+            run_thog2_owt.py \
+            run_thog2_lifecycle.py
+          git commit -m 'Implement PLASTIC COARSE FINE configuration surfaces'
+          git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
