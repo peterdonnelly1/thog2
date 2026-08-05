@@ -92,6 +92,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "plastic__layer_count_probe_noise_window:" in output
     assert "plastic__layer_count_probe_noise_min_observations:" in output
     assert "plastic__geometry_learning_rate_multiplier:" in output
+    assert "plastic__freeze_geometry_during_warmup:   true" in output
     assert "initial layer indices:" in output
     assert "capacity layer indices:" in output
 # ^^^ THOG
