@@ -43,9 +43,9 @@ def _colour_probe_losses(match: re.Match[str]) -> str:
     if current is None:
         return f"probe_losses [{label}] = [{body}]"
     relations: Tuple[Optional[float], Optional[float], Optional[float]] = (
-        None if numeric_values[0] is None else current - numeric_values[0],
+        None if numeric_values[0] is None else numeric_values[0] - current,
         None,
-        None if numeric_values[2] is None else current - numeric_values[2],
+        None if numeric_values[2] is None else numeric_values[2] - current,
     )
     coloured = [
         _colour_probe_loss(value, relation)
@@ -75,10 +75,12 @@ def _format_progress_line_with_plastic_console_cleanup(run_id: str, event: str, 
     line = _strip_loss_gain(line)
     line = _strip_sampled_values(line)
     line = line.replace("current_layer_count =", "layers =")
-    line = line.replace("\tlayer indices =", "\tsample_layer =")
-    line = line.replace("  layer indices =", "  sample_layer =")
-    line = line.replace("\tsample_pos_100 =", "\tsample_layer =")
-    line = line.replace("  sample_pos_100 =", "  sample_layer =")
+    line = line.replace("\tlayer indices =", "\tsampled =")
+    line = line.replace("  layer indices =", "  sampled =")
+    line = line.replace("\tsample_pos_100 =", "\tsampled =")
+    line = line.replace("  sample_pos_100 =", "  sampled =")
+    line = line.replace("\tsample_layer =", "\tsampled =")
+    line = line.replace("  sample_layer =", "  sampled =")
     line = re.sub(
         r"probe_losses \[(?P<label>[^\]]+)\] = \[(?P<body>[^\]]+)\]",
         _colour_probe_losses,
