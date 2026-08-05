@@ -37,6 +37,10 @@ set -- "${THOG2_UNDERSCORE_NORMALIZED_ARGS[@]}"
 unset THOG2_UNDERSCORE_NORMALIZED_ARGS THOG2_UNDERSCORE_NAME THOG2_UNDERSCORE_VALUE
 # ^^^ THOG
 
+# vvv THOG expose exact PLASTIC lookahead controls through the one canonical wrapper
+source ./plastic_depth_lookahead_wrapper_options.sh
+# ^^^ THOG
+
 # vvv THOG expose granular pure-DEPTH materialisation controls; matmul and profiling are explicit default-off options
 # THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-true}"                                                # <<< THOG preserved previous default-on policy
 THOG2_DEPTH_MATERIALISATION_MATMUL="${THOG2_DEPTH_MATERIALISATION_MATMUL:-false}"
