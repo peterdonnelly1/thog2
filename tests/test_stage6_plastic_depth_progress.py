@@ -3,6 +3,10 @@ import run_thog2_owt  # noqa: F401  # <<< THOG activate public train_OWT console
 from sheet.stage6_trainer import format_progress_line
 
 
+_GREEN = "\033[1;38;2;0;255;0m"
+_RESET = "\033[0m"
+
+
 def _optimizer_payload(**overrides):
     payload = {
         "completed_updates": "     7",
@@ -28,19 +32,17 @@ def _optimizer_payload(**overrides):
     return payload
 
 
-def test_plastic_probe_losses_loss_gain_score_z_layer_indices_and_samples_are_ordered() -> None:
+def test_plastic_probe_losses_score_z_sample_layer_and_samples_are_ordered() -> None:
     line = format_progress_line("RUN", "optimizer_progress", _optimizer_payload())
 
-    assert "current_layer_count = 4" in line
-    assert "sampled_values = [1.23e-03, 2.50]" in line
+    assert "layers = 4" in line
+    assert "sampled_values" not in line
     assert "\tprobe_losses [L-3, L, L+3] = [ 10.123,   9.235, 100.346]" in line
-    assert "loss_gain [L-3, L+3] = [  -0.889,  -91.111]" in line
+    assert "loss_gain" not in line
     assert "score_z [L-3, L+3] = [    -2.50,     +1.25]" in line
-    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]  sampled_values = [1.23e-03, 2.50]")
-    assert line.index("\tprobe_losses [L-3, L, L+3] =") < line.index("loss_gain [L-3, L+3] =")
-    assert line.index("loss_gain [L-3, L+3] =") < line.index("score_z [L-3, L+3] =")
-    assert line.index("score_z [L-3, L+3] =") < line.index("\tlayer indices =")
-    assert line.index("\tlayer indices =") < line.index("  sampled_values = ")
+    assert line.endswith("\tsample_layer = [  1.3,   4.6,   8.9, 100.0]")
+    assert line.index("\tprobe_losses [L-3, L, L+3] =") < line.index("score_z [L-3, L+3] =")
+    assert line.index("score_z [L-3, L+3] =") < line.index("\tsample_layer =")
 
 
 def test_huge_score_z_uses_fixed_width_scientific_not_row_blowout() -> None:
@@ -51,7 +53,8 @@ def test_huge_score_z_uses_fixed_width_scientific_not_row_blowout() -> None:
     )
 
     assert "score_z [L-3, L+3] = [+4.39e+10, -3.98e+10]" in line
-    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
+    assert "sampled_values" not in line
+    assert line.endswith("\tsample_layer = [  1.3,   4.6,   8.9, 100.0]")
 
 
 def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
@@ -60,8 +63,9 @@ def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
 
     line = format_progress_line("RUN", "optimizer_progress", payload)
 
-    assert "layer indices" not in line
-    assert line.endswith("score_z [L-3, L+3] = [    -2.50,     +1.25]  sampled_values = [1.23e-03, 2.50]")
+    assert "sample_layer" not in line
+    assert "sampled_values" not in line
+    assert line.endswith("score_z [L-3, L+3] = [    -2.50,     +1.25]")
 
 
 def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
@@ -77,7 +81,8 @@ def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
     assert "probe_losses" not in line
     assert "loss_gain" not in line
     assert "score_z" not in line
-    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]  sampled_values = [1.23e-03, 2.50]")
+    assert "sampled_values" not in line
+    assert line.endswith("\tsample_layer = [  1.3,   4.6,   8.9, 100.0]")
 
 
 def test_optimizer_progress_omits_score_z_when_absent() -> None:
@@ -87,12 +92,12 @@ def test_optimizer_progress_omits_score_z_when_absent() -> None:
     line = format_progress_line("RUN", "optimizer_progress", payload)
 
     assert "score_z" not in line
-    assert line.index("\tprobe_losses [L-3, L, L+3] =") < line.index("loss_gain [L-3, L+3] =")
-    assert line.index("loss_gain [L-3, L+3] =") < line.index("\tlayer indices =")
-    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
+    assert "loss_gain" not in line
+    assert line.index("\tprobe_losses [L-3, L, L+3] =") < line.index("\tsample_layer =")
+    assert "sampled_values" not in line
 
 
-def test_missing_edge_probe_loss_and_score_z_use_dash_placeholders() -> None:
+def test_missing_edge_probe_loss_and_score_z_use_dash_placeholders_and_green_only() -> None:
     line = format_progress_line(
         "RUN",
         "optimizer_progress",
@@ -105,8 +110,9 @@ def test_missing_edge_probe_loss_and_score_z_use_dash_placeholders() -> None:
         ),
     )
 
-    assert "\tprobe_losses [L-1, L, L+1] = [      -,   9.500,   9.250]" in line
-    assert "loss_gain [L-1, L+1] = [       -,   +0.250]" in line
+    assert f"\tprobe_losses [L-1, L, L+1] = [      -,   9.500,{_GREEN}   9.250{_RESET}]" in line
+    assert "loss_gain" not in line
     assert "score_z [L-1, L+1] = [        -,     +0.12]" in line
-    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
+    assert "\033[1;31m" not in line
+    assert "sampled_values" not in line
 # ^^^ THOG
