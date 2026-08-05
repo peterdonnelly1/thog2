@@ -18,20 +18,23 @@ def _optimizer_payload(**overrides):
         "current_layer_count": 4,
         "sampled_values": (0.00123, 2.5),
         "plastic_probe_losses": (10.1234, 9.2345, 100.3456),
+        "plastic_change_z": (-2.5, 1.25),
         "depth_sample_points": (1.26, 4.56, 8.94, 100.0),
     }
     payload.update(overrides)
     return payload
 
 
-def test_plastic_probe_losses_precede_final_layer_indices_field() -> None:
+def test_plastic_probe_losses_and_change_z_precede_final_layer_indices_field() -> None:
     line = format_progress_line("RUN", "optimizer_progress", _optimizer_payload())
 
     assert "current_layer_count = 4" in line
     assert "sampled_values = [1.23e-03, 2.50]" in line
-    assert "\tprobe_losses = [ 10.123,   9.235, 100.346]" in line
+    assert "\tprobe_losses [L-1, L, L+1] = [ 10.123,   9.235, 100.346]" in line
+    assert "\tchange_z [L-1, L+1] = [  -2.50,   +1.25]" in line
     assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]")
-    assert line.index("\tprobe_losses =") < line.index("\tlayer indices =")
+    assert line.index("\tprobe_losses [L-1, L, L+1] =") < line.index("\tchange_z [L-1, L+1] =")
+    assert line.index("\tchange_z [L-1, L+1] =") < line.index("\tlayer indices =")
 
 
 def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
@@ -41,7 +44,7 @@ def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
     line = format_progress_line("RUN", "optimizer_progress", payload)
 
     assert "layer indices" not in line
-    assert line.endswith("\tprobe_losses = [ 10.123,   9.235, 100.346]")
+    assert line.endswith("\tchange_z [L-1, L+1] = [  -2.50,   +1.25]")
 
 
 def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
@@ -51,15 +54,30 @@ def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
     line = format_progress_line("RUN", "optimizer_progress", payload)
 
     assert "probe_losses" not in line
+    assert "\tchange_z [L-1, L+1] = [  -2.50,   +1.25]" in line
     assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]")
 
 
-def test_missing_edge_probe_loss_uses_dash_placeholder() -> None:
+def test_optimizer_progress_omits_change_z_when_absent() -> None:
+    payload = _optimizer_payload()
+    del payload["plastic_change_z"]
+
+    line = format_progress_line("RUN", "optimizer_progress", payload)
+
+    assert "change_z" not in line
+    assert line.index("\tprobe_losses [L-1, L, L+1] =") < line.index("\tlayer indices =")
+
+
+def test_missing_edge_probe_loss_and_change_z_use_dash_placeholders() -> None:
     line = format_progress_line(
         "RUN",
         "optimizer_progress",
-        _optimizer_payload(plastic_probe_losses=(None, 9.5, 9.25)),
+        _optimizer_payload(
+            plastic_probe_losses=(None, 9.5, 9.25),
+            plastic_change_z=(None, 0.125),
+        ),
     )
 
-    assert "\tprobe_losses = [      -,   9.500,   9.250]" in line
+    assert "\tprobe_losses [L-1, L, L+1] = [      -,   9.500,   9.250]" in line
+    assert "\tchange_z [L-1, L+1] = [      -,   +0.12]" in line
 # ^^^ THOG
