@@ -25,16 +25,17 @@ def _optimizer_payload(**overrides):
     return payload
 
 
-def test_plastic_probe_losses_and_change_z_precede_final_layer_indices_field() -> None:
+def test_plastic_probe_losses_change_z_layer_indices_and_samples_are_ordered() -> None:
     line = format_progress_line("RUN", "optimizer_progress", _optimizer_payload())
 
     assert "current_layer_count = 4" in line
     assert "sampled_values = [1.23e-03, 2.50]" in line
     assert "\tprobe_losses [L-1, L, L+1] = [ 10.123,   9.235, 100.346]" in line
     assert "\tchange_z [L-1, L+1] = [    -2.50,     +1.25]" in line
-    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]")
+    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]  sampled_values = [1.23e-03, 2.50]")
     assert line.index("\tprobe_losses [L-1, L, L+1] =") < line.index("\tchange_z [L-1, L+1] =")
     assert line.index("\tchange_z [L-1, L+1] =") < line.index("\tlayer indices =")
+    assert line.index("\tlayer indices =") < line.index("  sampled_values = ")
 
 
 def test_huge_change_z_uses_fixed_width_scientific_not_row_blowout() -> None:
@@ -45,6 +46,7 @@ def test_huge_change_z_uses_fixed_width_scientific_not_row_blowout() -> None:
     )
 
     assert "\tchange_z [L-1, L+1] = [+4.39e+10, -3.98e+10]" in line
+    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
 
 
 def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
@@ -54,7 +56,7 @@ def test_optimizer_progress_omits_depth_samples_when_absent() -> None:
     line = format_progress_line("RUN", "optimizer_progress", payload)
 
     assert "layer indices" not in line
-    assert line.endswith("\tchange_z [L-1, L+1] = [    -2.50,     +1.25]")
+    assert line.endswith("\tchange_z [L-1, L+1] = [    -2.50,     +1.25]  sampled_values = [1.23e-03, 2.50]")
 
 
 def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
@@ -65,7 +67,7 @@ def test_optimizer_progress_omits_probe_losses_when_absent() -> None:
 
     assert "probe_losses" not in line
     assert "\tchange_z [L-1, L+1] = [    -2.50,     +1.25]" in line
-    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]")
+    assert line.endswith("\tlayer indices = [  1.3,   4.6,   8.9, 100.0]  sampled_values = [1.23e-03, 2.50]")
 
 
 def test_optimizer_progress_omits_change_z_when_absent() -> None:
@@ -76,6 +78,7 @@ def test_optimizer_progress_omits_change_z_when_absent() -> None:
 
     assert "change_z" not in line
     assert line.index("\tprobe_losses [L-1, L, L+1] =") < line.index("\tlayer indices =")
+    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
 
 
 def test_missing_edge_probe_loss_and_change_z_use_dash_placeholders() -> None:
@@ -90,4 +93,5 @@ def test_missing_edge_probe_loss_and_change_z_use_dash_placeholders() -> None:
 
     assert "\tprobe_losses [L-1, L, L+1] = [      -,   9.500,   9.250]" in line
     assert "\tchange_z [L-1, L+1] = [        -,     +0.12]" in line
+    assert line.endswith("  sampled_values = [1.23e-03, 2.50]")
 # ^^^ THOG
