@@ -94,12 +94,16 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "plastic__geometry_learning_rate_multiplier:" in output
     assert "initial layer indices:" in output
     assert "capacity layer indices:" in output
+    rows = output.splitlines()
     min_observation_row = next(
         line
-        for line in output.splitlines()
+        for line in rows
         if "plastic__layer_count_probe_noise_min_observations:" in line
     )
+    initial_row = next(line for line in rows if "initial layer indices:" in line)
+    capacity_row = next(line for line in rows if "capacity layer indices:" in line)
     assert min_observation_row.endswith("   6")
-    assert "initial layer indices:                                  1.0,  15.1,  29.3,  43.4" in output
-    assert "capacity layer indices:                                 1.0,  15.1,  29.3,  43.4,  57.6" in output
+    assert initial_row.endswith("  1.0,  15.1,  29.3,  43.4")
+    assert capacity_row.endswith("  1.0,  15.1,  29.3,  43.4,  57.6")
+    assert initial_row.index("1.0") == capacity_row.index("1.0")
 # ^^^ THOG
