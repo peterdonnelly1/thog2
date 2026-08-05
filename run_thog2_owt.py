@@ -94,7 +94,7 @@ _geometry_registry._format_field = _format_geometry_field_aligned
 _core._print_model_option = _print_model_option_aligned
 # ^^^ THOG
 
-# vvv THOG fixed-width PLASTIC progress tail columns keep probe losses and public layer coordinates readable as counts move
+# vvv THOG fixed-width PLASTIC progress tail columns keep probe losses, change gates and public layer coordinates readable as counts move
 def _plastic_progress_probe_loss(value: Any) -> str:
     if value is None:
         return f"{'-':>7}"
@@ -104,6 +104,15 @@ def _plastic_progress_probe_loss(value: Any) -> str:
     return f"{numeric:7.3f}"
 
 
+def _plastic_progress_change_z(value: Any) -> str:
+    if value is None:
+        return f"{'-':>7}"
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"{str(numeric):>7}"
+    return f"{numeric:+7.2f}"
+
+
 def _plastic_progress_layer_index(value: Any) -> str:
     numeric = float(value)
     if not math.isfinite(numeric):
@@ -111,9 +120,19 @@ def _plastic_progress_layer_index(value: Any) -> str:
     return f"{numeric:5.1f}"
 
 
+def _plastic_change_z_field(payload: Any) -> Optional[str]:
+    if not isinstance(payload, Mapping):
+        return None
+    values = payload.get("plastic_change_z")
+    if values is None:
+        return None
+    change_z = ", ".join(_plastic_progress_change_z(value) for value in values)
+    return f"\tchange_z [L-1, L+1] = [{change_z}]"
+
+
 def _plastic_progress_tail_tabs(line: str) -> str:
     return (
-        line.replace("  probe_losses = ", "\tprobe_losses = ")
+        line.replace("  probe_losses = ", "\tprobe_losses [L-1, L, L+1] = ")
         .replace("  layer indices = ", "\tlayer indices = ")
     )
 
@@ -140,6 +159,11 @@ def _format_progress_line_with_materialisation_last(run_id: str, event: str, pay
     line = _plastic_progress_tail_tabs(
         _ORIGINAL_MATERIALISATION_PROGRESS_FORMAT(run_id, event, payload)
     )
+    change_z_field = _plastic_change_z_field(payload)
+    if change_z_field is not None and "\tlayer indices = " in line:
+        line = line.replace("\tlayer indices = ", f"{change_z_field}\tlayer indices = ", 1)
+    elif change_z_field is not None:
+        line = f"{line}{change_z_field}"
     if event != "optimizer_progress" or "materialisation_penalty" not in payload:
         return line
     field = f"  materialisation penalty={payload['materialisation_penalty']}"
@@ -198,10 +222,33 @@ def _startup_float(value: Any) -> str:
 
 
 def _startup_public_indices(values: Any) -> str:
-    return ", ".join(f"{float(value):.1f}" for value in values)
+    return ", ".join(f"{float(value):5.1f}" for value in values)
 
 
-_PLASTIC_STARTUP_LABEL_WIDTH = len("plastic__freeze_geometry_during_warmup:") + 3
+_PLASTIC_STARTUP_LABELS = (
+    "plastic__enabled:",
+    "resolved count mode:",
+    "current active layers:",
+    "plastic__layers_to_sample:",
+    "plastic__do_learn_layer_count:",
+    "plastic__initial_layer_count:",
+    "plastic__initial_active_layers:",
+    "plastic__max_permitted_layers:",
+    "plastic__layer_sampling_initialisation:",
+    "plastic__layer_count_objective:",
+    "plastic__layer_count_update_brake:",
+    "plastic__layer_count_probe_noise_window:",
+    "plastic__layer_count_probe_noise_min_observations:",
+    "plastic__layer_count_probe_noise_lambda:",
+    "plastic__layer_count_cost_weight:",
+    "plastic__layer_memory_budget_gib:",
+    "plastic__cuda_allocator_reserve_gib:",
+    "plastic__geometry_learning_rate_multiplier:",
+    "plastic__freeze_geometry_during_warmup:",
+    "initial layer indices:",
+    "capacity layer indices:",
+)
+_PLASTIC_STARTUP_LABEL_WIDTH = max(len(label) for label in _PLASTIC_STARTUP_LABELS) + 3
 
 
 def _print_plastic_option(label: str, value: str) -> None:
@@ -304,12 +351,38 @@ _stage6._progress_timestamp = lambda: _stage6.datetime.now().strftime("%y%m%d:%H
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 
 
+def _latest_plastic_change_z(trainer: Any) -> Optional[tuple[Optional[float], Optional[float]]]:
+    if not bool(getattr(getattr(trainer, "config", None), "plastic__do_learn_layer_count", False)):
+        return None
+    for event in reversed(getattr(trainer, "events", ())):
+        if event.name != "plastic_depth_count_decision":
+            continue
+        payload = event.payload
+        values_by_direction = {}
+        for item in payload.get("paired_evidence", ()):
+            try:
+                direction = int(item["direction"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if direction not in (-1, 1):
+                continue
+            value = item.get("standardized_improvement")
+            values_by_direction[direction] = None if value is None else float(value)
+        if values_by_direction:
+            return (values_by_direction.get(-1), values_by_direction.get(1))
+        return None
+    return None
+
+
 def _prepare_console_progress_payload_with_precise_step(self: Any, event: str, payload: Any):
     values = _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD(self, event, payload)
     if event in {"optimizer_progress", "evaluation_completed"}:
         mean_step_seconds = getattr(self, "_console_latest_mean_step_seconds", None)
         if mean_step_seconds is not None:
             values["mean_step_seconds"] = f"{float(mean_step_seconds):8.4f}"
+        change_z = _latest_plastic_change_z(self)
+        if change_z is not None:
+            values["plastic_change_z"] = change_z
     return values
 
 
