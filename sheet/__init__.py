@@ -46,6 +46,10 @@ __all__ = [
 ]
 # ^^^ THOG
 
+# vvv THOG accept underscore long-option aliases wherever argparse owns the CLI, while preserving all existing hyphen spellings
+from . import argparse_underscore_alias_patch as _argparse_underscore_alias_patch
+# ^^^ THOG
+
 # vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
 from . import stage6_trainer as _stage6_trainer
 
