@@ -10,7 +10,9 @@ not invented coordinates produced by rescaling the current active prefix.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional, Sequence, Tuple
+import os
+import statistics
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -23,6 +25,9 @@ from . import trainer_step as _trainer_step
 
 
 _FIXED_TIMING_FRACTION = 0.20
+_ORIGINAL_CHOOSE_CANDIDATE = _plastic_depth.choose_plastic_depth_candidate
+_ORIGINAL_LATTICE_INIT = _plastic_depth.PlasticDepthSamplingLattice.__init__
+_ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 
 
 def _validate_active_count(lattice: Any, active_layers: int) -> int:
@@ -119,12 +124,6 @@ def _set_active_layer_count_absolute(self: Any, active_layers: int) -> None:
     self.active_layer_count.fill_(resolved_count)
 
 
-def _sample_layer_coordinates_from_public(public_coordinates: Tensor, maximum_layers: int) -> Tensor:
-    if int(maximum_layers) == 1:
-        return torch.ones_like(public_coordinates, dtype=public_coordinates.dtype)
-    return 1.0 + (float(maximum_layers) - 1.0) * (public_coordinates - 1.0) / 99.0
-
-
 def _sample_layer_tuple(public_values: Sequence[float], maximum_layers: int) -> Tuple[float, ...]:
     if int(maximum_layers) == 1:
         return tuple(1.0 for _ in public_values)
@@ -155,7 +154,9 @@ def _interval_report_absolute(self: Any) -> Dict[str, object]:
         "sample_layer_coordinates": capacity_sample_layer,
         "active_sample_layer_coordinates": active_sample_layer,
         "probe_public_coordinate": (
-            active_public[-1] if self.learn_layer_count and len(capacity_public) > self.current_active_layers else None
+            capacity_public[self.current_active_layers]
+            if self.learn_layer_count and len(capacity_public) > self.current_active_layers
+            else None
         ),
         "probe_sample_layer_coordinate": (
             capacity_sample_layer[self.current_active_layers]
@@ -172,9 +173,6 @@ def _interval_report_absolute(self: Any) -> Dict[str, object]:
     }
 
 
-_ORIGINAL_LATTICE_INIT = _plastic_depth.PlasticDepthSamplingLattice.__init__
-
-
 # Install method replacements before wrapping __init__, so the original constructor's
 # initial_public_coordinates buffer is built on the absolute capacity ruler.
 _plastic_depth.PlasticDepthSamplingLattice._public_coordinates_from_raw = _public_coordinates_from_raw_absolute
@@ -188,10 +186,7 @@ _plastic_depth.PlasticDepthSamplingLattice.interval_report = _interval_report_ab
 
 
 def _init_absolute_ruler(self: Any, *args: Any, **kwargs: Any) -> None:
-    initialisation = kwargs.get("initialisation")
     seed = int(kwargs.get("seed", 1337))
-    if len(args) >= 3 and initialisation is None:
-        initialisation = args[2]
     if len(args) >= 4:
         seed = int(args[3])
     _ORIGINAL_LATTICE_INIT(self, *args, **kwargs)
@@ -242,18 +237,60 @@ def _lookahead_counts_absolute(current: int, maximum: int, radius: int, max_step
 
 
 def _config_max_step_absolute(config: Any) -> int:
-    value = getattr(config, "plastic__layer_count_max_step", getattr(_lookahead, "os").environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1))
+    value = getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1))
     resolved = int(value)
     if resolved < 1:
         raise ValueError("plastic__layer_count_max_step must be positive")
     return resolved
 
 
+def _history_key(current_count: int, offset: int) -> str:
+    if offset == 0:
+        raise ValueError("PLASTIC DEPTH history offset must be non-zero")
+    return f"{current_count}:{offset:+d}"
+
+
+def _finite_score_by_count(score_report: Sequence[Mapping[str, object]]) -> Dict[int, float]:
+    result: Dict[int, float] = {}
+    for item in score_report:
+        count = int(item["active_layers"])
+        feasible = bool(item.get("feasible", False))
+        score = float(item.get("score", float("inf")))
+        if feasible and math.isfinite(score):
+            result[count] = score
+    return result
+
+
+def _candidate_offsets_from_report(*, current_count: int, score_report: Sequence[Mapping[str, object]]) -> Tuple[int, ...]:
+    offsets = []
+    for item in score_report:
+        try:
+            offset = int(item["active_layers"]) - current_count
+        except (KeyError, TypeError, ValueError):
+            continue
+        if offset != 0:
+            offsets.append(offset)
+    return tuple(sorted(set(offsets)))
+
+
+def _robust_scale(values: Sequence[float], current_difference: float) -> Tuple[float, float, float]:
+    median = float(statistics.median(values))
+    absolute_deviations = tuple(abs(value - median) for value in values)
+    mad = float(statistics.median(absolute_deviations))
+    scale_floor = _controller.PLASTIC_DEPTH_MAD_SIGMA_FLOOR * max(
+        1.0,
+        abs(median),
+        abs(current_difference),
+    )
+    sigma = max(_controller.PLASTIC_DEPTH_MAD_SCALE * mad, scale_floor)
+    return median, mad, sigma
+
+
 def choose_plastic_depth_count_with_absolute_radius(
     *,
     current_count: int,
-    score_report: Sequence[Dict[str, object]],
-    histories: Dict[str, Sequence[float]],
+    score_report: Sequence[Mapping[str, object]],
+    histories: Mapping[str, Sequence[float]],
     noise_window: int,
     minimum_observations: int,
     noise_lambda: float,
@@ -262,31 +299,102 @@ def choose_plastic_depth_count_with_absolute_radius(
     update_brake: int,
     max_step: int = 1,
 ) -> Any:
-    return _lookahead.choose_plastic_depth_count_with_exact_radius(
+    if noise_window < 1:
+        raise ValueError("noise_window must be at least 1")
+    if minimum_observations < 1 or minimum_observations > noise_window:
+        raise ValueError("minimum_observations must lie in [1, noise_window]")
+    if not math.isfinite(noise_lambda) or noise_lambda < 0.0:
+        raise ValueError("noise_lambda must be finite and non-negative")
+    if update_number < 1:
+        raise ValueError("update_number must be positive")
+    if update_brake < 0:
+        raise ValueError("update_brake must be non-negative")
+    resolved_max_step = max(1, int(max_step))
+    score_by_count = _finite_score_by_count(score_report)
+    current_score = score_by_count.get(current_count)
+    updated_histories: Dict[str, Tuple[float, ...]] = {}
+    for key, values in histories.items():
+        resolved_values = tuple(float(value) for value in values[-noise_window:])
+        if not all(math.isfinite(value) for value in resolved_values):
+            raise ValueError(f"PLASTIC DEPTH paired-score history {key!r} contains a non-finite value")
+        updated_histories[str(key)] = resolved_values
+    brake_active = (
+        update_brake > 0
+        and last_count_change_update >= 0
+        and update_number - last_count_change_update < update_brake
+    )
+    candidate_offsets = _candidate_offsets_from_report(
         current_count=current_count,
         score_report=score_report,
-        histories=histories,
-        noise_window=noise_window,
-        minimum_observations=minimum_observations,
-        noise_lambda=noise_lambda,
+    )
+    evidence = []
+    passing = []
+    for offset in candidate_offsets:
+        candidate_count = current_count + offset
+        candidate_score = score_by_count.get(candidate_count)
+        feasible = current_score is not None and candidate_score is not None
+        paired_difference: Optional[float] = None
+        median: Optional[float] = None
+        mad: Optional[float] = None
+        sigma: Optional[float] = None
+        standardized: Optional[float] = None
+        significant = False
+        key = _history_key(current_count, offset)
+        values = list(updated_histories.get(key, ()))
+        if feasible:
+            paired_difference = float(candidate_score - current_score)
+            values.append(paired_difference)
+            values = values[-noise_window:]
+            updated_histories[key] = tuple(values)
+            median, mad, sigma = _robust_scale(values, paired_difference)
+            standardized = -paired_difference / sigma
+            significant = (
+                len(values) >= minimum_observations
+                and paired_difference < -noise_lambda * sigma
+            )
+            if significant and not brake_active:
+                passing.append((standardized, offset, candidate_count))
+        evidence.append(
+            _controller.PlasticDepthPairedDirectionEvidence(
+                candidate_count=candidate_count,
+                direction=offset,
+                paired_difference=paired_difference,
+                observation_count=len(values),
+                median=median,
+                mad=mad,
+                sigma=sigma,
+                standardized_improvement=standardized,
+                significant=significant,
+                feasible=feasible,
+            )
+        )
+    selected_count = current_count
+    if passing:
+        _, selected_offset, _ = max(passing, key=lambda item: (item[0], -item[2]))
+        step = max(-resolved_max_step, min(resolved_max_step, selected_offset))
+        selected_count = current_count + step
+        for offset in candidate_offsets:
+            updated_histories.pop(_history_key(selected_count, offset), None)
+    return _controller.PlasticDepthRobustCountDecision(
+        selected_count=selected_count,
+        current_count=current_count,
         update_number=update_number,
+        brake_active=brake_active,
         last_count_change_update=last_count_change_update,
-        update_brake=update_brake,
-        max_step=max(1, int(max_step)),
+        histories=updated_histories,
+        evidence=tuple(evidence),
     )
 
 
 _lookahead._lookahead_counts = _lookahead_counts_absolute
 _lookahead._config_max_step = _config_max_step_absolute
+_lookahead.choose_plastic_depth_count_with_exact_radius = choose_plastic_depth_count_with_absolute_radius
 _controller.choose_plastic_depth_count_with_mad = choose_plastic_depth_count_with_absolute_radius
 _trainer_step.choose_plastic_depth_count_with_mad = choose_plastic_depth_count_with_absolute_radius
 # ^^^ THOG
 
 
 # vvv THOG give relative wall-time candidates an imputed timing estimate instead of deadlocking on unvisited counts
-_ORIGINAL_CANDIDATE_SCORE = _plastic_depth.plastic_depth_candidate_score
-
-
 def _imputed_training_time(measurements: Sequence[Any], measurement: Any) -> Optional[float]:
     anchors = [
         candidate
@@ -332,7 +440,7 @@ def choose_plastic_depth_candidate_with_timing_imputation(
             )
         )
         timing_sources.append(source)
-    selected, report = _plastic_depth.choose_plastic_depth_candidate.__wrapped__(  # type: ignore[attr-defined]
+    selected, report = _ORIGINAL_CHOOSE_CANDIDATE(
         tuple(imputed_measurements),
         objective=objective,
         maximum_layers=maximum_layers,
@@ -348,8 +456,6 @@ def choose_plastic_depth_candidate_with_timing_imputation(
     return selected, tuple(enriched)
 
 
-if not hasattr(_plastic_depth.choose_plastic_depth_candidate, "__wrapped__"):
-    _plastic_depth.choose_plastic_depth_candidate.__wrapped__ = _plastic_depth.choose_plastic_depth_candidate  # type: ignore[attr-defined]
 _plastic_depth.choose_plastic_depth_candidate = choose_plastic_depth_candidate_with_timing_imputation
 _trainer_step.choose_plastic_depth_candidate = choose_plastic_depth_candidate_with_timing_imputation
 _lookahead.choose_plastic_depth_candidate = choose_plastic_depth_candidate_with_timing_imputation
@@ -357,9 +463,6 @@ _lookahead.choose_plastic_depth_candidate = choose_plastic_depth_candidate_with_
 
 
 # vvv THOG show active coordinates on the absolute layer ruler rather than the old 1-100 UI ruler
-_ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
-
-
 def _prepare_console_progress_payload_with_sample_layer(self: Any, event: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     values = _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD(self, event, payload)
     if event in {"optimizer_progress", "evaluation_completed"} and "depth_sample_points" in values:
