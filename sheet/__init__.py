@@ -69,3 +69,7 @@ _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m
 # vvv THOG install active-prefix PLASTIC gauge verification after DEPTH trajectory classes are loaded
 from . import plastic_depth_active_gauge_patch as _plastic_depth_active_gauge_patch
 # ^^^ THOG
+
+# vvv THOG install exact-radius PLASTIC count lookahead and dynamic probe console labels
+from . import plastic_depth_lookahead_patch as _plastic_depth_lookahead_patch
+# ^^^ THOG
