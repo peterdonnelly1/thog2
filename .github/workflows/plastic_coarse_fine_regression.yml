@@ -39,6 +39,7 @@ jobs:
             run_thog2_owt.py \
             run_thog2_owt_core.py \
             sheet/plastic_depth_coarse.py \
+            sheet/plastic_depth_coarse_checkpoint.py \
             sheet/plastic_depth_coarse_runner.py \
             sheet/plastic_depth_fresh_state.py \
             sheet/plastic_depth_lifecycle.py \
