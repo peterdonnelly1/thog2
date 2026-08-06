@@ -139,8 +139,10 @@ def test_warmup_brake_ends_at_the_actual_schedule_boundary() -> None:
             warmup_updates=100,
         )
     )
-    assert console._row_has_warmup_brake(trainer, 99)
-    assert not console._row_has_warmup_brake(trainer, 100)
+    # assert console._row_has_warmup_brake(trainer, 99)                                                                                                    # <<< THOG preserve the pre-fix boundary assertion for source history
+    # assert not console._row_has_warmup_brake(trainer, 100)                                                                                               # <<< THOG preserve the pre-fix boundary assertion for source history
+    assert console._row_has_warmup_brake(trainer, 100)
+    assert not console._row_has_warmup_brake(trainer, 101)
 
 
 def test_registered_help_is_generated_from_the_complete_parser() -> None:
