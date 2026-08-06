@@ -37,12 +37,14 @@ jobs:
           python -m py_compile \
             sheet/plastic_depth_coarse.py \
             sheet/plastic_depth_coarse_runner.py \
-            sheet/plastic_depth_fresh_state.py
+            sheet/plastic_depth_fresh_state.py \
+            sheet/plastic_depth_lifecycle.py
 
-      - name: Run COARSE component tests
+      - name: Run COARSE component and orchestration tests
         run: |
           python -m pytest -q \
             tests/test_plastic_depth_coarse_config.py \
             tests/test_plastic_depth_coarse_scoring.py \
             tests/test_plastic_depth_coarse_trials.py \
-            tests/test_plastic_depth_fresh_state.py
+            tests/test_plastic_depth_fresh_state.py \
+            tests/test_plastic_depth_lifecycle.py
