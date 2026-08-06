@@ -36,6 +36,7 @@ jobs:
         env:
           THOG2_DDP_RESULT_DIR: ${{ runner.temp }}/plastic_ddp
           OMP_NUM_THREADS: '1'
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python -m torch.distributed.run \
             --standalone \
