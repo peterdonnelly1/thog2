@@ -54,6 +54,10 @@ from . import argparse_underscore_alias_patch as _argparse_underscore_alias_patc
 from . import help_registry_descriptor_patch as _help_registry_descriptor_patch
 # ^^^ THOG
 
+# vvv THOG make descriptor-registry help idempotent across layered argparse compatibility overlays
+from . import help_registry_descriptor_dedupe_patch as _help_registry_descriptor_dedupe_patch
+# ^^^ THOG
+
 # vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
 from . import stage6_trainer as _stage6_trainer
 
