@@ -46,7 +46,7 @@ def test_coarse_update_keeps_count_geometry_and_controller_state_fixed() -> None
     lattice = trainer.raw_model.trajectory.plastic_sampling
     before_coordinates = lattice.public_coordinates().detach().clone()
     before_count_decisions = int(lattice.count_decision_number.item())
-    before_timing_observations = int(lattice.training_time_observations.item())
+    before_timing_observations = lattice.training_time_observations.detach().clone()
 
     try:
         assert lattice.current_active_layers == 2
@@ -64,6 +64,11 @@ def test_coarse_update_keeps_count_geometry_and_controller_state_fixed() -> None
             atol=0.0,
         )
         assert int(lattice.count_decision_number.item()) == before_count_decisions
-        assert int(lattice.training_time_observations.item()) == before_timing_observations
+        torch.testing.assert_close(
+            lattice.training_time_observations,
+            before_timing_observations,
+            rtol=0.0,
+            atol=0.0,
+        )
     finally:
         destroy_fresh_training_state(state)
