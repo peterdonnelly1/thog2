@@ -50,6 +50,13 @@ class TrainerCheckpointSaveMixin:
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},
             "distributed_training": self.distributed.report(),
             "lifecycle": getattr(self, "lifecycle_metadata", None),                                                                                       # <<< THOG persist logical-run identity, lineage, W&B identity, target and LR phases
+            # vvv THOG COARSE/FINE phase, trial table, selected count and review-pause remainder are durable resume state
+            "plastic_coarse_fine_state": getattr(
+                self,
+                "plastic_coarse_fine_state",
+                None,
+            ),
+            # ^^^ THOG
         }
 
     def save_checkpoint(self, path: Union[str, Path]) -> Path:
