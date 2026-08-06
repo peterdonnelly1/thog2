@@ -1,9 +1,11 @@
 # vvv THOG
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+from sheet import plastic_depth_coarse_runtime_recovery_patch as recovery
 from sheet import plastic_depth_fresh_state
 from sheet import plastic_depth_lifecycle
 from sheet.plastic_depth_coarse import (
@@ -87,6 +89,29 @@ def test_destroy_fresh_state_breaks_all_trainer_ownership_edges() -> None:
         "distributed",
     ):
         assert getattr(trainer, attribute) is None
+
+
+def test_destroy_releases_trajectory_before_final_cuda_snapshot(monkeypatch) -> None:
+    trainer = _CleanupTrainer()
+    trajectory_reference = weakref.ref(trainer.raw_model.trajectory)
+    state = SimpleNamespace(
+        trainer=trainer,
+        phase="coarse",
+        active_layer_count=8,
+    )
+    trajectory_liveness_at_snapshots = []
+
+    def fake_cuda_snapshot(device):
+        trajectory_liveness_at_snapshots.append(trajectory_reference() is not None)
+        return (0, 0)
+
+    monkeypatch.setattr(recovery, "_cuda_snapshot", fake_cuda_snapshot)
+    monkeypatch.setattr(recovery, "_cuda_key", lambda device: "cpu")
+    monkeypatch.setattr(recovery, "_cuda_device", lambda device: None)
+
+    plastic_depth_fresh_state.destroy_fresh_training_state(state)
+
+    assert trajectory_liveness_at_snapshots == [True, False]
 
 
 def test_lifecycle_defaults_use_hard_builder_and_destroyer() -> None:
