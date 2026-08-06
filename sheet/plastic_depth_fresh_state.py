@@ -110,9 +110,19 @@ def _resolved_fresh_config(
         raise ValueError("active_layer_count must be positive")
     if not is_dataclass(config):
         raise TypeError("fresh-state construction requires a dataclass training config")
-    changes: Dict[str, Any] = {
-        "plastic__initial_layer_count": int(active_layer_count),
-    }
+    # vvv THOG fixed-count COARSE states use layers_to_sample; dynamic FINE states use initial_layer_count
+    if bool(getattr(config, "plastic__do_learn_layer_count", False)):
+        changes: Dict[str, Any] = {
+            "plastic__layers_to_sample": None,
+            "plastic__initial_layer_count": int(active_layer_count),
+        }
+    else:
+        changes = {
+            "plastic__layers_to_sample": int(active_layer_count),
+            "plastic__initial_layer_count": None,
+            "plastic__max_permitted_layers": None,
+        }
+    # ^^^ THOG
     if hasattr(config, "plastic__coarse_phase"):
         changes["plastic__coarse_phase"] = "disabled"
     if hasattr(config, "plastic__runtime_phase"):
