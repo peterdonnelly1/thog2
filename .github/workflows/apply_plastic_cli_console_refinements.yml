@@ -7,6 +7,9 @@ on:
     paths:
       - tools/apply_plastic_cli_console_refinements.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
@@ -80,6 +83,7 @@ jobs:
           fi
 
       - name: Commit refinements
+        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             exit 0
