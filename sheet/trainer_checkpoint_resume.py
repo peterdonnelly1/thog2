@@ -320,6 +320,9 @@ class TrainerCheckpointResumeMixin:
         # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
         trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
         trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_depth_count_audit = list(
+            payload.get("plastic_depth_count_audit", ())
+        )
         # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record("checkpoint_resumed", path=str(path))
@@ -370,6 +373,9 @@ class TrainerCheckpointResumeMixin:
         # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
         trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
         trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_depth_count_audit = list(
+            payload.get("plastic_depth_count_audit", ())
+        )
         # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record(

@@ -213,7 +213,11 @@ def _commit_plastic_depth_inline_update_with_audit(
         audit,
         "PLASTIC FINE complete count-decision audit",
     )
-    self.state.plastic_depth_count_audit.append(copy.deepcopy(audit))
+    audit_rows = getattr(self, "plastic_depth_count_audit", None)
+    if audit_rows is None:
+        audit_rows = []
+        self.plastic_depth_count_audit = audit_rows
+    audit_rows.append(copy.deepcopy(audit))
     self._record("plastic_depth_count_audit", **audit)
     return transition
 
