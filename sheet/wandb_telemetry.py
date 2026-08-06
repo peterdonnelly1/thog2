@@ -343,6 +343,8 @@ class WandbTelemetry:
             "sheet/*",
         ):
             define_metric(metric, step_metric="optimizer/update")
+        define_metric("fine/update")
+        define_metric("fine/*", step_metric="fine/update")
         self.module = module
         self.run = run
 
@@ -375,7 +377,63 @@ class WandbTelemetry:
             return
         step = int(metrics["optimizer/update"])
         metrics.update(self.sampler.sample(step))
+        if bool(self.config.get("plastic__enabled", False)):
+            metrics["fine/update"] = step
+            for name, value in tuple(metrics.items()):
+                if name in {"optimizer/update", "fine/update"}:
+                    continue
+                metrics[f"fine/{name.replace('/', '_')}"] = value
         self._log_scalars(metrics, step)
+
+    def log_plastic_coarse_fine(self, provenance: Mapping[str, Any]) -> None:
+        if not self.enabled or self.backend == "none":
+            return
+        for trial in provenance.get("trials", ()):
+            trial_index = int(trial["trial_index"])
+            axis = f"coarse/trial_{trial_index}/step"
+            loss_name = f"coarse/trial_{trial_index}/training_loss"
+            if self.run is not None:
+                define_metric = (
+                    self.run.define_metric
+                    if hasattr(self.run, "define_metric")
+                    else self.module.define_metric
+                )
+                define_metric(axis)
+                define_metric(f"coarse/trial_{trial_index}/*", step_metric=axis)
+            for local_step, loss in enumerate(trial.get("training_losses", ()), start=1):
+                metrics = {
+                    axis: local_step,
+                    "coarse/trial_index": trial_index,
+                    f"coarse/trial_{trial_index}/layers": int(trial["layers"]),
+                    loss_name: float(loss),
+                }
+                scalars = _scalar_metrics(metrics)
+                if self.run is not None:
+                    self.run.log(scalars)
+                if self.writer is not None:
+                    self.writer.add_scalar(loss_name, float(loss), local_step)
+            summary_step = max(1, int(trial.get("training_steps", 1)))
+            summary = {
+                axis: summary_step,
+                f"coarse/trial_{trial_index}/mean_validation_loss": trial.get("mean_validation_loss"),
+                f"coarse/trial_{trial_index}/validation_loss_std": trial.get("validation_loss_std"),
+                f"coarse/trial_{trial_index}/seconds_per_step": trial.get("seconds_per_step"),
+                f"coarse/trial_{trial_index}/tokens_per_second": trial.get("tokens_per_second"),
+                f"coarse/trial_{trial_index}/score": trial.get("score"),
+            }
+            scalars = _scalar_metrics(summary)
+            if self.run is not None:
+                self.run.log(scalars)
+            if self.writer is not None:
+                for name, value in scalars.items():
+                    if name != axis:
+                        self.writer.add_scalar(name, value, summary_step)
+        selected_layers = provenance.get("selected_layers")
+        if selected_layers is not None:
+            self._log_scalars(
+                {"coarse/selected_layers": int(selected_layers)},
+                0,
+            )
 
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)

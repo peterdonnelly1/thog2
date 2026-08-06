@@ -134,6 +134,7 @@ def run_fixed_plastic_coarse_trial(
         torch.cuda.reset_peak_memory_stats(trainer.device)
     _synchronize(trainer)
     started = clock()
+    training_losses = []
     try:
         for local_step in range(1, n_steps + 1):
             metrics = trainer.train_one_update()
@@ -141,6 +142,8 @@ def run_fixed_plastic_coarse_trial(
                 raise FloatingPointError(
                     "PLASTIC COARSE trial encountered a skipped non-finite update"
                 )
+            training_loss = float(metrics["training_loss"])
+            training_losses.append(training_loss)
             completed = int(trainer.state.completed_updates)
             if completed != local_step:
                 raise RuntimeError(
@@ -151,7 +154,7 @@ def run_fixed_plastic_coarse_trial(
                 progress_sink(
                     f"C {trial_index:02d} step {local_step:6d}/{n_steps:<6d} "
                     f"layers={state.active_layer_count:<4d} "
-                    f"loss={float(metrics['training_loss']):.6f}"
+                    f"loss={training_loss:.6f}"
                 )
         _synchronize(trainer)
         local_elapsed = float(clock() - started)
@@ -167,6 +170,7 @@ def run_fixed_plastic_coarse_trial(
             layers=state.active_layer_count,
             status="success",
             validation_losses=validation_losses,
+            training_losses=tuple(training_losses),
             training_elapsed_seconds=training_elapsed,
             training_steps=n_steps,
             tokens_per_update=plastic_tokens_per_update(trainer.config),
@@ -181,6 +185,7 @@ def run_fixed_plastic_coarse_trial(
             trial_index=trial_index,
             layers=state.active_layer_count,
             status="failed",
+            training_losses=tuple(training_losses),
             training_elapsed_seconds=(
                 elapsed if math.isfinite(elapsed) and elapsed > 0.0 else None
             ),

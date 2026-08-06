@@ -31,6 +31,7 @@ class PlasticCoarseTrialResult:
     layers: int
     status: str
     validation_losses: Tuple[float, ...] = ()
+    training_losses: Tuple[float, ...] = ()
     training_elapsed_seconds: Optional[float] = None
     training_steps: int = 0
     tokens_per_update: int = 0
@@ -51,6 +52,12 @@ class PlasticCoarseTrialResult:
                 raise ValueError("successful COARSE trials require validation losses")
             if not all(math.isfinite(float(value)) for value in self.validation_losses):
                 raise ValueError("COARSE validation losses must be finite")
+            if self.training_losses and len(self.training_losses) != self.training_steps:
+                raise ValueError(
+                    "COARSE training loss history must contain one value per recorded step"
+                )
+            if not all(math.isfinite(float(value)) for value in self.training_losses):
+                raise ValueError("COARSE training losses must be finite")
             if self.training_elapsed_seconds is None or not math.isfinite(self.training_elapsed_seconds) or self.training_elapsed_seconds <= 0.0:
                 raise ValueError("successful COARSE trials require positive finite training elapsed time")
             if self.training_steps < 1:

@@ -1301,6 +1301,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 trainer.lifecycle_metadata = dict(lifecycle)
                 write_run_manifest(paths["manifest_path"], lifecycle)
             telemetry.add_initial_summary(trainer.parameter_report)
+            coarse_telemetry = lifecycle.get("plastic_coarse_fine")
+            if isinstance(coarse_telemetry, Mapping):
+                telemetry.log_plastic_coarse_fine(coarse_telemetry)
 
         gathered_lifecycle = trainer.distributed.all_gather_object(
             lifecycle if trainer.distributed.is_primary else None
