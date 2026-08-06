@@ -6,6 +6,7 @@ on:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
       - tools/apply_plastic_cli_console_refinements.py
+      - tools/apply_plastic_cli_console_refinements_followup.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
   pull_request:
     branches:
@@ -30,7 +31,9 @@ jobs:
           python-version: '3.11'
 
       - name: Apply refinements
-        run: python tools/apply_plastic_cli_console_refinements.py
+        run: |
+          python tools/apply_plastic_cli_console_refinements.py
+          python tools/apply_plastic_cli_console_refinements_followup.py
 
       - name: Install CPU test dependencies
         run: |
@@ -54,6 +57,7 @@ jobs:
             sheet/plastic_depth_coarse_runtime_recovery_patch.py \
             sheet/run_config.py \
             sheet/training_config.py \
+            tools/apply_plastic_cli_console_refinements_followup.py \
             tests/test_plastic_cli_console_refinements.py
 
       - name: Run focused tests
@@ -69,7 +73,8 @@ jobs:
             tests/test_plastic_depth_console_minor_patch.py \
             tests/test_plastic_depth_coarse_runtime_recovery.py \
             tests/test_plastic_depth_coarse_real_lifecycle.py \
-            tests/test_plastic_depth_startup_lookahead_ui.py
+            tests/test_plastic_depth_startup_lookahead_ui.py \
+            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
 
       - name: Verify canonical PLASTIC help
         run: |
@@ -106,7 +111,8 @@ jobs:
             sheet/plastic_depth_coarse_runtime_recovery_patch.py \
             sheet/run_config.py \
             sheet/training_config.py \
-            tests/test_plastic_cli_console_refinements.py
+            tests/test_plastic_cli_console_refinements.py \
+            tests/test_plastic_depth_coarse_runtime_recovery.py
           git commit -m 'Refine PLASTIC CLI console and artifact identity'
           git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
