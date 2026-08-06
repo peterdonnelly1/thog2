@@ -3,14 +3,20 @@
 # vvv THOG
 # Canonical train_OWT.sh controls for PLASTIC DEPTH COARSE/FINE discovery.
 # train_OWT.sh normalizes underscore spellings before this helper runs.
-# Radius/max-step values are still exported for legacy overlays, but the
-# canonical arguments now remain in argv so resolved config/checkpoints own them.
+# Radius/max-step values remain exported for legacy overlays and remain visible
+# when this helper is sourced directly; train_OWT.sh routes them through its
+# Python-extra boundary together with the newer COARSE/FINE controls.
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
 THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS=()
+THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS=()
 THOG2_PLASTIC_LOOKAHEAD_HELP=false
 THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR=false
+THOG2_PLASTIC_LOOKAHEAD_FROM_TRAIN_WRAPPER=false
+case "${BASH_SOURCE[1]:-}" in
+  *train_OWT.sh) THOG2_PLASTIC_LOOKAHEAD_FROM_TRAIN_WRAPPER=true ;;
+esac
 
 while (( $# > 0 )); do
   if [[ "$THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR" == true ]]; then
@@ -31,23 +37,23 @@ while (( $# > 0 )); do
     --plastic-layer-count-probe-radius)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2"
-      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
+      THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1" "$2")
       shift 2
       ;;
     --plastic-layer-count-probe-radius=*)
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${1#*=}"
-      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
+      THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1")
       shift
       ;;
     --plastic-layer-count-max-step)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="$2"
-      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
+      THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1" "$2")
       shift 2
       ;;
     --plastic-layer-count-max-step=*)
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${1#*=}"
-      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
+      THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1")
       shift
       ;;
     -h|--help)
@@ -67,7 +73,15 @@ while (( $# > 0 )); do
   esac
 done
 
-# vvv THOG legacy train_OWT_core.sh parses short/established long options with getopts; route only the newer COARSE/FINE Python controls through its supported extra-argument boundary
+# vvv THOG preserve direct-source argument identity while keeping train_OWT_core.sh insulated from Python-only long options
+if [[ "$THOG2_PLASTIC_LOOKAHEAD_FROM_TRAIN_WRAPPER" == true ]]; then
+  THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("${THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS[@]}")
+else
+  THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=(
+    "${THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS[@]}"
+    "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"
+  )
+fi
 if (( ${#THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS[@]} > 0 )); then
   if [[ "$THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR" == true ]]; then
     THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("${THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS[@]}")
@@ -78,7 +92,7 @@ fi
 # ^^^ THOG
 
 set -- "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"
-unset THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR
+unset THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR THOG2_PLASTIC_LOOKAHEAD_FROM_TRAIN_WRAPPER
 
 [[ "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" =~ ^[1-9][0-9]*$ ]] || {
   echo "Invalid plastic__layer_count_probe_radius: $THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS; expected a positive integer." >&2
