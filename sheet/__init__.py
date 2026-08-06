@@ -113,3 +113,7 @@ from . import plastic_depth_console_minor_patch as _plastic_depth_console_minor_
 # vvv THOG final COARSE/FINE overlay wins after all compatibility patches and probes every valid integer count in the configured radius
 from . import plastic_depth_coarse_fine_patch as _plastic_depth_coarse_fine_patch
 # ^^^ THOG
+
+# vvv THOG install replayable FINE count-decision audit after final selector and commit semantics are fixed
+from . import plastic_depth_audit_patch as _plastic_depth_audit_patch
+# ^^^ THOG
