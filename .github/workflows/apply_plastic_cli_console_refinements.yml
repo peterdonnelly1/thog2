@@ -5,8 +5,6 @@ on:
     branches:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
-      - tools/apply_plastic_cli_console_refinements.py
-      - tools/apply_plastic_cli_console_refinements_followup.py
       - tools/apply_plastic_core_canonicalisation_final.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
   pull_request:
@@ -31,11 +29,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Apply refinements
-        run: |
-          python tools/apply_plastic_cli_console_refinements.py
-          python tools/apply_plastic_cli_console_refinements_followup.py
-          python tools/apply_plastic_core_canonicalisation_final.py
+      - name: Apply final core canonicalisation
+        run: python tools/apply_plastic_core_canonicalisation_final.py
 
       - name: Install CPU test dependencies
         run: |
@@ -59,7 +54,6 @@ jobs:
             sheet/plastic_depth_coarse_runtime_recovery_patch.py \
             sheet/run_config.py \
             sheet/training_config.py \
-            tools/apply_plastic_cli_console_refinements_followup.py \
             tools/apply_plastic_core_canonicalisation_final.py \
             tests/test_plastic_cli_console_refinements.py
 
@@ -104,19 +98,9 @@ jobs:
             train_OWT.sh \
             train_OWT_core.sh \
             plastic_depth_lookahead_wrapper_options.sh \
-            run_thog2_owt_core.py \
             sheet/__init__.py \
-            sheet/argparse_underscore_alias_patch.py \
-            sheet/plastic_depth.py \
-            sheet/plastic_depth_coarse.py \
-            sheet/plastic_depth_coarse_runner.py \
-            sheet/plastic_depth_lifecycle.py \
             sheet/plastic_depth_console_minor_patch.py \
-            sheet/plastic_depth_coarse_runtime_recovery_patch.py \
-            sheet/run_config.py \
-            sheet/training_config.py \
             tests/test_plastic_cli_console_refinements.py \
-            tests/test_plastic_depth_coarse_runtime_recovery.py \
             tests/test_plastic_depth_lifecycle.py
           git commit -m 'Make PLASTIC core CLI canonical and complete'
           for attempt in 1 2 3; do
