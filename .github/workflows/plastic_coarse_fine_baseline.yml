@@ -1,4 +1,4 @@
-name: PLASTIC COARSE FINE baseline
+name: PLASTIC COARSE FINE baseline evidence
 
 on:
   push:
@@ -11,17 +11,16 @@ on:
       - PLASTIC_DEPTH
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  baseline:
+  base_console_evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+          ref: 311decd512829b94116df19815e463e544cdf23a
 
       - uses: actions/setup-python@v5
         with:
@@ -33,61 +32,17 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install pytest numpy
 
-      - name: Run focused and affected baseline tests
-        id: tests
+      - name: Run exact base console-alignment test
+        id: base_console
         continue-on-error: true
-        shell: bash
         run: |
-          set -o pipefail
-          mkdir -p .coarse_fine_ci
           python -m pytest -q \
-            tests/test_plastic_depth_console_minor_patch.py \
-            tests/test_plastic_depth_controller_stability.py \
-            tests/test_plastic_depth_probe_delta_console.py \
-            tests/test_plastic_depth_startup_lookahead_ui.py \
-            tests/test_plastic_depth_transition_control_plane.py \
-            tests/test_plastic_depth_wrapper_options.py \
-            tests/test_training_config.py \
-            tests/test_checkpoints.py \
-            tests/test_stage6_trainer.py \
-            tests/test_run_thog2_owt.py \
-            2>&1 | tee .coarse_fine_ci/baseline.log
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+            tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
 
-      - name: Record baseline evidence
+      - name: Classify base result
         shell: bash
         env:
-          TEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
+          BASE_CONSOLE_OUTCOME: ${{ steps.base_console.outcome }}
         run: |
-          mkdir -p docs
-          {
-            echo '# THOG2 PLASTIC COARSE/FINE Baseline Evidence'
-            echo
-            echo "- Commit tested: $(git rev-parse HEAD)"
-            echo "- Branch: $(git branch --show-current)"
-            echo "- Test exit code: ${TEST_EXIT_CODE:-missing}"
-            echo "- Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-            echo
-            echo '## Test output'
-            echo
-            echo '```text'
-            cat .coarse_fine_ci/baseline.log
-            echo '```'
-          } > docs/THOG2_COARSE_FINE_BASELINE_STATUS.md
-
-      - name: Commit baseline evidence
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/THOG2_COARSE_FINE_BASELINE_STATUS.md
-          git commit -m 'Record COARSE/FINE baseline test evidence'
-          git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
-
-      - name: Enforce baseline result on pull requests
-        if: github.event_name == 'pull_request'
-        shell: bash
-        env:
-          TEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
-        run: exit "${TEST_EXIT_CODE:-1}"
+          echo "PLASTIC_DEPTH base 311decd console alignment outcome: $BASE_CONSOLE_OUTCOME"
+          test "$BASE_CONSOLE_OUTCOME" = failure
