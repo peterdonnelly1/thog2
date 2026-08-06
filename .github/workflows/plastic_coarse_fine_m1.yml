@@ -70,7 +70,6 @@ jobs:
             --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
 
       - name: Commit canonical wrapper integration
-        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             exit 0
