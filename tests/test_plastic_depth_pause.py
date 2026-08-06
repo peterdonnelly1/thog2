@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import io
 import os
 import pty
@@ -63,20 +64,46 @@ def test_ctrl_g_routes_checkpoint_and_exit() -> None:
         os.close(slave_fd)
 
 
-def test_ctrl_c_propagates_and_restores_terminal() -> None:
+def test_ctrl_c_propagates_and_restores_controlling_terminal() -> None:
     master_fd, slave_fd = pty.openpty()
     original = termios.tcgetattr(slave_fd)
-    thread = _write_key(master_fd, b"\x03")
+    child_pid = os.fork()
+    if child_pid == 0:
+        try:
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            os.close(master_fd)
+            with open(os.devnull, "w", encoding="utf-8") as output:
+                try:
+                    run_plastic_coarse_review_pause(
+                        duration_seconds=10.0,
+                        output=output,
+                        terminal_fd=slave_fd,
+                    )
+                except KeyboardInterrupt:
+                    os._exit(42)
+            os._exit(0)
+        except BaseException:
+            os._exit(43)
+
     try:
-        with pytest.raises(KeyboardInterrupt):
-            run_plastic_coarse_review_pause(
-                duration_seconds=2.0,
-                output=io.StringIO(),
-                terminal_fd=slave_fd,
-            )
-        thread.join(timeout=1.0)
+        deadline = time.monotonic() + 2.0
+        while termios.tcgetattr(slave_fd)[3] & termios.ICANON:
+            if time.monotonic() >= deadline:
+                os.kill(child_pid, 9)
+                pytest.fail("child did not enter cbreak mode")
+            time.sleep(0.01)
+        os.write(master_fd, b"\x03")
+        waited_pid, status = os.waitpid(child_pid, 0)
+        assert waited_pid == child_pid
+        assert os.WIFEXITED(status)
+        assert os.WEXITSTATUS(status) == 42
         assert termios.tcgetattr(slave_fd) == original
     finally:
+        try:
+            os.waitpid(child_pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
         os.close(master_fd)
         os.close(slave_fd)
 
