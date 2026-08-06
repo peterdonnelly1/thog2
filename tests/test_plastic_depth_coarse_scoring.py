@@ -122,7 +122,7 @@ def test_all_failed_or_outside_budget_stops() -> None:
         )
 
 
-def test_report_wording_heading_alignment_and_green_winner() -> None:
+def test_report_wording_heading_alignment_and_green_winner_marker() -> None:
     rows, winner = score_plastic_coarse_trials(
         (_trial(1, 4, 4.0, 10.0, 2.0), _trial(2, 8, 3.8, 12.0, 3.0)),
         objective="lowest_loss",
@@ -144,8 +144,8 @@ def test_report_wording_heading_alignment_and_green_winner() -> None:
     assert "loss_score" in plain
     assert "<<< WINNER" in plain
     winner_line = next(line for line in report.splitlines() if "<<< WINNER" in line)
-    assert winner_line.startswith("\033[1;92m")
-    assert winner_line.endswith("\033[0m")
+    assert not winner_line.startswith("\033[")
+    assert "\033[1;92m<<< WINNER\033[0m" in winner_line
 
 
 def test_structured_payload_agrees_with_selector() -> None:
