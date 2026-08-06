@@ -21,6 +21,20 @@ class PlasticFreshTrainingState:
     instrumentation_namespace: str
     fingerprint: Mapping[str, str]
 
+    # vvv THOG wrapping a checkpoint-restored COARSE trainer reinstates the same frozen-geometry invariant as fresh construction
+    def __post_init__(self) -> None:
+        if (
+            self.phase == "coarse"
+            and self.trainer is not None
+            and hasattr(self.trainer, "raw_model")
+            and bool(getattr(getattr(self.trainer, "config", None), "plastic__enabled", False))
+        ):
+            prepare_plastic_coarse_training_state(
+                self.trainer,
+                active_layer_count=self.active_layer_count,
+            )
+    # ^^^ THOG
+
 
 def reset_plastic_fresh_random_state(*, model_seed: int, device: str) -> None:
     random.seed(int(model_seed))
