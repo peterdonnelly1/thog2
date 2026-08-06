@@ -114,6 +114,10 @@ from . import plastic_depth_console_minor_patch as _plastic_depth_console_minor_
 from . import plastic_depth_coarse_fine_patch as _plastic_depth_coarse_fine_patch
 # ^^^ THOG
 
+# vvv THOG recover candidate-local CUDA OOMs across the contiguous full-radius upward suffix
+from . import plastic_depth_full_radius_oom_patch as _plastic_depth_full_radius_oom_patch
+# ^^^ THOG
+
 # vvv THOG install replayable FINE count-decision audit after final selector and commit semantics are fixed
 from . import plastic_depth_audit_patch as _plastic_depth_audit_patch
 # ^^^ THOG

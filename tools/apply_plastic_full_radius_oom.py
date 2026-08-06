@@ -21,8 +21,8 @@ def add_training_model_suffix_recovery() -> None:
     path = ROOT / "sheet/training_model.py"
     text = path.read_text(encoding="utf-8")
     marker = "    # ^^^ THOG\n\n    def forward(\n"
-    if text.count(marker) != 1:
-        raise RuntimeError("training_model.py forward insertion marker was not found exactly once")
+    class_start = text.index("class TrainingSheetGPT")
+    marker_index = text.index(marker, class_start)
     method = '''    # vvv THOG full-radius CUDA probing retains every completed lower candidate when one upward suffix candidate OOMs
     def _plastic_depth_recoverable_probe_candidate_suffix(
         self,
@@ -136,7 +136,8 @@ def add_training_model_suffix_recovery() -> None:
     # ^^^ THOG
 
 '''
-    text = text.replace(marker, "    # ^^^ THOG\n\n" + method + "    def forward(\n", 1)
+    replacement = "    # ^^^ THOG\n\n" + method + "    def forward(\n"
+    text = text[:marker_index] + replacement + text[marker_index + len(marker):]
     path.write_text(text, encoding="utf-8")
 
     replace_once(
