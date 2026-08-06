@@ -35,6 +35,7 @@ jobs:
           if ! grep -q '_plastic_coarse_trial_checkpoint_from_payload' run_thog2_lifecycle.py; then
             python tools/apply_plastic_coarse_trial_resume_routing.py
           fi
+          python tools/align_thog_inline_markers.py run_thog2_lifecycle.py
 
       - name: Install CPU test dependencies
         run: |
@@ -97,7 +98,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add run_thog2_lifecycle.py
-          git commit -m 'Route PLASTIC mid-trial checkpoints through COARSE resume'
+          git commit -m 'Align PLASTIC lifecycle THOG markers'
           git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
