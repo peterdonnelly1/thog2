@@ -33,6 +33,12 @@ jobs:
             python tools/apply_plastic_coarse_fine_m6.py
           fi
 
+      - name: Verify transformed source
+        run: |
+          grep -q 'decision_counts = tuple(range(lower, upper + 1))' sheet/plastic_depth_lookahead_patch.py
+          grep -q 'standardized = -median / sigma' sheet/plastic_depth_lookahead_patch.py
+          grep -q 'updated_histories = {}' sheet/plastic_depth_lookahead_patch.py
+
       - name: Install CPU test dependencies
         run: |
           python -m pip install --upgrade pip
