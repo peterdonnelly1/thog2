@@ -7,6 +7,7 @@ on:
     paths:
       - tools/apply_plastic_cli_console_refinements.py
       - tools/apply_plastic_cli_console_refinements_followup.py
+      - tools/apply_plastic_core_canonicalisation_final.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
   pull_request:
     branches:
@@ -34,6 +35,7 @@ jobs:
         run: |
           python tools/apply_plastic_cli_console_refinements.py
           python tools/apply_plastic_cli_console_refinements_followup.py
+          python tools/apply_plastic_core_canonicalisation_final.py
 
       - name: Install CPU test dependencies
         run: |
@@ -58,6 +60,7 @@ jobs:
             sheet/run_config.py \
             sheet/training_config.py \
             tools/apply_plastic_cli_console_refinements_followup.py \
+            tools/apply_plastic_core_canonicalisation_final.py \
             tests/test_plastic_cli_console_refinements.py
 
       - name: Run focused tests
@@ -80,6 +83,8 @@ jobs:
         run: |
           help_text="$(bash ./train_OWT.sh -h)"
           grep -q -- '--plastic__enabled' <<<"$help_text"
+          grep -q -- '--plastic__phase_1_n_steps' <<<"$help_text"
+          grep -q -- '--plastic__layer_count_probe_radius' <<<"$help_text"
           grep -q -- '--plastic__log_interval_coarse' <<<"$help_text"
           grep -q -- '--plastic__coarse_phase_roll_through' <<<"$help_text"
           grep -q -- '--max-nonfinite-update-skips' <<<"$help_text"
@@ -111,11 +116,18 @@ jobs:
             sheet/run_config.py \
             sheet/training_config.py \
             tests/test_plastic_cli_console_refinements.py \
-            tests/test_plastic_depth_coarse_runtime_recovery.py
-          git commit -m 'Refine PLASTIC CLI console and artifact identity'
-          git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
-          git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
-          git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            tests/test_plastic_depth_coarse_runtime_recovery.py \
+            tests/test_plastic_depth_lifecycle.py
+          git commit -m 'Make PLASTIC core CLI canonical and complete'
+          for attempt in 1 2 3; do
+            git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 2))
+          done
+          exit 1
 
-# vvv THOG workflow source change intentionally triggers the first application run
+# vvv THOG workflow source change intentionally triggers validated writeback
 # ^^^ THOG
