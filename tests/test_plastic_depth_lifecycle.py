@@ -23,6 +23,7 @@ class _Config:
     plastic__initial_layer_count: int = 2
     plastic__coarse_phase_roll_through: bool = False
     plastic__coarse_phase_roll_through: bool = False
+    plastic__coarse_phase_roll_through: bool = False
     max_updates: int = 100
 
 
