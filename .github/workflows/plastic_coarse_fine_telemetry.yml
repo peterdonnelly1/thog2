@@ -1,0 +1,76 @@
+name: Apply PLASTIC COARSE FINE telemetry
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - .github/workflows/plastic_coarse_fine_telemetry.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
+
+permissions:
+  contents: write
+
+jobs:
+  apply_telemetry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply phase-qualified telemetry when absent
+        run: |
+          if ! grep -q 'def log_plastic_coarse_fine' sheet/wandb_telemetry.py; then
+            python tools/apply_plastic_coarse_fine_telemetry.py
+            python tools/apply_plastic_telemetry_compat.py
+          fi
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Compile telemetry integration
+        run: |
+          python -m py_compile \
+            sheet/plastic_depth_coarse.py \
+            sheet/plastic_depth_coarse_runner.py \
+            sheet/wandb_telemetry.py \
+            run_thog2_lifecycle.py
+
+      - name: Run telemetry and affected lifecycle tests
+        run: |
+          python -m pytest -q \
+            tests/test_plastic_depth_telemetry.py \
+            tests/test_plastic_depth_coarse_trials.py \
+            tests/test_plastic_depth_coarse_scoring.py \
+            tests/test_plastic_depth_coarse_real_lifecycle.py \
+            tests/test_plastic_depth_lifecycle.py
+
+      - name: Commit phase-qualified telemetry
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            sheet/plastic_depth_coarse.py \
+            sheet/plastic_depth_coarse_runner.py \
+            sheet/wandb_telemetry.py \
+            run_thog2_lifecycle.py
+          git commit -m 'Add PLASTIC phase-qualified telemetry axes'
+          git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+          git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+          git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
