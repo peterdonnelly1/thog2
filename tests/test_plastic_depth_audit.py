@@ -86,8 +86,8 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
     try:
         metrics = trainer.train_one_update()
         assert metrics["skipped_update"] == 0.0
-        assert len(trainer.state.plastic_depth_count_audit) == 1
-        audit = copy.deepcopy(trainer.state.plastic_depth_count_audit[0])
+        assert len(trainer.plastic_depth_count_audit) == 1
+        audit = copy.deepcopy(trainer.plastic_depth_count_audit[0])
         required = {
             "phase",
             "update_number",
@@ -128,9 +128,9 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
         expected_config=config,
     )
     try:
-        assert resumed.state.plastic_depth_count_audit == [audit]
+        assert resumed.plastic_depth_count_audit == [audit]
         replay_plastic_depth_count_audit(
-            resumed.state.plastic_depth_count_audit[0]
+            resumed.plastic_depth_count_audit[0]
         )
     finally:
         resumed.close()
