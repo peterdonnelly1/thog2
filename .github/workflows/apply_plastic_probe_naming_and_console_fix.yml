@@ -39,12 +39,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: List workflow references needing canonical rename
-        run: |
-          git grep -l \
-            'plastic__layer_count_probe_interval\|plastic__layer_count_probe_noise_min_observations' \
-            -- .github/workflows || true
-
       - name: Apply probe naming and console fixes
         run: python tools/apply_plastic_probe_naming_and_console_fix.py
 
@@ -66,7 +60,12 @@ jobs:
             sheet/run_config.py \
             sheet/training_config.py \
             tools/apply_plastic_probe_naming_and_console_fix.py
-          if git grep -n 'plastic__layer_count_probe_interval\|plastic__layer_count_probe_noise_min_observations' -- ':!tools/apply_plastic_probe_naming_and_console_fix.py'; then
+          old_window_name='plastic__layer_count_probe_''interval'
+          old_minimum_name='plastic__layer_count_probe_noise_''min_observations'
+          if git grep -n \
+            -e "$old_window_name" \
+            -e "$old_minimum_name" \
+            -- ':!tools/apply_plastic_probe_naming_and_console_fix.py'; then
             echo 'superseded PLASTIC probe option name remains' >&2
             exit 1
           fi
