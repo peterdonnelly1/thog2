@@ -108,6 +108,13 @@ def _detach_retained_materialisation_controller(raw_model: Any, errors: list[str
         )
 
 
+def _clear_container(target: Any, name: str) -> None:
+    value = getattr(target, name, None)
+    clear = getattr(value, "clear", None)
+    if callable(clear):
+        clear()
+
+
 def _hard_destroy_fresh_training_state(state: Any) -> None:
     trainer = getattr(state, "trainer", None)
     if trainer is None:
@@ -126,8 +133,8 @@ def _hard_destroy_fresh_training_state(state: Any) -> None:
     if optimizer is not None:
         try:
             optimizer.zero_grad(set_to_none=True)
-            optimizer.state.clear()
-            optimizer.param_groups.clear()
+            _clear_container(optimizer, "state")
+            _clear_container(optimizer, "param_groups")
         except BaseException as error:
             cleanup_errors.append(
                 f"optimizer release: {type(error).__name__}: {error}"
