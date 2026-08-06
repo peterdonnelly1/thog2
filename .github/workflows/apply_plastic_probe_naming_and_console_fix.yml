@@ -119,6 +119,7 @@ jobs:
 
       - name: Commit validated fixes
         run: |
+          git restore -- .github/workflows
           if git diff --quiet; then
             exit 0
           fi
