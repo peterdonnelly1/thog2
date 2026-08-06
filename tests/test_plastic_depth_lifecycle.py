@@ -128,6 +128,7 @@ def test_coarse_trials_are_destroyed_and_fine_is_fresh_at_measured_winner() -> N
     assert outcome.fine_state.trainer.config.max_updates == 100
     assert outcome.fine_state.trainer.config.plastic__coarse_phase == "disabled"
     assert outcome.provenance["selected_layers"] == 4
+    assert outcome.provenance["phase"] == "fine_start"
     assert outcome.provenance["pause"]["disposition"] == "ctrl_f"
     assert coordinator.identities
     assert coordinator.barriers == 1
@@ -136,9 +137,11 @@ def test_coarse_trials_are_destroyed_and_fine_is_fresh_at_measured_winner() -> N
     assert coordinator.closed
 
 
-def test_checkpoint_exit_does_not_construct_fine() -> None:
+def test_checkpoint_exit_constructs_fresh_fine_checkpoint_collectively_then_discards_it() -> None:
     coordinator = _Coordinator()
     builds = []
+    destroyed = []
+    checkpoints = []
 
     def builder(**kwargs):
         builds.append(kwargs)
@@ -149,6 +152,13 @@ def test_checkpoint_exit_does_not_construct_fine() -> None:
             instrumentation_namespace=kwargs["instrumentation_namespace"],
             fingerprint={},
         )
+
+    def destroyer(state):
+        destroyed.append((state.phase, state.active_layer_count))
+        state.trainer = None
+
+    def checkpoint_callback(trainer, payload):
+        checkpoints.append((trainer, dict(payload)))
 
     outcome = run_plastic_coarse_fine_lifecycle(
         trainer_factory=lambda *_: None,
@@ -162,6 +172,7 @@ def test_checkpoint_exit_does_not_construct_fine() -> None:
         memory_budget_gib=None,
         geometry_initialisation="equidistant",
         console_stream=io.StringIO(),
+        checkpoint_callback=checkpoint_callback,
         fresh_state_builder=builder,
         trial_runner=lambda state, **_: PlasticCoarseTrialResult(
             trial_index=1,
@@ -172,15 +183,64 @@ def test_checkpoint_exit_does_not_construct_fine() -> None:
             training_steps=1,
             tokens_per_update=100,
         ),
-        state_destroyer=lambda state: setattr(state, "trainer", None),
+        state_destroyer=destroyer,
         pause_runner=lambda **_: PlasticCoarsePauseResult("checkpoint_exit", 2.0, 898.0),
         coordinator_factory=lambda _: coordinator,
     )
 
     assert outcome.fine_state is None
-    assert [item["phase"] for item in builds] == ["coarse"]
+    assert [item["phase"] for item in builds] == ["coarse", "fine"]
+    assert destroyed == [("coarse", 2), ("fine", 2)]
+    assert len(checkpoints) == 1
+    checkpoint_trainer, checkpoint_payload = checkpoints[0]
+    assert checkpoint_trainer.config.plastic__coarse_phase == "disabled"
+    assert checkpoint_payload["phase"] == "review_pause"
+    assert checkpoint_payload["pause"]["remaining_seconds"] == 898.0
     assert outcome.provenance["pause"]["disposition"] == "checkpoint_exit"
     outcome.close_coordinator()
+
+
+def test_checkpoint_exit_without_collective_callback_fails_closed() -> None:
+    coordinator = _Coordinator()
+
+    def builder(**kwargs):
+        return PlasticFreshTrainingState(
+            trainer=SimpleNamespace(config=kwargs["resolved_config"]),
+            phase=kwargs["phase"],
+            active_layer_count=kwargs["active_layer_count"],
+            instrumentation_namespace=kwargs["instrumentation_namespace"],
+            fingerprint={},
+        )
+
+    with pytest.raises(RuntimeError, match="collective checkpoint callback"):
+        run_plastic_coarse_fine_lifecycle(
+            trainer_factory=lambda *_: None,
+            resolved_config=_Config(),
+            train_tokens=object(),
+            validation_tokens=object(),
+            coarse_config=ResolvedPlasticCoarseConfig(True, (2,), 1, 1),
+            objective="lowest_loss",
+            maximum_layers=8,
+            cost_weight=0.0,
+            memory_budget_gib=None,
+            geometry_initialisation="equidistant",
+            console_stream=io.StringIO(),
+            fresh_state_builder=builder,
+            trial_runner=lambda state, **_: PlasticCoarseTrialResult(
+                trial_index=1,
+                layers=state.active_layer_count,
+                status="success",
+                validation_losses=(3.0,),
+                training_elapsed_seconds=1.0,
+                training_steps=1,
+                tokens_per_update=100,
+            ),
+            state_destroyer=lambda state: setattr(state, "trainer", None),
+            pause_runner=lambda **_: PlasticCoarsePauseResult("checkpoint_exit", 2.0, 898.0),
+            coordinator_factory=lambda _: coordinator,
+        )
+
+    assert coordinator.closed
 
 
 def test_unselectable_trials_close_coordinator_and_do_not_build_fine() -> None:
