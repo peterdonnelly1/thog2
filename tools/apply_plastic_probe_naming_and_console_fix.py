@@ -65,6 +65,64 @@ _INSERT_NEW = '''    if marker in line:
     return f"{line}\\t{inserted}"
 '''
 
+_ALIGNMENT_CONSTANT_OLD = '_ALIGNMENT_BY_RUN_ID: Dict[str, Dict[str, int]] = {}\n'
+_ALIGNMENT_CONSTANT_NEW = (
+    '_ALIGNMENT_BY_RUN_ID: Dict[str, Dict[str, int]] = {}\n'
+    '_MIN_FINAL_PROBE_COLUMN = 96\n'
+)
+
+_ALIGNMENT_HELPER_OLD = '''
+
+def _record_alignment(run_id: str, line: str) -> None:
+'''
+
+_ALIGNMENT_HELPER_NEW = '''
+
+def _align_probe_to_minimum_tab_column(line: str) -> str:
+    start = _field_start(line, "probe_losses")
+    if start is None or start >= _MIN_FINAL_PROBE_COLUMN:
+        return line
+    raw_index = line.find("probe_losses")
+    prefix = line[:raw_index].rstrip(" \\t")
+    suffix = line[raw_index:]
+    while _visible_width(prefix) < _MIN_FINAL_PROBE_COLUMN:
+        prefix += "\\t"
+    return prefix + suffix
+
+
+def _record_alignment(run_id: str, line: str) -> None:
+'''
+
+_ALIGN_FINAL_OLD = '''def _align_final_progress_line(run_id: str, event: str, line: str) -> str:
+    if event == "optimizer_progress":
+        _record_alignment(run_id, line)
+        return line
+    if event == "evaluation_completed":
+        return _align_validation_row(run_id, line)
+    return line
+'''
+
+_ALIGN_FINAL_NEW = '''def _align_final_progress_line(run_id: str, event: str, line: str) -> str:
+    line = _align_probe_to_minimum_tab_column(line)
+    if event == "optimizer_progress":
+        _record_alignment(run_id, line)
+        return line
+    if event == "evaluation_completed":
+        return _align_validation_row(run_id, line)
+    return line
+'''
+
+_WARMUP_ALIAS_OLD = '''_stage6.format_progress_line = _format_progress_line_with_compact_console_fields
+# ^^^ THOG
+'''
+
+_WARMUP_ALIAS_NEW = '''_format_progress_line_with_compact_sampled_array = (
+    _format_progress_line_with_compact_console_fields
+)
+_stage6.format_progress_line = _format_progress_line_with_compact_console_fields
+# ^^^ THOG
+'''
+
 
 def _tracked_paths() -> tuple[Path, ...]:
     output = subprocess.check_output(
@@ -79,10 +137,10 @@ def _tracked_paths() -> tuple[Path, ...]:
 
 
 def _replace_once(text: str, old: str, new: str, *, path: Path, label: str) -> str:
+    if new in text:
+        return text
     count = text.count(old)
     if count == 0:
-        if new in text:
-            return text
         raise RuntimeError(f"{path}: cannot find {label} source or replacement")
     if count != 1:
         raise RuntimeError(f"{path}: expected one {label} source, found {count}")
@@ -131,9 +189,51 @@ def _repair_lookahead_patch() -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _repair_console_alignment() -> None:
+    path = ROOT / "sheet" / "plastic_depth_console_minor_patch.py"
+    text = path.read_text(encoding="utf-8")
+    text = _replace_once(
+        text,
+        _ALIGNMENT_CONSTANT_OLD,
+        _ALIGNMENT_CONSTANT_NEW,
+        path=path,
+        label="minimum final probe column",
+    )
+    text = _replace_once(
+        text,
+        _ALIGNMENT_HELPER_OLD,
+        _ALIGNMENT_HELPER_NEW,
+        path=path,
+        label="minimum-tab alignment helper",
+    )
+    text = _replace_once(
+        text,
+        _ALIGN_FINAL_OLD,
+        _ALIGN_FINAL_NEW,
+        path=path,
+        label="final progress alignment",
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def _restore_warmup_helper_compatibility() -> None:
+    path = ROOT / "sheet" / "plastic_depth_warmup_guard_patch.py"
+    text = path.read_text(encoding="utf-8")
+    text = _replace_once(
+        text,
+        _WARMUP_ALIAS_OLD,
+        _WARMUP_ALIAS_NEW,
+        path=path,
+        label="compact sampled-array helper alias",
+    )
+    path.write_text(text, encoding="utf-8")
+
+
 def main() -> None:
     _rewrite_public_names()
     _repair_lookahead_patch()
+    _repair_console_alignment()
+    _restore_warmup_helper_compatibility()
 
 
 if __name__ == "__main__":
