@@ -137,3 +137,7 @@ from . import plastic_depth_coarse_runtime_recovery_patch as _plastic_depth_coar
 # vvv THOG make the final console compaction and FINE warmup count guard win after every earlier compatibility overlay
 from . import plastic_depth_warmup_guard_patch as _plastic_depth_warmup_guard_patch
 # ^^^ THOG
+
+# vvv THOG set the public cost-weight default and compact long probe-offset vector labels after final console formatting
+from . import plastic_depth_cli_cost_and_label_patch as _plastic_depth_cli_cost_and_label_patch
+# ^^^ THOG
