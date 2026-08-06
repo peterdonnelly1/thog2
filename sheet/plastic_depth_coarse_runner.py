@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import replace
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Tuple
 
 import torch
 
@@ -92,6 +92,15 @@ def _synchronize(trainer) -> None:
         torch.cuda.synchronize(trainer.device)
 
 
+def _worst_rank_elapsed(trainer, local_elapsed: float) -> float:
+    value = torch.tensor(
+        float(local_elapsed),
+        dtype=torch.float64,
+        device=trainer.device,
+    )
+    return trainer.distributed.max_float(value)
+
+
 def run_fixed_plastic_coarse_trial(
     state: PlasticFreshTrainingState,
     *,
@@ -145,11 +154,12 @@ def run_fixed_plastic_coarse_trial(
                     f"loss={float(metrics['training_loss']):.6f}"
                 )
         _synchronize(trainer)
-        training_elapsed = float(clock() - started)
-        if not math.isfinite(training_elapsed) or training_elapsed <= 0.0:
+        local_elapsed = float(clock() - started)
+        if not math.isfinite(local_elapsed) or local_elapsed <= 0.0:
             raise RuntimeError(
-                f"invalid PLASTIC COARSE training elapsed time: {training_elapsed!r}"
+                f"invalid PLASTIC COARSE training elapsed time: {local_elapsed!r}"
             )
+        training_elapsed = _worst_rank_elapsed(trainer, local_elapsed)
         peak_allocated, peak_reserved = _peak_memory_gib(trainer)
         validation_losses = _validation_losses(trainer, evaluation_steps_count)
         return PlasticCoarseTrialResult(
