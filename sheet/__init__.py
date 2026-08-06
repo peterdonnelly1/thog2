@@ -121,3 +121,7 @@ from . import plastic_depth_full_radius_oom_patch as _plastic_depth_full_radius_
 # vvv THOG install replayable FINE count-decision audit after final selector and commit semantics are fixed
 from . import plastic_depth_audit_patch as _plastic_depth_audit_patch
 # ^^^ THOG
+
+# vvv THOG hard-release each COARSE trainer before the next candidate or FINE state and keep telemetry phase axes independent
+from . import plastic_depth_coarse_runtime_recovery_patch as _plastic_depth_coarse_runtime_recovery_patch
+# ^^^ THOG
