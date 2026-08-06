@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Apply COARSE runtime policy when absent
+      - name: Apply repaired COARSE runtime policy when absent
         run: |
           if ! grep -q 'PLASTIC COARSE trainer has no sampling lattice' sheet/plastic_depth_fresh_state.py; then
             python tools/apply_plastic_coarse_fine_m3_runtime.py
