@@ -54,7 +54,6 @@ jobs:
             tests/test_plastic_depth.py
 
       - name: Commit M2 integration
-        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             exit 0
