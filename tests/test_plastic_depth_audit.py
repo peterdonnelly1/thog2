@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+from sheet.plastic_depth_audit_patch import replay_plastic_depth_count_audit
+from sheet.trainer import SharedTrainer
+from tests.stage3_test_support import stage3_config, token_splits
+
+
+def _synthetic_audit():
+    return {
+        "previous_count": 10,
+        "winning_probe_count": 8,
+        "committed_count": 9,
+        "decision_reason": "max_step_limited",
+        "max_step": 1,
+        "brake_active": False,
+        "robust_evidence": (
+            {
+                "candidate_count": 8,
+                "feasible": True,
+                "significant": True,
+                "standardized_improvement": 5.0,
+            },
+            {
+                "candidate_count": 12,
+                "feasible": True,
+                "significant": True,
+                "standardized_improvement": 5.0,
+            },
+        ),
+    }
+
+
+def test_replay_separates_winning_probe_from_bounded_commit() -> None:
+    replay = replay_plastic_depth_count_audit(_synthetic_audit())
+
+    assert replay == {
+        "winning_probe_count": 8,
+        "committed_count": 9,
+        "decision_reason": "max_step_limited",
+    }
+
+
+def test_replay_detects_tampered_commit() -> None:
+    audit = _synthetic_audit()
+    audit["committed_count"] = 8
+
+    with pytest.raises(ValueError, match="audit replay mismatch"):
+        replay_plastic_depth_count_audit(audit)
+
+
+def _config():
+    return stage3_config(
+        "thog2_sheet",
+        geometry_preset="depth",
+        basis_family="chebyshev",
+        depth_order=3,
+        n_layer=4,
+        max_updates=2,
+        eval_interval=0,
+        plastic__enabled=True,
+        plastic__runtime_phase="fine",
+        plastic__coarse_phase="disabled",
+        plastic__layers_to_sample=None,
+        plastic__do_learn_layer_count=True,
+        plastic__initial_layer_count=2,
+        plastic__max_permitted_layers=4,
+        plastic__layer_count_update_brake=0,
+        plastic__layer_count_probe_interval=1,
+        plastic__layer_count_probe_radius=2,
+        plastic__layer_count_max_step=1,
+        plastic__layer_count_probe_noise_window=4,
+        plastic__layer_count_probe_noise_min_observations=1,
+        plastic__layer_count_probe_noise_lambda=1.0e9,
+    )
+
+
+def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_path) -> None:
+    config = _config()
+    train_tokens, validation_tokens = token_splits()
+    checkpoint_path = tmp_path / "fine_audit.pt"
+    trainer = SharedTrainer(config, train_tokens, validation_tokens)
+    try:
+        metrics = trainer.train_one_update()
+        assert metrics["skipped_update"] == 0.0
+        assert len(trainer.state.plastic_depth_count_audit) == 1
+        audit = copy.deepcopy(trainer.state.plastic_depth_count_audit[0])
+        required = {
+            "phase",
+            "update_number",
+            "decision_number",
+            "previous_count",
+            "winning_probe_count",
+            "committed_count",
+            "decision_reason",
+            "objective",
+            "probe_interval",
+            "probe_radius",
+            "max_step",
+            "update_brake",
+            "brake_active",
+            "decision_candidate_counts",
+            "execution_candidate_counts",
+            "sampled_token_count",
+            "sampled_token_positions",
+            "score_table",
+            "robust_evidence",
+            "histories_before",
+            "histories_after",
+            "active_public_coordinates_after",
+            "transition",
+        }
+        assert required <= set(audit)
+        assert audit["decision_candidate_counts"] == (1, 2, 3, 4)
+        assert audit["sampled_token_count"] == len(audit["sampled_token_positions"])
+        replay_plastic_depth_count_audit(audit)
+        trainer.save_checkpoint(checkpoint_path)
+    finally:
+        trainer.close()
+
+    resumed = SharedTrainer.from_checkpoint(
+        checkpoint_path,
+        train_tokens,
+        validation_tokens,
+        expected_config=config,
+    )
+    try:
+        assert resumed.state.plastic_depth_count_audit == [audit]
+        replay_plastic_depth_count_audit(
+            resumed.state.plastic_depth_count_audit[0]
+        )
+    finally:
+        resumed.close()
