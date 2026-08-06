@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import re
+import subprocess
+from pathlib import Path
 
 import run_thog2_owt_core as core
 from sheet import help_registry_descriptor_patch as descriptor_help
 from sheet import plastic_depth_warmup_guard_patch as guard
 
 
+ROOT = Path(__file__).resolve().parents[1]
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -99,4 +102,18 @@ def test_registered_parser_help_appends_descriptor_registry_once() -> None:
     assert rendered.count("getopt / artifact descriptor registry") == 1
     assert "LPI" in rendered
     assert "--plastic__layer_count_probe_interval N" in rendered
+
+
+def test_wrapper_registry_emits_descriptor_table_once() -> None:
+    completed = subprocess.run(
+        ("bash", "./train_OWT.sh", "--print-geometry-registry"),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert completed.stdout.count("getopt / artifact descriptor registry") == 1
+    assert "abbrev" in completed.stdout
+    assert "parameter" in completed.stdout
+    assert "description" in completed.stdout
 # ^^^ THOG
