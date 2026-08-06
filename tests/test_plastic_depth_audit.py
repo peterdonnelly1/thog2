@@ -104,8 +104,8 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
             "brake_active",
             "decision_candidate_counts",
             "execution_candidate_counts",
-            "sampled_token_count",
-            "sampled_token_positions",
+            "sampled_tokens_by_rank",
+            "sampled_token_count_global",
             "score_table",
             "robust_evidence",
             "histories_before",
@@ -115,7 +115,15 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
         }
         assert required <= set(audit)
         assert audit["decision_candidate_counts"] == (1, 2, 3, 4)
-        assert audit["sampled_token_count"] == len(audit["sampled_token_positions"])
+        assert len(audit["sampled_tokens_by_rank"]) == 1
+        rank_sample = audit["sampled_tokens_by_rank"][0]
+        assert rank_sample["rank"] == 0
+        assert rank_sample["sampled_token_count"] == len(
+            rank_sample["sampled_token_positions"]
+        )
+        assert audit["sampled_token_count_global"] == rank_sample[
+            "sampled_token_count"
+        ]
         replay_plastic_depth_count_audit(audit)
         trainer.save_checkpoint(checkpoint_path)
     finally:
