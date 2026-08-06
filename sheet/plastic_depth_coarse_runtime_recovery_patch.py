@@ -130,6 +130,7 @@ def _hard_destroy_fresh_training_state(state: Any) -> None:
 
     raw_model = getattr(trainer, "raw_model", None)
     optimizer = getattr(trainer, "optimizer", None)
+    trajectory = None
     if optimizer is not None:
         try:
             optimizer.zero_grad(set_to_none=True)
@@ -150,6 +151,9 @@ def _hard_destroy_fresh_training_state(state: Any) -> None:
         except BaseException as error:
             cleanup_errors.append(f"model.zero_grad: {type(error).__name__}: {error}")
         _detach_retained_materialisation_controller(raw_model, cleanup_errors)
+    # vvv THOG the verifier snapshots CUDA before returning, so no local may retain the trajectory parameter tree
+    trajectory = None
+    # ^^^ THOG
     _call_cleanup_method(trainer, "_clear_plastic_depth_inline_update", cleanup_errors)
 
     try:
