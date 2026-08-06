@@ -111,8 +111,7 @@ jobs:
             tests/test_plastic_depth_console_minor_patch.py \
             tests/test_plastic_depth_coarse_runtime_recovery.py \
             tests/test_plastic_depth_coarse_real_lifecycle.py \
-            tests/test_plastic_depth_startup_lookahead_ui.py \
-            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
+            tests/test_plastic_depth_startup_lookahead_ui.py
 
       - name: Verify canonical PLASTIC help
         run: |
@@ -120,6 +119,8 @@ jobs:
           grep -q -- '--plastic__enabled' <<<"$help_text"
           grep -q -- '--plastic__phase_1_n_steps' <<<"$help_text"
           grep -q -- '--plastic__layer_count_probe_radius' <<<"$help_text"
+          grep -q -- '--plastic__layer_count_probe_window_size' <<<"$help_text"
+          grep -q -- '--plastic__layer_count_min_probes' <<<"$help_text"
           grep -q -- '--plastic__log_interval_coarse' <<<"$help_text"
           grep -q -- '--plastic__coarse_phase_roll_through' <<<"$help_text"
           grep -q -- '--max-nonfinite-update-skips' <<<"$help_text"
@@ -130,7 +131,8 @@ jobs:
           registry_text="$(bash ./train_OWT.sh --print-geometry-registry)"
           [[ "$(grep -c '^getopt / artifact descriptor registry$' <<<"$registry_text")" -eq 1 ]]
           grep -q -- 'LCS.*--plastic__phase_1_n_steps N' <<<"$registry_text"
-          grep -q -- 'LPI.*--plastic__layer_count_probe_interval N' <<<"$registry_text"
+          grep -q -- 'LPI.*--plastic__layer_count_probe_window_size N' <<<"$registry_text"
+          grep -q -- 'LNM.*--plastic__layer_count_min_probes N' <<<"$registry_text"
           grep -q -- 'DLB.*--depth-compress-layer-norm-and-bias' <<<"$registry_text"
           python - <<'PY'
           from run_thog2_owt_core import build_parser
