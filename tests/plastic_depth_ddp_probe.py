@@ -77,7 +77,8 @@ def main() -> None:
         metrics = trainer.train_one_update()
         if float(metrics["skipped_update"]) != 0.0:
             raise RuntimeError("DDP FINE probe update was skipped")
-        if len(trainer.state.plastic_depth_count_audit) != 1:
+        audit_rows = getattr(trainer, "plastic_depth_count_audit", ())
+        if len(audit_rows) != 1:
             raise RuntimeError("DDP FINE update did not emit exactly one audit row")
         result = {
             "rank": trainer.distributed.rank,
@@ -95,7 +96,7 @@ def main() -> None:
             "pause_disposition": outcome.pause_result.disposition,
             "fine_completed_updates": trainer.state.completed_updates,
             "fine_active_layers": trainer.raw_model.trajectory.plastic_sampling.current_active_layers,
-            "audit": trainer.state.plastic_depth_count_audit[0],
+            "audit": audit_rows[0],
         }
         result_dir = Path(os.environ["THOG2_DDP_RESULT_DIR"])
         result_dir.mkdir(parents=True, exist_ok=True)
