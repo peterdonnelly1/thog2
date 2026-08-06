@@ -148,6 +148,17 @@ def replay_plastic_depth_count_audit(
     return replay
 
 
+def _rank_sample_payload(self: Any, context: Mapping[str, Any]) -> Dict[str, object]:
+    positions = tuple(
+        int(value) for value in context["audit_sampled_token_positions"]
+    )
+    return {
+        "rank": int(self.distributed.rank),
+        "sampled_token_count": len(positions),
+        "sampled_token_positions": positions,
+    }
+
+
 def _commit_plastic_depth_inline_update_with_audit(
     self: Any,
     context: Optional[Dict[str, Any]],
@@ -164,7 +175,7 @@ def _commit_plastic_depth_inline_update_with_audit(
     lattice = self._plastic_depth_lattice()
     if lattice is None:
         raise RuntimeError("PLASTIC FINE audit lacks its sampling lattice")
-    audit: Dict[str, Any] = {
+    shared_audit: Dict[str, Any] = {
         "phase": "fine",
         "update_number": int(decision.update_number),
         "decision_number": int(lattice.count_decision_number.item()),
@@ -194,10 +205,6 @@ def _commit_plastic_depth_inline_update_with_audit(
         "execution_candidate_counts": tuple(
             int(value) for value in context["candidate_counts"]
         ),
-        "sampled_token_count": int(context["sampled_token_count"]),
-        "sampled_token_positions": tuple(
-            int(value) for value in context["audit_sampled_token_positions"]
-        ),
         "score_table": tuple(dict(item) for item in context["score_report"]),
         "robust_evidence": _evidence_payload(decision),
         "histories_before": copy.deepcopy(context["audit_history_before"]),
@@ -208,7 +215,27 @@ def _commit_plastic_depth_inline_update_with_audit(
         ),
         "transition": copy.deepcopy(transition),
     }
-    replay_plastic_depth_count_audit(audit)
+    replay_plastic_depth_count_audit(shared_audit)
+    self.distributed.assert_identical_object(
+        shared_audit,
+        "PLASTIC FINE shared count-decision audit",
+    )
+    samples_by_rank = tuple(
+        sorted(
+            self.distributed.all_gather_object(
+                _rank_sample_payload(self, context)
+            ),
+            key=lambda item: int(item["rank"]),
+        )
+    )
+    audit = {
+        **shared_audit,
+        "sampled_tokens_by_rank": samples_by_rank,
+        "sampled_token_count_global": sum(
+            int(item["sampled_token_count"])
+            for item in samples_by_rank
+        ),
+    }
     self.distributed.assert_identical_object(
         audit,
         "PLASTIC FINE complete count-decision audit",
