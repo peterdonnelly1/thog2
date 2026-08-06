@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from . import trainer_step as _trainer_step
 
@@ -91,6 +91,63 @@ def _evidence_payload(decision: Any) -> Tuple[Dict[str, object], ...]:
     )
 
 
+def replay_plastic_depth_count_audit(
+    audit: Mapping[str, Any],
+) -> Dict[str, object]:
+    """Recompute winner, bounded commit and reason from one durable audit row."""
+
+    current_count = int(audit["previous_count"])
+    max_step = int(audit["max_step"])
+    if max_step < 1:
+        raise ValueError("audit max_step must be positive")
+    brake_active = bool(audit["brake_active"])
+    passing = []
+    for item in audit["robust_evidence"]:
+        if not bool(item["feasible"]) or not bool(item["significant"]):
+            continue
+        standardized = item["standardized_improvement"]
+        if standardized is None:
+            continue
+        passing.append((float(standardized), int(item["candidate_count"])))
+    if not passing or brake_active:
+        winning_probe_count = current_count
+    else:
+        winning_probe_count = max(
+            passing,
+            key=lambda item: (item[0], -item[1]),
+        )[1]
+    committed_offset = max(
+        -max_step,
+        min(max_step, winning_probe_count - current_count),
+    )
+    committed_count = current_count + committed_offset
+    reason = _decision_reason(
+        current_count=current_count,
+        winning_probe_count=winning_probe_count,
+        committed_count=committed_count,
+        brake_active=brake_active,
+    )
+    replay = {
+        "winning_probe_count": winning_probe_count,
+        "committed_count": committed_count,
+        "decision_reason": reason,
+    }
+    expected = {
+        name: audit[name]
+        for name in (
+            "winning_probe_count",
+            "committed_count",
+            "decision_reason",
+        )
+    }
+    if replay != expected:
+        raise ValueError(
+            "PLASTIC FINE audit replay mismatch: "
+            f"recorded={expected}, replayed={replay}"
+        )
+    return replay
+
+
 def _commit_plastic_depth_inline_update_with_audit(
     self: Any,
     context: Optional[Dict[str, Any]],
@@ -151,6 +208,7 @@ def _commit_plastic_depth_inline_update_with_audit(
         ),
         "transition": copy.deepcopy(transition),
     }
+    replay_plastic_depth_count_audit(audit)
     self.distributed.assert_identical_object(
         audit,
         "PLASTIC FINE complete count-decision audit",
@@ -169,4 +227,7 @@ _trainer_step.TrainerStepMixin._plastic_depth_inline_probe_request = (
 _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update = (
     _commit_plastic_depth_inline_update_with_audit
 )
+
+
+__all__ = ["replay_plastic_depth_count_audit"]
 # ^^^ THOG
