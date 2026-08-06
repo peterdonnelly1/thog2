@@ -1,3 +1,4 @@
+# vvv THOG
 from __future__ import annotations
 
 import os
@@ -6,7 +7,7 @@ import termios
 import time
 import tty
 from dataclasses import dataclass
-from typing import Callable, Optional, TextIO
+from typing import Any, Callable, Optional, TextIO
 
 
 PLASTIC_COARSE_REVIEW_PAUSE_SECONDS = 900
@@ -22,6 +23,7 @@ class PlasticCoarsePauseResult:
 Clock = Callable[[], float]
 Sleeper = Callable[[float], None]
 CheckpointCallback = Callable[[], None]
+PauseRunner = Callable[..., PlasticCoarsePauseResult]
 
 
 def _open_controlling_terminal() -> Optional[int]:
@@ -126,3 +128,51 @@ def run_plastic_coarse_review_pause(
             termios.tcsetattr(fd, termios.TCSANOW, original_attributes)
         if owns_terminal and fd is not None:
             os.close(fd)
+
+
+def run_distributed_plastic_coarse_review_pause(
+    distributed: Any,
+    *,
+    duration_seconds: float = PLASTIC_COARSE_REVIEW_PAUSE_SECONDS,
+    output: Optional[TextIO] = None,
+    pause_runner: PauseRunner = run_plastic_coarse_review_pause,
+) -> PlasticCoarsePauseResult:
+    """Run terminal control on rank 0 and broadcast one disposition to every rank."""
+
+    local_result: Optional[PlasticCoarsePauseResult] = None
+    if distributed.is_primary:
+        try:
+            local_result = pause_runner(
+                duration_seconds=duration_seconds,
+                output=output,
+                checkpoint_callback=None,
+            )
+        except KeyboardInterrupt:
+            local_result = PlasticCoarsePauseResult(
+                disposition="interrupt",
+                elapsed_seconds=0.0,
+                remaining_seconds=max(0.0, float(duration_seconds)),
+            )
+    gathered = distributed.all_gather_object(local_result)
+    result = gathered[0]
+    if not isinstance(result, PlasticCoarsePauseResult):
+        raise RuntimeError(
+            "rank 0 did not provide a PLASTIC COARSE review-pause disposition"
+        )
+    distributed.barrier()
+    if result.disposition == "interrupt":
+        raise KeyboardInterrupt
+    if result.disposition not in {"ctrl_f", "checkpoint_exit", "timeout"}:
+        raise RuntimeError(
+            f"invalid PLASTIC COARSE review-pause disposition: {result.disposition!r}"
+        )
+    return result
+
+
+__all__ = [
+    "PLASTIC_COARSE_REVIEW_PAUSE_SECONDS",
+    "PlasticCoarsePauseResult",
+    "run_distributed_plastic_coarse_review_pause",
+    "run_plastic_coarse_review_pause",
+]
+# ^^^ THOG
