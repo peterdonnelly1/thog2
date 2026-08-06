@@ -32,6 +32,11 @@ def _begin_plastic_depth_inline_update_with_full_radius_oom(
     if not upward_counts:
         context["recoverable_upward_counts"] = ()
         return context
+    # vvv THOG preserve the established adjacent N+1 path exactly when full-radius probing produces only one upward candidate
+    if len(upward_counts) == 1:
+        context["recoverable_upward_counts"] = ()
+        return context
+    # ^^^ THOG
 
     reserve = context.get("cuda_allocator_reserve")
     if reserve is None:
