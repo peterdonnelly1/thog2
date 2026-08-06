@@ -42,6 +42,7 @@ jobs:
         run: |
           grep -q 'depth_order=2' current/tools/plastic_disabled_fingerprint.py
           grep -q 'n_embd=32' current/tools/plastic_disabled_fingerprint.py
+          grep -q 'redirect_stdout' current/tools/plastic_disabled_fingerprint.py
 
       - name: Apply pending disabled-compatibility source locally
         working-directory: current
