@@ -98,8 +98,10 @@ while (( $# > 0 )); do
       "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
       printf '\ncanonical train_OWT.sh options\n------------------------------\n'
       bash ./train_OWT_core.sh -h
-      printf '\nregistered runner hyperparameters\n---------------------------------\n'
-      "$THOG2_REGISTRY_PYTHON" -c 'from run_thog2_owt_core import build_parser; print(build_parser().format_help(), end="")'
+      # vvv THOG the direct registry entrypoint already prints complete parser and descriptor help once
+      # printf '\nregistered runner hyperparameters\n---------------------------------\n'
+      # "$THOG2_REGISTRY_PYTHON" -c 'from run_thog2_owt_core import build_parser; print(build_parser().format_help(), end="")'
+      # ^^^ THOG
       printf '\nTorch compilation:\n  --torch-compile false|true|regional        false=eager, true=whole-model, regional=checkpoint-segment compile\n'
       exit 0
       # ^^^ THOG
