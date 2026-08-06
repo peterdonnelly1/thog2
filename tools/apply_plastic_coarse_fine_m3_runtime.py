@@ -84,6 +84,18 @@ def disable_coarse_controller_paths() -> None:
         '            ):\n'
         '                lattice.record_training_time(\n',
     )
+    path = "sheet/plastic_depth_lookahead_patch.py"
+    replace_once(
+        path,
+        'def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:\n'
+        '    if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:\n'
+        '        return None\n',
+        'def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:\n'
+        '    if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:\n'
+        '        return None\n'
+        '    if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":\n'
+        '        return None\n',
+    )
 
 
 def main() -> None:
