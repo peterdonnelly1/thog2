@@ -67,8 +67,9 @@ jobs:
             tests/test_plastic_depth_lifecycle.py \
             tests/test_plastic_depth_pause.py \
             tests/test_plastic_depth_console_minor_patch.py \
-            tests/test_run_config.py \
-            tests/test_training_config.py
+            tests/test_plastic_depth_coarse_runtime_recovery.py \
+            tests/test_plastic_depth_coarse_real_lifecycle.py \
+            tests/test_plastic_depth_startup_lookahead_ui.py
 
       - name: Verify canonical PLASTIC help
         run: |
