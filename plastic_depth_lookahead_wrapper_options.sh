@@ -7,6 +7,7 @@ THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS=("$@")
 THOG2_PLASTIC_LOOKAHEAD_HELP=false
+THOG2_PLASTIC_LOOKAHEAD_REGISTRY=false
 THOG2_PLASTIC_LOOKAHEAD_INDEX=0
 while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )); do
   THOG2_PLASTIC_LOOKAHEAD_ARGUMENT="${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$THOG2_PLASTIC_LOOKAHEAD_INDEX]}"
@@ -35,6 +36,9 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
     --plastic__layer_count_max_step=*)
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LOOKAHEAD_ARGUMENT#*=}"
       ;;
+    --print-geometry-registry)
+      THOG2_PLASTIC_LOOKAHEAD_REGISTRY=true
+      ;;
     -h|--help)
       THOG2_PLASTIC_LOOKAHEAD_HELP=true
       ;;
@@ -54,6 +58,24 @@ unset THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS THOG2_PLASTIC_LOOKAHEAD_INDEX THOG2_
 }
 export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
 export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP
+
+# vvv THOG render the complete registry once; the later preserved wrapper branch remains as unreachable history for this option
+if [[ "$THOG2_PLASTIC_LOOKAHEAD_REGISTRY" == true ]]; then
+  if [[ -n "${THOG2_PYTHON:-}" ]]; then
+    THOG2_REGISTRY_PYTHON="$THOG2_PYTHON"
+  elif [[ -x .venv/bin/python ]]; then
+    THOG2_REGISTRY_PYTHON=.venv/bin/python
+  else
+    THOG2_REGISTRY_PYTHON=python
+  fi
+  "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
+  printf '\ncanonical train_OWT.sh options\n------------------------------\n'
+  bash ./train_OWT_core.sh -h
+  printf '\nTorch compilation:\n  --torch-compile false|true|regional        false=eager, true=whole-model, regional=checkpoint-segment compile\n'
+  exit 0
+fi
+unset THOG2_PLASTIC_LOOKAHEAD_REGISTRY
+# ^^^ THOG
 
 if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
   printf '%s
