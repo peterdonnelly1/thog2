@@ -125,3 +125,7 @@ from . import plastic_depth_audit_patch as _plastic_depth_audit_patch
 # vvv THOG hard-release each COARSE trainer before the next candidate or FINE state and keep telemetry phase axes independent
 from . import plastic_depth_coarse_runtime_recovery_patch as _plastic_depth_coarse_runtime_recovery_patch
 # ^^^ THOG
+
+# vvv THOG make the final console compaction and FINE warmup count guard win after every earlier compatibility overlay
+from . import plastic_depth_warmup_guard_patch as _plastic_depth_warmup_guard_patch
+# ^^^ THOG
