@@ -317,6 +317,10 @@ class TrainerCheckpointResumeMixin:
             )
         trainer.batch_source.load_state_dict(payload["batch_source"])
         restore_rng_state(payload["rng_state"])
+        # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
+        trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record("checkpoint_resumed", path=str(path))
         return trainer
@@ -363,6 +367,10 @@ class TrainerCheckpointResumeMixin:
             raise ValueError("checkpoint completed update counters disagree")
         trainer.batch_source.load_state_dict(payload["batch_source"])
         restore_rng_state(payload["rng_state"])
+        # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
+        trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record(
             "legacy_sheet_checkpoint_resumed",

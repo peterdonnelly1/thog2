@@ -27,6 +27,7 @@ from .plastic_depth_fresh_state import (
 from .plastic_depth_pause import (
     PLASTIC_COARSE_REVIEW_PAUSE_SECONDS,
     PlasticCoarsePauseResult,
+    run_distributed_plastic_coarse_review_pause,
     run_plastic_coarse_review_pause,
 )
 
@@ -62,28 +63,6 @@ def _emit(stream: TextIO, text: str) -> None:
     if not text.endswith("\n"):
         stream.write("\n")
     stream.flush()
-
-
-def _distributed_pause(
-    coordinator: Any,
-    *,
-    pause_runner: PauseRunner,
-    pause_duration_seconds: float,
-    console_stream: TextIO,
-) -> PlasticCoarsePauseResult:
-    local_result: Optional[PlasticCoarsePauseResult] = None
-    if coordinator.is_primary:
-        local_result = pause_runner(
-            duration_seconds=pause_duration_seconds,
-            output=console_stream,
-            checkpoint_callback=None,
-        )
-    gathered = coordinator.all_gather_object(local_result)
-    result = gathered[0]
-    if not isinstance(result, PlasticCoarsePauseResult):
-        raise RuntimeError("rank 0 did not provide a PLASTIC COARSE pause disposition")
-    coordinator.barrier()
-    return result
 
 
 def _build_fine_state(
@@ -223,11 +202,11 @@ def run_plastic_coarse_fine_lifecycle(
         if coordinator.is_primary:
             _emit(console_stream, report)
 
-        pause_result = _distributed_pause(
+        pause_result = run_distributed_plastic_coarse_review_pause(
             coordinator,
+            duration_seconds=pause_duration_seconds,
+            output=console_stream,
             pause_runner=pause_runner,
-            pause_duration_seconds=pause_duration_seconds,
-            console_stream=console_stream,
         )
         payload = dict(coarse_results_payload(scored_trials, winner))
         payload.update(
