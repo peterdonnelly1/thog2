@@ -1,4 +1,4 @@
-name: Apply PLASTIC COARSE FINE M1
+name: Validate PLASTIC COARSE FINE M1
 
 on:
   push:
@@ -11,62 +11,20 @@ on:
       - PLASTIC_DEPTH
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply_m1:
+  validate_m1:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Repair M1 transformation anchor
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('tools/apply_plastic_coarse_fine_m1.py')
-          text = path.read_text(encoding='utf-8')
-          old = """    replace_once(
-                  path,
-                  '    \"plastic__layer_count_update_brake\",\\n',
-                  '    \"plastic__layer_count_update_brake\",\\n'
-                  '    \"plastic__layer_count_probe_interval\",\\n'
-                  '    \"plastic__layer_count_probe_radius\",\\n'
-                  '    \"plastic__layer_count_max_step\",\\n',
-              )
-          """
-          new = """    replace_once(
-                  path,
-                  '    \"plastic__layer_count_update_brake\",\\n'
-                  '    \"plastic__layer_count_probe_noise_window\",\\n',
-                  '    \"plastic__layer_count_update_brake\",\\n'
-                  '    \"plastic__layer_count_probe_interval\",\\n'
-                  '    \"plastic__layer_count_probe_radius\",\\n'
-                  '    \"plastic__layer_count_max_step\",\\n'
-                  '    \"plastic__layer_count_probe_noise_window\",\\n',
-              )
-          """
-          if old in text:
-              path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          elif '"plastic__layer_count_probe_interval"' not in text:
-              raise SystemExit('M1 anchor repair target not found')
-          PY
-
-      - name: Apply M1 source integration when absent
-        run: |
-          if ! grep -q 'plastic__coarse_phase: str = "disabled"' sheet/training_config.py; then
-            python tools/apply_plastic_coarse_fine_m1.py
-          fi
-
-      - name: Apply compatibility repairs
-        run: python tools/apply_plastic_coarse_fine_m1_repairs.py
 
       - name: Install CPU test dependencies
         run: |
@@ -74,7 +32,7 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install pytest numpy
 
-      - name: Compile changed Python
+      - name: Compile M1 Python
         run: |
           python -m py_compile \
             sheet/plastic_depth.py \
@@ -85,6 +43,11 @@ jobs:
             run_thog2_owt.py \
             run_thog2_lifecycle.py
 
+      - name: Validate shell syntax
+        run: |
+          bash -n train_OWT.sh
+          bash -n plastic_depth_lookahead_wrapper_options.sh
+
       - name: Run M1 and affected PLASTIC tests
         shell: bash
         run: |
@@ -94,24 +57,3 @@ jobs:
           python -m pytest -q \
             --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
             "${test_files[@]}"
-
-      - name: Commit M1 when source changed
-        run: |
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            tools/apply_plastic_coarse_fine_m1.py \
-            tools/apply_plastic_coarse_fine_m1_repairs.py \
-            tests/test_plastic_depth_coarse_config.py \
-            sheet/plastic_depth.py \
-            sheet/plastic_depth_coarse.py \
-            sheet/training_config.py \
-            sheet/run_config.py \
-            run_thog2_owt_core.py \
-            run_thog2_owt.py \
-            run_thog2_lifecycle.py
-          git commit -m 'Implement PLASTIC COARSE FINE configuration surfaces'
-          git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
