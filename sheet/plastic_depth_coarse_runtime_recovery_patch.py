@@ -228,20 +228,9 @@ def _failure_message(error_message: Any) -> str:
 
 
 def _render_plastic_coarse_report_with_failures(*args: Any, **kwargs: Any) -> str:
-    report = _ORIGINAL_RENDER_PLASTIC_COARSE_REPORT(*args, **kwargs)
-    scored_trials = args[0] if args else kwargs.get("scored_trials", ())
-    failures = [row.result for row in scored_trials if row.result.status == "failed"]
-    if not failures:
-        return report
-    lines = [report, "", "PLASTIC COARSE FAILURES"]
-    requested_steps = int(kwargs.get("training_steps", 0))
-    for result in failures:
-        lines.append(
-            f"  trial {result.trial_index} layers={result.layers} "
-            f"completed={result.training_steps}/{requested_steps} "
-            f"{result.error_class or 'Exception'}: {_failure_message(result.error_message)}"
-        )
-    return "\n".join(lines)
+    # vvv THOG inline failure reasons now belong to the canonical result row
+    return _ORIGINAL_RENDER_PLASTIC_COARSE_REPORT(*args, **kwargs)
+    # ^^^ THOG
 
 
 def _log_scalars_without_rewinding_wandb(self: Any, metrics: Mapping[str, Any], step: int) -> None:

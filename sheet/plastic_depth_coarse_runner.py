@@ -47,9 +47,9 @@ def render_plastic_coarse_trial_header(
 ) -> str:
     return "\n".join(
         (
-            f"PLASTIC COARSE - trial {trial_index}/{trial_count}",
+            f"TRIAL {trial_index}/{trial_count}",
             f"  layers:      {layers}",
-            f"  training:    {n_steps} steps, starting at step 0",
+            f"  steps:       {n_steps}",
             f"  evaluation:  validation mean over final {evaluation_steps_count} batches",
             f"  goal:        {objective}",
             f"  geometry:    fixed {geometry_initialisation}",
@@ -152,6 +152,7 @@ def run_fixed_plastic_coarse_trial(
     n_steps: int,
     evaluation_steps_count: int,
     clock: Clock = time.perf_counter,
+    progress_clock: Clock = time.perf_counter,
     progress_sink: Optional[ProgressSink] = None,
     prior_training_losses: Sequence[float] = (),
     prior_training_elapsed_seconds: float = 0.0,
@@ -186,16 +187,18 @@ def run_fixed_plastic_coarse_trial(
             f"max_updates={trainer.config.max_updates}, n_steps={n_steps}"
         )
 
+    log_interval_coarse = int(getattr(trainer.config, "plastic__log_interval_coarse", 10))
     if progress_sink is not None:
         status = "local step zero" if completed_at_start == 0 else "resumed"
         progress_sink(
-            f"C {trial_index:02d} step {completed_at_start:6d}/{n_steps:<6d} "
-            f"layers={state.active_layer_count:<4d} {status}"
+            f"C {trial_index:02d} {completed_at_start:6d}/{n_steps:<6d} "
+            f"{status:<22} {float(prior_training_elapsed_seconds):8.1f}s"
         )
     if torch.device(trainer.device).type == "cuda":
         torch.cuda.reset_peak_memory_stats(trainer.device)
     _synchronize(trainer)
     started = clock()
+    progress_started = progress_clock()
     try:
         for local_step in range(completed_at_start + 1, n_steps + 1):
             metrics = trainer.train_one_update()
@@ -211,11 +214,19 @@ def run_fixed_plastic_coarse_trial(
                     "PLASTIC COARSE local step sequence diverged: "
                     f"expected={local_step}, completed={completed}"
                 )
-            if progress_sink is not None:
+            progress_due = (
+                local_step == 1
+                or local_step == n_steps
+                or local_step % log_interval_coarse == 0
+            )
+            if progress_sink is not None and progress_due:
+                elapsed_seconds = (
+                    float(prior_training_elapsed_seconds)
+                    + max(0.0, float(progress_clock() - progress_started))
+                )
                 progress_sink(
-                    f"C {trial_index:02d} step {local_step:6d}/{n_steps:<6d} "
-                    f"layers={state.active_layer_count:<4d} "
-                    f"loss={training_loss:.6f}"
+                    f"C {trial_index:02d} {local_step:6d}/{n_steps:<6d} "
+                    f"loss={training_loss:.6f} {elapsed_seconds:8.1f}s"
                 )
             should_checkpoint = (
                 checkpoint_interval > 0

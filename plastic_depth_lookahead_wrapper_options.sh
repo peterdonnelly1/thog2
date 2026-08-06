@@ -25,33 +25,37 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
-    --plastic-coarse-phase|--plastic-phase-1-n-steps|--plastic-phase-1-starting-layer-count|--plastic-phase-1-number-of-trials|--plastic-phase-1-evaluation-steps-count|--plastic-layer-count-probe-interval)
+    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__layer_count_probe_interval|--plastic__log_interval_coarse)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --plastic-coarse-phase=*|--plastic-phase-1-n-steps=*|--plastic-phase-1-starting-layer-count=*|--plastic-phase-1-number-of-trials=*|--plastic-phase-1-evaluation-steps-count=*|--plastic-layer-count-probe-interval=*)
+    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__layer_count_probe_interval=*|--plastic__log_interval_coarse=*)
       THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
       shift
       ;;
-    --plastic-layer-count-probe-radius)
+    --plastic__coarse_phase_roll_through|--no-plastic__coarse_phase_roll_through)
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
+      shift
+      ;;
+    --plastic__layer_count_probe_radius)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2"
       THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --plastic-layer-count-probe-radius=*)
+    --plastic__layer_count_probe_radius=*)
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${1#*=}"
       THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1")
       shift
       ;;
-    --plastic-layer-count-max-step)
+    --plastic__layer_count_max_step)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="$2"
       THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --plastic-layer-count-max-step=*)
+    --plastic__layer_count_max_step=*)
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${1#*=}"
       THOG2_PLASTIC_LOOKAHEAD_COMPAT_ARGS+=("$1")
       shift
@@ -114,10 +118,13 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '  --plastic__phase_1_starting_layer_count N      first doubling candidate' \
     '  --plastic__phase_1__number_of_trials N         number of doubling candidates' \
     '  --plastic__phase_1_evaluation_steps_count N    final validation batches per trial' \
+    '  --plastic__log_interval_coarse N=10             COARSE progress cadence' \
+    '  --plastic__coarse_phase_roll_through             skip the review delay and start FINE immediately' \
+    '  --no-plastic__coarse_phase_roll_through          retain the review delay; default' \
     '  --plastic__layer_count_probe_interval N        FINE probe cadence; defaults to update brake' \
     "  --plastic__layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}       full integer FINE probe radius" \
     "  --plastic__layer_count_max_step N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement" \
-    '  Hyphenated and legacy single-underscore aliases remain accepted.' \
+    '  Hyphenated and single-underscore PLASTIC aliases are rejected.' \
     ''
 fi
 unset THOG2_PLASTIC_LOOKAHEAD_HELP

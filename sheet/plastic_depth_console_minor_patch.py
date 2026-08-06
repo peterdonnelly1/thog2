@@ -14,6 +14,7 @@ from . import stage6_trainer as _stage6
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _PALE_RED = "\033[38;2;255;150;150m"
+_PALE_CYAN = "\033[38;2;150;220;255m"
 _RESET = "\033[0m"
 # _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                         # <<< THOG preserve the pre-public-formatter alignment field set
 _ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                              # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
@@ -71,6 +72,18 @@ def _row_has_active_update_brake(trainer: Any, completed_updates: int) -> bool:
 # ^^^ THOG
 
 
+# vvv THOG expose the separate warmup gate whenever learned count movement is prohibited
+def _row_has_warmup_brake(trainer: Any, completed_updates: int) -> bool:
+    config = getattr(trainer, "config", None)
+    return (
+        bool(getattr(config, "plastic__enabled", False))
+        and bool(getattr(config, "plastic__do_learn_layer_count", False))
+        and bool(getattr(config, "plastic__freeze_geometry_during_warmup", False))
+        and int(completed_updates) <= int(getattr(config, "warmup_updates", 0))
+    )
+# ^^^ THOG
+
+
 def _remove_probe_fields(values: Dict[str, Any]) -> None:
     for key in (
         "plastic_probe_losses",
@@ -103,6 +116,10 @@ def _prepare_console_progress_payload_with_probe_visibility(
         values["plastic_update_brake_active"] = True
     else:
         values.pop("plastic_update_brake_active", None)
+    if _row_has_warmup_brake(self, completed_updates):
+        values["plastic_warmup_brake_active"] = True
+    else:
+        values.pop("plastic_warmup_brake_active", None)
     return values
 
 
@@ -201,6 +218,8 @@ def _format_progress_line_with_minor_plastic_console_changes(
         line = _align_validation_row(run_id, line)
     if bool(payload.get("plastic_update_brake_active", False)):
         line = f"{line.rstrip()}  {_PALE_RED}<<< update brake on{_RESET}"
+    if bool(payload.get("plastic_warmup_brake_active", False)):
+        line = f"{line.rstrip()}  {_PALE_CYAN}<<< warmup braked enabled{_RESET}"
     return line
 
 

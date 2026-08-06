@@ -67,7 +67,7 @@ _stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
 # _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                               # <<< THOG preserve palette-dependent bright-green attempt
 _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
 # _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
-_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
+_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[0;1;93m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
 # ^^^ THOG
 
 # vvv THOG install active-prefix PLASTIC gauge verification after DEPTH trajectory classes are loaded

@@ -68,6 +68,8 @@ PUBLIC_MODEL_TYPES = ("dense", "sheet")
 PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__enabled",
     "plastic__coarse_phase",
+    "plastic__coarse_phase_roll_through",
+    "plastic__log_interval_coarse",
     "plastic__phase_1_n_steps",
     "plastic__phase_1_starting_layer_count",
     "plastic__phase_1__number_of_trials",
@@ -175,6 +177,8 @@ class OwtRunConfig:
     # vvv THOG PLASTIC DEPTH public run controls
     plastic__enabled: bool = False
     plastic__coarse_phase: str = "disabled"
+    plastic__coarse_phase_roll_through: bool = False
+    plastic__log_interval_coarse: int = 10
     plastic__phase_1_n_steps: Optional[int] = None
     plastic__phase_1_starting_layer_count: Optional[int] = None
     plastic__phase_1__number_of_trials: Optional[int] = None
@@ -221,7 +225,7 @@ class OwtRunConfig:
     grad_clip: float = 1.0
     # vvv THOG public bounded non-finite recovery controls
     nonfinite_update_policy: str = "skip"
-    max_nonfinite_update_skips: int = 10
+    max_nonfinite_update_skips: int = 99999
     # ^^^ THOG
     dropout: float = 0.0
     bias: bool = True
@@ -262,6 +266,14 @@ class OwtRunConfig:
         # vvv THOG resolve the PLASTIC DEPTH lattice size before n_layer-dependent public validation and naming
         if not isinstance(self.plastic__enabled, bool):
             raise ValueError("plastic__enabled must be bool")
+        if not isinstance(self.plastic__coarse_phase_roll_through, bool):
+            raise ValueError("plastic__coarse_phase_roll_through must be bool")
+        if (
+            isinstance(self.plastic__log_interval_coarse, bool)
+            or not isinstance(self.plastic__log_interval_coarse, int)
+            or self.plastic__log_interval_coarse < 1
+        ):
+            raise ValueError("plastic__log_interval_coarse must be a positive integer")
         if not isinstance(self.plastic__do_learn_layer_count, bool):
             raise ValueError("plastic__do_learn_layer_count must be bool")
         if not isinstance(self.plastic__freeze_geometry_during_warmup, bool):
@@ -729,6 +741,8 @@ class OwtRunConfig:
             # vvv THOG persist every exposed control under its exact canonical plastic__ name
             identity["plastic_depth"] = plastic_depth_identity_metadata(
                 coarse_phase=self.plastic__coarse_phase,
+                coarse_phase_roll_through=self.plastic__coarse_phase_roll_through,
+                log_interval_coarse=self.plastic__log_interval_coarse,
                 phase_1_n_steps=self.plastic__phase_1_n_steps,
                 phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
                 phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,
@@ -868,10 +882,10 @@ class OwtRunConfig:
 
     def parameter_artifact_fragment(self) -> str:
         fit_fields = [
+            f"d_{dataset_label(self.dataset)}",
             f"A_{self.gradient_accumulation_steps}",
             f"b_{self.batch_size}",
             f"c_{self._learning_rate_code(self.learning_rate)}",
-            f"d_{dataset_label(self.dataset)}",
             f"f_{self._learning_rate_code(self.min_lr)}",
             f"w_{self.warmup_iters}",
         ]
@@ -896,38 +910,45 @@ class OwtRunConfig:
         sections = ["_".join(fit_fields), "_".join(shape_fields)]
         # vvv THOG only enabled PLASTIC DEPTH runs acquire descriptor fields; established artifact names remain unchanged
         if self.plastic__enabled:
+            sampling_label = {"equidistant": "equ", "random": "rndm"}[self.plastic__layer_sampling_initialisation]
+            objective_label = {
+                "lowest_loss": "loss",
+                "relative_training_wall_time": "time",
+                "layer_efficiency": "lyrs",
+                "memory_budget": "mem",
+            }[self.plastic__layer_count_objective]
             plastic_fields = [
-                f"PLN_{self.plastic__initial_active_layers}",
-                f"PLM_{self.n_layer}",
-                f"PLI_{self.plastic__layer_sampling_initialisation}",
-                f"PLO_{self.plastic__layer_count_objective}",
+                f"LN_{self.plastic__initial_active_layers}",
+                f"LM_{self.n_layer}",
+                f"LI_{sampling_label}",
+                f"LO_{objective_label}",
             ]
             if self.plastic__coarse_phase == "enabled":
                 plastic_fields.extend([
-                    f"PLC_{self.plastic__phase_1_starting_layer_count}",
-                    f"PLCS_{self.plastic__phase_1_n_steps}",
-                    f"PLCT_{self.plastic__phase_1__number_of_trials}",
-                    f"PLCE_{self.plastic__phase_1_evaluation_steps_count}",
+                    f"LC_{self.plastic__phase_1_starting_layer_count}",
+                    f"LCS_{self.plastic__phase_1_n_steps}",
+                    f"LCT_{self.plastic__phase_1__number_of_trials}",
+                    f"LCE_{self.plastic__phase_1_evaluation_steps_count}",
                 ])
             if self.plastic__do_learn_layer_count:
                 plastic_fields.extend([
-                    f"PLPI_{self.plastic__layer_count_probe_interval}",
-                    f"PLPR_{self.plastic__layer_count_probe_radius}",
-                    f"PLMS_{self.plastic__layer_count_max_step}",
-                    f"PLB_{self.plastic__layer_count_update_brake}",
-                    f"PLNW_{self.plastic__layer_count_probe_noise_window}",
-                    f"PLNM_{self.plastic__layer_count_probe_noise_min_observations}",
-                    f"PLNL_{self._learning_rate_code(float(self.plastic__layer_count_probe_noise_lambda))}",
+                    f"LPI_{self.plastic__layer_count_probe_interval}",
+                    f"LPR_{self.plastic__layer_count_probe_radius}",
+                    f"LMS_{self.plastic__layer_count_max_step}",
+                    f"LB_{self.plastic__layer_count_update_brake}",
+                    f"LNW_{self.plastic__layer_count_probe_noise_window}",
+                    f"LNM_{self.plastic__layer_count_probe_noise_min_observations}",
+                    f"LNL_{self._learning_rate_code(float(self.plastic__layer_count_probe_noise_lambda))}",
                 ])
             if float(self.plastic__layer_count_cost_weight) != 0.0:
-                plastic_fields.append(f"PLW_{self._artifact_float(self.plastic__layer_count_cost_weight)}")
+                plastic_fields.append(f"LW_{self._artifact_float(self.plastic__layer_count_cost_weight)}")
             if self.plastic__layer_memory_budget_gib is not None:
-                plastic_fields.append(f"PLB_{self._artifact_float(self.plastic__layer_memory_budget_gib)}")
+                plastic_fields.append(f"LMB_{self._artifact_float(self.plastic__layer_memory_budget_gib)}")
             if float(self.plastic__geometry_learning_rate_multiplier) != 0.1:
-                plastic_fields.append(f"PLG_{self._artifact_float(self.plastic__geometry_learning_rate_multiplier)}")
+                plastic_fields.append(f"LG_{self._artifact_float(self.plastic__geometry_learning_rate_multiplier)}")
             if not self.plastic__freeze_geometry_during_warmup:
-                plastic_fields.append("PLF_0")
-            sections.append("_".join(plastic_fields))
+                plastic_fields.append("LF_0")
+            sections.append("P__" + "_".join(plastic_fields))
         # ^^^ THOG
         if self.model_type == "sheet":
             if self.hyperblock_enabled:
@@ -1071,6 +1092,8 @@ class OwtRunConfig:
             # vvv THOG pass complete PLASTIC DEPTH Plasticity Engine identity into the shared trainer
             plastic__enabled=self.plastic__enabled,
             plastic__coarse_phase=self.plastic__coarse_phase,
+            plastic__coarse_phase_roll_through=self.plastic__coarse_phase_roll_through,
+            plastic__log_interval_coarse=self.plastic__log_interval_coarse,
             plastic__phase_1_n_steps=self.plastic__phase_1_n_steps,
             plastic__phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
             plastic__phase_1__number_of_trials=self.plastic__phase_1__number_of_trials,

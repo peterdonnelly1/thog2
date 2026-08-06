@@ -32,6 +32,8 @@ class ResolvedPlasticDepthCounts:
 def plastic_depth_identity_metadata(
     *,
     coarse_phase: str = "disabled",
+    coarse_phase_roll_through: bool = False,
+    log_interval_coarse: int = 10,
     phase_1_n_steps: Optional[int] = None,
     phase_1_starting_layer_count: Optional[int] = None,
     phase_1_number_of_trials: Optional[int] = None,
@@ -60,6 +62,8 @@ def plastic_depth_identity_metadata(
         "version": PLASTIC_DEPTH_VERSION,
         "plastic__enabled": True,
         "plastic__coarse_phase": coarse_phase,
+        "plastic__coarse_phase_roll_through": bool(coarse_phase_roll_through),
+        "plastic__log_interval_coarse": int(log_interval_coarse),
         "plastic__phase_1_n_steps": phase_1_n_steps,
         "plastic__phase_1_starting_layer_count": phase_1_starting_layer_count,
         "plastic__phase_1__number_of_trials": phase_1_number_of_trials,

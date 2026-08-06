@@ -349,7 +349,7 @@ def render_plastic_coarse_report(
             raise ValueError("all scored trials must use one objective")
 
     headers = [
-        f"PLASTIC COARSE RESULTS",
+        "PLASTIC COARSE RESULTS",
         f"{len(scored_trials)} trials x {training_steps} training steps",
         f"validation mean over final {evaluation_steps_count} batches",
         f"goal: {objective}",
@@ -362,17 +362,27 @@ def render_plastic_coarse_report(
         f"{'trial':>5} {'layers':>6} {'elapsed_s':>10} {'sec/step':>10} "
         f"{'tok/s':>9} {'mean_val':>10} {'val_std':>9} {'peak_GiB':>9} "
         + (f"{'within_budget':>13} " if objective == "memory_budget" else "")
-        + f"{heading:>18} {'status':>9}"
+        + f"{heading:>18} status"
     )
     lines = headers + [columns]
     for row in scored_trials:
         result = row.result
-        marker = " <<< WINNER" if row is winner else ""
+        marker = (
+            f" {_WINNER_STYLE_START}<<< WINNER{_STYLE_END}"
+            if row is winner and ansi
+            else (" <<< WINNER" if row is winner else "")
+        )
         within = ""
         if objective == "memory_budget":
             within = f"{('yes' if row.within_budget else 'no'):>13} "
-        status = "failed" if result.status == "failed" else ("ok" if row.selectable else "unselectable")
-        line = (
+        if result.status == "failed":
+            reason = " ".join(str(result.error_message or "no reason recorded").split())
+            status = (
+                f"failed - because {result.error_class or 'Exception'}: {reason}"
+            )
+        else:
+            status = "ok" if row.selectable else "unselectable"
+        lines.append(
             f"{result.trial_index:5d} {result.layers:6d} "
             f"{_format_optional(result.training_elapsed_seconds, 10, 2)} "
             f"{_format_optional(result.seconds_per_step, 10, 5)} "
@@ -380,11 +390,8 @@ def render_plastic_coarse_report(
             f"{_format_optional(result.mean_validation_loss, 10, 4)} "
             f"{_format_optional(result.validation_loss_std, 9, 4)} "
             f"{_format_optional(result.peak_allocated_gib, 9, 2)} "
-            f"{within}{_format_optional(row.score, 18, 6)} {status:>9}{marker}"
+            f"{within}{_format_optional(row.score, 18, 6)} {status}{marker}"
         )
-        if row is winner and ansi:
-            line = f"{_WINNER_STYLE_START}{line}{_STYLE_END}"
-        lines.append(line)
     return "\n".join(lines)
 
 

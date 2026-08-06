@@ -63,6 +63,8 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
     "plastic__runtime_phase",
     "plastic__coarse_phase",
+    "plastic__coarse_phase_roll_through",
+    "plastic__log_interval_coarse",
     "plastic__phase_1_n_steps",
     "plastic__phase_1_starting_layer_count",
     "plastic__phase_1__number_of_trials",
@@ -195,6 +197,8 @@ class TrainingConfig:
     plastic__enabled: bool = False
     plastic__runtime_phase: str = "fine"
     plastic__coarse_phase: str = "disabled"
+    plastic__coarse_phase_roll_through: bool = False
+    plastic__log_interval_coarse: int = 10
     plastic__phase_1_n_steps: Optional[int] = None
     plastic__phase_1_starting_layer_count: Optional[int] = None
     plastic__phase_1__number_of_trials: Optional[int] = None
@@ -242,7 +246,7 @@ class TrainingConfig:
     grad_clip: float = 1.0
     # vvv THOG bounded non-finite update recovery controls
     nonfinite_update_policy: str = "skip"
-    max_nonfinite_update_skips: int = 10
+    max_nonfinite_update_skips: int = 99999
     # ^^^ THOG
     eval_interval: int = 0
     eval_batches: int = 1
@@ -275,6 +279,14 @@ class TrainingConfig:
                 "plastic__runtime_phase must be coarse or fine; "
                 f"got {self.plastic__runtime_phase!r}"
             )
+        if not isinstance(self.plastic__coarse_phase_roll_through, bool):
+            raise ValueError("plastic__coarse_phase_roll_through must be bool")
+        if (
+            isinstance(self.plastic__log_interval_coarse, bool)
+            or not isinstance(self.plastic__log_interval_coarse, int)
+            or self.plastic__log_interval_coarse < 1
+        ):
+            raise ValueError("plastic__log_interval_coarse must be a positive integer")
         if not isinstance(self.plastic__do_learn_layer_count, bool):
             raise ValueError(
                 "plastic__do_learn_layer_count must be bool; "
@@ -849,6 +861,8 @@ class TrainingConfig:
             # vvv THOG persist every exposed control under its exact canonical plastic__ name
             identity["plastic_depth"] = plastic_depth_identity_metadata(
                 coarse_phase=self.plastic__coarse_phase,
+                coarse_phase_roll_through=self.plastic__coarse_phase_roll_through,
+                log_interval_coarse=self.plastic__log_interval_coarse,
                 phase_1_n_steps=self.plastic__phase_1_n_steps,
                 phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
                 phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,

@@ -170,9 +170,8 @@ def test_coarse_report_prints_failed_trial_exception() -> None:
         ansi=False,
     )
 
-    assert "PLASTIC COARSE FAILURES" in report
-    assert "trial 2 layers=8 completed=1/2" in report
-    assert "OutOfMemoryError: CUDA out of memory" in report
+    assert "PLASTIC COARSE FAILURES" not in report
+    assert "failed - because OutOfMemoryError: CUDA out of memory" in report
 
 
 class _Run:

@@ -277,30 +277,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hyperblock-loop-decay", type=float, default=1.0)
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH public controls map directly to the canonical double-underscore configuration fields
-    parser.add_argument("--plastic-enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--plastic-coarse-phase", dest="plastic__coarse_phase", choices=("enabled", "disabled"), default="disabled")
-    parser.add_argument("--plastic-phase-1-n-steps", dest="plastic__phase_1_n_steps", type=int)
-    parser.add_argument("--plastic-phase-1-starting-layer-count", dest="plastic__phase_1_starting_layer_count", type=int)
-    parser.add_argument("--plastic-phase-1-number-of-trials", dest="plastic__phase_1__number_of_trials", type=int)
-    parser.add_argument("--plastic-phase-1-evaluation-steps-count", dest="plastic__phase_1_evaluation_steps_count", type=int)
-    parser.add_argument("--plastic-layers-to-sample", dest="plastic__layers_to_sample", type=int)
-    parser.add_argument("--plastic-do-learn-layer-count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--plastic-initial-layer-count", dest="plastic__initial_layer_count", type=int)
-    parser.add_argument("--plastic-max-permitted-layers", dest="plastic__max_permitted_layers", type=int)
-    parser.add_argument("--plastic-layer-sampling-initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
-    parser.add_argument("--plastic-layer-count-objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
-    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)
-    parser.add_argument("--plastic-layer-count-probe-interval", dest="plastic__layer_count_probe_interval", type=int)
-    parser.add_argument("--plastic-layer-count-probe-radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
-    parser.add_argument("--plastic-layer-count-max-step", dest="plastic__layer_count_max_step", type=int, default=1)
-    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
-    parser.add_argument("--plastic-layer-count-probe-noise-min-observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
-    parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
-    parser.add_argument("--plastic-layer-count-cost-weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
-    parser.add_argument("--plastic-layer-memory-budget-gib", dest="plastic__layer_memory_budget_gib", type=float)
-    parser.add_argument("--plastic-cuda-allocator-reserve-gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
-    parser.add_argument("--plastic-geometry-learning-rate-multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
-    parser.add_argument("--plastic-freeze-geometry-during-warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--plastic__enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__coarse_phase", dest="plastic__coarse_phase", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--plastic__coarse_phase_roll_through", dest="plastic__coarse_phase_roll_through", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__log_interval_coarse", dest="plastic__log_interval_coarse", type=int, default=10)
+    parser.add_argument("--plastic__phase_1_n_steps", dest="plastic__phase_1_n_steps", type=int)
+    parser.add_argument("--plastic__phase_1_starting_layer_count", dest="plastic__phase_1_starting_layer_count", type=int)
+    parser.add_argument("--plastic__phase_1__number_of_trials", dest="plastic__phase_1__number_of_trials", type=int)
+    parser.add_argument("--plastic__phase_1_evaluation_steps_count", dest="plastic__phase_1_evaluation_steps_count", type=int)
+    parser.add_argument("--plastic__layers_to_sample", dest="plastic__layers_to_sample", type=int)
+    parser.add_argument("--plastic__do_learn_layer_count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__initial_layer_count", dest="plastic__initial_layer_count", type=int)
+    parser.add_argument("--plastic__max_permitted_layers", dest="plastic__max_permitted_layers", type=int)
+    parser.add_argument("--plastic__layer_sampling_initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
+    parser.add_argument("--plastic__layer_count_objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
+    parser.add_argument("--plastic__layer_count_update_brake", dest="plastic__layer_count_update_brake", type=int, default=5)
+    parser.add_argument("--plastic__layer_count_probe_interval", dest="plastic__layer_count_probe_interval", type=int)
+    parser.add_argument("--plastic__layer_count_probe_radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
+    parser.add_argument("--plastic__layer_count_max_step", dest="plastic__layer_count_max_step", type=int, default=1)
+    parser.add_argument("--plastic__layer_count_probe_noise_window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
+    parser.add_argument("--plastic__layer_count_probe_noise_min_observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
+    parser.add_argument("--plastic__layer_count_probe_noise_lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
+    parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
+    parser.add_argument("--plastic__layer_memory_budget_gib", dest="plastic__layer_memory_budget_gib", type=float)
+    parser.add_argument("--plastic__cuda_allocator_reserve_gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
+    parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
+    parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
     # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
@@ -322,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                    # <<< THOG bounded recovery policy
-    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                                         # <<< THOG bounded recovery limit
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=99999)                                                                         # <<< THOG bounded recovery limit
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
@@ -489,6 +491,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         # vvv THOG pass PLASTIC DEPTH CLI controls into resolved run identity
         plastic__enabled=arguments.plastic__enabled,
         plastic__coarse_phase=arguments.plastic__coarse_phase,
+        plastic__coarse_phase_roll_through=arguments.plastic__coarse_phase_roll_through,
+        plastic__log_interval_coarse=arguments.plastic__log_interval_coarse,
         plastic__phase_1_n_steps=arguments.plastic__phase_1_n_steps,
         plastic__phase_1_starting_layer_count=arguments.plastic__phase_1_starting_layer_count,
         plastic__phase_1__number_of_trials=arguments.plastic__phase_1__number_of_trials,

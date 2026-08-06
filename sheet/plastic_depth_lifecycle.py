@@ -216,6 +216,12 @@ def run_plastic_coarse_fine_lifecycle(
     trial_results = list(resume.completed_trial_results if resume is not None else ())
     try:
         trial_count = len(coarse_config.candidate_layers)
+        if coordinator.is_primary:
+            _emit(console_stream, "COARSE TRIALS")
+            _emit(
+                console_stream,
+                "  layer counts: " + ", ".join(str(value) for value in coarse_config.candidate_layers),
+            )
         for trial_index, active_layers in enumerate(
             coarse_config.candidate_layers,
             start=1,
@@ -352,12 +358,22 @@ def run_plastic_coarse_fine_lifecycle(
         if coordinator.is_primary:
             _emit(console_stream, report)
 
-        pause_result = run_distributed_plastic_coarse_review_pause(
-            coordinator,
-            duration_seconds=pause_duration_seconds,
-            output=console_stream,
-            pause_runner=pause_runner,
-        )
+        if bool(getattr(resolved_config, "plastic__coarse_phase_roll_through", False)):
+            pause_result = PlasticCoarsePauseResult(
+                disposition="roll_through",
+                elapsed_seconds=0.0,
+                remaining_seconds=0.0,
+            )
+            if coordinator.is_primary:
+                _emit(console_stream, "COARSE roll-through enabled; starting FINE immediately.")
+            coordinator.barrier()
+        else:
+            pause_result = run_distributed_plastic_coarse_review_pause(
+                coordinator,
+                duration_seconds=pause_duration_seconds,
+                output=console_stream,
+                pause_runner=pause_runner,
+            )
         payload = dict(coarse_results_payload(scored_trials, winner))
         payload.update(
             {
