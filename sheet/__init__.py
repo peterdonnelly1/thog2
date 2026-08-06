@@ -109,3 +109,7 @@ from . import plastic_depth_controller_stability_patch as _plastic_depth_control
 # vvv THOG align PLASTIC validation suffixes, suppress stale probe fields and expose active count brakes
 from . import plastic_depth_console_minor_patch as _plastic_depth_console_minor_patch
 # ^^^ THOG
+
+# vvv THOG final COARSE/FINE overlay wins after all compatibility patches and probes every valid integer count in the configured radius
+from . import plastic_depth_coarse_fine_patch as _plastic_depth_coarse_fine_patch
+# ^^^ THOG
