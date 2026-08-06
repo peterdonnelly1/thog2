@@ -28,7 +28,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install final audit overlay
-        run: python tools/apply_plastic_audit_overlay.py
+        run: |
+          python tools/apply_plastic_audit_overlay.py
+          if grep -q 'self.state.plastic_depth_count_audit.append' sheet/plastic_depth_audit_patch.py; then
+            python tools/apply_plastic_disabled_checkpoint_compat.py
+          fi
 
       - name: Install CPU test dependencies
         run: |
@@ -40,6 +44,8 @@ jobs:
         run: |
           python -m py_compile \
             sheet/plastic_depth_audit_patch.py \
+            sheet/trainer_checkpoint_save.py \
+            sheet/trainer_checkpoint_resume.py \
             sheet/trainer_state.py \
             sheet/__init__.py
 
@@ -49,9 +55,10 @@ jobs:
             tests/test_plastic_depth_audit.py \
             tests/test_plastic_depth_full_radius.py \
             tests/test_plastic_depth_transition_control_plane.py \
-            tests/test_plastic_depth_lifecycle_checkpoint.py
+            tests/test_plastic_depth_lifecycle_checkpoint.py \
+            tests/test_plastic_depth.py
 
-      - name: Commit audit overlay integration
+      - name: Commit audit and disabled-checkpoint integration
         if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
@@ -59,8 +66,12 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add sheet/__init__.py
-          git commit -m 'Integrate replayable PLASTIC FINE decision audit'
+          git add \
+            sheet/__init__.py \
+            sheet/plastic_depth_audit_patch.py \
+            sheet/trainer_checkpoint_save.py \
+            sheet/trainer_checkpoint_resume.py
+          git commit -m 'Integrate replayable PLASTIC audit without disabled drift'
           git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
