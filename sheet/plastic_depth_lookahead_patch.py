@@ -252,6 +252,8 @@ _ORIGINAL_COMMIT_INLINE_UPDATE = _trainer_step.TrainerStepMixin._commit_plastic_
 def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:
     if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
         return None
+    if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":
+        return None
     lattice = self._plastic_depth_lattice()
     if lattice is None:
         raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")

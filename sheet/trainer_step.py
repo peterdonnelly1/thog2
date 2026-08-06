@@ -319,6 +319,8 @@ class TrainerStepMixin:
     def _begin_plastic_depth_inline_update(self) -> Optional[Dict[str, Any]]:
         if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
             return None
+        if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":
+            return None
         lattice = self._plastic_depth_lattice()
         if lattice is None:
             raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
@@ -1050,7 +1052,10 @@ class TrainerStepMixin:
                 and self.state.completed_updates >= self.config.warmup_updates
             )
             # vvv THOG fixed-count PLASTIC DEPTH reports timing without creating or checkpointing dormant controller statistics
-            if self.config.plastic__do_learn_layer_count:
+            if (
+                self.config.plastic__do_learn_layer_count
+                and getattr(self.config, "plastic__runtime_phase", "fine") == "fine"
+            ):
                 lattice.record_training_time(
                     active_layers,
                     training_only_seconds,

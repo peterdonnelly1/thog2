@@ -113,6 +113,8 @@ def _resolved_fresh_config(
     changes: Dict[str, Any] = {
         "plastic__initial_layer_count": int(active_layer_count),
     }
+    if hasattr(config, "plastic__coarse_phase"):
+        changes["plastic__coarse_phase"] = "disabled"
     if hasattr(config, "plastic__runtime_phase"):
         changes["plastic__runtime_phase"] = phase
     return replace(config, **changes)
@@ -140,6 +142,24 @@ def build_fresh_training_state(
         device=str(fresh_config.device),
     )
     trainer = trainer_factory(fresh_config, train_tokens, validation_tokens)
+    if phase == "coarse" and bool(getattr(fresh_config, "plastic__enabled", False)):
+        trajectory = getattr(trainer.raw_model, "trajectory", None)
+        lattice = getattr(trajectory, "plastic_sampling", None)
+        if lattice is None:
+            close = getattr(trainer, "close", None)
+            if callable(close):
+                close()
+            raise RuntimeError("PLASTIC COARSE trainer has no sampling lattice")
+        for parameter in lattice.parameters():
+            parameter.requires_grad_(False)
+        if int(lattice.current_active_layers) != int(active_layer_count):
+            close = getattr(trainer, "close", None)
+            if callable(close):
+                close()
+            raise RuntimeError(
+                "PLASTIC COARSE active count differs from its candidate: "
+                f"candidate={active_layer_count}, active={lattice.current_active_layers}"
+            )
     completed_updates = int(getattr(trainer.state, "completed_updates", 0))
     if completed_updates != 0:
         close = getattr(trainer, "close", None)
