@@ -67,7 +67,9 @@ jobs:
             tests/test_plastic_depth_full_radius.py \
             tests/test_plastic_depth_audit.py \
             tests/test_plastic_depth_transition_control_plane.py \
-            tests/test_plastic_depth_controller_stability.py
+            tests/test_plastic_depth_controller_stability.py \
+            tests/test_plastic_depth_cuda.py::test_successful_reserve_is_released_by_update_cleanup \
+            tests/test_modified_fast_discard_false.py::test_stage4_update_is_equivalent_and_releases_materializations
 
       - name: Commit full-radius candidate recovery
         if: github.event_name == 'push'
