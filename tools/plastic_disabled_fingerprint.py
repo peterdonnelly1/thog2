@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 from typing import Any
 
@@ -69,31 +71,33 @@ def _config() -> TrainingConfig:
 def main() -> None:
     tokens = torch.arange(512, dtype=torch.long) % 32
     validation = torch.roll(tokens, shifts=7)
-    trainer = SharedTrainer(_config(), tokens, validation)
-    try:
-        initial_model = _canonical(trainer.raw_model.state_dict())
-        initial_optimizer = _canonical(trainer.optimizer.state_dict())
-        initial_batch_source = _canonical(trainer.batch_source.state_dict())
-        metrics = trainer.train_one_update()
-        checkpoint = trainer.checkpoint_payload()
-        result = {
-            "persistent_config": trainer.config.persistent_dict(),
-            "structure_signature": _canonical(trainer.distributed_structure_signature()),
-            "initial_model": initial_model,
-            "initial_optimizer": initial_optimizer,
-            "initial_batch_source": initial_batch_source,
-            "update_metrics": _canonical(metrics),
-            "final_model": _canonical(trainer.raw_model.state_dict()),
-            "final_optimizer": _canonical(trainer.optimizer.state_dict()),
-            "final_batch_source": _canonical(trainer.batch_source.state_dict()),
-            "trainer_state": _canonical(checkpoint["trainer_state"]),
-            "checkpoint_keys": sorted(checkpoint),
-            "checkpoint_trainer_config": checkpoint["trainer_config"],
-            "event_names": [event.name for event in trainer.events],
-        }
-        print(json.dumps(result, indent=2, sort_keys=True))
-    finally:
-        trainer.close()
+    console = io.StringIO()
+    with contextlib.redirect_stdout(console):
+        trainer = SharedTrainer(_config(), tokens, validation)
+        try:
+            initial_model = _canonical(trainer.raw_model.state_dict())
+            initial_optimizer = _canonical(trainer.optimizer.state_dict())
+            initial_batch_source = _canonical(trainer.batch_source.state_dict())
+            metrics = trainer.train_one_update()
+            checkpoint = trainer.checkpoint_payload()
+            result = {
+                "persistent_config": trainer.config.persistent_dict(),
+                "structure_signature": _canonical(trainer.distributed_structure_signature()),
+                "initial_model": initial_model,
+                "initial_optimizer": initial_optimizer,
+                "initial_batch_source": initial_batch_source,
+                "update_metrics": _canonical(metrics),
+                "final_model": _canonical(trainer.raw_model.state_dict()),
+                "final_optimizer": _canonical(trainer.optimizer.state_dict()),
+                "final_batch_source": _canonical(trainer.batch_source.state_dict()),
+                "trainer_state": _canonical(checkpoint["trainer_state"]),
+                "checkpoint_keys": sorted(checkpoint),
+                "checkpoint_trainer_config": checkpoint["trainer_config"],
+                "event_names": [event.name for event in trainer.events],
+            }
+        finally:
+            trainer.close()
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
