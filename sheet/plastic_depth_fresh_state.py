@@ -138,6 +138,27 @@ def _resolved_fresh_config(
     return replace(config, **changes)
 
 
+# vvv THOG fresh and checkpoint-restored COARSE trainers share one frozen-geometry invariant
+def prepare_plastic_coarse_training_state(
+    trainer: Any,
+    *,
+    active_layer_count: int,
+) -> None:
+    trajectory = getattr(trainer.raw_model, "trajectory", None)
+    lattice = getattr(trajectory, "plastic_sampling", None)
+    if lattice is None:
+        raise RuntimeError("PLASTIC COARSE trainer has no sampling lattice")
+    if int(lattice.current_active_layers) != int(active_layer_count):
+        raise RuntimeError(
+            "PLASTIC COARSE active count differs from its candidate: "
+            f"candidate={active_layer_count}, active={lattice.current_active_layers}"
+        )
+    for parameter in lattice.parameters():
+        parameter.requires_grad_(False)
+    trainer.plastic_lifecycle_phase = "coarse"
+# ^^^ THOG
+
+
 def build_fresh_training_state(
     *,
     trainer_factory: Callable[[Any, Tensor, Tensor], Any],
@@ -161,23 +182,16 @@ def build_fresh_training_state(
     )
     trainer = trainer_factory(fresh_config, train_tokens, validation_tokens)
     if phase == "coarse" and bool(getattr(fresh_config, "plastic__enabled", False)):
-        trajectory = getattr(trainer.raw_model, "trajectory", None)
-        lattice = getattr(trajectory, "plastic_sampling", None)
-        if lattice is None:
-            close = getattr(trainer, "close", None)
-            if callable(close):
-                close()
-            raise RuntimeError("PLASTIC COARSE trainer has no sampling lattice")
-        for parameter in lattice.parameters():
-            parameter.requires_grad_(False)
-        if int(lattice.current_active_layers) != int(active_layer_count):
-            close = getattr(trainer, "close", None)
-            if callable(close):
-                close()
-            raise RuntimeError(
-                "PLASTIC COARSE active count differs from its candidate: "
-                f"candidate={active_layer_count}, active={lattice.current_active_layers}"
+        try:
+            prepare_plastic_coarse_training_state(
+                trainer,
+                active_layer_count=active_layer_count,
             )
+        except BaseException:
+            close = getattr(trainer, "close", None)
+            if callable(close):
+                close()
+            raise
     completed_updates = int(getattr(trainer.state, "completed_updates", 0))
     if completed_updates != 0:
         close = getattr(trainer, "close", None)
@@ -209,3 +223,13 @@ def destroy_fresh_training_state(state: PlasticFreshTrainingState) -> None:
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+__all__ = [
+    "PlasticFreshTrainingState",
+    "build_fresh_training_state",
+    "destroy_fresh_training_state",
+    "plastic_fresh_state_fingerprint",
+    "prepare_plastic_coarse_training_state",
+    "reset_plastic_fresh_random_state",
+]
