@@ -8,6 +8,7 @@
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
+THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS=()
 THOG2_PLASTIC_LOOKAHEAD_HELP=false
 THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR=false
 
@@ -18,26 +19,35 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
+    --plastic-coarse-phase|--plastic-phase-1-n-steps|--plastic-phase-1-starting-layer-count|--plastic-phase-1-number-of-trials|--plastic-phase-1-evaluation-steps-count|--plastic-layer-count-probe-interval)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
+      shift 2
+      ;;
+    --plastic-coarse-phase=*|--plastic-phase-1-n-steps=*|--plastic-phase-1-starting-layer-count=*|--plastic-phase-1-number-of-trials=*|--plastic-phase-1-evaluation-steps-count=*|--plastic-layer-count-probe-interval=*)
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
+      shift
+      ;;
     --plastic-layer-count-probe-radius)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2"
-      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1" "$2")
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
       shift 2
       ;;
     --plastic-layer-count-probe-radius=*)
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${1#*=}"
-      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1")
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
       shift
       ;;
     --plastic-layer-count-max-step)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="$2"
-      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1" "$2")
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1" "$2")
       shift 2
       ;;
     --plastic-layer-count-max-step=*)
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${1#*=}"
-      THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("$1")
+      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=("$1")
       shift
       ;;
     -h|--help)
@@ -57,8 +67,18 @@ while (( $# > 0 )); do
   esac
 done
 
+# vvv THOG legacy train_OWT_core.sh parses short/established long options with getopts; route only the newer COARSE/FINE Python controls through its supported extra-argument boundary
+if (( ${#THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS[@]} > 0 )); then
+  if [[ "$THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR" == true ]]; then
+    THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("${THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS[@]}")
+  else
+    THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS+=("--" "${THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS[@]}")
+  fi
+fi
+# ^^^ THOG
+
 set -- "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"
-unset THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR
+unset THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS THOG2_PLASTIC_LOOKAHEAD_SAW_SEPARATOR
 
 [[ "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" =~ ^[1-9][0-9]*$ ]] || {
   echo "Invalid plastic__layer_count_probe_radius: $THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS; expected a positive integer." >&2
