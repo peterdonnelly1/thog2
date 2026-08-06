@@ -8,6 +8,9 @@ on:
       - tools/apply_registered_runner_help.py
       - tools/apply_plastic_core_canonicalisation_final.py
       - tools/apply_plastic_final_cleanup.py
+      - sheet/__init__.py
+      - sheet/plastic_depth_cli_cost_and_label_patch.py
+      - tests/test_plastic_cli_cost_and_label_patch.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
   pull_request:
     branches:
@@ -58,6 +61,7 @@ jobs:
             sheet/plastic_depth_lifecycle.py \
             sheet/plastic_depth_console_minor_patch.py \
             sheet/plastic_depth_warmup_guard_patch.py \
+            sheet/plastic_depth_cli_cost_and_label_patch.py \
             sheet/plastic_depth_coarse_runtime_recovery_patch.py \
             sheet/run_config.py \
             sheet/training_config.py \
@@ -65,7 +69,8 @@ jobs:
             tools/apply_plastic_core_canonicalisation_final.py \
             tools/apply_plastic_final_cleanup.py \
             tests/test_console_and_descriptor_help.py \
-            tests/test_plastic_cli_console_refinements.py
+            tests/test_plastic_cli_console_refinements.py \
+            tests/test_plastic_cli_cost_and_label_patch.py
           python - <<'PY'
           from pathlib import Path
           paths = [
@@ -79,6 +84,7 @@ jobs:
               Path('sheet/plastic_depth_lifecycle.py'),
               Path('sheet/plastic_depth_console_minor_patch.py'),
               Path('sheet/plastic_depth_warmup_guard_patch.py'),
+              Path('sheet/plastic_depth_cli_cost_and_label_patch.py'),
               Path('sheet/plastic_depth_coarse_runtime_recovery_patch.py'),
           ]
           bad = []
@@ -95,6 +101,7 @@ jobs:
           python -m pytest -q \
             tests/test_console_and_descriptor_help.py \
             tests/test_plastic_cli_console_refinements.py \
+            tests/test_plastic_cli_cost_and_label_patch.py \
             tests/test_plastic_depth_wrapper_options.py \
             tests/test_plastic_depth_coarse_config.py \
             tests/test_plastic_depth_coarse_trials.py \
@@ -125,6 +132,12 @@ jobs:
           grep -q -- 'LCS.*--plastic__phase_1_n_steps N' <<<"$registry_text"
           grep -q -- 'LPI.*--plastic__layer_count_probe_interval N' <<<"$registry_text"
           grep -q -- 'DLB.*--depth-compress-layer-norm-and-bias' <<<"$registry_text"
+          python - <<'PY'
+          from run_thog2_owt_core import build_parser
+          value = build_parser().parse_args([]).plastic__layer_count_cost_weight
+          if value != 0.02:
+              raise SystemExit(f'unexpected PLASTIC layer-count cost default: {value!r}')
+          PY
 
       - name: Commit refinements
         run: |
