@@ -102,11 +102,11 @@ DEFAULT_O_ATTN_QKV_PER_CHANNEL = 6
 DEFAULT_O_ATTN_OUT_PER_CHANNEL = 6
 DEFAULT_O_MLP_D_MODEL = 64
 DEFAULT_O_MLP_HIDDEN = 256
-DEFAULT_MLP_CHANNEL_ORDER = DEFAULT_O_MLP_HIDDEN                                                                                                      # <<< THOG retained module constant name for callers while public configuration uses o_mlp_hidden
+DEFAULT_MLP_CHANNEL_ORDER = DEFAULT_O_MLP_HIDDEN                                                                                                           # <<< THOG retained module constant name for callers while public configuration uses o_mlp_hidden
 DEFAULT_EXPERIMENT_PREFIX = "NEL" + "SON"
 
-_RESIDUAL_POLICY_LABELS = {"depth_scaled": "ds", "unscaled": "us"}                                                                                 # <<< THOG descriptor v2 abbreviates long residual-init values only
-_RESIDUAL_DEPTH_SOURCE_LABELS = {"true_layer_depth": "tld", "dof_implied_depth": "did", "user_forced_depth": "ufd"}                              # <<< THOG descriptor v2 keeps getopts fields and shortens values
+_RESIDUAL_POLICY_LABELS = {"depth_scaled": "ds", "unscaled": "us"}                                                                                         # <<< THOG descriptor v2 abbreviates long residual-init values only
+_RESIDUAL_DEPTH_SOURCE_LABELS = {"true_layer_depth": "tld", "dof_implied_depth": "did", "user_forced_depth": "ufd"}                                        # <<< THOG descriptor v2 keeps getopts fields and shortens values
 
 
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ class OwtRunConfig:
     o_mlp_hidden: int = DEFAULT_O_MLP_HIDDEN
     mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
     mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
-    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias participation switch
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                       # <<< THOG DEPTH-only LayerNorm/bias participation switch
 
     geometry_preset: Optional[str] = GEOMETRY_PRESET_DEPTH
     attention_geometry: Optional[str] = None
@@ -203,8 +203,8 @@ class OwtRunConfig:
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
     # ^^^ THOG
-    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                              # <<< THOG locality control
-    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                      # <<< THOG overlap control
+    lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG locality control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                         # <<< THOG overlap control
     attention_backend: str = "auto"
     experiment_prefix: str = DEFAULT_EXPERIMENT_PREFIX
     run_start_label: Optional[str] = None
@@ -667,7 +667,7 @@ class OwtRunConfig:
         residual_init = self.residual_init_config()
         policy_label = _RESIDUAL_POLICY_LABELS.get(self.residual_init_policy, normalize_component(self.residual_init_policy))
         depth_source_label = _RESIDUAL_DEPTH_SOURCE_LABELS.get(residual_init.depth_source, normalize_component(residual_init.depth_source))
-        parts = [f"r_{policy_label}", f"z_{depth_source_label}"]                                                                                       # <<< THOG descriptor v2 keeps getopts letters and abbreviates long values
+        parts = [f"r_{policy_label}", f"z_{depth_source_label}"]                                                                                           # <<< THOG descriptor v2 keeps getopts letters and abbreviates long values
         if residual_init.depth_source == "user_forced_depth":
             parts.append(f"Z_{self.residual_init_depth_value}")
         return "_".join(parts)
@@ -709,8 +709,8 @@ class OwtRunConfig:
             mlp_hidden_group_size=self.mlp_hidden_group_size,
             mlp_hidden_compressor=self.mlp_hidden_compressor,
             basis_version=self.basis_version,
-            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                # <<< THOG compact identity locality control
-            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                          # <<< THOG compact identity overlap control
+            lapped_cosine_window_length=self.lapped_cosine_window_length,                                                                                  # <<< THOG compact identity locality control
+            lapped_cosine_overlap_fraction=self.lapped_cosine_overlap_fraction,                                                                            # <<< THOG compact identity overlap control
             row_order_scaling_rule=ROW_ORDER_SCALING_RULE,
             geometry_preset=self.geometry_preset,
             attention_geometry=self.attention_geometry,
@@ -791,7 +791,7 @@ class OwtRunConfig:
             return f"G0_{basis_family}"
         if preset == GEOMETRY_PRESET_JPEG_LIKE_V1 or identity["mlp_geometry"] == MLP_GEOMETRY_JPEG_LIKE_V1:
             return f"G0_{basis_family}_G1_jpeg_like_MLP_UP_MLP_HIDDEN"
-        return f"G0_{basis_family}_{normalize_component(preset)}"                                                                                       # <<< THOG legacy presets wither as resolved-ish compatibility labels
+        return f"G0_{basis_family}_{normalize_component(preset)}"                                                                                          # <<< THOG legacy presets wither as resolved-ish compatibility labels
 
     def compact_artifact_fragment(self) -> Optional[str]:
         if self.model_type != "sheet":
@@ -799,15 +799,15 @@ class OwtRunConfig:
         if self.hyperblock_enabled:
             return f"HB_{normalize_component(self.hyperblock_compressor)}"
         if self.resolved_geometry_plan is not None:
-            return self._geometry_slots_from_resolved_plan(self.resolved_geometry_plan)                                                                  # <<< THOG descriptor v2 names systematic geometry by ordered G slots
+            return self._geometry_slots_from_resolved_plan(self.resolved_geometry_plan)                                                                    # <<< THOG descriptor v2 names systematic geometry by ordered G slots
         return self._legacy_geometry_slots(self.compact_identity())
 
     def run_descriptor(self) -> str:
         geometry_fragment = self.compact_artifact_fragment() or "DENSE"
         host = normalize_component(self.host_label)
-        # body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"                                                                                  # <<< THOG preserved one-space descriptor separator
-        body = f"{host}_{self.experiment_prefix}___{geometry_fragment}"                                                                                 # <<< THOG three descriptor spaces after RUN_NAME
-        return f"{self.run_start_label}_{body}" if self.run_start_label else body                                                                        # <<< THOG descriptor v2 places host immediately after timestamp when present
+        # body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"                                                                                    # <<< THOG preserved one-space descriptor separator
+        body = f"{host}_{self.experiment_prefix}___{geometry_fragment}"                                                                                    # <<< THOG three descriptor spaces after RUN_NAME
+        return f"{self.run_start_label}_{body}" if self.run_start_label else body                                                                          # <<< THOG descriptor v2 places host immediately after timestamp when present
 
     def _learning_rate_code(self, value: float) -> int:
         return int(round(value / 1.0e-5))
@@ -974,7 +974,7 @@ class OwtRunConfig:
             else:
                 order_fields = self._legacy_order_fields(self.compact_identity())
             if order_fields:
-                sections.append("_".join(order_fields))                                                                                                 # <<< THOG descriptor v2 separates fit, shape, orders, and init with double underscores
+                sections.append("_".join(order_fields))                                                                                                    # <<< THOG descriptor v2 separates fit, shape, orders, and init with double underscores
         sections.append("_".join([self.residual_init_artifact_fragment(), f"S_{self.checkpoint_segment_size}"]))
         return "__".join(sections)
 
@@ -1043,10 +1043,10 @@ class OwtRunConfig:
                 "o_mlp_hidden": self.o_mlp_hidden,
                 "mlp_hidden_group_size": self.mlp_hidden_group_size,
                 "mlp_hidden_compressor": self.mlp_hidden_compressor,
-                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                         # <<< THOG checkpoint and model vector mode
+                "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                             # <<< THOG checkpoint and model vector mode
                 "basis_version": self.basis_version,
-                "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                         # <<< THOG checkpoint locality control
-                "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                    # <<< THOG checkpoint overlap control
+                "lapped_cosine_window_length": self.lapped_cosine_window_length,                                                                           # <<< THOG checkpoint locality control
+                "lapped_cosine_overlap_fraction": self.lapped_cosine_overlap_fraction,                                                                     # <<< THOG checkpoint overlap control
                 "geometry_preset": self.geometry_preset,
                 "attention_geometry": self.attention_geometry,
                 "mlp_geometry": self.mlp_geometry,
@@ -1117,9 +1117,9 @@ class OwtRunConfig:
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
             plastic__freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
             # ^^^ THOG
-            layer_dropout_stratum_size=self.layer_dropout_stratum_size,                                                                                   # <<< THOG pass stratified layer-dropout controls into trainer config
-            layer_dropout_active_per_stratum=self.layer_dropout_active_per_stratum,                                                                         # <<< THOG pass active cardinality per stratum
-            layer_dropout_resample_steps=self.layer_dropout_resample_steps,                                                                                 # <<< THOG pass selection lifetime in optimizer updates
+            layer_dropout_stratum_size=self.layer_dropout_stratum_size,                                                                                    # <<< THOG pass stratified layer-dropout controls into trainer config
+            layer_dropout_active_per_stratum=self.layer_dropout_active_per_stratum,                                                                        # <<< THOG pass active cardinality per stratum
+            layer_dropout_resample_steps=self.layer_dropout_resample_steps,                                                                                # <<< THOG pass selection lifetime in optimizer updates
             max_updates=self.max_iters,
             max_wall_minutes=self.max_wall_minutes,
             learning_rate=self.learning_rate,
@@ -1211,9 +1211,9 @@ class OwtRunConfig:
             "world_size": world_size,
             "local_gradient_accumulation_steps": self.local_gradient_accumulation_steps(world_size),
             "tokens_per_iter": self.tokens_per_iter(),
-            "layer_dropout_n_strata": self.layer_dropout_n_strata,                                                                                      # <<< THOG expose derived stratum count in run identity/telemetry
-            "n_active_layers": self.n_active_layers,                                                                                                    # <<< THOG expose exact active depth per training update
-            "layer_dropout_enabled": self.layer_dropout_enabled,                                                                                        # <<< THOG make degenerate path explicit in resolved config
+            "layer_dropout_n_strata": self.layer_dropout_n_strata,                                                                                         # <<< THOG expose derived stratum count in run identity/telemetry
+            "n_active_layers": self.n_active_layers,                                                                                                       # <<< THOG expose exact active depth per training update
+            "layer_dropout_enabled": self.layer_dropout_enabled,                                                                                           # <<< THOG make degenerate path explicit in resolved config
         })
         return values
 

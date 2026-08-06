@@ -16,7 +16,7 @@ import torch
 
 from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
-from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
+from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                          # <<< THOG lapped CLI defaults
 # from sheet.checkpoints import load_payload
 # vvv THOG resume-control preflight uses the same PLASTIC geometry-format guard as full trainer resume
 from sheet.checkpoints import load_payload, validate_plastic_depth_checkpoint_format
@@ -125,7 +125,7 @@ class OwtTrainer(Stage6Trainer):
         if "session_consumed_tokens" in values:
             values["session_consumed_tokens"] = int(values["session_consumed_tokens"]) * int(self.distributed.world_size)
         # ^^^ THOG
-        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
+        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))                                   # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
         result = super().run_pilot(**arguments)
@@ -139,10 +139,10 @@ class OwtTrainer(Stage6Trainer):
         # ^^^ THOG
         for row in result["updates"]:
             row["consumed_tokens"] *= multiplier
-            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier                                                                                                   # <<< THOG resumed-session token counts are global under DDP
         for row in result["evaluations"]:
             row["consumed_tokens"] *= multiplier
-            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier                                                                                                   # <<< THOG resumed-session token counts are global under DDP
         result["timing"]["tokens_per_training_second"] *= multiplier
         target = Path(arguments["result_path"])
         if self.distributed.is_primary:
@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-root", default="results")
     parser.add_argument("--wandb-root", default="wandb")
     parser.add_argument("--max-iters", type=int, default=100)
-    parser.add_argument("--max-wall-minutes", type=int, default=0)                                                                                   # <<< THOG soft wall-clock budget; zero preserves existing update-count runs
+    parser.add_argument("--max-wall-minutes", type=int, default=0)                                                                                         # <<< THOG soft wall-clock budget; zero preserves existing update-count runs
     parser.add_argument("--eval-interval", type=int, default=50)
     parser.add_argument("--eval-iters", type=int, default=5)
     parser.add_argument("--log-interval", type=int, default=10)
@@ -254,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
     parser.add_argument("--mlp-hidden-group-size", type=int, default=DEFAULT_MLP_HIDDEN_GROUP_SIZE)
     parser.add_argument("--mlp-hidden-compressor", choices=BASIS_FAMILIES, default=DEFAULT_MLP_HIDDEN_COMPRESSOR)
-    parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                  # <<< THOG DEPTH-only vector participation control
+    parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
@@ -323,8 +323,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                    # <<< THOG bounded recovery policy
-    parser.add_argument("--max-nonfinite-update-skips", type=int, default=99999)                                                                         # <<< THOG bounded recovery limit
+    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                            # <<< THOG bounded recovery policy
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=99999)                                                                           # <<< THOG bounded recovery limit
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
@@ -465,7 +465,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         o_mlp_hidden=selected_mlp_hidden_order,
         mlp_hidden_group_size=arguments.mlp_hidden_group_size if adapter is None or adapter.legacy_mlp_hidden_group_size is None else adapter.legacy_mlp_hidden_group_size,
         mlp_hidden_compressor=arguments.mlp_hidden_compressor if adapter is None or adapter.legacy_mlp_hidden_compressor is None else adapter.legacy_mlp_hidden_compressor,
-        depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                 # <<< THOG CLI vector mode
+        depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                   # <<< THOG CLI vector mode
         geometry_preset=None if arguments.hyperblock else (arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset),
         attention_geometry=None if arguments.hyperblock else (arguments.attention_geometry if adapter is None else None),
         mlp_geometry=None if arguments.hyperblock else (arguments.mlp_geometry if adapter is None else None),
@@ -676,7 +676,7 @@ def main() -> int:
             if geometry_plan is not None:
                 print(format_geometry_plan(geometry_plan), flush=True)
                 print(flush=True)
-            print_model_parameters_and_options(config, trainer)                                                                                         # <<< THOG show the complete effective training setup before the first update
+            print_model_parameters_and_options(config, trainer)                                                                                            # <<< THOG show the complete effective training setup before the first update
         result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=result_path)
         result["artifact"] = {"name": config.artifact_name, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}
         result["canonical_config"] = canonical

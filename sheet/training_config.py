@@ -110,13 +110,13 @@ MODEL_COMPATIBILITY_FIELDS = (
     "o_mlp_hidden",
     "mlp_hidden_group_size",
     "mlp_hidden_compressor",
-    "depth_compress_layer_norm_and_bias",                                                                                                               # <<< THOG DEPTH vector representation is checkpoint identity
+    "depth_compress_layer_norm_and_bias",                                                                                                                  # <<< THOG DEPTH vector representation is checkpoint identity
     "residual_init_policy",
     "residual_init_depth_source",
     "residual_init_depth_value",
     "basis_version",
-    "lapped_cosine_window_length",                                                                                                                        # <<< THOG checkpoint compatibility locality control
-    "lapped_cosine_overlap_fraction",                                                                                                                     # <<< THOG checkpoint compatibility overlap control
+    "lapped_cosine_window_length",                                                                                                                         # <<< THOG checkpoint compatibility locality control
+    "lapped_cosine_overlap_fraction",                                                                                                                      # <<< THOG checkpoint compatibility overlap control
     "row_order_scaling_rule",
     "geometry_preset",
     "attention_geometry",
@@ -157,20 +157,20 @@ class TrainingConfig:
     depth_order: int = 4
     base_row_order: int = 32
     mlp_channel_order: Optional[int] = None
-    o_attn_d_model: Optional[int] = None                                                                                                               # <<< THOG final attention model-axis order
-    o_attn_qkv_per_channel: Optional[int] = None                                                                                                       # <<< THOG final QKV per-head channel order
-    o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
-    o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
-    o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
+    o_attn_d_model: Optional[int] = None                                                                                                                   # <<< THOG final attention model-axis order
+    o_attn_qkv_per_channel: Optional[int] = None                                                                                                           # <<< THOG final QKV per-head channel order
+    o_attn_out_per_channel: Optional[int] = None                                                                                                           # <<< THOG final output per-head channel order
+    o_mlp_d_model: Optional[int] = None                                                                                                                    # <<< THOG final MLP model-axis order
+    o_mlp_hidden: Optional[int] = None                                                                                                                     # <<< THOG final MLP hidden-axis order
     mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
     mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
-    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias participation switch
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                       # <<< THOG DEPTH-only LayerNorm/bias participation switch
     residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG explicit locality control
-    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG explicit overlap control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                         # <<< THOG explicit overlap control
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -767,9 +767,9 @@ class TrainingConfig:
                     "mlp_hidden_group_size": self.mlp_hidden_group_size,
                     "mlp_hidden_compressor": self.mlp_hidden_compressor,
                     # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history
-                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                     # ^^^ THOG
-                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                         # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                     "basis_version": self.basis_version,
                     "geometry_preset": self.geometry_preset,
                     "attention_geometry": self.attention_geometry,

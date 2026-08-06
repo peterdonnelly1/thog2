@@ -16,8 +16,8 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _PALE_RED = "\033[38;2;255;150;150m"
 _PALE_CYAN = "\033[38;2;150;220;255m"
 _RESET = "\033[0m"
-# _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                         # <<< THOG preserve the pre-public-formatter alignment field set
-_ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                              # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
+# _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                             # <<< THOG preserve the pre-public-formatter alignment field set
+_ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                                   # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
 _ALIGNMENT_BY_RUN_ID: Dict[str, Dict[str, int]] = {}
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
@@ -179,7 +179,7 @@ def _align_field_to_column(line: str, label: str, target_column: int) -> str:
 
 
 def _record_alignment(run_id: str, line: str) -> None:
-    # positions = {                                                                                                                                         # <<< THOG preserve overwrite-on-every-T-row behaviour that discarded absent probe columns
+    # positions = {                                                                                                                                        # <<< THOG preserve overwrite-on-every-T-row behaviour that discarded absent probe columns
     #     label: position
     #     for label in _ALIGNMENT_LABELS
     #     if (position := _field_start(line, label)) is not None
