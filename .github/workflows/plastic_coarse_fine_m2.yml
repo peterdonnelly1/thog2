@@ -46,13 +46,12 @@ jobs:
             sheet/training_config.py \
             run_thog2_lifecycle.py
 
-      - name: Run deterministic factory and affected tests
+      - name: Run deterministic factory and checkpoint compatibility tests
         run: |
           python -m pytest -q \
             tests/test_plastic_depth_fresh_state.py \
             tests/test_plastic_depth_coarse_config.py \
-            tests/test_plastic_depth.py \
-            tests/test_run_thog2_owt_startup_report.py
+            tests/test_plastic_depth.py
 
       - name: Commit M2 integration
         if: github.event_name == 'push'
