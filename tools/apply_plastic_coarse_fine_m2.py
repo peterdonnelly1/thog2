@@ -21,6 +21,16 @@ def add_runtime_phase_to_training_config() -> None:
     path = "sheet/training_config.py"
     replace_once(
         path,
+        'PLASTIC_TRAINING_CONFIG_FIELDS = (\n'
+        '    "plastic__enabled",\n'
+        '    "plastic__coarse_phase",\n',
+        'PLASTIC_TRAINING_CONFIG_FIELDS = (\n'
+        '    "plastic__enabled",\n'
+        '    "plastic__runtime_phase",\n'
+        '    "plastic__coarse_phase",\n',
+    )
+    replace_once(
+        path,
         '    plastic__enabled: bool = False\n'
         '    plastic__coarse_phase: str = "disabled"\n',
         '    plastic__enabled: bool = False\n'
