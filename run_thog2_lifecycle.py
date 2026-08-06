@@ -38,6 +38,7 @@ from sheet.run_lifecycle import (
     validate_start_label,
 )
 from sheet.run_manifest import write_run_manifest
+from sheet.plastic_depth_fresh_state import build_fresh_training_state
 from sheet.training_config import TrainingConfig
 
 
@@ -1165,8 +1166,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     train_tokens = core.load_tokens(dataset_dir / "train.bin")
     validation_tokens = core.load_tokens(dataset_dir / "val.bin")
+    fresh_state = None
     if context["mode"] == "fresh":
-        trainer = core.OwtTrainer(training_config, train_tokens, validation_tokens)
+        # vvv THOG PLASTIC fresh runs and every future COARSE trial share one deterministic step-zero constructor; the disabled path remains byte-for-byte on the established constructor
+        if training_config.plastic__enabled:
+            fresh_state = build_fresh_training_state(
+                trainer_factory=core.OwtTrainer,
+                resolved_config=training_config,
+                train_tokens=train_tokens,
+                validation_tokens=validation_tokens,
+                phase="fine",
+                active_layer_count=int(training_config.plastic__initial_active_layers),
+                instrumentation_namespace="fine",
+            )
+            trainer = fresh_state.trainer
+        else:
+            trainer = core.OwtTrainer(training_config, train_tokens, validation_tokens)
+        # ^^^ THOG
     else:
         resolved: ResolvedCheckpoint = context["resolved"]
         trainer = core.OwtTrainer.from_checkpoint(
@@ -1293,6 +1309,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if rank == 0:
             telemetry.finish(exit_code=telemetry_exit_code)
         trainer.close()
+        if fresh_state is not None:
+            fresh_state.trainer = None
 
 
 if __name__ == "__main__":

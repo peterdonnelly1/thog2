@@ -61,6 +61,7 @@ EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
+    "plastic__runtime_phase",
     "plastic__coarse_phase",
     "plastic__phase_1_n_steps",
     "plastic__phase_1_starting_layer_count",
@@ -192,6 +193,7 @@ class TrainingConfig:
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH controls; disabled is the exact established path
     plastic__enabled: bool = False
+    plastic__runtime_phase: str = "fine"
     plastic__coarse_phase: str = "disabled"
     plastic__phase_1_n_steps: Optional[int] = None
     plastic__phase_1_starting_layer_count: Optional[int] = None
@@ -268,6 +270,11 @@ class TrainingConfig:
         # vvv THOG resolve PLASTIC DEPTH before selector and n_layer-dependent validation
         if not isinstance(self.plastic__enabled, bool):
             raise ValueError(f"plastic__enabled must be bool; got {self.plastic__enabled!r}")
+        if self.plastic__runtime_phase not in {"coarse", "fine"}:
+            raise ValueError(
+                "plastic__runtime_phase must be coarse or fine; "
+                f"got {self.plastic__runtime_phase!r}"
+            )
         if not isinstance(self.plastic__do_learn_layer_count, bool):
             raise ValueError(
                 "plastic__do_learn_layer_count must be bool; "
