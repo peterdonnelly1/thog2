@@ -39,6 +39,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: List workflow references needing canonical rename
+        run: |
+          git grep -l \
+            'plastic__layer_count_probe_interval\|plastic__layer_count_probe_noise_min_observations' \
+            -- .github/workflows || true
+
       - name: Apply probe naming and console fixes
         run: python tools/apply_plastic_probe_naming_and_console_fix.py
 
