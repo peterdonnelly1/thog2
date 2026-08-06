@@ -60,6 +60,8 @@ jobs:
           bash -n plastic_depth_lookahead_wrapper_options.sh
 
       - name: Run full CPU test suite
+        id: branch_suite
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -67,7 +69,7 @@ jobs:
             --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
             2>&1 | tee broad_regression.log
 
-      - name: Print compact regression failure summary
+      - name: Classify failures against untouched PLASTIC_DEPTH
         if: always()
         run: |
           python - <<'PY'
@@ -75,23 +77,55 @@ jobs:
           from pathlib import Path
 
           cache_path = Path('.pytest_cache/v/cache/lastfailed')
-          if cache_path.exists():
-              failed = json.loads(cache_path.read_text(encoding='utf-8'))
-              print('PYTEST_LASTFAILED_BEGIN')
-              for node_id in sorted(failed):
-                  print(node_id)
-              print('PYTEST_LASTFAILED_END')
-          else:
-              print('PYTEST_LASTFAILED_UNAVAILABLE')
+          branch_failed = set(
+              json.loads(cache_path.read_text(encoding='utf-8'))
+              if cache_path.exists()
+              else {}
+          )
+          inherited = {
+              line.strip()
+              for line in Path(
+                  'docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt'
+              ).read_text(encoding='utf-8').splitlines()
+              if line.strip() and not line.lstrip().startswith('#')
+          }
+          branch_only = sorted(branch_failed - inherited)
+          inherited_observed = sorted(branch_failed & inherited)
+          inherited_not_observed = sorted(inherited - branch_failed)
+
+          print('INHERITED_FAILURES_OBSERVED_BEGIN')
+          for node_id in inherited_observed:
+              print(node_id)
+          print('INHERITED_FAILURES_OBSERVED_END')
+          print('BRANCH_ONLY_FAILURES_BEGIN')
+          for node_id in branch_only:
+              print(node_id)
+          print('BRANCH_ONLY_FAILURES_END')
+          print(
+              'Regression classification: '
+              f'{len(branch_failed)} total; '
+              f'{len(inherited_observed)} inherited; '
+              f'{len(branch_only)} branch-only; '
+              f'{len(inherited_not_observed)} inherited failures now passing.'
+          )
+          Path('branch_only_failures.txt').write_text(
+              '\n'.join(branch_only) + ('\n' if branch_only else ''),
+              encoding='utf-8',
+          )
+          if branch_only:
+              raise SystemExit('branch-only CPU regression failures remain')
           PY
           echo 'PYTEST_LOG_TAIL_BEGIN'
           tail -n 250 broad_regression.log || true
           echo 'PYTEST_LOG_TAIL_END'
 
-      - name: Retain complete regression log
+      - name: Retain complete regression evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: plastic-coarse-fine-broad-regression-log
-          path: broad_regression.log
+          path: |
+            broad_regression.log
+            branch_only_failures.txt
+            docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt
           if-no-files-found: error
