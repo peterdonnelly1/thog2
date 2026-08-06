@@ -14,7 +14,12 @@ from .plastic_depth_coarse import (
     render_plastic_coarse_report,
     score_plastic_coarse_trials,
 )
+from .plastic_depth_coarse_checkpoint import (
+    PlasticCoarseTrialCheckpointState,
+    build_plastic_coarse_trial_checkpoint_state,
+)
 from .plastic_depth_coarse_runner import (
+    PlasticCoarseTrialProgress,
     coarse_trial_training_config,
     render_plastic_coarse_trial_header,
     run_fixed_plastic_coarse_trial,
@@ -91,6 +96,63 @@ def _build_fine_state(
     )
 
 
+def _validate_resume_checkpoint(
+    *,
+    resume: PlasticCoarseTrialCheckpointState,
+    coarse_config: ResolvedPlasticCoarseConfig,
+    objective: str,
+    maximum_layers: int,
+    cost_weight: float,
+    memory_budget_gib: Optional[float],
+    geometry_initialisation: str,
+    fine_max_updates: int,
+    resume_state: Optional[PlasticFreshTrainingState],
+) -> None:
+    expected = {
+        "candidate_layers": tuple(coarse_config.candidate_layers),
+        "n_steps": int(coarse_config.n_steps or 0),
+        "evaluation_steps_count": int(coarse_config.evaluation_steps_count or 0),
+        "objective": str(objective),
+        "maximum_layers": int(maximum_layers),
+        "cost_weight": float(cost_weight),
+        "memory_budget_gib": (
+            None if memory_budget_gib is None else float(memory_budget_gib)
+        ),
+        "geometry_initialisation": str(geometry_initialisation),
+        "fine_max_updates": int(fine_max_updates),
+    }
+    actual = {
+        "candidate_layers": tuple(resume.candidate_layers),
+        "n_steps": resume.n_steps,
+        "evaluation_steps_count": resume.evaluation_steps_count,
+        "objective": resume.objective,
+        "maximum_layers": resume.maximum_layers,
+        "cost_weight": resume.cost_weight,
+        "memory_budget_gib": resume.memory_budget_gib,
+        "geometry_initialisation": resume.geometry_initialisation,
+        "fine_max_updates": resume.fine_max_updates,
+    }
+    if actual != expected:
+        raise ValueError(
+            "PLASTIC mid-COARSE checkpoint controls differ from the requested lifecycle; "
+            f"checkpoint={actual!r}, requested={expected!r}"
+        )
+    if resume_state is None:
+        raise ValueError("PLASTIC mid-COARSE resume requires the restored training state")
+    if resume_state.phase != "coarse":
+        raise ValueError("PLASTIC mid-COARSE restored state must have phase='coarse'")
+    if int(resume_state.active_layer_count) != resume.current_trial_layers:
+        raise ValueError(
+            "PLASTIC mid-COARSE restored layer count differs from checkpoint state"
+        )
+    completed_updates = int(resume_state.trainer.state.completed_updates)
+    if completed_updates != resume.completed_steps:
+        raise ValueError(
+            "PLASTIC mid-COARSE restored trainer step differs from checkpoint state; "
+            f"trainer={completed_updates}, checkpoint={resume.completed_steps}"
+        )
+
+
 def run_plastic_coarse_fine_lifecycle(
     *,
     trainer_factory: Callable[[Any, Any, Any], Any],
@@ -106,6 +168,10 @@ def run_plastic_coarse_fine_lifecycle(
     pause_duration_seconds: float = PLASTIC_COARSE_REVIEW_PAUSE_SECONDS,
     console_stream: TextIO = sys.stdout,
     checkpoint_callback: Optional[PauseCheckpointCallback] = None,
+    coarse_checkpoint_interval: int = 0,
+    resume_checkpoint_state: Optional[Mapping[str, Any]] = None,
+    resume_state: Optional[PlasticFreshTrainingState] = None,
+    distributed_coordinator: Optional[Any] = None,
     fresh_state_builder: FreshStateBuilder = build_fresh_training_state,
     trial_runner: TrialRunner = run_fixed_plastic_coarse_trial,
     state_destroyer: StateDestroyer = destroy_fresh_training_state,
@@ -116,29 +182,65 @@ def run_plastic_coarse_fine_lifecycle(
         raise ValueError("COARSE/FINE lifecycle requires enabled COARSE configuration")
     if coarse_config.n_steps is None or coarse_config.evaluation_steps_count is None:
         raise ValueError("resolved COARSE configuration is incomplete")
+    if coarse_checkpoint_interval < 0:
+        raise ValueError("coarse_checkpoint_interval must be non-negative")
+    if coarse_checkpoint_interval > 0 and checkpoint_callback is None:
+        raise ValueError(
+            "positive coarse_checkpoint_interval requires checkpoint_callback"
+        )
+    resume = (
+        None
+        if resume_checkpoint_state is None
+        else PlasticCoarseTrialCheckpointState.from_mapping(resume_checkpoint_state)
+    )
+    if resume is None and resume_state is not None:
+        raise ValueError("resume_state was supplied without a mid-COARSE checkpoint")
+    if resume is not None:
+        _validate_resume_checkpoint(
+            resume=resume,
+            coarse_config=coarse_config,
+            objective=objective,
+            maximum_layers=maximum_layers,
+            cost_weight=cost_weight,
+            memory_budget_gib=memory_budget_gib,
+            geometry_initialisation=geometry_initialisation,
+            fine_max_updates=int(resolved_config.max_updates),
+            resume_state=resume_state,
+        )
 
-    coordinator = coordinator_factory(str(resolved_config.device))
-    trial_results = []
+    coordinator = (
+        distributed_coordinator
+        if distributed_coordinator is not None
+        else coordinator_factory(str(resolved_config.device))
+    )
+    trial_results = list(resume.completed_trial_results if resume is not None else ())
     try:
         trial_count = len(coarse_config.candidate_layers)
         for trial_index, active_layers in enumerate(
             coarse_config.candidate_layers,
             start=1,
         ):
+            if resume is not None and trial_index < resume.current_trial_index:
+                continue
             trial_config = coarse_trial_training_config(
                 resolved_config,
                 active_layer_count=active_layers,
                 n_steps=coarse_config.n_steps,
             )
-            state = fresh_state_builder(
-                trainer_factory=trainer_factory,
-                resolved_config=trial_config,
-                train_tokens=train_tokens,
-                validation_tokens=validation_tokens,
-                phase="coarse",
-                active_layer_count=active_layers,
-                instrumentation_namespace=f"coarse/trial_{trial_index}",
+            is_resumed_trial = (
+                resume is not None and trial_index == resume.current_trial_index
             )
+            state = resume_state if is_resumed_trial else None
+            if state is None:
+                state = fresh_state_builder(
+                    trainer_factory=trainer_factory,
+                    resolved_config=trial_config,
+                    train_tokens=train_tokens,
+                    validation_tokens=validation_tokens,
+                    phase="coarse",
+                    active_layer_count=active_layers,
+                    instrumentation_namespace=f"coarse/trial_{trial_index}",
+                )
             try:
                 if coordinator.is_primary:
                     _emit(
@@ -153,20 +255,68 @@ def run_plastic_coarse_fine_lifecycle(
                             geometry_initialisation=geometry_initialisation,
                         ),
                     )
-                result = trial_runner(
-                    state,
-                    trial_index=trial_index,
-                    n_steps=coarse_config.n_steps,
-                    evaluation_steps_count=coarse_config.evaluation_steps_count,
-                    progress_sink=(
+
+                def checkpoint_trial_progress(
+                    progress: PlasticCoarseTrialProgress,
+                    trainer: Any,
+                ) -> None:
+                    if checkpoint_callback is None:
+                        raise RuntimeError(
+                            "PLASTIC COARSE periodic checkpoint callback is unavailable"
+                        )
+                    checkpoint_state = build_plastic_coarse_trial_checkpoint_state(
+                        candidate_layers=coarse_config.candidate_layers,
+                        n_steps=coarse_config.n_steps,
+                        evaluation_steps_count=coarse_config.evaluation_steps_count,
+                        objective=objective,
+                        maximum_layers=maximum_layers,
+                        cost_weight=cost_weight,
+                        memory_budget_gib=memory_budget_gib,
+                        geometry_initialisation=geometry_initialisation,
+                        fine_max_updates=int(resolved_config.max_updates),
+                        current_trial_index=progress.trial_index,
+                        current_trial_layers=progress.layers,
+                        completed_steps=progress.completed_steps,
+                        training_losses=progress.training_losses,
+                        training_elapsed_seconds=progress.training_elapsed_seconds,
+                        completed_trial_results=tuple(trial_results),
+                    )
+                    payload = dict(checkpoint_state.structured())
+                    trainer.plastic_coarse_fine_state = payload
+                    checkpoint_callback(trainer, payload)
+
+                runner_kwargs = {
+                    "trial_index": trial_index,
+                    "n_steps": coarse_config.n_steps,
+                    "evaluation_steps_count": coarse_config.evaluation_steps_count,
+                    "progress_sink": (
                         (lambda line: _emit(console_stream, line))
                         if coordinator.is_primary
                         else None
                     ),
-                )
+                }
+                if is_resumed_trial:
+                    assert resume is not None
+                    runner_kwargs.update(
+                        {
+                            "prior_training_losses": resume.training_losses,
+                            "prior_training_elapsed_seconds": resume.training_elapsed_seconds,
+                        }
+                    )
+                if coarse_checkpoint_interval > 0:
+                    runner_kwargs.update(
+                        {
+                            "checkpoint_interval": coarse_checkpoint_interval,
+                            "checkpoint_callback": checkpoint_trial_progress,
+                        }
+                    )
+                result = trial_runner(state, **runner_kwargs)
                 trial_results.append(result)
             finally:
                 state_destroyer(state)
+            if is_resumed_trial:
+                resume_state = None
+                resume = None
 
         scored_trials, winner = score_plastic_coarse_trials(
             tuple(trial_results),
