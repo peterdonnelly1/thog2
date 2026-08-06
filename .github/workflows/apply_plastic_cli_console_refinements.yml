@@ -5,6 +5,7 @@ on:
     branches:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
+      - tools/apply_registered_runner_help.py
       - tools/apply_plastic_core_canonicalisation_final.py
       - .github/workflows/apply_plastic_cli_console_refinements.yml
   pull_request:
@@ -30,7 +31,9 @@ jobs:
           python-version: '3.11'
 
       - name: Apply final core canonicalisation
-        run: python tools/apply_plastic_core_canonicalisation_final.py
+        run: |
+          python tools/apply_registered_runner_help.py
+          python tools/apply_plastic_core_canonicalisation_final.py
 
       - name: Install CPU test dependencies
         run: |
@@ -54,6 +57,7 @@ jobs:
             sheet/plastic_depth_coarse_runtime_recovery_patch.py \
             sheet/run_config.py \
             sheet/training_config.py \
+            tools/apply_registered_runner_help.py \
             tools/apply_plastic_core_canonicalisation_final.py \
             tests/test_plastic_cli_console_refinements.py
 
