@@ -14,9 +14,9 @@ permissions:
   contents: read
 
 jobs:
-  base_console_evidence:
+  base_regression_evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,19 +30,48 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install pytest numpy
+          python -m pip install pytest numpy tiktoken tensorboard wandb psutil
 
-      - name: Run exact base console-alignment test
-        id: base_console
+      - name: Run untouched PLASTIC_DEPTH CPU suite
+        id: base_suite
         continue-on-error: true
-        run: |
-          python -m pytest -q \
-            tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
-
-      - name: Classify base result
         shell: bash
-        env:
-          BASE_CONSOLE_OUTCOME: ${{ steps.base_console.outcome }}
         run: |
-          echo "PLASTIC_DEPTH base 311decd console alignment outcome: $BASE_CONSOLE_OUTCOME"
-          test "$BASE_CONSOLE_OUTCOME" = failure
+          set -o pipefail
+          python -m pytest -q tests \
+            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
+            2>&1 | tee base_regression.log
+
+      - name: Print baseline failure nodes
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          cache_path = Path('.pytest_cache/v/cache/lastfailed')
+          failed = (
+              json.loads(cache_path.read_text(encoding='utf-8'))
+              if cache_path.exists()
+              else {}
+          )
+          print('BASE_PYTEST_LASTFAILED_BEGIN')
+          for node_id in sorted(failed):
+              print(node_id)
+          print('BASE_PYTEST_LASTFAILED_END')
+          PY
+          tail -n 250 base_regression.log || true
+
+      - name: Retain complete baseline log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-depth-base-regression-log
+          path: base_regression.log
+          if-no-files-found: error
+
+      - name: Record expected non-green base without hiding the evidence
+        env:
+          BASE_OUTCOME: ${{ steps.base_suite.outcome }}
+        run: |
+          echo "Untouched PLASTIC_DEPTH base outcome: $BASE_OUTCOME"
