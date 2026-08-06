@@ -29,10 +29,10 @@ def _config():
         plastic__enabled=True,
         plastic__runtime_phase="coarse",
         plastic__coarse_phase="disabled",
-        plastic__layers_to_sample=None,
+        plastic__layers_to_sample=2,
         plastic__do_learn_layer_count=False,
-        plastic__initial_layer_count=2,
-        plastic__max_permitted_layers=4,
+        plastic__initial_layer_count=None,
+        plastic__max_permitted_layers=None,
         plastic__layer_count_update_brake=5,
         plastic__layer_count_probe_interval=5,
     )
