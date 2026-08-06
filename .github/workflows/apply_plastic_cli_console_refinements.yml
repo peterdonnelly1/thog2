@@ -106,3 +106,6 @@ jobs:
           git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+# vvv THOG workflow source change intentionally triggers the first application run
+# ^^^ THOG
