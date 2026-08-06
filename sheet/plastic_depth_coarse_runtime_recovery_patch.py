@@ -252,28 +252,32 @@ def _log_plastic_coarse_fine_phase_safe(self: Any, provenance: Mapping[str, Any]
         trial_index = int(trial["trial_index"])
         status = str(trial.get("status", "unknown"))
         if self.run is not None:
-            self.run.summary.update(
-                {
-                    f"coarse/trial_{trial_index}/status": status,
-                    f"coarse/trial_{trial_index}/completed_steps": int(
-                        trial.get("training_steps", 0)
-                    ),
-                    f"coarse/trial_{trial_index}/error_class": trial.get("error_class"),
-                    f"coarse/trial_{trial_index}/error_message": trial.get("error_message"),
-                }
-            )
+            summary = getattr(self.run, "summary", None)
+            if hasattr(summary, "update"):
+                summary.update(
+                    {
+                        f"coarse/trial_{trial_index}/status": status,
+                        f"coarse/trial_{trial_index}/completed_steps": int(
+                            trial.get("training_steps", 0)
+                        ),
+                        f"coarse/trial_{trial_index}/error_class": trial.get("error_class"),
+                        f"coarse/trial_{trial_index}/error_message": trial.get("error_message"),
+                    }
+                )
         if self.writer is not None:
-            self.writer.add_text(
-                f"coarse/trial_{trial_index}/status",
-                status,
-                0,
-            )
-            if trial.get("error_class") or trial.get("error_message"):
-                self.writer.add_text(
-                    f"coarse/trial_{trial_index}/failure",
-                    f"{trial.get('error_class')}: {_failure_message(trial.get('error_message'))}",
+            add_text = getattr(self.writer, "add_text", None)
+            if callable(add_text):
+                add_text(
+                    f"coarse/trial_{trial_index}/status",
+                    status,
                     0,
                 )
+                if trial.get("error_class") or trial.get("error_message"):
+                    add_text(
+                        f"coarse/trial_{trial_index}/failure",
+                        f"{trial.get('error_class')}: {_failure_message(trial.get('error_message'))}",
+                        0,
+                    )
 
 
 _fresh_state.build_fresh_training_state = _build_fresh_training_state_with_cuda_baseline
