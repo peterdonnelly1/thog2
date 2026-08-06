@@ -43,7 +43,7 @@ jobs:
             --nproc_per_node=2 \
             tests/plastic_depth_ddp_probe.py
 
-      - name: Verify rank agreement
+      - name: Verify rank agreement and rank-qualified samples
         env:
           THOG2_DDP_RESULT_DIR: ${{ runner.temp }}/plastic_ddp
         run: |
@@ -67,6 +67,12 @@ jobs:
               assert rows[0][key] == rows[1][key], (key, rows[0][key], rows[1][key])
           assert rows[0]["pause_disposition"] == "timeout"
           assert rows[0]["fine_completed_updates"] == 1
-          assert rows[0]["audit"]["phase"] == "fine"
+          audit = rows[0]["audit"]
+          assert audit["phase"] == "fine"
+          samples = audit["sampled_tokens_by_rank"]
+          assert [item["rank"] for item in samples] == [0, 1]
+          assert audit["sampled_token_count_global"] == sum(
+              item["sampled_token_count"] for item in samples
+          )
           print(json.dumps(rows[0], indent=2, sort_keys=True))
           PY
