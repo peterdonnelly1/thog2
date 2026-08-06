@@ -3,28 +3,37 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# vvv THOG accept underscore-form long options directly in the canonical wrapper while preserving established hyphen aliases
+# vvv THOG accept canonical double-underscore and legacy single-underscore long options while preserving established hyphen aliases
+thog2_normalize_long_option() {
+  local option_name="$1"
+  while [[ "$option_name" == *"__"* ]]; do
+    option_name="${option_name//__/_}"
+  done
+  printf '%s' "${option_name//_/-}"
+}
 THOG2_UNDERSCORE_NORMALIZED_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic_layer_count_probe_interval|--plastic-layer-count-probe-interval)
+    --plastic__layer_count_probe_interval|--plastic_layer_count_probe_interval|--plastic-layer-count-probe-interval)
       (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
       export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2"
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("--plastic-layer-count-probe-interval" "$2")
       shift 2
       ;;
-    --plastic_layer_count_probe_interval=*|--plastic-layer-count-probe-interval=*)
+    --plastic__layer_count_probe_interval=*|--plastic_layer_count_probe_interval=*|--plastic-layer-count-probe-interval=*)
       export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="${1#*=}"
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("--plastic-layer-count-probe-interval=${1#*=}")
       shift
       ;;
     --*=*)
       THOG2_UNDERSCORE_NAME="${1%%=*}"
       THOG2_UNDERSCORE_VALUE="${1#*=}"
-      THOG2_UNDERSCORE_NAME="${THOG2_UNDERSCORE_NAME//_/-}"
+      THOG2_UNDERSCORE_NAME="$(thog2_normalize_long_option "$THOG2_UNDERSCORE_NAME")"
       THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${THOG2_UNDERSCORE_NAME}=${THOG2_UNDERSCORE_VALUE}")
       shift
       ;;
     --*)
-      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${1//_/-}")
+      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("$(thog2_normalize_long_option "$1")")
       shift
       ;;
     *)
@@ -35,6 +44,7 @@ while (( $# > 0 )); do
 done
 set -- "${THOG2_UNDERSCORE_NORMALIZED_ARGS[@]}"
 unset THOG2_UNDERSCORE_NORMALIZED_ARGS THOG2_UNDERSCORE_NAME THOG2_UNDERSCORE_VALUE
+unset -f thog2_normalize_long_option
 # ^^^ THOG
 
 # vvv THOG expose exact PLASTIC lookahead controls through the one canonical wrapper
