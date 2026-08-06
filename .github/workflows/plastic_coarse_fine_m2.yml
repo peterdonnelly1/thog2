@@ -6,6 +6,9 @@ on:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
       - .github/workflows/plastic_coarse_fine_m2.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
 
 permissions:
   contents: write
@@ -52,6 +55,7 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit M2 integration
+        if: github.event_name == 'push'
         run: |
           if git diff --quiet; then
             exit 0
