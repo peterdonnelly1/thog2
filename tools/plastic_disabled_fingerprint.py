@@ -42,7 +42,7 @@ def _config() -> TrainingConfig:
         vocab_size=32,
         n_layer=2,
         n_head=2,
-        n_embd=16,
+        n_embd=32,
         depth_order=2,
         dropout=0.0,
         bias=True,
