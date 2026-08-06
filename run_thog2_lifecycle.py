@@ -38,7 +38,16 @@ from sheet.run_lifecycle import (
     validate_start_label,
 )
 from sheet.run_manifest import write_run_manifest
+# vvv THOG PLASTIC COARSE/FINE one-shot discovery, fresh FINE reconstruction and review-pause resume
+from sheet.plastic_depth_coarse import resolve_plastic_coarse_config
 from sheet.plastic_depth_fresh_state import build_fresh_training_state
+from sheet.plastic_depth_lifecycle import run_plastic_coarse_fine_lifecycle
+from sheet.plastic_depth_resume import (
+    PLASTIC_RESUME_CHECKPOINT_EXIT,
+    PLASTIC_RESUME_CONTINUE_FINE,
+    resume_plastic_coarse_fine_boundary,
+)
+# ^^^ THOG
 from sheet.training_config import TrainingConfig
 
 
@@ -1167,9 +1176,53 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     train_tokens = core.load_tokens(dataset_dir / "train.bin")
     validation_tokens = core.load_tokens(dataset_dir / "val.bin")
     fresh_state = None
+    coarse_fine_outcome = None
     if context["mode"] == "fresh":
-        # vvv THOG PLASTIC fresh runs and every future COARSE trial share one deterministic step-zero constructor; the disabled path remains byte-for-byte on the established constructor
-        if training_config.plastic__enabled:
+        # vvv THOG COARSE is a one-shot pre-FINE lifecycle; disabled PLASTIC remains on the exact established constructor
+        if training_config.plastic__enabled and training_config.plastic__coarse_phase == "enabled":
+            coarse_config = resolve_plastic_coarse_config(
+                coarse_phase=training_config.plastic__coarse_phase,
+                plastic_enabled=training_config.plastic__enabled,
+                do_learn_layer_count=training_config.plastic__do_learn_layer_count,
+                n_steps=training_config.plastic__phase_1_n_steps,
+                starting_layer_count=training_config.plastic__phase_1_starting_layer_count,
+                number_of_trials=training_config.plastic__phase_1__number_of_trials,
+                evaluation_steps_count=training_config.plastic__phase_1_evaluation_steps_count,
+                max_permitted_layers=training_config.plastic__max_permitted_layers,
+            )
+            def checkpoint_review_pause(coarse_trainer: Any, state: Mapping[str, object]) -> None:
+                paused_lifecycle = {**lifecycle, "plastic_coarse_fine": dict(state)}
+                coarse_trainer.lifecycle_metadata = paused_lifecycle
+                coarse_trainer.plastic_coarse_fine_state = dict(state)
+                coarse_trainer.save_checkpoint(checkpoint_path)
+                if coarse_trainer.distributed.is_primary:
+                    write_run_manifest(paths["manifest_path"], paused_lifecycle)
+            coarse_fine_outcome = run_plastic_coarse_fine_lifecycle(
+                trainer_factory=core.OwtTrainer,
+                resolved_config=training_config,
+                train_tokens=train_tokens,
+                validation_tokens=validation_tokens,
+                coarse_config=coarse_config,
+                objective=training_config.plastic__layer_count_objective,
+                maximum_layers=int(training_config.plastic__max_permitted_layers),
+                cost_weight=float(training_config.plastic__layer_count_cost_weight),
+                memory_budget_gib=training_config.plastic__layer_memory_budget_gib,
+                geometry_initialisation=training_config.plastic__layer_sampling_initialisation,
+                checkpoint_callback=checkpoint_review_pause,
+            )
+            if coarse_fine_outcome.fine_state is None:
+                coarse_fine_outcome.close_coordinator()
+                return 0
+            fresh_state = coarse_fine_outcome.fine_state
+            trainer = fresh_state.trainer
+            training_config = trainer.config
+            lifecycle = {
+                **lifecycle,
+                "plastic_coarse_fine": dict(coarse_fine_outcome.provenance),
+            }
+            if trainer.distributed.is_primary:
+                write_run_manifest(paths["manifest_path"], lifecycle)
+        elif training_config.plastic__enabled:
             fresh_state = build_fresh_training_state(
                 trainer_factory=core.OwtTrainer,
                 resolved_config=training_config,
@@ -1192,6 +1245,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             expected_config=training_config,
             overrides=_resume_overrides(training_config),
         )
+        resume_boundary = resume_plastic_coarse_fine_boundary(
+            trainer,
+            checkpoint_path,
+        )
+        if resume_boundary == PLASTIC_RESUME_CHECKPOINT_EXIT:
+            trainer.close()
+            return 0
+        if resume_boundary == PLASTIC_RESUME_CONTINUE_FINE:
+            lifecycle = {
+                **lifecycle,
+                "plastic_coarse_fine": dict(trainer.plastic_coarse_fine_state),
+            }
+            if trainer.distributed.is_primary:
+                write_run_manifest(paths["manifest_path"], lifecycle)
     trainer.lifecycle_metadata = dict(lifecycle)
 
     canonical = config.canonical_dict(world_size=int(context["world_size"]))
@@ -1270,6 +1337,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "paths": {name: str(path) for name, path in paths.items()},
         }
         result["lifecycle"] = lifecycle
+        # vvv THOG keep COARSE trial evidence and selected-count provenance in the canonical result and telemetry payload
+        if hasattr(trainer, "plastic_coarse_provenance"):
+            result["plastic_coarse_fine"] = trainer.plastic_coarse_provenance
+        # ^^^ THOG
         result["canonical_config"] = canonical
         result["source"] = source
         result["timing"]["session_training_seconds"] = result["timing"]["training_seconds"]
@@ -1311,6 +1382,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         trainer.close()
         if fresh_state is not None:
             fresh_state.trainer = None
+        if coarse_fine_outcome is not None:
+            coarse_fine_outcome.close_coordinator()
 
 
 if __name__ == "__main__":
