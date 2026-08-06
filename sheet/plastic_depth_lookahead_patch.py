@@ -93,8 +93,16 @@ def _parse_known_args_with_plastic_lookahead(self: argparse.ArgumentParser, args
     if max_step is not None:
         os.environ[_MAX_STEP_ENV] = str(max_step)
     parsed, extras = _ORIGINAL_ARGPARSE_PARSE_KNOWN_ARGS(self, stripped, namespace)
-    setattr(parsed, "plastic__layer_count_probe_radius", _positive_int(os.environ.get(_RADIUS_ENV, 1), name="plastic__layer_count_probe_radius"))
-    setattr(parsed, "plastic__layer_count_max_step", _positive_int(os.environ.get(_MAX_STEP_ENV, 1), name="plastic__layer_count_max_step"))
+    parsed_probe_radius = getattr(parsed, "plastic__layer_count_probe_radius", None)
+    parsed_max_step = getattr(parsed, "plastic__layer_count_max_step", None)
+    resolved_probe_radius = probe_radius if probe_radius is not None else parsed_probe_radius
+    resolved_max_step = max_step if max_step is not None else parsed_max_step
+    if resolved_probe_radius is None:
+        resolved_probe_radius = os.environ.get(_RADIUS_ENV, 1)
+    if resolved_max_step is None:
+        resolved_max_step = os.environ.get(_MAX_STEP_ENV, 1)
+    setattr(parsed, "plastic__layer_count_probe_radius", _positive_int(resolved_probe_radius, name="plastic__layer_count_probe_radius"))
+    setattr(parsed, "plastic__layer_count_max_step", _positive_int(resolved_max_step, name="plastic__layer_count_max_step"))
     return parsed, extras
 
 
@@ -369,7 +377,7 @@ def _plastic_depth_inline_probe_request_with_lookahead(self: Any, targets: torch
             score_report=score_report,
             histories=self.state.plastic_depth_probe_histories,
             noise_window=self.config.plastic__layer_count_probe_noise_window,
-            minimum_observations=self.config.plastic__layer_count_probe_noise_min_observations,
+            minimum_observations=self.config.plastic__layer_count_min_probes,
             noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
             update_number=int(self.state.completed_updates) + 1,
             last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
@@ -577,7 +585,7 @@ def _format_progress_line_with_lookahead(run_id: str, event: str, payload: Dict[
     if probe_losses:
         probe_label = ", ".join(_format_offset(offset) for offset in offsets)
         formatted_losses = ", ".join(_stage6._format_plastic_probe_loss(value) for value in probe_losses)
-        fields.append(f"\tprobe_losses [{probe_label}] = [{formatted_losses}]")
+        fields.append(f"probe_losses [{probe_label}] = [{formatted_losses}]")
     if loss_gain:
         gain_label = ", ".join(_format_offset(offset) for offset in edge_offsets)
         fields.append(f"loss_gain [{gain_label}] = [{', '.join(_format_gain(value) for value in loss_gain)}]")
@@ -589,8 +597,8 @@ def _format_progress_line_with_lookahead(run_id: str, event: str, payload: Dict[
     inserted = "  ".join(fields)
     marker = "  layer indices = "
     if marker in line:
-        return line.replace(marker, f"  {inserted}{marker}", 1)
-    return f"{line}  {inserted}"
+        return line.replace(marker, f"\t{inserted}\tlayer indices = ", 1)
+    return f"{line}\t{inserted}"
 
 
 _stage6.Stage6Trainer._prepare_console_progress_payload = _prepare_console_progress_payload_with_lookahead

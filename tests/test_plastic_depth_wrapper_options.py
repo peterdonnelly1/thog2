@@ -13,7 +13,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 class PlasticDepthWrapperOptionsTests(unittest.TestCase):
     def _run_bash(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         environment = dict(os.environ)
-        environment.pop("THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL", None)
+        environment.pop("THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE", None)
         environment.pop("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", None)
         environment.pop("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", None)
         return subprocess.run(
@@ -31,7 +31,7 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
             "./train_OWT.sh",
             "--plastic__coarse_phase",
             "disabled",
-            "--plastic__layer_count_probe_interval",
+            "--plastic__layer_count_probe_window_size",
             "7",
             "--plastic__layer_count_probe_radius",
             "3",

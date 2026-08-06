@@ -474,7 +474,7 @@ class TrainerStepMixin:
                 score_report=score_report,
                 histories=self.state.plastic_depth_probe_histories,
                 noise_window=self.config.plastic__layer_count_probe_noise_window,
-                minimum_observations=self.config.plastic__layer_count_probe_noise_min_observations,
+                minimum_observations=self.config.plastic__layer_count_min_probes,
                 noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
                 update_number=int(self.state.completed_updates) + 1,
                 last_count_change_update=int(self.state.plastic_depth_last_count_change_update),

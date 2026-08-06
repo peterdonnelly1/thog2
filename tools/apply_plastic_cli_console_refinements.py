@@ -160,7 +160,7 @@ unset -f thog2_normalize_nonplastic_long_option
         "--plastic-phase-1-starting-layer-count": "--plastic__phase_1_starting_layer_count",
         "--plastic-phase-1-number-of-trials": "--plastic__phase_1__number_of_trials",
         "--plastic-phase-1-evaluation-steps-count": "--plastic__phase_1_evaluation_steps_count",
-        "--plastic-layer-count-probe-interval": "--plastic__layer_count_probe_interval",
+        "--plastic-layer-count-probe-interval": "--plastic__layer_count_probe_window_size",
         "--plastic-layer-count-probe-radius": "--plastic__layer_count_probe_radius",
         "--plastic-layer-count-max-step": "--plastic__layer_count_max_step",
     }
@@ -168,11 +168,11 @@ unset -f thog2_normalize_nonplastic_long_option
     helper = read("plastic_depth_lookahead_wrapper_options.sh")
     if "--plastic__log_interval_coarse" not in helper:
         helper = helper.replace(
-            "--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__layer_count_probe_interval)",
-            "--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__layer_count_probe_interval|--plastic__log_interval_coarse)",
+            "--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__layer_count_probe_window_size)",
+            "--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__layer_count_probe_window_size|--plastic__log_interval_coarse)",
         ).replace(
-            "--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__layer_count_probe_interval=*)",
-            "--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__layer_count_probe_interval=*|--plastic__log_interval_coarse=*)",
+            "--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__layer_count_probe_window_size=*)",
+            "--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__layer_count_probe_window_size=*|--plastic__log_interval_coarse=*)",
         ).replace(
             "    --plastic__layer_count_probe_radius)",
             "    --plastic__coarse_phase_roll_through|--no-plastic__coarse_phase_roll_through)\n      THOG2_PLASTIC_LOOKAHEAD_EXTRA_ARGS+=(\"$1\")\n      shift\n      ;;\n    --plastic__layer_count_probe_radius)",
@@ -202,11 +202,11 @@ def core_config_fields() -> None:
         "--plastic-layer-sampling-initialisation": "--plastic__layer_sampling_initialisation",
         "--plastic-layer-count-objective": "--plastic__layer_count_objective",
         "--plastic-layer-count-update-brake": "--plastic__layer_count_update_brake",
-        "--plastic-layer-count-probe-interval": "--plastic__layer_count_probe_interval",
+        "--plastic-layer-count-probe-interval": "--plastic__layer_count_probe_window_size",
         "--plastic-layer-count-probe-radius": "--plastic__layer_count_probe_radius",
         "--plastic-layer-count-max-step": "--plastic__layer_count_max_step",
         "--plastic-layer-count-probe-noise-window": "--plastic__layer_count_probe_noise_window",
-        "--plastic-layer-count-probe-noise-min-observations": "--plastic__layer_count_probe_noise_min_observations",
+        "--plastic-layer-count-probe-noise-min-observations": "--plastic__layer_count_min_probes",
         "--plastic-layer-count-probe-noise-lambda": "--plastic__layer_count_probe_noise_lambda",
         "--plastic-layer-count-cost-weight": "--plastic__layer_count_cost_weight",
         "--plastic-layer-memory-budget-gib": "--plastic__layer_memory_budget_gib",
@@ -609,7 +609,7 @@ def core_wrapper_help_and_startup() -> None:
         "--plastic-layer-count-objective": "--plastic__layer_count_objective",
         "--plastic-layer-count-update-brake": "--plastic__layer_count_update_brake",
         "--plastic-layer-count-probe-noise-window": "--plastic__layer_count_probe_noise_window",
-        "--plastic-layer-count-probe-noise-min-observations": "--plastic__layer_count_probe_noise_min_observations",
+        "--plastic-layer-count-probe-noise-min-observations": "--plastic__layer_count_min_probes",
         "--plastic-layer-count-probe-noise-lambda": "--plastic__layer_count_probe_noise_lambda",
         "--plastic-layer-count-cost-weight": "--plastic__layer_count_cost_weight",
         "--plastic-layer-memory-budget-gib": "--plastic__layer_memory_budget_gib",

@@ -26,7 +26,7 @@ class PlasticDepthStartupLookaheadUiTests(unittest.TestCase):
             "plastic__layer_count_objective": "relative_training_wall_time",
             "plastic__layer_count_update_brake": 30,
             "plastic__layer_count_probe_noise_window": 16,
-            "plastic__layer_count_probe_noise_min_observations": 4,
+            "plastic__layer_count_min_probes": 4,
             "plastic__layer_count_probe_noise_lambda": 0.5,
             "plastic__layer_count_cost_weight": 0.03,
             "plastic__layer_memory_budget_gib": None,

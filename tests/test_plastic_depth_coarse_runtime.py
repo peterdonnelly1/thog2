@@ -26,7 +26,7 @@ def _coarse_training_config():
         plastic__initial_layer_count=2,
         plastic__max_permitted_layers=4,
         plastic__layer_count_update_brake=0,
-        plastic__layer_count_probe_interval=1,
+        plastic__layer_count_probe_window_size=1,
         plastic__freeze_geometry_during_warmup=False,
     )
 

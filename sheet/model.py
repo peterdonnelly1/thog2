@@ -131,7 +131,7 @@ class SheetGPTConfig:
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
     plastic__layer_count_probe_noise_window: int = 50
-    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_min_probes: int = 5
     plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
@@ -219,14 +219,14 @@ class SheetGPTConfig:
                 f"got {self.plastic__layer_count_probe_noise_window!r}"
             )
         if (
-            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
-            or self.plastic__layer_count_probe_noise_min_observations < 1
-            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
+            isinstance(self.plastic__layer_count_min_probes, bool)
+            or not isinstance(self.plastic__layer_count_min_probes, int)
+            or self.plastic__layer_count_min_probes < 1
+            or self.plastic__layer_count_min_probes > self.plastic__layer_count_probe_noise_window
         ):
             raise ValueError(
-                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]; "
-                f"got {self.plastic__layer_count_probe_noise_min_observations!r}"
+                "plastic__layer_count_min_probes must lie in [1, noise_window]; "
+                f"got {self.plastic__layer_count_min_probes!r}"
             )
         if (
             isinstance(self.plastic__layer_count_probe_noise_lambda, bool)

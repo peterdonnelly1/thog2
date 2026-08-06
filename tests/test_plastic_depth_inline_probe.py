@@ -227,7 +227,7 @@ def _learned_trainer(**overrides) -> SharedTrainer:
         plastic__layer_count_objective="lowest_loss",
         plastic__layer_count_update_brake=0,
         plastic__layer_count_probe_noise_window=8,
-        plastic__layer_count_probe_noise_min_observations=1,
+        plastic__layer_count_min_probes=1,
         plastic__layer_count_probe_noise_lambda=0.0,
         n_layer=5,
         depth_order=4,

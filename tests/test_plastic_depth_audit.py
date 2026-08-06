@@ -69,11 +69,11 @@ def _config():
         plastic__initial_layer_count=2,
         plastic__max_permitted_layers=4,
         plastic__layer_count_update_brake=0,
-        plastic__layer_count_probe_interval=1,
+        plastic__layer_count_probe_window_size=1,
         plastic__layer_count_probe_radius=2,
         plastic__layer_count_max_step=1,
         plastic__layer_count_probe_noise_window=4,
-        plastic__layer_count_probe_noise_min_observations=1,
+        plastic__layer_count_min_probes=1,
         plastic__layer_count_probe_noise_lambda=1.0e9,
     )
 

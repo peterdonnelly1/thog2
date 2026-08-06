@@ -101,7 +101,7 @@ def test_registered_parser_help_appends_descriptor_registry_once() -> None:
     rendered = core.build_parser().format_help()
     assert rendered.count("getopt / artifact descriptor registry") == 1
     assert "LPI" in rendered
-    assert "--plastic__layer_count_probe_interval N" in rendered
+    assert "--plastic__layer_count_probe_window_size N" in rendered
 
 
 def test_wrapper_registry_emits_descriptor_table_once() -> None:

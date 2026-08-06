@@ -99,7 +99,7 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '  --plastic__log_interval_coarse N=10            COARSE progress cadence' \
     '  --plastic__coarse_phase_roll_through            skip the review delay and start FINE immediately' \
     '  --no-plastic__coarse_phase_roll_through         retain the review delay; default' \
-    '  --plastic__layer_count_probe_interval N        FINE probe cadence; defaults to update brake' \
+    '  --plastic__layer_count_probe_window_size N        FINE probe cadence; defaults to update brake' \
     "  --plastic__layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}       full integer FINE probe radius" \
     "  --plastic__layer_count_max_step N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement" \
     '  Hyphenated and single-underscore PLASTIC aliases are rejected.' \
@@ -138,18 +138,18 @@ def make_shell_core_authoritative() -> None:
     )
     if '  --plastic__phase_1_n_steps N\n' not in content:
         content = content.replace(help_anchor, help_anchor + help_addition, 1)
-    if '  --plastic__layer_count_probe_interval N' not in content:
+    if '  --plastic__layer_count_probe_window_size N' not in content:
         content = content.replace(
             '  --plastic__layer_count_update_brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}\n',
             '  --plastic__layer_count_update_brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}\n'
-            '  --plastic__layer_count_probe_interval N=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update brake}\n'
+            '  --plastic__layer_count_probe_window_size N=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update brake}\n'
             '  --plastic__layer_count_probe_radius N=${PLASTIC_LAYER_COUNT_PROBE_RADIUS}\n'
             '  --plastic__layer_count_max_step N=${PLASTIC_LAYER_COUNT_MAX_STEP}\n',
             1,
         )
 
-    value_group_old = '--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_noise_window|--plastic__layer_count_probe_noise_min_observations|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)'
-    value_group_new = '--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_interval|--plastic__layer_count_probe_radius|--plastic__layer_count_max_step|--plastic__layer_count_probe_noise_window|--plastic__layer_count_probe_noise_min_observations|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)'
+    value_group_old = '--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_noise_window|--plastic__layer_count_min_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)'
+    value_group_new = '--plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_window_size|--plastic__layer_count_probe_radius|--plastic__layer_count_max_step|--plastic__layer_count_probe_noise_window|--plastic__layer_count_min_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)'
     content = content.replace(value_group_old, value_group_new)
 
     cases_anchor = '      case "$1" in\n        --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$2" ;;\n'
@@ -161,15 +161,15 @@ def make_shell_core_authoritative() -> None:
         '        --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$2" ;;\n'
         '        --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$2" ;;\n'
         '        --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$2" ;;\n'
-        '        --plastic__layer_count_probe_interval) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2" ;;\n'
+        '        --plastic__layer_count_probe_window_size) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2" ;;\n'
         '        --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2" ;;\n'
         '        --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$2" ;;\n'
     )
     if '        --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$2" ;;' not in content:
         content = content.replace(cases_anchor, cases_new, 1)
 
-    equals_old = '--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_probe_noise_min_observations=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)'
-    equals_new = '--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_interval=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count_max_step=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_probe_noise_min_observations=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)'
+    equals_old = '--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_min_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)'
+    equals_new = '--plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_window_size=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count_max_step=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_min_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)'
     content = content.replace(equals_old, equals_new)
 
     equals_cases_anchor = '      case "$plastic_name" in\n        --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$plastic_value" ;;\n'
@@ -181,7 +181,7 @@ def make_shell_core_authoritative() -> None:
         '        --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$plastic_value" ;;\n'
         '        --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$plastic_value" ;;\n'
         '        --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$plastic_value" ;;\n'
-        '        --plastic__layer_count_probe_interval) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$plastic_value" ;;\n'
+        '        --plastic__layer_count_probe_window_size) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$plastic_value" ;;\n'
         '        --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$plastic_value" ;;\n'
         '        --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$plastic_value" ;;\n'
     )
@@ -222,7 +222,7 @@ def make_shell_core_authoritative() -> None:
         '      optional_args+=(--plastic__phase_1__number_of_trials "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS")\n'
         '      optional_args+=(--plastic__phase_1_evaluation_steps_count "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT")\n'
         '    fi\n'
-        '    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] && optional_args+=(--plastic__layer_count_probe_interval "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL")\n'
+        '    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] && optional_args+=(--plastic__layer_count_probe_window_size "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL")\n'
         '    optional_args+=(--plastic__layer_count_probe_radius "$PLASTIC_LAYER_COUNT_PROBE_RADIUS")\n'
         '    optional_args+=(--plastic__layer_count_max_step "$PLASTIC_LAYER_COUNT_MAX_STEP")\n'
     )
@@ -325,7 +325,7 @@ def test_shell_core_owns_every_coarse_and_fine_control() -> None:
         "--plastic__phase_1_starting_layer_count",
         "--plastic__phase_1__number_of_trials",
         "--plastic__phase_1_evaluation_steps_count",
-        "--plastic__layer_count_probe_interval",
+        "--plastic__layer_count_probe_window_size",
         "--plastic__layer_count_probe_radius",
         "--plastic__layer_count_max_step",
         "--plastic__log_interval_coarse",

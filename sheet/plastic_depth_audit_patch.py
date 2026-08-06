@@ -191,7 +191,7 @@ def _commit_plastic_depth_inline_update_with_audit(
         "objective": self.config.plastic__layer_count_objective,
         "objective_cost_weight": float(self.config.plastic__layer_count_cost_weight),
         "memory_budget_gib": self.config.plastic__layer_memory_budget_gib,
-        "probe_interval": int(self.config.plastic__layer_count_probe_interval),
+        "probe_interval": int(self.config.plastic__layer_count_probe_window_size),
         "probe_radius": int(context["probe_radius"]),
         "max_step": int(context["max_step"]),
         "update_brake": int(self.config.plastic__layer_count_update_brake),

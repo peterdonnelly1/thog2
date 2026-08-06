@@ -33,7 +33,7 @@ def _config():
         plastic__initial_layer_count=None,
         plastic__max_permitted_layers=None,
         plastic__layer_count_update_brake=5,
-        plastic__layer_count_probe_interval=5,
+        plastic__layer_count_probe_window_size=5,
     )
 
 

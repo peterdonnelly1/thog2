@@ -114,6 +114,9 @@ def _format_progress_line_with_compact_console_fields(
     return _console_minor._align_final_progress_line(run_id, event, line)
 
 
+_format_progress_line_with_compact_sampled_array = (
+    _format_progress_line_with_compact_console_fields
+)
 _stage6.format_progress_line = _format_progress_line_with_compact_console_fields
 # ^^^ THOG
 

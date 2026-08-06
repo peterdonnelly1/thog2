@@ -19,6 +19,7 @@ _RESET = "\033[0m"
 # _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                             # <<< THOG preserve the pre-public-formatter alignment field set
 _ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                                   # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
 _ALIGNMENT_BY_RUN_ID: Dict[str, Dict[str, int]] = {}
+_MIN_FINAL_PROBE_COLUMN = 96
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 _ORIGINAL_COLOUR_POSITIVE_SCORE = _cleanup._colour_positive_score
@@ -178,6 +179,18 @@ def _align_field_to_column(line: str, label: str, target_column: int) -> str:
     return prefix + (" " * padding) + suffix
 
 
+def _align_probe_to_minimum_tab_column(line: str) -> str:
+    start = _field_start(line, "probe_losses")
+    if start is None or start >= _MIN_FINAL_PROBE_COLUMN:
+        return line
+    raw_index = line.find("probe_losses")
+    prefix = line[:raw_index].rstrip(" \t")
+    suffix = line[raw_index:]
+    while _visible_width(prefix) < _MIN_FINAL_PROBE_COLUMN:
+        prefix += "\t"
+    return prefix + suffix
+
+
 def _record_alignment(run_id: str, line: str) -> None:
     # positions = {                                                                                                                                        # <<< THOG preserve overwrite-on-every-T-row behaviour that discarded absent probe columns
     #     label: position
@@ -229,6 +242,7 @@ _stage6.format_progress_line = _format_progress_line_with_minor_plastic_console_
 
 # vvv THOG apply alignment after every later public formatter has inserted its own tabs and suffix fields
 def _align_final_progress_line(run_id: str, event: str, line: str) -> str:
+    line = _align_probe_to_minimum_tab_column(line)
     if event == "optimizer_progress":
         _record_alignment(run_id, line)
         return line
