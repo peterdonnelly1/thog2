@@ -1,4 +1,4 @@
-name: Apply PLASTIC COARSE FINE M7 audit
+name: Validate PLASTIC COARSE FINE M7 audit
 
 on:
   push:
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install final audit overlay
+      - name: Install final rank-qualified audit overlay
         run: |
           python tools/apply_plastic_audit_overlay.py
           if grep -q 'self.state.plastic_depth_count_audit.append' sheet/plastic_depth_audit_patch.py; then
