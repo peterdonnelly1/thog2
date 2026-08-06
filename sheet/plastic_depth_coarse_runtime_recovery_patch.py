@@ -18,6 +18,7 @@ from . import wandb_telemetry as _telemetry
 _BYTES_PER_GIB = float(1024**3)
 _CUDA_LEAK_TOLERANCE_BYTES = 64 * 1024 * 1024
 _CUDA_BASELINES: Dict[str, Tuple[int, int]] = {}
+_RETAINED_CONTROLLER_ATTRIBUTE = "_update_retained_materializations_controller"
 _ORIGINAL_BUILD_FRESH_TRAINING_STATE = _fresh_state.build_fresh_training_state
 _ORIGINAL_RENDER_PLASTIC_COARSE_REPORT = _coarse.render_plastic_coarse_report
 _ORIGINAL_LOG_PLASTIC_COARSE_FINE = _telemetry.WandbTelemetry.log_plastic_coarse_fine
@@ -80,6 +81,33 @@ def _call_cleanup_method(target: Any, name: str, errors: list[str]) -> None:
         errors.append(f"{name}: {type(error).__name__}: {error}")
 
 
+def _detach_retained_materialisation_controller(raw_model: Any, errors: list[str]) -> None:
+    trajectory = getattr(raw_model, "trajectory", None)
+    controller = getattr(raw_model, "_update_retained_materializations", None)
+    if controller is None:
+        return
+    try:
+        end = getattr(controller, "end", None)
+        if callable(end):
+            end()
+        retained = getattr(controller, "_retained", None)
+        if hasattr(retained, "clear"):
+            retained.clear()
+        if trajectory is not None:
+            if getattr(trajectory, _RETAINED_CONTROLLER_ATTRIBUTE, None) is controller:
+                delattr(trajectory, _RETAINED_CONTROLLER_ATTRIBUTE)
+            for method_name in ("materialize", "materialize_layer_matrices"):
+                trajectory.__dict__.pop(method_name, None)
+        if hasattr(controller, "_trajectory"):
+            controller._trajectory = None
+        raw_model._update_retained_materializations = None
+    except BaseException as error:
+        errors.append(
+            "detach retained materialisations: "
+            f"{type(error).__name__}: {error}"
+        )
+
+
 def _hard_destroy_fresh_training_state(state: Any) -> None:
     trainer = getattr(state, "trainer", None)
     if trainer is None:
@@ -98,8 +126,12 @@ def _hard_destroy_fresh_training_state(state: Any) -> None:
     if optimizer is not None:
         try:
             optimizer.zero_grad(set_to_none=True)
+            optimizer.state.clear()
+            optimizer.param_groups.clear()
         except BaseException as error:
-            cleanup_errors.append(f"optimizer.zero_grad: {type(error).__name__}: {error}")
+            cleanup_errors.append(
+                f"optimizer release: {type(error).__name__}: {error}"
+            )
     if raw_model is not None:
         _call_cleanup_method(raw_model, "end_optimizer_update", cleanup_errors)
         _call_cleanup_method(raw_model, "clear_plastic_depth_update_layer_count", cleanup_errors)
@@ -110,6 +142,7 @@ def _hard_destroy_fresh_training_state(state: Any) -> None:
             raw_model.zero_grad(set_to_none=True)
         except BaseException as error:
             cleanup_errors.append(f"model.zero_grad: {type(error).__name__}: {error}")
+        _detach_retained_materialisation_controller(raw_model, cleanup_errors)
     _call_cleanup_method(trainer, "_clear_plastic_depth_inline_update", cleanup_errors)
 
     try:
