@@ -59,17 +59,6 @@ def enumerate_full_radius() -> None:
         '    decision_counts = tuple(range(lower, upper + 1))\n'
         '    return decision_counts, decision_counts\n',
     )
-    replace_once(
-        path,
-        'def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:\n'
-        '    if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:\n'
-        '        return None\n',
-        'def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:\n'
-        '    if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:\n'
-        '        return None\n'
-        '    if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":\n'
-        '        return None\n',
-    )
 
 
 def strengthen_robust_qualification() -> None:
