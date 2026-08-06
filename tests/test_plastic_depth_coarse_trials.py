@@ -20,6 +20,7 @@ class _Config:
     plastic__runtime_phase: str = "coarse"
     plastic__coarse_phase: str = "disabled"
     plastic__initial_layer_count: int = 4
+    plastic__log_interval_coarse: int = 10
     max_updates: int = 3
     batch_size: int = 2
     block_size: int = 4
@@ -44,7 +45,7 @@ class _Model(nn.Module):
         self.weight = nn.Parameter(torch.tensor(1.0))
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor):
-        loss = (inputs.float().mean() * 0.0 + self.weight.square())
+        loss = inputs.float().mean() * 0.0 + self.weight.square()
         return inputs, loss
 
 
@@ -115,8 +116,10 @@ def test_header_is_compact_and_uses_required_wording() -> None:
         geometry_initialisation="equidistant",
     )
 
-    assert "PLASTIC COARSE - trial 2/4" in header
-    assert "training:    500 steps, starting at step 0" in header
+    assert header.startswith("TRIAL 2/4")
+    assert "  layers:      8" in header
+    assert "  steps:       500" in header
+    assert "starting at step" not in header
     assert "validation mean over final 10 batches" in header
     assert "fixed equidistant" in header
 
@@ -130,6 +133,7 @@ def test_fixed_trial_runs_exact_local_steps_and_final_validation_batches() -> No
         n_steps=3,
         evaluation_steps_count=2,
         clock=_Clock((10.0, 16.0)),
+        progress_clock=_Clock((20.0, 20.5, 21.5)),
         progress_sink=progress.append,
     )
 
@@ -138,8 +142,11 @@ def test_fixed_trial_runs_exact_local_steps_and_final_validation_batches() -> No
     assert trainer.state.completed_updates == 3
     assert result.training_elapsed_seconds == 6.0
     assert len(result.validation_losses) == 2
-    assert progress[0].startswith("C 01 step      0/3")
-    assert progress[-1].startswith("C 01 step      3/3")
+    assert progress[0].startswith("C 01      0/3")
+    assert progress[-1].startswith("C 01      3/3")
+    assert "step" not in progress[-1]
+    assert "layers=" not in progress[-1]
+    assert progress[-1].endswith("     1.5s")
     assert trainer.batch_source.validation_trace()
 
 
