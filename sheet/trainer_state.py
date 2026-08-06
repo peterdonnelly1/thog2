@@ -15,9 +15,10 @@ class TrainerState:
     skipped_nonfinite_updates: int = 0
     failed_update_attempts: int = 0
     # ^^^ THOG
-    # vvv THOG PLASTIC DEPTH robust paired-score evidence and count-change spacing survive checkpoints
+    # vvv THOG PLASTIC DEPTH robust paired-score evidence, count-change spacing and replayable decisions survive checkpoints
     plastic_depth_probe_histories: Dict[str, List[float]] = field(default_factory=dict)
     plastic_depth_last_count_change_update: int = -1
+    plastic_depth_count_audit: List[Dict[str, Any]] = field(default_factory=list)
     # ^^^ THOG
 
 
