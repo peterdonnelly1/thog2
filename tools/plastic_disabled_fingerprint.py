@@ -43,6 +43,7 @@ def _config() -> TrainingConfig:
         n_layer=2,
         n_head=2,
         n_embd=16,
+        depth_order=2,
         dropout=0.0,
         bias=True,
         batch_size=2,
