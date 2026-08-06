@@ -39,7 +39,7 @@ def enforce_fresh_phase_semantics() -> None:
         '    trainer = trainer_factory(fresh_config, train_tokens, validation_tokens)\n'
         '    completed_updates = int(getattr(trainer.state, "completed_updates", 0))\n',
         '    trainer = trainer_factory(fresh_config, train_tokens, validation_tokens)\n'
-        '    if phase == "coarse":\n'
+        '    if phase == "coarse" and bool(getattr(fresh_config, "plastic__enabled", False)):\n'
         '        trajectory = getattr(trainer.raw_model, "trajectory", None)\n'
         '        lattice = getattr(trajectory, "plastic_sampling", None)\n'
         '        if lattice is None:\n'
