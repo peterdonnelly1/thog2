@@ -1,0 +1,137 @@
+name: Apply PLASTIC probe naming and console fix
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - tools/apply_plastic_probe_naming_and_console_fix.py
+      - .github/workflows/apply_plastic_probe_naming_and_console_fix.yml
+      - sheet/plastic_depth_lookahead_patch.py
+      - sheet/plastic_depth_warmup_guard_patch.py
+      - sheet/plastic_depth_console_minor_patch.py
+      - sheet/run_config.py
+      - sheet/training_config.py
+      - run_thog2_owt_core.py
+      - train_OWT.sh
+      - train_OWT_core.sh
+      - plastic_depth_lookahead_wrapper_options.sh
+      - tests/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply_and_validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply probe naming and console fixes
+        run: python tools/apply_plastic_probe_naming_and_console_fix.py
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Validate syntax and canonical public names
+        run: |
+          bash -n train_OWT.sh
+          bash -n train_OWT_core.sh
+          bash -n plastic_depth_lookahead_wrapper_options.sh
+          python -m py_compile \
+            run_thog2_owt_core.py \
+            sheet/plastic_depth_lookahead_patch.py \
+            sheet/plastic_depth_warmup_guard_patch.py \
+            sheet/run_config.py \
+            sheet/training_config.py \
+            tools/apply_plastic_probe_naming_and_console_fix.py
+          if git grep -n 'plastic__layer_count_probe_interval\|plastic__layer_count_probe_noise_min_observations' -- ':!tools/apply_plastic_probe_naming_and_console_fix.py'; then
+            echo 'superseded PLASTIC probe option name remains' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import re
+
+          from run_thog2_owt_core import build_parser
+          from sheet import stage6_trainer
+
+          parser = build_parser()
+          arguments = parser.parse_args([
+              '--plastic__layer_count_probe_radius', '5',
+              '--plastic__layer_count_max_step', '2',
+              '--plastic__layer_count_probe_window_size', '10',
+              '--plastic__layer_count_min_probes', '4',
+          ])
+          assert arguments.plastic__layer_count_probe_radius == 5
+          assert arguments.plastic__layer_count_max_step == 2
+          assert arguments.plastic__layer_count_probe_window_size == 10
+          assert arguments.plastic__layer_count_min_probes == 4
+
+          payload = {
+              'completed_updates': '10',
+              'timestamp': '260806:2300',
+              'cumulative_training_seconds': '30',
+              'mean_step_seconds': '3.0000',
+              'tok/s': '24576',
+              'consumed_tokens': '737280',
+              'training_loss': '5.0000',
+              'training_loss_delta': '-0.010',
+              'learning_rate': '9.000e-04',
+              'gradient_norm': '0.250',
+              'current_layer_count': 8,
+              'plastic_probe_offsets': (-1, 0, 1),
+              'plastic_probe_edge_offsets': (-1, 1),
+              'plastic_probe_losses': (5.01, 5.00, 4.99),
+              'plastic_score_z': (-0.25, 0.50),
+              'depth_sample_points': (1.0, 2.0, 3.0),
+          }
+          line = stage6_trainer.format_progress_line('test', 'optimizer_progress', payload)
+          plain = re.sub(r'\x1b\[[0-9;]*m', '', line)
+          assert 'layers = 8\tprobe_losses' in plain, repr(plain)
+          assert '  \tprobe_losses' not in plain, repr(plain)
+          assert ']\tsampled = [1.0, 2.0, 3.0]' in plain, repr(plain)
+          PY
+
+      - name: Run focused tests
+        run: |
+          python -m pytest -q \
+            tests/test_console_and_descriptor_help.py \
+            tests/test_plastic_cli_console_refinements.py \
+            tests/test_plastic_depth_console_minor_patch.py \
+            tests/test_plastic_depth_full_radius.py \
+            tests/test_plastic_depth_warmup_guard.py \
+            tests/test_plastic_depth_wrapper_options.py
+
+      - name: Commit validated fixes
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix PLASTIC probe names radius parsing and console tabs'
+          for attempt in 1 2 3; do
+            git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+# vvv THOG dedicated validated writeback for the final PLASTIC probe control and console fixes
+# ^^^ THOG
