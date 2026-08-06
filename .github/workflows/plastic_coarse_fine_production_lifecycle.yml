@@ -47,6 +47,7 @@ jobs:
           python -m py_compile \
             run_thog2_lifecycle.py \
             sheet/plastic_depth_coarse_checkpoint.py \
+            sheet/plastic_depth_coarse_runner.py \
             sheet/plastic_depth_lifecycle.py \
             sheet/plastic_depth_resume.py
 
@@ -59,11 +60,28 @@ jobs:
           grep -q 'resume_plastic_coarse_fine_boundary' run_thog2_lifecycle.py
           grep -q 'result\["plastic_coarse_fine"\]' run_thog2_lifecycle.py
 
+      - name: Verify inline THOG marker columns in production launcher
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          violations = []
+          for line_number, line in enumerate(
+              Path('run_thog2_lifecycle.py').read_text(encoding='utf-8').splitlines(),
+              start=1,
+          ):
+              if '# <<< THOG' in line and line.index('# <<< THOG') + 1 != 156:
+                  violations.append((line_number, line.index('# <<< THOG') + 1))
+          if violations:
+              raise SystemExit(f'inline THOG markers not at column 156: {violations}')
+          PY
+
       - name: Run real CPU lifecycle and affected tests
         run: |
           python -m pytest -q \
             tests/test_plastic_depth_coarse_checkpoint.py \
             tests/test_plastic_depth_coarse_resume_lifecycle.py \
+            tests/test_plastic_depth_coarse_runner_resume.py \
             tests/test_plastic_depth_coarse_real_lifecycle.py \
             tests/test_plastic_depth_lifecycle.py \
             tests/test_plastic_depth_resume.py \
