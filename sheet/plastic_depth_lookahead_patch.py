@@ -1,13 +1,9 @@
 # vvv THOG
-"""Exact-radius PLASTIC DEPTH lookahead and console reporting.
+"""Full-radius PLASTIC DEPTH FINE probing and bounded count movement.
 
-This patch keeps the existing inline-probe execution path but separates three
-ideas that were previously collapsed into adjacent N-1/N/N+1 probing:
-
-* decision probes are exactly L-radius, L, L+radius where valid;
-* bridge candidates L±max_step are checkpointed only so the selected one-step
-  training prefix exists;
-* console statistics report the exact decision probes, not the bridge points.
+Every valid integer count in the inclusive configured radius is measured on
+one shared first-microstep chain.  The robust winner records the desired probe
+count, while max_step independently limits the committed prefix transition.
 """
 
 from __future__ import annotations
@@ -189,8 +185,14 @@ def choose_plastic_depth_count_with_exact_radius(
             values = values[-noise_window:]
             updated_histories[key] = tuple(values)
             median, mad, sigma = _robust_scale(values, paired_difference)
-            standardized = -paired_difference / sigma
-            significant = len(values) >= minimum_observations and paired_difference < -noise_lambda * sigma
+            standardized = -median / sigma
+            favourable_count = sum(value < 0.0 for value in values)
+            significant = (
+                len(values) >= minimum_observations
+                and median < -noise_lambda * sigma
+                and paired_difference < 0.0
+                and favourable_count * 2 > len(values)
+            )
             if significant and not brake_active:
                 passing.append((standardized, offset, candidate_count))
         evidence.append(
@@ -213,8 +215,7 @@ def choose_plastic_depth_count_with_exact_radius(
         _, selected_offset, _ = max(passing, key=lambda item: (item[0], -item[2]))
         step = max(-max_step, min(max_step, selected_offset))
         selected_count = current_count + step
-        for offset in candidate_offsets:
-            updated_histories.pop(_history_key(selected_count, offset), None)
+        updated_histories = {}
 
     return _controller.PlasticDepthRobustCountDecision(
         selected_count=selected_count,
@@ -232,16 +233,11 @@ _trainer_step.choose_plastic_depth_count_with_mad = choose_plastic_depth_count_w
 
 
 def _lookahead_counts(current: int, maximum: int, radius: int, max_step: int) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
-    decision_counts = {current}
-    execution_counts = {current}
-    if current - radius >= 1:
-        decision_counts.add(current - radius)
-        execution_counts.add(max(1, current - max_step))
-    if current + radius <= maximum:
-        decision_counts.add(current + radius)
-        execution_counts.add(min(maximum, current + max_step))
-    execution_counts.update(decision_counts)
-    return tuple(sorted(decision_counts)), tuple(sorted(execution_counts))
+    del max_step
+    lower = max(1, current - radius)
+    upper = min(maximum, current + radius)
+    decision_counts = tuple(range(lower, upper + 1))
+    return decision_counts, decision_counts
 
 
 _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
