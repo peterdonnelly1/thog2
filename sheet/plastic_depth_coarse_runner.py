@@ -1,9 +1,10 @@
+# vvv THOG
 from __future__ import annotations
 
 import math
 import time
-from dataclasses import replace
-from typing import Callable, Optional, Tuple
+from dataclasses import dataclass, replace
+from typing import Callable, Optional, Sequence, Tuple
 
 import torch
 
@@ -13,6 +14,19 @@ from .plastic_depth_fresh_state import PlasticFreshTrainingState
 
 Clock = Callable[[], float]
 ProgressSink = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class PlasticCoarseTrialProgress:
+    trial_index: int
+    layers: int
+    completed_steps: int
+    n_steps: int
+    training_losses: Tuple[float, ...]
+    training_elapsed_seconds: float
+
+
+TrialCheckpointCallback = Callable[[PlasticCoarseTrialProgress, object], None]
 
 
 def plastic_tokens_per_update(config) -> int:
@@ -101,6 +115,36 @@ def _worst_rank_elapsed(trainer, local_elapsed: float) -> float:
     return trainer.distributed.max_float(value)
 
 
+def _validate_resume_prefix(
+    *,
+    completed_updates: int,
+    n_steps: int,
+    prior_training_losses: Sequence[float],
+    prior_training_elapsed_seconds: float,
+) -> Tuple[float, ...]:
+    losses = tuple(float(value) for value in prior_training_losses)
+    if completed_updates < 0 or completed_updates > n_steps:
+        raise ValueError(
+            "COARSE resume completed_updates lies outside the trial budget; "
+            f"completed={completed_updates}, n_steps={n_steps}"
+        )
+    if len(losses) != completed_updates:
+        raise ValueError(
+            "COARSE resume loss history does not match completed updates; "
+            f"losses={len(losses)}, completed={completed_updates}"
+        )
+    if not all(math.isfinite(value) for value in losses):
+        raise ValueError("COARSE resume loss history contains a non-finite value")
+    if (
+        not math.isfinite(float(prior_training_elapsed_seconds))
+        or float(prior_training_elapsed_seconds) < 0.0
+    ):
+        raise ValueError(
+            "COARSE resume prior training elapsed time must be finite and non-negative"
+        )
+    return losses
+
+
 def run_fixed_plastic_coarse_trial(
     state: PlasticFreshTrainingState,
     *,
@@ -109,16 +153,33 @@ def run_fixed_plastic_coarse_trial(
     evaluation_steps_count: int,
     clock: Clock = time.perf_counter,
     progress_sink: Optional[ProgressSink] = None,
+    prior_training_losses: Sequence[float] = (),
+    prior_training_elapsed_seconds: float = 0.0,
+    checkpoint_interval: int = 0,
+    checkpoint_callback: Optional[TrialCheckpointCallback] = None,
 ) -> PlasticCoarseTrialResult:
     if state.phase != "coarse":
         raise ValueError("fixed COARSE trial requires a coarse fresh state")
     if n_steps < 1:
         raise ValueError("n_steps must be positive")
+    if checkpoint_interval < 0:
+        raise ValueError("checkpoint_interval must be non-negative")
+    if checkpoint_interval > 0 and checkpoint_callback is None:
+        raise ValueError(
+            "positive COARSE checkpoint_interval requires checkpoint_callback"
+        )
     trainer = state.trainer
     if getattr(trainer.config, "plastic__runtime_phase", "fine") != "coarse":
         raise RuntimeError("COARSE trainer was not constructed in coarse runtime phase")
-    if int(trainer.state.completed_updates) != 0:
-        raise RuntimeError("COARSE trial did not begin at local step zero")
+    completed_at_start = int(trainer.state.completed_updates)
+    training_losses = list(
+        _validate_resume_prefix(
+            completed_updates=completed_at_start,
+            n_steps=n_steps,
+            prior_training_losses=prior_training_losses,
+            prior_training_elapsed_seconds=prior_training_elapsed_seconds,
+        )
+    )
     if int(trainer.config.max_updates) < n_steps:
         raise ValueError(
             "COARSE trainer max_updates is below the requested trial length: "
@@ -126,17 +187,17 @@ def run_fixed_plastic_coarse_trial(
         )
 
     if progress_sink is not None:
+        status = "local step zero" if completed_at_start == 0 else "resumed"
         progress_sink(
-            f"C {trial_index:02d} step {0:6d}/{n_steps:<6d} "
-            f"layers={state.active_layer_count:<4d} local step zero"
+            f"C {trial_index:02d} step {completed_at_start:6d}/{n_steps:<6d} "
+            f"layers={state.active_layer_count:<4d} {status}"
         )
     if torch.device(trainer.device).type == "cuda":
         torch.cuda.reset_peak_memory_stats(trainer.device)
     _synchronize(trainer)
     started = clock()
-    training_losses = []
     try:
-        for local_step in range(1, n_steps + 1):
+        for local_step in range(completed_at_start + 1, n_steps + 1):
             metrics = trainer.train_one_update()
             if float(metrics.get("skipped_update", 0.0)) != 0.0:
                 raise FloatingPointError(
@@ -156,13 +217,43 @@ def run_fixed_plastic_coarse_trial(
                     f"layers={state.active_layer_count:<4d} "
                     f"loss={training_loss:.6f}"
                 )
+            should_checkpoint = (
+                checkpoint_interval > 0
+                and local_step < n_steps
+                and local_step % checkpoint_interval == 0
+            )
+            if should_checkpoint:
+                _synchronize(trainer)
+                segment_elapsed = _worst_rank_elapsed(
+                    trainer,
+                    float(clock() - started),
+                )
+                progress = PlasticCoarseTrialProgress(
+                    trial_index=int(trial_index),
+                    layers=int(state.active_layer_count),
+                    completed_steps=local_step,
+                    n_steps=n_steps,
+                    training_losses=tuple(training_losses),
+                    training_elapsed_seconds=(
+                        float(prior_training_elapsed_seconds) + segment_elapsed
+                    ),
+                )
+                assert checkpoint_callback is not None
+                checkpoint_callback(progress, trainer)
         _synchronize(trainer)
         local_elapsed = float(clock() - started)
-        if not math.isfinite(local_elapsed) or local_elapsed <= 0.0:
+        if not math.isfinite(local_elapsed) or local_elapsed < 0.0:
             raise RuntimeError(
                 f"invalid PLASTIC COARSE training elapsed time: {local_elapsed!r}"
             )
-        training_elapsed = _worst_rank_elapsed(trainer, local_elapsed)
+        segment_elapsed = _worst_rank_elapsed(trainer, local_elapsed)
+        training_elapsed = (
+            float(prior_training_elapsed_seconds) + segment_elapsed
+        )
+        if training_elapsed <= 0.0:
+            raise RuntimeError(
+                f"invalid PLASTIC COARSE accumulated training time: {training_elapsed!r}"
+            )
         peak_allocated, peak_reserved = _peak_memory_gib(trainer)
         validation_losses = _validation_losses(trainer, evaluation_steps_count)
         return PlasticCoarseTrialResult(
@@ -181,13 +272,17 @@ def run_fixed_plastic_coarse_trial(
         raise
     except Exception as error:
         elapsed = float(clock() - started)
+        accumulated_elapsed = (
+            float(prior_training_elapsed_seconds)
+            + (elapsed if math.isfinite(elapsed) and elapsed >= 0.0 else 0.0)
+        )
         return PlasticCoarseTrialResult(
             trial_index=trial_index,
             layers=state.active_layer_count,
             status="failed",
             training_losses=tuple(training_losses),
             training_elapsed_seconds=(
-                elapsed if math.isfinite(elapsed) and elapsed > 0.0 else None
+                accumulated_elapsed if accumulated_elapsed > 0.0 else None
             ),
             training_steps=int(trainer.state.completed_updates),
             tokens_per_update=plastic_tokens_per_update(trainer.config),
@@ -209,3 +304,13 @@ def coarse_trial_training_config(
         plastic__initial_layer_count=int(active_layer_count),
         max_updates=int(n_steps),
     )
+
+
+__all__ = [
+    "PlasticCoarseTrialProgress",
+    "coarse_trial_training_config",
+    "plastic_tokens_per_update",
+    "render_plastic_coarse_trial_header",
+    "run_fixed_plastic_coarse_trial",
+]
+# ^^^ THOG
