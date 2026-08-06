@@ -59,6 +59,38 @@ jobs:
           bash -n plastic_depth_lookahead_wrapper_options.sh
 
       - name: Run full CPU test suite
+        shell: bash
         run: |
+          set -o pipefail
           python -m pytest -q tests \
-            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs
+            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
+            2>&1 | tee broad_regression.log
+
+      - name: Print compact regression failure summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          cache_path = Path('.pytest_cache/v/cache/lastfailed')
+          if cache_path.exists():
+              failed = json.loads(cache_path.read_text(encoding='utf-8'))
+              print('PYTEST_LASTFAILED_BEGIN')
+              for node_id in sorted(failed):
+                  print(node_id)
+              print('PYTEST_LASTFAILED_END')
+          else:
+              print('PYTEST_LASTFAILED_UNAVAILABLE')
+          PY
+          echo 'PYTEST_LOG_TAIL_BEGIN'
+          tail -n 250 broad_regression.log || true
+          echo 'PYTEST_LOG_TAIL_END'
+
+      - name: Retain complete regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-coarse-fine-broad-regression-log
+          path: broad_regression.log
+          if-no-files-found: error
