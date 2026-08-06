@@ -17,6 +17,9 @@ on:
       - train_OWT_core.sh
       - plastic_depth_lookahead_wrapper_options.sh
       - tests/**
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
