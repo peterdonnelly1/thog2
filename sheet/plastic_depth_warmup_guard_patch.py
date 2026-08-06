@@ -110,7 +110,8 @@ def _format_progress_line_with_compact_console_fields(
     line = _ORIGINAL_FORMAT_PROGRESS_LINE(run_id, event, payload)
     line = _compact_sampled_array(line)
     line = _compact_training_and_validation_row(line, event)
-    return line.replace("<<< warmup braked enabled", "<<< warmup brake enabled")
+    line = line.replace("<<< warmup braked enabled", "<<< warmup brake enabled")
+    return _console_minor._align_final_progress_line(run_id, event, line)
 
 
 _stage6.format_progress_line = _format_progress_line_with_compact_console_fields
