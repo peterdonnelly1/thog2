@@ -21,6 +21,7 @@ class _Config:
     plastic__coarse_phase: str = "enabled"
     plastic__runtime_phase: str = "fine"
     plastic__initial_layer_count: int = 2
+    plastic__coarse_phase_roll_through: bool = False
     max_updates: int = 100
 
 
@@ -282,3 +283,53 @@ def test_unselectable_trials_close_coordinator_and_do_not_build_fine() -> None:
         )
 
     assert coordinator.closed
+
+
+def test_roll_through_skips_pause_and_builds_fine_immediately() -> None:
+    coordinator = _Coordinator()
+    builds = []
+    output = io.StringIO()
+
+    def builder(**kwargs):
+        builds.append(kwargs["phase"])
+        return PlasticFreshTrainingState(
+            trainer=SimpleNamespace(config=kwargs["resolved_config"]),
+            phase=kwargs["phase"],
+            active_layer_count=kwargs["active_layer_count"],
+            instrumentation_namespace=kwargs["instrumentation_namespace"],
+            fingerprint={},
+        )
+
+    outcome = run_plastic_coarse_fine_lifecycle(
+        trainer_factory=lambda *_: None,
+        resolved_config=_Config(plastic__coarse_phase_roll_through=True),
+        train_tokens=object(),
+        validation_tokens=object(),
+        coarse_config=ResolvedPlasticCoarseConfig(True, (2,), 1, 1),
+        objective="lowest_loss",
+        maximum_layers=8,
+        cost_weight=0.0,
+        memory_budget_gib=None,
+        geometry_initialisation="equidistant",
+        console_stream=output,
+        fresh_state_builder=builder,
+        trial_runner=lambda state, **_: PlasticCoarseTrialResult(
+            trial_index=1,
+            layers=state.active_layer_count,
+            status="success",
+            validation_losses=(3.0,),
+            training_elapsed_seconds=1.0,
+            training_steps=1,
+            tokens_per_update=100,
+        ),
+        state_destroyer=lambda state: setattr(state, "trainer", None),
+        pause_runner=lambda **_: pytest.fail("roll-through must not invoke the pause runner"),
+        coordinator_factory=lambda _: coordinator,
+    )
+
+    assert builds == ["coarse", "fine"]
+    assert outcome.pause_result.disposition == "roll_through"
+    assert outcome.provenance["pause"]["disposition"] == "roll_through"
+    assert "starting FINE immediately" in output.getvalue()
+    assert coordinator.barriers == 1
+    outcome.close_coordinator()

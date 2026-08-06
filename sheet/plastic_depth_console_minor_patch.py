@@ -79,7 +79,7 @@ def _row_has_warmup_brake(trainer: Any, completed_updates: int) -> bool:
         bool(getattr(config, "plastic__enabled", False))
         and bool(getattr(config, "plastic__do_learn_layer_count", False))
         and bool(getattr(config, "plastic__freeze_geometry_during_warmup", False))
-        and int(completed_updates) <= int(getattr(config, "warmup_updates", 0))
+        and int(completed_updates) < int(getattr(config, "warmup_updates", 0))
     )
 # ^^^ THOG
 

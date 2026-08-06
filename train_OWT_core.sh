@@ -67,6 +67,14 @@ HYPERBLOCK_LOOP_DECAY="1.0"
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH wrapper defaults preserve the established fixed DEPTH path
 PLASTIC_ENABLED=false
+PLASTIC_COARSE_PHASE="disabled"
+PLASTIC_PHASE_1_N_STEPS=""
+PLASTIC_PHASE_1_STARTING_LAYER_COUNT=""
+PLASTIC_PHASE_1_NUMBER_OF_TRIALS=""
+PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT=""
+PLASTIC_LAYER_COUNT_PROBE_INTERVAL=""
+PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
+PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 PLASTIC_LAYERS_TO_SAMPLE=""
 PLASTIC_DO_LEARN_LAYER_COUNT=false
 PLASTIC_INITIAL_LAYER_COUNT=""
@@ -209,6 +217,11 @@ HYPERBLOCK:
 
 PLASTIC DEPTH:
   --plastic__enabled | --no-plastic__enabled
+  --plastic__coarse_phase enabled|disabled
+  --plastic__phase_1_n_steps N
+  --plastic__phase_1_starting_layer_count N
+  --plastic__phase_1__number_of_trials N
+  --plastic__phase_1_evaluation_steps_count N
   --plastic__layers_to_sample N                      fixed active count; defaults to N_LAYER
   --plastic__do_learn_layer_count | --no-plastic__do_learn_layer_count
   --plastic__initial_layer_count N                   initial learned count; defaults to N_LAYER
@@ -216,6 +229,9 @@ PLASTIC DEPTH:
   --plastic__layer_sampling_initialisation equidistant|random
   --plastic__layer_count_objective lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget
   --plastic__layer_count_update_brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}
+  --plastic__layer_count_probe_interval N=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update brake}
+  --plastic__layer_count_probe_radius N=${PLASTIC_LAYER_COUNT_PROBE_RADIUS}
+  --plastic__layer_count_max_step N=${PLASTIC_LAYER_COUNT_MAX_STEP}
   --plastic__layer_count_probe_noise_window N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW}
   --plastic__layer_count_probe_noise_min_observations N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS}
   --plastic__layer_count_probe_noise_lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
@@ -382,10 +398,18 @@ while (( $# > 0 )); do
     --plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true; shift ;;
     --no-plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=false; shift ;;
     # --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_noise_window|--plastic__layer_count_probe_noise_min_observations|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__geometry_learning_rate_multiplier)
-    --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_noise_window|--plastic__layer_count_probe_noise_min_observations|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
+    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_interval|--plastic__layer_count_probe_radius|--plastic__layer_count_max_step|--plastic__layer_count_probe_noise_window|--plastic__layer_count_probe_noise_min_observations|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
+        --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$2" ;;
+        --plastic__phase_1_n_steps) PLASTIC_PHASE_1_N_STEPS="$2" ;;
+        --plastic__phase_1_starting_layer_count) PLASTIC_PHASE_1_STARTING_LAYER_COUNT="$2" ;;
+        --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$2" ;;
+        --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$2" ;;
         --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$2" ;;
+        --plastic__layer_count_probe_interval) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2" ;;
+        --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2" ;;
+        --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$2" ;;
         --plastic__layers_to_sample) PLASTIC_LAYERS_TO_SAMPLE="$2" ;;
         --plastic__initial_layer_count) PLASTIC_INITIAL_LAYER_COUNT="$2" ;;
         --plastic__max_permitted_layers) PLASTIC_MAX_PERMITTED_LAYERS="$2" ;;
@@ -403,10 +427,18 @@ while (( $# > 0 )); do
       shift 2
       ;;
     # --plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_probe_noise_min_observations=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__geometry_learning_rate_multiplier=*)
-    --plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_probe_noise_min_observations=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
+    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_interval=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count_max_step=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_probe_noise_min_observations=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
       plastic_name="${1%%=*}"; plastic_value="${1#*=}"
       case "$plastic_name" in
+        --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$plastic_value" ;;
+        --plastic__phase_1_n_steps) PLASTIC_PHASE_1_N_STEPS="$plastic_value" ;;
+        --plastic__phase_1_starting_layer_count) PLASTIC_PHASE_1_STARTING_LAYER_COUNT="$plastic_value" ;;
+        --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$plastic_value" ;;
+        --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$plastic_value" ;;
         --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$plastic_value" ;;
+        --plastic__layer_count_probe_interval) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$plastic_value" ;;
+        --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$plastic_value" ;;
+        --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$plastic_value" ;;
         --plastic__layers_to_sample) PLASTIC_LAYERS_TO_SAMPLE="$plastic_value" ;;
         --plastic__initial_layer_count) PLASTIC_INITIAL_LAYER_COUNT="$plastic_value" ;;
         --plastic__max_permitted_layers) PLASTIC_MAX_PERMITTED_LAYERS="$plastic_value" ;;
@@ -725,6 +757,14 @@ validate_true_false "$PLASTIC_DO_LEARN_LAYER_COUNT" "PLASTIC_DO_LEARN_LAYER_COUN
 validate_true_false "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" "PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP"
 validate_true_false "$PLASTIC_COARSE_PHASE_ROLL_THROUGH" "PLASTIC_COARSE_PHASE_ROLL_THROUGH"
 validate_positive_uint "$PLASTIC_LOG_INTERVAL_COARSE" "PLASTIC_LOG_INTERVAL_COARSE"
+case "$PLASTIC_COARSE_PHASE" in enabled|disabled) ;; *) echo "PLASTIC_COARSE_PHASE must be enabled or disabled." >&2; exit 2 ;; esac
+[[ -z "$PLASTIC_PHASE_1_N_STEPS" ]] || validate_positive_uint "$PLASTIC_PHASE_1_N_STEPS" "PLASTIC_PHASE_1_N_STEPS"
+[[ -z "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" "PLASTIC_PHASE_1_STARTING_LAYER_COUNT"
+[[ -z "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" ]] || validate_positive_uint "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" "PLASTIC_PHASE_1_NUMBER_OF_TRIALS"
+[[ -z "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" ]] || validate_positive_uint "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" "PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT"
+[[ -z "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] || validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" "PLASTIC_LAYER_COUNT_PROBE_INTERVAL"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_RADIUS" "PLASTIC_LAYER_COUNT_PROBE_RADIUS"
+validate_positive_uint "$PLASTIC_LAYER_COUNT_MAX_STEP" "PLASTIC_LAYER_COUNT_MAX_STEP"
 validate_nonnegative_uint "$MAX_NONFINITE_UPDATE_SKIPS" "MAX_NONFINITE_UPDATE_SKIPS"
 [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || validate_positive_uint "$PLASTIC_LAYERS_TO_SAMPLE" "PLASTIC_LAYERS_TO_SAMPLE"
 [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_INITIAL_LAYER_COUNT" "PLASTIC_INITIAL_LAYER_COUNT"
@@ -735,6 +775,11 @@ validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS" "PLAS
 (( PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS <= PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW )) || { echo "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS must not exceed PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW." >&2; exit 2; }
 case "$PLASTIC_LAYER_SAMPLING_INITIALISATION" in equidistant|random) ;; *) echo "PLASTIC_LAYER_SAMPLING_INITIALISATION must be equidistant or random." >&2; exit 2 ;; esac
 case "$PLASTIC_LAYER_COUNT_OBJECTIVE" in lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget) ;; *) echo "Bad PLASTIC_LAYER_COUNT_OBJECTIVE: $PLASTIC_LAYER_COUNT_OBJECTIVE" >&2; exit 2 ;; esac
+if [[ "$PLASTIC_COARSE_PHASE" == enabled ]]; then
+  [[ "$PLASTIC_ENABLED" == true ]] || { echo "--plastic__coarse_phase enabled requires --plastic__enabled." >&2; exit 2; }
+  [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]] || { echo "--plastic__coarse_phase enabled requires --plastic__do_learn_layer_count." >&2; exit 2; }
+  [[ -n "$PLASTIC_PHASE_1_N_STEPS" && -n "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" && -n "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" && -n "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" ]] || { echo "enabled COARSE requires every plastic__phase_1 control." >&2; exit 2; }
+fi
 if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
   [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || { echo "--plastic__layers_to_sample conflicts with learned layer count." >&2; exit 2; }
   [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "--plastic__max_permitted_layers is required for learned layer count." >&2; exit 2; }
@@ -881,6 +926,8 @@ export THOG2_DEPTH_CURVE_PLOTS="$DEPTH_CURVE_PLOTS"
 export THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS="$DEPTH_CURVE_SAMPLE_ELEMENTS"
 export THOG2_DEPTH_CURVE_RENDERER="$DEPTH_CURVE_RENDERER"
 export THOG2_DEPTH_CURVE_LOCAL_HTML="$DEPTH_CURVE_LOCAL_HTML"
+export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="$PLASTIC_LAYER_COUNT_PROBE_RADIUS"
+export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="$PLASTIC_LAYER_COUNT_MAX_STEP"
 export THOG2_FAST_DISCARD="$FAST_DISCARD"
 export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"                                                                                  # <<< THOG pass wrapper-only optimisation switch into SheetGPTConfig
 export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
@@ -915,6 +962,16 @@ run_grid_point() {
     [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] && optional_args+=(--plastic__max_permitted_layers "$PLASTIC_MAX_PERMITTED_LAYERS")
     optional_args+=(--plastic__layer_sampling_initialisation "$PLASTIC_LAYER_SAMPLING_INITIALISATION")
     optional_args+=(--plastic__layer_count_objective "$PLASTIC_LAYER_COUNT_OBJECTIVE")
+    optional_args+=(--plastic__coarse_phase "$PLASTIC_COARSE_PHASE")
+    if [[ "$PLASTIC_COARSE_PHASE" == enabled ]]; then
+      optional_args+=(--plastic__phase_1_n_steps "$PLASTIC_PHASE_1_N_STEPS")
+      optional_args+=(--plastic__phase_1_starting_layer_count "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT")
+      optional_args+=(--plastic__phase_1__number_of_trials "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS")
+      optional_args+=(--plastic__phase_1_evaluation_steps_count "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT")
+    fi
+    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] && optional_args+=(--plastic__layer_count_probe_interval "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL")
+    optional_args+=(--plastic__layer_count_probe_radius "$PLASTIC_LAYER_COUNT_PROBE_RADIUS")
+    optional_args+=(--plastic__layer_count_max_step "$PLASTIC_LAYER_COUNT_MAX_STEP")
     optional_args+=(--plastic__layer_count_update_brake "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE")
     optional_args+=(--plastic__log_interval_coarse "$PLASTIC_LOG_INTERVAL_COARSE")
     if [[ "$PLASTIC_COARSE_PHASE_ROLL_THROUGH" == true ]]; then
@@ -1053,6 +1110,8 @@ scruffy OWT train
   vectorise per-head materialisation:     $VECTORISE_PER_HEAD_MATERIALISATION
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   plastic depth:      enabled=$PLASTIC_ENABLED fixed=${PLASTIC_LAYERS_TO_SAMPLE:-N_LAYER} learn_count=$PLASTIC_DO_LEARN_LAYER_COUNT initial=${PLASTIC_INITIAL_LAYER_COUNT:-N_LAYER} max=${PLASTIC_MAX_PERMITTED_LAYERS:-N_LAYER} init=$PLASTIC_LAYER_SAMPLING_INITIALISATION objective=$PLASTIC_LAYER_COUNT_OBJECTIVE
+  plastic coarse:     phase=$PLASTIC_COARSE_PHASE start=${PLASTIC_PHASE_1_STARTING_LAYER_COUNT:--} trials=${PLASTIC_PHASE_1_NUMBER_OF_TRIALS:--} steps=${PLASTIC_PHASE_1_N_STEPS:--} eval=${PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT:--} log=$PLASTIC_LOG_INTERVAL_COARSE roll_through=$PLASTIC_COARSE_PHASE_ROLL_THROUGH
+  plastic fine:       probe_interval=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update_brake} radius=$PLASTIC_LAYER_COUNT_PROBE_RADIUS max_step=$PLASTIC_LAYER_COUNT_MAX_STEP brake=$PLASTIC_LAYER_COUNT_UPDATE_BRAKE
 $depth_curve_console
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              $shape_summary

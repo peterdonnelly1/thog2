@@ -125,3 +125,45 @@ def test_wrapper_help_covers_every_registered_plastic_option() -> None:
     missing = sorted(option for option in registered if option not in completed.stdout)
     assert missing == []
     assert "--max-nonfinite-update-skips" in completed.stdout
+
+
+def test_warmup_brake_ends_at_the_actual_schedule_boundary() -> None:
+    from types import SimpleNamespace
+    from sheet import plastic_depth_console_minor_patch as console
+
+    trainer = SimpleNamespace(
+        config=SimpleNamespace(
+            plastic__enabled=True,
+            plastic__do_learn_layer_count=True,
+            plastic__freeze_geometry_during_warmup=True,
+            warmup_updates=100,
+        )
+    )
+    assert console._row_has_warmup_brake(trainer, 99)
+    assert not console._row_has_warmup_brake(trainer, 100)
+
+
+def test_registered_help_is_generated_from_the_complete_parser() -> None:
+    source = (ROOT / "train_OWT.sh").read_text(encoding="utf-8")
+    assert "registered runner hyperparameters" in source
+    assert "build_parser().format_help()" in source
+
+
+def test_shell_core_owns_every_coarse_and_fine_control() -> None:
+    source = (ROOT / "train_OWT_core.sh").read_text(encoding="utf-8")
+    for option in (
+        "--plastic__coarse_phase",
+        "--plastic__phase_1_n_steps",
+        "--plastic__phase_1_starting_layer_count",
+        "--plastic__phase_1__number_of_trials",
+        "--plastic__phase_1_evaluation_steps_count",
+        "--plastic__layer_count_probe_interval",
+        "--plastic__layer_count_probe_radius",
+        "--plastic__layer_count_max_step",
+        "--plastic__log_interval_coarse",
+        "--plastic__coarse_phase_roll_through",
+    ):
+        assert option in source
+    helper = (ROOT / "plastic_depth_lookahead_wrapper_options.sh").read_text(encoding="utf-8")
+    assert "LOOKAHEAD_EXTRA_ARGS" not in helper
+    assert "Python-extra boundary" not in helper
