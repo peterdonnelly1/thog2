@@ -7,6 +7,9 @@ on:
     paths:
       - tools/apply_plastic_v052_followup_cleanup.py
       - .github/workflows/apply_plastic_v052_followup_cleanup.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
@@ -59,6 +62,7 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated cleanup
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git restore -- .github/workflows
           if git diff --quiet; then
@@ -78,7 +82,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG validated test/spec-history cleanup for PLASTIC v0.52
-# ^^^ THOG
-# vvv THOG trigger the post-migration cleanup after the workflow itself exists on the branch
+# vvv THOG validated test/spec-history cleanup for PLASTIC v0.52 with PR-visible diagnostics and push-only writeback
 # ^^^ THOG
