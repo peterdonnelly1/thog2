@@ -64,6 +64,9 @@ def _config() -> TrainingConfig:
         data_seed=202,
         device="cpu",
         dtype="float32",
+        # vvv THOG pin the unrelated global non-finite setting so this fixture compares identical PLASTIC-disabled configurations
+        max_nonfinite_update_skips=10,
+        # ^^^ THOG
         plastic__enabled=False,
     )
 
