@@ -58,10 +58,12 @@ jobs:
       - name: Config checkpoint and lifecycle regression
         run: |
           python -m pytest -q \
-            tests/test_plastic_depth_config.py \
-            tests/test_plastic_depth_checkpoint_equivalence.py \
+            tests/test_plastic_depth.py \
+            tests/test_plastic_depth_coarse_config.py \
+            tests/test_plastic_depth_checkpoint_format.py \
             tests/test_plastic_depth_lifecycle.py \
+            tests/test_plastic_depth_lifecycle_checkpoint.py \
             tests/test_plastic_depth_coarse_real_lifecycle.py
 
-# vvv THOG CPU regression gate for the v0.52 directional-controller and console revision; use the real audit regression module
+# vvv THOG CPU regression gate for v0.52 using actual config, checkpoint and lifecycle regression modules
 # ^^^ THOG
