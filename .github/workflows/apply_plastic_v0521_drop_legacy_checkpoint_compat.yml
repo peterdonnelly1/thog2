@@ -73,15 +73,23 @@ jobs:
       - name: Focused descriptor help
         run: python -m pytest -q --tb=short tests/test_console_and_descriptor_help.py
 
-      - name: Affected PLASTIC regression
-        run: |
-          python -m pytest -q \
-            tests/test_plastic_depth_inline_probe.py \
-            tests/test_plastic_depth_full_radius.py \
-            tests/test_plastic_depth_full_radius_oom.py \
-            tests/test_plastic_depth_checkpoint_format.py \
-            tests/test_plastic_depth_resume.py \
-            tests/test_run_thog2_owt_startup_report.py
+      - name: Regression inline probe
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_inline_probe.py
+
+      - name: Regression full radius
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_full_radius.py
+
+      - name: Regression full radius OOM
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_full_radius_oom.py
+
+      - name: Regression checkpoint format
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_checkpoint_format.py
+
+      - name: Regression resume
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_resume.py
+
+      - name: Regression startup report
+        run: python -m pytest -q --tb=short tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
