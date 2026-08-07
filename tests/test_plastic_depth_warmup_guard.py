@@ -60,16 +60,15 @@ def test_warmup_brake_matches_the_optimizer_schedule_boundary() -> None:
     assert not console_minor._row_has_warmup_brake(trainer, 101)
 
 
-def test_frozen_warmup_skips_probe_construction_and_preserves_history(monkeypatch) -> None:
+def test_frozen_warmup_skips_probe_construction_and_clears_history(monkeypatch) -> None:
     trainer = _trainer(completed_updates=39)
-    history_before = dict(trainer.state.plastic_depth_probe_histories)
 
     def unexpected_begin(_self):
         raise AssertionError("warmup must not construct a PLASTIC FINE probe")
 
     monkeypatch.setattr(guard, "_ORIGINAL_BEGIN_INLINE_UPDATE", unexpected_begin)
     assert guard._begin_plastic_depth_inline_update_without_warmup_probe(trainer) is None
-    assert trainer.state.plastic_depth_probe_histories == history_before
+    assert trainer.state.plastic_depth_probe_histories == {}
 
 
 def test_first_post_warmup_update_delegates_to_probe_path(monkeypatch) -> None:
@@ -85,6 +84,7 @@ def test_first_post_warmup_update_delegates_to_probe_path(monkeypatch) -> None:
 
 
 def test_probe_interval_restarts_immediately_after_frozen_warmup(monkeypatch) -> None:
+    monkeypatch.delenv(probe_interval._ENVIRONMENT_KEY, raising=False)
     trainer = _trainer(completed_updates=9)
     trainer.config.warmup_updates = 10
     sentinel = {"probe": "started"}
@@ -161,5 +161,6 @@ def test_warmup_selector_backstop_discards_probe_evidence_if_called_directly(
     assert context["selected_count"] == 32
     assert context["decision"].selected_count == 32
     assert context["decision"].histories == {}
+    assert trainer.state.plastic_depth_probe_histories == {}
     assert context["warmup_brake_active"] is True
 # ^^^ THOG
