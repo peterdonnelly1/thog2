@@ -35,3 +35,5 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 # ^^^ THOG
+# vvv THOG migration trigger after retiring superseded writeback workflows
+# ^^^ THOG
