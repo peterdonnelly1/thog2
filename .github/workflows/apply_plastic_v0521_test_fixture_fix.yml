@@ -79,7 +79,6 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git restore -- .github/workflows
           if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
@@ -99,6 +98,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG validate v0.521 against tiny stage3 fixtures, direct-config capacity, durable SE audit retention, lifecycle regressions and the reconciled operator-console specification
-# final clean takeover writeback trigger: 2026-08-07
+# vvv THOG same-repository PR validation has contents:write, so the green gate itself writes back its generated source/spec cleanup instead of relying on an opaque push-only twin
 # ^^^ THOG
