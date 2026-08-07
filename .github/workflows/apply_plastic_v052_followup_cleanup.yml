@@ -80,3 +80,5 @@ jobs:
 
 # vvv THOG validated test/spec-history cleanup for PLASTIC v0.52
 # ^^^ THOG
+# vvv THOG trigger the post-migration cleanup after the workflow itself exists on the branch
+# ^^^ THOG
