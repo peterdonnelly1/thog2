@@ -156,3 +156,7 @@ def _plastic_depth_leave_sampled_after_layers(line):
 
 _plastic_depth_directional_coherence_patch._align_sampled_to_minimum_tab_column = _plastic_depth_leave_sampled_after_layers
 # ^^^ THOG
+
+# vvv THOG keep postfix brake annotations at the physical end of the row and render neutral L/R/A outcomes as stet
+from . import plastic_depth_console_postfix_patch as _plastic_depth_console_postfix_patch
+# ^^^ THOG
