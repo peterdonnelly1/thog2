@@ -100,4 +100,5 @@ jobs:
           exit 1
 
 # vvv THOG validate v0.521 against tiny stage3 fixtures, direct-config capacity, durable SE audit retention, lifecycle regressions and the reconciled operator-console specification
+# final clean takeover writeback trigger: 2026-08-07
 # ^^^ THOG
