@@ -63,7 +63,10 @@ def _decision_reason(
     winning_probe_count: int,
     committed_count: int,
     brake_active: bool,
+    warmup_brake_active: bool,
 ) -> str:
+    if warmup_brake_active:
+        return "warmup_brake"
     if brake_active:
         return "update_brake"
     if winning_probe_count == current_count:
@@ -101,6 +104,7 @@ def replay_plastic_depth_count_audit(
     if max_step < 1:
         raise ValueError("audit max_step must be positive")
     brake_active = bool(audit["brake_active"])
+    warmup_brake_active = bool(audit.get("warmup_brake_active", False))
     passing = []
     for item in audit["robust_evidence"]:
         if not bool(item["feasible"]) or not bool(item["significant"]):
@@ -116,16 +120,20 @@ def replay_plastic_depth_count_audit(
             passing,
             key=lambda item: (item[0], -item[1]),
         )[1]
-    committed_offset = max(
-        -max_step,
-        min(max_step, winning_probe_count - current_count),
-    )
-    committed_count = current_count + committed_offset
+    if warmup_brake_active:
+        committed_count = current_count
+    else:
+        committed_offset = max(
+            -max_step,
+            min(max_step, winning_probe_count - current_count),
+        )
+        committed_count = current_count + committed_offset
     reason = _decision_reason(
         current_count=current_count,
         winning_probe_count=winning_probe_count,
         committed_count=committed_count,
         brake_active=brake_active,
+        warmup_brake_active=warmup_brake_active,
     )
     replay = {
         "winning_probe_count": winning_probe_count,
@@ -172,6 +180,7 @@ def _commit_plastic_depth_inline_update_with_audit(
     current_count = int(context["current_count"])
     committed_count = int(decision.selected_count)
     winning_probe_count = _winning_probe_count(decision, current_count)
+    warmup_brake_active = bool(context.get("warmup_brake_active", False))
     lattice = self._plastic_depth_lattice()
     if lattice is None:
         raise RuntimeError("PLASTIC FINE audit lacks its sampling lattice")
@@ -187,6 +196,7 @@ def _commit_plastic_depth_inline_update_with_audit(
             winning_probe_count=winning_probe_count,
             committed_count=committed_count,
             brake_active=bool(decision.brake_active),
+            warmup_brake_active=warmup_brake_active,
         ),
         "objective": self.config.plastic__layer_count_objective,
         "objective_cost_weight": float(self.config.plastic__layer_count_cost_weight),
@@ -197,6 +207,7 @@ def _commit_plastic_depth_inline_update_with_audit(
         "max_step": int(context["max_step"]),
         "update_brake": int(self.config.plastic__layer_count_update_brake),
         "brake_active": bool(decision.brake_active),
+        "warmup_brake_active": warmup_brake_active,
         "last_count_change_update": int(
             self.state.plastic_depth_last_count_change_update
         ),
