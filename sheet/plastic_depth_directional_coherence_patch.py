@@ -30,6 +30,7 @@ _PROBE_VECTOR = re.compile(
 )
 _LAYER_FIELD = re.compile(r"layers = (?P<count>\d+)")
 _SAMPLED_BY_RUN_ID: Dict[str, Tuple[str, ...]] = {}
+_MIN_FINAL_SAMPLED_COLUMN = 328
 
 
 def _positive_integer(value: Any, *, name: str) -> int:
@@ -537,6 +538,20 @@ def _move_sampled_after_layers(line: str) -> str:
     )
 
 
+# vvv THOG retain one real tab before sampled while forcing T/V sampled to the same visible terminal column
+def _align_sampled_to_minimum_tab_column(line: str) -> str:
+    sampled = _SAMPLED_ARRAY.search(line)
+    if sampled is None:
+        return line
+    prefix = line[: sampled.start()].rstrip(" \t")
+    suffix = line[sampled.start() :]
+    prefix += "\t"
+    while len(_ANSI_ESCAPE.sub("", prefix).expandtabs(8)) < _MIN_FINAL_SAMPLED_COLUMN:
+        prefix += "\t"
+    return prefix + suffix
+# ^^^ THOG
+
+
 def _highlight_changed_sampled_values(run_id: str, event: str, line: str) -> str:
     if event != "optimizer_progress":
         return line
@@ -592,6 +607,7 @@ def _format_progress_line_with_directional_summary(
     line = line.replace("loss  =", "loss=")
     line = re.sub(r"grad norm=\s+", "grad norm= ", line)
     line = _move_sampled_after_layers(line)
+    line = _align_sampled_to_minimum_tab_column(line)
     line = _highlight_changed_sampled_values(run_id, event, line)
     line = _bold_current_probe_loss(line, offsets)
     if lra_summary is not None:
