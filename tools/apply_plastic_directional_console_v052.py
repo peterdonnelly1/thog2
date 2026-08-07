@@ -127,12 +127,12 @@ def _retire_old_min_probe_migrations() -> None:
         text = text.replace("LNM.*--plastic__layer_count_min_probes N", "")
         if path.endswith("apply_plastic_probe_naming_and_console_fix.py"):
             text = re.sub(
-                r"\n    \(\n        \"THOG2_PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS\",\n        \"THOG2_PLASTIC_LAYER_COUNT_MIN_PROBES\",\n    \),",
+                r"\n    \(\n        \"THOG2_PLASTIC_LAYER_COUNT_MIN_PROBES\",\n        \"THOG2_PLASTIC_LAYER_COUNT_MIN_PROBES\",\n    \),",
                 "",
                 text,
             )
             text = re.sub(
-                r"\n    \(\n        \"layer_count_probe_noise_min_observations\",\n        \"layer_count_min_probes\",\n    \),",
+                r"\n    \(\n        \"layer_count_min_probes\",\n        \"layer_count_min_probes\",\n    \),",
                 "",
                 text,
             )
