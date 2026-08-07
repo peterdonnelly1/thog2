@@ -7,6 +7,7 @@ on:
     paths:
       - tools/apply_plastic_v052_followup_cleanup.py
       - tools/apply_plastic_v052_startup_test_cleanup.py
+      - tools/apply_plastic_v052_sampled_alignment_fix.py
       - .github/workflows/apply_plastic_v052_followup_cleanup.yml
   pull_request:
     branches:
@@ -34,6 +35,7 @@ jobs:
         run: |
           python tools/apply_plastic_v052_followup_cleanup.py
           python tools/apply_plastic_v052_startup_test_cleanup.py
+          python tools/apply_plastic_v052_sampled_alignment_fix.py
 
       - name: Install CPU dependencies
         run: |
@@ -45,7 +47,7 @@ jobs:
         run: |
           bash -n train_OWT.sh
           bash -n train_OWT_core.sh
-          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tools/apply_plastic_v052_startup_test_cleanup.py tests/test_plastic_depth_directional_coherence_v052.py
+          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tools/apply_plastic_v052_startup_test_cleanup.py tools/apply_plastic_v052_sampled_alignment_fix.py tests/test_plastic_depth_directional_coherence_v052.py
           if git grep -n 'plastic__layer_count_min_probes[=:]' -- tests ':!tests/test_plastic_depth_directional_coherence_v052.py'; then
             echo 'active test still constructs or expects retired min-probes control' >&2
             exit 1
@@ -63,6 +65,12 @@ jobs:
             tests/test_plastic_depth_inline_probe.py \
             tests/test_plastic_depth_startup_lookahead_ui.py \
             tests/test_run_thog2_owt_startup_report.py
+
+      - name: Run final full-radius and console alignment regression
+        run: |
+          python -m pytest -q \
+            tests/test_plastic_depth_full_radius.py \
+            tests/test_plastic_depth_console_minor_patch.py
 
       - name: Commit validated cleanup
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
