@@ -141,10 +141,18 @@ def _inline_probe_request_with_paired_token_se(
         try:
             selected_count = int(original_selector(candidates))
             counts = tuple(int(count) for count, _ in candidates)
+            if len(diagnostic_buffer) < len(counts):
+                raise RuntimeError(
+                    "PLASTIC DEPTH paired-token diagnostics lost a retained candidate; "
+                    f"retained={len(counts)}, diagnostic_vectors={len(diagnostic_buffer)}"
+                )
+            # vvv THOG a candidate may succeed locally but be globally discarded when another DDP rank OOMs; retained candidates are always the completed prefix
+            retained_token_losses = tuple(diagnostic_buffer[: len(counts)])
+            # ^^^ THOG
             local_stats = _local_paired_delta_stats(
                 counts=counts,
                 current_count=int(context["current_count"]),
-                token_losses=tuple(diagnostic_buffer),
+                token_losses=retained_token_losses,
             )
             gathered_stats = self.distributed.all_gather_object(local_stats)
             standard_errors = _combine_paired_delta_standard_errors(
