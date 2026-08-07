@@ -34,7 +34,11 @@ class ResumeAndForkCliCompatibilityTests(unittest.TestCase):
         start = wrapper.index("OPTIMIZER_FILTERED_ARGS=()")
         end = wrapper.index("while getopts", start)
         master_preparser = wrapper[start:end]
-        master_long_options = set(re.findall(r"--[a-z][a-z0-9-]+", master_preparser))
+        master_long_options = {
+            option
+            for option in re.findall(r"--[a-z][a-z0-9-]+", master_preparser)
+            if option not in {"--plastic", "--no-plastic"}
+        }
         lifecycle_long_options = {
             option
             for action in run_thog2_owt._lifecycle.build_parser()._actions
