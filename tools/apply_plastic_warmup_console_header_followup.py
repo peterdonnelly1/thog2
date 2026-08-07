@@ -69,6 +69,29 @@ def _update_startup_report() -> None:
     )
 
 
+def _update_probe_renderer() -> None:
+    path = ROOT / "sheet/plastic_depth_probe_sampling_v0521_patch.py"
+    _replace_once(
+        path,
+        '            rendered.append(\n'
+        '                f"{_constants.BOLD_WHITE}{_format_probe_absolute(loss)}{_constants.R}"\n'
+        '            )\n',
+        '            rendered.append(\n'
+        '                f"{_constants.BOLD_WHITE}{_constants.UNDER}{_format_probe_absolute(loss)}{_constants.R}"\n'
+        '            )\n',
+    )
+    _replace_once(
+        path,
+        '        if delta is not None and math.isfinite(delta) and delta < 0.0:\n'
+        '            text = f"{_cleanup._GREEN}{text}{_cleanup._RESET}"\n',
+        '        if delta is not None and math.isfinite(delta) and delta < 0.0:\n'
+        '            if offset < 0:\n'
+        '                text = f"{_constants.BOLD_MAGENTA}{text}{_constants.R}"\n'
+        '            else:\n'
+        '                text = f"{_cleanup._GREEN}{text}{_cleanup._RESET}"\n',
+    )
+
+
 def _update_probe_render_test() -> None:
     path = ROOT / "tests/test_plastic_depth_probe_sampling_v0521.py"
     _replace_once(
@@ -115,6 +138,7 @@ def _update_startup_report_test() -> None:
 
 def main() -> None:
     _update_startup_report()
+    _update_probe_renderer()
     _update_probe_render_test()
     _update_startup_report_test()
 
