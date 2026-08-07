@@ -61,13 +61,17 @@ jobs:
             exit 1
           fi
 
-      - name: Focused v0.521 tests
-        run: |
-          python -m pytest -q \
-            tests/test_plastic_depth_probe_sampling_v0521.py \
-            tests/test_plastic_depth_directional_coherence_v052.py \
-            tests/test_plastic_cli_console_refinements.py \
-            tests/test_console_and_descriptor_help.py
+      - name: Focused v0.521 probe sampling
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_probe_sampling_v0521.py
+
+      - name: Focused v0.521 directional coherence
+        run: python -m pytest -q --tb=short tests/test_plastic_depth_directional_coherence_v052.py
+
+      - name: Focused PLASTIC CLI console refinements
+        run: python -m pytest -q --tb=short tests/test_plastic_cli_console_refinements.py
+
+      - name: Focused descriptor help
+        run: python -m pytest -q --tb=short tests/test_console_and_descriptor_help.py
 
       - name: Affected PLASTIC regression
         run: |
