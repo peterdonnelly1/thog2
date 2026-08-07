@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 # vvv THOG
-"""Apply PLASTIC v0.521 and migrate pre-existing tiny test fixtures to explicit legal probe-token samples."""
+"""Migrate tiny PLASTIC v0.521 fixtures without replaying or overwriting later v0.521 overlays."""
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
-subprocess.run(
-    ["python", "tools/apply_plastic_v0521_probe_sampling_and_console.py"],
-    cwd=ROOT,
-    check=True,
-)
+# vvv THOG this migration must never re-run the older v0.521 implementation applicator because later v0.521 overlays, including paired-token SE, must remain authoritative
+# subprocess.run(["python", "tools/apply_plastic_v0521_probe_sampling_and_console.py"], cwd=ROOT, check=True)                                  # <<< THOG retired because it overwrote later v0.521 diagnostics and tests
+# ^^^ THOG
 
 # vvv THOG the artifact-name fixture has 2 x 32 = 64 token positions and should not inherit the production 1024-token default
 path = ROOT / "tests/test_plastic_cli_console_refinements.py"
@@ -98,6 +95,49 @@ if addition not in content:
     path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
+# vvv THOG paired-token SE unit tests are part of v0.521 and must survive fixture migrations
+path = ROOT / "tests/test_plastic_depth_probe_sampling_v0521.py"
+content = path.read_text(encoding="utf-8")
+se_tests = """
+
+# vvv THOG v0.521 paired-token SE is a diagnostic precision estimate and never participates in count selection
+def test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_deviation() -> None:
+    from sheet import plastic_depth_probe_se_v0521_patch as probe_se
+
+    counts = (6, 7, 8)
+    current = torch.tensor([2.0, 2.0, 2.0, 2.0], dtype=torch.float64)
+    left = current + torch.tensor([-1.0, 0.0, 1.0, 2.0], dtype=torch.float64)
+    right = current + torch.tensor([0.5, 0.5, 0.5, 0.5], dtype=torch.float64)
+    local = probe_se._local_paired_delta_stats(
+        counts=counts,
+        current_count=7,
+        token_losses=(left, current, right),
+    )
+    standard_errors = probe_se._combine_paired_delta_standard_errors(
+        counts=counts,
+        current_count=7,
+        gathered_stats=(local,),
+    )
+
+    expected_left = torch.tensor([-1.0, 0.0, 1.0, 2.0], dtype=torch.float64).std(unbiased=True).item() / 2.0
+    assert standard_errors[6] == pytest.approx(expected_left)
+    assert standard_errors[7] == 0.0
+    assert standard_errors[8] == pytest.approx(0.0)
+
+
+def test_paired_token_se_overlay_is_installed_after_v0521_sampler() -> None:
+    from sheet import plastic_depth_probe_se_v0521_patch as probe_se
+    from sheet.training_model import TrainingSheetGPT
+
+    assert TrainingSheetGPT._plastic_depth_candidate_head_loss.__module__ == probe_se.__name__
+    assert TrainerStepMixin._plastic_depth_inline_probe_request.__module__ == probe_se.__name__
+# ^^^ THOG
+"""
+if "def test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_deviation()" not in content:
+    content = content.rstrip() + se_tests + "\n"
+    path.write_text(content, encoding="utf-8")
+# ^^^ THOG
+
 # vvv THOG the deterministic-sampling regression now asserts the configured cardinality rather than the retired hard-coded 256
 path = ROOT / "tests/test_plastic_depth_inline_probe.py"
 content = path.read_text(encoding="utf-8")
@@ -129,6 +169,13 @@ if new not in content:
         raise RuntimeError(f"expected one v0.521 console acceptance bullet; found {content.count(old)}")
     content = content.replace(old, new, 1)
 
+body_anchor = "All candidate layer counts in one probe event must continue to use exactly the same selected token positions. The sampler remains confined to the first probe microbatch; representativeness across training data is provided temporally by the multi-probe evidence window rather than by probing every gradient-accumulation microbatch.\n"
+body_se = "Paired-token standard-error diagnostic. For each non-current candidate on a probe event, define per-token paired deltas d_i = candidate_token_loss_i − L_token_loss_i on the exact shared sampled positions. Report the diagnostic standard error SE = sample_stddev(d_i) / sqrt(n), combining sufficient statistics across DDP ranks. The current-L entry has SE=0. This is diagnostic only in Version 0.521: it must be recorded with candidate diagnostics but must not alter the established median/MAD/z-score, L/R/A, brake or movement rules. Because token losses within sequences are correlated, this SE is a useful precision diagnostic rather than a claim that token observations are independent.\n"
+if body_se not in content:
+    if content.count(body_anchor) != 1:
+        raise RuntimeError(f"expected one probe-token body anchor; found {content.count(body_anchor)}")
+    content = content.replace(body_anchor, body_anchor + body_se, 1)
+
 old = "WHAT DOES NOT CHANGE The selected PLASTIC objective still defines what “better” means. Full-radius probe losses/scores remain naked and inspectable. Existing per-offset paired histories, robust median/MAD scale, z-score ranking, latest-win gate, strict-majority gate, update brake, max_step and history reset remain conceptually intact except that readiness now means a complete configured history window rather than a separate min-probes threshold.\n"
 new = "WHAT DOES NOT CHANGE The selected PLASTIC objective still defines what “better” means. Full-radius objective scores and raw candidate losses remain retained and auditable; Version 0.521 changes only the compact operator-facing loss vector to the hybrid probe_Δloss display. Existing per-offset paired histories, robust median/MAD scale, z-score ranking, latest-win gate, strict-majority gate, update brake, max_step and history reset remain conceptually intact except that readiness now means a complete configured history window rather than a separate min-probes threshold.\n"
 if old in content:
@@ -149,5 +196,5 @@ elif new not in content:
 path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
-print("Applied PLASTIC v0.521, migrated tiny fixtures, locked SE audit retention, and reconciled the v0.521 spec.")
+print("Migrated PLASTIC v0.521 tiny fixtures, restored SE tests/spec detail, and reconciled operator-console wording without replaying older overlays.")
 # ^^^ THOG
