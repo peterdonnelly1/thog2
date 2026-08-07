@@ -7,6 +7,9 @@ on:
     paths:
       - .github/workflows/apply_plastic_warmup_console_header_followup.yml
       - tools/apply_plastic_warmup_console_header_followup.py
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
@@ -42,6 +45,7 @@ jobs:
             sheet/plastic_depth_probe_interval_patch.py \
             sheet/plastic_depth_warmup_guard_patch.py \
             sheet/plastic_depth_probe_sampling_v0521_patch.py
+          git diff --check
 
       - name: Run focused PLASTIC tests
         run: |
@@ -53,6 +57,7 @@ jobs:
             tests/test_plastic_depth_directional_coherence_v052.py
 
       - name: Commit generated source and test updates
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           if git diff --quiet; then
             exit 0
@@ -61,6 +66,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
             run_thog2_owt.py \
+            sheet/plastic_depth_probe_sampling_v0521_patch.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_run_thog2_owt_startup_report.py
           git commit -m 'Complete PLASTIC warmup and probe console refinements'
@@ -68,4 +74,5 @@ jobs:
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
 
-# Trigger after workflow creation so the branch receives the generated follow-up immediately.
+# vvv THOG validate frozen-warmup probe suppression, complete startup reporting and side-aware probe-delta emphasis
+# ^^^ THOG
