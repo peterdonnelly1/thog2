@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import ast
-import subprocess
+import re
 from pathlib import Path
 
 
@@ -59,7 +59,22 @@ def remove_runtime_marker_block(
     return content[:start] + replacement + content[end:]
 
 
-# Remove the two obsolete compatibility-generating calls structurally, not by brittle textual span deletion.
+def collapse_duplicate_capacity_guards(content: str) -> str:
+    pattern = re.compile(
+        r"(?P<block>"
+        r"        # vvv THOG v0\.521 reject a requested sample larger than the physical first-microbatch token capacity\n"
+        r".*?"
+        r"        # \^\^\^ THOG\n"
+        r")(?P=block)",
+        re.DOTALL,
+    )
+    while True:
+        content, count = pattern.subn(r"\g<block>", content, count=1)
+        if count == 0:
+            return content
+
+
+# Remove obsolete checkpoint-compatibility generator calls structurally. Old PLASTIC checkpoints are intentionally out of scope.
 primary = PRIMARY.read_text(encoding="utf-8")
 primary = remove_top_level_nodes_containing(
     primary,
@@ -85,7 +100,7 @@ primary = primary.replace(
     "",
 )
 
-# The physical-capacity rule matters only when learned-count probing can actually execute.
+# Keep the primary migration itself idempotent with the final active-probe capacity semantics.
 primary = primary.replace(
     "        if self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity:\\n",
     "        if (\\n"
@@ -97,14 +112,8 @@ primary = primary.replace(
 ast.parse(primary)
 PRIMARY.write_text(primary, encoding="utf-8")
 
-# Apply the clean current-only implementation.
-subprocess.run(
-    ["python", str(PRIMARY.relative_to(ROOT))],
-    cwd=ROOT,
-    check=True,
-)
-
-# Defensive cleanup only for a workspace in which an older generator was invoked before this script.
+# The preceding fixture migration already applied the primary migration to this workspace. Do not apply it a second time here.
+# vvv THOG current-only finalization therefore cleans the generated workspace in place and remains idempotent across later runs
 runner_path = ROOT / "run_thog2_owt_core.py"
 runner = runner_path.read_text(encoding="utf-8")
 runner = remove_runtime_marker_block(
@@ -124,8 +133,9 @@ resume = remove_runtime_marker_block(
     label="trainer-resume compatibility block",
 )
 resume_path.write_text(resume, encoding="utf-8")
+# ^^^ THOG
 
-# Gate installed static-capacity checks to active learned-count probing.
+# Gate installed static-capacity checks to active learned-count probing and collapse any duplicate emitted by an older two-apply workflow.
 for relative_path in ("sheet/training_config.py", "sheet/run_config.py"):
     path = ROOT / relative_path
     content = path.read_text(encoding="utf-8")
@@ -138,6 +148,7 @@ for relative_path in ("sheet/training_config.py", "sheet/run_config.py"):
         "        ):\n"
     )
     content = replace_exact_once(content, old, new, label=f"{relative_path} active-probe capacity gate")
+    content = collapse_duplicate_capacity_guards(content)
     path.write_text(content, encoding="utf-8")
 
 # Capacity tests exercise active learned-count probing; dormant tiny configs remain unaffected.
@@ -166,5 +177,5 @@ spec = spec.replace(
 )
 spec_path.write_text(spec, encoding="utf-8")
 
-print("PLASTIC v0.521 finalized with current-only semantics and active-probe capacity validation.")
+print("PLASTIC v0.521 finalized idempotently with current-only semantics and one active-probe capacity guard.")
 # ^^^ THOG
