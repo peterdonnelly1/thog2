@@ -144,4 +144,5 @@ from . import plastic_depth_cli_cost_and_label_patch as _plastic_depth_cli_cost_
 
 # vvv THOG install v0.52 goal-agnostic directional coherence and final PLASTIC progress formatting after every earlier overlay
 from . import plastic_depth_directional_coherence_patch as _plastic_depth_directional_coherence_patch
+_plastic_depth_console_minor_patch._ALIGNMENT_LABELS = ("sampled =", "probe_losses", "score_z", "change_z")
 # ^^^ THOG
