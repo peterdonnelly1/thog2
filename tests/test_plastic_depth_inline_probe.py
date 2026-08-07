@@ -400,9 +400,9 @@ def test_inline_probe_sample_positions_are_deterministic_per_update_and_rank() -
 def test_fast_discard_false_retains_maximum_candidate_prefix() -> None:
     with patch.dict(os.environ, {"THOG2_FAST_DISCARD": "false"}):
         trainer = _learned_trainer(
-        gradient_accumulation_steps=2,
-        plastic__layer_count_probe__window_size_as_number_of_probes=1,
-    )
+            gradient_accumulation_steps=2,
+            plastic__layer_count_probe__window_size_as_number_of_probes=1,
+        )
     observed_layer_indices = []
     original_materialize = trainer.raw_model._materialize_block_parameters_for_update
 
