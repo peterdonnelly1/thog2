@@ -328,6 +328,18 @@ class TrainingConfig:
                 f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens!r}"
             )
         # ^^^ THOG
+        # vvv THOG v0.521 direct TrainingConfig paths reject impossible positive probe samples before trainer construction
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed "
+                f"batch_size * block_size ({probe_token_capacity})"
+            )
+        # ^^^ THOG
         validate_plastic_fine_count_controls(
             probe_radius=self.plastic__layer_count_probe_radius,
             max_step=self.plastic__layer_count_max_step,

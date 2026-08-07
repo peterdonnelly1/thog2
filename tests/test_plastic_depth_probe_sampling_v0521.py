@@ -95,6 +95,25 @@ def test_probe_token_static_capacity_validation_rejects_negative_or_too_large(va
         )
 
 
+
+
+def test_training_config_static_capacity_validation_rejects_too_large() -> None:
+    with pytest.raises(ValueError, match="plastic__layer_count_probe__number_of_sampled_valid_tokens"):
+        TrainingConfig(
+            model_type="thog2_sheet",
+            geometry_preset="depth",
+            basis_family="chebyshev",
+            n_layer=8,
+            depth_order=4,
+            batch_size=2,
+            block_size=8,
+            plastic__enabled=True,
+            plastic__do_learn_layer_count=True,
+            plastic__initial_layer_count=4,
+            plastic__max_permitted_layers=8,
+            plastic__layer_count_probe__number_of_sampled_valid_tokens=17,
+        )
+
 def test_zero_uses_every_valid_token_without_random_subsampling() -> None:
     targets = torch.tensor([[10, 11, -1, 12], [13, -1, 14, 15]], dtype=torch.long)
     sampled = TrainerStepMixin._plastic_depth_sampled_token_indices(
