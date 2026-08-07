@@ -73,7 +73,6 @@ def _config():
         plastic__layer_count_probe_radius=2,
         plastic__layer_count_max_step=1,
         plastic__layer_count_probe__window_size_as_number_of_probes=4,
-        plastic__layer_count_min_probes=1,
         plastic__layer_count_probe_noise_lambda=1.0e9,
     )
 
@@ -97,7 +96,7 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
             "committed_count",
             "decision_reason",
             "objective",
-            "probe_interval",
+            "probe_every_n_steps",
             "probe_radius",
             "max_step",
             "update_brake",

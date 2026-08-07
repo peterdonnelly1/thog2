@@ -227,7 +227,6 @@ def _learned_trainer(**overrides) -> SharedTrainer:
         plastic__layer_count_objective="lowest_loss",
         plastic__layer_count_update_brake=0,
         plastic__layer_count_probe__window_size_as_number_of_probes=8,
-        plastic__layer_count_min_probes=1,
         plastic__layer_count_probe_noise_lambda=0.0,
         n_layer=5,
         depth_order=4,
@@ -304,7 +303,10 @@ def test_trainer_uses_inline_probe_then_selected_prefix_for_remaining_microsteps
 
 
 def test_trainer_commits_count_only_after_stock_adamw_step() -> None:
-    trainer = _learned_trainer(gradient_accumulation_steps=2)
+    trainer = _learned_trainer(
+        gradient_accumulation_steps=2,
+        plastic__layer_count_probe__window_size_as_number_of_probes=1,
+    )
     forward_counts = []
     optimizer_step_counts = []
     original_forward = trainer.model.forward
@@ -450,7 +452,13 @@ def test_five_update_brake_collects_evidence_and_enforces_spacing() -> None:
         gradient_accumulation_steps=1,
         max_updates=6,
         plastic__layer_count_update_brake=5,
+        plastic__layer_count_probe__window_size_as_number_of_probes=5,
     )
+    trainer.state.plastic_depth_probe_histories = {
+        "3:-1": [1.0, 1.0, 1.0, 1.0],
+        "3:+1": [-1.0, -1.0, -1.0, -1.0],
+        "3:@LRA": [1.0, 1.0, 1.0, 1.0],
+    }
     try:
         with patch(
             "sheet.trainer_step.choose_plastic_depth_candidate",

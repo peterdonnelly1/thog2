@@ -305,7 +305,7 @@ When the pause expires or Ctrl-F is pressed, discard all trial model state, reco
 
 8.1 Probe cadence
 
-FINE performs ordinary training on non-probe updates. Count candidates are evaluated only on selected probe updates. plastic__layer_count_probe__probe_every_n_steps controls the cadence; when unset it resolves to plastic__layer_count_update_brake. Update 1 is a probe update, followed by exact interval boundaries.
+FINE performs ordinary training on non-probe updates. Count candidates are evaluated only on selected probe updates. plastic__layer_count_probe_window_size controls the cadence; when unset it resolves to plastic__layer_count_update_brake. Update 1 is a probe update, followed by exact interval boundaries.
 
 8.2 Entire radius
 
@@ -466,10 +466,10 @@ plastic__max_permitted_layers                        | required when learning   
 plastic__layer_sampling_initialisation               | equidistant                  | Capacity-ruler initialisation: equidistant or random.
 plastic__layer_count_objective                       | lowest_loss                  | Goal shared by COARSE and FINE.
 plastic__layer_count_update_brake                    | 5                            | Minimum completed updates after a FINE count change.
-plastic__layer_count_probe__probe_every_n_steps                  | update_brake                 | FINE probe cadence; update 1 and interval boundaries.
+plastic__layer_count_probe_window_size                  | update_brake                 | FINE probe cadence; update 1 and interval boundaries.
 plastic__layer_count_probe_radius                    | 1                            | FINE full integer probe radius.
 plastic__layer_count_max_step                        | 1                            | Maximum committed FINE count movement.
-plastic__layer_count_probe__window_size_as_number_of_probes              | 50                           | Recent paired differences retained per candidate offset.
+plastic__layer_count_probe_noise_window              | 50                           | Recent paired differences retained per candidate offset.
 plastic__layer_count_min_probes    | 5                            | Minimum evidence before movement.
 plastic__layer_count_probe_noise_lambda              | 3.0                          | Robust median/MAD threshold.
 plastic__layer_count_cost_weight                     | 0.0                          | Penalty strength for layer_efficiency or relative_training_wall_time.
@@ -491,7 +491,7 @@ Every generated doubling candidate must be at most plastic__max_permitted_layers
 
 plastic__phase_1_evaluation_steps_count must be positive.
 
-plastic__layer_count_probe__probe_every_n_steps, radius and max_step must be positive.
+plastic__layer_count_probe_window_size, radius and max_step must be positive.
 
 plastic__layer_count_min_probes must lie within the noise window.
 
@@ -508,7 +508,7 @@ plastic
   plastic__phase_1__number_of_trials:              4
   plastic__phase_1_evaluation_steps_count:         10
   coarse candidate layers:                         4, 8, 16, 32
-  plastic__layer_count_probe__probe_every_n_steps:             10
+  plastic__layer_count_probe_window_size:             10
   plastic__layer_count_probe_radius:               2
   plastic__layer_count_max_step:                   1
 

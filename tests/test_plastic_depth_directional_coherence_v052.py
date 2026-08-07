@@ -48,7 +48,7 @@ def test_both_sides_majority_is_ambiguous_even_if_one_support_is_larger() -> Non
 def test_boundary_with_only_right_side_can_vote_right() -> None:
     report = directional._directional_support(
         current_count=1,
-        score_by_count={1: 10.0, 2: 9.0, 3: 11.0},
+        score_by_count={1: 10.0, 2: 9.0},
         extrapolation_weight=0.8,
     )
     assert report["left_support"] is None
@@ -89,12 +89,12 @@ def test_count_change_requires_the_complete_probe_history_window() -> None:
 
 
 def test_directional_majority_vetoes_candidate_on_the_other_side() -> None:
-    score_report = (_score(9, 9.0), _score(10, 10.0), _score(11, 9.0))
+    score_report = (_score(9, 11.0), _score(10, 10.0), _score(11, 9.0))
     decision = directional.choose_plastic_depth_count_with_directional_coherence(
         current_count=10,
         score_report=score_report,
         histories={
-            "10:-1": (-1.0, -1.0),
+            "10:-1": (1.0, 1.0),
             "10:+1": (-1.0, -1.0),
             "10:@LRA": (-1.0, -1.0),
         },
@@ -172,6 +172,7 @@ def test_current_l_probe_loss_is_bold_white_using_offset_zero_not_vector_midpoin
 
 def test_requested_loss_and_gradient_spacing_is_exact() -> None:
     line = "loss  =   4.7168  grad norm=   0.269"
-    line = line.replace("loss  =", "loss=").replace("grad norm=  ", "grad norm= ")
-    assert line == "loss=   4.7168  grad norm=  0.269"
+    line = line.replace("loss  =", "loss=")
+    line = re.sub(r"grad norm=\s+", "grad norm= ", line)
+    assert line == "loss=   4.7168  grad norm= 0.269"
 # ^^^ THOG

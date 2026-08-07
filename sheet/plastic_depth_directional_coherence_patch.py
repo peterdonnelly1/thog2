@@ -590,7 +590,7 @@ def _format_progress_line_with_directional_summary(
     offsets = local_payload.get("plastic_probe_offsets")
     line = _ORIGINAL_FORMAT_PROGRESS_LINE(run_id, event, local_payload)
     line = line.replace("loss  =", "loss=")
-    line = line.replace("grad norm=  ", "grad norm= ")
+    line = re.sub(r"grad norm=\s+", "grad norm= ", line)
     line = _move_sampled_after_layers(line)
     line = _highlight_changed_sampled_values(run_id, event, line)
     line = _bold_current_probe_loss(line, offsets)

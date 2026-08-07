@@ -51,8 +51,9 @@ def _config():
         plastic__layer_sampling_initialisation="equidistant",
         plastic__layer_count_objective="relative_training_wall_time",
         plastic__layer_count_update_brake=20,
+        plastic__layer_count_probe__probe_every_n_steps=10,
         plastic__layer_count_probe__window_size_as_number_of_probes=48,
-        plastic__layer_count_min_probes=6,
+        plastic__layer_count_extrapolation_weight=0.8,
         plastic__layer_count_probe_noise_lambda=2.0,
         plastic__layer_count_cost_weight=0.04,
         plastic__layer_memory_budget_gib=None,
@@ -90,19 +91,19 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "plastic\n" in output
     assert "plastic__layer_count_update_brake:" in output
     assert "plastic__layer_count_probe__window_size_as_number_of_probes:" in output
-    assert "plastic__layer_count_min_probes:" in output
+    assert "plastic__layer_count_extrapolation_weight:" in output
     assert "plastic__geometry_learning_rate_multiplier:" in output
-    assert "initial layer indices:" in output
-    assert "capacity layer indices:" in output
+    assert "active sample_layer:" in output
+    assert "capacity sample_layer:" in output
     rows = output.splitlines()
-    min_observation_row = next(
+    extrapolation_row = next(
         line
         for line in rows
-        if "plastic__layer_count_min_probes:" in line
+        if "plastic__layer_count_extrapolation_weight:" in line
     )
-    initial_row = next(line for line in rows if "initial layer indices:" in line)
-    capacity_row = next(line for line in rows if "capacity layer indices:" in line)
-    assert min_observation_row.endswith("   6")
+    initial_row = next(line for line in rows if "active sample_layer:" in line)
+    capacity_row = next(line for line in rows if "capacity sample_layer:" in line)
+    assert extrapolation_row.endswith("   0.8")
     assert initial_row.endswith("1.0,  15.1,  29.3,  43.4")
     assert capacity_row.endswith("1.0,  15.1,  29.3,  43.4,  57.6")
     assert initial_row.index("1.0") == capacity_row.index("1.0")

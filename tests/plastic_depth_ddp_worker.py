@@ -69,7 +69,6 @@ def main() -> None:
         plastic__max_permitted_layers=4,
         plastic__layer_count_update_brake=0,
         plastic__layer_count_probe__window_size_as_number_of_probes=8,
-        plastic__layer_count_min_probes=1,
         plastic__layer_count_probe_noise_lambda=0.0,
         plastic__freeze_geometry_during_warmup=False,
     )
