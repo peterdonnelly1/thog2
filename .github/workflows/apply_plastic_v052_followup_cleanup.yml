@@ -8,6 +8,7 @@ on:
       - tools/apply_plastic_v052_followup_cleanup.py
       - tools/apply_plastic_v052_startup_test_cleanup.py
       - tools/apply_plastic_v052_sampled_alignment_fix.py
+      - tools/apply_plastic_v052_idempotency_guard.py
       - .github/workflows/apply_plastic_v052_followup_cleanup.yml
   pull_request:
     branches:
@@ -36,6 +37,7 @@ jobs:
           python tools/apply_plastic_v052_followup_cleanup.py
           python tools/apply_plastic_v052_startup_test_cleanup.py
           python tools/apply_plastic_v052_sampled_alignment_fix.py
+          python tools/apply_plastic_v052_idempotency_guard.py
 
       - name: Install CPU dependencies
         run: |
@@ -47,7 +49,7 @@ jobs:
         run: |
           bash -n train_OWT.sh
           bash -n train_OWT_core.sh
-          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tools/apply_plastic_v052_startup_test_cleanup.py tools/apply_plastic_v052_sampled_alignment_fix.py tests/test_plastic_depth_directional_coherence_v052.py
+          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tools/apply_plastic_v052_startup_test_cleanup.py tools/apply_plastic_v052_sampled_alignment_fix.py tools/apply_plastic_v052_idempotency_guard.py tests/test_plastic_depth_directional_coherence_v052.py tests/test_run_thog2_owt_startup_report.py
           if git grep -n 'plastic__layer_count_min_probes[=:]' -- tests ':!tests/test_plastic_depth_directional_coherence_v052.py'; then
             echo 'active test still constructs or expects retired min-probes control' >&2
             exit 1
@@ -93,5 +95,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG validated test/spec-history cleanup for PLASTIC v0.52 with PR-visible diagnostics and push-only writeback
+# vvv THOG validated test/spec-history cleanup for PLASTIC v0.52 with PR-visible diagnostics, idempotent replay and push-only writeback
 # ^^^ THOG
