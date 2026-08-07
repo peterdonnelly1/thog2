@@ -67,3 +67,5 @@ jobs:
           git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+# Trigger after workflow creation so the branch receives the generated follow-up immediately.
