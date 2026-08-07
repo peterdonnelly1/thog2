@@ -18,6 +18,9 @@ from .plastic_depth_inline import PlasticDepthInlineProbeRequest
 
 
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
+_ORIGINAL_BEGIN_INLINE_UPDATE = (
+    _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
+)
 _ORIGINAL_INLINE_PROBE_REQUEST = (
     _trainer_step.TrainerStepMixin._plastic_depth_inline_probe_request
 )
@@ -141,7 +144,7 @@ _console_minor._row_has_warmup_brake = (
 # ^^^ THOG
 
 
-# vvv THOG enforce the warmup brake in the FINE selector and again at commit as a state-safety backstop
+# vvv THOG enforce the warmup brake before FINE probe construction; no probe work or evidence history is created while geometry is frozen
 def _count_warmup_brake_active(
     trainer: Any,
     *,
@@ -162,23 +165,18 @@ def _count_warmup_brake_active(
     )
 
 
+def _begin_plastic_depth_inline_update_without_warmup_probe(self: Any):
+    if _count_warmup_brake_active(self):
+        return None
+    return _ORIGINAL_BEGIN_INLINE_UPDATE(self)
+
+
 def _warmup_histories(
     trainer: Any,
     decision: PlasticDepthRobustCountDecision,
 ) -> Dict[str, Tuple[float, ...]]:
-    noise_window = int(trainer.config.plastic__layer_count_probe__window_size_as_number_of_probes)
-    histories = {
-        str(key): tuple(float(value) for value in values[-noise_window:])
-        for key, values in trainer.state.plastic_depth_probe_histories.items()
-    }
-    for evidence in decision.evidence:
-        if not evidence.feasible or evidence.paired_difference is None:
-            continue
-        key = f"{int(decision.current_count)}:{int(evidence.direction):+d}"
-        values = list(histories.get(key, ()))
-        values.append(float(evidence.paired_difference))
-        histories[key] = tuple(values[-noise_window:])
-    return histories
+    del trainer, decision
+    return {}
 
 
 def _apply_count_warmup_brake(
@@ -194,11 +192,11 @@ def _apply_count_warmup_brake(
         update_number=int(decision.update_number),
     ):
         return int(context["selected_count"])
-    if int(decision.selected_count) != current_count:
+    if int(decision.selected_count) != current_count or decision.histories:
         decision = replace(
             decision,
             selected_count=current_count,
-            histories=_warmup_histories(trainer, decision),
+            histories={},
         )
         context["decision"] = decision
         context["paired_evidence"] = decision.report()
@@ -233,6 +231,9 @@ def _commit_plastic_depth_inline_update_with_count_warmup_backstop(
     return _ORIGINAL_COMMIT_INLINE_UPDATE(self, context)
 
 
+_trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update = (
+    _begin_plastic_depth_inline_update_without_warmup_probe
+)
 _trainer_step.TrainerStepMixin._plastic_depth_inline_probe_request = (
     _plastic_depth_inline_probe_request_with_count_warmup_brake
 )
