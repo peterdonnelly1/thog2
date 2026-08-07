@@ -167,6 +167,7 @@ def _count_warmup_brake_active(
 
 def _begin_plastic_depth_inline_update_without_warmup_probe(self: Any):
     if _count_warmup_brake_active(self):
+        self.state.plastic_depth_probe_histories = {}                                                                                                        # <<< THOG frozen warmup always leaves FINE evidence empty, including resumed-in-warmup runs
         return None
     return _ORIGINAL_BEGIN_INLINE_UPDATE(self)
 
@@ -192,6 +193,7 @@ def _apply_count_warmup_brake(
         update_number=int(decision.update_number),
     ):
         return int(context["selected_count"])
+    trainer.state.plastic_depth_probe_histories = {}                                                                                                        # <<< THOG direct-call safety backstop cannot retain warmup evidence
     if int(decision.selected_count) != current_count or decision.histories:
         decision = replace(
             decision,
