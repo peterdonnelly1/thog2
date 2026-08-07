@@ -7,6 +7,9 @@ on:
     paths:
       - tools/apply_plastic_v0521_test_fixture_fix.py
       - .github/workflows/apply_plastic_v0521_test_fixture_fix.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
@@ -45,6 +48,7 @@ jobs:
             sheet/run_config.py \
             sheet/trainer_checkpoint_resume.py \
             sheet/plastic_depth_probe_sampling_v0521_patch.py \
+            sheet/plastic_depth_probe_se_v0521_patch.py \
             tests/stage3_test_support.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_plastic_depth_audit.py \
@@ -75,6 +79,7 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git restore -- .github/workflows
           if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
@@ -94,5 +99,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG validate v0.521 against tiny stage3 fixtures, durable SE audit retention, lifecycle regressions and the reconciled operator-console specification
+# vvv THOG validate v0.521 against tiny stage3 fixtures, direct-config capacity, durable SE audit retention, lifecycle regressions and the reconciled operator-console specification
 # ^^^ THOG
