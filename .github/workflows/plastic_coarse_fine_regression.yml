@@ -35,12 +35,14 @@ jobs:
       - name: Compile changed production modules
         run: |
           python -m py_compile \
+            constants.py \
             run_thog2_lifecycle.py \
             run_thog2_owt.py \
             run_thog2_owt_core.py \
             sheet/plastic_depth_coarse.py \
             sheet/plastic_depth_coarse_checkpoint.py \
             sheet/plastic_depth_coarse_runner.py \
+            sheet/plastic_depth_directional_coherence_patch.py \
             sheet/plastic_depth_fresh_state.py \
             sheet/plastic_depth_lifecycle.py \
             sheet/plastic_depth_pause.py \
@@ -65,14 +67,23 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m pytest -q tests \
-            --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
-            2>&1 | tee broad_regression.log
+          # vvv THOG run the complete CPU suite now that the late-formatter T/V alignment regression is fixed
+          # python -m pytest -q tests \
+          #   --deselect=tests/test_plastic_depth_console_minor_patch.py::PlasticDepthConsoleMinorPatchTests::test_final_alignment_runs_after_late_formatter_tabs \
+          python -m pytest -q tests 2>&1 | tee broad_regression.log
+          # ^^^ THOG
 
       - name: Classify failures against untouched PLASTIC_DEPTH
         if: always()
+        env:
+          BRANCH_SUITE_OUTCOME: ${{ steps.branch_suite.outcome }}
         run: |
-          python - <<'PY'
+          # vvv THOG a zero-exit complete branch suite is definitive; do not reinterpret pytest's internal lastfailed cache as a failure list
+          if [ "$BRANCH_SUITE_OUTCOME" = "success" ]; then
+            : > branch_only_failures.txt
+            echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
+          else
+            python - <<'PY'
           import json
           from pathlib import Path
 
@@ -115,6 +126,8 @@ jobs:
           if branch_only:
               raise SystemExit('branch-only CPU regression failures remain')
           PY
+          fi
+          # ^^^ THOG
           echo 'PYTEST_LOG_TAIL_BEGIN'
           tail -n 250 broad_regression.log || true
           echo 'PYTEST_LOG_TAIL_END'
@@ -129,3 +142,6 @@ jobs:
             branch_only_failures.txt
             docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt
           if-no-files-found: error
+
+# vvv THOG complete-suite regression gate with zero-exit fast classification and no obsolete test deselection
+# ^^^ THOG
