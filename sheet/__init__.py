@@ -146,3 +146,13 @@ from . import plastic_depth_cli_cost_and_label_patch as _plastic_depth_cli_cost_
 from . import plastic_depth_directional_coherence_patch as _plastic_depth_directional_coherence_patch
 _plastic_depth_console_minor_patch._ALIGNMENT_LABELS = ("sampled =", "probe_losses", "score_z", "change_z")
 # ^^^ THOG
+
+# vvv THOG keep sampled immediately after layers with the single tab already inserted by the v0.52 formatter; do not reserve a fixed terminal column
+# def _align_sampled_to_minimum_tab_column(line):                                                                                                           # <<< THOG preserve the superseded fixed-column helper entry point concept
+#     ...
+def _plastic_depth_leave_sampled_after_layers(line):
+    return line
+
+
+_plastic_depth_directional_coherence_patch._align_sampled_to_minimum_tab_column = _plastic_depth_leave_sampled_after_layers
+# ^^^ THOG
