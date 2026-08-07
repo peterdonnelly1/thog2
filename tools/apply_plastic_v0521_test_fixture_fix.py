@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # vvv THOG
-"""Apply PLASTIC v0.521 and make pre-existing tiny test fixtures explicit about legal probe-token samples."""
+"""Apply PLASTIC v0.521 and migrate pre-existing tiny test fixtures to explicit legal probe-token samples."""
 
 from __future__ import annotations
 
@@ -50,5 +50,19 @@ if addition not in content:
     path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
-print("Applied PLASTIC v0.521 and explicit legal probe-token sizes for tiny test fixtures.")
+# vvv THOG the deterministic-sampling regression now asserts the configured cardinality rather than the retired hard-coded 256
+path = ROOT / "tests/test_plastic_depth_inline_probe.py"
+content = path.read_text(encoding="utf-8")
+old = "        assert first.numel() == 256\n"
+new = "        assert first.numel() == trainer.config.plastic__layer_count_probe__number_of_sampled_valid_tokens\n"
+if old in content:
+    if content.count(old) != 1:
+        raise RuntimeError(f"expected one retired 256-token assertion; found {content.count(old)}")
+    content = content.replace(old, new, 1)
+elif new not in content:
+    raise RuntimeError("deterministic probe sample-count assertion was not found")
+path.write_text(content, encoding="utf-8")
+# ^^^ THOG
+
+print("Applied PLASTIC v0.521 and migrated tiny fixtures plus deterministic sample-count assertion.")
 # ^^^ THOG
