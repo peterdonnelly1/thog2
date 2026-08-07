@@ -35,23 +35,23 @@ def update_train_owt_normalization() -> None:
     )
     replace_once(
         path,
-        '    --plastic_layer_count_probe_window_size|--plastic-layer-count-probe-interval)\n'
+        '    --plastic_layer_count_probe__probe_every_n_steps|--plastic-layer-count-probe-interval)\n'
         '      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }\n'
-        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE="$2"\n'
+        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS="$2"\n'
         '      shift 2\n'
         '      ;;\n'
-        '    --plastic_layer_count_probe_window_size=*|--plastic-layer-count-probe-interval=*)\n'
-        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE="${1#*=}"\n'
+        '    --plastic_layer_count_probe__probe_every_n_steps=*|--plastic-layer-count-probe-interval=*)\n'
+        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS="${1#*=}"\n'
         '      shift\n'
         '      ;;\n',
-        '    --plastic__layer_count_probe_window_size|--plastic_layer_count_probe_window_size|--plastic-layer-count-probe-interval)\n'
+        '    --plastic__layer_count_probe__probe_every_n_steps|--plastic_layer_count_probe__probe_every_n_steps|--plastic-layer-count-probe-interval)\n'
         '      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }\n'
-        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE="$2"\n'
+        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS="$2"\n'
         '      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("--plastic-layer-count-probe-interval" "$2")\n'
         '      shift 2\n'
         '      ;;\n'
-        '    --plastic__layer_count_probe_window_size=*|--plastic_layer_count_probe_window_size=*|--plastic-layer-count-probe-interval=*)\n'
-        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE="${1#*=}"\n'
+        '    --plastic__layer_count_probe__probe_every_n_steps=*|--plastic_layer_count_probe__probe_every_n_steps=*|--plastic-layer-count-probe-interval=*)\n'
+        '      export THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS="${1#*=}"\n'
         '      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("--plastic-layer-count-probe-interval=${1#*=}")\n'
         '      shift\n'
         '      ;;\n',

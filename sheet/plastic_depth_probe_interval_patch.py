@@ -9,7 +9,7 @@ from typing import Any, Optional
 from . import trainer_step as _trainer_step
 
 
-_ENVIRONMENT_KEY = "THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE"
+_ENVIRONMENT_KEY = "THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS"
 _ORIGINAL_BEGIN_PLASTIC_DEPTH_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
 
 
@@ -28,9 +28,9 @@ def _plastic_depth_probe_interval(trainer: Any) -> int:
     if configured is not None and configured.strip() != "":
         return _positive_interval_from_value(configured, label=_ENVIRONMENT_KEY)
     config = getattr(trainer, "config", None)
-    direct_value: Optional[Any] = getattr(config, "plastic__layer_count_probe_window_size", None)
+    direct_value: Optional[Any] = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)
     if direct_value is not None:
-        return _positive_interval_from_value(direct_value, label="plastic__layer_count_probe_window_size")
+        return _positive_interval_from_value(direct_value, label="plastic__layer_count_probe__probe_every_n_steps")
     brake_value = getattr(config, "plastic__layer_count_update_brake", 1)
     try:
         brake_interval = int(brake_value)

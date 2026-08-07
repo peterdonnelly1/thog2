@@ -14,7 +14,7 @@ import sys
 from typing import List, Optional, Sequence
 
 
-_PROBE_INTERVAL_ENVIRONMENT_KEY = "THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE"
+_PROBE_INTERVAL_ENVIRONMENT_KEY = "THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS"
 _PROBE_INTERVAL_OPTION = "--plastic-layer-count-probe-interval"
 _ORIGINAL_PARSE_ARGS = argparse.ArgumentParser.parse_args
 _ORIGINAL_PARSE_KNOWN_ARGS = argparse.ArgumentParser.parse_known_args

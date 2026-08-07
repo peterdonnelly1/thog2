@@ -72,9 +72,10 @@ PLASTIC_PHASE_1_N_STEPS=""
 PLASTIC_PHASE_1_STARTING_LAYER_COUNT=""
 PLASTIC_PHASE_1_NUMBER_OF_TRIALS=""
 PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT=""
-PLASTIC_LAYER_COUNT_PROBE_INTERVAL=""
+PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS=""
 PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
+PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT="0.8"
 PLASTIC_LAYERS_TO_SAMPLE=""
 PLASTIC_DO_LEARN_LAYER_COUNT=false
 PLASTIC_INITIAL_LAYER_COUNT=""
@@ -82,8 +83,7 @@ PLASTIC_MAX_PERMITTED_LAYERS=""
 PLASTIC_LAYER_SAMPLING_INITIALISATION="equidistant"
 PLASTIC_LAYER_COUNT_OBJECTIVE="lowest_loss"
 PLASTIC_LAYER_COUNT_UPDATE_BRAKE=5
-PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW=50
-PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS=5
+PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES=50
 PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="3.0"
 PLASTIC_LAYER_COUNT_COST_WEIGHT="0.0"
 PLASTIC_LAYER_MEMORY_BUDGET_GIB=""
@@ -229,11 +229,11 @@ PLASTIC DEPTH:
   --plastic__layer_sampling_initialisation equidistant|random
   --plastic__layer_count_objective lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget
   --plastic__layer_count_update_brake N=${PLASTIC_LAYER_COUNT_UPDATE_BRAKE}
-  --plastic__layer_count_probe_window_size N=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update brake}
+  --plastic__layer_count_probe__probe_every_n_steps N=${PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS:-update brake}
   --plastic__layer_count_probe_radius N=${PLASTIC_LAYER_COUNT_PROBE_RADIUS}
   --plastic__layer_count_max_step N=${PLASTIC_LAYER_COUNT_MAX_STEP}
-  --plastic__layer_count_probe_noise_window N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW}
-  --plastic__layer_count_min_probes N=${PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS}
+  --plastic__layer_count_extrapolation_weight VALUE=${PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT}
+  --plastic__layer_count_probe__window_size_as_number_of_probes N=${PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES}
   --plastic__layer_count_probe_noise_lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
   --plastic__layer_count_cost_weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
   --plastic__layer_memory_budget_gib VALUE
@@ -397,8 +397,8 @@ while (( $# > 0 )); do
     --no-plastic__do_learn_layer_count) PLASTIC_DO_LEARN_LAYER_COUNT=false; shift ;;
     --plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true; shift ;;
     --no-plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=false; shift ;;
-    # --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_noise_window|--plastic__layer_count_min_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__geometry_learning_rate_multiplier)
-    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe_window_size|--plastic__layer_count_probe_radius|--plastic__layer_count_max_step|--plastic__layer_count_probe_noise_window|--plastic__layer_count_min_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
+    # --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_extrapolation_weight|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__geometry_learning_rate_multiplier)
+    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__probe_every_n_steps|--plastic__layer_count_probe_radius|--plastic__layer_count_max_step|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count_extrapolation_weight|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$2" ;;
@@ -407,7 +407,7 @@ while (( $# > 0 )); do
         --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$2" ;;
         --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$2" ;;
         --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$2" ;;
-        --plastic__layer_count_probe_window_size) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2" ;;
+        --plastic__layer_count_probe__probe_every_n_steps) PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS="$2" ;;
         --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$2" ;;
         --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$2" ;;
         --plastic__layers_to_sample) PLASTIC_LAYERS_TO_SAMPLE="$2" ;;
@@ -416,9 +416,9 @@ while (( $# > 0 )); do
         --plastic__layer_sampling_initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$2" ;;
         --plastic__layer_count_objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$2" ;;
         --plastic__layer_count_update_brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$2" ;;
-        --plastic__layer_count_probe_noise_window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$2" ;;
-        --plastic__layer_count_min_probes) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$2" ;;
+        --plastic__layer_count_probe__window_size_as_number_of_probes) PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES="$2" ;;
         --plastic__layer_count_probe_noise_lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$2" ;;
+        --plastic__layer_count_extrapolation_weight) PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT="$2" ;;
         --plastic__layer_count_cost_weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$2" ;;
         --plastic__layer_memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$2" ;;
         --plastic__cuda_allocator_reserve_gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$2" ;;
@@ -426,8 +426,8 @@ while (( $# > 0 )); do
       esac
       shift 2
       ;;
-    # --plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_min_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__geometry_learning_rate_multiplier=*)
-    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe_window_size=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count_max_step=*|--plastic__layer_count_probe_noise_window=*|--plastic__layer_count_min_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
+    # --plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe__window_size_as_number_of_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_extrapolation_weight=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__geometry_learning_rate_multiplier=*)
+    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe__probe_every_n_steps=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count_max_step=*|--plastic__layer_count_probe__window_size_as_number_of_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count_extrapolation_weight=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
       plastic_name="${1%%=*}"; plastic_value="${1#*=}"
       case "$plastic_name" in
         --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$plastic_value" ;;
@@ -436,7 +436,7 @@ while (( $# > 0 )); do
         --plastic__phase_1__number_of_trials) PLASTIC_PHASE_1_NUMBER_OF_TRIALS="$plastic_value" ;;
         --plastic__phase_1_evaluation_steps_count) PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT="$plastic_value" ;;
         --plastic__log_interval_coarse) PLASTIC_LOG_INTERVAL_COARSE="$plastic_value" ;;
-        --plastic__layer_count_probe_window_size) PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$plastic_value" ;;
+        --plastic__layer_count_probe__probe_every_n_steps) PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS="$plastic_value" ;;
         --plastic__layer_count_probe_radius) PLASTIC_LAYER_COUNT_PROBE_RADIUS="$plastic_value" ;;
         --plastic__layer_count_max_step) PLASTIC_LAYER_COUNT_MAX_STEP="$plastic_value" ;;
         --plastic__layers_to_sample) PLASTIC_LAYERS_TO_SAMPLE="$plastic_value" ;;
@@ -445,9 +445,9 @@ while (( $# > 0 )); do
         --plastic__layer_sampling_initialisation) PLASTIC_LAYER_SAMPLING_INITIALISATION="$plastic_value" ;;
         --plastic__layer_count_objective) PLASTIC_LAYER_COUNT_OBJECTIVE="$plastic_value" ;;
         --plastic__layer_count_update_brake) PLASTIC_LAYER_COUNT_UPDATE_BRAKE="$plastic_value" ;;
-        --plastic__layer_count_probe_noise_window) PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW="$plastic_value" ;;
-        --plastic__layer_count_min_probes) PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS="$plastic_value" ;;
+        --plastic__layer_count_probe__window_size_as_number_of_probes) PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES="$plastic_value" ;;
         --plastic__layer_count_probe_noise_lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$plastic_value" ;;
+        --plastic__layer_count_extrapolation_weight) PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT="$plastic_value" ;;
         --plastic__layer_count_cost_weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$plastic_value" ;;
         --plastic__layer_memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$plastic_value" ;;
         --plastic__cuda_allocator_reserve_gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$plastic_value" ;;
@@ -762,7 +762,7 @@ case "$PLASTIC_COARSE_PHASE" in enabled|disabled) ;; *) echo "PLASTIC_COARSE_PHA
 [[ -z "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" "PLASTIC_PHASE_1_STARTING_LAYER_COUNT"
 [[ -z "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" ]] || validate_positive_uint "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" "PLASTIC_PHASE_1_NUMBER_OF_TRIALS"
 [[ -z "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" ]] || validate_positive_uint "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" "PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT"
-[[ -z "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] || validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" "PLASTIC_LAYER_COUNT_PROBE_INTERVAL"
+[[ -z "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS" ]] || validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS" "PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS"
 validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_RADIUS" "PLASTIC_LAYER_COUNT_PROBE_RADIUS"
 validate_positive_uint "$PLASTIC_LAYER_COUNT_MAX_STEP" "PLASTIC_LAYER_COUNT_MAX_STEP"
 validate_nonnegative_uint "$MAX_NONFINITE_UPDATE_SKIPS" "MAX_NONFINITE_UPDATE_SKIPS"
@@ -770,9 +770,7 @@ validate_nonnegative_uint "$MAX_NONFINITE_UPDATE_SKIPS" "MAX_NONFINITE_UPDATE_SK
 [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" ]] || validate_positive_uint "$PLASTIC_INITIAL_LAYER_COUNT" "PLASTIC_INITIAL_LAYER_COUNT"
 [[ -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || validate_positive_uint "$PLASTIC_MAX_PERMITTED_LAYERS" "PLASTIC_MAX_PERMITTED_LAYERS"
 validate_nonnegative_uint "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE" "PLASTIC_LAYER_COUNT_UPDATE_BRAKE"
-validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW" "PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW"
-validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS" "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS"
-(( PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS <= PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW )) || { echo "PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS must not exceed PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW." >&2; exit 2; }
+validate_positive_uint "$PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES" "PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES"
 case "$PLASTIC_LAYER_SAMPLING_INITIALISATION" in equidistant|random) ;; *) echo "PLASTIC_LAYER_SAMPLING_INITIALISATION must be equidistant or random." >&2; exit 2 ;; esac
 case "$PLASTIC_LAYER_COUNT_OBJECTIVE" in lowest_loss|layer_efficiency|relative_training_wall_time|memory_budget) ;; *) echo "Bad PLASTIC_LAYER_COUNT_OBJECTIVE: $PLASTIC_LAYER_COUNT_OBJECTIVE" >&2; exit 2 ;; esac
 if [[ "$PLASTIC_COARSE_PHASE" == enabled ]]; then
@@ -787,6 +785,12 @@ else
   [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" && -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "initial/max layer count controls require --plastic__do_learn_layer_count." >&2; exit 2; }
 fi
 [[ "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_memory_budget_gib." >&2; exit 2; }
+python - "$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT" <<'PY'
+import math, sys
+value = float(sys.argv[1])
+if not math.isfinite(value) or not (0.5 < value <= 1.0):
+    raise SystemExit("PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT must lie in (0.5, 1.0]")
+PY
 validate_nonnegative_number "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB" "PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB"
 if [[ "$PLASTIC_ENABLED" == true ]]; then
   [[ "$HYPERBLOCK" == false ]] || { echo "PLASTIC DEPTH may not be combined with HYPERBLOCK." >&2; exit 2; }
@@ -969,7 +973,7 @@ run_grid_point() {
       optional_args+=(--plastic__phase_1__number_of_trials "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS")
       optional_args+=(--plastic__phase_1_evaluation_steps_count "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT")
     fi
-    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL" ]] && optional_args+=(--plastic__layer_count_probe_window_size "$PLASTIC_LAYER_COUNT_PROBE_INTERVAL")
+    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS" ]] && optional_args+=(--plastic__layer_count_probe__probe_every_n_steps "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS")
     optional_args+=(--plastic__layer_count_probe_radius "$PLASTIC_LAYER_COUNT_PROBE_RADIUS")
     optional_args+=(--plastic__layer_count_max_step "$PLASTIC_LAYER_COUNT_MAX_STEP")
     optional_args+=(--plastic__layer_count_update_brake "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE")
@@ -979,9 +983,9 @@ run_grid_point() {
     else
       optional_args+=(--no-plastic__coarse_phase_roll_through)
     fi
-    optional_args+=(--plastic__layer_count_probe_noise_window "$PLASTIC_LAYER_COUNT_PROBE_NOISE_WINDOW")
-    optional_args+=(--plastic__layer_count_min_probes "$PLASTIC_LAYER_COUNT_PROBE_NOISE_MIN_OBSERVATIONS")
+    optional_args+=(--plastic__layer_count_probe__window_size_as_number_of_probes "$PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES")
     optional_args+=(--plastic__layer_count_probe_noise_lambda "$PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA")
+    optional_args+=(--plastic__layer_count_extrapolation_weight "$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT")
     optional_args+=(--plastic__layer_count_cost_weight "$PLASTIC_LAYER_COUNT_COST_WEIGHT")
     [[ -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] && optional_args+=(--plastic__layer_memory_budget_gib "$PLASTIC_LAYER_MEMORY_BUDGET_GIB")
     optional_args+=(--plastic__cuda_allocator_reserve_gib "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB")
@@ -1111,7 +1115,7 @@ scruffy OWT train
   layer dropout:      stratum=${LAYER_DROPOUT_STRATUM_SIZE:-N_LAYER} active=${LAYER_DROPOUT_ACTIVE_PER_STRATUM:-STRATUM_SIZE} resample_steps=$LAYER_DROPOUT_RESAMPLE_STEPS
   plastic depth:      enabled=$PLASTIC_ENABLED fixed=${PLASTIC_LAYERS_TO_SAMPLE:-N_LAYER} learn_count=$PLASTIC_DO_LEARN_LAYER_COUNT initial=${PLASTIC_INITIAL_LAYER_COUNT:-N_LAYER} max=${PLASTIC_MAX_PERMITTED_LAYERS:-N_LAYER} init=$PLASTIC_LAYER_SAMPLING_INITIALISATION objective=$PLASTIC_LAYER_COUNT_OBJECTIVE
   plastic coarse:     phase=$PLASTIC_COARSE_PHASE start=${PLASTIC_PHASE_1_STARTING_LAYER_COUNT:--} trials=${PLASTIC_PHASE_1_NUMBER_OF_TRIALS:--} steps=${PLASTIC_PHASE_1_N_STEPS:--} eval=${PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT:--} log=$PLASTIC_LOG_INTERVAL_COARSE roll_through=$PLASTIC_COARSE_PHASE_ROLL_THROUGH
-  plastic fine:       probe_interval=${PLASTIC_LAYER_COUNT_PROBE_INTERVAL:-update_brake} radius=$PLASTIC_LAYER_COUNT_PROBE_RADIUS max_step=$PLASTIC_LAYER_COUNT_MAX_STEP brake=$PLASTIC_LAYER_COUNT_UPDATE_BRAKE
+  plastic fine:       probe_every=${PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS:-update_brake} window=$PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES radius=$PLASTIC_LAYER_COUNT_PROBE_RADIUS max_step=$PLASTIC_LAYER_COUNT_MAX_STEP brake=$PLASTIC_LAYER_COUNT_UPDATE_BRAKE extrap_w=$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT
 $depth_curve_console
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              $shape_summary

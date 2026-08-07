@@ -141,3 +141,7 @@ from . import plastic_depth_warmup_guard_patch as _plastic_depth_warmup_guard_pa
 # vvv THOG set the public cost-weight default and compact long probe-offset vector labels after final console formatting
 from . import plastic_depth_cli_cost_and_label_patch as _plastic_depth_cli_cost_and_label_patch
 # ^^^ THOG
+
+# vvv THOG install v0.52 goal-agnostic directional coherence and final PLASTIC progress formatting after every earlier overlay
+from . import plastic_depth_directional_coherence_patch as _plastic_depth_directional_coherence_patch
+# ^^^ THOG

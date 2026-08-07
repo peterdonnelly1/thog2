@@ -292,11 +292,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__layer_sampling_initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
     parser.add_argument("--plastic__layer_count_objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
     parser.add_argument("--plastic__layer_count_update_brake", dest="plastic__layer_count_update_brake", type=int, default=5)
-    parser.add_argument("--plastic__layer_count_probe_window_size", dest="plastic__layer_count_probe_window_size", type=int)
+    parser.add_argument("--plastic__layer_count_probe__probe_every_n_steps", dest="plastic__layer_count_probe__probe_every_n_steps", type=int)
     parser.add_argument("--plastic__layer_count_probe_radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
     parser.add_argument("--plastic__layer_count_max_step", dest="plastic__layer_count_max_step", type=int, default=1)
-    parser.add_argument("--plastic__layer_count_probe_noise_window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
-    parser.add_argument("--plastic__layer_count_min_probes", dest="plastic__layer_count_min_probes", type=int, default=5)
+    parser.add_argument("--plastic__layer_count_extrapolation_weight", dest="plastic__layer_count_extrapolation_weight", type=float, default=0.8)
+    parser.add_argument("--plastic__layer_count_probe__window_size_as_number_of_probes", dest="plastic__layer_count_probe__window_size_as_number_of_probes", type=int, default=50)
     parser.add_argument("--plastic__layer_count_probe_noise_lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
     parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
     parser.add_argument("--plastic__layer_memory_budget_gib", dest="plastic__layer_memory_budget_gib", type=float)
@@ -504,11 +504,11 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_sampling_initialisation=arguments.plastic__layer_sampling_initialisation,
         plastic__layer_count_objective=arguments.plastic__layer_count_objective,
         plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,
-        plastic__layer_count_probe_window_size=arguments.plastic__layer_count_probe_window_size,
+        plastic__layer_count_probe__probe_every_n_steps=arguments.plastic__layer_count_probe__probe_every_n_steps,
         plastic__layer_count_probe_radius=arguments.plastic__layer_count_probe_radius,
         plastic__layer_count_max_step=arguments.plastic__layer_count_max_step,
-        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,
-        plastic__layer_count_min_probes=arguments.plastic__layer_count_min_probes,
+        plastic__layer_count_extrapolation_weight=arguments.plastic__layer_count_extrapolation_weight,
+        plastic__layer_count_probe__window_size_as_number_of_probes=arguments.plastic__layer_count_probe__window_size_as_number_of_probes,
         plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
@@ -588,8 +588,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         _print_model_option(
             "plastic objective:",
             f"{config.plastic__layer_count_objective}  update_brake={config.plastic__layer_count_update_brake}  "
-            f"noise_window={config.plastic__layer_count_probe_noise_window}  "
-            f"min_observations={config.plastic__layer_count_min_probes}  "
+            f"noise_window={config.plastic__layer_count_probe__window_size_as_number_of_probes}  "
             f"lambda={float(config.plastic__layer_count_probe_noise_lambda):g}",
         )
         public_coordinates = plastic_report.get("active_public_coordinates", ())

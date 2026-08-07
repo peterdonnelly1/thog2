@@ -166,7 +166,7 @@ def _warmup_histories(
     trainer: Any,
     decision: PlasticDepthRobustCountDecision,
 ) -> Dict[str, Tuple[float, ...]]:
-    noise_window = int(trainer.config.plastic__layer_count_probe_noise_window)
+    noise_window = int(trainer.config.plastic__layer_count_probe__window_size_as_number_of_probes)
     histories = {
         str(key): tuple(float(value) for value in values[-noise_window:])
         for key, values in trainer.state.plastic_depth_probe_histories.items()

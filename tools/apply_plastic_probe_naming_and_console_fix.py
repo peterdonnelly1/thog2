@@ -19,8 +19,8 @@ _NAME_REPLACEMENTS = (
         "THOG2_PLASTIC_LAYER_COUNT_MIN_PROBES",
     ),
     (
-        "THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL",
-        "THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE",
+        "THOG2_PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS",
+        "THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS",
     ),
     (
         "layer_count_probe_noise_min_observations",
@@ -28,7 +28,7 @@ _NAME_REPLACEMENTS = (
     ),
     (
         "layer_count_probe_interval",
-        "layer_count_probe_window_size",
+        "layer_count_probe__probe_every_n_steps",
     ),
 )
 

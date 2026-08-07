@@ -24,7 +24,7 @@ Core controls:
 - `plastic__layer_sampling_initialisation`: initial active lattice placement.
 - `plastic__layer_count_objective`: count-selection objective.
 - `plastic__layer_count_update_brake`: minimum successful-update spacing between count changes.
-- `plastic__layer_count_probe_noise_window`: rolling paired-score window length.
+- `plastic__layer_count_probe__window_size_as_number_of_probes`: rolling paired-score window length.
 - `plastic__layer_count_min_probes`: minimum observations before the significance gate can trigger.
 - `plastic__layer_count_probe_noise_lambda`: robust MAD significance multiplier.
 - `plastic__layer_count_cost_weight`: cost penalty for count objectives that use it.

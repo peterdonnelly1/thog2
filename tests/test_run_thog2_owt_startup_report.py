@@ -51,7 +51,7 @@ def _config():
         plastic__layer_sampling_initialisation="equidistant",
         plastic__layer_count_objective="relative_training_wall_time",
         plastic__layer_count_update_brake=20,
-        plastic__layer_count_probe_noise_window=48,
+        plastic__layer_count_probe__window_size_as_number_of_probes=48,
         plastic__layer_count_min_probes=6,
         plastic__layer_count_probe_noise_lambda=2.0,
         plastic__layer_count_cost_weight=0.04,
@@ -89,7 +89,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "execution:" in output
     assert "plastic\n" in output
     assert "plastic__layer_count_update_brake:" in output
-    assert "plastic__layer_count_probe_noise_window:" in output
+    assert "plastic__layer_count_probe__window_size_as_number_of_probes:" in output
     assert "plastic__layer_count_min_probes:" in output
     assert "plastic__geometry_learning_rate_multiplier:" in output
     assert "initial layer indices:" in output

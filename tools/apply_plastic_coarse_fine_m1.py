@@ -29,12 +29,12 @@ def insert_plastic_field_names(path: str, tuple_name: str) -> None:
     replace_once(
         path,
         '    "plastic__layer_count_update_brake",\n'
-        '    "plastic__layer_count_probe_noise_window",\n',
+        '    "plastic__layer_count_probe__window_size_as_number_of_probes",\n',
         '    "plastic__layer_count_update_brake",\n'
-        '    "plastic__layer_count_probe_window_size",\n'
+        '    "plastic__layer_count_probe__probe_every_n_steps",\n'
         '    "plastic__layer_count_probe_radius",\n'
         '    "plastic__layer_count_max_step",\n'
-        '    "plastic__layer_count_probe_noise_window",\n',
+        '    "plastic__layer_count_probe__window_size_as_number_of_probes",\n',
     )
 
 
@@ -54,12 +54,12 @@ def insert_plastic_dataclass_fields(path: str, frozen: bool) -> None:
     replace_once(
         path,
         '    plastic__layer_count_update_brake: int = 5\n'
-        '    plastic__layer_count_probe_noise_window: int = 50\n',
+        '    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50\n',
         '    plastic__layer_count_update_brake: int = 5\n'
-        '    plastic__layer_count_probe_window_size: Optional[int] = None\n'
+        '    plastic__layer_count_probe__probe_every_n_steps: Optional[int] = None\n'
         '    plastic__layer_count_probe_radius: int = 1\n'
         '    plastic__layer_count_max_step: int = 1\n'
-        '    plastic__layer_count_probe_noise_window: int = 50\n',
+        '    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50\n',
     )
 
 
@@ -94,9 +94,9 @@ def insert_config_validation(path: str, frozen: bool) -> None:
         '        )\n'
     )
     setter = (
-        '        object.__setattr__(self, "plastic__layer_count_probe_window_size", resolved_probe_interval)\n'
+        '        object.__setattr__(self, "plastic__layer_count_probe__probe_every_n_steps", resolved_probe_interval)\n'
         if frozen
-        else '        self.plastic__layer_count_probe_window_size = resolved_probe_interval\n'
+        else '        self.plastic__layer_count_probe__probe_every_n_steps = resolved_probe_interval\n'
     )
     new = (
         '        # vvv THOG resolve one-shot COARSE scheduling and canonical FINE lookahead controls before active-count construction\n'
@@ -111,7 +111,7 @@ def insert_config_validation(path: str, frozen: bool) -> None:
         '            max_permitted_layers=self.plastic__max_permitted_layers,\n'
         '        )\n'
         '        resolved_probe_interval = resolve_plastic_probe_interval(\n'
-        '            probe_interval=self.plastic__layer_count_probe_window_size,\n'
+        '            probe_interval=self.plastic__layer_count_probe__probe_every_n_steps,\n'
         '            update_brake=self.plastic__layer_count_update_brake,\n'
         '            enabled=self.plastic__enabled,\n'
         '            do_learn_layer_count=self.plastic__do_learn_layer_count,\n'
@@ -152,7 +152,7 @@ def update_identity_function() -> None:
         '    phase_1_starting_layer_count: Optional[int] = None,\n'
         '    phase_1_number_of_trials: Optional[int] = None,\n'
         '    phase_1_evaluation_steps_count: Optional[int] = None,\n'
-        '    layer_count_probe_window_size: Optional[int] = None,\n'
+        '    layer_count_probe__probe_every_n_steps: Optional[int] = None,\n'
         '    layer_count_probe_radius: int = 1,\n'
         '    layer_count_max_step: int = 1,\n'
         '    layers_to_sample: Optional[int],\n',
@@ -167,7 +167,7 @@ def update_identity_function() -> None:
         '        "plastic__phase_1_starting_layer_count": phase_1_starting_layer_count,\n'
         '        "plastic__phase_1__number_of_trials": phase_1_number_of_trials,\n'
         '        "plastic__phase_1_evaluation_steps_count": phase_1_evaluation_steps_count,\n'
-        '        "plastic__layer_count_probe_window_size": layer_count_probe_window_size,\n'
+        '        "plastic__layer_count_probe__probe_every_n_steps": layer_count_probe__probe_every_n_steps,\n'
         '        "plastic__layer_count_probe_radius": int(layer_count_probe_radius),\n'
         '        "plastic__layer_count_max_step": int(layer_count_max_step),\n'
         '        "plastic__layers_to_sample": layers_to_sample,\n',
@@ -185,7 +185,7 @@ def add_identity_call_arguments(path: str) -> None:
         '                phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,\n'
         '                phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,\n'
         '                phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,\n'
-        '                layer_count_probe_window_size=self.plastic__layer_count_probe_window_size,\n'
+        '                layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,\n'
         '                layer_count_probe_radius=self.plastic__layer_count_probe_radius,\n'
         '                layer_count_max_step=self.plastic__layer_count_max_step,\n'
         '                layers_to_sample=self.plastic__layers_to_sample,\n',
@@ -209,12 +209,12 @@ def update_run_config_propagation() -> None:
     replace_once(
         path,
         '            plastic__layer_count_update_brake=self.plastic__layer_count_update_brake,\n'
-        '            plastic__layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,\n',
+        '            plastic__layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,\n',
         '            plastic__layer_count_update_brake=self.plastic__layer_count_update_brake,\n'
-        '            plastic__layer_count_probe_window_size=self.plastic__layer_count_probe_window_size,\n'
+        '            plastic__layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,\n'
         '            plastic__layer_count_probe_radius=self.plastic__layer_count_probe_radius,\n'
         '            plastic__layer_count_max_step=self.plastic__layer_count_max_step,\n'
-        '            plastic__layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,\n',
+        '            plastic__layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,\n',
     )
     replace_once(
         path,
@@ -236,7 +236,7 @@ def update_run_config_propagation() -> None:
         '                ])\n'
         '            if self.plastic__do_learn_layer_count:\n'
         '                plastic_fields.extend([\n'
-        '                    f"PLPI_{self.plastic__layer_count_probe_window_size}",\n'
+        '                    f"PLPI_{self.plastic__layer_count_probe__probe_every_n_steps}",\n'
         '                    f"PLPR_{self.plastic__layer_count_probe_radius}",\n'
         '                    f"PLMS_{self.plastic__layer_count_max_step}",\n',
     )
@@ -259,12 +259,12 @@ def update_core_parser_and_mapping() -> None:
     replace_once(
         path,
         '    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)\n'
-        '    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)\n',
+        '    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe__window_size_as_number_of_probes", type=int, default=50)\n',
         '    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)\n'
-        '    parser.add_argument("--plastic-layer-count-probe-interval", dest="plastic__layer_count_probe_window_size", type=int)\n'
+        '    parser.add_argument("--plastic-layer-count-probe-interval", dest="plastic__layer_count_probe__probe_every_n_steps", type=int)\n'
         '    parser.add_argument("--plastic-layer-count-probe-radius", dest="plastic__layer_count_probe_radius", type=int, default=1)\n'
         '    parser.add_argument("--plastic-layer-count-max-step", dest="plastic__layer_count_max_step", type=int, default=1)\n'
-        '    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)\n',
+        '    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe__window_size_as_number_of_probes", type=int, default=50)\n',
     )
     replace_once(
         path,
@@ -281,12 +281,12 @@ def update_core_parser_and_mapping() -> None:
     replace_once(
         path,
         '        plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,\n'
-        '        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,\n',
+        '        plastic__layer_count_probe__window_size_as_number_of_probes=arguments.plastic__layer_count_probe__window_size_as_number_of_probes,\n',
         '        plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,\n'
-        '        plastic__layer_count_probe_window_size=arguments.plastic__layer_count_probe_window_size,\n'
+        '        plastic__layer_count_probe__probe_every_n_steps=arguments.plastic__layer_count_probe__probe_every_n_steps,\n'
         '        plastic__layer_count_probe_radius=arguments.plastic__layer_count_probe_radius,\n'
         '        plastic__layer_count_max_step=arguments.plastic__layer_count_max_step,\n'
-        '        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,\n',
+        '        plastic__layer_count_probe__window_size_as_number_of_probes=arguments.plastic__layer_count_probe__window_size_as_number_of_probes,\n',
     )
 
 
@@ -334,7 +334,7 @@ def update_startup_report() -> None:
         path,
         '    probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))\n'
         '    max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))\n',
-        '    probe_interval = getattr(config, "plastic__layer_count_probe_window_size", None)\n'
+        '    probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)\n'
         '    probe_radius = int(config.plastic__layer_count_probe_radius)\n'
         '    max_step = int(config.plastic__layer_count_max_step)\n',
     )
@@ -343,7 +343,7 @@ def update_startup_report() -> None:
         '    _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))\n'
         '    _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))\n',
         '    _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))\n'
-        '    _print_plastic_option("plastic__layer_count_probe_window_size:", _startup_optional(probe_interval))\n'
+        '    _print_plastic_option("plastic__layer_count_probe__probe_every_n_steps:", _startup_optional(probe_interval))\n'
         '    _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))\n',
     )
     replace_once(
@@ -351,7 +351,7 @@ def update_startup_report() -> None:
         '    "plastic__layer_count_update_brake:",\n'
         '    "plastic__layer_count_probe_radius:",\n',
         '    "plastic__layer_count_update_brake:",\n'
-        '    "plastic__layer_count_probe_window_size:",\n'
+        '    "plastic__layer_count_probe__probe_every_n_steps:",\n'
         '    "plastic__layer_count_probe_radius:",\n',
     )
 
@@ -368,7 +368,7 @@ def update_lifecycle_material_mapping() -> None:
         '    "plastic__phase_1_starting_layer_count": "plastic__phase_1_starting_layer_count",\n'
         '    "plastic__phase_1__number_of_trials": "plastic__phase_1__number_of_trials",\n'
         '    "plastic__phase_1_evaluation_steps_count": "plastic__phase_1_evaluation_steps_count",\n'
-        '    "plastic__layer_count_probe_window_size": "plastic__layer_count_probe_window_size",\n'
+        '    "plastic__layer_count_probe__probe_every_n_steps": "plastic__layer_count_probe__probe_every_n_steps",\n'
         '    "plastic__layer_count_probe_radius": "plastic__layer_count_probe_radius",\n'
         '    "plastic__layer_count_max_step": "plastic__layer_count_max_step",\n'
         '    "artifact_name_limit": "artifact_name_limit",\n',

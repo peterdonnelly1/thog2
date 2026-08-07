@@ -20,7 +20,7 @@ def _config():
         plastic__initial_layer_count=2,
         plastic__max_permitted_layers=4,
         plastic__layer_count_update_brake=5,
-        plastic__layer_count_probe_window_size=5,
+        plastic__layer_count_probe__probe_every_n_steps=5,
     )
 
 

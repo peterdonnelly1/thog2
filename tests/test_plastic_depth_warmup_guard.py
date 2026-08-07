@@ -20,7 +20,7 @@ def _trainer(*, completed_updates: int) -> SimpleNamespace:
             plastic__enabled=True,
             plastic__do_learn_layer_count=True,
             plastic__freeze_geometry_during_warmup=True,
-            plastic__layer_count_probe_noise_window=16,
+            plastic__layer_count_probe__window_size_as_number_of_probes=16,
             warmup_updates=100,
         ),
         state=SimpleNamespace(

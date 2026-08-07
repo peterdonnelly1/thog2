@@ -238,7 +238,7 @@ def resolve_plastic_probe_interval(
 ) -> Optional[int]:
     if probe_interval is not None:
         return _optional_positive_integer(
-            "plastic__layer_count_probe_window_size",
+            "plastic__layer_count_probe__probe_every_n_steps",
             probe_interval,
         )
     if not enabled or not do_learn_layer_count:

@@ -145,7 +145,7 @@ _ARGUMENT_TO_CONFIG = {
     "plastic__phase_1_starting_layer_count": "plastic__phase_1_starting_layer_count",
     "plastic__phase_1__number_of_trials": "plastic__phase_1__number_of_trials",
     "plastic__phase_1_evaluation_steps_count": "plastic__phase_1_evaluation_steps_count",
-    "plastic__layer_count_probe_window_size": "plastic__layer_count_probe_window_size",
+    "plastic__layer_count_probe__probe_every_n_steps": "plastic__layer_count_probe__probe_every_n_steps",
     "plastic__layer_count_probe_radius": "plastic__layer_count_probe_radius",
     "plastic__layer_count_max_step": "plastic__layer_count_max_step",
     "artifact_name_limit": "artifact_name_limit",

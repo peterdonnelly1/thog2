@@ -5,5 +5,5 @@ import os
 
 
 def pytest_runtest_setup(item):
-    os.environ.setdefault("THOG2_PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE", "1")
+    os.environ.setdefault("THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS", "1")
 # ^^^ THOG

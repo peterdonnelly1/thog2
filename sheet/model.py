@@ -130,8 +130,7 @@ class SheetGPTConfig:
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
-    plastic__layer_count_probe_noise_window: int = 50
-    plastic__layer_count_min_probes: int = 5
+    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
@@ -210,23 +209,13 @@ class SheetGPTConfig:
             )
         # vvv THOG PLASTIC DEPTH robust paired-score gate controls
         if (
-            isinstance(self.plastic__layer_count_probe_noise_window, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
-            or self.plastic__layer_count_probe_noise_window < 1
+            isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, bool)
+            or not isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, int)
+            or self.plastic__layer_count_probe__window_size_as_number_of_probes < 1
         ):
             raise ValueError(
-                "plastic__layer_count_probe_noise_window must be a positive integer; "
-                f"got {self.plastic__layer_count_probe_noise_window!r}"
-            )
-        if (
-            isinstance(self.plastic__layer_count_min_probes, bool)
-            or not isinstance(self.plastic__layer_count_min_probes, int)
-            or self.plastic__layer_count_min_probes < 1
-            or self.plastic__layer_count_min_probes > self.plastic__layer_count_probe_noise_window
-        ):
-            raise ValueError(
-                "plastic__layer_count_min_probes must lie in [1, noise_window]; "
-                f"got {self.plastic__layer_count_min_probes!r}"
+                "plastic__layer_count_probe__window_size_as_number_of_probes must be a positive integer; "
+                f"got {self.plastic__layer_count_probe__window_size_as_number_of_probes!r}"
             )
         if (
             isinstance(self.plastic__layer_count_probe_noise_lambda, bool)

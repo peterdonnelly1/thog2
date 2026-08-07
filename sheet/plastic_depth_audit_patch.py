@@ -190,8 +190,9 @@ def _commit_plastic_depth_inline_update_with_audit(
         ),
         "objective": self.config.plastic__layer_count_objective,
         "objective_cost_weight": float(self.config.plastic__layer_count_cost_weight),
+        "extrapolation_weight": float(self.config.plastic__layer_count_extrapolation_weight),
         "memory_budget_gib": self.config.plastic__layer_memory_budget_gib,
-        "probe_interval": int(self.config.plastic__layer_count_probe_window_size),
+        "probe_every_n_steps": int(self.config.plastic__layer_count_probe__probe_every_n_steps),
         "probe_radius": int(context["probe_radius"]),
         "max_step": int(context["max_step"]),
         "update_brake": int(self.config.plastic__layer_count_update_brake),
@@ -207,6 +208,7 @@ def _commit_plastic_depth_inline_update_with_audit(
         ),
         "score_table": tuple(dict(item) for item in context["score_report"]),
         "robust_evidence": _evidence_payload(decision),
+        "directional_report": copy.deepcopy(context.get("plastic_directional_report")),
         "histories_before": copy.deepcopy(context["audit_history_before"]),
         "histories_after": copy.deepcopy(self.state.plastic_depth_probe_histories),
         "active_public_coordinates_after": tuple(

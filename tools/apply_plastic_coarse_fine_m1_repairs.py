@@ -22,7 +22,7 @@ def repair_probe_interval_compatibility() -> None:
         "sheet/plastic_depth_coarse.py",
         '    if update_brake < 1:\n'
         '        raise ValueError(\n'
-        '            "plastic__layer_count_probe_window_size must be supplied when "\n'
+        '            "plastic__layer_count_probe__probe_every_n_steps must be supplied when "\n'
         '            "plastic__layer_count_update_brake is zero"\n'
         '        )\n'
         '    return update_brake\n',
@@ -63,10 +63,10 @@ def repair_startup_fallbacks() -> None:
     path = "run_thog2_owt.py"
     replace_once(
         path,
-        '    probe_interval = getattr(config, "plastic__layer_count_probe_window_size", None)\n'
+        '    probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)\n'
         '    probe_radius = int(config.plastic__layer_count_probe_radius)\n'
         '    max_step = int(config.plastic__layer_count_max_step)\n',
-        '    probe_interval = getattr(config, "plastic__layer_count_probe_window_size", None)\n'
+        '    probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)\n'
         '    probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))\n'
         '    max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))\n',
     )

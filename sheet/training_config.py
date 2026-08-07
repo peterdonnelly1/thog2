@@ -76,11 +76,11 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__layer_sampling_initialisation",
     "plastic__layer_count_objective",
     "plastic__layer_count_update_brake",
-    "plastic__layer_count_probe_window_size",
+    "plastic__layer_count_probe__probe_every_n_steps",
     "plastic__layer_count_probe_radius",
     "plastic__layer_count_max_step",
-    "plastic__layer_count_probe_noise_window",
-    "plastic__layer_count_min_probes",
+    "plastic__layer_count_extrapolation_weight",
+    "plastic__layer_count_probe__window_size_as_number_of_probes",
     "plastic__layer_count_probe_noise_lambda",
     "plastic__layer_count_cost_weight",
     "plastic__layer_memory_budget_gib",
@@ -210,11 +210,11 @@ class TrainingConfig:
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
-    plastic__layer_count_probe_window_size: Optional[int] = None
+    plastic__layer_count_probe__probe_every_n_steps: Optional[int] = None
     plastic__layer_count_probe_radius: int = 1
     plastic__layer_count_max_step: int = 1
-    plastic__layer_count_probe_noise_window: int = 50
-    plastic__layer_count_min_probes: int = 5
+    plastic__layer_count_extrapolation_weight: float = 0.8
+    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
@@ -309,16 +309,26 @@ class TrainingConfig:
             max_permitted_layers=self.plastic__max_permitted_layers,
         )
         resolved_probe_interval = resolve_plastic_probe_interval(
-            probe_interval=self.plastic__layer_count_probe_window_size,
+            probe_interval=self.plastic__layer_count_probe__probe_every_n_steps,
             update_brake=self.plastic__layer_count_update_brake,
             enabled=self.plastic__enabled,
             do_learn_layer_count=self.plastic__do_learn_layer_count,
         )
-        self.plastic__layer_count_probe_window_size = resolved_probe_interval
+        self.plastic__layer_count_probe__probe_every_n_steps = resolved_probe_interval
         validate_plastic_fine_count_controls(
             probe_radius=self.plastic__layer_count_probe_radius,
             max_step=self.plastic__layer_count_max_step,
         )
+        if (
+            isinstance(self.plastic__layer_count_extrapolation_weight, bool)
+            or not isinstance(self.plastic__layer_count_extrapolation_weight, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count_extrapolation_weight))
+            or not (0.5 < float(self.plastic__layer_count_extrapolation_weight) <= 1.0)
+        ):
+            raise ValueError(
+                "plastic__layer_count_extrapolation_weight must lie in (0.5, 1.0]; "
+                f"got {self.plastic__layer_count_extrapolation_weight!r}"
+            )
         initial_layer_count_for_resolution = (
             resolved_coarse.candidate_layers[0]
             if resolved_coarse.enabled
@@ -349,23 +359,13 @@ class TrainingConfig:
             )
         # vvv THOG PLASTIC DEPTH robust paired-score gate controls
         if (
-            isinstance(self.plastic__layer_count_probe_noise_window, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
-            or self.plastic__layer_count_probe_noise_window < 1
+            isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, bool)
+            or not isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, int)
+            or self.plastic__layer_count_probe__window_size_as_number_of_probes < 1
         ):
             raise ValueError(
-                "plastic__layer_count_probe_noise_window must be a positive integer; "
-                f"got {self.plastic__layer_count_probe_noise_window!r}"
-            )
-        if (
-            isinstance(self.plastic__layer_count_min_probes, bool)
-            or not isinstance(self.plastic__layer_count_min_probes, int)
-            or self.plastic__layer_count_min_probes < 1
-            or self.plastic__layer_count_min_probes > self.plastic__layer_count_probe_noise_window
-        ):
-            raise ValueError(
-                "plastic__layer_count_min_probes must lie in [1, noise_window]; "
-                f"got {self.plastic__layer_count_min_probes!r}"
+                "plastic__layer_count_probe__window_size_as_number_of_probes must be a positive integer; "
+                f"got {self.plastic__layer_count_probe__window_size_as_number_of_probes!r}"
             )
         if (
             isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
@@ -787,8 +787,7 @@ class TrainingConfig:
                         "plastic__layer_sampling_initialisation": self.plastic__layer_sampling_initialisation,
                         "plastic__layer_count_objective": self.plastic__layer_count_objective,
                         "plastic__layer_count_update_brake": self.plastic__layer_count_update_brake,
-                        "plastic__layer_count_probe_noise_window": self.plastic__layer_count_probe_noise_window,
-                        "plastic__layer_count_min_probes": self.plastic__layer_count_min_probes,
+                        "plastic__layer_count_probe__window_size_as_number_of_probes": self.plastic__layer_count_probe__window_size_as_number_of_probes,
                         "plastic__layer_count_probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
                         "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
                         "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
@@ -849,8 +848,7 @@ class TrainingConfig:
             #     "sampling_initialisation": self.plastic__layer_sampling_initialisation,
             #     "count_objective": self.plastic__layer_count_objective,
             #     "count_update_brake": self.plastic__layer_count_update_brake,
-            #     "probe_noise_window": self.plastic__layer_count_probe_noise_window,
-            #     "probe_noise_min_observations": self.plastic__layer_count_min_probes,
+            #     "probe_noise_window": self.plastic__layer_count_probe__window_size_as_number_of_probes,
             #     "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
             #     "count_cost_weight": float(self.plastic__layer_count_cost_weight),
             #     "memory_budget_gib": self.plastic__layer_memory_budget_gib,
@@ -867,9 +865,10 @@ class TrainingConfig:
                 phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
                 phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,
                 phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
-                layer_count_probe_window_size=self.plastic__layer_count_probe_window_size,
+                layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,
                 layer_count_probe_radius=self.plastic__layer_count_probe_radius,
                 layer_count_max_step=self.plastic__layer_count_max_step,
+                layer_count_extrapolation_weight=float(self.plastic__layer_count_extrapolation_weight),
                 layers_to_sample=self.plastic__layers_to_sample,
                 do_learn_layer_count=self.plastic__do_learn_layer_count,
                 initial_layer_count=self.plastic__initial_layer_count,
@@ -877,8 +876,7 @@ class TrainingConfig:
                 layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
                 layer_count_objective=self.plastic__layer_count_objective,
                 layer_count_update_brake=self.plastic__layer_count_update_brake,
-                layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
-                layer_count_min_probes=self.plastic__layer_count_min_probes,
+                layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
                 layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
@@ -932,8 +930,7 @@ class TrainingConfig:
 # "sampling_initialisation": self.plastic__layer_sampling_initialisation,
 # "count_objective": self.plastic__layer_count_objective,
 # "count_update_brake": self.plastic__layer_count_update_brake,
-# "probe_noise_window": self.plastic__layer_count_probe_noise_window,
-# "probe_noise_min_observations": self.plastic__layer_count_min_probes,
+# "probe_noise_window": self.plastic__layer_count_probe__window_size_as_number_of_probes,
 # "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
 # "count_cost_weight": float(self.plastic__layer_count_cost_weight),
 # "memory_budget_gib": self.plastic__layer_memory_budget_gib,
