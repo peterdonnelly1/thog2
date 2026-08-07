@@ -181,3 +181,36 @@ def test_artifact_and_help_registry_name_the_new_probe_token_control() -> None:
     help_text = build_parser().format_help()
     assert "--plastic__layer_count_probe__number_of_sampled_valid_tokens" in help_text
 # ^^^ THOG
+
+# vvv THOG v0.521 paired-token SE is a diagnostic precision estimate and never participates in count selection
+def test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_deviation() -> None:
+    from sheet import plastic_depth_probe_se_v0521_patch as probe_se
+
+    counts = (6, 7, 8)
+    current = torch.tensor([2.0, 2.0, 2.0, 2.0], dtype=torch.float64)
+    left = current + torch.tensor([-1.0, 0.0, 1.0, 2.0], dtype=torch.float64)
+    right = current + torch.tensor([0.5, 0.5, 0.5, 0.5], dtype=torch.float64)
+    local = probe_se._local_paired_delta_stats(
+        counts=counts,
+        current_count=7,
+        token_losses=(left, current, right),
+    )
+    standard_errors = probe_se._combine_paired_delta_standard_errors(
+        counts=counts,
+        current_count=7,
+        gathered_stats=(local,),
+    )
+
+    expected_left = torch.tensor([-1.0, 0.0, 1.0, 2.0], dtype=torch.float64).std(unbiased=True).item() / 2.0
+    assert standard_errors[6] == pytest.approx(expected_left)
+    assert standard_errors[7] == 0.0
+    assert standard_errors[8] == pytest.approx(0.0)
+
+
+def test_paired_token_se_overlay_is_installed_after_v0521_sampler() -> None:
+    from sheet import plastic_depth_probe_se_v0521_patch as probe_se
+    from sheet.training_model import TrainingSheetGPT
+
+    assert TrainingSheetGPT._plastic_depth_candidate_head_loss.__module__ == probe_se.__name__
+    assert TrainerStepMixin._plastic_depth_inline_probe_request.__module__ == probe_se.__name__
+# ^^^ THOG
