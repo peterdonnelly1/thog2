@@ -1,0 +1,212 @@
+name: Apply PLASTIC v0.52 directional console
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - tools/apply_plastic_directional_console_v052.py
+      - tools/stabilize_plastic_apply_workflows.py
+      - sheet/plastic_depth_directional_coherence_patch.py
+      - constants.py
+      - .github/workflows/apply_plastic_directional_console_v052.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply_and_validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Stabilize older apply transform
+        run: python tools/stabilize_plastic_apply_workflows.py
+
+      - name: Apply v0.52 migration
+        run: python tools/apply_plastic_directional_console_v052.py
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Validate syntax
+        run: |
+          bash -n train_OWT.sh
+          bash -n train_OWT_core.sh
+          bash -n plastic_depth_lookahead_wrapper_options.sh
+          python -m py_compile \
+            constants.py \
+            run_thog2_owt.py \
+            run_thog2_owt_core.py \
+            sheet/__init__.py \
+            sheet/checkpoints.py \
+            sheet/help_registry_descriptor_patch.py \
+            sheet/model.py \
+            sheet/plastic_depth.py \
+            sheet/plastic_depth_audit_patch.py \
+            sheet/plastic_depth_directional_coherence_patch.py \
+            sheet/plastic_depth_lookahead_patch.py \
+            sheet/run_config.py \
+            sheet/training_config.py \
+            sheet/trainer_step.py \
+            tools/apply_plastic_directional_console_v052.py \
+            tools/stabilize_plastic_apply_workflows.py
+
+      - name: Verify canonical controls and removed min-probes knob
+        run: |
+          cadence_old='plastic__layer_count_probe_''window_size'
+          history_old='plastic__layer_count_probe_noise_''window'
+          min_old='plastic__layer_count_''min_probes'
+          active_paths=(
+            run_thog2_owt.py
+            run_thog2_owt_core.py
+            train_OWT_core.sh
+            sheet/checkpoints.py
+            sheet/help_registry_descriptor_patch.py
+            sheet/model.py
+            sheet/plastic_depth.py
+            sheet/plastic_depth_audit_patch.py
+            sheet/plastic_depth_lookahead_patch.py
+            sheet/run_config.py
+            sheet/training_config.py
+            sheet/trainer_step.py
+          )
+          if git grep -n -e "$cadence_old" -e "$history_old" -e "$min_old" -- "${active_paths[@]}"; then
+            echo 'superseded active PLASTIC probe control remains' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          from run_thog2_owt_core import build_parser
+
+          parser = build_parser()
+          args = parser.parse_args([
+              '--plastic__layer_count_probe__probe_every_n_steps', '10',
+              '--plastic__layer_count_probe__window_size_as_number_of_probes', '6',
+              '--plastic__layer_count_probe_radius', '5',
+              '--plastic__layer_count_max_step', '2',
+              '--plastic__layer_count_extrapolation_weight', '0.8',
+          ])
+          assert args.plastic__layer_count_probe__probe_every_n_steps == 10
+          assert args.plastic__layer_count_probe__window_size_as_number_of_probes == 6
+          assert args.plastic__layer_count_probe_radius == 5
+          assert args.plastic__layer_count_max_step == 2
+          assert args.plastic__layer_count_extrapolation_weight == 0.8
+          assert not hasattr(args, 'plastic__layer_count_min_probes')
+          PY
+
+      - name: Verify directional rule and full-window readiness
+        run: |
+          python - <<'PY'
+          from sheet.plastic_depth_directional_coherence_patch import (
+              _directional_support,
+              choose_plastic_depth_count_with_directional_coherence,
+          )
+
+          def score(count, value):
+              return {'active_layers': count, 'feasible': True, 'score': value}
+
+          side = _directional_support(
+              current_count=10,
+              score_by_count={8: 9.0, 9: 9.0, 10: 10.0, 11: 9.0, 12: 9.0},
+              extrapolation_weight=0.8,
+          )
+          assert side['left_support'] == 1.0
+          assert side['right_support'] > 0.5
+          assert side['vote'] == 0.0
+
+          score_report = (score(9, 9.0), score(10, 10.0), score(11, 11.0))
+          hold = choose_plastic_depth_count_with_directional_coherence(
+              current_count=10,
+              score_report=score_report,
+              histories={'10:-1': (-1.0,), '10:@LRA': (-1.0,)},
+              noise_window=3,
+              noise_lambda=0.0,
+              update_number=10,
+              last_count_change_update=0,
+              update_brake=0,
+              max_step=1,
+              extrapolation_weight=0.8,
+          )
+          assert hold.selected_count == 10
+
+          move = choose_plastic_depth_count_with_directional_coherence(
+              current_count=10,
+              score_report=score_report,
+              histories={'10:-1': (-1.0, -1.0), '10:@LRA': (-1.0, -1.0)},
+              noise_window=3,
+              noise_lambda=0.0,
+              update_number=11,
+              last_count_change_update=0,
+              update_brake=0,
+              max_step=1,
+              extrapolation_weight=0.8,
+          )
+          assert move.selected_count == 9
+          assert move.histories == {}
+          PY
+
+      - name: Verify console primitives
+        run: |
+          python - <<'PY'
+          import re
+          import constants
+          from sheet import plastic_depth_directional_coherence_patch as patch
+
+          line = 'T 1 loss  =  5.000 grad norm=  0.250 layers = 8\tprobe_losses [L-1, L, L+1] = [5.100, 5.000, 4.900]\tsampled = [1.0, 2.0, 3.0]'
+          line = line.replace('loss  =', 'loss=').replace('grad norm=  ', 'grad norm= ')
+          line = patch._move_sampled_after_layers(line)
+          line = patch._bold_current_probe_loss(line, (-1, 0, 1))
+          plain = re.sub(r'\x1b\[[0-9;]*m', '', line)
+          assert 'loss=' in plain and 'loss  =' not in plain
+          assert 'grad norm= 0.250' in plain
+          assert plain.index('layers = 8') < plain.index('sampled =') < plain.index('probe_losses')
+          assert constants.BOLD_WHITE in line
+          assert patch._format_lra_summary((1, 5, 2, 8, 'R')) == 'L/R/A=[1/5/2]/8=>R'
+          assert patch._format_win_counts((2,1,3,2,1), (6,7,6,5,4), 8) == 'wins L[2,1,3,2,1]/8; R[6,7,6,5,4]/8'
+          PY
+
+      - name: Verify help surface
+        run: |
+          help_text="$(bash ./train_OWT.sh -h)"
+          grep -q -- '--plastic__layer_count_probe__probe_every_n_steps' <<<"$help_text"
+          grep -q -- '--plastic__layer_count_probe__window_size_as_number_of_probes' <<<"$help_text"
+          grep -q -- '--plastic__layer_count_extrapolation_weight' <<<"$help_text"
+          if grep -q -- '--plastic__layer_count_min_probes' <<<"$help_text"; then
+            echo 'retired min-probes option leaked into help' >&2
+            exit 1
+          fi
+
+      - name: Commit validated v0.52 source migration
+        run: |
+          git restore -- .github/workflows
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Apply PLASTIC v0.52 directional coherence'
+          for attempt in 1 2 3; do
+            git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+# vvv THOG validated writeback for PLASTIC v0.52 directional coherence and console controls
+# ^^^ THOG
