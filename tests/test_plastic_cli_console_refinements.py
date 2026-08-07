@@ -58,6 +58,7 @@ def test_artifact_uses_dataset_first_and_one_plastic_group_prefix() -> None:
         plastic__phase_1_evaluation_steps_count=10,
         plastic__do_learn_layer_count=True,
         plastic__max_permitted_layers=32,
+        plastic__layer_count_probe__number_of_sampled_valid_tokens=64,
     )
     fragment = config.parameter_artifact_fragment()
     assert fragment.startswith("d_owt_A_3_b_2_c_60_f_6_w_2")

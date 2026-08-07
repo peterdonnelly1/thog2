@@ -71,7 +71,7 @@ _insert_after(
     "        for name in (\"block_size\", \"vocab_size\", \"n_layer\", \"n_head\", \"n_embd\", \"depth_order\", \"base_row_order\", \"mlp_hidden_group_size\", \"hyperblock_common_family_order\", \"hyperblock_attention_family_order\", \"hyperblock_mlp_family_order\", \"hyperblock_depth_order\", \"hyperblock_d_model_order\", \"hyperblock_mlp_hidden_order\", \"hyperblock_attention_head_order\", \"hyperblock_attention_head_channel_order\", \"hyperblock_mlp_hidden_multiplier\", \"hyperblock_loop_count\", \"batch_size\", \"gradient_accumulation_steps\", \"layer_dropout_resample_steps\", \"max_updates\", \"decay_updates\", \"eval_batches\", \"log_interval\"):\n            value = getattr(self, name)\n            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:\n                raise ValueError(f\"{name} must be a positive integer; got {value!r}\")\n",
     "        # vvv THOG v0.521 reject impossible configured samples rather than silently clipping to microbatch capacity\n"
     "        probe_token_capacity = self.batch_size * self.block_size\n"
-    "        if self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity:\n"
+    "        if (\n            self.plastic__enabled\n            and self.plastic__do_learn_layer_count\n            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity\n        ):\n"
     "            raise ValueError(\n"
     "                \"plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed \"\n"
     "                f\"batch_size * block_size ({probe_token_capacity}); \"\n"
@@ -110,7 +110,7 @@ _insert_after(
     "        for name in positive:\n            value = getattr(self, name)\n            if isinstance(value, bool) or not isinstance(value, int) or value < 1:\n                raise ValueError(f\"{name} must be a positive integer\")\n",
     "        # vvv THOG v0.521 reject a requested sample larger than the physical first-microbatch token capacity\n"
     "        probe_token_capacity = self.batch_size * self.block_size\n"
-    "        if self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity:\n"
+    "        if (\n            self.plastic__enabled\n            and self.plastic__do_learn_layer_count\n            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity\n        ):\n"
     "            raise ValueError(\n"
     "                \"plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed \"\n"
     "                f\"batch_size * block_size ({probe_token_capacity})\"\n"
@@ -128,7 +128,7 @@ _replace_once(
     "            plastic__layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,\n            plastic__layer_count_probe__number_of_sampled_valid_tokens=self.plastic__layer_count_probe__number_of_sampled_valid_tokens,\n            plastic__layer_count_probe_radius=self.plastic__layer_count_probe_radius,",
 )
 
-# Canonical runner CLI, resolved config, startup report, and exact old-checkpoint migration.
+# Canonical runner CLI, resolved config and startup report.
 _replace_once(
     "run_thog2_owt_core.py",
     '    parser.add_argument("--plastic__layer_count_probe__probe_every_n_steps", dest="plastic__layer_count_probe__probe_every_n_steps", type=int)\n    parser.add_argument("--plastic__layer_count_probe_radius",',
@@ -146,21 +146,10 @@ _replace_once(
 )
 _replace_once(
     "run_thog2_owt_core.py",
-    '    stored = TrainingConfig(**payload["trainer_config"])\n',
-    '    # vvv THOG v0.521 checkpoints written before the public probe-token knob retain their historical hard-coded 256-token semantics\n    stored_values = dict(payload["trainer_config"])\n    if stored_values.get("plastic__enabled", False) and "plastic__layer_count_probe__number_of_sampled_valid_tokens" not in stored_values:\n        stored_values["plastic__layer_count_probe__number_of_sampled_valid_tokens"] = 256\n    stored = TrainingConfig(**stored_values)\n    # ^^^ THOG\n',
-)
-_replace_once(
-    "run_thog2_owt_core.py",
     '        "layer_dropout_stratum_size", "layer_dropout_active_per_stratum", "layer_dropout_resample_steps",\n',
     '        "layer_dropout_stratum_size", "layer_dropout_active_per_stratum", "layer_dropout_resample_steps",\n        "plastic__layer_count_probe__number_of_sampled_valid_tokens",\n',
 )
 
-# Shared checkpoint resume path gets the same legacy-256 migration before TrainingConfig construction.
-_replace_once(
-    "sheet/trainer_checkpoint_resume.py",
-    '        checkpoint_config = TrainingConfig(**payload["trainer_config"])\n',
-    '        # vvv THOG v0.521 preserve exact pre-knob PLASTIC resume semantics: missing probe-token field means the historical fixed 256-token sample\n        checkpoint_config_values = dict(payload["trainer_config"])\n        if checkpoint_config_values.get("plastic__enabled", False) and "plastic__layer_count_probe__number_of_sampled_valid_tokens" not in checkpoint_config_values:\n            checkpoint_config_values["plastic__layer_count_probe__number_of_sampled_valid_tokens"] = 256\n        checkpoint_config = TrainingConfig(**checkpoint_config_values)\n        # ^^^ THOG\n',
-)
 
 # Wrapper: public default/usage, both long-option forms, validation and forwarding.
 _insert_after(
@@ -530,7 +519,6 @@ spec = spec.replace(
     "VERSION 0.521 DELTA\n"
     "Version 0.521 is a +0.001 refinement over Version 0.52. It preserves the Version 0.52 controller and decision semantics unchanged while making FINE probe-token sampling explicit and configurable, and replacing the arbitrary-radius raw probe-loss vector with a scan-oriented hybrid delta display. Fresh runs default plastic__layer_count_probe__number_of_sampled_valid_tokens to 1024; zero means all valid target tokens in the first probe microbatch. Positive values request exactly that many valid tokens and are never silently clipped.\n"
     "Console probe vectors retain the absolute current-L probe loss in the centre, rendered bold white. Every L-k/L+k entry is rendered as signed candidate_loss minus L_loss; negative deltas are bold bright green and positive deltas are uncoloured. The public label is probe_Δloss while the positional L-r ... L+r label remains unchanged.\n"
-    "Checkpoint migration is semantic: a pre-v0.521 PLASTIC checkpoint that lacks the new field is interpreted as 256 sampled valid tokens, matching the previously hard-coded implementation.\n"
     "\nVERSION 0.52 DELTA (retained historical basis)\n",
     1,
 )
@@ -558,7 +546,6 @@ acceptance_insert = (
     "• Fresh configuration resolves plastic__layer_count_probe__number_of_sampled_valid_tokens=1024 unless explicitly overridden.\n"
     "• Value 0 uses all valid tokens in the first probe microbatch; positive N uses exactly N deterministic randomly sampled valid positions shared by all candidate counts in that probe event.\n"
     "• Negative N, N > batch_size × block_size, and runtime N greater than the actual valid-target count are rejected; no implicit min(requested, available) clipping is permitted.\n"
-    "• Pre-v0.521 PLASTIC checkpoints lacking the field retain the historical 256-token meaning.\n"
     "• Arbitrary-radius console vectors render signed candidate-loss deltas around an absolute bold-white L; every negative delta is bold bright green.\n"
     "\n"
 )

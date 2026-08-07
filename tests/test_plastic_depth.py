@@ -54,6 +54,7 @@ def plastic_training_config(**overrides):
         plastic__enabled=True,
         plastic__layers_to_sample=4,
         plastic__freeze_geometry_during_warmup=False,
+        plastic__layer_count_probe__number_of_sampled_valid_tokens=16,
         depth_order=3,
         n_layer=4,
         max_updates=6,

@@ -107,6 +107,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("LO", "--plastic__layer_count_objective OBJECTIVE", "lowest_loss | layer_efficiency | relative_training_wall_time | memory_budget"),
             ("LB", "--plastic__layer_count_update_brake N", "minimum updates between committed count changes"),
             ("LPI", "--plastic__layer_count_probe__probe_every_n_steps N", "updates between count probes"),
+            ("LPT", "--plastic__layer_count_probe__number_of_sampled_valid_tokens N", "valid-token sample per probe microbatch; 0 means all valid tokens"),
             ("LPR", "--plastic__layer_count_probe_radius N", "integer candidate radius"),
             ("LMS", "--plastic__layer_count_max_step N", "maximum committed count movement"),
             ("LEW", "--plastic__layer_count_extrapolation_weight VALUE", "discount for extrapolative/right-side directional evidence"),

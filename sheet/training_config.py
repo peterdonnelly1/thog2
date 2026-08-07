@@ -77,6 +77,7 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__layer_count_objective",
     "plastic__layer_count_update_brake",
     "plastic__layer_count_probe__probe_every_n_steps",
+    "plastic__layer_count_probe__number_of_sampled_valid_tokens",
     "plastic__layer_count_probe_radius",
     "plastic__layer_count_max_step",
     "plastic__layer_count_extrapolation_weight",
@@ -211,6 +212,7 @@ class TrainingConfig:
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
     plastic__layer_count_probe__probe_every_n_steps: Optional[int] = None
+    plastic__layer_count_probe__number_of_sampled_valid_tokens: int = 1024
     plastic__layer_count_probe_radius: int = 1
     plastic__layer_count_max_step: int = 1
     plastic__layer_count_extrapolation_weight: float = 0.8
@@ -315,6 +317,17 @@ class TrainingConfig:
             do_learn_layer_count=self.plastic__do_learn_layer_count,
         )
         self.plastic__layer_count_probe__probe_every_n_steps = resolved_probe_interval
+        # vvv THOG v0.521 fresh probe-token sampling uses 1024 by default and zero as the explicit all-valid sentinel
+        if (
+            isinstance(self.plastic__layer_count_probe__number_of_sampled_valid_tokens, bool)
+            or not isinstance(self.plastic__layer_count_probe__number_of_sampled_valid_tokens, int)
+            or self.plastic__layer_count_probe__number_of_sampled_valid_tokens < 0
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must be a non-negative integer; "
+                f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens!r}"
+            )
+        # ^^^ THOG
         validate_plastic_fine_count_controls(
             probe_radius=self.plastic__layer_count_probe_radius,
             max_step=self.plastic__layer_count_max_step,
@@ -505,6 +518,32 @@ class TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        # vvv THOG v0.521 reject impossible configured samples rather than silently clipping to microbatch capacity
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed "
+                f"batch_size * block_size ({probe_token_capacity}); "
+                f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens}"
+            )
+        # ^^^ THOG
+        # vvv THOG v0.521 reject impossible configured samples rather than silently clipping to microbatch capacity
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed "
+                f"batch_size * block_size ({probe_token_capacity}); "
+                f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens}"
+            )
+        # ^^^ THOG
         # vvv THOG validate shared-factory recurrence independently of the HYPERBLOCK basis orders
         if (
             isinstance(self.hyperblock_loop_decay, bool)

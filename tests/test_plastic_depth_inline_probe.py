@@ -387,7 +387,7 @@ def test_inline_probe_sample_positions_are_deterministic_per_update_and_rank() -
         first = trainer._plastic_depth_sampled_token_indices(targets)
         second = trainer._plastic_depth_sampled_token_indices(targets)
         torch.testing.assert_close(first, second, rtol=0.0, atol=0.0)
-        assert first.numel() == 256
+        assert first.numel() == trainer.config.plastic__layer_count_probe__number_of_sampled_valid_tokens
         assert bool((targets.reshape(-1).index_select(0, first) != -1).all().item())
 
         trainer.state.completed_updates += 1
