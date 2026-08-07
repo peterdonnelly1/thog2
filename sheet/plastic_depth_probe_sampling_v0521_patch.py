@@ -82,13 +82,16 @@ def _render_probe_delta_values(
     for offset, loss in zip(resolved_offsets, resolved_losses):
         if offset == 0:
             rendered.append(
-                f"{_constants.BOLD_WHITE}{_format_probe_absolute(loss)}{_constants.R}"
+                f"{_constants.BOLD_WHITE}{_constants.UNDER}{_format_probe_absolute(loss)}{_constants.R}"
             )
             continue
         delta = None if loss is None else float(loss) - float(current_loss)
         text = _format_probe_delta(delta)
         if delta is not None and math.isfinite(delta) and delta < 0.0:
-            text = f"{_cleanup._GREEN}{text}{_cleanup._RESET}"
+            if offset < 0:
+                text = f"{_constants.BOLD_MAGENTA}{text}{_constants.R}"
+            else:
+                text = f"{_cleanup._GREEN}{text}{_cleanup._RESET}"
         rendered.append(text)
     return ", ".join(rendered)
 
