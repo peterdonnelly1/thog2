@@ -31,9 +31,11 @@ def test_distant_winner_is_committed_only_to_max_step() -> None:
     decision = choose_plastic_depth_count_with_exact_radius(
         current_count=31,
         score_report=(_score(29, 8.0), _score(30, 9.0), _score(31, 10.0), _score(32, 11.0), _score(33, 12.0)),
-        histories={"31:-2": (-2.0, -2.0, -2.0, -2.0)},
-        noise_window=10,
-        minimum_observations=5,
+        histories={
+            "31:-2": (-2.0, -2.0, -2.0, -2.0),
+            "31:@LRA": (-1.0, -1.0, -1.0, -1.0),
+        },
+        noise_window=5,
         noise_lambda=3.0,
         update_number=20,
         last_count_change_update=0,
@@ -51,9 +53,11 @@ def test_latest_unfavourable_evidence_blocks_old_favourable_history() -> None:
     decision = choose_plastic_depth_count_with_exact_radius(
         current_count=10,
         score_report=(_score(8, 10.5), _score(9, 10.0), _score(10, 10.0), _score(11, 10.5), _score(12, 10.5)),
-        histories={"10:-2": (-2.0, -2.0, -2.0, -2.0, -2.0)},
-        noise_window=10,
-        minimum_observations=5,
+        histories={
+            "10:-2": (-2.0, -2.0, -2.0, -2.0, -2.0),
+            "10:@LRA": (-1.0, -1.0, -1.0, -1.0, -1.0),
+        },
+        noise_window=6,
         noise_lambda=0.1,
         update_number=20,
         last_count_change_update=0,
@@ -67,16 +71,16 @@ def test_latest_unfavourable_evidence_blocks_old_favourable_history() -> None:
     assert not evidence.significant
 
 
-def test_exact_z_tie_prefers_fewer_layers() -> None:
+def test_exact_z_tie_prefers_fewer_layers_within_permitted_side() -> None:
     decision = choose_plastic_depth_count_with_exact_radius(
         current_count=10,
-        score_report=(_score(8, 9.0), _score(10, 10.0), _score(12, 9.0)),
+        score_report=(_score(8, 9.0), _score(9, 9.0), _score(10, 10.0), _score(11, 11.0), _score(12, 11.0)),
         histories={
             "10:-2": (-1.0, -1.0, -1.0, -1.0),
-            "10:+2": (-1.0, -1.0, -1.0, -1.0),
+            "10:-1": (-1.0, -1.0, -1.0, -1.0),
+            "10:@LRA": (-1.0, -1.0, -1.0, -1.0),
         },
-        noise_window=10,
-        minimum_observations=5,
+        noise_window=5,
         noise_lambda=0.1,
         update_number=20,
         last_count_change_update=0,
