@@ -1,0 +1,100 @@
+name: Apply PLASTIC v0.521 without legacy checkpoint compatibility
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - tools/apply_plastic_v0521_drop_legacy_checkpoint_compat.py
+      - .github/workflows/apply_plastic_v0521_drop_legacy_checkpoint_compat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply_and_validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply current-only v0.521 semantics
+        run: |
+          python tools/apply_plastic_v0521_test_fixture_fix.py
+          python tools/apply_plastic_v0521_drop_legacy_checkpoint_compat.py
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Syntax and compatibility-path audit
+        run: |
+          bash -n train_OWT.sh
+          bash -n train_OWT_core.sh
+          python -m py_compile \
+            run_thog2_owt_core.py \
+            sheet/training_config.py \
+            sheet/run_config.py \
+            sheet/trainer_checkpoint_resume.py \
+            sheet/plastic_depth_probe_sampling_v0521_patch.py \
+            tests/test_plastic_depth_probe_sampling_v0521.py
+          git diff --check
+          if git grep -n -E 'pre-v0\.521|hard-coded 256-token|historical fixed 256-token|pre-knob PLASTIC resume semantics' -- \
+              run_thog2_owt_core.py \
+              sheet/trainer_checkpoint_resume.py \
+              docs/THOG2_PLASTIC_Requirements_Specification_v0.521.txt \
+              tools/apply_plastic_v0521_probe_sampling_and_console.py; then
+            echo 'legacy v0.521 checkpoint compatibility text/path remains' >&2
+            exit 1
+          fi
+
+      - name: Focused v0.521 tests
+        run: |
+          python -m pytest -q \
+            tests/test_plastic_depth_probe_sampling_v0521.py \
+            tests/test_plastic_depth_directional_coherence_v052.py \
+            tests/test_plastic_cli_console_refinements.py \
+            tests/test_console_and_descriptor_help.py
+
+      - name: Affected PLASTIC regression
+        run: |
+          python -m pytest -q \
+            tests/test_plastic_depth_inline_probe.py \
+            tests/test_plastic_depth_full_radius.py \
+            tests/test_plastic_depth_full_radius_oom.py \
+            tests/test_plastic_depth_checkpoint_format.py \
+            tests/test_plastic_depth_resume.py \
+            tests/test_run_thog2_owt_startup_report.py
+
+      - name: Commit validated v0.521 implementation
+        run: |
+          git restore -- .github/workflows
+          if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Implement PLASTIC v0.521 probe sampling and console'
+          for attempt in 1 2 3; do
+            git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+# vvv THOG validate current-only v0.521 semantics with no pre-v0.521 checkpoint compatibility branch
+# ^^^ THOG
