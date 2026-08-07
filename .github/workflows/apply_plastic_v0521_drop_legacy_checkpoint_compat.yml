@@ -7,6 +7,9 @@ on:
     paths:
       - tools/apply_plastic_v0521_drop_legacy_checkpoint_compat.py
       - .github/workflows/apply_plastic_v0521_drop_legacy_checkpoint_compat.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
   workflow_dispatch:
 
 permissions:
@@ -77,6 +80,7 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git restore -- .github/workflows
           if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
