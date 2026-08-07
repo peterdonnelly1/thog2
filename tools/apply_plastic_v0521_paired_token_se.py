@@ -72,7 +72,7 @@ def test_paired_token_se_overlay_is_installed_after_v0521_sampler() -> None:
 '''
 content = test_path.read_text(encoding="utf-8")
 if "test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_deviation" not in content:
-    test_path.write_text(content.rstrip() + test_addition + "\n", encoding="utf-8")
+    test_path.write_text(content.rstrip() + test_addition.rstrip() + "\n", encoding="utf-8")
 
 # Extend the v0.521 delta without changing the controller decision rule.
 spec_path = ROOT / "docs/THOG2_PLASTIC_Requirements_Specification_v0.521.txt"
