@@ -70,6 +70,34 @@ elif new not in content:
 path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
+# vvv THOG direct TrainingConfig construction must enforce the same static first-microbatch capacity rule as OwtRunConfig before trainer construction
+path = ROOT / "sheet/training_config.py"
+content = path.read_text(encoding="utf-8")
+capacity_guard = """        # vvv THOG v0.521 direct TrainingConfig paths reject impossible positive probe samples before trainer construction
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                \"plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed \"
+                f\"batch_size * block_size ({probe_token_capacity})\"
+            )
+        # ^^^ THOG
+"""
+if capacity_guard not in content:
+    anchor = "        # ^^^ THOG\n        validate_plastic_fine_count_controls(\n"
+    if content.count(anchor) != 1:
+        raise RuntimeError(f"expected one TrainingConfig fine-control anchor; found {content.count(anchor)}")
+    content = content.replace(
+        anchor,
+        "        # ^^^ THOG\n" + capacity_guard + "        validate_plastic_fine_count_controls(\n",
+        1,
+    )
+    path.write_text(content, encoding="utf-8")
+# ^^^ THOG
+
 # vvv THOG the durable FINE audit must retain the v0.521 paired-token SE diagnostic for every candidate and zero for current L
 path = ROOT / "tests/test_plastic_depth_audit.py"
 content = path.read_text(encoding="utf-8")
@@ -95,9 +123,34 @@ if addition not in content:
     path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
-# vvv THOG paired-token SE unit tests are part of v0.521 and must survive fixture migrations
+# vvv THOG paired-token SE unit tests and direct TrainingConfig capacity validation are part of v0.521 and must survive fixture migrations
 path = ROOT / "tests/test_plastic_depth_probe_sampling_v0521.py"
 content = path.read_text(encoding="utf-8")
+capacity_test = """
+
+def test_training_config_static_capacity_validation_rejects_too_large() -> None:
+    with pytest.raises(ValueError, match=\"plastic__layer_count_probe__number_of_sampled_valid_tokens\"):
+        TrainingConfig(
+            model_type=\"thog2_sheet\",
+            geometry_preset=\"depth\",
+            basis_family=\"chebyshev\",
+            n_layer=8,
+            depth_order=4,
+            batch_size=2,
+            block_size=8,
+            plastic__enabled=True,
+            plastic__do_learn_layer_count=True,
+            plastic__initial_layer_count=4,
+            plastic__max_permitted_layers=8,
+            plastic__layer_count_probe__number_of_sampled_valid_tokens=17,
+        )
+"""
+if "def test_training_config_static_capacity_validation_rejects_too_large()" not in content:
+    anchor = "def test_zero_uses_every_valid_token_without_random_subsampling() -> None:\n"
+    if content.count(anchor) != 1:
+        raise RuntimeError(f"expected one zero-sampling test anchor; found {content.count(anchor)}")
+    content = content.replace(anchor, capacity_test + "\n" + anchor, 1)
+
 se_tests = """
 
 # vvv THOG v0.521 paired-token SE is a diagnostic precision estimate and never participates in count selection
@@ -135,7 +188,7 @@ def test_paired_token_se_overlay_is_installed_after_v0521_sampler() -> None:
 """
 if "def test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_deviation()" not in content:
     content = content.rstrip() + se_tests + "\n"
-    path.write_text(content, encoding="utf-8")
+path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
 # vvv THOG the deterministic-sampling regression now asserts the configured cardinality rather than the retired hard-coded 256
@@ -196,5 +249,5 @@ elif new not in content:
 path.write_text(content, encoding="utf-8")
 # ^^^ THOG
 
-print("Migrated PLASTIC v0.521 tiny fixtures, restored SE tests/spec detail, and reconciled operator-console wording without replaying older overlays.")
+print("Migrated PLASTIC v0.521 tiny fixtures, enforced direct-config capacity, restored SE tests/spec detail, and reconciled operator-console wording without replaying older overlays.")
 # ^^^ THOG
