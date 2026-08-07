@@ -1,0 +1,87 @@
+name: Apply PLASTIC v0.521 paired token SE diagnostics
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - sheet/plastic_depth_probe_se_v0521_patch.py
+      - tools/apply_plastic_v0521_paired_token_se.py
+      - .github/workflows/apply_plastic_v0521_paired_token_se.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply_and_validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply paired-token SE diagnostics
+        run: python tools/apply_plastic_v0521_paired_token_se.py
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Syntax and source audit
+        run: |
+          python -m py_compile \
+            sheet/plastic_depth_probe_se_v0521_patch.py \
+            sheet/__init__.py \
+            tests/test_plastic_depth_probe_sampling_v0521.py
+          git diff --check
+
+      - name: Focused v0.521 diagnostics
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_plastic_depth_probe_sampling_v0521.py \
+            tests/test_plastic_depth_inline_probe.py \
+            tests/test_plastic_depth_directional_coherence_v052.py
+
+      - name: Full-radius and console regression
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_plastic_depth_full_radius.py \
+            tests/test_plastic_depth_full_radius_oom.py \
+            tests/test_plastic_cli_console_refinements.py \
+            tests/test_console_and_descriptor_help.py
+
+      - name: Commit validated diagnostic overlay
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          git restore -- .github/workflows
+          if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add PLASTIC v0.521 paired token SE diagnostics'
+          for attempt in 1 2 3; do
+            git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
+              exit 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+# vvv THOG validate paired per-token delta standard errors as diagnostics only, with no controller-rule change
+# ^^^ THOG
