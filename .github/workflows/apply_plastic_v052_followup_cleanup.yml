@@ -6,6 +6,7 @@ on:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
       - tools/apply_plastic_v052_followup_cleanup.py
+      - tools/apply_plastic_v052_startup_test_cleanup.py
       - .github/workflows/apply_plastic_v052_followup_cleanup.yml
   pull_request:
     branches:
@@ -30,7 +31,9 @@ jobs:
           python-version: '3.11'
 
       - name: Apply follow-up cleanup
-        run: python tools/apply_plastic_v052_followup_cleanup.py
+        run: |
+          python tools/apply_plastic_v052_followup_cleanup.py
+          python tools/apply_plastic_v052_startup_test_cleanup.py
 
       - name: Install CPU dependencies
         run: |
@@ -42,7 +45,7 @@ jobs:
         run: |
           bash -n train_OWT.sh
           bash -n train_OWT_core.sh
-          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tests/test_plastic_depth_directional_coherence_v052.py
+          python -m py_compile sheet/plastic_depth_directional_coherence_patch.py tools/apply_plastic_v052_followup_cleanup.py tools/apply_plastic_v052_startup_test_cleanup.py tests/test_plastic_depth_directional_coherence_v052.py
           if git grep -n 'plastic__layer_count_min_probes[=:]' -- tests ':!tests/test_plastic_depth_directional_coherence_v052.py'; then
             echo 'active test still constructs or expects retired min-probes control' >&2
             exit 1
