@@ -96,7 +96,6 @@ def test_probe_token_static_capacity_validation_rejects_negative_or_too_large(va
 
 
 
-
 def test_training_config_static_capacity_validation_rejects_too_large() -> None:
     with pytest.raises(ValueError, match="plastic__layer_count_probe__number_of_sampled_valid_tokens"):
         TrainingConfig(
@@ -156,9 +155,10 @@ def test_hybrid_probe_vector_keeps_absolute_l_and_signed_candidate_deltas() -> N
     assert rendered is not None
     plain = _plain(rendered)
     assert plain == "+0.023, -0.027, 4.077, +0.057, -0.017"
-    assert f"{constants.BOLD_WHITE}4.077{constants.R}" in rendered
-    assert f"{cleanup._GREEN}-0.027{cleanup._RESET}" in rendered
+    assert f"{constants.BOLD_WHITE}{constants.UNDER}4.077{constants.R}" in rendered
+    assert f"{constants.BOLD_MAGENTA}-0.027{constants.R}" in rendered
     assert f"{cleanup._GREEN}-0.017{cleanup._RESET}" in rendered
+    assert constants.BOLD_MAGENTA not in rendered.split(", ")[0]
     assert cleanup._GREEN not in rendered.split(", ")[0]
     assert cleanup._GREEN not in rendered.split(", ")[3]
 
