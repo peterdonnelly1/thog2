@@ -248,7 +248,10 @@ def _startup_public_indices(values: Any) -> str:
 
 _PLASTIC_STARTUP_LABELS = (
     "plastic__enabled:",
+    "plastic__runtime_phase:",
     "plastic__coarse_phase:",
+    "plastic__coarse_phase_roll_through:",
+    "plastic__log_interval_coarse:",
     "plastic__phase_1_n_steps:",
     "plastic__phase_1_starting_layer_count:",
     "plastic__phase_1__number_of_trials:",
@@ -265,6 +268,7 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__layer_count_objective:",
     "plastic__layer_count_update_brake:",
     "plastic__layer_count_probe__probe_every_n_steps:",
+    "plastic__layer_count_probe__number_of_sampled_valid_tokens:",
     "plastic__layer_count_probe_radius:",
     "plastic__layer_count_max_step:",
     "plastic__layer_count_extrapolation_weight:",
@@ -293,16 +297,20 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     public_coordinates = tuple(report.get("active_sample_layer_coordinates", report.get("active_public_coordinates", ())))
     full_coordinates = tuple(report.get("sample_layer_coordinates", report.get("public_coordinates", ())))
     probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)
+    probe_token_count = int(getattr(config, "plastic__layer_count_probe__number_of_sampled_valid_tokens", 1024))
     probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))
     max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
+    _print_plastic_option("plastic__runtime_phase:", str(getattr(config, "plastic__runtime_phase", "fine")))
     coarse_phase = str(getattr(config, "plastic__coarse_phase", "disabled"))
     phase_1_n_steps = getattr(config, "plastic__phase_1_n_steps", None)
     phase_1_starting_layer_count = getattr(config, "plastic__phase_1_starting_layer_count", None)
     phase_1_number_of_trials = getattr(config, "plastic__phase_1__number_of_trials", None)
     phase_1_evaluation_steps_count = getattr(config, "plastic__phase_1_evaluation_steps_count", None)
     _print_plastic_option("plastic__coarse_phase:", coarse_phase)
+    _print_plastic_option("plastic__coarse_phase_roll_through:", _startup_bool(getattr(config, "plastic__coarse_phase_roll_through", False)))
+    _print_plastic_option("plastic__log_interval_coarse:", str(int(getattr(config, "plastic__log_interval_coarse", 10))))
     _print_plastic_option("plastic__phase_1_n_steps:", _startup_optional(phase_1_n_steps))
     _print_plastic_option("plastic__phase_1_starting_layer_count:", _startup_optional(phase_1_starting_layer_count))
     _print_plastic_option("plastic__phase_1__number_of_trials:", _startup_optional(phase_1_number_of_trials))
@@ -331,6 +339,7 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
     _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
     _print_plastic_option("plastic__layer_count_probe__probe_every_n_steps:", _startup_optional(probe_interval))
+    _print_plastic_option("plastic__layer_count_probe__number_of_sampled_valid_tokens:", str(probe_token_count))
     _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))
     _print_plastic_option("plastic__layer_count_max_step:", str(max_step))
     _print_plastic_option("plastic__layer_count_extrapolation_weight:", _startup_float(config.plastic__layer_count_extrapolation_weight))
