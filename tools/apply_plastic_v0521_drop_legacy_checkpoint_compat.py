@@ -62,7 +62,10 @@ def remove_runtime_marker_block(
 def collapse_duplicate_capacity_guards(content: str) -> str:
     pattern = re.compile(
         r"(?P<block>"
-        r"        # vvv THOG v0\.521 reject a requested sample larger than the physical first-microbatch token capacity\n"
+        r"        # vvv THOG v0\.521 (?:"
+        r"reject a requested sample larger than the physical first-microbatch token capacity|"
+        r"reject impossible configured samples rather than silently clipping to microbatch capacity"
+        r")\n"
         r".*?"
         r"        # \^\^\^ THOG\n"
         r")(?P=block)",
