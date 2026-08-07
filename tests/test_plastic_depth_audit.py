@@ -113,6 +113,19 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
             "transition",
         }
         assert required <= set(audit)
+        # vvv THOG v0.521 paired-token SE is durable candidate diagnostic state and must not disappear before audit emission
+        assert all(
+            "paired_delta_standard_error" in item
+            for item in audit["score_table"]
+        )
+        current_rows = [
+            item
+            for item in audit["score_table"]
+            if int(item["active_layers"]) == int(audit["previous_count"])
+        ]
+        assert len(current_rows) == 1
+        assert current_rows[0]["paired_delta_standard_error"] == pytest.approx(0.0)
+        # ^^^ THOG
         assert audit["decision_candidate_counts"] == (1, 2, 3, 4)
         assert len(audit["sampled_tokens_by_rank"]) == 1
         rank_sample = audit["sampled_tokens_by_rank"][0]
