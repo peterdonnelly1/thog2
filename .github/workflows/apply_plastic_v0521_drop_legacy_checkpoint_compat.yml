@@ -5,6 +5,8 @@ on:
     branches:
       - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
     paths:
+      - tools/apply_plastic_v0521_probe_sampling_and_console.py
+      - tools/apply_plastic_v0521_test_fixture_fix.py
       - tools/apply_plastic_v0521_drop_legacy_checkpoint_compat.py
       - .github/workflows/apply_plastic_v0521_drop_legacy_checkpoint_compat.yml
   pull_request:
