@@ -79,6 +79,7 @@ jobs:
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git restore -- .github/workflows
           if git diff --quiet && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
@@ -98,5 +99,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG same-repository PR validation has contents:write, so the green gate itself writes back its generated source/spec cleanup instead of relying on an opaque push-only twin
+# vvv THOG keep PR validation observable while limiting permanent branch writeback to push or explicit workflow dispatch
 # ^^^ THOG
