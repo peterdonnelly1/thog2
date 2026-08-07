@@ -17,6 +17,7 @@ def _synthetic_audit():
         "decision_reason": "max_step_limited",
         "max_step": 1,
         "brake_active": False,
+        "warmup_brake_active": False,
         "robust_evidence": (
             {
                 "candidate_count": 8,
@@ -42,6 +43,34 @@ def test_replay_separates_winning_probe_from_bounded_commit() -> None:
         "committed_count": 9,
         "decision_reason": "max_step_limited",
     }
+
+
+# vvv THOG reproduce the real warmup-held 4 -> winning probe 1 -> committed 4 audit path exposed by the forced-change CUDA run
+def test_replay_preserves_winner_when_warmup_brake_holds_current_count() -> None:
+    audit = {
+        "previous_count": 4,
+        "winning_probe_count": 1,
+        "committed_count": 4,
+        "decision_reason": "warmup_brake",
+        "max_step": 5,
+        "brake_active": False,
+        "warmup_brake_active": True,
+        "robust_evidence": (
+            {
+                "candidate_count": 1,
+                "feasible": True,
+                "significant": True,
+                "standardized_improvement": 5.0,
+            },
+        ),
+    }
+
+    assert replay_plastic_depth_count_audit(audit) == {
+        "winning_probe_count": 1,
+        "committed_count": 4,
+        "decision_reason": "warmup_brake",
+    }
+# ^^^ THOG
 
 
 def test_replay_detects_tampered_commit() -> None:
@@ -101,6 +130,7 @@ def test_real_fine_decision_audit_is_complete_replayable_and_checkpointed(tmp_pa
             "max_step",
             "update_brake",
             "brake_active",
+            "warmup_brake_active",
             "decision_candidate_counts",
             "execution_candidate_counts",
             "sampled_tokens_by_rank",
