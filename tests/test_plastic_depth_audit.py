@@ -89,6 +89,7 @@ def _config():
         depth_order=3,
         n_layer=4,
         max_updates=2,
+        warmup_updates=0,
         eval_interval=0,
         plastic__enabled=True,
         plastic__runtime_phase="fine",
