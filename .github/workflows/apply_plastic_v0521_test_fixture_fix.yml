@@ -45,7 +45,9 @@ jobs:
             sheet/run_config.py \
             sheet/trainer_checkpoint_resume.py \
             sheet/plastic_depth_probe_sampling_v0521_patch.py \
+            tests/stage3_test_support.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
+            tests/test_plastic_depth_audit.py \
             tests/test_plastic_cli_console_refinements.py
           git diff --check
 
@@ -63,8 +65,13 @@ jobs:
             tests/test_plastic_depth_inline_probe.py \
             tests/test_plastic_depth_full_radius.py \
             tests/test_plastic_depth_full_radius_oom.py \
+            tests/test_plastic_depth_audit.py \
+            tests/test_plastic_depth_warmup_guard.py \
             tests/test_plastic_depth_checkpoint_format.py \
             tests/test_plastic_depth_resume.py \
+            tests/test_plastic_depth_lifecycle.py \
+            tests/test_plastic_depth_lifecycle_checkpoint.py \
+            tests/test_plastic_depth_coarse_real_lifecycle.py \
             tests/test_run_thog2_owt_startup_report.py
 
       - name: Commit validated v0.521 implementation
@@ -76,7 +83,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'Implement PLASTIC v0.521 probe sampling and console'
+          git commit -m 'Complete PLASTIC v0.521 regression and spec cleanup'
           for attempt in 1 2 3; do
             git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
             if git rebase origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION && git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION; then
@@ -87,5 +94,5 @@ jobs:
           done
           exit 1
 
-# vvv THOG validate the v0.521 implementation after making the pre-existing tiny artifact fixture explicit about its legal sample size
+# vvv THOG validate v0.521 against tiny stage3 fixtures, durable SE audit retention, lifecycle regressions and the reconciled operator-console specification
 # ^^^ THOG
