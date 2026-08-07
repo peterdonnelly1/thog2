@@ -53,7 +53,7 @@ jobs:
             tests/test_plastic_cli_console_refinements.py \
             tests/test_plastic_cli_cost_and_label_patch.py \
             tests/test_plastic_depth_startup_lookahead_ui.py \
-            tests/test_plastic_depth_audit_patch.py
+            tests/test_plastic_depth_audit.py
 
       - name: Config checkpoint and lifecycle regression
         run: |
@@ -63,5 +63,5 @@ jobs:
             tests/test_plastic_depth_lifecycle.py \
             tests/test_plastic_depth_coarse_real_lifecycle.py
 
-# vvv THOG CPU regression gate for the v0.52 directional-controller and console revision
+# vvv THOG CPU regression gate for the v0.52 directional-controller and console revision; use the real audit regression module
 # ^^^ THOG
