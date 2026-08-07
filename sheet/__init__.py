@@ -151,6 +151,10 @@ _plastic_depth_console_minor_patch._ALIGNMENT_LABELS = ("sampled =", "probe_loss
 from . import plastic_depth_probe_sampling_v0521_patch as _plastic_depth_probe_sampling_v0521_patch
 # ^^^ THOG
 
+# vvv THOG v0.521 report paired per-token delta standard errors as diagnostics only; robust MAD/z-score decisions are unchanged
+from . import plastic_depth_probe_se_v0521_patch as _plastic_depth_probe_se_v0521_patch
+# ^^^ THOG
+
 # vvv THOG keep sampled immediately after layers with the single tab already inserted by the v0.52 formatter; do not reserve a fixed terminal column
 # def _align_sampled_to_minimum_tab_column(line):                                                                                                           # <<< THOG preserve the superseded fixed-column helper entry point concept
 #     ...
