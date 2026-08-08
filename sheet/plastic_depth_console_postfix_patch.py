@@ -50,3 +50,7 @@ _stage6.format_progress_line = _format_progress_line_with_final_postfixes
 
 __all__ = ["_finalize_plastic_postfixes"]
 # ^^^ THOG
+
+# vvv THOG install the v0.531 equivalent-time wall-time objective and final operator-console overlay after every earlier PLASTIC formatter
+from . import plastic_depth_wall_time_equivalent_time_gain_patch as _plastic_depth_wall_time_equivalent_time_gain_patch
+# ^^^ THOG

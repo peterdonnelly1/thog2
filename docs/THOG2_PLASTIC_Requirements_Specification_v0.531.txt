@@ -1,0 +1,316 @@
+PLASTIC REQUIREMENTS SPECIFICATION
+THOG2
+Plastic
+Coarse-to-fine DEPTH discovery
+with supervised global MLP expansion
+and directionally coherent FINE count control
+
+VERSION | DATE | STATUS
+0.531 | 8 August 2026 | Relative-wall-time algorithm and operator-console refinement
+
+GOVERNING BASIS
+Version 0.531 is a +0.01 revision over Version 0.521. Version 0.521 is incorporated by reference and remains normative except where this Version 0.531 delta explicitly supersedes it. The complete Version 0.521 specification remains at docs/THOG2_PLASTIC_Requirements_Specification_v0.521.txt.
+
+VERSION 0.531 DELTA
+
+1. RELATIVE TRAINING WALL TIME: FIRST NAMED FINE ALGORITHM
+
+The FINE objective relative_training_wall_time shall no longer use the Version 0.521 weighted score
+
+    probe_loss + cost_weight * candidate_training_time / reference_training_time
+
+as its active FINE decision rule.
+
+Version 0.531 defines the first named relative-wall-time FINE algorithm:
+
+    wall_time_equivalent_time_gain
+
+This name is deliberately algorithm-specific. Later PLASTIC versions may add alternative relative-wall-time algorithms without changing the high-level relative_training_wall_time objective name.
+
+plastic__layer_count_cost_weight has no decision role in wall_time_equivalent_time_gain. It remains available to objectives whose semantics genuinely require it, including layer_efficiency. Existing configuration fields are retained for compatibility; setting plastic__layer_count_cost_weight does not alter Version 0.531 FINE relative-training-wall-time decisions.
+
+COARSE is not redefined by this delta. wall_time_equivalent_time_gain depends on an ordinary-training loss-rate estimate that is naturally available during FINE. Existing COARSE scoring remains governed by the incorporated Version 0.521 requirements until a separate COARSE wall-time algorithm is specified.
+
+2. CORE INTERPRETATION
+
+Every FINE probe continues to measure real candidate probe losses on the same sampled target positions.
+
+For candidate C and current count L:
+
+    probe_loss_gain(C) = probe_loss(L) - probe_loss(C)
+
+Positive probe_loss_gain is immediately favourable: the candidate has produced a lower loss on the probe examples.
+
+wall_time_equivalent_time_gain converts that immediate probe-loss difference into an equivalent amount of ordinary training time. The conversion uses the currently observed local rate at which ordinary training is reducing loss:
+
+    raw_equivalent_time_gain_seconds(C)
+        = probe_loss_gain(C) / loss_improvement_rate_per_second
+
+The interpretation is:
+
+    "How many seconds of current ordinary training progress does this probe-loss change appear to be worth?"
+
+This conversion is a modelling assumption, not an identity. A probe-loss gain of 0.010 is not assumed automatically to be identical in value to a 0.010 loss decrease obtained by continuing ordinary training.
+
+3. MODELLING DISCOUNT
+
+Version 0.531 applies one explicit modelling discount to positive equivalent-time gains:
+
+    wall_time_equivalent_time_gain_discount = 0.9
+
+Therefore:
+
+    credited_equivalent_time_gain_seconds
+        = 0.9 * raw_equivalent_time_gain_seconds
+
+when raw_equivalent_time_gain_seconds is positive.
+
+The interpretation of 0.9 is exact and intentionally simple:
+
+    "Credit only 90% of the candidate's alleged equivalent-time benefit."
+
+A negative equivalent-time gain is harm rather than a claimed benefit and shall not be softened by the discount. Therefore, for raw_equivalent_time_gain_seconds <= 0:
+
+    credited_equivalent_time_gain_seconds
+        = raw_equivalent_time_gain_seconds
+
+The Version 0.531 value 0.9 is a named algorithm constant and shall be recorded in structured diagnostics and telemetry. It is not to be implemented by repurposing plastic__layer_count_cost_weight. A future version may expose algorithm selection and algorithm-specific parameters as public configuration without changing the semantics defined here.
+
+The 0.9 discount is modelling scepticism. It is distinct from statistical uncertainty in timing or loss-rate estimates. Version 0.531 shall expose statistical quality diagnostics but does not fold an additional arbitrary sigma multiplier into the core score.
+
+4. ORDINARY UPDATE WALL-TIME MODEL
+
+The wall-time algorithm shall learn timing only from successful ordinary FINE training updates.
+
+A timing observation is eligible only when:
+- PLASTIC is enabled;
+- layer-count learning is enabled;
+- runtime phase is FINE;
+- the update is not a PLASTIC probe update;
+- the optimiser update succeeds and is not skipped as non-finite.
+
+Probe updates shall not contribute timing samples. This prevents full-radius probe work from being charged to the active layer count.
+
+No extra forward pass, backward pass, optimiser step or calibration run may be introduced solely to measure timing.
+
+No new per-update CUDA synchronisation may be introduced for wall-time measurement. Version 0.531 removes the PLASTIC-specific timing synchronisation barriers for non-memory-budget objectives. It does not redefine the pre-existing outer Stage6 run timer. memory_budget may retain synchronisation where it is required for its separate resource measurement semantics.
+
+The initial timing model is affine:
+
+    predicted_update_time(L) = timing_intercept + timing_slope * L
+
+where timing_slope is the estimated marginal ordinary-update cost of one active layer.
+
+The controller shall accumulate the ordinary-update timing regression using constant-memory sufficient statistics rather than retaining an unbounded timing history:
+
+    n
+    sum(L)
+    sum(t)
+    sum(L^2)
+    sum(L*t)
+    sum(t^2)
+
+At least two distinct observed layer counts are required before the marginal timing slope is considered available. The fitted slope must be finite and positive. The intercept is not artificially clamped; its diagnostic value is useful when testing the affine-model assumption, provided predicted times for the candidate counts used by the decision remain finite and positive.
+
+5. LOCAL LOSS-IMPROVEMENT RATE
+
+The equivalent-time conversion requires a local estimate of ordinary training progress in loss units per second.
+
+Version 0.531 shall estimate this from successful ordinary non-probe FINE updates after warmup. The initial implementation uses a rolling window of the latest 64 eligible observations and requires at least 16 observations before the loss-rate estimate is available.
+
+For observations (ordinary_training_seconds, training_loss), fit a local straight line. If fitted loss versus time has slope m:
+
+    loss_improvement_rate_per_second = -m
+
+The estimate is usable only when this quantity is finite and strictly positive.
+
+The rolling loss-rate history is deliberately bounded. Timing-model sufficient statistics may accumulate for the process lifetime because the marginal cost per layer is expected to be substantially more stationary than the global training-loss slope.
+
+6. DECISION HORIZON
+
+A layer-count change cannot necessarily be reversed at the next optimiser update. A committed move clears count-decision histories, and the normal full-window and update-brake rules remain applicable.
+
+Let:
+    p = plastic__layer_count_probe__probe_every_n_steps
+    w = plastic__layer_count_probe__window_size_as_number_of_probes
+    b = plastic__layer_count_update_brake
+
+Define:
+
+    brake_probe_gaps = max(1, ceil(b / p))     when b > 0
+                       1                       when b = 0
+
+    probe_gaps = max(1, w, brake_probe_gaps)
+
+    held_updates_before_next_possible_count_change
+        = probe_gaps * p - 1
+
+This is the short local horizon over which the candidate's predicted ordinary-update time difference is charged.
+
+Example for p=4, w=2, b=0:
+
+    held_updates_before_next_possible_count_change = 2*4 - 1 = 7
+
+7. EQUIVALENT-TIME SCORE
+
+For candidate C:
+
+    predicted_extra_wall_time_seconds(C)
+        = [predicted_update_time(C) - predicted_update_time(L)]
+          * held_updates_before_next_possible_count_change
+
+The Version 0.531 candidate score is measured entirely in seconds:
+
+    wall_time_score_seconds(C)
+        = predicted_extra_wall_time_seconds(C)
+          - credited_equivalent_time_gain_seconds(C)
+
+Current L therefore has score 0.
+
+Lower is better:
+- negative score: predicted credited benefit exceeds predicted extra wall time;
+- zero score: no estimated net advantage;
+- positive score: predicted extra wall time exceeds credited benefit.
+
+This rule can rationally accept:
+- a slower candidate whose immediate loss gain is worth more equivalent training time than its short-horizon extra cost;
+- a faster candidate with slightly worse probe loss when the saved time is sufficient to recover that loss under the current local training rate.
+
+It rejects candidates whose time/loss combination does not pay for itself under the same units. No user-supplied loss-versus-seconds exchange rate is required.
+
+8. BOOTSTRAP AND UNIT-SAFETY RULE
+
+The affine timing slope cannot be identified from only one observed layer count.
+
+Version 0.531 shall not add calibration runs merely to solve that bootstrap problem.
+
+Before both the timing model and the local positive loss-improvement rate are available, FINE relative_training_wall_time temporarily uses the ordinary raw probe-loss ordering. This permits normal PLASTIC exploration to visit another layer count and obtain real ordinary timing observations at that count.
+
+The instant wall_time_equivalent_time_gain first becomes ready:
+- mark the algorithm activated;
+- clear existing candidate-local and directional count-decision histories;
+- begin the new evidence window in seconds.
+
+This reset is mandatory because pre-activation histories contain raw-loss score differences while post-activation histories contain equivalent-time score differences. The two units shall never be mixed in one robust history.
+
+After activation, if a required timing or loss-rate estimate becomes temporarily unavailable, the controller shall HOLD rather than fall back to raw-loss scoring.
+
+9. STATISTICAL AND ASSUMPTION TELEMETRY
+
+The implementation shall provide enough TensorBoard/W&B telemetry to test the core affine timing assumption without materially affecting training throughput.
+
+Telemetry shall piggyback the existing optimiser-progress logging call. It shall not create a second logging call, an extra model evaluation, an extra backward pass or a timing synchronisation.
+
+When PLASTIC learned-count mode is active, the following metrics shall be available as applicable:
+
+    plastic/timing/layer_count
+    plastic/timing/update_ms
+    plastic/timing/fitted_ms_per_layer
+    plastic/timing/fitted_intercept_ms
+    plastic/timing/r_squared
+    plastic/timing/residual_ms
+    plastic/timing/n_observations
+    plastic/timing/distinct_layer_counts
+    plastic/timing/slope_standard_error_ms
+
+    plastic/wall_time/loss_improvement_per_second
+    plastic/wall_time/loss_rate_r_squared
+    plastic/wall_time/loss_rate_observations
+    plastic/wall_time/timing_model_ready
+    plastic/wall_time/loss_rate_ready
+    plastic/wall_time/algorithm_ready
+    plastic/wall_time/algorithm_activated
+    plastic/wall_time/equivalent_time_gain_discount
+    plastic/wall_time/horizon_updates
+
+plastic/timing/update_ms and plastic/timing/residual_ms are emitted only when the current optimiser update contributed an eligible ordinary timing observation. Fit/state diagnostics may be repeated at the user's normal logging cadence.
+
+A logging cadence of 1 is explicitly supported. The incremental work is small scalar arithmetic and addition of fields to the telemetry call that is already being made.
+
+10. CHECKPOINT / RESUME STATUS OF V0.531 TIMING FITS
+
+Version 0.531 timing-regression and rolling loss-rate fit state is runtime observational state, not model state. It is not added to the checkpoint schema in this revision.
+
+After a process restart/resume, wall_time_equivalent_time_gain re-enters bootstrap until sufficient new ordinary-update observations make both models ready. Pre-existing architecture/controller checkpoint state remains authoritative. This limitation is explicit rather than silently persisting hardware-specific wall-time observations across execution sessions.
+
+A future version may choose to persist statistical state together with a hardware/execution identity if empirical evidence shows that doing so is useful and safe.
+
+11. OPERATOR CONSOLE REFINEMENT
+
+Version 0.531 supersedes the Version 0.521 compact directional summary presentation.
+
+The directional vote summary shall render:
+
+    ↓|↑|? =[left/right/ambiguous]/total=>outcome
+
+Outcome mapping is:
+    LEFT       -> ↓
+    RIGHT      -> ↑
+    AMBIGUOUS / neutral / stet -> ●
+
+Examples:
+
+    ↓|↑|? =[1/0/2]/3=>●
+    ↓|↑|? =[1/0/2]/3=>↓
+    ↓|↑|? =[1/0/2]/3=>↑
+
+Only a committed directional outcome glyph of ↓ or ↑ in this summary is rendered bold bright yellow. The label arrows and neutral ● remain unhighlighted. The implementation shall use the existing colour constants from constants.py.
+
+The progress label:
+
+    grad norm=
+
+is replaced by:
+
+    g nrm=
+
+The active-count/sample junction uses a four-character value field for the layer count before the tab:
+
+    layers = 8   <TAB>sampled =
+    layers = 144 <TAB>sampled =
+
+where the visible layer-count value field is exactly four characters wide.
+
+For fixed-decimal score_z values with a one-digit absolute integer component, the numeric display is zero-padded so columns remain visually stable:
+
+    -5.20  -> -05.20
+    +0.42  -> +00.42
+    -1.22  -> -01.22
+
+Values already requiring two or more integer digits are unchanged. Scientific-notation values are not reformatted by this rule.
+
+12. RETAINED V0.521 / V0.52 SEMANTICS
+
+Unless explicitly superseded above, Version 0.521 and Version 0.52 behaviour remains unchanged, including:
+- deterministic shared-token full-radius probing;
+- absolute underlined bold-white current-L probe loss;
+- candidate-minus-L probe deltas;
+- negative left-side deltas in bold magenta;
+- negative right-side deltas in bold bright green;
+- paired-token delta standard-error diagnostics;
+- directional spatial coherence;
+- right-side extrapolation weighting;
+- full-window temporal readiness;
+- median/MAD/z-score candidate evidence;
+- update brake;
+- max_step;
+- warmup probe suppression and history clearing;
+- atomic count transition and optimiser-state handling;
+- PLASTIC-disabled equivalence requirements.
+
+13. V0.531 ACCEPTANCE CRITERIA
+
+A conforming implementation shall demonstrate at least the following:
+
+A. A synthetic affine timing series recovers the expected seconds-per-layer slope and intercept.
+B. Positive equivalent-time gain is discounted by exactly 0.9; negative gain is not softened.
+C. With p=4, w=2, b=0 the decision horizon is 7 ordinary updates; brake-dominated cases resolve according to the formula above.
+D. On first transition from bootstrap to ready equivalent-time scoring, old raw-loss histories are cleared.
+E. relative_training_wall_time FINE scoring no longer depends on plastic__layer_count_cost_weight.
+F. No explicit PLASTIC timing CUDA synchronisation is performed for non-memory-budget objectives.
+G. Timing samples are excluded on PLASTIC probe updates.
+H. Timing/loss-rate telemetry is absent from PLASTIC-disabled runs.
+I. Normal TensorBoard/W&B logging cadence, including cadence 1, receives the new scalar diagnostics without an extra telemetry call.
+J. The directional console summary, g nrm label, four-character layer-count field and score_z zero padding match the Version 0.531 examples.
+K. Existing non-wall-time objectives retain their existing scoring implementation.
+L. Existing PLASTIC-disabled equivalence tests remain unchanged and pass.
