@@ -35,6 +35,17 @@ jobs:
         shell: bash
         run: |
           set +e
+          rm -f docs/PLASTIC_V0541_APPLY_STATUS.txt
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply_plastic_v0541.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'allowed = path.name in {"training_config.py", "checkpoints.py"}'
+          new = 'allowed = path.name in {"training_config.py", "checkpoints.py", "test_plastic_v0541_controls_and_provenance.py"}'
+          if old not in text:
+              raise SystemExit("v0.541 applicator negative-test exemption anchor missing")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
           {
             python tools/apply_plastic_v0541.py && \
             git diff --check && \
@@ -86,7 +97,8 @@ jobs:
             plastic_depth_lookahead_wrapper_options.sh \
             sheet \
             tests \
-            docs/THOG2_PLASTIC_Requirements_Specification_v0.541.txt
+            docs/THOG2_PLASTIC_Requirements_Specification_v0.541.txt \
+            docs/PLASTIC_V0541_APPLY_STATUS.txt
           if git diff --cached --quiet; then
             echo "No generated changes to commit"
             exit 1
