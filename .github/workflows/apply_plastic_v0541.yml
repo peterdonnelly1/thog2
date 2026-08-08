@@ -25,46 +25,59 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Apply v0.541 source transformation
-        run: python tools/apply_plastic_v0541.py
-
-      - name: Validate generated diff
-        run: |
-          git diff --check
-          python -m py_compile \
-            run_thog2_owt.py \
-            run_thog2_owt_core.py \
-            sheet/checkpoints.py \
-            sheet/plastic_depth.py \
-            sheet/plastic_depth_audit_patch.py \
-            sheet/plastic_depth_directional_coherence_patch.py \
-            sheet/plastic_depth_v0541_patch.py \
-            sheet/plastic_depth_wall_time_equivalent_time_gain_patch.py \
-            sheet/run_config.py \
-            sheet/trainer_checkpoint_resume.py \
-            sheet/trainer_state.py \
-            sheet/training_config.py
-
       - name: Install focused CPU test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install pytest numpy tiktoken tensorboard wandb psutil
 
-      - name: Run focused v0.541 and retained PLASTIC tests
+      - name: Apply, validate and publish v0.541
+        shell: bash
         run: |
-          python -m pytest -q \
-            tests/test_plastic_v0541_controls_and_provenance.py \
-            tests/test_plastic_depth_wall_time_equivalent_time_gain.py \
-            tests/test_plastic_depth_directional_coherence_v052.py \
-            tests/test_plastic_depth_probe_sampling_v0521.py \
-            tests/test_plastic_depth_checkpoint_format.py \
-            tests/test_run_thog2_owt_startup_report.py
+          set +e
+          {
+            python tools/apply_plastic_v0541.py && \
+            git diff --check && \
+            python -m py_compile \
+              run_thog2_owt.py \
+              run_thog2_owt_core.py \
+              sheet/checkpoints.py \
+              sheet/plastic_depth.py \
+              sheet/plastic_depth_audit_patch.py \
+              sheet/plastic_depth_directional_coherence_patch.py \
+              sheet/plastic_depth_v0541_patch.py \
+              sheet/plastic_depth_wall_time_equivalent_time_gain_patch.py \
+              sheet/run_config.py \
+              sheet/trainer_checkpoint_resume.py \
+              sheet/trainer_state.py \
+              sheet/training_config.py && \
+            python -m pytest -q \
+              tests/test_plastic_v0541_controls_and_provenance.py \
+              tests/test_plastic_depth_wall_time_equivalent_time_gain.py \
+              tests/test_plastic_depth_directional_coherence_v052.py \
+              tests/test_plastic_depth_probe_sampling_v0521.py \
+              tests/test_plastic_depth_checkpoint_format.py \
+              tests/test_run_thog2_owt_startup_report.py
+          } > /tmp/v0541.log 2>&1
+          status=$?
+          cat /tmp/v0541.log
 
-      - name: Commit generated v0.541 implementation
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            {
+              echo "status=failed"
+              echo
+              cat /tmp/v0541.log
+            } > docs/PLASTIC_V0541_APPLY_STATUS.txt
+            git add docs/PLASTIC_V0541_APPLY_STATUS.txt
+            git commit -m "Record PLASTIC v0.541 applicator failure"
+            git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+            exit "$status"
+          fi
+
           git add \
             run_thog2_owt.py \
             run_thog2_owt_core.py \
