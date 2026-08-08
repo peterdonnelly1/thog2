@@ -40,7 +40,9 @@ New CLI/configuration and newly written persistent metadata shall use only the n
 
 3. PROBE SEQUENCE AND DECISION PROVENANCE
 
-Every actual FINE layer-count probe receives one monotonically increasing sequence number. The sequence counter and the active temporal evidence-window probe IDs are TrainerState and survive checkpoint/resume. Warmup-suppressed updates do not consume probe numbers.
+Every completed evidence-bearing FINE layer-count probe receives one monotonically increasing sequence number. The sequence uses the existing persistent PLASTIC-only count_decision_number state: the in-flight probe is count_decision_number + 1 and a successful probe commit increments count_decision_number exactly once. Warmup-suppressed updates and failed/skipped updates that contribute no decision evidence do not consume probe numbers.
+
+No new generic TrainerState fields are introduced for v0.541 probe numbering. This is mandatory so PLASTIC-disabled TrainerState and checkpoint identity remain exactly unchanged.
 
 The probe row prefix is fixed-width through probe 9999:
 
@@ -50,11 +52,11 @@ The probe row prefix is fixed-width through probe 9999:
 
 At P10000 the field expands naturally rather than truncating the sequence.
 
-Every directional decision summary displays the exact probe IDs contributing to its current temporal vote window. Example:
+Every directional decision summary displays the exact probe IDs contributing to its current temporal vote window. Since retained directional evidence consists of consecutive successful probe decisions, provenance is derived exactly from the current probe sequence and vote_total. Example:
 
     ⇩|⇧|? =[1/0/2]/3=>⇧ (P14,15,16)
 
-The same sequence/provenance shall be retained in the durable FINE count-decision audit. No probe IDs may be invented for evidence restored from an older checkpoint that predates provenance; such old robust history is discarded and rebuilt.
+The same sequence/provenance shall be retained in the durable FINE count-decision audit. Existing v0.531 checkpoints already persist count_decision_number and the directional evidence histories, so provenance can continue across resume without inventing a second counter or changing the checkpoint schema.
 
 4. PROBE LABEL
 
