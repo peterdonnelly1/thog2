@@ -255,7 +255,7 @@ def validate_plastic_fine_count_controls(
     max_step: int,
 ) -> None:
     _optional_positive_integer("plastic__layer_count_probe_radius", probe_radius)
-    _optional_positive_integer("plastic__layer_count_max_step", max_step)
+    _optional_positive_integer("plastic__layer_count__max_allowable_layer_change", max_step)
 
 
 def score_plastic_coarse_trials(

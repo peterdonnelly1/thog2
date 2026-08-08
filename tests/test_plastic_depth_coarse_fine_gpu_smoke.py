@@ -45,7 +45,7 @@ def _config():
         plastic__layer_count_update_brake=0,
         plastic__layer_count_probe__probe_every_n_steps=1,
         plastic__layer_count_probe_radius=2,
-        plastic__layer_count_max_step=1,
+        plastic__layer_count__max_allowable_layer_change=1,
         plastic__layer_count_probe__window_size_as_number_of_probes=4,
         plastic__layer_count_probe_noise_lambda=1.0e9,
         plastic__cuda_allocator_reserve_gib=0.125,

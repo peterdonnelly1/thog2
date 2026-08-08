@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from .basis import BASIS_VERSION
 # vvv THOG lapped cosine controls survive training config and checkpoints
@@ -79,10 +79,13 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__layer_count_probe__probe_every_n_steps",
     "plastic__layer_count_probe__number_of_sampled_valid_tokens",
     "plastic__layer_count_probe_radius",
-    "plastic__layer_count_max_step",
-    "plastic__layer_count_extrapolation_weight",
+    "plastic__layer_count__max_allowable_layer_change",
+    "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
     "plastic__layer_count_probe__window_size_as_number_of_probes",
     "plastic__layer_count_probe_noise_lambda",
+    "plastic__wall_time_equivalent_time_gain_discount",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_window",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
     "plastic__layer_memory_budget_gib",
     "plastic__cuda_allocator_reserve_gib",
@@ -90,6 +93,26 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__freeze_geometry_during_warmup",
     "plastic__initial_active_layers",
 )
+# ^^^ THOG
+
+# vvv THOG v0.541 accept superseded PLASTIC config keys only when reconstructing existing checkpoints; new writes use canonical names
+PLASTIC_V0541_RENAMED_CONFIG_FIELDS = {
+    "plastic__layer_count_extrapolation_weight": "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
+    "plastic__layer_count_max_step": "plastic__layer_count__max_allowable_layer_change",
+}
+
+def normalize_plastic_v0541_config_fields(values: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = dict(values)
+    for old_name, new_name in PLASTIC_V0541_RENAMED_CONFIG_FIELDS.items():
+        if old_name not in normalized:
+            continue
+        old_value = normalized.pop(old_name)
+        if new_name in normalized and normalized[new_name] != old_value:
+            raise ValueError(
+                f"conflicting PLASTIC checkpoint fields {old_name} and {new_name}"
+            )
+        normalized[new_name] = old_value
+    return normalized
 # ^^^ THOG
 
 MODEL_COMPATIBILITY_FIELDS = (
@@ -214,10 +237,13 @@ class TrainingConfig:
     plastic__layer_count_probe__probe_every_n_steps: Optional[int] = None
     plastic__layer_count_probe__number_of_sampled_valid_tokens: int = 1024
     plastic__layer_count_probe_radius: int = 1
-    plastic__layer_count_max_step: int = 1
-    plastic__layer_count_extrapolation_weight: float = 0.8
+    plastic__layer_count__max_allowable_layer_change: int = 1
+    plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence: float = 0.8
     plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
+    plastic__wall_time_equivalent_time_gain_discount: float = 0.9
+    plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
+    plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
     plastic__cuda_allocator_reserve_gib: float = 0.5
@@ -342,17 +368,17 @@ class TrainingConfig:
         # ^^^ THOG
         validate_plastic_fine_count_controls(
             probe_radius=self.plastic__layer_count_probe_radius,
-            max_step=self.plastic__layer_count_max_step,
+            max_step=self.plastic__layer_count__max_allowable_layer_change,
         )
         if (
-            isinstance(self.plastic__layer_count_extrapolation_weight, bool)
-            or not isinstance(self.plastic__layer_count_extrapolation_weight, (int, float))
-            or not math.isfinite(float(self.plastic__layer_count_extrapolation_weight))
-            or not (0.5 < float(self.plastic__layer_count_extrapolation_weight) <= 1.0)
+            isinstance(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence, bool)
+            or not isinstance(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence))
+            or not (0.5 < float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence) <= 1.0)
         ):
             raise ValueError(
-                "plastic__layer_count_extrapolation_weight must lie in (0.5, 1.0]; "
-                f"got {self.plastic__layer_count_extrapolation_weight!r}"
+                "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence must lie in (0.5, 1.0]; "
+                f"got {self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence!r}"
             )
         initial_layer_count_for_resolution = (
             resolved_coarse.candidate_layers[0]
@@ -401,6 +427,37 @@ class TrainingConfig:
             raise ValueError(
                 "plastic__layer_count_probe_noise_lambda must be finite and non-negative; "
                 f"got {self.plastic__layer_count_probe_noise_lambda!r}"
+            )
+        # ^^^ THOG
+        # vvv THOG v0.541 public equivalent-time-gain controls are explicit, bounded and checkpoint-persistent
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_discount, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_discount, (int, float))
+            or not math.isfinite(float(self.plastic__wall_time_equivalent_time_gain_discount))
+            or not (0.0 <= float(self.plastic__wall_time_equivalent_time_gain_discount) <= 1.0)
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_discount must be finite and lie in [0, 1]; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_discount!r}"
+            )
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_window, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_window, int)
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_window < 2
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_loss_rate_window must be an integer >= 2; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_loss_rate_window!r}"
+            )
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations, int)
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations < 2
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations > self.plastic__wall_time_equivalent_time_gain_loss_rate_window
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations must be an integer in [2, plastic__wall_time_equivalent_time_gain_loss_rate_window]; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations!r}"
             )
         # ^^^ THOG
         if (
@@ -905,8 +962,11 @@ class TrainingConfig:
                 phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
                 layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,
                 layer_count_probe_radius=self.plastic__layer_count_probe_radius,
-                layer_count_max_step=self.plastic__layer_count_max_step,
-                layer_count_extrapolation_weight=float(self.plastic__layer_count_extrapolation_weight),
+                layer_count_max_step=self.plastic__layer_count__max_allowable_layer_change,
+                layer_count_extrapolation_weight=float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence),
+                wall_time_equivalent_time_gain_discount=float(self.plastic__wall_time_equivalent_time_gain_discount),
+                wall_time_equivalent_time_gain_loss_rate_window=self.plastic__wall_time_equivalent_time_gain_loss_rate_window,
+                wall_time_equivalent_time_gain_loss_rate_min_observations=self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
                 layers_to_sample=self.plastic__layers_to_sample,
                 do_learn_layer_count=self.plastic__do_learn_layer_count,
                 initial_layer_count=self.plastic__initial_layer_count,

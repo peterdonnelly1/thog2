@@ -270,10 +270,13 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__layer_count_probe__probe_every_n_steps:",
     "plastic__layer_count_probe__number_of_sampled_valid_tokens:",
     "plastic__layer_count_probe_radius:",
-    "plastic__layer_count_max_step:",
-    "plastic__layer_count_extrapolation_weight:",
+    "plastic__layer_count__max_allowable_layer_change:",
+    "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:",
     "plastic__layer_count_probe__window_size_as_number_of_probes:",
     "plastic__layer_count_probe_noise_lambda:",
+    "plastic__wall_time_equivalent_time_gain_discount:",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_window:",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:",
     "plastic__layer_count_cost_weight:",
     "plastic__layer_memory_budget_gib:",
     "plastic__cuda_allocator_reserve_gib:",
@@ -299,7 +302,7 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)
     probe_token_count = int(getattr(config, "plastic__layer_count_probe__number_of_sampled_valid_tokens", 1024))
     probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))
-    max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
+    max_step = int(getattr(config, "plastic__layer_count__max_allowable_layer_change", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
     _print_plastic_option("plastic__runtime_phase:", str(getattr(config, "plastic__runtime_phase", "fine")))
@@ -341,10 +344,13 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__layer_count_probe__probe_every_n_steps:", _startup_optional(probe_interval))
     _print_plastic_option("plastic__layer_count_probe__number_of_sampled_valid_tokens:", str(probe_token_count))
     _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))
-    _print_plastic_option("plastic__layer_count_max_step:", str(max_step))
-    _print_plastic_option("plastic__layer_count_extrapolation_weight:", _startup_float(config.plastic__layer_count_extrapolation_weight))
+    _print_plastic_option("plastic__layer_count__max_allowable_layer_change:", str(max_step))
+    _print_plastic_option("plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:", _startup_float(config.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence))
     _print_plastic_option("plastic__layer_count_probe__window_size_as_number_of_probes:", str(config.plastic__layer_count_probe__window_size_as_number_of_probes))
     _print_plastic_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_discount:", _startup_float(getattr(config, "plastic__wall_time_equivalent_time_gain_discount", 0.9)))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_window:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_window", 64)))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", 16)))
     _print_plastic_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
     _print_plastic_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
     _print_plastic_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))

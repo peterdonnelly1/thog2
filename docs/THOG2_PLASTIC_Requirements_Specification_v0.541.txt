@@ -1,0 +1,77 @@
+PLASTIC REQUIREMENTS SPECIFICATION
+THOG2
+Plastic
+
+VERSION | DATE | STATUS
+0.541 | 8 August 2026 | Public wall-time controls, canonical layer-count names and probe provenance
+
+GOVERNING BASIS
+Version 0.541 is a +0.01 revision over Version 0.531. Version 0.531 remains normative except where this delta explicitly supersedes it.
+
+1. PUBLIC wall_time_equivalent_time_gain CONTROLS
+
+The following are public persisted hyperparameters:
+
+    plastic__wall_time_equivalent_time_gain_discount = 0.9
+    plastic__wall_time_equivalent_time_gain_loss_rate_window = 64
+    plastic__wall_time_equivalent_time_gain_loss_rate_min_observations = 16
+
+The discount is finite in [0,1]. The loss-rate window is an integer >=2. The minimum observation count is an integer >=2 and may not exceed the window. The algorithm shall use these configured values everywhere that Version 0.531 previously used fixed constants, including scoring, bootstrap diagnostics, telemetry and the rolling loss-rate fit.
+
+2. CANONICAL LAYER-COUNT CONTROL RENAMES
+
+The public control
+
+    plastic__layer_count_extrapolation_weight
+
+is superseded by
+
+    plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence
+
+The public control
+
+    plastic__layer_count_max_step
+
+is superseded by
+
+    plastic__layer_count__max_allowable_layer_change
+
+New CLI/configuration and newly written persistent metadata shall use only the new names. Existing checkpoints containing the superseded names may be normalized on read when values are unambiguous. The superseded CLI spellings are not accepted.
+
+3. PROBE SEQUENCE AND DECISION PROVENANCE
+
+Every actual FINE layer-count probe receives one monotonically increasing sequence number. The sequence counter and the active temporal evidence-window probe IDs are TrainerState and survive checkpoint/resume. Warmup-suppressed updates do not consume probe numbers.
+
+The probe row prefix is fixed-width through probe 9999:
+
+    P   1
+    P  14
+    P 9999
+
+At P10000 the field expands naturally rather than truncating the sequence.
+
+Every directional decision summary displays the exact probe IDs contributing to its current temporal vote window. Example:
+
+    ⇩|⇧|? =[1/0/2]/3=>⇧ (P14,15,16)
+
+The same sequence/provenance shall be retained in the durable FINE count-decision audit. No probe IDs may be invented for evidence restored from an older checkpoint that predates provenance; such old robust history is discarded and rebuilt.
+
+4. PROBE LABEL
+
+The console label
+
+    probe_Δloss [L-5 ... L+5]
+
+is superseded by
+
+    probe_Δloss [L-5 .. L+5]
+
+The same two-dot convention applies for any radius.
+
+5. LARGER DIRECTION ARROWS
+
+ANSI provides no portable terminal font-size control. Version 0.541 therefore replaces the small text arrows ↓ and ↑ with the larger text glyphs ⇩ and ⇧ in both the directional labels and the outcome. This avoids emoji-width instability. A committed ⇩ or ⇧ outcome retains the existing bold bright-yellow constants from constants.py; label arrows and the neutral ● remain unhighlighted.
+
+6. RETAINED SEMANTICS
+
+Except for the public configuration and presentation changes above, Version 0.531 wall_time_equivalent_time_gain mathematics, directional evidence, braking, probe sampling, score_z formatting and PLASTIC-disabled equivalence remain unchanged.

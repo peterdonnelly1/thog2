@@ -31,7 +31,7 @@ def _full_radius_counts(
         radius,
         name="plastic__layer_count_probe_radius",
     )
-    _positive_integer(max_step, name="plastic__layer_count_max_step")
+    _positive_integer(max_step, name="plastic__layer_count__max_allowable_layer_change")
     if resolved_current < 1 or resolved_current > resolved_maximum:
         raise ValueError(
             "current PLASTIC layer count must lie within capacity; "
@@ -45,8 +45,8 @@ def _full_radius_counts(
 
 def _config_max_step(config: Any) -> int:
     return _positive_integer(
-        getattr(config, "plastic__layer_count_max_step", 1),
-        name="plastic__layer_count_max_step",
+        getattr(config, "plastic__layer_count__max_allowable_layer_change", 1),
+        name="plastic__layer_count__max_allowable_layer_change",
     )
 
 
@@ -123,7 +123,7 @@ def choose_plastic_depth_count_with_full_radius(
         raise ValueError("update_brake must be non-negative")
     resolved_max_step = _positive_integer(
         max_step,
-        name="plastic__layer_count_max_step",
+        name="plastic__layer_count__max_allowable_layer_change",
     )
 
     resolved_current = int(current_count)

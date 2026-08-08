@@ -58,7 +58,7 @@ def _config():
         plastic__layer_count_probe__probe_every_n_steps=10,
         plastic__layer_count_probe__number_of_sampled_valid_tokens=1024,
         plastic__layer_count_probe__window_size_as_number_of_probes=48,
-        plastic__layer_count_extrapolation_weight=0.8,
+        plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=0.8,
         plastic__layer_count_probe_noise_lambda=2.0,
         plastic__layer_count_cost_weight=0.04,
         plastic__layer_memory_budget_gib=None,
@@ -100,7 +100,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "plastic__layer_count_update_brake:" in output
     assert "plastic__layer_count_probe__number_of_sampled_valid_tokens:" in output
     assert "plastic__layer_count_probe__window_size_as_number_of_probes:" in output
-    assert "plastic__layer_count_extrapolation_weight:" in output
+    assert "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:" in output
     assert "plastic__geometry_learning_rate_multiplier:" in output
     assert "active sample_layer:" in output
     assert "capacity sample_layer:" in output
@@ -113,7 +113,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     extrapolation_row = next(
         line
         for line in rows
-        if "plastic__layer_count_extrapolation_weight:" in line
+        if "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:" in line
     )
     initial_row = next(line for line in rows if "active sample_layer:" in line)
     capacity_row = next(line for line in rows if "capacity sample_layer:" in line)

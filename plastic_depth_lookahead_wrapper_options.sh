@@ -23,7 +23,7 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
     --plastic__layer_count_probe_radius=*)
       THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LOOKAHEAD_ARGUMENT#*=}"
       ;;
-    --plastic__layer_count_max_step)
+    --plastic__layer_count__max_allowable_layer_change)
       (( THOG2_PLASTIC_LOOKAHEAD_INDEX + 1 < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )) || {
         echo "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT requires a positive integer" >&2
         exit 2
@@ -32,7 +32,7 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
       ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 2))
       continue
       ;;
-    --plastic__layer_count_max_step=*)
+    --plastic__layer_count__max_allowable_layer_change=*)
       THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LOOKAHEAD_ARGUMENT#*=}"
       ;;
     -h|--help)
@@ -49,7 +49,7 @@ unset THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS THOG2_PLASTIC_LOOKAHEAD_INDEX THOG2_
   exit 2
 }
 [[ "$THOG2_PLASTIC_LAYER_COUNT_MAX_STEP" =~ ^[1-9][0-9]*$ ]] || {
-  echo "Invalid plastic__layer_count_max_step: $THOG2_PLASTIC_LAYER_COUNT_MAX_STEP; expected a positive integer." >&2
+  echo "Invalid plastic__layer_count__max_allowable_layer_change: $THOG2_PLASTIC_LAYER_COUNT_MAX_STEP; expected a positive integer." >&2
   exit 2
 }
 export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
@@ -57,7 +57,7 @@ export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP
 
 if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
   printf '%s
-'     'PLASTIC DEPTH COARSE/FINE:'     '  --plastic__coarse_phase enabled|disabled       one-shot COARSE discovery; default disabled'     '  --plastic__phase_1_n_steps N                   optimizer steps per COARSE trial'     '  --plastic__phase_1_starting_layer_count N      first doubling candidate'     '  --plastic__phase_1__number_of_trials N         number of doubling candidates'     '  --plastic__phase_1_evaluation_steps_count N    final validation batches per trial'     '  --plastic__log_interval_coarse N=10            COARSE progress cadence'     '  --plastic__coarse_phase_roll_through            skip the review delay and start FINE immediately'     '  --no-plastic__coarse_phase_roll_through         retain the review delay; default'     '  --plastic__layer_count_probe__probe_every_n_steps N        FINE probe cadence; defaults to update brake'     "  --plastic__layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}       full integer FINE probe radius"     "  --plastic__layer_count_max_step N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement"     '  Hyphenated and single-underscore PLASTIC aliases are rejected.'     ''
+'     'PLASTIC DEPTH COARSE/FINE:'     '  --plastic__coarse_phase enabled|disabled       one-shot COARSE discovery; default disabled'     '  --plastic__phase_1_n_steps N                   optimizer steps per COARSE trial'     '  --plastic__phase_1_starting_layer_count N      first doubling candidate'     '  --plastic__phase_1__number_of_trials N         number of doubling candidates'     '  --plastic__phase_1_evaluation_steps_count N    final validation batches per trial'     '  --plastic__log_interval_coarse N=10            COARSE progress cadence'     '  --plastic__coarse_phase_roll_through            skip the review delay and start FINE immediately'     '  --no-plastic__coarse_phase_roll_through         retain the review delay; default'     '  --plastic__layer_count_probe__probe_every_n_steps N        FINE probe cadence; defaults to update brake'     "  --plastic__layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}       full integer FINE probe radius"     "  --plastic__layer_count__max_allowable_layer_change N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement"     '  Hyphenated and single-underscore PLASTIC aliases are rejected.'     ''
 fi
 unset THOG2_PLASTIC_LOOKAHEAD_HELP
 # ^^^ THOG

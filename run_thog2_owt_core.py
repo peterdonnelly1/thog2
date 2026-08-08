@@ -44,7 +44,7 @@ from sheet.run_config import (
 )
 from sheet.run_naming import compact_log_timestamp
 from sheet.stage6_trainer import Stage6Trainer
-from sheet.training_config import TrainingConfig
+from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
@@ -200,7 +200,7 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
     # ^^^ THOG
     if "trainer_config" not in payload:
         return
-    stored = TrainingConfig(**payload["trainer_config"])
+    stored = TrainingConfig(**normalize_plastic_v0541_config_fields(payload["trainer_config"]))
     # vvv THOG layer-dropout execution policy must not silently change across normal resume
     control_fields = (
         "batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip",
@@ -296,10 +296,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__layer_count_probe__probe_every_n_steps", dest="plastic__layer_count_probe__probe_every_n_steps", type=int)
     parser.add_argument("--plastic__layer_count_probe__number_of_sampled_valid_tokens", dest="plastic__layer_count_probe__number_of_sampled_valid_tokens", type=int, default=1024)
     parser.add_argument("--plastic__layer_count_probe_radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
-    parser.add_argument("--plastic__layer_count_max_step", dest="plastic__layer_count_max_step", type=int, default=1)
-    parser.add_argument("--plastic__layer_count_extrapolation_weight", dest="plastic__layer_count_extrapolation_weight", type=float, default=0.8)
+    parser.add_argument("--plastic__layer_count__max_allowable_layer_change", dest="plastic__layer_count__max_allowable_layer_change", type=int, default=1)
+    parser.add_argument("--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence", dest="plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence", type=float, default=0.8)
     parser.add_argument("--plastic__layer_count_probe__window_size_as_number_of_probes", dest="plastic__layer_count_probe__window_size_as_number_of_probes", type=int, default=50)
     parser.add_argument("--plastic__layer_count_probe_noise_lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_discount", dest="plastic__wall_time_equivalent_time_gain_discount", type=float, default=0.9)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_window", dest="plastic__wall_time_equivalent_time_gain_loss_rate_window", type=int, default=64)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", dest="plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", type=int, default=16)
     parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
     parser.add_argument("--plastic__layer_memory_budget_gib", dest="plastic__layer_memory_budget_gib", type=float)
     parser.add_argument("--plastic__cuda_allocator_reserve_gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
@@ -509,10 +512,13 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_count_probe__probe_every_n_steps=arguments.plastic__layer_count_probe__probe_every_n_steps,
         plastic__layer_count_probe__number_of_sampled_valid_tokens=arguments.plastic__layer_count_probe__number_of_sampled_valid_tokens,
         plastic__layer_count_probe_radius=arguments.plastic__layer_count_probe_radius,
-        plastic__layer_count_max_step=arguments.plastic__layer_count_max_step,
-        plastic__layer_count_extrapolation_weight=arguments.plastic__layer_count_extrapolation_weight,
+        plastic__layer_count__max_allowable_layer_change=arguments.plastic__layer_count__max_allowable_layer_change,
+        plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=arguments.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence,
         plastic__layer_count_probe__window_size_as_number_of_probes=arguments.plastic__layer_count_probe__window_size_as_number_of_probes,
         plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
+        plastic__wall_time_equivalent_time_gain_discount=arguments.plastic__wall_time_equivalent_time_gain_discount,
+        plastic__wall_time_equivalent_time_gain_loss_rate_window=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_window,
+        plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
         plastic__cuda_allocator_reserve_gib=arguments.plastic__cuda_allocator_reserve_gib,

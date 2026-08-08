@@ -73,7 +73,9 @@ def _runtime_state(trainer: Any) -> Dict[str, Any]:
         "last_timing_sample_update": None,
         "last_timing_residual_seconds": None,
         "ordinary_elapsed_seconds": 0.0,
-        "loss_history": deque(maxlen=WALL_TIME_LOSS_RATE_WINDOW),
+        "loss_history": deque(
+            maxlen=int(getattr(trainer.config, "plastic__wall_time_equivalent_time_gain_loss_rate_window", WALL_TIME_LOSS_RATE_WINDOW))
+        ),
         "activated": False,
         "activation_update": None,
     }
@@ -158,7 +160,14 @@ def _timing_fit(trainer: Any) -> Optional[Dict[str, float]]:
 def _loss_rate_fit(trainer: Any) -> Optional[Dict[str, float]]:
     state = _runtime_state(trainer)
     points = tuple(state["loss_history"])
-    if len(points) < WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS:
+    minimum_observations = int(
+        getattr(
+            trainer.config,
+            "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
+            WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS,
+        )
+    )
+    if len(points) < minimum_observations:
         return None
     fit = _linear_fit_points(points)
     if fit is None:
@@ -247,6 +256,8 @@ def _equivalent_time_score(
 
 def _bootstrap_score_report(
     measurements: Sequence[Any],
+    *,
+    discount: float,
 ) -> Tuple[Any, Tuple[Dict[str, object], ...]]:
     scored = []
     for measurement in measurements:
@@ -271,7 +282,7 @@ def _bootstrap_score_report(
             "score": float(score),
             "wall_time_algorithm": WALL_TIME_ALGORITHM,
             "wall_time_bootstrap": True,
-            "wall_time_discount": WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+            "wall_time_discount": float(discount),
         }
         for measurement, feasible, score in scored
     )
@@ -283,6 +294,7 @@ def _hold_score_report(
     *,
     current_count: int,
     reason: str,
+    discount: float,
 ) -> Tuple[Any, Tuple[Dict[str, object], ...]]:
     current = None
     report = []
@@ -301,7 +313,7 @@ def _hold_score_report(
                 "score": 0.0 if is_current else float("inf"),
                 "wall_time_algorithm": WALL_TIME_ALGORITHM,
                 "wall_time_bootstrap": False,
-                "wall_time_discount": WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+                "wall_time_discount": float(discount),
                 "wall_time_hold_reason": reason,
             }
         )
@@ -331,11 +343,18 @@ def _choose_wall_time_equivalent_time_gain(
     state = _runtime_state(trainer)
     timing_fit = _timing_fit(trainer)
     loss_fit = _loss_rate_fit(trainer)
+    discount = float(
+        getattr(
+            trainer.config,
+            "plastic__wall_time_equivalent_time_gain_discount",
+            WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+        )
+    )
     ready = timing_fit is not None and loss_fit is not None
 
     if not bool(state["activated"]):
         if not ready:
-            return _bootstrap_score_report(measurements)
+            return _bootstrap_score_report(measurements, discount=discount)
         state["activated"] = True
         state["activation_update"] = int(trainer.state.completed_updates) + 1
         trainer.state.plastic_depth_probe_histories = {}
@@ -345,12 +364,14 @@ def _choose_wall_time_equivalent_time_gain(
             measurements,
             current_count=current_count,
             reason="timing_model_unavailable",
+            discount=discount,
         )
     if loss_fit is None:
         return _hold_score_report(
             measurements,
             current_count=current_count,
             reason="loss_rate_unavailable",
+            discount=discount,
         )
 
     slope = float(timing_fit["slope"])
@@ -363,6 +384,7 @@ def _choose_wall_time_equivalent_time_gain(
             measurements,
             current_count=current_count,
             reason="invalid_predicted_current_time",
+            discount=discount,
         )
 
     scored = []
@@ -386,6 +408,7 @@ def _choose_wall_time_equivalent_time_gain(
                 predicted_current_update_seconds=predicted_current,
                 predicted_candidate_update_seconds=predicted_candidate,
                 horizon_updates=horizon_updates,
+                discount=discount,
             )
             score = float(details["score_seconds"])
             scored.append((measurement, score))
@@ -402,7 +425,7 @@ def _choose_wall_time_equivalent_time_gain(
                 "score": score,
                 "wall_time_algorithm": WALL_TIME_ALGORITHM,
                 "wall_time_bootstrap": False,
-                "wall_time_discount": WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+                "wall_time_discount": float(discount),
                 "wall_time_horizon_updates": horizon_updates,
                 "loss_improvement_rate_per_second": loss_improvement_rate,
                 "predicted_current_update_seconds": predicted_current,
@@ -618,7 +641,13 @@ def _wall_time_telemetry_values(
             timing_fit is not None and loss_fit is not None
         ),
         "plastic_wall_time_algorithm_activated": int(bool(state["activated"])),
-        "plastic_wall_time_discount": WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+        "plastic_wall_time_discount": float(
+            getattr(
+                trainer.config,
+                "plastic__wall_time_equivalent_time_gain_discount",
+                WALL_TIME_EQUIVALENT_TIME_GAIN_DISCOUNT,
+            )
+        ),
         "plastic_wall_time_horizon_updates": _wall_time_horizon_updates(
             trainer.config
         ),

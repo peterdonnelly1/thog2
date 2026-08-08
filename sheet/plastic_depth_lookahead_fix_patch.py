@@ -52,9 +52,9 @@ def _single_probe_growth_counts(
 
 
 def _config_max_step(config: Any) -> int:
-    resolved = int(getattr(config, "plastic__layer_count_max_step", 1))
+    resolved = int(getattr(config, "plastic__layer_count__max_allowable_layer_change", 1))
     if resolved != 1:
-        raise ValueError("PLASTIC DEPTH count transitions currently require plastic__layer_count_max_step=1")
+        raise ValueError("PLASTIC DEPTH count transitions currently require plastic__layer_count__max_allowable_layer_change=1")
     return 1
 
 

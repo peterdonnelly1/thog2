@@ -26,6 +26,7 @@ from .training_config import (
     CHECKPOINT_SCHEMA_VERSION,
     EXECUTION_OVERRIDE_FIELDS,
     TrainingConfig,
+    normalize_plastic_v0541_config_fields,
 )
 
 
@@ -268,7 +269,7 @@ class TrainerCheckpointResumeMixin:
         # vvv THOG reject ambiguous or v0.1 PLASTIC geometry before TrainingConfig, model, or optimizer restoration
         validate_plastic_depth_checkpoint_format(payload)
         # ^^^ THOG
-        checkpoint_config = TrainingConfig(**payload["trainer_config"])
+        checkpoint_config = TrainingConfig(**normalize_plastic_v0541_config_fields(payload["trainer_config"]))
         if expected_config is not None:
             validate_compatibility(payload, expected_config)
         # override_values = dict(overrides or {})

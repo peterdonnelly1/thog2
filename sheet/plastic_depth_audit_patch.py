@@ -187,6 +187,8 @@ def _commit_plastic_depth_inline_update_with_audit(
     shared_audit: Dict[str, Any] = {
         "phase": "fine",
         "update_number": int(decision.update_number),
+        "probe_sequence": int(context.get("plastic_probe_sequence", 0)),
+        "probe_provenance": tuple(int(value) for value in context.get("plastic_probe_provenance", ())),
         "decision_number": int(lattice.count_decision_number.item()),
         "previous_count": current_count,
         "winning_probe_count": winning_probe_count,
@@ -200,7 +202,7 @@ def _commit_plastic_depth_inline_update_with_audit(
         ),
         "objective": self.config.plastic__layer_count_objective,
         "objective_cost_weight": float(self.config.plastic__layer_count_cost_weight),
-        "extrapolation_weight": float(self.config.plastic__layer_count_extrapolation_weight),
+        "extrapolation_weight": float(self.config.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence),
         "memory_budget_gib": self.config.plastic__layer_memory_budget_gib,
         "probe_every_n_steps": int(self.config.plastic__layer_count_probe__probe_every_n_steps),
         "probe_radius": int(context["probe_radius"]),

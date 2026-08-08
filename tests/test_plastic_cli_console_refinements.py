@@ -164,7 +164,7 @@ def test_shell_core_owns_every_coarse_and_fine_control() -> None:
         "--plastic__phase_1_evaluation_steps_count",
         "--plastic__layer_count_probe__probe_every_n_steps",
         "--plastic__layer_count_probe_radius",
-        "--plastic__layer_count_max_step",
+        "--plastic__layer_count__max_allowable_layer_change",
         "--plastic__log_interval_coarse",
         "--plastic__coarse_phase_roll_through",
     ):

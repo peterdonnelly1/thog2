@@ -35,7 +35,7 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
             "7",
             "--plastic__layer_count_probe_radius",
             "3",
-            "--plastic__layer_count_max_step",
+            "--plastic__layer_count__max_allowable_layer_change",
             "1",
             "-h",
         )
@@ -43,7 +43,7 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
         self.assertIn("--plastic__coarse_phase enabled|disabled", result.stdout)
         self.assertIn("--plastic__phase_1__number_of_trials N", result.stdout)
         self.assertIn("--plastic__layer_count_probe_radius N=3", result.stdout)
-        self.assertIn("--plastic__layer_count_max_step N=1", result.stdout)
+        self.assertIn("--plastic__layer_count__max_allowable_layer_change N=1", result.stdout)
         self.assertIn("--plastic__log_interval_coarse", result.stdout)
         self.assertIn("--plastic__coarse_phase_roll_through", result.stdout)
         self.assertNotIn("plastic--phase", result.stdout + result.stderr)
@@ -51,7 +51,7 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
 
     def test_canonical_controls_retain_arguments_and_legacy_environment(self) -> None:
         command = """
-set -- --plastic__layer_count_probe_radius 4 --plastic__layer_count_max_step=2 marker
+set -- --plastic__layer_count_probe_radius 4 --plastic__layer_count__max_allowable_layer_change=2 marker
 source ./plastic_depth_lookahead_wrapper_options.sh
 printf '%s|%s|%s\\n' "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" "$THOG2_PLASTIC_LAYER_COUNT_MAX_STEP" "$*"
 """
@@ -59,7 +59,7 @@ printf '%s|%s|%s\\n' "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" "$THOG2_PLASTIC_L
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(
             result.stdout.strip(),
-            "4|2|--plastic__layer_count_probe_radius 4 --plastic__layer_count_max_step=2 marker",
+            "4|2|--plastic__layer_count_probe_radius 4 --plastic__layer_count__max_allowable_layer_change=2 marker",
         )
 
     def test_hyphen_and_single_underscore_aliases_are_rejected(self) -> None:

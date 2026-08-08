@@ -45,8 +45,8 @@ def _config_probe_radius(config: Any) -> int:
 
 
 def _config_max_step(config: Any) -> int:
-    value = getattr(config, "plastic__layer_count_max_step", os.environ.get(_MAX_STEP_ENV, 1))
-    return _positive_int(value, name="plastic__layer_count_max_step")
+    value = getattr(config, "plastic__layer_count__max_allowable_layer_change", os.environ.get(_MAX_STEP_ENV, 1))
+    return _positive_int(value, name="plastic__layer_count__max_allowable_layer_change")
 
 
 # vvv THOG expose exact-radius controls through the existing CLI without changing canonical dataclasses yet
@@ -74,11 +74,11 @@ def _strip_plastic_lookahead_args(args: Optional[Sequence[str]]) -> Tuple[list[s
         if argument == "--plastic-layer-count-max-step":
             if index + 1 >= len(source):
                 raise ValueError("--plastic-layer-count-max-step requires a value")
-            max_step = _positive_int(source[index + 1], name="plastic__layer_count_max_step")
+            max_step = _positive_int(source[index + 1], name="plastic__layer_count__max_allowable_layer_change")
             index += 2
             continue
         if argument.startswith("--plastic-layer-count-max-step="):
-            max_step = _positive_int(argument.split("=", 1)[1], name="plastic__layer_count_max_step")
+            max_step = _positive_int(argument.split("=", 1)[1], name="plastic__layer_count__max_allowable_layer_change")
             index += 1
             continue
         stripped.append(argument)
@@ -94,7 +94,7 @@ def _parse_known_args_with_plastic_lookahead(self: argparse.ArgumentParser, args
         os.environ[_MAX_STEP_ENV] = str(max_step)
     parsed, extras = _ORIGINAL_ARGPARSE_PARSE_KNOWN_ARGS(self, stripped, namespace)
     parsed_probe_radius = getattr(parsed, "plastic__layer_count_probe_radius", None)
-    parsed_max_step = getattr(parsed, "plastic__layer_count_max_step", None)
+    parsed_max_step = getattr(parsed, "plastic__layer_count__max_allowable_layer_change", None)
     resolved_probe_radius = probe_radius if probe_radius is not None else parsed_probe_radius
     resolved_max_step = max_step if max_step is not None else parsed_max_step
     if resolved_probe_radius is None:
@@ -102,7 +102,7 @@ def _parse_known_args_with_plastic_lookahead(self: argparse.ArgumentParser, args
     if resolved_max_step is None:
         resolved_max_step = os.environ.get(_MAX_STEP_ENV, 1)
     setattr(parsed, "plastic__layer_count_probe_radius", _positive_int(resolved_probe_radius, name="plastic__layer_count_probe_radius"))
-    setattr(parsed, "plastic__layer_count_max_step", _positive_int(resolved_max_step, name="plastic__layer_count_max_step"))
+    setattr(parsed, "plastic__layer_count__max_allowable_layer_change", _positive_int(resolved_max_step, name="plastic__layer_count__max_allowable_layer_change"))
     return parsed, extras
 
 
@@ -161,7 +161,7 @@ def choose_plastic_depth_count_with_exact_radius(
         raise ValueError("update_number must be positive")
     if update_brake < 0:
         raise ValueError("update_brake must be non-negative")
-    max_step = _positive_int(max_step, name="plastic__layer_count_max_step")
+    max_step = _positive_int(max_step, name="plastic__layer_count__max_allowable_layer_change")
 
     score_by_count = _finite_score_by_count(score_report)
     current_score = score_by_count.get(current_count)
@@ -377,7 +377,7 @@ def _plastic_depth_inline_probe_request_with_lookahead(self: Any, targets: torch
             score_report=score_report,
             histories=self.state.plastic_depth_probe_histories,
             noise_window=self.config.plastic__layer_count_probe__window_size_as_number_of_probes,
-            extrapolation_weight=float(self.config.plastic__layer_count_extrapolation_weight),
+            extrapolation_weight=float(self.config.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence),
             noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
             update_number=int(self.state.completed_updates) + 1,
             last_count_change_update=int(self.state.plastic_depth_last_count_change_update),

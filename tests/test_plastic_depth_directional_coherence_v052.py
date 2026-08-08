@@ -129,13 +129,13 @@ def test_new_probe_names_are_canonical_and_min_probes_is_removed() -> None:
             "10",
             "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "8",
-            "--plastic__layer_count_extrapolation_weight",
+            "--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
             "0.8",
         ]
     )
     assert args.plastic__layer_count_probe__probe_every_n_steps == 10
     assert args.plastic__layer_count_probe__window_size_as_number_of_probes == 8
-    assert args.plastic__layer_count_extrapolation_weight == 0.8
+    assert args.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence == 0.8
     assert not hasattr(args, "plastic__layer_count_min_probes")
 
 

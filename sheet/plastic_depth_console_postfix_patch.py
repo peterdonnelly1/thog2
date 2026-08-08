@@ -58,3 +58,7 @@ from . import plastic_depth_wall_time_equivalent_time_gain_patch as _plastic_dep
 # vvv THOG restore pre-v0.531 selector patchability, paired-SE ownership and final visible-column alignment after the new overlay
 from . import plastic_depth_wall_time_v0531_integration_patch as _plastic_depth_wall_time_v0531_integration_patch
 # ^^^ THOG
+
+# vvv THOG install v0.541 canonical controls, durable probe provenance and final console glyph refinement
+from . import plastic_depth_v0541_patch as _plastic_depth_v0541_patch
+# ^^^ THOG

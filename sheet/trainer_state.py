@@ -17,6 +17,8 @@ class TrainerState:
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH robust paired-score evidence and count-change spacing survive checkpoints
     plastic_depth_probe_histories: Dict[str, List[float]] = field(default_factory=dict)
+    plastic_depth_probe_sequence: int = 0
+    plastic_depth_probe_provenance: List[int] = field(default_factory=list)
     plastic_depth_last_count_change_update: int = -1
     # ^^^ THOG
 

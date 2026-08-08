@@ -44,7 +44,7 @@ def _validate_extrapolation_weight(value: Any) -> float:
     resolved = float(value)
     if not math.isfinite(resolved) or not (0.5 < resolved <= 1.0):
         raise ValueError(
-            "plastic__layer_count_extrapolation_weight must be finite and lie in (0.5, 1.0]; "
+            "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence must be finite and lie in (0.5, 1.0]; "
             f"got {value!r}"
         )
     return resolved
@@ -285,7 +285,7 @@ def choose_plastic_depth_count_with_directional_coherence(
         raise ValueError("update_brake must be non-negative")
     resolved_max_step = _positive_integer(
         max_step,
-        name="plastic__layer_count_max_step",
+        name="plastic__layer_count__max_allowable_layer_change",
     )
     resolved_weight = _validate_extrapolation_weight(extrapolation_weight)
     resolved_current = int(current_count)
@@ -417,7 +417,7 @@ def _plastic_depth_inline_probe_request_with_directional_snapshot(
         weight = _validate_extrapolation_weight(
             getattr(
                 self.config,
-                "plastic__layer_count_extrapolation_weight",
+                "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
                 _DEFAULT_EXTRAPOLATION_WEIGHT,
             )
         )
