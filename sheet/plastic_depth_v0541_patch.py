@@ -47,10 +47,9 @@ def _probe_provenance_from_sequence(
     resolved_total = max(1, int(vote_total))
     first = resolved_sequence - resolved_total + 1
     if first < 1:
-        raise RuntimeError(
-            "PLASTIC FINE probe provenance predates P1: "
-            f"probe_sequence={resolved_sequence}, vote_total={resolved_total}"
-        )
+        # vvv THOG never fabricate provenance for inconsistent injected/legacy evidence; normal persistent PLASTIC state cannot take this path
+        return ()
+        # ^^^ THOG
     return tuple(range(first, resolved_sequence + 1))
 
 
