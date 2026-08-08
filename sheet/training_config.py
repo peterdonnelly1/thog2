@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from .basis import BASIS_VERSION
 # vvv THOG lapped cosine controls survive training config and checkpoints
@@ -35,6 +35,13 @@ from .hyperblock import (
     ResolvedHyperblockPlan,
 )
 # ^^^ THOG
+# vvv THOG PLASTIC COARSE/FINE lifecycle configuration and candidate resolution
+from .plastic_depth_coarse import (
+    resolve_plastic_coarse_config,
+    resolve_plastic_probe_interval,
+    validate_plastic_fine_count_controls,
+)
+# ^^^ THOG
 from .residual_init import DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE, DEFAULT_RESIDUAL_INIT_DEPTH_VALUE, DEFAULT_RESIDUAL_INIT_POLICY, ResidualInitConfig
 # vvv THOG PLASTIC DEPTH configuration resolves a fixed persistent lattice and optional discrete active-count controller
 from .plastic_depth import (
@@ -54,6 +61,14 @@ EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
+    "plastic__runtime_phase",
+    "plastic__coarse_phase",
+    "plastic__coarse_phase_roll_through",
+    "plastic__log_interval_coarse",
+    "plastic__phase_1_n_steps",
+    "plastic__phase_1_starting_layer_count",
+    "plastic__phase_1__number_of_trials",
+    "plastic__phase_1_evaluation_steps_count",
     "plastic__layers_to_sample",
     "plastic__do_learn_layer_count",
     "plastic__initial_layer_count",
@@ -61,9 +76,16 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__layer_sampling_initialisation",
     "plastic__layer_count_objective",
     "plastic__layer_count_update_brake",
-    "plastic__layer_count_probe_noise_window",
-    "plastic__layer_count_probe_noise_min_observations",
+    "plastic__layer_count_probe__probe_every_n_steps",
+    "plastic__layer_count_probe__number_of_sampled_valid_tokens",
+    "plastic__layer_count_probe_radius",
+    "plastic__layer_count__max_allowable_layer_change",
+    "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
+    "plastic__layer_count_probe__window_size_as_number_of_probes",
     "plastic__layer_count_probe_noise_lambda",
+    "plastic__wall_time_equivalent_time_gain_discount",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_window",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
     "plastic__layer_memory_budget_gib",
     "plastic__cuda_allocator_reserve_gib",
@@ -71,6 +93,26 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__freeze_geometry_during_warmup",
     "plastic__initial_active_layers",
 )
+# ^^^ THOG
+
+# vvv THOG v0.541 accept superseded PLASTIC config keys only when reconstructing existing checkpoints; new writes use canonical names
+PLASTIC_V0541_RENAMED_CONFIG_FIELDS = {
+    "plastic__layer_count_extrapolation_weight": "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
+    "plastic__layer_count_max_step": "plastic__layer_count__max_allowable_layer_change",
+}
+
+def normalize_plastic_v0541_config_fields(values: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = dict(values)
+    for old_name, new_name in PLASTIC_V0541_RENAMED_CONFIG_FIELDS.items():
+        if old_name not in normalized:
+            continue
+        old_value = normalized.pop(old_name)
+        if new_name in normalized and normalized[new_name] != old_value:
+            raise ValueError(
+                f"conflicting PLASTIC checkpoint fields {old_name} and {new_name}"
+            )
+        normalized[new_name] = old_value
+    return normalized
 # ^^^ THOG
 
 MODEL_COMPATIBILITY_FIELDS = (
@@ -92,13 +134,13 @@ MODEL_COMPATIBILITY_FIELDS = (
     "o_mlp_hidden",
     "mlp_hidden_group_size",
     "mlp_hidden_compressor",
-    "depth_compress_layer_norm_and_bias",                                                                                                               # <<< THOG DEPTH vector representation is checkpoint identity
+    "depth_compress_layer_norm_and_bias",                                                                                                                  # <<< THOG DEPTH vector representation is checkpoint identity
     "residual_init_policy",
     "residual_init_depth_source",
     "residual_init_depth_value",
     "basis_version",
-    "lapped_cosine_window_length",                                                                                                                        # <<< THOG checkpoint compatibility locality control
-    "lapped_cosine_overlap_fraction",                                                                                                                     # <<< THOG checkpoint compatibility overlap control
+    "lapped_cosine_window_length",                                                                                                                         # <<< THOG checkpoint compatibility locality control
+    "lapped_cosine_overlap_fraction",                                                                                                                      # <<< THOG checkpoint compatibility overlap control
     "row_order_scaling_rule",
     "geometry_preset",
     "attention_geometry",
@@ -139,20 +181,20 @@ class TrainingConfig:
     depth_order: int = 4
     base_row_order: int = 32
     mlp_channel_order: Optional[int] = None
-    o_attn_d_model: Optional[int] = None                                                                                                               # <<< THOG final attention model-axis order
-    o_attn_qkv_per_channel: Optional[int] = None                                                                                                       # <<< THOG final QKV per-head channel order
-    o_attn_out_per_channel: Optional[int] = None                                                                                                       # <<< THOG final output per-head channel order
-    o_mlp_d_model: Optional[int] = None                                                                                                                # <<< THOG final MLP model-axis order
-    o_mlp_hidden: Optional[int] = None                                                                                                                 # <<< THOG final MLP hidden-axis order
+    o_attn_d_model: Optional[int] = None                                                                                                                   # <<< THOG final attention model-axis order
+    o_attn_qkv_per_channel: Optional[int] = None                                                                                                           # <<< THOG final QKV per-head channel order
+    o_attn_out_per_channel: Optional[int] = None                                                                                                           # <<< THOG final output per-head channel order
+    o_mlp_d_model: Optional[int] = None                                                                                                                    # <<< THOG final MLP model-axis order
+    o_mlp_hidden: Optional[int] = None                                                                                                                     # <<< THOG final MLP hidden-axis order
     mlp_hidden_group_size: int = DEFAULT_MLP_HIDDEN_GROUP_SIZE
     mlp_hidden_compressor: str = DEFAULT_MLP_HIDDEN_COMPRESSOR
-    depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias participation switch
+    depth_compress_layer_norm_and_bias: bool = False                                                                                                       # <<< THOG DEPTH-only LayerNorm/bias participation switch
     residual_init_policy: str = DEFAULT_RESIDUAL_INIT_POLICY
     residual_init_depth_source: str = DEFAULT_RESIDUAL_INIT_DEPTH_SOURCE
     residual_init_depth_value: int = DEFAULT_RESIDUAL_INIT_DEPTH_VALUE
     basis_version: str = BASIS_VERSION
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG explicit locality control
-    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                          # <<< THOG explicit overlap control
+    lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                         # <<< THOG explicit overlap control
     row_order_scaling_rule: str = ROW_ORDER_SCALING_RULE
     geometry_preset: Optional[str] = None
     attention_geometry: Optional[str] = None
@@ -177,6 +219,14 @@ class TrainingConfig:
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH controls; disabled is the exact established path
     plastic__enabled: bool = False
+    plastic__runtime_phase: str = "fine"
+    plastic__coarse_phase: str = "disabled"
+    plastic__coarse_phase_roll_through: bool = False
+    plastic__log_interval_coarse: int = 10
+    plastic__phase_1_n_steps: Optional[int] = None
+    plastic__phase_1_starting_layer_count: Optional[int] = None
+    plastic__phase_1__number_of_trials: Optional[int] = None
+    plastic__phase_1_evaluation_steps_count: Optional[int] = None
     plastic__layers_to_sample: Optional[int] = None
     plastic__do_learn_layer_count: bool = False
     plastic__initial_layer_count: Optional[int] = None
@@ -184,9 +234,16 @@ class TrainingConfig:
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
-    plastic__layer_count_probe_noise_window: int = 50
-    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_probe__probe_every_n_steps: Optional[int] = None
+    plastic__layer_count_probe__number_of_sampled_valid_tokens: int = 1024
+    plastic__layer_count_probe_radius: int = 1
+    plastic__layer_count__max_allowable_layer_change: int = 1
+    plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence: float = 0.8
+    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
+    plastic__wall_time_equivalent_time_gain_discount: float = 0.9
+    plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
+    plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
     plastic__layer_memory_budget_gib: Optional[float] = None
     plastic__cuda_allocator_reserve_gib: float = 0.5
@@ -217,7 +274,7 @@ class TrainingConfig:
     grad_clip: float = 1.0
     # vvv THOG bounded non-finite update recovery controls
     nonfinite_update_policy: str = "skip"
-    max_nonfinite_update_skips: int = 10
+    max_nonfinite_update_skips: int = 99999
     # ^^^ THOG
     eval_interval: int = 0
     eval_batches: int = 1
@@ -245,6 +302,19 @@ class TrainingConfig:
         # vvv THOG resolve PLASTIC DEPTH before selector and n_layer-dependent validation
         if not isinstance(self.plastic__enabled, bool):
             raise ValueError(f"plastic__enabled must be bool; got {self.plastic__enabled!r}")
+        if self.plastic__runtime_phase not in {"coarse", "fine"}:
+            raise ValueError(
+                "plastic__runtime_phase must be coarse or fine; "
+                f"got {self.plastic__runtime_phase!r}"
+            )
+        if not isinstance(self.plastic__coarse_phase_roll_through, bool):
+            raise ValueError("plastic__coarse_phase_roll_through must be bool")
+        if (
+            isinstance(self.plastic__log_interval_coarse, bool)
+            or not isinstance(self.plastic__log_interval_coarse, int)
+            or self.plastic__log_interval_coarse < 1
+        ):
+            raise ValueError("plastic__log_interval_coarse must be a positive integer")
         if not isinstance(self.plastic__do_learn_layer_count, bool):
             raise ValueError(
                 "plastic__do_learn_layer_count must be bool; "
@@ -255,12 +325,73 @@ class TrainingConfig:
                 "plastic__freeze_geometry_during_warmup must be bool; "
                 f"got {self.plastic__freeze_geometry_during_warmup!r}"
             )
+        # vvv THOG resolve one-shot COARSE scheduling and canonical FINE lookahead controls before active-count construction
+        resolved_coarse = resolve_plastic_coarse_config(
+            coarse_phase=self.plastic__coarse_phase,
+            plastic_enabled=self.plastic__enabled,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+            n_steps=self.plastic__phase_1_n_steps,
+            starting_layer_count=self.plastic__phase_1_starting_layer_count,
+            number_of_trials=self.plastic__phase_1__number_of_trials,
+            evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
+            max_permitted_layers=self.plastic__max_permitted_layers,
+        )
+        resolved_probe_interval = resolve_plastic_probe_interval(
+            probe_interval=self.plastic__layer_count_probe__probe_every_n_steps,
+            update_brake=self.plastic__layer_count_update_brake,
+            enabled=self.plastic__enabled,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+        )
+        self.plastic__layer_count_probe__probe_every_n_steps = resolved_probe_interval
+        # vvv THOG v0.521 fresh probe-token sampling uses 1024 by default and zero as the explicit all-valid sentinel
+        if (
+            isinstance(self.plastic__layer_count_probe__number_of_sampled_valid_tokens, bool)
+            or not isinstance(self.plastic__layer_count_probe__number_of_sampled_valid_tokens, int)
+            or self.plastic__layer_count_probe__number_of_sampled_valid_tokens < 0
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must be a non-negative integer; "
+                f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens!r}"
+            )
+        # ^^^ THOG
+        # vvv THOG v0.521 direct TrainingConfig paths reject impossible positive probe samples before trainer construction
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed "
+                f"batch_size * block_size ({probe_token_capacity})"
+            )
+        # ^^^ THOG
+        validate_plastic_fine_count_controls(
+            probe_radius=self.plastic__layer_count_probe_radius,
+            max_step=self.plastic__layer_count__max_allowable_layer_change,
+        )
+        if (
+            isinstance(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence, bool)
+            or not isinstance(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence))
+            or not (0.5 < float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence) <= 1.0)
+        ):
+            raise ValueError(
+                "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence must lie in (0.5, 1.0]; "
+                f"got {self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence!r}"
+            )
+        initial_layer_count_for_resolution = (
+            resolved_coarse.candidate_layers[0]
+            if resolved_coarse.enabled
+            else self.plastic__initial_layer_count
+        )
+        # ^^^ THOG
         resolved_plastic_counts = resolve_plastic_depth_counts(
             n_layer=self.n_layer,
             enabled=self.plastic__enabled,
             layers_to_sample=self.plastic__layers_to_sample,
             do_learn_layer_count=self.plastic__do_learn_layer_count,
-            initial_layer_count=self.plastic__initial_layer_count,
+            initial_layer_count=initial_layer_count_for_resolution,
             max_permitted_layers=self.plastic__max_permitted_layers,
         )
         self.plastic__initial_active_layers = resolved_plastic_counts.initial_active_layers
@@ -279,23 +410,13 @@ class TrainingConfig:
             )
         # vvv THOG PLASTIC DEPTH robust paired-score gate controls
         if (
-            isinstance(self.plastic__layer_count_probe_noise_window, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
-            or self.plastic__layer_count_probe_noise_window < 1
+            isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, bool)
+            or not isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, int)
+            or self.plastic__layer_count_probe__window_size_as_number_of_probes < 1
         ):
             raise ValueError(
-                "plastic__layer_count_probe_noise_window must be a positive integer; "
-                f"got {self.plastic__layer_count_probe_noise_window!r}"
-            )
-        if (
-            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
-            or self.plastic__layer_count_probe_noise_min_observations < 1
-            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
-        ):
-            raise ValueError(
-                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]; "
-                f"got {self.plastic__layer_count_probe_noise_min_observations!r}"
+                "plastic__layer_count_probe__window_size_as_number_of_probes must be a positive integer; "
+                f"got {self.plastic__layer_count_probe__window_size_as_number_of_probes!r}"
             )
         if (
             isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
@@ -306,6 +427,37 @@ class TrainingConfig:
             raise ValueError(
                 "plastic__layer_count_probe_noise_lambda must be finite and non-negative; "
                 f"got {self.plastic__layer_count_probe_noise_lambda!r}"
+            )
+        # ^^^ THOG
+        # vvv THOG v0.541 public equivalent-time-gain controls are explicit, bounded and checkpoint-persistent
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_discount, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_discount, (int, float))
+            or not math.isfinite(float(self.plastic__wall_time_equivalent_time_gain_discount))
+            or not (0.0 <= float(self.plastic__wall_time_equivalent_time_gain_discount) <= 1.0)
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_discount must be finite and lie in [0, 1]; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_discount!r}"
+            )
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_window, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_window, int)
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_window < 2
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_loss_rate_window must be an integer >= 2; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_loss_rate_window!r}"
+            )
+        if (
+            isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations, bool)
+            or not isinstance(self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations, int)
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations < 2
+            or self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations > self.plastic__wall_time_equivalent_time_gain_loss_rate_window
+        ):
+            raise ValueError(
+                "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations must be an integer in [2, plastic__wall_time_equivalent_time_gain_loss_rate_window]; "
+                f"got {self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations!r}"
             )
         # ^^^ THOG
         if (
@@ -435,6 +587,19 @@ class TrainingConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer; got {value!r}")
+        # vvv THOG v0.521 reject impossible configured samples rather than silently clipping to microbatch capacity
+        probe_token_capacity = self.batch_size * self.block_size
+        if (
+            self.plastic__enabled
+            and self.plastic__do_learn_layer_count
+            and self.plastic__layer_count_probe__number_of_sampled_valid_tokens > probe_token_capacity
+        ):
+            raise ValueError(
+                "plastic__layer_count_probe__number_of_sampled_valid_tokens must not exceed "
+                f"batch_size * block_size ({probe_token_capacity}); "
+                f"got {self.plastic__layer_count_probe__number_of_sampled_valid_tokens}"
+            )
+        # ^^^ THOG
         # vvv THOG validate shared-factory recurrence independently of the HYPERBLOCK basis orders
         if (
             isinstance(self.hyperblock_loop_decay, bool)
@@ -697,9 +862,9 @@ class TrainingConfig:
                     "mlp_hidden_group_size": self.mlp_hidden_group_size,
                     "mlp_hidden_compressor": self.mlp_hidden_compressor,
                     # vvv THOG preserve the exact pre-HYPERBLOCK model-argument line for source history
-                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                           # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    # "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                     # ^^^ THOG
-                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                       # <<< THOG pass DEPTH vector mode into SheetGPTConfig
+                    "depth_compress_layer_norm_and_bias": self.depth_compress_layer_norm_and_bias,                                                         # <<< THOG pass DEPTH vector mode into SheetGPTConfig
                     "basis_version": self.basis_version,
                     "geometry_preset": self.geometry_preset,
                     "attention_geometry": self.attention_geometry,
@@ -717,8 +882,7 @@ class TrainingConfig:
                         "plastic__layer_sampling_initialisation": self.plastic__layer_sampling_initialisation,
                         "plastic__layer_count_objective": self.plastic__layer_count_objective,
                         "plastic__layer_count_update_brake": self.plastic__layer_count_update_brake,
-                        "plastic__layer_count_probe_noise_window": self.plastic__layer_count_probe_noise_window,
-                        "plastic__layer_count_probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+                        "plastic__layer_count_probe__window_size_as_number_of_probes": self.plastic__layer_count_probe__window_size_as_number_of_probes,
                         "plastic__layer_count_probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
                         "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
                         "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
@@ -779,8 +943,7 @@ class TrainingConfig:
             #     "sampling_initialisation": self.plastic__layer_sampling_initialisation,
             #     "count_objective": self.plastic__layer_count_objective,
             #     "count_update_brake": self.plastic__layer_count_update_brake,
-            #     "probe_noise_window": self.plastic__layer_count_probe_noise_window,
-            #     "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+            #     "probe_noise_window": self.plastic__layer_count_probe__window_size_as_number_of_probes,
             #     "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
             #     "count_cost_weight": float(self.plastic__layer_count_cost_weight),
             #     "memory_budget_gib": self.plastic__layer_memory_budget_gib,
@@ -790,6 +953,20 @@ class TrainingConfig:
             # }
             # vvv THOG persist every exposed control under its exact canonical plastic__ name
             identity["plastic_depth"] = plastic_depth_identity_metadata(
+                coarse_phase=self.plastic__coarse_phase,
+                coarse_phase_roll_through=self.plastic__coarse_phase_roll_through,
+                log_interval_coarse=self.plastic__log_interval_coarse,
+                phase_1_n_steps=self.plastic__phase_1_n_steps,
+                phase_1_starting_layer_count=self.plastic__phase_1_starting_layer_count,
+                phase_1_number_of_trials=self.plastic__phase_1__number_of_trials,
+                phase_1_evaluation_steps_count=self.plastic__phase_1_evaluation_steps_count,
+                layer_count_probe__probe_every_n_steps=self.plastic__layer_count_probe__probe_every_n_steps,
+                layer_count_probe_radius=self.plastic__layer_count_probe_radius,
+                layer_count_max_step=self.plastic__layer_count__max_allowable_layer_change,
+                layer_count_extrapolation_weight=float(self.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence),
+                wall_time_equivalent_time_gain_discount=float(self.plastic__wall_time_equivalent_time_gain_discount),
+                wall_time_equivalent_time_gain_loss_rate_window=self.plastic__wall_time_equivalent_time_gain_loss_rate_window,
+                wall_time_equivalent_time_gain_loss_rate_min_observations=self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
                 layers_to_sample=self.plastic__layers_to_sample,
                 do_learn_layer_count=self.plastic__do_learn_layer_count,
                 initial_layer_count=self.plastic__initial_layer_count,
@@ -797,8 +974,7 @@ class TrainingConfig:
                 layer_sampling_initialisation=self.plastic__layer_sampling_initialisation,
                 layer_count_objective=self.plastic__layer_count_objective,
                 layer_count_update_brake=self.plastic__layer_count_update_brake,
-                layer_count_probe_noise_window=self.plastic__layer_count_probe_noise_window,
-                layer_count_probe_noise_min_observations=self.plastic__layer_count_probe_noise_min_observations,
+                layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
                 layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
@@ -852,8 +1028,7 @@ class TrainingConfig:
 # "sampling_initialisation": self.plastic__layer_sampling_initialisation,
 # "count_objective": self.plastic__layer_count_objective,
 # "count_update_brake": self.plastic__layer_count_update_brake,
-# "probe_noise_window": self.plastic__layer_count_probe_noise_window,
-# "probe_noise_min_observations": self.plastic__layer_count_probe_noise_min_observations,
+# "probe_noise_window": self.plastic__layer_count_probe__window_size_as_number_of_probes,
 # "probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
 # "count_cost_weight": float(self.plastic__layer_count_cost_weight),
 # "memory_budget_gib": self.plastic__layer_memory_budget_gib,

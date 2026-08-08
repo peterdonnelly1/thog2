@@ -92,7 +92,7 @@ def test_positive_delta_is_red_and_signed() -> None:
             "training_loss_delta": "  +0.125",
         },
     )
-    assert "\033[1;31mΔloss=  +0.125\033[0m" in line
+    assert "\033[1;31mΔ=  +0.125\033[0m" in line
 
 
 def test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss() -> None:
@@ -119,7 +119,7 @@ def test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_los
     assert "tokens=         24576" in line
 
 
-def test_training_and_validation_loss_numerals_start_in_the_same_column() -> None:
+def test_training_and_validation_loss_numerals_use_the_same_numeric_field_width() -> None:
     line = format_progress_line(
         "OPTIMO",
         "evaluation_completed",
@@ -127,17 +127,17 @@ def test_training_and_validation_loss_numerals_start_in_the_same_column() -> Non
             "completed_updates": "     2",
             "consumed_tokens": "         24576",
             "cumulative_training_seconds": "   196",
+            "tok/s": "          63",
             "training_loss": "  10.8831",
             "validation_loss": "  10.7777",
         },
     )
     plain = re.sub(r"\x1b\[[0-9;]*m", "", line)
-    training_value_column = plain.index("10.8831")
-    validation_field_start = plain.index("validation loss")
-    validation_value_column = plain.index("10.7777")
-    training_field_start = plain.index("training loss")
-    assert training_value_column - training_field_start == validation_value_column - validation_field_start
-
+    training_match = re.search(r"(?<!validation )loss=(\s+10\.8831)", plain)
+    validation_match = re.search(r"validation loss=(\s+10\.7777)", plain)
+    assert training_match is not None
+    assert validation_match is not None
+    assert len(training_match.group(1)) == len(validation_match.group(1))
 
 def test_run_started_console_output_is_followed_by_one_blank_line() -> None:
     fake_trainer = SimpleNamespace(

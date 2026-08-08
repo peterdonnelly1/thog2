@@ -246,7 +246,7 @@ def _lookahead_counts_absolute(current: int, maximum: int, radius: int, max_step
     if resolved_radius < 1:
         raise ValueError("plastic__layer_count_probe_radius must be positive")
     if resolved_step < 1:
-        raise ValueError("plastic__layer_count_max_step must be positive")
+        raise ValueError("plastic__layer_count__max_allowable_layer_change must be positive")
     decision_counts = {resolved_current}
     execution_counts = {resolved_current}
     lower_decision = max(1, resolved_current - resolved_radius)
@@ -262,10 +262,10 @@ def _lookahead_counts_absolute(current: int, maximum: int, radius: int, max_step
 
 
 def _config_max_step_absolute(config: Any) -> int:
-    value = getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1))
+    value = getattr(config, "plastic__layer_count__max_allowable_layer_change", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1))
     resolved = int(value)
     if resolved < 1:
-        raise ValueError("plastic__layer_count_max_step must be positive")
+        raise ValueError("plastic__layer_count__max_allowable_layer_change must be positive")
     return resolved
 
 

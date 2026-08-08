@@ -3,38 +3,45 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# vvv THOG accept underscore-form long options directly in the canonical wrapper while preserving established hyphen aliases
-THOG2_UNDERSCORE_NORMALIZED_ARGS=()
+# vvv THOG reject non-canonical PLASTIC aliases before any wrapper parses them
+thog2_normalize_nonplastic_long_option() {
+  local option_name="$1"
+  while [[ "$option_name" == *"__"* ]]; do
+    option_name="${option_name//__/_}"
+  done
+  printf '%s' "${option_name//_/-}"
+}
+THOG2_STRICT_LONG_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic_layer_count_probe_interval|--plastic-layer-count-probe-interval)
-      (( $# >= 2 )) || { echo "$1 requires a positive integer" >&2; exit 2; }
-      export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="$2"
-      shift 2
-      ;;
-    --plastic_layer_count_probe_interval=*|--plastic-layer-count-probe-interval=*)
-      export THOG2_PLASTIC_LAYER_COUNT_PROBE_INTERVAL="${1#*=}"
+    --plastic__*|--no-plastic__*)
+      THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;
+    --plastic-*|--no-plastic-*|--plastic_[!_]*|--no-plastic_[!_]*)
+      echo "Non-canonical PLASTIC option rejected: $1; use the exact --plastic__... or --no-plastic__... spelling." >&2
+      exit 2
+      ;;
     --*=*)
-      THOG2_UNDERSCORE_NAME="${1%%=*}"
-      THOG2_UNDERSCORE_VALUE="${1#*=}"
-      THOG2_UNDERSCORE_NAME="${THOG2_UNDERSCORE_NAME//_/-}"
-      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${THOG2_UNDERSCORE_NAME}=${THOG2_UNDERSCORE_VALUE}")
+      THOG2_LONG_NAME="${1%%=*}"
+      THOG2_LONG_VALUE="${1#*=}"
+      THOG2_LONG_NAME="$(thog2_normalize_nonplastic_long_option "$THOG2_LONG_NAME")"
+      THOG2_STRICT_LONG_ARGS+=("${THOG2_LONG_NAME}=${THOG2_LONG_VALUE}")
       shift
       ;;
     --*)
-      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("${1//_/-}")
+      THOG2_STRICT_LONG_ARGS+=("$(thog2_normalize_nonplastic_long_option "$1")")
       shift
       ;;
     *)
-      THOG2_UNDERSCORE_NORMALIZED_ARGS+=("$1")
+      THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;
   esac
 done
-set -- "${THOG2_UNDERSCORE_NORMALIZED_ARGS[@]}"
-unset THOG2_UNDERSCORE_NORMALIZED_ARGS THOG2_UNDERSCORE_NAME THOG2_UNDERSCORE_VALUE
+set -- "${THOG2_STRICT_LONG_ARGS[@]}"
+unset THOG2_STRICT_LONG_ARGS THOG2_LONG_NAME THOG2_LONG_VALUE
+unset -f thog2_normalize_nonplastic_long_option
 # ^^^ THOG
 
 # vvv THOG expose exact PLASTIC lookahead controls through the one canonical wrapper
@@ -91,6 +98,10 @@ while (( $# > 0 )); do
       "$THOG2_REGISTRY_PYTHON" -m run_thog2_owt --print-geometry-registry
       printf '\ncanonical train_OWT.sh options\n------------------------------\n'
       bash ./train_OWT_core.sh -h
+      # vvv THOG the direct registry entrypoint already prints complete parser and descriptor help once
+      # printf '\nregistered runner hyperparameters\n---------------------------------\n'
+      # "$THOG2_REGISTRY_PYTHON" -c 'from run_thog2_owt_core import build_parser; print(build_parser().format_help(), end="")'
+      # ^^^ THOG
       printf '\nTorch compilation:\n  --torch-compile false|true|regional        false=eager, true=whole-model, regional=checkpoint-segment compile\n'
       exit 0
       # ^^^ THOG

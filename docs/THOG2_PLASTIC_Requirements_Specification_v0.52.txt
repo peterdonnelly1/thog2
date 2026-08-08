@@ -1,0 +1,537 @@
+PLASTIC REQUIREMENTS SPECIFICATION
+THOG2
+Plastic
+Coarse-to-fine DEPTH discovery
+with supervised global MLP expansion
+and directionally coherent FINE count control
+
+VERSION | DATE | STATUS
+0.52 | 7 August 2026 | Proposed architecture-control refinement
+
+SCOPE
+Generalise PLASTIC from a DEPTH-only controller into a shared global architecture controller, retain the Version 0.4 COARSE/FINE DEPTH design and the Version 0.5 supervised global MLP-width design, and refine the DEPTH FINE decision rule so count movement requires both candidate-local robust evidence and coherent left/right evidence across the complete probe radius.
+VERSION 0.52 DELTA
+Version 0.52 is a +0.01 controller revision over Version 0.51. It retains the goal catalogue, full-radius probing, candidate-local median/MAD/z_score evidence and the new LEFT/RIGHT/AMBIGUOUS directional-coherence gate, but makes the decision readiness rule simpler and stricter: there is no separate minimum-probes hyperparameter; a count change is ineligible until the configured probe-history window is full. Version 0.52 also gives the two probe controls unambiguous canonical names, standardises the extrapolation-weight control at default 0.8, and defines the normal and DEBUG console presentation required to make the complete decision rule inspectable.
+IMPLEMENTATION BASIS
+PLASTIC_DEPTH remains the implementation base. Version 0.52 supersedes Version 0.51 as the governing requirements document. Existing Version 0.5 and Version 0.51 requirements remain normative except where this document explicitly replaces DEPTH FINE names, readiness semantics or operator-console presentation.
+THOG2 architecture enhancement
+
+Contents
+This contents page is intentionally static. The section order is normative; pagination may move as detailed controller material is expanded.
+1. Executive Summary
+2. Background
+3. Scope, Terms and Governing Decisions
+4. Shared PLASTIC Architecture Controller
+5. DEPTH Plasticity
+6. MLP Plasticity
+7. Integrating DEPTH and MLP Plasticity
+8. Configuration and Resolution
+9. Training, Checkpoint, Resume and Instrumentation
+10. Diagnostics and Required Implementation Work
+11. Requirements and Acceptance Criteria
+12. Known Issues and Limitations
+13. Acceptance Scenarios and Out of Scope
+Appendix A. Resolved Examples
+Appendix B. Implementation Sequence and Migration
+Document purpose
+This document is an implementation requirements specification, not a research claim. It records the architectural motivation, operational rules and acceptance conditions for the shared PLASTIC controller. Version 0.52 consolidates the DEPTH FINE count rule into three observable layers: objective-specific candidate scores, candidate-local robust evidence, and an event-level directional-coherence history. The controller moves only when all applicable layers agree and the full configured history window is mature.
+
+1. Executive Summary
+CORE DECISION PLASTIC remains a shared architecture controller with optional DEPTH and global MLP-width modes. Version 0.52 adds a second, directional-coherence gate to DEPTH FINE count changes. A candidate may still win its own median/MAD/z-score test, but the controller may move in that direction only when recent full-radius probe events consistently support that side and do not simultaneously support the opposite side.
+WHAT DOES NOT CHANGE The selected PLASTIC objective still defines what “better” means. Full-radius probe losses/scores remain naked and inspectable. Existing per-offset paired histories, robust median/MAD scale, z-score ranking, latest-win gate, strict-majority gate, update brake, max_step and history reset remain conceptually intact except that readiness now means a complete configured history window rather than a separate min-probes threshold.
+WHY ADD DIRECTIONAL COHERENCE A single L+k candidate can look attractive while several L−k candidates also beat L. Treating those as independent directionless winners allows obvious noise or a non-monotone local bump to drive count movement. Version 0.52 therefore makes one left/right/ambiguous assessment per full-radius probe event and requires a strict temporal majority for the eventual move direction.
+INTERPOLATION / EXTRAPOLATION ASYMMETRY Counts below the current active prefix are evaluated by removing already-trained active positions: they are interpolation-like evidence. Counts above the prefix activate positions that have not yet participated in ordinary steady-state training: they are extrapolation-like evidence and are intentionally discounted. The right-side discount is controlled by one global hyperparameter, plastic__layer_count_extrapolation_weight, default 0.8.
+ONE NEW HYPERPARAMETER Version 0.52 introduces no additional majority or side thresholds. The fixed 0.5 strict-majority rule is normative. The sole new rule-specific hyperparameter remains plastic__layer_count_extrapolation_weight. A value of 1.0 disables the asymmetry and is the symmetric-control setting.
+READINESS SIMPLIFICATION plastic__layer_count_min_probes is removed. Candidate-local and L/R/A histories must each have the complete configured history window before any count movement is eligible. This removes a partially redundant anti-flapping control and makes the denominator visible and unambiguous.
+OPERATOR VISIBILITY Normal probe rows show L/R/A=[L/R/A]/N=>D. With DEBUG>9 they additionally show per-offset win counts as wins L[…]/N; R[…]/N. sampled moves immediately after layers; changed sampled coordinate values are pale pink for one optimizer row; the current-L probe loss is bold white. The existing raw probe_losses and score_z remain visible.
+
+2. Background
+2.1 Motivation
+Large language models conventionally repeat a transformer block family over depth and use a fixed MLP expansion ratio inside each block. Dense models therefore carry two large repeated architecture dimensions: number of layers and MLP hidden width. THOG’s premise is that some of this repeated structure may be represented compactly and materialised ephemerally from learned low-dimensional descriptions rather than stored independently for every layer and matrix element.
+PLASTIC addresses a related but different question: once a compact representation is being trained natively rather than compressing a finished dense model, how much architecture should the model actually use? A fixed layer count or MLP width chosen before training may be unnecessarily conservative, unnecessarily expensive, or simply wrong for the representation capacity available to the compact parameterisation.
+DEPTH plasticity therefore treats active layer count as a learnable architecture variable. MLP plasticity treats the global hidden expansion factor as a supervised architecture variable. Both must be controlled carefully because architecture changes alter training cost, memory use, optimisation state and the meaning of performance comparisons.
+2.2 Why GPT-2 / nanoGPT remains the implementation base
+GPT-2 is architecturally conventional enough that changes can be attributed to THOG rather than to a moving target. nanoGPT is correspondingly small, legible and easy to instrument. It exposes the essential transformer ingredients—token/position embeddings, repeated attention/MLP blocks, layer normalisation and LM head—without a large framework abstraction layer.
+That makes nanoGPT a useful laboratory for PLASTIC because:
+• dense baselines are well understood;
+• layer count and MLP expansion have obvious dense equivalents;
+• materialisation and activation-checkpointing costs can be measured directly;
+• checkpoint/resume behaviour is tractable;
+• CPU tests can exercise substantial control logic before scarce GPU testing;
+• exact console/audit output can remain human-readable.
+2.3 The specific DEPTH FINE problem addressed by Version 0.52
+The Version 0.51 FINE controller already probes every valid integer layer count within a configured radius and maintains exact-offset paired histories. That is materially better than a ternary L−1/L/L+1 controller. However, the candidate-local decision still has a failure mode: it can treat opposite directions as separate candidates even when both sides of L appear favourable in the same recent regime.
+If several L− candidates and several L+ candidates repeatedly beat L, the evidence is not clean evidence for movement. It may be noise, a transient local bump at L, shared-sample correlation, immature extrapolation above L, or a genuinely non-monotone objective surface. In all cases immediate directional commitment is questionable.
+Version 0.52 therefore adds a side-level interpretation without throwing away the candidate-local machinery. Full-radius measurements answer two different questions:
+• side evidence: which direction, if either, is spatially coherent enough to trust?
+• exact-offset evidence: if a direction is permitted, which candidate in that direction has the strongest robust improvement?
+This separation is central to the Version 0.52 design.
+
+3. Scope, Terms and Governing Decisions
+3.1 Scope
+Version 0.52 governs the shared PLASTIC architecture controller, with detailed new normative requirements for DEPTH FINE count decisions. It retains Version 0.5 MLP plasticity unchanged except where shared infrastructure is affected by configuration, checkpoint or diagnostics rules.
+3.2 Terms
+Term | Meaning
+PLASTIC | Shared architecture controller coordinating enabled architecture dimensions.
+DEPTH | Plasticity of active transformer layer count and trainable depth coordinates.
+MLP | Global supervised plasticity of the MLP hidden expansion factor F.
+COARSE | Optional DEPTH bracket/discovery phase before ordinary FINE training.
+FINE | Ordinary training phase in which DEPTH count may change through probe decisions.
+L | Current active DEPTH layer count at a probe event.
+L−k | Candidate with k fewer active layers than L, if feasible.
+L+k | Candidate with k more active layers than L, if feasible.
+probe event | One scheduled FINE update on which all valid candidate counts in the configured radius are evaluated on a shared first-microstep chain.
+paired difference | candidate objective score minus current-L objective score for the same probe event; negative is favourable to the candidate.
+exact-offset history | Retained temporal paired differences for one state/current-count and one exact offset k.
+left side | All feasible L−k candidates in the current probe radius.
+right side | All feasible L+k candidates in the current probe radius.
+LEFT / RIGHT / AMBIGUOUS | Single directional classification emitted by one full-radius probe event.
+directional history | Retained sequence of LEFT/RIGHT/AMBIGUOUS event votes for the current count state.
+interpolation-like | Evidence from removing positions that already participate in the trained active prefix.
+extrapolation-like | Evidence from activating positions beyond the current trained active prefix.
+full-window readiness | Movement is forbidden until the complete configured number of probe observations exists for the relevant exact-offset and directional histories.
+3.3 Governing decisions
+G1. PLASTIC is one shared architecture controller, not independent controllers that can change dimensions concurrently without coordination.
+G2. DEPTH COARSE/FINE and MLP supervised widening remain serialised when both are enabled.
+G3. The selected objective defines candidate scores. Directional coherence is goal-agnostic and operates only on “candidate score better than current score” outcomes after scoring.
+G4. All valid candidates in the configured FINE radius are measured; max_step constrains the committed transition, not the measurement radius.
+G5. Within-event candidate outcomes are correlated and shall not be counted as independent temporal observations.
+G6. The controller emits exactly one directional vote per probe event.
+G7. Lower-side evidence is undiscounted. Higher-side evidence is discounted for extrapolation and distance using plastic__layer_count_extrapolation_weight.
+G8. If both sides have strict within-event majority support, the event is AMBIGUOUS rather than choosing the larger support.
+G9. A directional history must contain the complete configured history window before it can authorise movement.
+G10. A candidate’s exact-offset history must likewise contain the complete configured history window before that candidate can qualify.
+G11. AMBIGUOUS votes remain in the denominator of the temporal strict-majority rule.
+G12. Count changes clear candidate-local and directional histories for the old count state.
+G13. The update brake remains separate from history readiness and continues to prevent rapid recommits.
+G14. Newly activated positions are not assumed to become trustworthy interpolation immediately after growth. History reset, full-window readiness and the update brake jointly provide a deliberate maturation interval.
+G15. The sole new rule-specific hyperparameter is the extrapolation weight; fixed majority thresholds are not exposed as knobs.
+
+4. Shared PLASTIC Architecture Controller
+4.1 Shared objective layer
+The controller supports the existing goal catalogue. For DEPTH these include lowest_loss, layer_efficiency, relative_training_wall_time and memory_budget. Each objective maps a candidate measurement to a scalar score where lower is better.
+The new directional rule does not reinterpret those objectives. It receives already-computed candidate scores and therefore applies uniformly across all goals. A “win” always means candidate_score < current_score under the active goal.
+4.2 Decision pipeline
+The normative DEPTH FINE pipeline is:
+1. Schedule a full-radius probe event.
+2. Measure every feasible count in [L−r, L+r] using the existing paired/shared-sample probe machinery.
+3. Convert measurements to objective-specific scalar scores.
+4. Append each candidate-vs-L paired score difference to its exact-offset history.
+5. Evaluate candidate-local robust statistics.
+6. Compute one left/right/ambiguous assessment from the current probe event across all feasible offsets.
+7. Append that single event vote to the current state’s directional history.
+8. Require full-window readiness for candidate-local and directional histories.
+9. Require a strict temporal majority for the candidate’s direction.
+10. Among candidates that pass both the local and directional gates, choose the strongest standardized improvement; retain the existing lower-count exact-tie rule.
+11. Clamp the desired offset to max_step.
+12. Apply the existing update-brake and transition machinery.
+13. On a committed count change, clear old candidate and directional histories and start fresh evidence collection for the new count.
+4.3 Shared-brake principle
+The update brake remains an architecture-transition safety mechanism. It is not a substitute for statistical readiness and is not folded into the history window. A state can have a mature evidence window while brake-active, or a brake can expire while history is still immature. Both gates must independently pass.
+4.4 Shared checkpoint principle
+All architecture-control state required to reproduce future decisions must be checkpointed semantically. For DEPTH this includes the current count, coordinate state, exact-offset histories, directional history, last count-change update, canonical probe cadence/history settings and extrapolation weight. Retired config fields may be read for migration but shall not be re-emitted as canonical state.
+
+5. DEPTH Plasticity
+5.1 Existing DEPTH model
+DEPTH plasticity retains the active-prefix coordinate model: public sample_layer coordinates represent notional layer positions; the first N positions are active when current layer count is N. Surviving coordinates are not remapped merely because the count changes. Growth appends/activates the next prefix positions; shrinkage removes the tail of the active prefix.
+5.2 COARSE phase
+The Version 0.4/0.5 COARSE design remains unchanged. COARSE is optional, uses fixed-count frozen-geometry trials from reproducibly reconstructed fresh model state, scores candidate counts under the selected objective, and chooses the best starting count for FINE. Roll-through and review-pause behaviour remain as already specified.
+5.3 FINE probe cadence
+plastic__layer_count_probe__probe_every_n_steps is the canonical cadence control. It is measured in successful optimiser updates. Example: a value of 10 schedules full-radius probe events ten updates apart. The name is intentionally explicit: this control is not an evidence-history length.
+If the existing resolution rule permits an unset cadence to inherit the update brake, that resolution may remain, but the resolved startup output and checkpoint identity must use the canonical field name.
+5.4 FINE evidence history length
+plastic__layer_count_probe__window_size_as_number_of_probes is the canonical history-length control. It is measured in probe events, not optimiser updates.
+For a value of 8, each exact-offset history retains at most the latest eight paired differences for its current-count state. The directional history likewise retains the latest eight LEFT/RIGHT/AMBIGUOUS votes.
+The cadence and history length are deliberately independent. For cadence=10 and history=8, mature evidence contains eight probe events spread across seven cadence gaps; from first retained event to last retained event the span is 70 optimiser updates.
+5.5 Full-radius measurements
+Let r = plastic__layer_count_probe_radius. At current layer count L and maximum capacity M, probe every integer count:
+max(1,L−r), …, L, …, min(M,L+r).
+The probe radius defines evidence acquisition. plastic__layer_count_max_step constrains only how far a committed transition may move after a winner is selected.
+5.6 Objective score and paired differences
+For every feasible candidate c, let J(c) be its scalar objective score after applying the selected goal. Define paired difference:
+d_k = J(L+k) − J(L).
+Negative d_k means L+k is better than L for that probe event. Positive means worse. Zero is not a win.
+The existing raw probe losses remain displayed because they are valuable direct evidence even for objectives that later add time, memory or layer-cost terms.
+5.7 Candidate-local robust evidence
+5.7.1 Exact-offset histories
+Histories remain keyed by current count and exact signed offset. Evidence for L+1 is not pooled with L+2, nor with the same absolute candidate count reached from another current state. This preserves locality and avoids treating changes in the meaning of the comparison as stationary observations.
+5.7.2 Full-window readiness replaces min_probes
+plastic__layer_count_min_probes is removed as a public/config hyperparameter.
+For an exact-offset candidate to qualify, its retained history length must equal the configured plastic__layer_count_probe__window_size_as_number_of_probes. Partial windows may be displayed and checkpointed but may never trigger a count change.
+There is deliberately no second readiness threshold. If the configured history window is 8, readiness is exactly 8 observations.
+5.7.3 Robust statistics
+For retained values x_1…x_n at one exact offset:
+median = median(x)
+MAD = median(|x_i − median|)
+sigma = max(1.4826 × MAD, implementation floor)
+score_z = −median / sigma
+Positive score_z means the historical median favours the candidate. Negative score_z means the historical median favours current L.
+The existing implementation floor remains required to avoid division instability when MAD is zero or extremely small.
+5.7.4 Candidate-local qualification
+After full-window readiness, an exact-offset candidate is locally qualified only when all existing substantive gates pass:
+• median < −lambda × sigma;
+• latest paired difference < 0;
+• strict majority of retained paired differences are < 0;
+• candidate is feasible.
+The lambda control remains plastic__layer_count_probe_noise_lambda.
+The previous minimum-observation gate is removed because full-window readiness is stronger and unambiguous.
+5.7.5 Why candidate-local evidence is not enough
+Candidate-local evidence answers “does this exact count look better than L?” It does not answer “is the objective surface coherently pointing in this direction?” If L−3 and L+4 both pass independently, a directionless winner contest can commit to whichever happens to have the larger standardized score even though the spatial evidence is contradictory.
+Version 0.52 therefore adds an event-level directional gate underneath all objectives and above the exact winner selection.
+5.8 Per-probe directional assessment
+5.8.1 Evidence unit
+One full-radius probe event is the temporal evidence unit. The controller must not treat each of the r left and r right comparisons as an independent temporal vote because they share the same current-L reference, model state and sampled tokens.
+The spatial comparisons are used within the event to construct side support. The event then contributes exactly one of LEFT, RIGHT or AMBIGUOUS to temporal history.
+5.8.2 Left/interpolation support
+For every feasible negative offset k<0 define win_k=1 if J(L+k)<J(L), else 0.
+Let K_L be the set of feasible negative offsets. If K_L is non-empty:
+S_left = sum(win_k for k in K_L) / |K_L|.
+All left candidates have equal weight 1.0. They are interpolation-like because they use a subset of the currently active/trained prefix.
+If no left candidate is feasible, S_left is unavailable rather than zero.
+5.8.3 Right/extrapolation support
+Let e = plastic__layer_count_extrapolation_weight, with 0.5 < e <= 1.0 and default 0.8.
+For feasible positive distance k=1…r, define raw distance weight:
+q_k = e^(k−1).
+Thus with e=.8 and radius 5:
+L+1 1.0000
+L+2 0.8000
+L+3 0.6400
+L+4 0.5120
+L+5 0.4096
+Let K_R be the feasible positive offsets and define the normalized weighted win fraction:
+U_right = sum(q_k × win_k) / sum(q_k).
+Then apply the same hyperparameter once more as a side-level extrapolation credibility discount:
+S_right = e × U_right.
+This intentionally makes the right side harder to authorise than the left. At e=.8 the maximum possible S_right is .8 even when every higher-count candidate wins.
+The double use of e is deliberate but simple: distance within extrapolation decays geometrically, and the whole extrapolative side is less credible than interpolation. One knob governs both effects.
+At e=1.0, q_k=1 for all k and S_right becomes the ordinary unweighted right win fraction; this is the symmetric ablation.
+If no right candidate is feasible, S_right is unavailable rather than zero.
+5.8.4 Event vote rule
+The event vote uses fixed strict-majority threshold 0.5; there is no threshold hyperparameter.
+Vote LEFT iff:
+• S_left is available and S_left > 0.5; and
+• S_right is unavailable or S_right <= 0.5.
+Vote RIGHT iff:
+• S_right is available and S_right > 0.5; and
+• S_left is unavailable or S_left <= 0.5.
+Otherwise vote AMBIGUOUS.
+Most importantly, if both S_left>0.5 and S_right>0.5, the event is AMBIGUOUS. The controller must not choose whichever side has the numerically larger support. Contradictory majority evidence is evidence to wait.
+5.8.5 Boundary behaviour
+At L=1 there may be no left candidates. A coherent right majority may still emit RIGHT; the unavailable left side does not become an artificial zero vote.
+At L=M there may be no right candidates. A coherent left majority may still emit LEFT.
+If the only feasible side lacks strict-majority support, emit AMBIGUOUS.
+5.9 Directional history and temporal gate
+5.9.1 State-local history
+Directional history is keyed to the current layer-count state, just like exact-offset evidence. A history gathered while L=8 does not become evidence for L=9 after a transition.
+5.9.2 Full-window readiness
+The directional history must contain exactly the configured maximum retained window before it can authorise movement. With window_size_as_number_of_probes=8, histories of 1…7 events always conclude “no permitted direction” regardless of their vote split.
+5.9.3 Temporal strict majority
+For a full history of N votes, count:
+n_L = number of LEFT votes
+n_R = number of RIGHT votes
+n_A = number of AMBIGUOUS votes
+A LEFT direction is permitted iff n_L > N/2.
+A RIGHT direction is permitted iff n_R > N/2.
+Otherwise no direction is permitted.
+AMBIGUOUS votes remain in the denominator. They are not discarded, because repeated ambiguity is itself evidence against committing an architectural move.
+For N=8:
+5/1/2 => LEFT
+1/5/2 => RIGHT
+4/0/4 => none
+0/4/4 => none
+3/3/2 => none
+5.10 Combined count-change gate
+A candidate at offset k may participate in the winner contest only if:
+1. its exact-offset history is full;
+2. its robust candidate-local qualification passes;
+3. the directional history is full;
+4. k<0 and the temporal directional conclusion is LEFT, or k>0 and it is RIGHT;
+5. the update brake is not active.
+A high score_z is therefore insufficient on its own.
+If no candidate passes all gates, remain at L.
+5.11 Winner and bounded commit
+Among all eligible candidates in the permitted direction, retain the existing winner rule: choose maximum standardized improvement score_z; exact ties favour lower candidate count.
+Let k* be the desired winning offset. Commit:
+step = clamp(k*, −max_step, +max_step)
+new_count = L + step.
+The full-radius winner may therefore be L+5 while max_step=2 commits only L+2. This distinction must remain visible in audit data.
+5.12 Reset after a count change
+A committed count change clears all exact-offset histories and the L/R/A history from the old state for active decision purposes. New histories begin empty at the new count.
+Audit records may preserve the archived pre-transition evidence, but it must not remain live decision state.
+5.13 Post-growth evidence maturity
+After growth, newly activated positions have begun receiving ordinary training but are not instantly “steady-state interpolation” for future downward probes. Version 0.52 deliberately introduces no separate maturity timer.
+The existing count-change brake, history reset and mandatory full-window readiness rule do double duty:
+• brake prevents immediate recommit;
+• reset prevents pre-growth evidence from masquerading as evidence about the new state;
+• full-window readiness requires several fresh probes after growth before movement can recur.
+If experiments later show that newly activated positions need a longer independent maturity model, that is future work rather than a Version 0.52 knob.
+5.14 Relationship to all goals
+The directional rule applies identically to every DEPTH count objective because it consumes score comparisons after objective construction.
+For lowest_loss, a win means lower measured probe loss.
+For relative_training_wall_time, a win means lower loss-plus-time-penalty objective score.
+For layer_efficiency, a win means lower architecture-efficiency score as already defined.
+For memory_budget, a win means the candidate’s memory-budget objective score is lower under the established feasibility/scoring rule.
+The directional machinery never substitutes raw loss for the configured goal. Raw probe losses are nevertheless kept on the console because they remain valuable diagnostics.
+5.15 Rationale against giant pooled buckets
+With radius 5 and history 8, there can be 40 candidate comparisons on each side over the retained history. Treating those as 40 independent observations is statistically misleading: five comparisons from one event share the same current reference, model state and data sample.
+Version 0.52 instead performs spatial aggregation within each event and temporal aggregation across events. This preserves information from all probed counts without overstating sample size.
+
+6. MLP Plasticity
+6.1 Scope
+Version 0.52 makes no behavioural change to the Version 0.5 MLP plasticity design. MLP plasticity remains global rather than per-layer: one hidden expansion factor F applies to all transformer blocks.
+6.2 Supervised widening
+The MLP controller may widen the hidden dimension at configured supervision points when the active objective indicates that added capacity is justified. Function-preserving widening, optimizer-state handling, paired validation and serialisation with DEPTH changes remain governed by Version 0.5.
+6.3 Shared-controller implication
+Although the new L/R/A rule is DEPTH-specific, its implementation must live within the shared PLASTIC lifecycle cleanly. A future MLP directional analogue is not implied by Version 0.52. No DEPTH count change and MLP width change may be committed in the same joint decision unless a later specification explicitly defines such a joint move.
+
+7. Integrating DEPTH and MLP Plasticity
+7.1 Serial architecture decisions
+When DEPTH and MLP plasticity are both enabled, retain serial decision scheduling. The controller should attribute evidence to one architecture dimension at a time rather than confounding simultaneous depth and width changes.
+7.2 Shared brakes and attribution
+Existing shared-brake rules remain normative. A DEPTH count transition invalidates DEPTH candidate and directional histories and may also postpone MLP supervision according to the existing shared-controller schedule. Likewise, MLP widening may require a quiet period before DEPTH decisions resume.
+7.3 Checkpoint exactness
+Checkpoint state must identify which plastic mode currently owns the architecture decision opportunity, outstanding brakes, current DEPTH histories, MLP audit state and all canonical configuration values necessary to reproduce the same next decision after resume.
+
+8. Configuration and Resolution
+8.1 Canonical DEPTH FINE controls
+Control | Default | Units | Meaning
+plastic__layer_count_probe__probe_every_n_steps | existing resolved cadence | successful optimizer updates | Number of successful updates between full-radius DEPTH FINE probe events. This is cadence, not evidence depth.
+plastic__layer_count_probe__window_size_as_number_of_probes | existing history default | probe events | Maximum retained exact-offset paired comparisons and L/R/A event votes. It is also the mandatory readiness count.
+plastic__layer_count_probe_radius | 1 | layer-count offsets | Maximum integer distance measured on either side of current L, clipped by [1,M].
+plastic__layer_count_max_step | 1 | layers | Maximum absolute committed count movement after a winner is selected.
+plastic__layer_count_probe_noise_lambda | existing | robust sigma units | Candidate-local robust significance threshold.
+plastic__layer_count_extrapolation_weight | 0.8 | dimensionless | Right-side credibility and geometric distance discount e. Valid 0.5<e<=1.0; e=1.0 is symmetric.
+plastic__layer_count_update_brake | existing | successful optimizer updates | Minimum spacing between committed count changes.
+8.2 Retired / superseded controls
+Superseded name | Version 0.52 disposition
+plastic__layer_count_probe_window_size | Retired. Superseded by plastic__layer_count_probe__probe_every_n_steps because the old name falsely suggested evidence-window length.
+plastic__layer_count_probe_noise_window | Retired. Superseded by plastic__layer_count_probe__window_size_as_number_of_probes because the new name states the unit explicitly.
+plastic__layer_count_min_probes | Removed. No public/config alias. Full configured probe-history window is the sole readiness count.
+Any still older interval/min-observation spellings | Retired. They must not reappear as canonical CLI/config/checkpoint fields.
+8.3 Extrapolation-weight validation
+plastic__layer_count_extrapolation_weight must be finite and satisfy:
+0.5 < e <= 1.0.
+Values <=0.5 are rejected rather than allowed to make RIGHT mathematically unable to pass a strict >0.5 side majority even when every right candidate wins.
+Values >1 are rejected because they would amplify extrapolation relative to interpolation and reverse the intended reliability prior.
+8.4 Resolution and startup output
+Startup output shall print the canonical cadence, history length, radius, max_step, update brake and extrapolation weight. The retired min-probes field shall not be shown.
+The shell wrapper, argparse layer, RunConfig, TrainingConfig, model config, checkpoint identity, audit and help registry must agree exactly on the canonical spellings.
+8.5 Global DEBUG
+A genuinely global DEBUG constant shall reside in the shared project constants module. Initial/default DEBUG remains 9. This is intended as a cross-project debug verbosity mechanism and may later govern additional diagnostics.
+For this Version 0.52 feature:
+• DEBUG<=9: normal compact L/R/A summary only;
+• DEBUG>9: additionally expose per-offset win counts.
+The controller’s behaviour must never depend on DEBUG; it controls presentation only.
+
+9. Training, Checkpoint, Resume and Instrumentation
+9.1 Training-state requirements
+The trainer state must retain, at minimum:
+• current active layer count;
+• last committed count-change update;
+• exact-offset paired histories for current state;
+• current L/R/A directional history;
+• trainable sample coordinates and optimizer state;
+• any existing COARSE/FINE lifecycle state;
+• deterministic probe sampling state already required by the implementation.
+9.2 Checkpoint migration
+A Version 0.51 checkpoint may contain retired probe-control names and the min-probes field. Resume compatibility shall map the two renamed controls to their Version 0.52 semantic equivalents. The retired min-probes value is ignored for future readiness; Version 0.52 uses the configured history window itself.
+A Version 0.51 checkpoint with a partially filled history may resume that history, but no movement may occur until the retained history reaches the full Version 0.52 window.
+If old directional history is absent, it begins empty; candidate-local evidence alone shall not permit an immediate move.
+9.3 DDP determinism
+All ranks must resolve the same candidate scores, event vote, directional history, conclusion and committed count. Rank-local sampled token positions may remain rank-local where already intended, but the count decision is shared and deterministic.
+9.4 Audit requirements
+Every probe decision audit should include enough data to replay both gates:
+• current count and update number;
+• candidate and execution counts;
+• objective and candidate score table;
+• exact-offset paired histories before/after;
+• median, MAD, sigma, score_z, latest comparison and favourable count per offset;
+• configured extrapolation weight;
+• S_left and S_right for the event;
+• event vote LEFT/RIGHT/AMBIGUOUS;
+• directional history before/after;
+• L/R/A counts and temporal conclusion;
+• desired winning count;
+• max_step-limited committed count;
+• brake state and decision reason;
+• transition details.
+The normal console need not expose the full audit payload.
+9.5 W&B / TensorBoard
+Existing objective/probe telemetry remains. Add compact scalar/categorical telemetry where useful for S_left, S_right, event vote, retained L/R/A counts and final directional conclusion. Avoid exploding telemetry into one metric namespace per possible radius offset unless existing exact-offset audit already provides that information more appropriately.
+
+10. Diagnostics and Required Implementation Work
+10.1 Normal probe-row ordering
+The normal single-row console should preserve existing progress fields while changing the PLASTIC section ordering to:
+… layers = N    sampled = […]    probe_losses […] = […]    score_z […] = […]    L/R/A=[…]/N=>D
+The precise tab alignment may remain ANSI-aware and implementation-specific, but sampled must appear immediately after layers and before probe_losses.
+10.2 L/R/A compact conclusion
+The normal summary format is exactly:
+L/R/A=[1/5/2]/8=>R
+Meaning:
+• 1 retained LEFT event;
+• 5 retained RIGHT events;
+• 2 retained AMBIGUOUS events;
+• 8 retained events in total;
+• RIGHT is currently directionally permitted.
+Before the full configured history exists, use the actual denominator but conclusion “-”. Example:
+L/R/A=[0/3/0]/3=>-
+The displayed denominator therefore makes readiness immediately visible.
+10.3 DEBUG win counts
+When constants.DEBUG>9, additionally show:
+wins L[2,1,3,2,1]/8; R[6,7,6,5,4]/8
+Entries correspond in distance order to the currently displayed probe range on each side: L−r…L−1 and L+1…L+r, clipped at boundaries.
+Each entry is the number of retained exact-offset comparisons in which that candidate beat L. The denominator is the number of retained comparisons for the displayed mature state. It is “wins”, not “net wins”.
+At DEBUG>9 the implementation need not preserve a single physical terminal row. Readability and complete diagnostics take precedence.
+10.4 sampled change cue
+The sampled coordinate array is a trajectory diagnostic, not the count itself. Compare the formatted sampled values on consecutive emitted optimizer-progress rows for a run.
+If one displayed coordinate value changes, render only that changed value pale pink (PINK) for exactly one emitted optimizer row. If the displayed value is unchanged on the next emitted row, render it ordinary white again.
+The comparison is against the previous emitted optimizer row, not every hidden training update. A change first becoming visible after several unlogged updates is highlighted when it first appears.
+A change in array length/count is a structural transition and need not mark every shifted entry as pink; the normal count-change diagnostics already identify the transition.
+10.5 Current-L probe-loss cue
+Within probe_losses, the element corresponding to offset 0/current L shall be bold white. Determine it from the actual candidate-offset list; do not assume it is the physical middle of the array, because radius clipping at L=1 or L=M can make the current element off-centre.
+Only the current-L value is bold white. Candidate values retain their existing presentation.
+10.6 Progress-field spacing
+Change the field labels exactly:
+loss  =  -> loss=
+grad norm=  VALUE -> grad norm= VALUE
+There shall be exactly one separating space after grad norm= before the numeric field. Existing T/V alignment must remain valid after ANSI color codes are stripped for visible-column calculations.
+10.7 Existing raw evidence remains visible
+Do not replace probe_losses or score_z with the new directional summary. The new fields supplement the existing raw/robust evidence:
+probe_losses: immediate candidate measurements;
+score_z: candidate-local historical effect strength;
+L/R/A: side-level temporal coherence;
+DEBUG wins: exact-offset historical consistency.
+
+11. Requirements and Acceptance Criteria
+11.1 Version 0.52 DEPTH FINE requirements
+ID | Requirement
+PD52-001 | The objective-specific score layer shall remain the sole definition of whether a candidate beats current L; the directional rule shall be goal-agnostic.
+PD52-002 | Every scheduled probe event shall evaluate every feasible integer count within the configured radius, including current L.
+PD52-003 | Candidate-local histories shall remain keyed by current-count state and exact signed offset.
+PD52-004 | plastic__layer_count_min_probes shall not exist as a public/config hyperparameter; supplying it shall be rejected.
+PD52-005 | A candidate-local count move shall be ineligible until its exact-offset history contains the complete configured number of probes.
+PD52-006 | Candidate-local qualification shall retain robust median/MAD/sigma significance, newest-comparison win and strict retained-history win majority.
+PD52-007 | The controller shall construct at most one directional vote per full-radius probe event.
+PD52-008 | Left support shall be the ordinary fraction of feasible L− candidates whose score is lower than current L.
+PD52-009 | Right raw distance weight at positive distance k shall be e^(k−1), where e=plastic__layer_count_extrapolation_weight.
+PD52-010 | Right support shall equal e times the normalized weighted fraction of feasible L+ candidates that beat L.
+PD52-011 | plastic__layer_count_extrapolation_weight shall default to 0.8 and be validated in (0.5,1.0].
+PD52-012 | e=1.0 shall recover symmetric equal candidate weighting and no whole-side right discount.
+PD52-013 | A probe event shall vote LEFT only when left support has strict majority and right support does not; RIGHT is symmetric with the discounted right support.
+PD52-014 | If both side supports exceed 0.5, the event shall be AMBIGUOUS regardless of which support is larger.
+PD52-015 | An unavailable boundary side shall not be treated as a zero-support side; the feasible side may vote if it meets its strict-majority rule.
+PD52-016 | Directional history shall be keyed to current-count state and retain at most the canonical configured number of probe events.
+PD52-017 | Directional history shall not authorise a move until its complete configured window is present.
+PD52-018 | LEFT or RIGHT shall be permitted only by a strict majority of all retained votes, with AMBIGUOUS votes retained in the denominator.
+PD52-019 | A candidate may enter the winner contest only if its local robust gate and the matching directional gate both pass.
+PD52-020 | A committed count change shall clear live candidate-local and directional histories from the old state.
+PD52-021 | plastic__layer_count_probe__probe_every_n_steps shall be the sole canonical FINE probe-cadence control; the prior cadence names are retired.
+PD52-022 | plastic__layer_count_probe__window_size_as_number_of_probes shall be the sole canonical retained probe-history length for candidate-local and L/R/A histories.
+PD52-023 | plastic__layer_count_min_probes shall not exist as a public/config hyperparameter; supplying it shall be rejected.
+PD52-024 | Every probe row shall normally expose L/R/A=[left/right/ambiguous]/n=>D, with D=- until full-window readiness and directional strict majority are both satisfied.
+PD52-025 | When constants.DEBUG>9, probe diagnostics shall additionally expose wins L[…]/n; R[…]/n, where entries are favourable-count histories in displayed offset order.
+PD52-026 | sampled shall appear immediately after layers on the progress row; a sampled value whose displayed value changes shall be pale pink for one optimizer-progress row only.
+PD52-027 | The probe_losses element corresponding to offset 0/current L shall be bold white, including radius clipping at hard boundaries.
+PD52-028 | Progress formatting shall render loss= and grad norm= with one following numeric-field space while retaining ANSI-aware T/V alignment.
+11.2 MLP and integration requirements
+All Version 0.5 PM5 and PI5 requirements remain normative: global F, function-preserving widening, paired auditions, serial scheduling, shared brakes, no diagonal joint move and exact joint-state checkpointing.
+
+12. Known Issues and Limitations
+Issue or limitation | Version 0.52 position
+Directional weighting is empirical | e=0.8 is an initial engineering default, not a theoretically optimal estimator. The public range is (0.5,1] so growth remains possible under the strict-majority rule. It requires ablation.
+Probe-event outcomes are correlated | The event-level vote reduces but does not eliminate dependence across time; successive probes occur on one evolving model trajectory.
+Both sides can genuinely improve | A non-monotone local objective can make L a real local bump. Version 0.52 intentionally waits rather than attempting an immediate multi-modal interpretation.
+Fresh interpolation after growth is weak | Newly activated positions have little ordinary-training history. Update brake + history reset + mandatory full-window readiness are the initial mitigation.
+Growth may become conservative | Discounting R can under-grow models whose higher counts are genuinely useful. e=1.0 is the controlled symmetric ablation.
+Boundary asymmetry | Near N=1 or N=M one side may be unavailable. The rule permits the feasible side to vote without an artificial zero from the missing side.
+Noise-window calibration | Cadence, retained probe-window size and lambda interact; the removed min-probes knob no longer creates a second readiness threshold.
+Full-radius probing costs more | The probe cadence must be large enough that exploration overhead does not erase training-throughput advantages.
+Local FINE remains path-dependent | COARSE improves starting count but does not prove global optimality.
+MLP auditions remain expensive | Version 0.52 does not reduce their branch cost.
+
+13. Acceptance Scenarios and Out of Scope
+13.1 Acceptance scenarios
+Scenario | Pass condition
+Cadence semantics | probe_every_n_steps=10 schedules full-radius candidate work at the defined ten-update cadence and does not change history length.
+Probe-history semantics | window_size_as_number_of_probes=6 retains at most six observations per exact offset and six side votes; no count move is eligible until all six are present.
+Right weighting | e=0.8, R=5 produces raw right weights 1,.8,.64,.512,.4096 and S_right=e*normalized_weighted_win_fraction.
+Symmetric fallback | e=1.0 yields equal right weights and no side-level discount.
+RIGHT event | S_right>0.5 while S_left<=0.5 yields RIGHT.
+LEFT event | S_left>0.5 while S_right<=0.5 yields LEFT.
+Contradiction | S_left>0.5 and S_right>0.5 yields AMBIGUOUS.
+No-majority | Neither side >0.5 yields AMBIGUOUS.
+Boundary | Unavailable side does not veto a coherent majority on the feasible side.
+Temporal majority | Window [R,A,R,R,L,R,R,A] permits RIGHT because 5/8 votes are RIGHT.
+Ambiguous denominator | Four RIGHT and four AMBIGUOUS in an 8-vote window does not permit growth.
+Two-gate rejection | A high-z L+ candidate cannot move count if directional history does not permit RIGHT.
+Reset | After a count change old candidate histories and side votes are archived and new state histories start empty.
+Post-growth brake | A newly grown state cannot recommit before both the configured update brake and a completely fresh probe-history window have been satisfied.
+Resume/DDP | All ranks and resumed execution reproduce identical support/vote/decision.
+Partial window | With window_size_as_number_of_probes=8, even a 6/7 RIGHT split at the seventh probe produces =>- and cannot move count.
+Normal console | A mature [L,R,A]=[1,5,2] history renders exactly L/R/A=[1/5/2]/8=>R.
+DEBUG console | With DEBUG>9 and the example histories, render exactly wins L[2,1,3,2,1]/8; R[6,7,6,5,4]/8 in addition to L/R/A.
+Sample change cue | A formatted sampled coordinate that changes is pink for exactly one optimizer row and ordinary white on the next unchanged row.
+Current-L cue | The loss for offset 0 is bold white even when boundary clipping means it is not physically centered in the array.
+13.2 Explicitly out of scope
+• learning the extrapolation weight automatically;
+• a separate maturity timer or confidence model for newly activated positions;
+• distance weighting on L− interpolation candidates;
+• probabilistic independence assumptions over all within-event candidate outcomes;
+• simultaneous diagonal N/F moves;
+• input-dependent layer count or sample positions;
+• automatic re-COARSE or global bracket search after FINE begins.
+
+Appendix A. Resolved Examples
+A.1 Probe cadence versus evidence history
+plastic__layer_count_probe__probe_every_n_steps = 10
+plastic__layer_count_probe__window_size_as_number_of_probes = 6
+
+probe events: 100, 110, 120, 130, 140, 150
+latest retained observations per offset: 6
+first-to-last span of mature six-event window: 50 optimizer updates
+The cadence is 10 updates; the evidence window is 6 probe events. They are intentionally different units and controls.
+A.2 Radius-five spatial evidence
+current N = 8, radius = 5
+counts = 3 4 5 6 7 | 8 | 9 10 11 12 13
+L-5 ... L-1 | L | L+1 ... L+5
+Each probe event generates up to ten candidate-vs-current outcomes but only one directional vote.
+A.3 Right weighting at e=0.8
+raw q: L+1=1.0000 L+2=.8000 L+3=.6400 L+4=.5120 L+5=.4096
+if wins are L+1,L+2,L+3:
+U_right=(1+.8+.64)/(1+.8+.64+.512+.4096)=.7258
+S_right=.8*.7258=.5806
+A.4 Contradictory event
+S_left = 3/5 = 0.60
+S_right = 0.5806
+=> AMBIGUOUS because both sides exceed 0.5
+A.5 Eight-event directional history
+history = [RIGHT, AMBIGUOUS, RIGHT, RIGHT, LEFT, RIGHT, RIGHT, AMBIGUOUS]
+RIGHT=5 LEFT=1 AMBIGUOUS=2
+=> RIGHT directional majority passes (5/8)
+A.6 Candidate winner still separate
+directional gate: RIGHT
+qualified candidates: L+1 z=.42, L+3 z=.88, L+5 z=.51
+winning probe count: L+3
+max_step=2
+commit: L+2
+The side gate chooses which direction is credible; the existing z machinery chooses which candidate in that direction is strongest; max_step decides how far the architecture is allowed to move now.
+Appendix B. Implementation Sequence and Migration
+B.1 Recommended implementation order
+1. Canonicalize the Version 0.52 cadence/history names in parser, wrappers, config, startup output, help, checkpoint metadata and audit records; remove the min-probes public/config field.
+2. Retain plastic__layer_count_extrapolation_weight with default 0.8, validate 0.5 < e <= 1, and include e=1.0 symmetric-ablation tests.
+3. Implement a pure event-level side-support function over an immutable full-radius score report.
+4. Add LEFT/RIGHT/AMBIGUOUS classification with explicit unavailable-side semantics.
+5. Add state-keyed side-vote history using the canonical full-window probe-history control.
+6. Insert the directional gate after existing candidate-local qualification and before winner/max_step commit.
+7. Archive/reset side history together with candidate histories on N/F changes.
+8. Extend decision audit, startup diagnostics, W&B/checkpoints and replay tests.
+9. Add deterministic synthetic tests for formulas, contradiction, boundaries, e=1, reset/brake and resume.
+10. Run focused CPU/DDP regressions before any GPU controller tuning.
+11. Tune e separately from lambda/window where possible so behavioural causes remain attributable.
+B.2 Version migration
+Version 0.52 changes exact DEPTH FINE readiness relative to Version 0.51: a partial candidate or directional history can never commit a count change. A Version 0.51 checkpoint may contain fewer retained votes than its configured window and may contain the retired min-probes field. Resume compatibility must therefore map the retained histories faithfully, ignore/retire the old minimum field, and enforce the Version 0.52 full-window gate before any post-resume movement.
+B.3 Revision summary
+Revision | Controller change
+0.50 | Shared PLASTIC controller: retained DEPTH COARSE/FINE plus supervised global MLP width and serial integration.
+0.51 | DEPTH FINE direction must be coherent across the full radius; event-level side votes, interpolation/extrapolation asymmetry, e-weighted right support, canonical probe cadence/minimum names.
+0.52 | Renamed the DEPTH probe cadence/history controls; removed the separate min-probes hyperparameter in favour of mandatory full-window readiness; retained the L/R/A directional-coherence rule with e-weighted right support; and specified the compact normal/DEBUG probe-row diagnostics and console formatting cues.

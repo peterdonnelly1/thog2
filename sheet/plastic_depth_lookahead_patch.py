@@ -1,13 +1,9 @@
 # vvv THOG
-"""Exact-radius PLASTIC DEPTH lookahead and console reporting.
+"""Full-radius PLASTIC DEPTH FINE probing and bounded count movement.
 
-This patch keeps the existing inline-probe execution path but separates three
-ideas that were previously collapsed into adjacent N-1/N/N+1 probing:
-
-* decision probes are exactly L-radius, L, L+radius where valid;
-* bridge candidates L±max_step are checkpointed only so the selected one-step
-  training prefix exists;
-* console statistics report the exact decision probes, not the bridge points.
+Every valid integer count in the inclusive configured radius is measured on
+one shared first-microstep chain.  The robust winner records the desired probe
+count, while max_step independently limits the committed prefix transition.
 """
 
 from __future__ import annotations
@@ -49,8 +45,8 @@ def _config_probe_radius(config: Any) -> int:
 
 
 def _config_max_step(config: Any) -> int:
-    value = getattr(config, "plastic__layer_count_max_step", os.environ.get(_MAX_STEP_ENV, 1))
-    return _positive_int(value, name="plastic__layer_count_max_step")
+    value = getattr(config, "plastic__layer_count__max_allowable_layer_change", os.environ.get(_MAX_STEP_ENV, 1))
+    return _positive_int(value, name="plastic__layer_count__max_allowable_layer_change")
 
 
 # vvv THOG expose exact-radius controls through the existing CLI without changing canonical dataclasses yet
@@ -78,11 +74,11 @@ def _strip_plastic_lookahead_args(args: Optional[Sequence[str]]) -> Tuple[list[s
         if argument == "--plastic-layer-count-max-step":
             if index + 1 >= len(source):
                 raise ValueError("--plastic-layer-count-max-step requires a value")
-            max_step = _positive_int(source[index + 1], name="plastic__layer_count_max_step")
+            max_step = _positive_int(source[index + 1], name="plastic__layer_count__max_allowable_layer_change")
             index += 2
             continue
         if argument.startswith("--plastic-layer-count-max-step="):
-            max_step = _positive_int(argument.split("=", 1)[1], name="plastic__layer_count_max_step")
+            max_step = _positive_int(argument.split("=", 1)[1], name="plastic__layer_count__max_allowable_layer_change")
             index += 1
             continue
         stripped.append(argument)
@@ -97,8 +93,16 @@ def _parse_known_args_with_plastic_lookahead(self: argparse.ArgumentParser, args
     if max_step is not None:
         os.environ[_MAX_STEP_ENV] = str(max_step)
     parsed, extras = _ORIGINAL_ARGPARSE_PARSE_KNOWN_ARGS(self, stripped, namespace)
-    setattr(parsed, "plastic__layer_count_probe_radius", _positive_int(os.environ.get(_RADIUS_ENV, 1), name="plastic__layer_count_probe_radius"))
-    setattr(parsed, "plastic__layer_count_max_step", _positive_int(os.environ.get(_MAX_STEP_ENV, 1), name="plastic__layer_count_max_step"))
+    parsed_probe_radius = getattr(parsed, "plastic__layer_count_probe_radius", None)
+    parsed_max_step = getattr(parsed, "plastic__layer_count__max_allowable_layer_change", None)
+    resolved_probe_radius = probe_radius if probe_radius is not None else parsed_probe_radius
+    resolved_max_step = max_step if max_step is not None else parsed_max_step
+    if resolved_probe_radius is None:
+        resolved_probe_radius = os.environ.get(_RADIUS_ENV, 1)
+    if resolved_max_step is None:
+        resolved_max_step = os.environ.get(_MAX_STEP_ENV, 1)
+    setattr(parsed, "plastic__layer_count_probe_radius", _positive_int(resolved_probe_radius, name="plastic__layer_count_probe_radius"))
+    setattr(parsed, "plastic__layer_count__max_allowable_layer_change", _positive_int(resolved_max_step, name="plastic__layer_count__max_allowable_layer_change"))
     return parsed, extras
 
 
@@ -157,7 +161,7 @@ def choose_plastic_depth_count_with_exact_radius(
         raise ValueError("update_number must be positive")
     if update_brake < 0:
         raise ValueError("update_brake must be non-negative")
-    max_step = _positive_int(max_step, name="plastic__layer_count_max_step")
+    max_step = _positive_int(max_step, name="plastic__layer_count__max_allowable_layer_change")
 
     score_by_count = _finite_score_by_count(score_report)
     current_score = score_by_count.get(current_count)
@@ -189,8 +193,14 @@ def choose_plastic_depth_count_with_exact_radius(
             values = values[-noise_window:]
             updated_histories[key] = tuple(values)
             median, mad, sigma = _robust_scale(values, paired_difference)
-            standardized = -paired_difference / sigma
-            significant = len(values) >= minimum_observations and paired_difference < -noise_lambda * sigma
+            standardized = -median / sigma
+            favourable_count = sum(value < 0.0 for value in values)
+            significant = (
+                len(values) >= minimum_observations
+                and median < -noise_lambda * sigma
+                and paired_difference < 0.0
+                and favourable_count * 2 > len(values)
+            )
             if significant and not brake_active:
                 passing.append((standardized, offset, candidate_count))
         evidence.append(
@@ -213,8 +223,7 @@ def choose_plastic_depth_count_with_exact_radius(
         _, selected_offset, _ = max(passing, key=lambda item: (item[0], -item[2]))
         step = max(-max_step, min(max_step, selected_offset))
         selected_count = current_count + step
-        for offset in candidate_offsets:
-            updated_histories.pop(_history_key(selected_count, offset), None)
+        updated_histories = {}
 
     return _controller.PlasticDepthRobustCountDecision(
         selected_count=selected_count,
@@ -232,16 +241,11 @@ _trainer_step.choose_plastic_depth_count_with_mad = choose_plastic_depth_count_w
 
 
 def _lookahead_counts(current: int, maximum: int, radius: int, max_step: int) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
-    decision_counts = {current}
-    execution_counts = {current}
-    if current - radius >= 1:
-        decision_counts.add(current - radius)
-        execution_counts.add(max(1, current - max_step))
-    if current + radius <= maximum:
-        decision_counts.add(current + radius)
-        execution_counts.add(min(maximum, current + max_step))
-    execution_counts.update(decision_counts)
-    return tuple(sorted(decision_counts)), tuple(sorted(execution_counts))
+    del max_step
+    lower = max(1, current - radius)
+    upper = min(maximum, current + radius)
+    decision_counts = tuple(range(lower, upper + 1))
+    return decision_counts, decision_counts
 
 
 _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
@@ -251,6 +255,8 @@ _ORIGINAL_COMMIT_INLINE_UPDATE = _trainer_step.TrainerStepMixin._commit_plastic_
 
 def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dict[str, Any]]:
     if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
+        return None
+    if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":
         return None
     lattice = self._plastic_depth_lattice()
     if lattice is None:
@@ -370,8 +376,8 @@ def _plastic_depth_inline_probe_request_with_lookahead(self: Any, targets: torch
             current_count=int(context["current_count"]),
             score_report=score_report,
             histories=self.state.plastic_depth_probe_histories,
-            noise_window=self.config.plastic__layer_count_probe_noise_window,
-            minimum_observations=self.config.plastic__layer_count_probe_noise_min_observations,
+            noise_window=self.config.plastic__layer_count_probe__window_size_as_number_of_probes,
+            extrapolation_weight=float(self.config.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence),
             noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
             update_number=int(self.state.completed_updates) + 1,
             last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
@@ -579,7 +585,7 @@ def _format_progress_line_with_lookahead(run_id: str, event: str, payload: Dict[
     if probe_losses:
         probe_label = ", ".join(_format_offset(offset) for offset in offsets)
         formatted_losses = ", ".join(_stage6._format_plastic_probe_loss(value) for value in probe_losses)
-        fields.append(f"\tprobe_losses [{probe_label}] = [{formatted_losses}]")
+        fields.append(f"probe_losses [{probe_label}] = [{formatted_losses}]")
     if loss_gain:
         gain_label = ", ".join(_format_offset(offset) for offset in edge_offsets)
         fields.append(f"loss_gain [{gain_label}] = [{', '.join(_format_gain(value) for value in loss_gain)}]")
@@ -591,8 +597,8 @@ def _format_progress_line_with_lookahead(run_id: str, event: str, payload: Dict[
     inserted = "  ".join(fields)
     marker = "  layer indices = "
     if marker in line:
-        return line.replace(marker, f"  {inserted}{marker}", 1)
-    return f"{line}  {inserted}"
+        return line.replace(marker, f"\t{inserted}\tlayer indices = ", 1)
+    return f"{line}\t{inserted}"
 
 
 _stage6.Stage6Trainer._prepare_console_progress_payload = _prepare_console_progress_payload_with_lookahead

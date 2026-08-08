@@ -226,8 +226,7 @@ def _learned_trainer(**overrides) -> SharedTrainer:
         plastic__max_permitted_layers=5,
         plastic__layer_count_objective="lowest_loss",
         plastic__layer_count_update_brake=0,
-        plastic__layer_count_probe_noise_window=8,
-        plastic__layer_count_probe_noise_min_observations=1,
+        plastic__layer_count_probe__window_size_as_number_of_probes=8,
         plastic__layer_count_probe_noise_lambda=0.0,
         n_layer=5,
         depth_order=4,
@@ -304,7 +303,10 @@ def test_trainer_uses_inline_probe_then_selected_prefix_for_remaining_microsteps
 
 
 def test_trainer_commits_count_only_after_stock_adamw_step() -> None:
-    trainer = _learned_trainer(gradient_accumulation_steps=2)
+    trainer = _learned_trainer(
+        gradient_accumulation_steps=2,
+        plastic__layer_count_probe__window_size_as_number_of_probes=1,
+    )
     forward_counts = []
     optimizer_step_counts = []
     original_forward = trainer.model.forward
@@ -385,7 +387,7 @@ def test_inline_probe_sample_positions_are_deterministic_per_update_and_rank() -
         first = trainer._plastic_depth_sampled_token_indices(targets)
         second = trainer._plastic_depth_sampled_token_indices(targets)
         torch.testing.assert_close(first, second, rtol=0.0, atol=0.0)
-        assert first.numel() == 256
+        assert first.numel() == trainer.config.plastic__layer_count_probe__number_of_sampled_valid_tokens
         assert bool((targets.reshape(-1).index_select(0, first) != -1).all().item())
 
         trainer.state.completed_updates += 1
@@ -397,7 +399,10 @@ def test_inline_probe_sample_positions_are_deterministic_per_update_and_rank() -
 
 def test_fast_discard_false_retains_maximum_candidate_prefix() -> None:
     with patch.dict(os.environ, {"THOG2_FAST_DISCARD": "false"}):
-        trainer = _learned_trainer(gradient_accumulation_steps=2)
+        trainer = _learned_trainer(
+            gradient_accumulation_steps=2,
+            plastic__layer_count_probe__window_size_as_number_of_probes=1,
+        )
     observed_layer_indices = []
     original_materialize = trainer.raw_model._materialize_block_parameters_for_update
 
@@ -450,7 +455,13 @@ def test_five_update_brake_collects_evidence_and_enforces_spacing() -> None:
         gradient_accumulation_steps=1,
         max_updates=6,
         plastic__layer_count_update_brake=5,
+        plastic__layer_count_probe__window_size_as_number_of_probes=5,
     )
+    trainer.state.plastic_depth_probe_histories = {
+        "3:-1": [1.0, 1.0, 1.0, 1.0],
+        "3:+1": [-1.0, -1.0, -1.0, -1.0],
+        "3:@LRA": [1.0, 1.0, 1.0, 1.0],
+    }
     try:
         with patch(
             "sheet.trainer_step.choose_plastic_depth_candidate",

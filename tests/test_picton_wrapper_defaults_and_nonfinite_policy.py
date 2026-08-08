@@ -164,11 +164,11 @@ def test_core_nonfinite_recovery_defaults_to_bounded_skip_across_public_config_l
     run_config = OwtRunConfig(model_type="dense")
     training_config = TrainingConfig()
     assert parser_arguments.nonfinite_update_policy == "skip"
-    assert parser_arguments.max_nonfinite_update_skips == 10
+    assert parser_arguments.max_nonfinite_update_skips == 99999
     assert run_config.nonfinite_update_policy == "skip"
-    assert run_config.max_nonfinite_update_skips == 10
+    assert run_config.max_nonfinite_update_skips == 99999
     assert training_config.nonfinite_update_policy == "skip"
-    assert training_config.max_nonfinite_update_skips == 10
+    assert training_config.max_nonfinite_update_skips == 99999
 
 
 def test_explicit_fail_fast_nonfinite_policy_remains_available() -> None:

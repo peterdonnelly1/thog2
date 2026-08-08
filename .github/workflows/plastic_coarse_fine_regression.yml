@@ -1,0 +1,146 @@
+name: Validate PLASTIC COARSE FINE regression
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - .github/workflows/plastic_coarse_fine_regression.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
+
+permissions:
+  contents: read
+
+jobs:
+  cpu_regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy tiktoken tensorboard wandb psutil
+
+      - name: Compile changed production modules
+        run: |
+          python -m py_compile \
+            constants.py \
+            run_thog2_lifecycle.py \
+            run_thog2_owt.py \
+            run_thog2_owt_core.py \
+            sheet/plastic_depth_coarse.py \
+            sheet/plastic_depth_coarse_checkpoint.py \
+            sheet/plastic_depth_coarse_runner.py \
+            sheet/plastic_depth_directional_coherence_patch.py \
+            sheet/plastic_depth_fresh_state.py \
+            sheet/plastic_depth_lifecycle.py \
+            sheet/plastic_depth_pause.py \
+            sheet/plastic_depth_resume.py \
+            sheet/plastic_depth_coarse_fine_patch.py \
+            sheet/plastic_depth_full_radius_oom_patch.py \
+            sheet/plastic_depth_audit_patch.py \
+            sheet/plastic_depth_console_postfix_patch.py \
+            sheet/plastic_depth_wall_time_equivalent_time_gain_patch.py \
+            sheet/plastic_depth_wall_time_v0531_integration_patch.py \
+            sheet/training_model.py \
+            sheet/trainer_step.py \
+            sheet/trainer_checkpoint_save.py \
+            sheet/trainer_checkpoint_resume.py \
+            sheet/wandb_telemetry.py
+
+      - name: Validate public shell syntax
+        run: |
+          bash -n train_OWT.sh
+          bash -n plastic_depth_lookahead_wrapper_options.sh
+
+      - name: Run full CPU test suite
+        id: branch_suite
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q tests 2>&1 | tee broad_regression.log
+
+      - name: Classify failures against untouched PLASTIC_DEPTH
+        if: always()
+        env:
+          BRANCH_SUITE_OUTCOME: ${{ steps.branch_suite.outcome }}
+        run: |
+          # vvv THOG retain the complete suite while gating only failures absent from the recorded untouched-PLASTIC_DEPTH baseline
+          if [ "$BRANCH_SUITE_OUTCOME" = "success" ]; then
+            : > branch_only_failures.txt
+            echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
+          else
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          cache_path = Path('.pytest_cache/v/cache/lastfailed')
+          branch_failed = set(
+              json.loads(cache_path.read_text(encoding='utf-8'))
+              if cache_path.exists()
+              else {}
+          )
+          inherited = {
+              line.strip()
+              for line in Path(
+                  'docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt'
+              ).read_text(encoding='utf-8').splitlines()
+              if line.strip() and not line.lstrip().startswith('#')
+          }
+          branch_only = sorted(branch_failed - inherited)
+          inherited_observed = sorted(branch_failed & inherited)
+          inherited_not_observed = sorted(inherited - branch_failed)
+
+          print('INHERITED_FAILURES_OBSERVED_BEGIN')
+          for node_id in inherited_observed:
+              print(node_id)
+          print('INHERITED_FAILURES_OBSERVED_END')
+          print('BRANCH_ONLY_FAILURES_BEGIN')
+          for node_id in branch_only:
+              print(node_id)
+          print('BRANCH_ONLY_FAILURES_END')
+          print(
+              'Regression classification: '
+              f'{len(branch_failed)} total failing node IDs; '
+              f'{len(inherited_observed)} inherited; '
+              f'{len(branch_only)} branch-only; '
+              f'{len(inherited_not_observed)} recorded inherited failures now passing.'
+          )
+          Path('branch_only_failures.txt').write_text(
+              '\n'.join(branch_only) + ('\n' if branch_only else ''),
+              encoding='utf-8',
+          )
+          if branch_only:
+              raise SystemExit('branch-only CPU regression failures remain')
+          PY
+          fi
+          # ^^^ THOG
+          echo 'PYTEST_LOG_TAIL_BEGIN'
+          tail -n 250 broad_regression.log || true
+          echo 'PYTEST_LOG_TAIL_END'
+
+      - name: Retain complete regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plastic-coarse-fine-broad-regression-log
+          path: |
+            broad_regression.log
+            branch_only_failures.txt
+            docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt
+          if-no-files-found: error
+
+# vvv THOG complete-suite no-new-failures gate against the recorded untouched-PLASTIC_DEPTH baseline; no test deselection
+# ^^^ THOG

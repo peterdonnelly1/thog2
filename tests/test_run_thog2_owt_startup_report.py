@@ -44,6 +44,10 @@ def _config():
         layer_dropout_resample_steps=1,
         activation_checkpointing=True,
         plastic__enabled=True,
+        plastic__runtime_phase="fine",
+        plastic__coarse_phase="disabled",
+        plastic__coarse_phase_roll_through=True,
+        plastic__log_interval_coarse=10,
         plastic__layers_to_sample=None,
         plastic__do_learn_layer_count=True,
         plastic__initial_layer_count=8,
@@ -51,8 +55,10 @@ def _config():
         plastic__layer_sampling_initialisation="equidistant",
         plastic__layer_count_objective="relative_training_wall_time",
         plastic__layer_count_update_brake=20,
-        plastic__layer_count_probe_noise_window=48,
-        plastic__layer_count_probe_noise_min_observations=6,
+        plastic__layer_count_probe__probe_every_n_steps=10,
+        plastic__layer_count_probe__number_of_sampled_valid_tokens=1024,
+        plastic__layer_count_probe__window_size_as_number_of_probes=48,
+        plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=0.8,
         plastic__layer_count_probe_noise_lambda=2.0,
         plastic__layer_count_cost_weight=0.04,
         plastic__layer_memory_budget_gib=None,
@@ -88,21 +94,31 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "layer dropout:" in output
     assert "execution:" in output
     assert "plastic\n" in output
+    assert "plastic__runtime_phase:" in output
+    assert "plastic__coarse_phase_roll_through:" in output
+    assert "plastic__log_interval_coarse:" in output
     assert "plastic__layer_count_update_brake:" in output
-    assert "plastic__layer_count_probe_noise_window:" in output
-    assert "plastic__layer_count_probe_noise_min_observations:" in output
+    assert "plastic__layer_count_probe__number_of_sampled_valid_tokens:" in output
+    assert "plastic__layer_count_probe__window_size_as_number_of_probes:" in output
+    assert "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:" in output
     assert "plastic__geometry_learning_rate_multiplier:" in output
-    assert "initial layer indices:" in output
-    assert "capacity layer indices:" in output
+    assert "active sample_layer:" in output
+    assert "capacity sample_layer:" in output
     rows = output.splitlines()
-    min_observation_row = next(
+    token_row = next(
         line
         for line in rows
-        if "plastic__layer_count_probe_noise_min_observations:" in line
+        if "plastic__layer_count_probe__number_of_sampled_valid_tokens:" in line
     )
-    initial_row = next(line for line in rows if "initial layer indices:" in line)
-    capacity_row = next(line for line in rows if "capacity layer indices:" in line)
-    assert min_observation_row.endswith("   6")
+    extrapolation_row = next(
+        line
+        for line in rows
+        if "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:" in line
+    )
+    initial_row = next(line for line in rows if "active sample_layer:" in line)
+    capacity_row = next(line for line in rows if "capacity sample_layer:" in line)
+    assert token_row.endswith("   1024")
+    assert extrapolation_row.endswith("   0.8")
     assert initial_row.endswith("1.0,  15.1,  29.3,  43.4")
     assert capacity_row.endswith("1.0,  15.1,  29.3,  43.4,  57.6")
     assert initial_row.index("1.0") == capacity_row.index("1.0")
