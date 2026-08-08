@@ -54,3 +54,7 @@ __all__ = ["_finalize_plastic_postfixes"]
 # vvv THOG install the v0.531 equivalent-time wall-time objective and final operator-console overlay after every earlier PLASTIC formatter
 from . import plastic_depth_wall_time_equivalent_time_gain_patch as _plastic_depth_wall_time_equivalent_time_gain_patch
 # ^^^ THOG
+
+# vvv THOG restore pre-v0.531 selector patchability, paired-SE ownership and final visible-column alignment after the new overlay
+from . import plastic_depth_wall_time_v0531_integration_patch as _plastic_depth_wall_time_v0531_integration_patch
+# ^^^ THOG
