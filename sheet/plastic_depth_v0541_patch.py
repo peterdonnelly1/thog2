@@ -22,10 +22,6 @@ _POSTFIX_START = re.compile(r"(?P<postfix>[ \t]+(?:\x1b\[[0-9;]*m)*<<<)")
 
 
 def _begin_plastic_depth_inline_update_v0541(self: Any) -> Optional[Dict[str, Any]]:
-    # An older checkpoint may have robust histories but no v0.541 provenance IDs.
-    # Discard that evidence rather than attach invented probe provenance to it.
-    if self.state.plastic_depth_probe_histories and not self.state.plastic_depth_probe_provenance:
-        self.state.plastic_depth_probe_histories = {}
     return _ORIGINAL_BEGIN_INLINE_UPDATE(self)
 
 
@@ -42,13 +38,33 @@ def _advance_probe_provenance(
     return (*prior, int(probe_sequence))
 
 
+def _probe_provenance_from_sequence(
+    *,
+    probe_sequence: int,
+    vote_total: int,
+) -> tuple[int, ...]:
+    resolved_sequence = int(probe_sequence)
+    resolved_total = max(1, int(vote_total))
+    first = resolved_sequence - resolved_total + 1
+    if first < 1:
+        raise RuntimeError(
+            "PLASTIC FINE probe provenance predates P1: "
+            f"probe_sequence={resolved_sequence}, vote_total={resolved_total}"
+        )
+    return tuple(range(first, resolved_sequence + 1))
+
+
 def _plastic_depth_inline_probe_request_v0541(
     self: Any,
     targets: Any,
     context: Dict[str, Any],
 ):
-    self.state.plastic_depth_probe_sequence = int(self.state.plastic_depth_probe_sequence) + 1
-    probe_sequence = int(self.state.plastic_depth_probe_sequence)
+    lattice = self._plastic_depth_lattice()
+    if lattice is None:
+        raise RuntimeError("PLASTIC FINE probe provenance lacks its sampling lattice")
+    # count_decision_number is already PLASTIC-only, persistent and incremented exactly once
+    # after each successful FINE probe decision; the in-flight probe is therefore +1.
+    probe_sequence = int(lattice.count_decision_number.item()) + 1
     context["plastic_probe_sequence"] = probe_sequence
     request = _ORIGINAL_INLINE_PROBE_REQUEST(self, targets, context)
     original_selector = request.selector
@@ -58,21 +74,15 @@ def _plastic_depth_inline_probe_request_v0541(
         report = context.get("plastic_directional_report")
         decision = context.get("decision")
         if report is None or decision is None:
-            self.state.plastic_depth_probe_provenance = [probe_sequence]
             context["plastic_probe_provenance"] = (probe_sequence,)
             return selected
-        provenance = _advance_probe_provenance(
-            self.state.plastic_depth_probe_provenance,
+        provenance = _probe_provenance_from_sequence(
             probe_sequence=probe_sequence,
             vote_total=int(report.get("vote_total", 1)),
         )
         report["probe_sequence"] = probe_sequence
         report["probe_provenance"] = provenance
         context["plastic_probe_provenance"] = provenance
-        if int(decision.selected_count) != int(context["current_count"]):
-            self.state.plastic_depth_probe_provenance = []
-        else:
-            self.state.plastic_depth_probe_provenance = list(provenance)
         return selected
 
     return replace(request, selector=selector)
@@ -169,5 +179,10 @@ def _format_progress_line_v0541(
 _stage6.format_progress_line = _format_progress_line_v0541
 
 
-__all__ = ["_advance_probe_provenance", "_finalize_console_v0541", "_provenance_text"]
+__all__ = [
+    "_advance_probe_provenance",
+    "_finalize_console_v0541",
+    "_probe_provenance_from_sequence",
+    "_provenance_text",
+]
 # ^^^ THOG
