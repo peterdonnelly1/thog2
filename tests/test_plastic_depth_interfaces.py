@@ -224,6 +224,10 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
             "25",
             "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "20",
+            # vvv THOG keep the tiny 1x8 dry-run fixture inside the exact v0.521 sampled-token contract
+            "--plastic__layer_count_probe__number_of_sampled_valid_tokens",
+            "8",
+            # ^^^ THOG
             "--plastic__layer_count_probe_noise_lambda",
             "2.5",
             "--plastic__layer_count_cost_weight",
@@ -293,6 +297,7 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
         "--plastic__layer_count_objective layer_efficiency",
         "--plastic__layer_count_update_brake 25",
         "--plastic__layer_count_probe__window_size_as_number_of_probes 20",
+        "--plastic__layer_count_probe__number_of_sampled_valid_tokens 8",
         "--plastic__layer_count_probe_noise_lambda 2.5",
         "--plastic__layer_count_cost_weight 0.2",
         "--plastic__cuda_allocator_reserve_gib 0.75",
