@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/apply_plastic_v0541.yml
       - tools/apply_plastic_v0541.py
+      - tools/fix_plastic_v0541_generated.py
 
 permissions:
   contents: write
@@ -48,6 +49,7 @@ jobs:
           PY
           {
             python tools/apply_plastic_v0541.py && \
+            python tools/fix_plastic_v0541_generated.py && \
             git diff --check && \
             python -m py_compile \
               run_thog2_owt.py \
