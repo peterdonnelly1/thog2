@@ -80,7 +80,7 @@ def test_wall_time_controls_join_existing_extra_args_separator() -> None:
 
 def test_routed_wall_time_controls_do_not_reach_getopts_as_long_options() -> None:
     result = _bash(
-        'set -- "$@"; source "$1"; shift; source "$1" "$@"',
+        'set -- "$@"; helper="$1"; core="$2"; shift 2; source "$helper"; source "$core" "$@"',
         HELPER,
         CORE,
         "--plastic__wall_time_equivalent_time_gain_discount",
