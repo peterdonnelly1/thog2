@@ -144,5 +144,5 @@ def test_fine_radius_and_max_step_are_positive() -> None:
     validate_plastic_fine_count_controls(probe_radius=2, max_step=1)
     with pytest.raises(ValueError, match="probe_radius"):
         validate_plastic_fine_count_controls(probe_radius=0, max_step=1)
-    with pytest.raises(ValueError, match="max_step"):
+    with pytest.raises(ValueError, match="max_allowable_layer_change"):
         validate_plastic_fine_count_controls(probe_radius=1, max_step=0)
