@@ -44,3 +44,6 @@ jobs:
           git diff --cached --check
           git commit -m "Fix v0.541 wall-time wrapper plumbing"
           git push origin HEAD:PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+# vvv THOG explicit retrigger marker for the one-shot guarded applicator
+# ^^^ THOG
