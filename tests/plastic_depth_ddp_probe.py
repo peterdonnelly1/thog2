@@ -21,6 +21,7 @@ def _config():
         n_layer=4,
         max_updates=2,
         eval_interval=0,
+        warmup_updates=0,
         plastic__enabled=True,
         plastic__runtime_phase="fine",
         plastic__coarse_phase="enabled",
