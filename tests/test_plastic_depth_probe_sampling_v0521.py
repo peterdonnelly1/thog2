@@ -226,10 +226,12 @@ def test_paired_token_standard_error_uses_paired_deltas_and_sample_standard_devi
     assert standard_errors[8] == pytest.approx(0.0)
 
 
-def test_paired_token_se_overlay_is_installed_after_v0521_sampler() -> None:
+def test_paired_token_se_overlay_remains_beneath_final_same_batch_wrapper() -> None:
     from sheet import plastic_depth_probe_se_v0521_patch as probe_se
+    from sheet import plastic_depth_same_batch_all_probes_patch as same_batch
     from sheet.training_model import TrainingSheetGPT
 
     assert TrainingSheetGPT._plastic_depth_candidate_head_loss.__module__ == probe_se.__name__
-    assert TrainerStepMixin._plastic_depth_inline_probe_request.__module__ == probe_se.__name__
+    assert TrainerStepMixin._plastic_depth_inline_probe_request.__module__ == same_batch.__name__
+    assert same_batch._ORIGINAL_INLINE_PROBE_REQUEST.__module__ == probe_se.__name__
 # ^^^ THOG
