@@ -216,7 +216,13 @@ def _fix_gradient_norm_width(line: str) -> str:
 
 
 def _visible_length(text: str) -> int:
-    return len(_ANSI_ESCAPE.sub("", text))
+    visible = 0
+    for character in _ANSI_ESCAPE.sub("", text):
+        if character == "\t":
+            visible += 8 - (visible % 8)
+        else:
+            visible += 1
+    return visible
 
 
 def _truncate_visible(text: str, width: int) -> str:
@@ -231,10 +237,22 @@ def _truncate_visible(text: str, width: int) -> str:
             rendered.append(escape.group(0))
             position = escape.end()
             continue
-        rendered.append(text[position])
+        character = text[position]
+        if character == "\t":
+            advance = 8 - (visible % 8)
+            if visible + advance <= width:
+                rendered.append(character)
+                visible += advance
+            else:
+                rendered.append(" " * (width - visible))
+                visible = width
+            position += 1
+            continue
+        rendered.append(character)
         visible += 1
         position += 1
-    rendered.append(_constants.R)
+    if position < len(text):
+        rendered.append(_constants.R)
     return "".join(rendered)
 
 
