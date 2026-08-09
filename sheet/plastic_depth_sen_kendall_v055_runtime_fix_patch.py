@@ -100,11 +100,14 @@ _stage6.Stage6Trainer._prepare_console_progress_payload = (
 # ^^^ THOG
 
 
-# vvv THOG align sampled identically on probe/non-probe rows and suppress the obsolete bare directional outcome before the authoritative v0.55 result
+# vvv THOG align sampled identically and suppress all retired z-score plus bare-direction fields before the authoritative v0.55 result
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 _LAYERS_SAMPLED = re.compile(r"(?P<layers>layers\s+\d+)[ \t]+sampled[ \t]+")
 _LEGACY_BARE_PROBE_OUTCOME = re.compile(
     r"(?P<close>\])=>(?:\x1b\[[0-9;]*m)*(?:▼|▲|⇩|⇧|↓|↑)(?:\x1b\[[0-9;]*m)*"
+)
+_RETIRED_SCORE_VECTOR = re.compile(
+    r"[ \t]+(?:score_z|change_z)\s+\[[^\]]+\]\s*=\s*\[[^\]]*\]"
 )
 
 
@@ -120,6 +123,10 @@ def _remove_legacy_bare_probe_outcome(line: str) -> str:
     return _LEGACY_BARE_PROBE_OUTCOME.sub(r"\g<close>", line, count=1)
 
 
+def _remove_retired_score_vectors(line: str) -> str:
+    return _RETIRED_SCORE_VECTOR.sub("", line)
+
+
 def _format_progress_line_with_v055_runtime_fixes(
     run_id: str,
     event: str,
@@ -131,7 +138,8 @@ def _format_progress_line_with_v055_runtime_fixes(
     line = _align_sampled_field(line)
     if _v055._runtime_algorithm() in _v055.SEN_KENDALL_ALGORITHMS:
         line = _remove_legacy_bare_probe_outcome(line)
-    return line
+        line = _remove_retired_score_vectors(line)
+    return line.rstrip(" \t")
 
 
 _stage6.format_progress_line = _format_progress_line_with_v055_runtime_fixes
@@ -142,6 +150,7 @@ __all__ = [
     "_legacy_compatible_v055_report",
     "_prepare_console_progress_payload_with_window_local_v055_provenance",
     "_remove_legacy_bare_probe_outcome",
+    "_remove_retired_score_vectors",
     "_updated_histories_and_direction_without_legacy_sen_kendall_ownership",
 ]
 # ^^^ THOG
