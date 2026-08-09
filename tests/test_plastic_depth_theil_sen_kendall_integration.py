@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,21 @@ import pytest
 from sheet import plastic_depth_theil_sen_kendall_console_fix_patch as console_fix
 from sheet import plastic_depth_theil_sen_kendall_patch as gradient
 from sheet import plastic_depth_theil_sen_kendall_resume_config_patch as resume_config
+
+
+@pytest.fixture(autouse=True)
+def _isolated_gradient_runtime_environment():
+    previous_algorithm = os.environ.pop(gradient._ALGORITHM_ENV, None)
+    previous_tau = os.environ.pop(gradient._TAU_ENV, None)
+    try:
+        yield
+    finally:
+        os.environ.pop(gradient._ALGORITHM_ENV, None)
+        os.environ.pop(gradient._TAU_ENV, None)
+        if previous_algorithm is not None:
+            os.environ[gradient._ALGORITHM_ENV] = previous_algorithm
+        if previous_tau is not None:
+            os.environ[gradient._TAU_ENV] = previous_tau
 
 
 def test_gradient_algorithm_is_opt_in_and_legacy_is_default(monkeypatch):
@@ -44,8 +60,6 @@ def test_resume_shim_consumes_synthetic_gradient_fields(monkeypatch):
         captured["kwargs"] = dict(kwargs)
 
     monkeypatch.setattr(resume_config, "_ORIGINAL_TRAINING_CONFIG_INIT", fake_init)
-    monkeypatch.delenv(gradient._ALGORITHM_ENV, raising=False)
-    monkeypatch.delenv(gradient._TAU_ENV, raising=False)
     resume_config._training_config_init_with_gradient_resume(
         SimpleNamespace(),
         123,
