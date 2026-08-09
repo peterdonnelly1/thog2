@@ -273,6 +273,9 @@ cat() {
           [[ -n "$effective_stratum_size" && "$effective_active_per_stratum" == "$effective_stratum_size" ]] && continue
           printf '  %-35s %s\n' "$label" "$value"
           ;;
+        "plastic fine:")
+          printf '  %-35s %s same_batch=%s\n' "$label" "$value" "$THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES"
+          ;;
         *)
           printf '  %-35s %s\n' "$label" "$value"
           ;;
