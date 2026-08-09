@@ -88,22 +88,26 @@ jobs:
           set -o pipefail
           python -m pytest -q tests 2>&1 | tee broad_regression.log
 
-      - name: Classify failures against untouched PLASTIC_DEPTH
-        if: always()
-        env:
-          BRANCH_SUITE_OUTCOME: ${{ steps.branch_suite.outcome }}
+      # vvv THOG make successful pytest classification an explicit success path and reserve baseline classification only for a genuinely failed suite
+      - name: Record successful complete CPU suite
+        if: always() && steps.branch_suite.outcome == 'success'
         run: |
-          # vvv THOG retain the complete suite while gating only failures absent from the recorded untouched-PLASTIC_DEPTH baseline without fragile inline heredoc parsing
           : > branch_only_failures.txt
-          if [ "$BRANCH_SUITE_OUTCOME" = "success" ]; then
-            echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
-          else
-            python .github/scripts/classify_plastic_coarse_fine_failures.py
-          fi
+          echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
+
+      - name: Classify failed suite against untouched PLASTIC_DEPTH
+        if: always() && steps.branch_suite.outcome != 'success'
+        run: |
+          : > branch_only_failures.txt
+          python .github/scripts/classify_plastic_coarse_fine_failures.py
+
+      - name: Show retained pytest tail
+        if: always()
+        run: |
           echo 'PYTEST_LOG_TAIL_BEGIN'
           tail -n 250 broad_regression.log || true
           echo 'PYTEST_LOG_TAIL_END'
-          # ^^^ THOG
+      # ^^^ THOG
 
       - name: Retain complete regression evidence
         if: always()
