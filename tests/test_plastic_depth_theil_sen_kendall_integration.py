@@ -32,7 +32,7 @@ def test_gradient_cli_options_are_stripped_for_core_parser():
 
 def test_gradient_tau_rejects_out_of_range(monkeypatch):
     monkeypatch.setenv(gradient._TAU_ENV, "1.01")
-    with pytest.raises(ValueError, match="lie in \[0, 1\]"):
+    with pytest.raises(ValueError, match=r"lie in \[0, 1\]"):
         gradient._runtime_minimum_absolute_kendall_tau()
 
 
