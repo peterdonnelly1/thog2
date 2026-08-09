@@ -95,8 +95,11 @@ def test_both_adjacent_worse_is_ambiguous():
 
 
 def test_adjacent_left_better_but_gradient_right_is_ambiguous():
-    report = _classification({7: 0.8, 8: 0.6, 9: -0.01, 10: 0.0, 11: -0.5})
+    report = _classification({6: 10.0, 7: 9.0, 8: 8.0, 9: -0.01, 10: 0.0, 11: 0.1})
     assert report["theil_sen_slope_seconds_per_layer"] < 0.0
+    assert report["kendall_tau"] <= -0.5
+    assert report["left_adjacent_score_seconds"] < report["current_score_seconds"]
+    assert report["right_adjacent_score_seconds"] > report["current_score_seconds"]
     assert report["per_probe_vote"] == 0.0
 
 
