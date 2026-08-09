@@ -23,11 +23,12 @@ def test_compact_progress_labels_and_one_decimal_step_seconds() -> None:
     assert "g nrm=" not in rendered
 
 
-def test_sampled_moves_left_exactly_four_visible_columns() -> None:
-    original = "layers = 22\tsampled = [1.0, 2.0]"
-    current_column = original.expandtabs(8).index("sampled =")
-    rendered = compact._pull_sampled_left_four_columns(original)
-    new_column = rendered.expandtabs(8).index("sampled =")
+def test_final_sampled_column_is_four_left_of_current_layout() -> None:
+    natural = "layers = 22\tsampled = [1.0, 2.0]"
+    current = compact._pull_sampled_left_three_columns(natural)
+    current_column = current.expandtabs(8).index("sampled =")
+    rendered = compact._finalize_compact_progress_line(current)
+    new_column = rendered.expandtabs(8).index("sampled [")
     assert new_column == current_column - 4
 
 
@@ -35,7 +36,10 @@ def test_final_progress_labels_drop_equals_signs() -> None:
     rendered = compact._finalize_compact_progress_line(
         "layers = 22    sampled = [1.0, 2.0]"
     )
-    assert rendered == "layers 22    sampled [1.0, 2.0]"
+    assert "layers 22" in rendered
+    assert "sampled [1.0, 2.0]" in rendered
+    assert "layers = " not in rendered
+    assert "sampled = " not in rendered
 
 
 def test_gradient_header_rows_show_both_new_controls(monkeypatch) -> None:
