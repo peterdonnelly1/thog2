@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,34 @@ def test_public_flag_is_exact_and_persists_only_when_enabled():
         runner.build_parser().parse_args(
             ["--model-type", "sheet", "--plastic-layer-count-same-batch-all-probes"]
         )
+
+
+# vvv THOG reproduce the public wrapper failure where the Python-native same-batch flag reached getopts before the wrapper's -- delimiter
+def test_train_owt_wrapper_routes_same_batch_with_wall_time_controls_after_separator() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            "bash",
+            "./train_OWT.sh",
+            "-h",
+            "--plastic__layer_count__same_batch_all_probes",
+            "--plastic__wall_time_equivalent_time_gain_discount",
+            "0.9",
+            "--plastic__wall_time_equivalent_time_gain_loss_rate_window",
+            "64",
+            "--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
+            "16",
+        ],
+        cwd=repository_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 0, output
+    assert "Unknown option: --" not in output
+    assert same_batch._PUBLIC_OPTION in output
+# ^^^ THOG
 
 
 def test_false_mode_preserves_existing_metadata_shape():
