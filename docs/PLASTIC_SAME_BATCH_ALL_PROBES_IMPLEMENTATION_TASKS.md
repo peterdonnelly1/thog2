@@ -6,10 +6,12 @@ PR: #33
 Started: 2026-08-09
 Implementation code head validated: `da43638b2266ed7122618400299e768af3edb52d`
 Corrected CUDA-smoke test head: `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f`
+Public-wrapper routing fix: `b60524d820d86db5eb4b14292806cb880a926d02`
+Wrapper regression test: `4e23cc98c78228b14f1a37e34f1899a42a28fda6`
 
 ## Status
 
-Overall: IMPLEMENTED; CPU/DDP VALIDATED; FIRST REAL CUDA ATTEMPT REACHED FINE/TRAINING BUT EXPOSED A STALE SMOKE ASSERTION; CORRECTED REAL CUDA RERUN OUTSTANDING
+Overall: IMPLEMENTED; CPU/DDP VALIDATED; PUBLIC WRAPPER ROUTING DEFECT FIXED; CORRECTED REAL CUDA RERUN OUTSTANDING
 
 ## Task list
 
@@ -31,7 +33,25 @@ Overall: IMPLEMENTED; CPU/DDP VALIDATED; FIRST REAL CUDA ATTEMPT REACHED FINE/TR
 - [x] Update PR implementation summary and finalize this task list/log.
 - [x] Run the first external real-CUDA smoke attempt on scruffy; it reached COARSE, fresh FINE construction and one successful optimizer update, then the test failed because its inherited `warmup_updates=1` correctly suppressed the first FINE probe while the stale assertion expected an audit row.
 - [x] Correct the CUDA smoke so it disables warmup for the probe check, explicitly enables same-batch mode, completes a four-probe fixed-batch window and validates non-overlap/provenance/audit semantics.
+- [x] Reproduce and diagnose the public `train_OWT.sh` `Unknown option: --` failure with same-batch plus wall-time controls.
+- [x] Route `--plastic__layer_count__same_batch_all_probes` and its negative form through the existing Python-extra-argument channel after the wrapper delimiter.
+- [x] Add a wrapper regression covering same-batch plus all three equivalent-time wall-time controls.
 - [ ] Rerun the corrected external real-CUDA smoke before relying on this mode for a serious GPU run.
+
+## Public wrapper routing defect
+
+The user run stanza correctly supplied:
+
+```bash
+--plastic__layer_count__same_batch_all_probes \
+--plastic__wall_time_equivalent_time_gain_discount 0.9 \
+--plastic__wall_time_equivalent_time_gain_loss_rate_window 64 \
+--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations 16 \
+```
+
+The v0.541 shell shim already extracted the three Python-native wall-time controls and placed them after the wrapper's literal `--` delimiter. The new v0.53 same-batch Boolean had not been added to that pass-through list, so it remained before the delimiter. `train_OWT_core.sh` then handed it to `getopts`, which interpreted the first character of the long option as an invalid short option and emitted `Unknown option: --`.
+
+Fix `b60524d820d86db5eb4b14292806cb880a926d02` extracts both the positive and negative same-batch flags and inserts them after the same delimiter as the wall-time controls. Public syntax is unchanged. Regression `4e23cc98c78228b14f1a37e34f1899a42a28fda6` invokes `train_OWT.sh -h` with the same-batch flag and all three wall-time controls and requires success with no `Unknown option: --` output.
 
 ## Validation at code head `da43638b2266ed7122618400299e768af3edb52d`
 
@@ -42,6 +62,8 @@ Overall: IMPLEMENTED; CPU/DDP VALIDATED; FIRST REAL CUDA ATTEMPT REACHED FINE/TR
   - untouched-`PLASTIC_DEPTH` inherited-failure classifier: passed with no new branch-only failures.
 - `Validate PLASTIC disabled equivalence` run `31289904395`: SUCCESS, exact disabled equivalence.
 - `Validate PLASTIC COARSE FINE DDP` run `31289904420`: SUCCESS with `same_batch_all_probes=true`; two ranks agreed on the fixed-batch/window audit.
+
+Wrapper-fix CI for head `4e23cc98c78228b14f1a37e34f1899a42a28fda6` is running as of this update.
 
 ## External CUDA gate
 
