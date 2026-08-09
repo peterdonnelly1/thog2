@@ -73,5 +73,28 @@ from . import plastic_depth_same_batch_resume_config_patch as _plastic_depth_sam
 
 # vvv THOG make same-batch mode explicit in startup/probe console and reset visible P provenance for each fresh evidence batch
 from . import plastic_depth_same_batch_visibility_patch as _plastic_depth_same_batch_visibility_patch
-_plastic_depth_same_batch_visibility_patch._PROBE_COLUMN = 300                                                                                             # <<< THOG shift PLASTIC probe block to terminal column 300
+_plastic_depth_same_batch_visibility_patch._PROBE_COLUMN = 300                                                                                             # <<< THOG anchor PLASTIC probe block at terminal column 300
+_ORIGINAL_ALIGN_PROBE_SECTION = _plastic_depth_same_batch_visibility_patch._align_probe_section
+
+
+def _align_probe_section_with_probe_priority(line: str) -> str:
+    match = _plastic_depth_same_batch_visibility_patch._P_SECTION.search(line)
+    if match is None:
+        return line
+    probe = line[match.start() :]
+    probe = _plastic_depth_same_batch_visibility_patch._P_SECTION.sub(
+        lambda value: f"P{value.group('number')}  probe_Δloss",
+        probe,
+        count=1,
+    )
+    prefix = line[: match.start()].rstrip(" \t")
+    prefix_width = _plastic_depth_same_batch_visibility_patch._PROBE_COLUMN - 3
+    prefix = _plastic_depth_same_batch_visibility_patch._truncate_visible(prefix, prefix_width)
+    visible = _plastic_depth_same_batch_visibility_patch._visible_length(prefix)
+    if visible < prefix_width:
+        prefix = f"{prefix}{' ' * (prefix_width - visible)}"
+    return f"{prefix}  {probe}"
+
+
+_plastic_depth_same_batch_visibility_patch._align_probe_section = _align_probe_section_with_probe_priority
 # ^^^ THOG
