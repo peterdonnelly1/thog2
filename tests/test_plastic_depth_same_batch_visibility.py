@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 from contextlib import redirect_stdout
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +17,9 @@ from sheet import stage6_trainer as stage6
 from sheet.trainer import SharedTrainer
 from tests.stage3_test_support import token_splits
 from tests.test_plastic_depth import plastic_training_config
+
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -135,4 +141,61 @@ def test_plastic_startup_section_prints_resolved_same_batch_mode() -> None:
     assert "plastic__layer_count_probe__window_size_as_number_of_probes:" in rendered
     assert "plastic__layer_count__same_batch_all_probes:" in rendered
     assert "true" in rendered
+
+
+def test_public_wrapper_compact_header_prints_same_batch_true() -> None:
+    environment = dict(os.environ)
+    environment["THOG2_PYTHON"] = sys.executable
+    completed = subprocess.run(
+        [
+            "bash",
+            "train_OWT.sh",
+            "-x",
+            "true",
+            "-I",
+            "none",
+            "-g",
+            "SAME_BATCH_VISIBILITY",
+            "-n",
+            "2",
+            "-w",
+            "0",
+            "-b",
+            "1",
+            "-A",
+            "1",
+            "-L",
+            "4",
+            "-H",
+            "2",
+            "-D",
+            "8",
+            "-C",
+            "8",
+            "-P",
+            "2",
+            "-S",
+            "1",
+            "--plastic__enabled",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
+            "2",
+            "--plastic__max_permitted_layers",
+            "4",
+            "--plastic__layer_count__same_batch_all_probes",
+            "--plastic__layer_count_probe__window_size_as_number_of_probes",
+            "2",
+        ],
+        cwd=_REPOSITORY_ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    compact_line = next(
+        line for line in completed.stdout.splitlines()
+        if line.lstrip().startswith("plastic fine:")
+    )
+    assert "same_batch=true" in compact_line
 # ^^^ THOG
