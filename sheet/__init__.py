@@ -188,3 +188,7 @@ from . import plastic_depth_theil_sen_kendall_resume_config_patch as _plastic_de
 # vvv THOG v0.54 align gradient diagnostics with the final fat-arrow/provenance console layer without altering controller semantics
 from . import plastic_depth_theil_sen_kendall_console_fix_patch as _plastic_depth_theil_sen_kendall_console_fix_patch
 # ^^^ THOG
+
+# vvv THOG final compact PLASTIC operator layout: decimal-hour elapsed time, shorter progress labels, tighter sampled placement and visible gradient controls
+from . import plastic_depth_console_compact_layout_patch as _plastic_depth_console_compact_layout_patch
+# ^^^ THOG
