@@ -5,30 +5,37 @@ from sheet import plastic_depth_console_compact_layout_patch as compact
 from sheet import plastic_depth_theil_sen_kendall_patch as gradient
 
 
-def test_elapsed_is_fixed_width_decimal_hours() -> None:
-    rendered = compact._progress_elapsed_decimal_hours("72", 12)
-    assert rendered == "   0.020"
-    assert len(rendered) == 8
+def test_elapsed_shows_seconds_then_fixed_width_decimal_hours() -> None:
+    rendered = compact._progress_elapsed_decimal_hours("4455", 12)
+    assert rendered == "   4455s    1.238"
 
 
-def test_compact_progress_labels() -> None:
+def test_compact_progress_labels_and_one_decimal_step_seconds() -> None:
     rendered = compact._compact_progress_fields(
         "Δstep=  5.4972s  tokens=    73728  g nrm=   5.921"
     )
-    assert "Δ=  5.4972s" in rendered
+    assert "Δ=  5.5s" in rendered
     assert "toks=    73728" in rendered
     assert "g/n=  5.921" in rendered
     assert "Δstep=" not in rendered
+    assert "5.4972s" not in rendered
     assert "tokens=" not in rendered
     assert "g nrm=" not in rendered
 
 
-def test_sampled_moves_left_exactly_three_visible_columns() -> None:
+def test_sampled_moves_left_exactly_four_visible_columns() -> None:
     original = "layers = 22\tsampled = [1.0, 2.0]"
     current_column = original.expandtabs(8).index("sampled =")
-    rendered = compact._pull_sampled_left_three_columns(original)
+    rendered = compact._pull_sampled_left_four_columns(original)
     new_column = rendered.expandtabs(8).index("sampled =")
-    assert new_column == current_column - 3
+    assert new_column == current_column - 4
+
+
+def test_final_progress_labels_drop_equals_signs() -> None:
+    rendered = compact._finalize_compact_progress_line(
+        "layers = 22    sampled = [1.0, 2.0]"
+    )
+    assert rendered == "layers 22    sampled [1.0, 2.0]"
 
 
 def test_gradient_header_rows_show_both_new_controls(monkeypatch) -> None:
