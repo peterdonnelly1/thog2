@@ -66,3 +66,7 @@ from . import plastic_depth_v0541_patch as _plastic_depth_v0541_patch
 # vvv THOG install v0.53 fixed-batch non-overlapping FINE probe windows after every later selector/provenance overlay
 from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_batch_all_probes_patch
 # ^^^ THOG
+
+# vvv THOG make same-batch mode explicit in startup/probe console and reset visible P provenance for each fresh evidence batch
+from . import plastic_depth_same_batch_visibility_patch as _plastic_depth_same_batch_visibility_patch
+# ^^^ THOG
