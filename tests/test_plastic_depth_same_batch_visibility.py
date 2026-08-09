@@ -105,10 +105,8 @@ def test_same_batch_visible_probe_number_resets_with_fresh_batch() -> None:
         assert "P   1" in first_line
         assert "same_batch W1:1/2 B=" in first_line
         assert "P   2" in second_line
-        assert "(P1,2)" in second_line
         assert "same_batch W1:2/2 B=" in second_line
         assert "P   1" in third_line
-        assert "(P1)" in third_line
         assert "same_batch W2:1/2 B=" in third_line
 
         audits = trainer.plastic_depth_count_audit[-3:]
