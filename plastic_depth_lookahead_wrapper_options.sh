@@ -5,6 +5,7 @@
 # v0.541 Python-native wall-time controls plus v0.53 same-batch controls through the established -- extra-args channel.
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
+THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES="${THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES:-false}"
 THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS=("$@")
 THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
 THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS=()
@@ -23,7 +24,14 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
       done
       break
       ;;
-    --plastic__layer_count__same_batch_all_probes|--no-plastic__layer_count__same_batch_all_probes)
+    --plastic__layer_count__same_batch_all_probes)
+      THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES=true
+      THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
+      continue
+      ;;
+    --no-plastic__layer_count__same_batch_all_probes)
+      THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES=false
       THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
       ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
       continue
@@ -114,8 +122,13 @@ unset THOG2_PLASTIC_LOOKAHEAD_INDEX THOG2_PLASTIC_LOOKAHEAD_ARGUMENT
   echo "Invalid plastic__layer_count__max_allowable_layer_change: $THOG2_PLASTIC_LAYER_COUNT_MAX_STEP; expected a positive integer." >&2
   exit 2
 }
+case "$THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES" in
+  true|false) ;;
+  *) echo "THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES must be true or false; got: $THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES" >&2; exit 2 ;;
+esac
 export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
 export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP
+export THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES
 
 if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
   printf '%s\n' \
