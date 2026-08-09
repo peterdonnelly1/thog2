@@ -181,6 +181,10 @@ from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_b
 from . import plastic_depth_theil_sen_kendall_patch as _plastic_depth_theil_sen_kendall_patch
 # ^^^ THOG
 
+# vvv THOG v0.54 restore synthetic gradient-control fields before the dataclass constructor during checkpoint resume
+from . import plastic_depth_theil_sen_kendall_resume_config_patch as _plastic_depth_theil_sen_kendall_resume_config_patch
+# ^^^ THOG
+
 # vvv THOG v0.54 align gradient diagnostics with the final fat-arrow/provenance console layer without altering controller semantics
 from . import plastic_depth_theil_sen_kendall_console_fix_patch as _plastic_depth_theil_sen_kendall_console_fix_patch
 # ^^^ THOG
