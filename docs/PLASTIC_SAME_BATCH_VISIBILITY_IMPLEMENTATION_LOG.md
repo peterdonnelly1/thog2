@@ -4,6 +4,7 @@ Parent implementation: `docs/PLASTIC_SAME_BATCH_ALL_PROBES_IMPLEMENTATION_LOG.md
 Branch: `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION`
 PR: #33
 Date: 2026-08-09
+Validated code head: `a55e2c5d53b9ce8540c426ab28a2b824e03bcd42`
 
 ## Trigger
 
@@ -56,24 +57,25 @@ The overlay is imported after the v0.53 same-batch runtime overlay in `sheet/pla
 - detailed startup prints the resolved same-batch Boolean;
 - a public `train_OWT.sh` dry-run with the public flag prints compact `same_batch=true`.
 
-The first version of this test incorrectly invoked `_prepare_console_progress_payload` on `SharedTrainer`. That method belongs to the Stage6 console layer. The classifier correctly identified this as the sole new branch failure. The test was corrected to use `SharedTrainer` only for actual window/audit runtime state and invoke the Stage6 formatter at its proper boundary. Production code was not changed to satisfy that test defect. Correction commit: `e40748ebe5cd0467f25cde4d916e3b7cee28111c`.
+The visibility test went through three fixture corrections. None required a production change:
 
-The visibility production module was added to the workflow's explicit `py_compile` list in `c26ab54e55de0419257fd2323cc56b919233d5a8`. The public compact-header regression was added in `d7838fab7f9a5522a8249a8cafd477087bf072a0`.
+1. It first called a Stage6 console method on `SharedTrainer`; corrected by separating real runtime/audit state from formatter testing (`e40748e`).
+2. The tiny public-wrapper dry-run inherited the real 1024-token probe default despite an 8-token toy microbatch; corrected by explicitly requesting 8 sampled tokens (`5c6a882`).
+3. The synthetic formatter row expected provenance text without supplying the directional-summary context that v0.541 requires before rendering provenance; the synthetic assertion was narrowed while local provenance remains directly asserted in the real audit (`a55e2c5`).
 
-## Validation history
+The visibility production module was added to the workflow's explicit `py_compile` list in `c26ab54e55de0419257fd2323cc56b919233d5a8`.
 
-At visibility head `11f4d8833502235f865e8e987bd984219eb06caf`:
+## Final validation
 
-- exact disabled-equivalence workflow passed;
-- same-batch-enabled two-rank DDP workflow passed;
-- the broad branch suite had the recorded inherited failures plus one new failure in `test_same_batch_visible_probe_number_resets_with_fresh_batch`;
-- root cause was the test-boundary mistake above, not production behavior.
+Validated code head: `a55e2c5d53b9ce8540c426ab28a2b824e03bcd42`.
 
-Final validation after `e40748e` / `d7838fa` is pending at the time this log entry is written. Do not mark the visibility follow-on complete until the classifier reports zero new branch-only failures and the disabled/DDP gates remain green.
+- Regression workflow `31292791606`: SUCCESS. Explicit compile and shell syntax passed; broad CPU suite contained only recorded inherited failures; classifier reported zero new branch-only failures.
+- Disabled-equivalence workflow `31292791593`: SUCCESS.
+- Same-batch-enabled two-rank DDP workflow `31292791598`: SUCCESS.
+
+The visibility/local-P follow-on is therefore CPU/DDP validated. The corrected real-CUDA smoke remains the final external gate.
 
 ## External GPU gate
-
-The corrected same-batch CUDA smoke remains the final real-GPU gate:
 
 ```bash
 cd ~/git/thog2
