@@ -7,9 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from sheet import plastic_depth_theil_sen_kendall_bootstrap_fix_patch as bootstrap
 from sheet import plastic_depth_theil_sen_kendall_console_fix_patch as console_fix
 from sheet import plastic_depth_theil_sen_kendall_patch as gradient
 from sheet import plastic_depth_theil_sen_kendall_resume_config_patch as resume_config
+from sheet import trainer_step
 
 
 @pytest.fixture(autouse=True)
@@ -99,4 +101,8 @@ def test_gradient_classifier_is_deterministic_for_identical_ddp_inputs():
 def test_console_diagnostic_units_are_seconds_per_layer():
     assert gradient._format_gradient_value(0.1834, digits=3) == "+0.183"
     assert "s/layer" in inspect.getsource(gradient._format_progress_line_with_gradient)
+
+
+def test_bootstrap_fix_is_installed_on_runtime_selector_surface():
+    assert trainer_step.choose_plastic_depth_count_with_mad is bootstrap._choose_count_with_v0531_bootstrap
 # ^^^ THOG
