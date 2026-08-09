@@ -2,12 +2,13 @@
 
 # vvv THOG
 # Observe core-owned PLASTIC controls for legacy environment consumers and route the
-# v0.541 Python-native wall-time controls through the established -- extra-args channel.
+# v0.541 Python-native wall-time controls plus v0.53 same-batch controls through the established -- extra-args channel.
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS=("$@")
 THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
 THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS=()
+THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS=()
 THOG2_PLASTIC_LOOKAHEAD_HELP=false
 THOG2_PLASTIC_LOOKAHEAD_INDEX=0
 while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )); do
@@ -21,6 +22,11 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
         ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
       done
       break
+      ;;
+    --plastic__layer_count__same_batch_all_probes|--no-plastic__layer_count__same_batch_all_probes)
+      THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
+      continue
       ;;
     --plastic__wall_time_equivalent_time_gain_discount|--plastic__wall_time_equivalent_time_gain_loss_rate_window|--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations)
       (( THOG2_PLASTIC_LOOKAHEAD_INDEX + 1 < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )) || {
@@ -79,25 +85,25 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
   ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
 done
 
-if (( ${#THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]} > 0 )); then
+if (( ${#THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]} > 0 || ${#THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS[@]} > 0 )); then
   THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS=()
-  THOG2_PLASTIC_LOOKAHEAD_INSERTED_WALL_TIME_ARGS=false
+  THOG2_PLASTIC_LOOKAHEAD_INSERTED_PYTHON_ARGS=false
   for THOG2_PLASTIC_LOOKAHEAD_ARGUMENT in "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"; do
     THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
-    if [[ "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT" == "--" && "$THOG2_PLASTIC_LOOKAHEAD_INSERTED_WALL_TIME_ARGS" == false ]]; then
-      THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS+=("${THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]}")
-      THOG2_PLASTIC_LOOKAHEAD_INSERTED_WALL_TIME_ARGS=true
+    if [[ "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT" == "--" && "$THOG2_PLASTIC_LOOKAHEAD_INSERTED_PYTHON_ARGS" == false ]]; then
+      THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS+=("${THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS[@]}" "${THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]}")
+      THOG2_PLASTIC_LOOKAHEAD_INSERTED_PYTHON_ARGS=true
     fi
   done
-  if [[ "$THOG2_PLASTIC_LOOKAHEAD_INSERTED_WALL_TIME_ARGS" == false ]]; then
-    THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS+=("--" "${THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]}")
+  if [[ "$THOG2_PLASTIC_LOOKAHEAD_INSERTED_PYTHON_ARGS" == false ]]; then
+    THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS+=("--" "${THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS[@]}" "${THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS[@]}")
   fi
   set -- "${THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS[@]}"
 else
   set -- "${THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS[@]}"
 fi
 unset THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS THOG2_PLASTIC_LOOKAHEAD_FINAL_ARGS
-unset THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS THOG2_PLASTIC_LOOKAHEAD_INSERTED_WALL_TIME_ARGS
+unset THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS THOG2_PLASTIC_SAME_BATCH_EXTRA_ARGS THOG2_PLASTIC_LOOKAHEAD_INSERTED_PYTHON_ARGS
 unset THOG2_PLASTIC_LOOKAHEAD_INDEX THOG2_PLASTIC_LOOKAHEAD_ARGUMENT
 
 [[ "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" =~ ^[1-9][0-9]*$ ]] || {
@@ -125,6 +131,8 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '  --plastic__layer_count_probe__probe_every_n_steps N        FINE probe cadence; defaults to update brake' \
     "  --plastic__layer_count_probe_radius N=${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS}       full integer FINE probe radius" \
     "  --plastic__layer_count__max_allowable_layer_change N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement" \
+    '  --plastic__layer_count__same_batch_all_probes             one fixed probe batch per strict non-overlapping evidence window' \
+    '  --no-plastic__layer_count__same_batch_all_probes          established rolling/multi-batch probe path; default' \
     '  --plastic__wall_time_equivalent_time_gain_discount X       credited fraction of positive equivalent-time gain; default 0.9' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_window N       rolling ordinary-training loss-rate window; default 64' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations N       minimum observations before loss-rate fit is usable; default 16' \
