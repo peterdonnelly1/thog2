@@ -194,8 +194,8 @@ def test_sample_change_is_yellow_for_exactly_one_progress_row() -> None:
 def test_gradient_norm_is_fixed_width() -> None:
     small = _plain(_ordinary_progress_line("grad-small", (1.0, 2.0), gradient_norm="   5.921"))
     large = _plain(_ordinary_progress_line("grad-large", (1.0, 2.0), gradient_norm="  10.746"))
-    assert "g nrm=  5.921" in small
-    assert "g nrm= 10.746" in large
+    assert "g/n=  5.921" in small
+    assert "g/n= 10.746" in large
 
 
 def test_plastic_startup_section_prints_resolved_same_batch_mode() -> None:
