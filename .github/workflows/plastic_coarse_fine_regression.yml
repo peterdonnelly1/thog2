@@ -54,6 +54,7 @@ jobs:
             sheet/plastic_depth_wall_time_equivalent_time_gain_patch.py \
             sheet/plastic_depth_wall_time_v0531_integration_patch.py \
             sheet/plastic_depth_same_batch_all_probes_patch.py \
+            sheet/plastic_depth_same_batch_resume_config_patch.py \
             sheet/plastic_depth_same_batch_visibility_patch.py \
             sheet/training_model.py \
             sheet/trainer_step.py \
