@@ -62,3 +62,7 @@ from . import plastic_depth_wall_time_v0531_integration_patch as _plastic_depth_
 # vvv THOG install v0.541 canonical controls, durable probe provenance and final console glyph refinement
 from . import plastic_depth_v0541_patch as _plastic_depth_v0541_patch
 # ^^^ THOG
+
+# vvv THOG install v0.53 fixed-batch non-overlapping FINE probe windows after every later selector/provenance overlay
+from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_batch_all_probes_patch
+# ^^^ THOG
