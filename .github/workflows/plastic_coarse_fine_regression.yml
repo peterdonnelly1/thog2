@@ -68,7 +68,8 @@ jobs:
             sheet/trainer_step.py \
             sheet/trainer_checkpoint_save.py \
             sheet/trainer_checkpoint_resume.py \
-            sheet/wandb_telemetry.py
+            sheet/wandb_telemetry.py \
+            .github/scripts/classify_plastic_coarse_fine_failures.py
       # ^^^ THOG
 
       - name: Validate public shell syntax
@@ -89,59 +90,17 @@ jobs:
         env:
           BRANCH_SUITE_OUTCOME: ${{ steps.branch_suite.outcome }}
         run: |
-          # vvv THOG retain the complete suite while gating only failures absent from the recorded untouched-PLASTIC_DEPTH baseline
+          # vvv THOG retain the complete suite while gating only failures absent from the recorded untouched-PLASTIC_DEPTH baseline without fragile inline heredoc parsing
+          : > branch_only_failures.txt
           if [ "$BRANCH_SUITE_OUTCOME" = "success" ]; then
-            : > branch_only_failures.txt
             echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
           else
-            python - <<'PY'
-          import json
-          from pathlib import Path
-
-          cache_path = Path('.pytest_cache/v/cache/lastfailed')
-          branch_failed = set(
-              json.loads(cache_path.read_text(encoding='utf-8'))
-              if cache_path.exists()
-              else {}
-          )
-          inherited = {
-              line.strip()
-              for line in Path(
-                  'docs/THOG2_COARSE_FINE_INHERITED_FAILURES.txt'
-              ).read_text(encoding='utf-8').splitlines()
-              if line.strip() and not line.lstrip().startswith('#')
-          }
-          branch_only = sorted(branch_failed - inherited)
-          inherited_observed = sorted(branch_failed & inherited)
-          inherited_not_observed = sorted(inherited - branch_failed)
-
-          print('INHERITED_FAILURES_OBSERVED_BEGIN')
-          for node_id in inherited_observed:
-              print(node_id)
-          print('INHERITED_FAILURES_OBSERVED_END')
-          print('BRANCH_ONLY_FAILURES_BEGIN')
-          for node_id in branch_only:
-              print(node_id)
-          print('BRANCH_ONLY_FAILURES_END')
-          print(
-              'Regression classification: '
-              f'{len(branch_failed)} total failing node IDs; '
-              f'{len(inherited_observed)} inherited; '
-              f'{len(branch_only)} branch-only; '
-              f'{len(inherited_not_observed)} recorded inherited failures now passing.'
-          )
-          Path('branch_only_failures.txt').write_text(
-              '\n'.join(branch_only) + ('\n' if branch_only else ''),
-              encoding='utf-8',
-          )
-          if branch_only:
-              raise SystemExit('branch-only CPU regression failures remain')
-          PY
+            python .github/scripts/classify_plastic_coarse_fine_failures.py
           fi
-          # ^^^ THOG
           echo 'PYTEST_LOG_TAIL_BEGIN'
           tail -n 250 broad_regression.log || true
           echo 'PYTEST_LOG_TAIL_END'
+          # ^^^ THOG
 
       - name: Retain complete regression evidence
         if: always()
