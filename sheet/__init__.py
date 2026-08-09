@@ -180,3 +180,7 @@ from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_b
 # vvv THOG v0.54 install selectable Theil-Sen/Kendall gradient classification last so legacy behaviour remains the untouched default path
 from . import plastic_depth_theil_sen_kendall_patch as _plastic_depth_theil_sen_kendall_patch
 # ^^^ THOG
+
+# vvv THOG v0.54 align gradient diagnostics with the final fat-arrow/provenance console layer without altering controller semantics
+from . import plastic_depth_theil_sen_kendall_console_fix_patch as _plastic_depth_theil_sen_kendall_console_fix_patch
+# ^^^ THOG
