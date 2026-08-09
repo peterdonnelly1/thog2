@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import Any, Optional
 
@@ -14,6 +15,7 @@ from . import stage6_trainer as _stage6
 
 _ORIGINAL_FIX_GRADIENT_NORM_WIDTH = _visibility._fix_gradient_norm_width
 _ORIGINAL_STAGE6_INIT = _stage6.Stage6Trainer.__init__
+_ORIGINAL_FINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 _STARTUP_GRADIENT_VISIBILITY_INSTALLED = False
 _WINDOW_LABEL = "plastic__layer_count_probe__window_size_as_number_of_probes:"
 _ALGORITHM_LABEL = "plastic__layer_count_decision_algorithm:"
@@ -22,8 +24,8 @@ _TAU_LABEL = "plastic__layer_count_gradient__minimum_absolute_kendall_tau:"
 
 def _progress_elapsed_decimal_hours(value: Any, completed_updates: Any) -> str:
     del completed_updates
-    elapsed_seconds = max(0.0, float(str(value).strip()))
-    return f"{elapsed_seconds / 3600.0:8.3f}"
+    elapsed_seconds = max(0, int(round(float(str(value).strip()))))
+    return f"{elapsed_seconds:7d}s {elapsed_seconds / 3600.0:8.3f}"
 
 
 _stage6._progress_elapsed = _progress_elapsed_decimal_hours
@@ -32,6 +34,12 @@ _stage6._progress_elapsed = _progress_elapsed_decimal_hours
 def _compact_progress_fields(line: str) -> str:
     rendered = _ORIGINAL_FIX_GRADIENT_NORM_WIDTH(line)
     rendered = rendered.replace("Δstep=", "Δ=", 1)
+    rendered = re.sub(
+        r"Δ=\s*(?P<seconds>[+-]?(?:\d+(?:\.\d*)?|\.\d+))s",
+        lambda match: f"Δ={float(match.group('seconds')):5.1f}s",
+        rendered,
+        count=1,
+    )
     rendered = rendered.replace("tokens=", "toks=", 1)
     rendered = rendered.replace("g nrm=", "g/n=", 1)
     return rendered
@@ -44,7 +52,7 @@ def _visible_width(text: str) -> int:
     return len(_visibility._ANSI_ESCAPE.sub("", text).expandtabs(8))
 
 
-def _pull_sampled_left_three_columns(line: str) -> str:
+def _pull_sampled_left_four_columns(line: str) -> str:
     sampled = _directional._SAMPLED_ARRAY.search(line)
     if sampled is None:
         return line
@@ -52,12 +60,17 @@ def _pull_sampled_left_three_columns(line: str) -> str:
     current_column = _visible_width(current_prefix)
     compact_prefix = current_prefix.rstrip(" \t")
     compact_column = _visible_width(compact_prefix)
-    target_column = max(compact_column + 1, current_column - 3)
+    target_column = max(compact_column + 1, current_column - 4)
     gap_width = max(1, target_column - compact_column)
     return compact_prefix + (" " * gap_width) + line[sampled.start() :]
 
 
-_directional._align_sampled_to_minimum_tab_column = _pull_sampled_left_three_columns
+# Preserve the previously exported helper name for callers while applying the new four-column policy.
+def _pull_sampled_left_three_columns(line: str) -> str:
+    return _pull_sampled_left_four_columns(line)
+
+
+_directional._align_sampled_to_minimum_tab_column = _pull_sampled_left_four_columns
 
 
 def _gradient_header_rows() -> tuple[tuple[str, str], tuple[str, str]]:
@@ -105,11 +118,32 @@ def _stage6_init_with_gradient_startup_visibility(self: Any, *args: Any, **kwarg
 _stage6.Stage6Trainer.__init__ = _stage6_init_with_gradient_startup_visibility
 
 
+def _finalize_compact_progress_line(line: str) -> str:
+    rendered = line.replace("layers = ", "layers ", 1)
+    rendered = rendered.replace("sampled = ", "sampled ", 1)
+    return rendered
+
+
+def _format_progress_line_with_final_compaction(
+    run_id: str,
+    event: str,
+    payload: dict[str, Any],
+) -> str:
+    return _finalize_compact_progress_line(
+        _ORIGINAL_FINAL_FORMAT_PROGRESS_LINE(run_id, event, payload)
+    )
+
+
+_stage6.format_progress_line = _format_progress_line_with_final_compaction
+
+
 __all__ = [
     "_compact_progress_fields",
+    "_finalize_compact_progress_line",
     "_gradient_header_rows",
     "_install_gradient_startup_visibility",
     "_progress_elapsed_decimal_hours",
+    "_pull_sampled_left_four_columns",
     "_pull_sampled_left_three_columns",
 ]
 # ^^^ THOG
