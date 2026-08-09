@@ -200,3 +200,7 @@ from . import plastic_depth_console_compact_layout_patch as _plastic_depth_conso
 # vvv THOG v0.55 install renamed LRA and whole-window stratified Sen/Kendall control after every older selector and console overlay
 from . import plastic_depth_sen_kendall_v055_patch as _plastic_depth_sen_kendall_v055_patch
 # ^^^ THOG
+
+# vvv THOG v0.55 ignore infeasible lower decision points without weakening the adjacent-action requirement or far-right informational probing
+from . import plastic_depth_sen_kendall_v055_boundary_fix_patch as _plastic_depth_sen_kendall_v055_boundary_fix_patch
+# ^^^ THOG
