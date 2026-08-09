@@ -104,4 +104,18 @@ def test_obsolete_bare_probe_outcome_is_removed() -> None:
     rendered = runtime_fix._remove_legacy_bare_probe_outcome(line)
     assert "]=>▼" not in rendered
     assert rendered.endswith("sen=+0.500 ken=+0.80 adj=-0.700 ∴ ▼")
+
+
+def test_retired_change_z_and_score_z_vectors_are_removed() -> None:
+    line = (
+        "T 39 layers 22 sampled [1.0]  P2 probe_Δloss [L-1 .. L+1] = [-0.1, 7.2, +0.1] "
+        "sen=+0.482 ken=+0.81 adj=-0.864 ∴ ▼ (P1,2)"
+        "\tchange_z [L-1, L+1] = [        -,         -]"
+        "  score_z [L-1, L+1] = [+1.000, -1.000]"
+    )
+    rendered = runtime_fix._remove_retired_score_vectors(line)
+    assert "change_z" not in rendered
+    assert "score_z" not in rendered
+    assert "probe_Δloss" in rendered
+    assert "sen=+0.482 ken=+0.81 adj=-0.864" in rendered
 # ^^^ THOG
