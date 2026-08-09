@@ -4,53 +4,146 @@ Governing specification: `docs/THOG2_PLASTIC_Requirements_Specification_v0.53.tx
 Branch: `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION`
 PR: #33
 Started: 2026-08-09
+Implementation code head validated: `da43638b2266ed7122618400299e768af3edb52d`
 
-## Takeover summary
+## Takeover status
 
-Implement Version 0.53 as an additive FINE probe-framework mode. The current branch already implements v0.521/v0.52 FINE full-radius probing, full-window readiness, directional coherence, probe provenance, token subsampling, audit/replay and COARSE/FINE lifecycle. Do not disturb the established path when the new flag is false.
+Implementation is complete for CPU/DDP purposes. The remaining external gate is a real CUDA smoke. Do not redesign the controller before running that smoke: the feature is intentionally an additive final overlay on top of the current v0.531/v0.541 selector/provenance stack, with the established path preserved when the option is false.
 
-The key architectural change is that the current inline FINE decision evidence is derived from a training microbatch. That cannot simply be cached across probe events because it would cause repeated training on the same data. In same-batch mode, decision-loss evidence must therefore be evaluated on a separate cached probe batch under no-grad, while the authoritative training update continues on its ordinary fresh microbatches.
+## Implemented architecture
 
-## Chronological log
+The existing FINE inline probe used the first training microbatch and therefore could not simply retain that batch across probe events without repeatedly training on the same data. Version 0.53 now separates the roles:
 
-### 2026-08-09 - initialization
+1. A same-batch window acquires one deterministic dedicated training-split probe batch.
+2. Every probe event in that window reuses that batch and one deterministic sampled-token set.
+3. Candidate decision losses are evaluated through a shared logical-layer chain under `torch.no_grad()`.
+4. Candidate losses are handed to the already-installed v0.541 selector/audit stack; decision algorithms are not duplicated.
+5. The authoritative optimizer update still uses its normal fresh training microbatch stream.
+6. Before the configured W probes, framework gating forces STAY even if an underlying selector would attempt movement.
+7. At W, one decision is accepted subject to existing decision rules and `plastic__layer_count__max_allowable_layer_change`.
+8. The window is retired after CHANGE or STAY; histories are cleared and the next window receives a fresh batch.
+9. Partial-window checkpoint/resume reconstructs the exact batch from deterministic global start indices and reconstructs sampled-token positions from the persisted window seed.
+10. DDP stores one deterministic global start tuple; each rank reconstructs the same rank-local slice throughout the window.
 
-- Confirmed active implementation branch `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION` and draft PR #33.
-- Confirmed governing text spec v0.53 is committed at branch head ancestry.
-- Confirmed user requested frequent progress heartbeats and takeover-safe task/log files.
-- Created `docs/PLASTIC_SAME_BATCH_ALL_PROBES_IMPLEMENTATION_TASKS.md` and this log before modifying runtime code.
-- Local `git clone` is unavailable in the current execution environment because DNS/network access is blocked. Repository inspection/writes will use the connected GitHub app; validation will use repository CI where practical and static/focused reasoning otherwise.
-- Earlier source inspection established:
-  - `sheet/trainer_step.py::_plastic_depth_candidate_loss()` is explicitly `torch.no_grad()` but belongs to the superseded external controller path.
-  - current FINE inline probing is initiated from the first training microbatch via `plastic_depth_probe_request`; the same forward participates in the training backward path.
-  - legacy timing/memory resource probes deliberately execute backward but zero gradients and do not optimizer-step; they are not decision-loss evidence and must remain distinct.
-  - v0.52 decision readiness already requires the complete configured history window.
+## Main source changes
 
-## Planned implementation shape
+### `sheet/plastic_depth_same_batch_all_probes_patch.py`
 
-Prefer an additive final overlay/module imported after existing v0.521/v0.52 patches, plus minimal canonical dataclass/config/checkpoint plumbing. Keep the old inline path intact when `same_batch_all_probes=false`.
+New final runtime overlay. It provides:
 
-For `true`, expected state machine:
+- exact public flag `--plastic__layer_count__same_batch_all_probes` and explicit negative form;
+- disabled default and false-mode metadata preservation;
+- enabled-mode persistent config/compact identity;
+- fixed non-overlapping window state and deterministic batch identity/digest;
+- runtime batch and sampled-token caches;
+- no-grad shared-chain candidate evidence;
+- training-only sentinel path that prevents candidate evidence from being recomputed on the real training batch;
+- complete-window gating and STAY/CHANGE retirement;
+- structured window events and audit augmentation;
+- checkpoint persistence and exact partial-window reconstruction.
 
-1. First eligible probe of new window acquires and caches a fresh dedicated probe batch and deterministic sampled-token indices.
-2. Every scheduled probe event performs a no-grad decision-evidence forward against that cached batch for all feasible candidate counts.
-3. The ordinary training update still executes on its normal current training microbatch chain.
-4. Evidence/provenance accumulates only within the active window.
-5. No commit before exactly W valid probes.
-6. At W, run one decision; commit bounded movement or STAY; record audit; retire batch/evidence/provenance.
-7. Next eligible probe starts a new window with a fresh probe batch.
-8. Any joint architecture-state change invalidates a partial window.
-9. Checkpoint/resume reconstructs the exact partial window and cached batch/token selection.
+Initial implementation commit: `6c74a6480a47a405682aa8bf8084b65c9f4aa38`.
 
-## Decisions still to verify in source before coding
+### `sheet/plastic_depth_console_postfix_patch.py`
 
-- Exact current `SheetGPT.forward(... plastic_depth_probe_request=...)` implementation and whether candidate losses can be obtained through a dedicated no-grad helper without mutating authoritative active-count state.
-- Exact trainer-state/checkpoint serialization shape for `plastic_depth_probe_histories`, audit and transient runtime state.
-- Existing batch-source state format and best deterministic way to checkpoint the fixed probe batch: raw tensors vs source indices/state.
-- Existing console provenance owner and audit event names.
-- CLI/help generation path for canonical dataclass fields.
-- Existing test/CI workflow entry points that can validate branch-only changes without CUDA.
+Imports the same-batch overlay after v0.531/v0.541 so the new evidence-acquisition framework wins last without replacing later selector/provenance behavior.
 
-## Validation log
+Integration commit: `6a7348215faba0346be8053e803ae8de32d42f1c`.
 
-No runtime code changed yet. Validation pending.
+### `tests/test_plastic_depth_same_batch_all_probes.py`
+
+Focused tests cover:
+
+- exact public option spelling and enabled-mode persistence;
+- false-mode metadata/checkpoint preservation;
+- no-grad/no-optimizer/no-parameter-mutation evidence collection;
+- ordinary training batch generator/trace not advanced by the dedicated evidence probe;
+- same batch and sampled tokens throughout one window;
+- retirement after STAY and fresh next window;
+- window-local P provenance;
+- exact partial-window checkpoint resume;
+- malformed persisted provenance rejection.
+
+Initial test commit: `71e8fc3f09fe1020b3ebdc1edd787dcbbd73a8f5`.
+
+### `tests/plastic_depth_ddp_probe.py`
+
+The existing two-rank COARSE/FINE lifecycle validation now explicitly enables same-batch mode and requires shared fixed-batch identity plus correct window ordinal/size/provenance.
+
+Commit: `c9b855780b1e2abb84b430cf85168032930be20d`.
+
+### `.github/workflows/plastic_coarse_fine_regression.yml`
+
+The same-batch production module is explicitly included in `py_compile` validation.
+
+Commit: `da43638b2266ed7122618400299e768af3edb52d`.
+
+## Chronological implementation notes
+
+### Initialization
+
+- Confirmed branch `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION` and draft PR #33.
+- Confirmed v0.53 spec and that later v0.531/v0.541 code already existed on the branch; implementation was therefore layered on top rather than rolling later work back.
+- Local clone was unavailable because the execution environment could not resolve external DNS; repository reads/writes used the connected GitHub app and validation used GitHub Actions.
+- Confirmed legacy resource timing/memory probes may deliberately execute backward without optimizer stepping; they remain separate from decision-loss evidence.
+
+### Runtime design decisions
+
+- Fixed batch is represented checkpoint-portably by deterministic global training-split start indices plus batch digest rather than persisting device tensors.
+- Runtime cache may remain device resident; checkpoint cache is reconstructed on resume.
+- Probe RNG is captured/restored around the no-grad evidence forward so the extra evidence computation does not perturb the authoritative training RNG trajectory.
+- The ordinary training batch source generator and trace are not touched when constructing the dedicated probe batch.
+- Count changes invalidate a partial window through active-count mismatch detection. Future global MLP-width integration should invoke the same invalidation hook on an F change.
+- When later wall-time logic resets history inside an active window, a completed same-batch window whose directional history count is not aligned with its window ordinal is conservatively forced to STAY and retired rather than mixing incompatible evidence.
+
+### CI regression found and corrected
+
+The first broad CI run correctly found branch-only failures rather than a classifier false positive:
+
+- the new public-flag test used `max_permitted_layers=5` while leaving `o_depth=16`, causing its own invalid fixture;
+- the feature test left the process-global runtime mode selected, contaminating unrelated subsequent checkpoint tests in the same pytest process;
+- an inherited v0.521 test asserted that its SE wrapper remained the final method owner, which was no longer true after the intentional final v0.53 wrapper.
+
+Corrections:
+
+- public-flag test now sets a valid `--o-depth 3`;
+- feature-test fixture explicitly removes the runtime/explicit mode environment after every test;
+- overlay ownership test now asserts that the v0.53 wrapper is final and that its captured underlying request remains the v0.521 paired-SE wrapper.
+
+No classifier waiver or test deselection was added.
+
+## Validation results
+
+Code head: `da43638b2266ed7122618400299e768af3edb52d`.
+
+- Regression workflow run `31289904430`: SUCCESS.
+  - new module explicit `py_compile`: SUCCESS;
+  - shell syntax: SUCCESS;
+  - complete CPU pytest suite executed;
+  - untouched-`PLASTIC_DEPTH` inherited-failure classifier: SUCCESS, no new branch-only failures;
+  - regression evidence artifact retained.
+- Disabled-equivalence workflow run `31289904395`: SUCCESS; exact disabled-path fingerprint equivalence.
+- DDP workflow run `31289904420`: SUCCESS with same-batch mode enabled on two ranks; lifecycle/FINE probe and rank agreement passed.
+
+PR #33 body has been updated with the v0.53 implementation and current validation evidence.
+
+## Remaining external gate
+
+Real CUDA smoke has not been run in this environment:
+
+```bash
+bash tools/run_plastic_coarse_fine_gpu_smoke.sh
+```
+
+This matters for allocator/OOM behavior and performance. The dedicated decision-evidence forward is no-grad, so it naturally consumes less activation/gradient memory than the subsequent real optimizer update. Existing upward candidate reserve/preflight machinery remains in the path, but a real GPU run is required before declaring live CUDA behavior production-proven.
+
+## Do not regress these semantics
+
+- Do not make the cached probe batch an ordinary training batch.
+- Do not restore rolling overlap in same-batch mode.
+- Do not carry evidence from a completed STAY window into the next window.
+- Do not permit a decision before W valid probes.
+- Do not replace the v0.541 selector stack with a duplicate v0.53 decision implementation.
+- Do not treat resource-probe backward passes as decision-loss evidence.
+- Do not lose P provenance or exact partial-window resume.
+- Keep false mode on the established path.
