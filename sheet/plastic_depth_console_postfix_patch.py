@@ -73,5 +73,5 @@ from . import plastic_depth_same_batch_resume_config_patch as _plastic_depth_sam
 
 # vvv THOG make same-batch mode explicit in startup/probe console and reset visible P provenance for each fresh evidence batch
 from . import plastic_depth_same_batch_visibility_patch as _plastic_depth_same_batch_visibility_patch
-_plastic_depth_same_batch_visibility_patch._PROBE_COLUMN = 340                                                                                             # <<< THOG shift PLASTIC probe block twenty terminal columns left
+_plastic_depth_same_batch_visibility_patch._PROBE_COLUMN = 300                                                                                             # <<< THOG shift PLASTIC probe block to terminal column 300
 # ^^^ THOG
