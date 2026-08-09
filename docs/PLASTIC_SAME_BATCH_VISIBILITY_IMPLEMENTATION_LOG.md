@@ -4,78 +4,77 @@ Parent implementation: `docs/PLASTIC_SAME_BATCH_ALL_PROBES_IMPLEMENTATION_LOG.md
 Branch: `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION`
 PR: #33
 Date: 2026-08-09
-Validated code head: `a55e2c5d53b9ce8540c426ab28a2b824e03bcd42`
+Validated code head: `5e6e62045d77c53ac4a5f31616e59034f29a9c36`
 
 ## Trigger
 
-A real scruffy run at head `a9e95f571731e54895d838b06a7c2e87c1e5bb09` used the public `--plastic__layer_count__same_batch_all_probes` flag successfully, but neither startup summary stated that the mode was active and probe rows did not expose a fixed-batch identity. The observed provenance P1,P1-2,P1-3,P1-4 then P5 was consistent with strict non-overlapping windows but was not sufficient operator proof.
+A real scruffy run showed that the same-batch state machine was working, but the operator console still exposed too much interim decision detail, used visually small arrows, did not make changed sampled coordinates conspicuous enough, allowed probe tails to drift horizontally with sampled-vector length, and omitted the new same-batch control from the detailed PLASTIC header when the runner executed as `__main__`.
 
-The user also clarified that, under same-batch mode, visible probe numbering should reset to P1 whenever a fresh evidence batch/window begins. A global P5/P6/... sequence has no useful operator meaning once the evidence batch changes.
+## Final governing display semantics
 
-## Governing display semantics
-
-When same-batch mode is enabled:
-
-1. Compact startup reports `same_batch=true` on the `plastic fine:` row.
-2. Detailed startup reports `plastic__layer_count__same_batch_all_probes: true`.
-3. Each probe row reports the actual same-batch window and batch identity as `same_batch W<window_id>:<ordinal>/<window_size> B=<digest8>`.
-4. Operator-facing P sequence/provenance is window-local and restarts at P1 for every fresh batch.
-5. A monotonically increasing global probe sequence remains available only in audit state as `probe_global_sequence` / `probe_global_provenance`; it is not the console provenance.
-6. False/default mode retains the established display/runtime path and does not emit a same-batch per-probe marker.
+1. Compact startup continues to report `same_batch=true|false`.
+2. Detailed startup reports `plastic__layer_count__same_batch_all_probes: true|false`; direct `__main__` execution is explicitly supported.
+3. The detailed PLASTIC header is regression-checked against every parser-exposed `plastic__*` control so a new public PLASTIC hyperparameter cannot silently disappear from the header.
+4. Visible probe numbering is evidence-window local: `P1`, `P2`, ...; a fresh batch resets to `P1`.
+5. Probe labels contain no padding between P and the number.
+6. The probe section starts at terminal-visible column 360. Terminal tab expansion is accounted for. If the sampled vector would extend beyond that point, its visible tail is truncated and the probe section wins.
+7. The directional decision summary/provenance is not displayed before the configured evidence window is complete. Probe loss and `score_z` remain visible on interim probes.
+8. Direction glyphs use `constants.DOWN_ARROW` / `constants.UP_ARROW` (`▼` / `▲`) rather than the smaller arrow glyphs.
+9. Only a committed directional outcome (`▼` or `▲`) is emphasized, using `constants.BOLD + constants.YELLOW` and then `constants.R`.
+10. Existing sampled-layer values are compared by displayed one-decimal value. A changed existing coordinate is `constants.YELLOW` for the first row showing its new value and plain thereafter while unchanged. Newly appended values are not treated as a change to an existing value.
+11. `g nrm=` again owns a fixed seven-character numeric field.
+12. The forensic `same_batch W<window>:<ordinal>/<size> B=<digest8>` marker is hidden for routine runs and emitted only when `constants.DEBUG > 9`.
+13. Global monotonically increasing probe sequence/provenance remains internal audit state; operator P numbering stays window local.
 
 ## Implementation
 
 ### `sheet/plastic_depth_same_batch_visibility_patch.py`
 
-New additive overlay. It:
+This remains the final additive console overlay. The follow-on cleanup in `98b09ae35171463c37d3e45b093b23c57e9bdfef` added:
 
-- rewrites enabled-mode audit `probe_window_provenance` to local `1..ordinal`;
-- preserves prior global provenance separately;
-- maps console `plastic_probe_sequence` and `plastic_probe_provenance` to the local window ordinal/provenance;
-- exposes window ID, ordinal, size and persisted batch digest to the progress formatter;
-- appends the compact same-batch marker to probe rows;
-- injects the resolved same-batch Boolean into the detailed PLASTIC startup block.
+- full-window readiness metadata for console-only decision-summary gating;
+- exact one-row sampled-coordinate change highlighting using `constants.YELLOW`;
+- full-size direction glyph normalization;
+- explicit bold/yellow committed-direction outcome normalization;
+- fixed-width `g nrm` normalization;
+- DEBUG-gated same-batch forensic identity;
+- compact `P1`/`P2` formatting;
+- absolute probe-tail alignment;
+- direct-`__main__` startup-module resolution so the detailed header receives the same-batch control during normal script execution.
 
-Initial commit: `b99186fad0ae5633b89bd3e96bf523d8f0ac4a9f`.
+The first column-360 implementation counted raw tab characters rather than terminal tab stops. That would have aligned the string but not the actual terminal. Commit `3351ffda5798babf1e1b04e60f04da1f06c911b3` corrected visible-width and truncation calculations to use 8-column terminal tab semantics.
 
-The overlay is imported after the v0.53 same-batch runtime overlay in `sheet/plastic_depth_console_postfix_patch.py` so operator display wins last without replacing selector behavior. Integration commit: `a67ed03ac82e5de182645019c6201da375f3a222`.
+### `tests/test_plastic_depth_same_batch_visibility.py`
 
-### Shell startup visibility
+The final focused tests assert:
 
-`plastic_depth_lookahead_wrapper_options.sh` now retains the explicitly requested same-batch Boolean in `THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES`, exports it, validates it, and still routes the actual public Python flag after the wrapper delimiter. Commit: `e655708fec7d4a951897ab79a7c2c361cd00d966`.
+- incomplete evidence windows do not show `▼|▲|?` or provenance;
+- complete windows do show the decision summary;
+- committed `▲` is wrapped exactly in `constants.BOLD + constants.YELLOW`;
+- P numbering resets with each fresh batch and renders as `P1`, `P2`, ...;
+- the P section begins at 1-based terminal column 360 after ANSI removal and tab expansion;
+- the same-batch forensic marker is absent at normal DEBUG and present above 9;
+- an existing sampled coordinate changing `19.0 -> 18.9` is yellow exactly once;
+- `g nrm=  5.921` and `g nrm= 10.746` retain one common field width;
+- startup resolution works through `__main__`;
+- every parser-exposed `plastic__*` control is represented on the detailed PLASTIC header surface;
+- the public wrapper still reports compact `same_batch=true`.
 
-`train_OWT.sh` appends `same_batch=true|false` to the compact `plastic fine:` startup row. Commit: `11f4d8833502235f865e8e987bd984219eb06caf`.
+Focused test commit: `aa3643c8cf8bf0e86e5755dddac7f4dfc7d29b83`. Terminal-column assertion correction: `5e6e62045d77c53ac4a5f31616e59034f29a9c36`.
 
-### Tests
+## Validation
 
-`tests/test_plastic_depth_same_batch_visibility.py` checks:
+Validated code head: `5e6e62045d77c53ac4a5f31616e59034f29a9c36`.
 
-- a real same-batch W=2 runtime produces audit windows 1,1,2;
-- local audit provenance is `(1,)`, `(1,2)`, `(1,)`;
-- internal global sequence remains `1,2,3` with global provenance retained separately;
-- rendered probe rows show P1/P2 then reset to P1 and expose matching W/batch markers;
-- detailed startup prints the resolved same-batch Boolean;
-- a public `train_OWT.sh` dry-run with the public flag prints compact `same_batch=true`.
+- `Validate PLASTIC COARSE FINE regression` run `31294179340`: SUCCESS. Production compile and shell syntax passed; broad CPU suite and inherited-failure classifier passed.
+- `Validate PLASTIC disabled equivalence` run `31294179362`: SUCCESS.
+- `Validate PLASTIC COARSE FINE DDP` run `31294179291`: SUCCESS.
 
-The visibility test went through three fixture corrections. None required a production change:
-
-1. It first called a Stage6 console method on `SharedTrainer`; corrected by separating real runtime/audit state from formatter testing (`e40748e`).
-2. The tiny public-wrapper dry-run inherited the real 1024-token probe default despite an 8-token toy microbatch; corrected by explicitly requesting 8 sampled tokens (`5c6a882`).
-3. The synthetic formatter row expected provenance text without supplying the directional-summary context that v0.541 requires before rendering provenance; the synthetic assertion was narrowed while local provenance remains directly asserted in the real audit (`a55e2c5`).
-
-The visibility production module was added to the workflow's explicit `py_compile` list in `c26ab54e55de0419257fd2323cc56b919233d5a8`.
-
-## Final validation
-
-Validated code head: `a55e2c5d53b9ce8540c426ab28a2b824e03bcd42`.
-
-- Regression workflow `31292791606`: SUCCESS. Explicit compile and shell syntax passed; broad CPU suite contained only recorded inherited failures; classifier reported zero new branch-only failures.
-- Disabled-equivalence workflow `31292791593`: SUCCESS.
-- Same-batch-enabled two-rank DDP workflow `31292791598`: SUCCESS.
-
-The visibility/local-P follow-on is therefore CPU/DDP validated. The corrected real-CUDA smoke remains the final external gate.
+No decision algorithm, score calculation, evidence history, checkpoint state, batch acquisition, or DDP semantics were changed by this UI follow-on.
 
 ## External GPU gate
+
+The corrected same-batch CUDA smoke remains useful for allocator/OOM coverage:
 
 ```bash
 cd ~/git/thog2
