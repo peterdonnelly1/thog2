@@ -32,7 +32,7 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install pytest numpy tiktoken tensorboard wandb psutil
 
-      # vvv THOG compile the complete v0.54 TSK stack, including bootstrap deadlock protection, before running the broad regression suite
+      # vvv THOG compile the complete v0.54 TSK stack, bootstrap protection and final operator console layout before broad regression
       - name: Compile changed production modules
         run: |
           python -m py_compile \
@@ -52,6 +52,7 @@ jobs:
             sheet/plastic_depth_full_radius_oom_patch.py \
             sheet/plastic_depth_audit_patch.py \
             sheet/plastic_depth_console_postfix_patch.py \
+            sheet/plastic_depth_console_compact_layout_patch.py \
             sheet/plastic_depth_wall_time_equivalent_time_gain_patch.py \
             sheet/plastic_depth_wall_time_v0531_integration_patch.py \
             sheet/plastic_depth_same_batch_all_probes_patch.py \
