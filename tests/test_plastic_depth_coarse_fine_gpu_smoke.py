@@ -5,6 +5,7 @@ import io
 import pytest
 import torch
 
+from sheet import plastic_depth_same_batch_all_probes_patch as same_batch
 from sheet.plastic_depth_audit_patch import replay_plastic_depth_count_audit
 from sheet.plastic_depth_coarse import resolve_plastic_coarse_config
 from sheet.plastic_depth_fresh_state import destroy_fresh_training_state
@@ -19,6 +20,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture
+def _same_batch_runtime(monkeypatch):
+    # vvv THOG make the external CUDA smoke exercise the v0.53 fixed-batch path without leaking process-global mode into sibling smoke tests
+    monkeypatch.setenv(same_batch._RUNTIME_ENV, "true")
+    monkeypatch.delenv(same_batch._EXPLICIT_ENV, raising=False)
+    yield
+    # ^^^ THOG
+
+
 def _config():
     return stage3_config(
         "thog2_sheet",
@@ -28,7 +38,8 @@ def _config():
         n_layer=4,
         device="cuda",
         dtype="float32",
-        max_updates=2,
+        max_updates=4,
+        warmup_updates=0,
         eval_interval=0,
         checkpoint_interval=0,
         plastic__enabled=True,
@@ -52,7 +63,8 @@ def _config():
     )
 
 
-def test_real_cuda_coarse_to_full_radius_fine_update() -> None:
+def test_real_cuda_coarse_to_full_radius_fine_update(_same_batch_runtime) -> None:
+    del _same_batch_runtime
     config = _config()
     train_tokens, validation_tokens = token_splits()
     coarse = resolve_plastic_coarse_config(
@@ -88,13 +100,32 @@ def test_real_cuda_coarse_to_full_radius_fine_update() -> None:
         assert outcome.trial_results[0].status == "success"
         assert outcome.selected_layers == 2
         assert fine_state.trainer.state.completed_updates == 0
-        metrics = fine_state.trainer.train_one_update()
-        torch.cuda.synchronize()
 
-        assert metrics["skipped_update"] == 0.0
-        assert fine_state.trainer.state.completed_updates == 1
-        assert len(fine_state.trainer.plastic_depth_count_audit) == 1
-        audit = fine_state.trainer.plastic_depth_count_audit[0]
+        # vvv THOG complete one strict four-probe same-batch window on real CUDA; no early count decision may change the architecture
+        for expected_update in range(1, 5):
+            metrics = fine_state.trainer.train_one_update()
+            torch.cuda.synchronize()
+            assert metrics["skipped_update"] == 0.0
+            assert fine_state.trainer.state.completed_updates == expected_update
+            assert metrics["plastic_active_layers"] == 2.0
+            assert len(fine_state.trainer.plastic_depth_count_audit) == expected_update
+
+        audits = fine_state.trainer.plastic_depth_count_audit
+        assert {audit["probe_batch_digest"] for audit in audits} == {audits[0]["probe_batch_digest"]}
+        assert [audit["probe_window_ordinal"] for audit in audits] == [1, 2, 3, 4]
+        assert [audit["probe_window_complete"] for audit in audits] == [False, False, False, True]
+        assert [tuple(audit["probe_window_provenance"]) for audit in audits] == [
+            (1,),
+            (1, 2),
+            (1, 2, 3),
+            (1, 2, 3, 4),
+        ]
+        assert audits[-1]["probe_window_disposition"] == "stay"
+        assert audits[-1]["histories_after_window_retirement"] == {}
+        assert same_batch._window_state(fine_state.trainer)["active"] is None
+        # ^^^ THOG
+
+        audit = audits[-1]
         assert audit["decision_candidate_counts"] == (1, 2, 3, 4)
         assert audit["execution_candidate_counts"] == (1, 2, 3, 4)
         replay_plastic_depth_count_audit(audit)
