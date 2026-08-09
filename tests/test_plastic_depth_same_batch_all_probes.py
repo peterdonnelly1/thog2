@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,13 @@ from tests.test_plastic_depth import plastic_training_config
 def _isolated_same_batch_environment(monkeypatch):
     monkeypatch.delenv(same_batch._RUNTIME_ENV, raising=False)
     monkeypatch.delenv(same_batch._EXPLICIT_ENV, raising=False)
-    yield
+    try:
+        yield
+    finally:
+        # vvv THOG the runtime flag deliberately survives for one real process; tests must not leak that process-global selection into unrelated suites
+        os.environ.pop(same_batch._RUNTIME_ENV, None)
+        os.environ.pop(same_batch._EXPLICIT_ENV, None)
+        # ^^^ THOG
 
 
 def _same_batch_trainer(*, window_size: int = 2, max_updates: int = 8):
@@ -57,6 +64,8 @@ def test_public_flag_is_exact_and_persists_only_when_enabled():
         [
             "--model-type",
             "sheet",
+            "--o-depth",
+            "3",
             "--plastic__enabled",
             "--plastic__do_learn_layer_count",
             "--plastic__initial_layer_count",
