@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+from sheet import plastic_depth_same_batch_all_probes_patch as same_batch
 from sheet.plastic_depth_coarse import resolve_plastic_coarse_config
 from sheet.plastic_depth_fresh_state import destroy_fresh_training_state
 from sheet.plastic_depth_lifecycle import run_plastic_coarse_fine_lifecycle
@@ -44,6 +45,9 @@ def _config():
 
 
 def main() -> None:
+    # vvv THOG make the existing two-rank lifecycle probe exercise the v0.53 fixed-batch path rather than only its disabled regression path
+    same_batch._set_runtime_enabled(True)
+    # ^^^ THOG
     config = _config()
     train_tokens, validation_tokens = token_splits(length=1024)
     coarse = resolve_plastic_coarse_config(
@@ -81,6 +85,17 @@ def main() -> None:
         audit_rows = getattr(trainer, "plastic_depth_count_audit", ())
         if len(audit_rows) != 1:
             raise RuntimeError("DDP FINE update did not emit exactly one audit row")
+        # vvv THOG require the DDP probe audit to identify one shared fixed batch and the first slot of its four-probe non-overlapping window
+        audit = audit_rows[0]
+        if audit.get("same_batch_all_probes") is not True:
+            raise RuntimeError("DDP FINE probe did not use same_batch_all_probes")
+        if int(audit.get("probe_window_ordinal", 0)) != 1 or int(audit.get("probe_window_size", 0)) != 4:
+            raise RuntimeError("DDP FINE probe window ordinal/size is incorrect")
+        if tuple(audit.get("probe_window_provenance", ())) != (1,):
+            raise RuntimeError("DDP FINE probe provenance is not window-local")
+        if not str(audit.get("probe_batch_digest", "")):
+            raise RuntimeError("DDP FINE probe lacks shared batch identity")
+        # ^^^ THOG
         result = {
             "rank": trainer.distributed.rank,
             "world_size": trainer.distributed.world_size,
@@ -97,7 +112,7 @@ def main() -> None:
             "pause_disposition": outcome.pause_result.disposition,
             "fine_completed_updates": trainer.state.completed_updates,
             "fine_active_layers": trainer.raw_model.trajectory.plastic_sampling.current_active_layers,
-            "audit": audit_rows[0],
+            "audit": audit,
         }
         result_dir = Path(os.environ["THOG2_DDP_RESULT_DIR"])
         result_dir.mkdir(parents=True, exist_ok=True)
