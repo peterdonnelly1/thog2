@@ -5,10 +5,11 @@ Branch: `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION`
 PR: #33
 Started: 2026-08-09
 Implementation code head validated: `da43638b2266ed7122618400299e768af3edb52d`
+Corrected CUDA-smoke test head: `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f`
 
 ## Takeover status
 
-Implementation is complete for CPU/DDP purposes. The remaining external gate is a real CUDA smoke. Do not redesign the controller before running that smoke: the feature is intentionally an additive final overlay on top of the current v0.531/v0.541 selector/provenance stack, with the established path preserved when the option is false.
+Implementation is complete for CPU/DDP purposes. A first real CUDA smoke on scruffy reached COARSE, fresh FINE construction and a successful optimizer update, then exposed a stale smoke-test assertion caused by inherited warmup suppression. That smoke has been corrected to exercise a full same-batch window; the corrected real-CUDA rerun remains the final external gate.
 
 ## Implemented architecture
 
@@ -78,6 +79,20 @@ The same-batch production module is explicitly included in `py_compile` validati
 
 Commit: `da43638b2266ed7122618400299e768af3edb52d`.
 
+### `tests/test_plastic_depth_coarse_fine_gpu_smoke.py`
+
+The external smoke was corrected after the first real run showed that the inherited `warmup_updates=1` prevented the first FINE probe while the stale test still demanded an audit row immediately. The corrected version:
+
+- explicitly enables same-batch runtime mode only for this test;
+- sets `warmup_updates=0` so the smoke probes immediately rather than testing warmup suppression;
+- performs four real CUDA optimizer updates for W=4;
+- checks one fixed batch digest across all four probes;
+- checks ordinals 1..4 and exact window-local provenance growth;
+- verifies no early layer-count change;
+- verifies STAY retirement, cleared histories, full-radius candidate counts, audit replay and nonzero CUDA peak allocation.
+
+Correction commit: `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f`.
+
 ## Chronological implementation notes
 
 ### Initialization
@@ -112,6 +127,35 @@ Corrections:
 
 No classifier waiver or test deselection was added.
 
+### First real CUDA smoke on scruffy
+
+User ran the external smoke on 9 August 2026 at branch head `a23636f090c3cb0e21f9eb30f41dec10d29dbb49`.
+
+Environment reported:
+
+- NVIDIA GeForce RTX 4090 Laptop GPU;
+- PyTorch 2.12.1+cu126;
+- CUDA runtime 12.6.
+
+Observed execution:
+
+- COARSE trial completed successfully;
+- fresh FINE state was constructed;
+- first authoritative FINE optimizer update completed successfully and was not skipped;
+- CUDA cleanup completed without an OOM report;
+- the test then failed at `len(fine_state.trainer.plastic_depth_count_audit) == 1` because that attribute had not yet been created.
+
+Root cause:
+
+- `stage3_config()` defaults to `warmup_updates=1`;
+- the final PLASTIC warmup guard intentionally returns no FINE probe context during a frozen warmup update;
+- therefore update 1 correctly produced no probe evidence and no count audit;
+- the smoke assertion was stale and incorrectly treated “one training update” as “one FINE probe.”
+
+This failure did not establish a same-batch CUDA defect. In fact the smoke did not explicitly enable same-batch mode, so it was not a sufficient external gate for v0.53 even if the old assertion had passed.
+
+The correction in `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f` makes the smoke a genuine v0.53 CUDA gate rather than merely repairing the failing assertion.
+
 ## Validation results
 
 Code head: `da43638b2266ed7122618400299e768af3edb52d`.
@@ -129,13 +173,17 @@ PR #33 body has been updated with the v0.53 implementation and current validatio
 
 ## Remaining external gate
 
-Real CUDA smoke has not been run in this environment:
+Rerun the corrected real CUDA smoke from current branch head:
 
 ```bash
+cd ~/git/thog2
+git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+git checkout PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+git reset --hard origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
 bash tools/run_plastic_coarse_fine_gpu_smoke.sh
 ```
 
-This matters for allocator/OOM behavior and performance. The dedicated decision-evidence forward is no-grad, so it naturally consumes less activation/gradient memory than the subsequent real optimizer update. Existing upward candidate reserve/preflight machinery remains in the path, but a real GPU run is required before declaring live CUDA behavior production-proven.
+A pass now means materially more than the original smoke: it exercises a complete four-probe same-batch window on real CUDA and verifies fixed-batch identity, window-local provenance, no early count movement, retirement, audit replay and allocator use.
 
 ## Do not regress these semantics
 
