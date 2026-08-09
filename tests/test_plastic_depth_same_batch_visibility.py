@@ -53,19 +53,31 @@ def _trainer(*, window_size: int = 2) -> SharedTrainer:
     return SharedTrainer(config, train_tokens, validation_tokens)
 
 
-def _progress_line(trainer: SharedTrainer) -> str:
-    update = int(trainer.state.completed_updates)
-    payload = trainer._prepare_console_progress_payload(
-        "optimizer_progress",
-        {
-            "completed_updates": update,
-            "cumulative_training_seconds": float(update),
-            "consumed_tokens": update * trainer.config.batch_size * trainer.config.block_size,
-            "training_loss": 1.0,
-            "learning_rate": 1.0e-3,
-            "gradient_norm": 1.0,
-        },
-    )
+def _progress_line_from_audit(row: dict) -> str:
+    ordinal = int(row["probe_window_ordinal"])
+    payload = {
+        "completed_updates": f"{int(row['update_number']):6d}",
+        "timestamp": "260809:1300",
+        "cumulative_training_seconds": "       10",
+        "mean_step_seconds": "  1.0000",
+        "tok/s": "       10000",
+        "consumed_tokens": "       10000",
+        "training_loss": "  7.0000",
+        "training_loss_delta": "  -0.001",
+        "learning_rate": " 9.000e-04",
+        "gradient_norm": "   1.000",
+        "current_layer_count": int(row["previous_active_layers"]),
+        "plastic_probe_offsets": (-1, 0, 1),
+        "plastic_probe_edge_offsets": (-1, 1),
+        "plastic_probe_losses": (7.001, 7.0, 6.999),
+        "plastic_score_z": (None, None),
+        "plastic_probe_sequence": ordinal,
+        "plastic_probe_provenance": tuple(row["probe_window_provenance"]),
+        "plastic_same_batch_window_id": int(row["probe_window_id"]),
+        "plastic_same_batch_window_ordinal": ordinal,
+        "plastic_same_batch_window_size": int(row["probe_window_size"]),
+        "plastic_same_batch_batch_digest": str(row["probe_batch_digest"]),
+    }
     return stage6.format_progress_line("visibility-test", "optimizer_progress", payload)
 
 
@@ -73,11 +85,16 @@ def test_same_batch_visible_probe_number_resets_with_fresh_batch() -> None:
     trainer = _trainer(window_size=2)
     try:
         trainer.train_one_update()
-        first_line = _progress_line(trainer)
+        first_audit = trainer.plastic_depth_count_audit[-1]
+        first_line = _progress_line_from_audit(first_audit)
+
         trainer.train_one_update()
-        second_line = _progress_line(trainer)
+        second_audit = trainer.plastic_depth_count_audit[-1]
+        second_line = _progress_line_from_audit(second_audit)
+
         trainer.train_one_update()
-        third_line = _progress_line(trainer)
+        third_audit = trainer.plastic_depth_count_audit[-1]
+        third_line = _progress_line_from_audit(third_audit)
 
         assert "P   1" in first_line
         assert "same_batch W1:1/2 B=" in first_line
