@@ -168,3 +168,15 @@ _plastic_depth_directional_coherence_patch._align_sampled_to_minimum_tab_column 
 # vvv THOG keep postfix brake annotations at the physical end of the row and render neutral L/R/A outcomes as stet
 from . import plastic_depth_console_postfix_patch as _plastic_depth_console_postfix_patch
 # ^^^ THOG
+
+# vvv THOG v0.541 install equivalent-time wall-time economics after established FINE scoring and console overlays
+from . import plastic_depth_wall_time_equivalent_time_gain_patch as _plastic_depth_wall_time_equivalent_time_gain_patch
+# ^^^ THOG
+
+# vvv THOG v0.53 install fixed-batch non-overlapping probe windows after equivalent-time scoring so cached evidence reuses the complete selector stack
+from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_batch_all_probes_patch
+# ^^^ THOG
+
+# vvv THOG v0.54 install selectable Theil-Sen/Kendall gradient classification last so legacy behaviour remains the untouched default path
+from . import plastic_depth_theil_sen_kendall_patch as _plastic_depth_theil_sen_kendall_patch
+# ^^^ THOG
