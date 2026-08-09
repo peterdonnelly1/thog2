@@ -140,9 +140,9 @@ def test_same_batch_visible_probe_number_resets_with_fresh_batch() -> None:
         assert "P1  probe_Δloss" in first_plain
         assert "P2  probe_Δloss" in second_plain
         assert "P1  probe_Δloss" in third_plain
-        assert first_plain.expandtabs(8).index("P1  probe_Δloss") == 339
-        assert second_plain.expandtabs(8).index("P2  probe_Δloss") == 339
-        assert third_plain.expandtabs(8).index("P1  probe_Δloss") == 339
+        assert first_plain.expandtabs(8).index("P1  probe_Δloss") == 299
+        assert second_plain.expandtabs(8).index("P2  probe_Δloss") == 299
+        assert third_plain.expandtabs(8).index("P1  probe_Δloss") == 299
         assert "▼|▲|? =" not in first_plain
         assert "▼|▲|? =" in second_plain
         assert "(P1,2)" in second_plain
