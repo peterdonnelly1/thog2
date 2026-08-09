@@ -189,6 +189,10 @@ from . import plastic_depth_theil_sen_kendall_resume_config_patch as _plastic_de
 from . import plastic_depth_theil_sen_kendall_console_fix_patch as _plastic_depth_theil_sen_kendall_console_fix_patch
 # ^^^ THOG
 
-# vvv THOG final compact PLASTIC operator layout: decimal-hour elapsed time, shorter progress labels, tighter sampled placement and visible gradient controls
+# vvv THOG v0.54 keep raw-loss bootstrap exploration active until wall-time timing/loss models can provide real TSK economic scores
+from . import plastic_depth_theil_sen_kendall_bootstrap_fix_patch as _plastic_depth_theil_sen_kendall_bootstrap_fix_patch
+# ^^^ THOG
+
+# vvv THOG final compact PLASTIC operator layout: seconds plus decimal-hour elapsed time, one-decimal step seconds, shorter labels and tighter sampled placement
 from . import plastic_depth_console_compact_layout_patch as _plastic_depth_console_compact_layout_patch
 # ^^^ THOG
