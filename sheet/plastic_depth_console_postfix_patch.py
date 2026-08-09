@@ -67,6 +67,10 @@ from . import plastic_depth_v0541_patch as _plastic_depth_v0541_patch
 from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_batch_all_probes_patch
 # ^^^ THOG
 
+# vvv THOG let lifecycle resume reconstruct TrainingConfig from the v0.53 persisted same-batch field without changing ordinary constructor semantics
+from . import plastic_depth_same_batch_resume_config_patch as _plastic_depth_same_batch_resume_config_patch
+# ^^^ THOG
+
 # vvv THOG make same-batch mode explicit in startup/probe console and reset visible P provenance for each fresh evidence batch
 from . import plastic_depth_same_batch_visibility_patch as _plastic_depth_same_batch_visibility_patch
 # ^^^ THOG
