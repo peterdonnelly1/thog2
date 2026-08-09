@@ -38,3 +38,7 @@ _v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055 = (
     _stratified_selector_with_feasible_decision_points
 )
 # ^^^ THOG
+
+# vvv THOG install the final fixed-width operator console only after every v0.55 selector and diagnostic formatter has been installed
+from . import plastic_depth_console_alignment_v055_patch as _plastic_depth_console_alignment_v055_patch
+# ^^^ THOG
