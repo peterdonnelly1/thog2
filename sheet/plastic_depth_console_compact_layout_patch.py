@@ -20,6 +20,7 @@ _STARTUP_GRADIENT_VISIBILITY_INSTALLED = False
 _WINDOW_LABEL = "plastic__layer_count_probe__window_size_as_number_of_probes:"
 _ALGORITHM_LABEL = "plastic__layer_count_decision_algorithm:"
 _TAU_LABEL = "plastic__layer_count_gradient__minimum_absolute_kendall_tau:"
+_FINAL_SAMPLED_ARRAY = re.compile(r"sampled \[(?P<body>[^\]]*)\]")
 
 
 def _progress_elapsed_decimal_hours(value: Any, completed_updates: Any) -> str:
@@ -52,7 +53,7 @@ def _visible_width(text: str) -> int:
     return len(_visibility._ANSI_ESCAPE.sub("", text).expandtabs(8))
 
 
-def _pull_sampled_left_four_columns(line: str) -> str:
+def _pull_sampled_left_three_columns(line: str) -> str:
     sampled = _directional._SAMPLED_ARRAY.search(line)
     if sampled is None:
         return line
@@ -60,17 +61,12 @@ def _pull_sampled_left_four_columns(line: str) -> str:
     current_column = _visible_width(current_prefix)
     compact_prefix = current_prefix.rstrip(" \t")
     compact_column = _visible_width(compact_prefix)
-    target_column = max(compact_column + 1, current_column - 4)
+    target_column = max(compact_column + 1, current_column - 3)
     gap_width = max(1, target_column - compact_column)
     return compact_prefix + (" " * gap_width) + line[sampled.start() :]
 
 
-# Preserve the previously exported helper name for callers while applying the new four-column policy.
-def _pull_sampled_left_three_columns(line: str) -> str:
-    return _pull_sampled_left_four_columns(line)
-
-
-_directional._align_sampled_to_minimum_tab_column = _pull_sampled_left_four_columns
+_directional._align_sampled_to_minimum_tab_column = _pull_sampled_left_three_columns
 
 
 def _gradient_header_rows() -> tuple[tuple[str, str], tuple[str, str]]:
@@ -119,9 +115,21 @@ _stage6.Stage6Trainer.__init__ = _stage6_init_with_gradient_startup_visibility
 
 
 def _finalize_compact_progress_line(line: str) -> str:
+    current_sampled = _directional._SAMPLED_ARRAY.search(line)
+    target_sampled_column = None
+    if current_sampled is not None:
+        target_sampled_column = max(0, _visible_width(line[: current_sampled.start()]) - 4)
+
     rendered = line.replace("layers = ", "layers ", 1)
     rendered = rendered.replace("sampled = ", "sampled ", 1)
-    return rendered
+
+    sampled = _FINAL_SAMPLED_ARRAY.search(rendered)
+    if sampled is None or target_sampled_column is None:
+        return rendered
+    compact_prefix = rendered[: sampled.start()].rstrip(" \t")
+    compact_column = _visible_width(compact_prefix)
+    gap_width = max(1, target_sampled_column - compact_column)
+    return compact_prefix + (" " * gap_width) + rendered[sampled.start() :]
 
 
 def _format_progress_line_with_final_compaction(
@@ -143,7 +151,6 @@ __all__ = [
     "_gradient_header_rows",
     "_install_gradient_startup_visibility",
     "_progress_elapsed_decimal_hours",
-    "_pull_sampled_left_four_columns",
     "_pull_sampled_left_three_columns",
 ]
 # ^^^ THOG
