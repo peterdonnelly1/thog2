@@ -46,6 +46,10 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
         self.assertIn("--plastic__layer_count__max_allowable_layer_change N=1", result.stdout)
         self.assertIn("--plastic__log_interval_coarse", result.stdout)
         self.assertIn("--plastic__coarse_phase_roll_through", result.stdout)
+        self.assertIn("wall_time__theil_sen_kendall_LRA", result.stdout)
+        self.assertIn("wall_time__sen_kendall__tau__stratified", result.stdout)
+        self.assertNotIn("wall_time__gradient__theil_sen_kendall_slope_tau", result.stdout)
+        self.assertNotIn("--plastic__layer_count_gradient__minimum_absolute_kendall_tau", result.stdout)
         self.assertNotIn("plastic--phase", result.stdout + result.stderr)
         self.assertNotIn("Unknown option", result.stdout + result.stderr)
 
@@ -61,6 +65,34 @@ printf '%s|%s|%s\\n' "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" "$THOG2_PLASTIC_L
             result.stdout.strip(),
             "4|2|--plastic__layer_count_probe_radius 4 --plastic__layer_count__max_allowable_layer_change=2 marker",
         )
+
+    def test_v055_decision_algorithm_is_routed_after_separator(self) -> None:
+        command = """
+set -- -g RUN --plastic__layer_count_decision_algorithm wall_time__sen_kendall__tau__stratified
+source ./plastic_depth_lookahead_wrapper_options.sh
+printf '%s\\n' "$@"
+"""
+        result = self._run_bash("-c", command)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "-g",
+                "RUN",
+                "--",
+                "--plastic__layer_count_decision_algorithm",
+                "wall_time__sen_kendall__tau__stratified",
+            ],
+        )
+
+    def test_retired_kendall_tau_control_is_rejected(self) -> None:
+        command = """
+set -- --plastic__layer_count_gradient__minimum_absolute_kendall_tau 0.7
+source ./plastic_depth_lookahead_wrapper_options.sh
+"""
+        result = self._run_bash("-c", command)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("removed in PLASTIC v0.55", result.stderr)
 
     def test_hyphen_and_single_underscore_aliases_are_rejected(self) -> None:
         for alias in ("--plastic-enabled", "--plastic_enabled"):
