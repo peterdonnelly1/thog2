@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from sheet import plastic_depth_console_compact_layout_patch as compact
-from sheet import plastic_depth_theil_sen_kendall_patch as gradient
+from sheet import plastic_depth_sen_kendall_v055_patch as v055
+from sheet import plastic_depth_theil_sen_kendall_patch as tsk
 
 
 def test_elapsed_shows_seconds_then_fixed_width_decimal_hours() -> None:
@@ -42,10 +43,9 @@ def test_final_progress_labels_drop_equals_signs() -> None:
     assert "sampled = " not in rendered
 
 
-def test_gradient_header_rows_show_both_new_controls(monkeypatch) -> None:
-    monkeypatch.setenv(gradient._ALGORITHM_ENV, gradient.GRADIENT_ALGORITHM)
-    monkeypatch.setenv(gradient._TAU_ENV, "0.5")
+def test_sen_kendall_header_rows_show_algorithm_only(monkeypatch) -> None:
+    monkeypatch.setenv(tsk._ALGORITHM_ENV, v055.STRATIFIED_ALGORITHM)
     rows = dict(compact._gradient_header_rows())
-    assert rows["plastic__layer_count_decision_algorithm:"] == gradient.GRADIENT_ALGORITHM
-    assert rows["plastic__layer_count_gradient__minimum_absolute_kendall_tau:"] == "0.5"
+    assert rows["plastic__layer_count_decision_algorithm:"] == v055.STRATIFIED_ALGORITHM
+    assert "plastic__layer_count_gradient__minimum_absolute_kendall_tau:" not in rows
 # ^^^ THOG
