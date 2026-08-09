@@ -46,3 +46,7 @@ from . import plastic_depth_console_alignment_v055_patch as _plastic_depth_conso
 # vvv THOG keep v0.55 Sen/Kendall history ownership and final operator fields authoritative after all retained legacy wrappers
 from . import plastic_depth_sen_kendall_v055_runtime_fix_patch as _plastic_depth_sen_kendall_v055_runtime_fix_patch
 # ^^^ THOG
+
+# vvv THOG replay v0.55 Sen/Kendall audit rows from their single significant adjacent candidate rather than retired score_z ranking
+from . import plastic_depth_sen_kendall_v055_audit_fix_patch as _plastic_depth_sen_kendall_v055_audit_fix_patch
+# ^^^ THOG
