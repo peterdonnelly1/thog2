@@ -63,6 +63,7 @@ jobs:
             sheet/plastic_depth_theil_sen_kendall_resume_config_patch.py \
             sheet/plastic_depth_theil_sen_kendall_console_fix_patch.py \
             sheet/plastic_depth_sen_kendall_v055_patch.py \
+            sheet/plastic_depth_sen_kendall_v055_boundary_fix_patch.py \
             sheet/training_model.py \
             sheet/trainer_step.py \
             sheet/trainer_checkpoint_save.py \
