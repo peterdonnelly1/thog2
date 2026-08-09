@@ -1,6 +1,7 @@
 # vvv THOG
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -83,5 +84,5 @@ def test_gradient_classifier_is_deterministic_for_identical_ddp_inputs():
 
 def test_console_diagnostic_units_are_seconds_per_layer():
     assert gradient._format_gradient_value(0.1834, digits=3) == "+0.183"
-    assert "s/layer" in gradient._format_progress_line_with_gradient.__code__.co_consts
+    assert "s/layer" in inspect.getsource(gradient._format_progress_line_with_gradient)
 # ^^^ THOG
