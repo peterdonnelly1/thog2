@@ -91,6 +91,7 @@ jobs:
 
       # vvv THOG fail fast on the new v0.56 objective/decision matrix, exclusivity, help and transition-display contracts before paying for the complete suite
       - name: Run focused PLASTIC v0.56 tests
+        id: focused_suite
         run: |
           python -m pytest -q \
             tests/test_plastic_depth_v056_objective_decision.py \
@@ -112,7 +113,7 @@ jobs:
           set -o pipefail
           python -m pytest -q tests 2>&1 | tee broad_regression.log
 
-      # vvv THOG make successful pytest classification an explicit success path and reserve baseline classification only for a genuinely failed suite
+      # vvv THOG make successful pytest classification an explicit success path and reserve baseline classification only for a genuinely failed completed suite
       - name: Record successful complete CPU suite
         if: always() && steps.branch_suite.outcome == 'success'
         run: |
@@ -120,7 +121,7 @@ jobs:
           echo 'Regression classification: complete CPU suite passed; 0 branch-only failures.'
 
       - name: Classify failed suite against untouched PLASTIC_DEPTH
-        if: always() && steps.branch_suite.outcome != 'success'
+        if: always() && steps.branch_suite.outcome == 'failure'
         run: |
           : > branch_only_failures.txt
           python .github/scripts/classify_plastic_coarse_fine_failures.py
