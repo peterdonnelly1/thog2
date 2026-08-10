@@ -4,7 +4,7 @@ from __future__ import annotations
 from sheet import plastic_depth_directional_coherence_patch as directional
 
 
-def test_sampled_follows_layers_with_exactly_one_tab_and_no_fixed_column_padding() -> None:
+def test_sampled_follows_layers_with_compact_spacing_and_precedes_probe_block() -> None:
     source = (
         "T 4 070826-1540 00:00:31 loss= 10.2769 grad norm= 5.475 "
         "layers = 32\tprobe_losses [L-5 ... L+5] = [10.5, 10.4, 10.3] "
@@ -19,7 +19,7 @@ def test_sampled_follows_layers_with_exactly_one_tab_and_no_fixed_column_padding
     layer_end = rendered.index(layer_text) + len(layer_text)
     sampled_start = rendered.index(sampled_text)
 
-    assert rendered[layer_end:sampled_start] == "\t"
+    assert rendered[layer_end:sampled_start] == "  "
     assert sampled_start < rendered.index("probe_losses")
 
 
