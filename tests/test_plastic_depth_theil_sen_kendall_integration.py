@@ -38,12 +38,13 @@ def test_retired_gradient_algorithm_name_is_rejected(monkeypatch):
         tsk._ALGORITHM_ENV,
         "wall_time__gradient__theil_sen_kendall_slope_tau",
     )
-    with pytest.raises(ValueError, match="renamed in PLASTIC v0.55"):
+    with pytest.raises(ValueError, match="retired in PLASTIC v0.56"):
         v055._runtime_algorithm()
 
 
-def test_v055_retargets_v054_compatibility_constant_to_lra():
+def test_v056_retargets_v054_compatibility_constant_to_objective_neutral_lra():
     assert tsk.GRADIENT_ALGORITHM == v055.LRA_ALGORITHM
+    assert tsk.GRADIENT_ALGORITHM == "theil_sen_kendall_LRA"
     assert v055.FIXED_MINIMUM_ABSOLUTE_KENDALL_TAU == pytest.approx(0.5)
     assert tsk._runtime_minimum_absolute_kendall_tau() == pytest.approx(0.5)
 
