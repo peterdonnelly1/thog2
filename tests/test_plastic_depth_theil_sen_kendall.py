@@ -227,7 +227,7 @@ def test_far_right_candidate_cannot_be_selected_even_when_locally_attractive():
 
 
 def test_algorithm_constants_and_default_threshold_are_stable():
-    assert GRADIENT_ALGORITHM == "wall_time__theil_sen_kendall_LRA"
+    assert GRADIENT_ALGORITHM == "theil_sen_kendall_LRA"
     assert LEGACY_DIRECTIONAL_ALGORITHM == "directional_coherence"
     assert DEFAULT_MINIMUM_ABSOLUTE_KENDALL_TAU == 0.5
 # ^^^ THOG
