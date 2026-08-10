@@ -55,6 +55,10 @@ from . import plastic_depth_sen_kendall_v055_audit_fix_patch as _plastic_depth_s
 from . import plastic_depth_v055_growth_side_discount_patch as _plastic_depth_v055_growth_side_discount_patch
 # ^^^ THOG
 
+# vvv THOG show the active growth-side discount alongside the selected Sen/Kendall algorithm in the existing PLASTIC startup section
+from . import plastic_depth_v055_growth_side_startup_patch as _plastic_depth_v055_growth_side_startup_patch
+# ^^^ THOG
+
 # vvv THOG add rolling W&B-only raw probe-loss spaghetti curves after the final PLASTIC decision/provenance overlays are installed
 from . import plastic_depth_wandb_probe_curves_patch as _plastic_depth_wandb_probe_curves_patch
 # ^^^ THOG
