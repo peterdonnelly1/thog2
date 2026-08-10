@@ -62,12 +62,12 @@ def test_replay_matches_actual_stratified_22_to_21_commit_without_score_z() -> N
         },
         "winning_probe_count": 21,
         "committed_count": 21,
-        "decision_reason": "robust_gate_committed",
+        "decision_reason": "winning_probe_committed",
     }
     assert audit_fix.replay_plastic_depth_count_audit_v055(audit) == {
         "winning_probe_count": 21,
         "committed_count": 21,
-        "decision_reason": "robust_gate_committed",
+        "decision_reason": "winning_probe_committed",
     }
 
 
@@ -109,7 +109,7 @@ def test_lra_replay_uses_strict_majority_plus_adjacent_economic_check() -> None:
         },
         "winning_probe_count": 21,
         "committed_count": 21,
-        "decision_reason": "robust_gate_committed",
+        "decision_reason": "winning_probe_committed",
     }
     assert audit_fix.replay_plastic_depth_count_audit_v055(audit)["winning_probe_count"] == 21
 
