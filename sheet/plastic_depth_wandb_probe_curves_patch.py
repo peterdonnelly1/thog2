@@ -126,6 +126,41 @@ def _rows_for_side(history: Iterable[Mapping[str, Any]], side: str) -> List[List
     return rows
 
 
+# vvv THOG concatenate the established interpolation/extrapolation probe sides into one signed-offset landscape while retaining L exactly once
+def _rows_for_combined(history: Iterable[Mapping[str, Any]]) -> List[List[Any]]:
+    rows: List[List[Any]] = []
+    for record in history:
+        probe_id = str(record["probe_id"])
+        update = int(record["optimizer_update"])
+        active = int(record["active_layers"])
+        selected = int(record["selected_layers"])
+        point_by_offset: Dict[int, Tuple[int, float, int, int]] = {}
+        for side in ("shrink", "growth"):
+            for distance, delta, candidate, offset in record.get(side, ()):
+                point_by_offset[int(offset)] = (
+                    int(distance),
+                    float(delta),
+                    int(candidate),
+                    int(offset),
+                )
+        for offset in sorted(point_by_offset):
+            distance, delta, candidate, signed_offset = point_by_offset[offset]
+            rows.append(
+                [
+                    distance,
+                    delta,
+                    probe_id,
+                    update,
+                    active,
+                    selected,
+                    candidate,
+                    signed_offset,
+                ]
+            )
+    return rows
+# ^^^ THOG
+
+
 def _bounded_rows_for_side(
     history: Iterable[Mapping[str, Any]],
     side: str,
@@ -147,6 +182,29 @@ def _bounded_rows_for_side(
     for group in reversed(groups):
         rows.extend(group)
     return rows
+
+
+# vvv THOG give the wider combined landscape its own whole-probe row cap so very wide probes reduce only this panel's retained probe count
+
+def _bounded_rows_for_combined(history: Iterable[Mapping[str, Any]]) -> List[List[Any]]:
+    records = tuple(history)
+    groups: List[List[List[Any]]] = []
+    row_count = 0
+    for record in reversed(records):
+        group = _rows_for_combined((record,))
+        if not group:
+            continue
+        if len(group) > _MAX_TABLE_ROWS:
+            group = group[-_MAX_TABLE_ROWS:]
+        if row_count + len(group) > _MAX_TABLE_ROWS:
+            break
+        groups.append(group)
+        row_count += len(group)
+    rows: List[List[Any]] = []
+    for group in reversed(groups):
+        rows.extend(group)
+    return rows
+# ^^^ THOG
 
 
 def _should_refresh_charts(
@@ -182,7 +240,7 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
         ),
         (
             "growth",
-            f"PLASTIC probe growth/extrapolation side — recent {len(history)} probes",
+            f"PLASTIC probe grow/extrapolation side — recent {len(history)} probes",
             "fine/plastic_probe_growth_curves",
         ),
     ):
@@ -197,6 +255,26 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
             stroke="probe_id",
             title=title,
         )
+
+    # vvv THOG add a third objective-neutral visual joining both existing sides around signed offset zero without changing either established split chart
+    combined_rows = _bounded_rows_for_combined(history)
+    if combined_rows:
+        combined_table = telemetry.module.Table(
+            data=combined_rows,
+            columns=list(_CHART_COLUMNS),
+        )
+        payload["fine/plastic_probe_combined_curves"] = telemetry.module.plot.line(
+            table=combined_table,
+            x="offset",
+            y="delta_loss",
+            stroke="probe_id",
+            title=(
+                "PLASTIC probe shrink/interpolation : grow/extrapolation — "
+                f"recent {len(history)} probes"
+            ),
+        )
+    # ^^^ THOG
+
     if not payload:
         return
     try:
@@ -248,10 +326,12 @@ _wandb.attach_telemetry = attach_telemetry_with_plastic_probe_curves
 
 
 __all__ = [
+    "_bounded_rows_for_combined",
     "_bounded_rows_for_side",
     "_consume_new_probe_records",
     "_log_rolling_probe_charts",
     "_probe_record_from_event",
+    "_rows_for_combined",
     "_rows_for_side",
     "attach_telemetry_with_plastic_probe_curves",
 ]
