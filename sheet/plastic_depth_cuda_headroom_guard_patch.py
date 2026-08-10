@@ -241,3 +241,9 @@ _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update = (
     _commit_plastic_depth_inline_update_with_cuda_headroom
 )
 # ^^^ THOG
+
+# vvv THOG install PLASTIC v0.56 objective-neutral decision ownership only after CUDA/same-batch/v0.55 runtime guards are fully established
+from . import plastic_depth_v056_objective_decision_patch as _plastic_depth_v056_objective_decision_patch
+from . import plastic_depth_v056_transition_highlight_patch as _plastic_depth_v056_transition_highlight_patch
+from . import plastic_depth_v056_help_patch as _plastic_depth_v056_help_patch
+# ^^^ THOG
