@@ -17,6 +17,18 @@ _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_de
 _ORIGINAL_INLINE_PROBE_REQUEST = _trainer_step.TrainerStepMixin._plastic_depth_inline_probe_request
 
 
+def _release_cuda_allocator_reserve(
+    context: Dict[str, Any],
+    *,
+    empty_cache: bool,
+) -> None:
+    reserve = context.get("cuda_allocator_reserve")
+    release = getattr(reserve, "release", None)
+    if callable(release):
+        release(empty_cache=empty_cache)
+    context["cuda_allocator_reserve"] = None
+
+
 def _begin_plastic_depth_inline_update_with_full_radius_oom(
     self: Any,
 ) -> Optional[Dict[str, Any]]:
@@ -134,20 +146,25 @@ def _plastic_depth_inline_probe_request_with_full_radius_oom(
                 if higher_count > candidate_count:
                     context["upward_candidate_feasible_by_count"][higher_count] = False
             # vvv THOG a failed candidate ends upward exploration; release the barrier only after all ranks reject the candidate and before cleanup
-            reserve = context.get("cuda_allocator_reserve")
-            release = getattr(reserve, "release", None)
-            if callable(release):
-                release(empty_cache=True)
-            context["cuda_allocator_reserve"] = None
+            _release_cuda_allocator_reserve(context, empty_cache=True)
             # ^^^ THOG
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         return globally_feasible
 
+    # vvv THOG the reserve protects upward evidence only; if the selector stays or shrinks, release it before the real gradient-bearing update at the already-safe count
+    def select_with_reserve_lifetime(candidates):
+        selected_count = int(request.selector(candidates))
+        current_count = int(context["current_count"])
+        if selected_count <= current_count:
+            _release_cuda_allocator_reserve(context, empty_cache=True)
+        return selected_count
+    # ^^^ THOG
+
     return PlasticDepthInlineProbeRequest(
         candidate_counts=request.candidate_counts,
         sampled_token_indices=request.sampled_token_indices,
-        selector=request.selector,
+        selector=select_with_reserve_lifetime,
         recoverable_upward_counts=upward_counts,
         prepare_recoverable_upward_counts=prepare_upward_counts,
         synchronize_recoverable_upward_candidate=synchronize_candidate,
