@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from sheet import plastic_depth_controller as controller
+from sheet import plastic_depth_sen_kendall_v055_patch as v055
+from sheet import plastic_depth_v055_same_batch_audit_bridge_patch as bridge
+
+
+def _decision(*, current: int = 10, selected: int = 11):
+    evidence = (
+        controller.PlasticDepthPairedDirectionEvidence(
+            candidate_count=current - 1,
+            direction=-1,
+            paired_difference=0.4,
+            observation_count=2,
+            median=None,
+            mad=None,
+            sigma=None,
+            standardized_improvement=None,
+            significant=False,
+            feasible=True,
+        ),
+        controller.PlasticDepthPairedDirectionEvidence(
+            candidate_count=current + 1,
+            direction=1,
+            paired_difference=-0.2,
+            observation_count=2,
+            median=None,
+            mad=None,
+            sigma=None,
+            standardized_improvement=None,
+            significant=True,
+            feasible=True,
+        ),
+    )
+    return controller.PlasticDepthRobustCountDecision(
+        selected_count=selected,
+        current_count=current,
+        update_number=20,
+        brake_active=False,
+        last_count_change_update=-1,
+        histories={},
+        evidence=evidence,
+    )
+
+
+def _stratified_report() -> dict:
+    return {
+        "algorithm": v055.STRATIFIED_ALGORITHM,
+        "window_ready": True,
+        "sen_slope_seconds_per_layer": -1.25,
+        "kendall_tau": -0.8,
+        "adjacent_score_seconds": -0.2,
+        "selected_count": 11,
+    }
+
+
+def test_same_batch_hold_records_raw_v055_decision_and_replays_hold() -> None:
+    context = {
+        "current_count": 10,
+        "selected_count": 11,
+        "decision": _decision(),
+        "plastic_directional_report": _stratified_report(),
+    }
+
+    bridge._force_framework_hold_with_v055_audit_metadata(
+        context,
+        reason="incomplete_same_batch_window",
+    )
+
+    assert context["selected_count"] == 10
+    assert context["decision"].selected_count == 10
+    assert all(not item.significant for item in context["decision"].evidence)
+    report = context["plastic_directional_report"]
+    assert report["selected_count"] == 10
+    assert report["framework_hold_reason"] == "incomplete_same_batch_window"
+    assert report["framework_raw_selected_count"] == 11
+
+    audit = {
+        "previous_count": 10,
+        "brake_active": False,
+        "directional_report": report,
+    }
+    assert bridge._sen_kendall_winning_count_from_audit_with_framework_hold(audit) == 10
+
+
+def test_same_batch_hold_audit_rejects_tampered_raw_v055_decision() -> None:
+    report = _stratified_report()
+    report["framework_hold_reason"] = "incomplete_same_batch_window"
+    report["framework_raw_selected_count"] = 9
+    audit = {
+        "previous_count": 10,
+        "brake_active": False,
+        "directional_report": deepcopy(report),
+    }
+
+    with pytest.raises(ValueError, match="framework-hold raw decision mismatch"):
+        bridge._sen_kendall_winning_count_from_audit_with_framework_hold(audit)
+
+
+def test_no_framework_hold_preserves_raw_v055_audit_winner() -> None:
+    audit = {
+        "previous_count": 10,
+        "brake_active": False,
+        "directional_report": _stratified_report(),
+    }
+
+    assert bridge._sen_kendall_winning_count_from_audit_with_framework_hold(audit) == 11
