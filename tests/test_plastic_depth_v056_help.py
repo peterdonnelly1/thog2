@@ -28,6 +28,20 @@ def test_help_registry_contains_v056_decision_section() -> None:
     assert "change_z/score_z" in text
 
 
+def test_growth_discount_registry_entry_is_unique_and_objective_neutral() -> None:
+    matches = [
+        (section, row)
+        for section, rows in registry._DESCRIPTOR_SECTIONS
+        for row in rows
+        if row[1] == help_patch._GROWTH_DISCOUNT_OPTION
+    ]
+    assert len(matches) == 1
+    section, row = matches[0]
+    assert section == help_patch._SECTION
+    assert "growth-side objective evidence" in row[2]
+    assert "economic evidence" not in row[2]
+
+
 def test_argparse_help_uses_objective_neutral_tsk_names() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--plastic__enabled", action="store_true")
