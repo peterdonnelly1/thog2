@@ -24,13 +24,14 @@ def test_compact_progress_labels_and_one_decimal_step_seconds() -> None:
     assert "g nrm=" not in rendered
 
 
-def test_final_sampled_column_is_four_left_of_current_layout() -> None:
+def test_final_sampled_column_moves_four_left_unless_separator_sets_floor() -> None:
     natural = "layers = 22\tsampled = [1.0, 2.0]"
     current = compact._pull_sampled_left_three_columns(natural)
     current_column = current.expandtabs(8).index("sampled =")
     rendered = compact._finalize_compact_progress_line(current)
     new_column = rendered.expandtabs(8).index("sampled [")
-    assert new_column == current_column - 4
+    minimum_column = len("layers 22") + 1
+    assert new_column == max(current_column - 4, minimum_column)
 
 
 def test_final_progress_labels_drop_equals_signs() -> None:
