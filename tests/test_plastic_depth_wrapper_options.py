@@ -48,6 +48,7 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
         self.assertIn("--plastic__coarse_phase_roll_through", result.stdout)
         self.assertIn("wall_time__theil_sen_kendall_LRA", result.stdout)
         self.assertIn("wall_time__sen_kendall__tau__stratified", result.stdout)
+        self.assertIn("--plastic__layer_count_decision_algorithm__growth_side_discount X", result.stdout)
         self.assertNotIn("wall_time__gradient__theil_sen_kendall_slope_tau", result.stdout)
         self.assertNotIn("--plastic__layer_count_gradient__minimum_absolute_kendall_tau", result.stdout)
         self.assertNotIn("plastic--phase", result.stdout + result.stderr)
@@ -66,9 +67,9 @@ printf '%s|%s|%s\\n' "$THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS" "$THOG2_PLASTIC_L
             "4|2|--plastic__layer_count_probe_radius 4 --plastic__layer_count__max_allowable_layer_change=2 marker",
         )
 
-    def test_v055_decision_algorithm_is_routed_after_separator(self) -> None:
+    def test_v055_decision_controls_are_routed_after_separator(self) -> None:
         command = """
-set -- -g RUN --plastic__layer_count_decision_algorithm wall_time__sen_kendall__tau__stratified
+set -- -g RUN --plastic__layer_count_decision_algorithm wall_time__sen_kendall__tau__stratified --plastic__layer_count_decision_algorithm__growth_side_discount 0.6
 source ./plastic_depth_lookahead_wrapper_options.sh
 printf '%s\\n' "$@"
 """
@@ -82,6 +83,8 @@ printf '%s\\n' "$@"
                 "--",
                 "--plastic__layer_count_decision_algorithm",
                 "wall_time__sen_kendall__tau__stratified",
+                "--plastic__layer_count_decision_algorithm__growth_side_discount",
+                "0.6",
             ],
         )
 
