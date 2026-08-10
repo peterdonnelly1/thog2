@@ -32,7 +32,7 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
           python -m pip install pytest numpy tiktoken tensorboard wandb psutil
 
-      # vvv THOG compile the complete v0.55 Sen/Kendall stack including independent audit replay, growth-side discount and W&B-only probe curves before broad regression
+      # vvv THOG compile the complete v0.55 Sen/Kendall stack including independent audit replay, growth-side discount and W&B-only probe curves before final broad regression
       - name: Compile changed production modules
         run: |
           python -m py_compile \
