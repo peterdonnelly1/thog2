@@ -10,6 +10,7 @@ from . import plastic_depth_v056_objective_decision_patch as _v056
 
 
 _SECTION = "PLASTIC DEPTH decision algorithms"
+_GROWTH_DISCOUNT_OPTION = "--plastic__layer_count_decision_algorithm__growth_side_discount VALUE"
 _ROWS = (
     (
         "—",
@@ -118,18 +119,22 @@ _ROWS = (
     ),
     (
         "—",
-        "--plastic__layer_count_decision_algorithm__growth_side_discount VALUE",
+        _GROWTH_DISCOUNT_OPTION,
         "TSK only: credit [0,1] of beneficial growth-side objective evidence before Sen/Kendall; adverse growth evidence and the exact adjacent check remain undiscounted",
     ),
 )
 
 
 def _descriptor_sections_v056():
-    sections = [
-        (section, tuple(rows))
-        for section, rows in _registry._DESCRIPTOR_SECTIONS
-        if section != _SECTION
-    ]
+    sections = []
+    for section, rows in _registry._DESCRIPTOR_SECTIONS:
+        if section == _SECTION:
+            continue
+        filtered_rows = tuple(
+            row for row in rows
+            if row[1] != _GROWTH_DISCOUNT_OPTION
+        )
+        sections.append((section, filtered_rows))
     insertion_index = next(
         (index + 1 for index, (section, _rows) in enumerate(sections) if section == "PLASTIC DEPTH"),
         len(sections),
