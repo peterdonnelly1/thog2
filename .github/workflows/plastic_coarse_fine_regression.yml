@@ -89,12 +89,13 @@ jobs:
           bash -n train_OWT.sh
           bash -n plastic_depth_lookahead_wrapper_options.sh
 
-      # vvv THOG fail fast on the new v0.56 objective/decision matrix, exclusivity, help and transition-display contracts before paying for the complete suite
+      # vvv THOG fail fast on the v0.56 matrix, strict algorithm ownership, migration/help contracts and one-shot transition display before paying for the complete suite
       - name: Run focused PLASTIC v0.56 tests
         id: focused_suite
         run: |
           python -m pytest -q \
             tests/test_plastic_depth_v056_objective_decision.py \
+            tests/test_plastic_depth_v056_exclusivity_integration.py \
             tests/test_plastic_depth_v056_transition_highlight.py \
             tests/test_plastic_depth_v056_help.py \
             tests/test_plastic_depth_sen_kendall_v055.py \
@@ -102,7 +103,11 @@ jobs:
             tests/test_plastic_depth_v055_growth_side_persistence.py \
             tests/test_plastic_depth_v055_growth_side_startup.py \
             tests/test_plastic_depth_v055_same_batch_audit_bridge.py \
-            tests/test_plastic_depth_cuda_headroom_guard.py
+            tests/test_plastic_depth_cuda_headroom_guard.py \
+            tests/test_plastic_depth_probe_sampling_v0521.py \
+            tests/test_plastic_depth_theil_sen_kendall.py \
+            tests/test_plastic_depth_theil_sen_kendall_bootstrap_fix.py \
+            tests/test_plastic_depth_theil_sen_kendall_integration.py
       # ^^^ THOG
 
       - name: Run full CPU test suite
