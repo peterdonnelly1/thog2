@@ -40,11 +40,11 @@ def _decision(function, scores, *, histories=None, window=1, current=10, update=
     )
 
 
-def test_v055_algorithm_names_are_exact_and_old_name_is_retired(monkeypatch):
-    assert v055.LRA_ALGORITHM == "wall_time__theil_sen_kendall_LRA"
-    assert v055.STRATIFIED_ALGORITHM == "wall_time__sen_kendall__tau__stratified"
+def test_v056_algorithm_names_are_objective_neutral_and_old_name_is_retired(monkeypatch):
+    assert v055.LRA_ALGORITHM == "theil_sen_kendall_LRA"
+    assert v055.STRATIFIED_ALGORITHM == "sen_kendall__tau__stratified"
     monkeypatch.setenv(tsk._ALGORITHM_ENV, "wall_time__gradient__theil_sen_kendall_slope_tau")
-    with pytest.raises(ValueError, match="renamed"):
+    with pytest.raises(ValueError, match="retired in PLASTIC v0.56"):
         v055._runtime_algorithm()
 
 
