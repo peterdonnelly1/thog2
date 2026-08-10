@@ -41,6 +41,23 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
       echo "--plastic__layer_count_gradient__minimum_absolute_kendall_tau was removed in PLASTIC v0.55; Kendall coherence is fixed at |tau| >= 0.5 for the Sen/Kendall algorithms" >&2
       exit 2
       ;;
+    --plastic__layer_count_decision_algorithm__growth_side_discount)
+      (( THOG2_PLASTIC_LOOKAHEAD_INDEX + 1 < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )) || {
+        echo "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT requires a value in [0, 1]" >&2
+        exit 2
+      }
+      THOG2_PLASTIC_DECISION_EXTRA_ARGS+=(
+        "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT"
+        "${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$((THOG2_PLASTIC_LOOKAHEAD_INDEX + 1))]}"
+      )
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 2))
+      continue
+      ;;
+    --plastic__layer_count_decision_algorithm__growth_side_discount=*)
+      THOG2_PLASTIC_DECISION_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
+      continue
+      ;;
     --plastic__layer_count_decision_algorithm)
       (( THOG2_PLASTIC_LOOKAHEAD_INDEX + 1 < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )) || {
         echo "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT requires a value" >&2
@@ -169,6 +186,7 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '  --plastic__layer_count__same_batch_all_probes             one fixed probe batch per strict non-overlapping evidence window' \
     '  --no-plastic__layer_count__same_batch_all_probes          established rolling/multi-batch probe path; default' \
     '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), wall_time__theil_sen_kendall_LRA, or wall_time__sen_kendall__tau__stratified' \
+    '  --plastic__layer_count_decision_algorithm__growth_side_discount X       v0.55 Sen/Kendall only; credit fraction [0,1] of beneficial growth-side economic evidence; default 1.0' \
     '  --plastic__wall_time_equivalent_time_gain_discount X       credited fraction of positive equivalent-time gain; default 0.9' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_window N       rolling ordinary-training loss-rate window; default 64' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations N       minimum observations before loss-rate fit is usable; default 16' \
