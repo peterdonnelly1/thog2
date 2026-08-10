@@ -23,6 +23,7 @@ _STEP_DELTA = re.compile(r"Δ=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))s")
 _TOKENS_PER_SECOND = re.compile(r"tok/s=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))")
 _CONSUMED_TOKENS = re.compile(r"toks=\s*(?P<value>[0-9,]+)")
 _TRAINING_LOSS = re.compile(r"(?<!validation )(?<!training )loss=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))")
+_VALIDATION_LOSS = re.compile(r"validation loss=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))")
 _LEARNING_RATE = re.compile(r"lr=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+)[eE][+-]?\d+)")
 _GRADIENT_NORM = re.compile(r"g/n=\s*(?P<value>[+-]?(?:\d+(?:\.\d*)?|\.\d+))")
 _LAYER_COUNT = re.compile(r"layers\s+(?P<value>\d+)")
@@ -87,6 +88,11 @@ def _restore_fixed_numeric_fields(line: str) -> str:
     )
     rendered = _TRAINING_LOSS.sub(
         lambda match: f"loss={float(match.group('value')):8.4f}",
+        rendered,
+        count=1,
+    )
+    rendered = _VALIDATION_LOSS.sub(
+        lambda match: f"validation loss={float(match.group('value')):8.4f}",
         rendered,
         count=1,
     )
