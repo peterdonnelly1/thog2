@@ -222,6 +222,9 @@ def _commit_plastic_depth_inline_update_with_audit(
         "score_table": tuple(dict(item) for item in context["score_report"]),
         "robust_evidence": _evidence_payload(decision),
         "directional_report": copy.deepcopy(context.get("plastic_directional_report")),
+        # vvv THOG TSK report must be present before immediate audit replay; the outer commit wrapper records the public TSK event only after this inner replay returns
+        "sen_kendall_report": copy.deepcopy(context.get("plastic_v055_sen_kendall_report")),
+        # ^^^ THOG
         "histories_before": copy.deepcopy(context["audit_history_before"]),
         "histories_after": copy.deepcopy(self.state.plastic_depth_probe_histories),
         "active_public_coordinates_after": tuple(
