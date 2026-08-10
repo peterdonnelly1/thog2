@@ -18,6 +18,18 @@ _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_de
 _ORIGINAL_COMMIT_INLINE_UPDATE = _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update
 
 
+def _release_context_reserve(
+    context: Dict[str, Any],
+    *,
+    empty_cache: bool,
+) -> None:
+    reserve = context.get("cuda_allocator_reserve")
+    release = getattr(reserve, "release", None)
+    if callable(release):
+        release(empty_cache=empty_cache)
+    context["cuda_allocator_reserve"] = None
+
+
 def _force_growth_hold(
     trainer: Any,
     context: Dict[str, Any],
@@ -143,8 +155,11 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
         return context
     current_count = int(context["current_count"])
     selected_count = int(selected)
+    # vvv THOG full-radius evidence may acquire the growth reserve before same-batch window logic forces STAY; never charge that reserve to an already-safe non-growth update
     if selected_count <= current_count:
+        _release_context_reserve(context, empty_cache=True)
         return context
+    # ^^^ THOG
 
     # vvv THOG a grow decision is provisional until one real training forward/backward at the proposed count succeeds while the configured reserve remains allocated
     reserve, reserve_feasible = _headroom_reserve(self, context)
@@ -166,8 +181,7 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
         selected_count=selected_count,
     )
     if not training_feasible:
-        reserve.release(empty_cache=True)
-        context["cuda_allocator_reserve"] = None
+        _release_context_reserve(context, empty_cache=True)
         _force_growth_hold(
             self,
             context,
