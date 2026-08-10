@@ -205,7 +205,8 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
         telemetry.run.log(payload)
 
 
-# vvv THOG attach the rolling charts after the established scalar telemetry wrapper; TensorBoard receives no tables, plots or figures from this path\ n_ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
+# vvv THOG attach the rolling charts after the established scalar telemetry wrapper; TensorBoard receives no tables, plots or figures from this path
+_ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 
 
 def attach_telemetry_with_plastic_probe_curves(trainer: Any, telemetry: Any) -> None:
