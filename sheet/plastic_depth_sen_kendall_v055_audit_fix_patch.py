@@ -15,6 +15,13 @@ _ORIGINAL_REPLAY = _audit.replay_plastic_depth_count_audit
 
 
 def _audit_algorithm(audit: Mapping[str, Any]) -> str:
+    # vvv THOG prefer the dedicated pre-replay TSK report; directional_report is legacy compatibility only
+    sen_kendall = audit.get("sen_kendall_report")
+    if isinstance(sen_kendall, Mapping):
+        value = str(sen_kendall.get("algorithm", "")).strip()
+        if value:
+            return value
+    # ^^^ THOG
     directional = audit.get("directional_report")
     if isinstance(directional, Mapping):
         value = str(directional.get("algorithm", "")).strip()
@@ -132,9 +139,13 @@ def _lra_winning_count_from_report(
 
 
 def _sen_kendall_winning_count_from_audit(audit: Mapping[str, Any]) -> int:
-    report = audit.get("directional_report")
+    # vvv THOG the dedicated TSK report is captured before immediate generic audit replay; fall back to the legacy compatibility field for older audit rows
+    report = audit.get("sen_kendall_report")
     if not isinstance(report, Mapping):
-        raise ValueError("PLASTIC v0.55 Sen/Kendall audit lacks its directional report")
+        report = audit.get("directional_report")
+    # ^^^ THOG
+    if not isinstance(report, Mapping):
+        raise ValueError("PLASTIC v0.55 Sen/Kendall audit lacks its Sen/Kendall report")
     algorithm = str(report.get("algorithm", ""))
     if algorithm == _v055.STRATIFIED_ALGORITHM:
         return _stratified_winning_count_from_report(audit, report)
