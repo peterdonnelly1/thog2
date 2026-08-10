@@ -52,7 +52,7 @@ def test_step_one_console_row_keeps_elapsed_seconds() -> None:
     assert "00:00:09" not in line
 
 
-def test_step_one_seconds_field_aligns_following_columns_with_hh_mm_ss_rows() -> None:
+def test_step_one_seconds_field_aligns_following_columns_with_later_rows() -> None:
     common = {
         "mean_step_seconds": " 4.7500",
         "training_loss": "   6.0000",
@@ -78,7 +78,7 @@ def test_step_one_seconds_field_aligns_following_columns_with_hh_mm_ss_rows() ->
     )
     plain_step_one = re.sub(r"\x1b\[[0-9;]*m", "", step_one)
     plain_later = re.sub(r"\x1b\[[0-9;]*m", "", later)
-    assert plain_step_one.index("Δstep=") == plain_later.index("Δstep=")
+    assert plain_step_one.index("Δ=") == plain_later.index("Δ=")
 
 
 def test_positive_delta_is_red_and_signed() -> None:
@@ -138,6 +138,7 @@ def test_training_and_validation_loss_numerals_use_the_same_numeric_field_width(
     assert training_match is not None
     assert validation_match is not None
     assert len(training_match.group(1)) == len(validation_match.group(1))
+
 
 def test_run_started_console_output_is_followed_by_one_blank_line() -> None:
     fake_trainer = SimpleNamespace(
