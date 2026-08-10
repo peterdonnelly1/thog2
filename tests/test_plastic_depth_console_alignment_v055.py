@@ -48,12 +48,12 @@ def test_numeric_fields_restore_stable_visual_widths() -> None:
     assert "layers   7" in two
 
 
-def test_probe_block_moves_exactly_thirty_columns_right() -> None:
+def test_probe_block_moves_exactly_twenty_seven_columns_right() -> None:
     original = (
         "T      7  2236       34s    0.009h  layers  22  sampled [1.0, 2.0]  "
         "P2  probe_Δloss [L-5 .. L+5] = [-0.035, 9.025]  sen=- ken=- adj=- ∴ ● (P1,2)"
     )
     shifted = alignment._shift_probe_block_right(original)
-    assert shifted.index("P2  probe_Δloss") - original.index("P2  probe_Δloss") == 30
+    assert shifted.index("P2  probe_Δloss") - original.index("P2  probe_Δloss") == 27
     assert shifted.endswith("sen=- ken=- adj=- ∴ ● (P1,2)")
 # ^^^ THOG

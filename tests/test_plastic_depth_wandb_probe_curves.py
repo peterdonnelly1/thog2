@@ -57,6 +57,33 @@ def test_combined_rows_span_negative_to_positive_offsets_with_one_center() -> No
 # ^^^ THOG
 
 
+# vvv THOG the built-in W&B line preset gets an explicit zero-loss reference spanning the complete visible x domain
+@pytest.mark.parametrize(
+    ("side", "x", "x_index"),
+    (("shrink", "distance", 0), ("growth", "distance", 0), ("combined", "offset", 7)),
+)
+def test_zero_loss_reference_spans_each_chart_domain(side: str, x: str, x_index: int) -> None:
+    record = curves._probe_record_from_event(_event())
+    assert record is not None
+    rows = (
+        curves._rows_for_combined((record,))
+        if side == "combined"
+        else curves._rows_for_side((record,), side)
+    )
+
+    rendered = curves._rows_with_zero_loss_reference(rows, x=x)
+    reference = [row for row in rendered if row[2] == curves._ZERO_LOSS_REFERENCE_ID]
+    data = [row for row in rendered if row[2] != curves._ZERO_LOSS_REFERENCE_ID]
+
+    assert len(reference) == 2
+    assert all(row[1] == 0.0 for row in reference)
+    assert [row[x_index] for row in reference] == [
+        min(row[x_index] for row in data),
+        max(row[x_index] for row in data),
+    ]
+# ^^^ THOG
+
+
 def test_curve_history_is_rolling_300_probes() -> None:
     telemetry = SimpleNamespace()
     history = curves._ensure_curve_state(telemetry)
@@ -175,6 +202,14 @@ def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer() -
         assert chart["y"] == "delta_loss"
         assert chart["stroke"] == "probe_id"
         assert chart["table"].columns == list(curves._CHART_COLUMNS)
+        assert len(chart["table"].data) <= curves._MAX_TABLE_ROWS
+        reference = [
+            row
+            for row in chart["table"].data
+            if row[2] == curves._ZERO_LOSS_REFERENCE_ID
+        ]
+        assert len(reference) == 2
+        assert all(row[1] == 0.0 for row in reference)
 # ^^^ THOG
 
 

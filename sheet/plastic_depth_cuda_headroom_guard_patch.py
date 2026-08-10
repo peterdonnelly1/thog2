@@ -8,14 +8,20 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 
+from . import plastic_depth_console_minor_patch as _console_minor
 from . import plastic_depth_same_batch_all_probes_patch as _same_batch
+from . import stage6_trainer as _stage6
 from . import trainer_step as _trainer_step
 from .plastic_depth_cuda import PlasticDepthCudaAllocatorReserve, is_cuda_out_of_memory
 
 
 _EVENT_NAME = "plastic_depth_cuda_growth_headroom"
+_CONSOLE_MEMORY_HOLD_KEY = "plastic_cuda_growth_memory_hold"
+_CONSOLE_MEMORY_HOLD_UPDATE_ATTRIBUTE = "_plastic_cuda_growth_memory_hold_update"
 _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
 _ORIGINAL_COMMIT_INLINE_UPDATE = _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update
+_ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
+_ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 
 
 def _release_context_reserve(
@@ -242,13 +248,17 @@ def _commit_plastic_depth_inline_update_with_cuda_headroom(
     transition = _ORIGINAL_COMMIT_INLINE_UPDATE(self, context)
     if context is None or "cuda_growth_headroom_verified" not in context:
         return transition
+    update_number = int(self.state.completed_updates) + 1
+    verified = bool(context["cuda_growth_headroom_verified"])
+    if not verified and int(context["selected_count"]) == int(context["current_count"]):
+        setattr(self, _CONSOLE_MEMORY_HOLD_UPDATE_ATTRIBUTE, update_number)
     self._record(
         _EVENT_NAME,
-        update_number=int(self.state.completed_updates) + 1,
+        update_number=update_number,
         current_count=int(context["current_count"]),
         selected_count=int(context["selected_count"]),
         reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
-        verified=bool(context["cuda_growth_headroom_verified"]),
+        verified=verified,
         reason=str(context.get("cuda_growth_headroom_reason", "")),
         # vvv THOG expose how far the accumulation-aware preflight ran and where an OOM was trapped without changing the established event name
         preflight_microsteps=int(context.get("cuda_growth_headroom_preflight_microsteps", 0)),
@@ -264,6 +274,52 @@ _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update = (
 _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update = (
     _commit_plastic_depth_inline_update_with_cuda_headroom
 )
+# ^^^ THOG
+
+
+# vvv THOG expose a CUDA-vetoed statistical GROW on its exact operator row without changing the committed STAY decision or audit evidence
+def _prepare_console_progress_payload_with_cuda_growth_hold(
+    self: Any,
+    event: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    values = _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD(self, event, payload)
+    values.pop(_CONSOLE_MEMORY_HOLD_KEY, None)
+    if event != "optimizer_progress":
+        return values
+    try:
+        completed_updates = int(
+            str(values.get("completed_updates", payload.get("completed_updates")))
+            .strip()
+            .replace(",", "")
+        )
+    except (TypeError, ValueError):
+        return values
+    if int(getattr(self, _CONSOLE_MEMORY_HOLD_UPDATE_ATTRIBUTE, -1)) == completed_updates:
+        values[_CONSOLE_MEMORY_HOLD_KEY] = True
+    return values
+
+
+def _format_progress_line_with_cuda_growth_hold(
+    run_id: str,
+    event: str,
+    payload: Dict[str, Any],
+) -> str:
+    local = dict(payload)
+    memory_hold = bool(local.pop(_CONSOLE_MEMORY_HOLD_KEY, False))
+    line = _ORIGINAL_FORMAT_PROGRESS_LINE(run_id, event, local)
+    if event == "optimizer_progress" and memory_hold:
+        line = (
+            f"{line.rstrip()}  {_console_minor._PALE_CYAN}"
+            f"<<< stopped by memory limit{_console_minor._RESET}"
+        )
+    return line
+
+
+_stage6.Stage6Trainer._prepare_console_progress_payload = (
+    _prepare_console_progress_payload_with_cuda_growth_hold
+)
+_stage6.format_progress_line = _format_progress_line_with_cuda_growth_hold
 # ^^^ THOG
 
 # vvv THOG install PLASTIC v0.56 objective-neutral decision ownership only after CUDA/same-batch/v0.55 runtime guards are fully established

@@ -14,6 +14,8 @@ _WINDOW_PROBES = 300
 _REFRESH_EVERY_PROBES = 25
 _EARLY_REFRESH_PROBES = 10
 _MAX_TABLE_ROWS = 9_999
+_ZERO_LOSS_REFERENCE_ID = "Δloss = 0 reference"
+_ZERO_LOSS_REFERENCE_MAX_ROWS = 2
 _CHART_COLUMNS = (
     "distance",
     "delta_loss",
@@ -172,9 +174,10 @@ def _bounded_rows_for_side(
         group = _rows_for_side((record,), side)
         if not group:
             continue
-        if len(group) > _MAX_TABLE_ROWS:
-            group = group[-_MAX_TABLE_ROWS:]
-        if row_count + len(group) > _MAX_TABLE_ROWS:
+        data_row_limit = _MAX_TABLE_ROWS - _ZERO_LOSS_REFERENCE_MAX_ROWS
+        if len(group) > data_row_limit:
+            group = group[-data_row_limit:]
+        if row_count + len(group) > data_row_limit:
             break
         groups.append(group)
         row_count += len(group)
@@ -194,9 +197,10 @@ def _bounded_rows_for_combined(history: Iterable[Mapping[str, Any]]) -> List[Lis
         group = _rows_for_combined((record,))
         if not group:
             continue
-        if len(group) > _MAX_TABLE_ROWS:
-            group = group[-_MAX_TABLE_ROWS:]
-        if row_count + len(group) > _MAX_TABLE_ROWS:
+        data_row_limit = _MAX_TABLE_ROWS - _ZERO_LOSS_REFERENCE_MAX_ROWS
+        if len(group) > data_row_limit:
+            group = group[-data_row_limit:]
+        if row_count + len(group) > data_row_limit:
             break
         groups.append(group)
         row_count += len(group)
@@ -204,6 +208,35 @@ def _bounded_rows_for_combined(history: Iterable[Mapping[str, Any]]) -> List[Lis
     for group in reversed(groups):
         rows.extend(group)
     return rows
+# ^^^ THOG
+
+
+# vvv THOG make the zero-delta x axis unmistakable in W&B's fixed built-in line preset by logging it as an explicit full-width reference series
+def _rows_with_zero_loss_reference(
+    rows: Sequence[Sequence[Any]],
+    *,
+    x: str,
+) -> List[List[Any]]:
+    rendered = [list(row) for row in rows]
+    if not rendered:
+        return rendered
+    x_index = _CHART_COLUMNS.index(str(x))
+    coordinates = sorted({float(row[x_index]) for row in rendered})
+    endpoints = (coordinates[0],) if coordinates[0] == coordinates[-1] else (
+        coordinates[0],
+        coordinates[-1],
+    )
+    template = list(rendered[-1])
+    active_layers = int(template[4])
+    for coordinate in endpoints:
+        reference = list(template)
+        reference[0] = abs(coordinate)
+        reference[1] = 0.0
+        reference[2] = _ZERO_LOSS_REFERENCE_ID
+        reference[6] = active_layers + int(coordinate) if x == "offset" else active_layers
+        reference[7] = int(coordinate) if x == "offset" else 0
+        rendered.append(reference)
+    return rendered
 # ^^^ THOG
 
 
@@ -244,7 +277,10 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
             "fine/plastic_probe_growth_curves",
         ),
     ):
-        rows = _bounded_rows_for_side(history, side)
+        rows = _rows_with_zero_loss_reference(
+            _bounded_rows_for_side(history, side),
+            x="distance",
+        )
         if not rows:
             continue
         table = telemetry.module.Table(data=rows, columns=list(_CHART_COLUMNS))
@@ -257,7 +293,10 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
         )
 
     # vvv THOG add a third objective-neutral visual joining both existing sides around signed offset zero without changing either established split chart
-    combined_rows = _bounded_rows_for_combined(history)
+    combined_rows = _rows_with_zero_loss_reference(
+        _bounded_rows_for_combined(history),
+        x="offset",
+    )
     if combined_rows:
         combined_table = telemetry.module.Table(
             data=combined_rows,
@@ -333,6 +372,7 @@ __all__ = [
     "_probe_record_from_event",
     "_rows_for_combined",
     "_rows_for_side",
+    "_rows_with_zero_loss_reference",
     "attach_telemetry_with_plastic_probe_curves",
 ]
 # ^^^ THOG

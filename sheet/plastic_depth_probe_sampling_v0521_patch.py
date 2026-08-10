@@ -89,7 +89,7 @@ def _render_probe_delta_values(
         text = _format_probe_delta(delta)
         if delta is not None and math.isfinite(delta) and delta < 0.0:
             if offset < 0:
-                text = f"{_constants.BOLD_MAGENTA}{text}{_constants.R}"
+                text = f"{_constants.BOLD_GREEN}{text}{_constants.R}"
             else:
                 text = f"{_cleanup._GREEN}{text}{_cleanup._RESET}"
         rendered.append(text)

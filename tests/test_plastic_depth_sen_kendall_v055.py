@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import constants
+
 from sheet import plastic_depth_sen_kendall_v055_patch as v055
 from sheet import plastic_depth_theil_sen_kendall_patch as tsk
 from sheet import plastic_depth_wall_time_equivalent_time_gain_patch as wall_time
@@ -230,5 +232,34 @@ def test_console_removes_score_z_and_uses_therefore(monkeypatch):
     assert "score_z" not in rendered
     assert "ts=" not in rendered and "tau=" not in rendered
     assert "sen=-0.100 ken=-1.00 adj=-0.200" in rendered
-    assert "∴ ▼|▲|? =[0/2/0]/2 ∴ ▲ (P1,2)" in rendered
+    assert "∴ ▼|▲|? =[0/2/0]/2 ∴ ▲ (P1,2)" in v055._ANSI_ESCAPE.sub("", rendered)
+    assert f"∴ {constants.BOLD}{constants.YELLOW}▲{constants.R} (P1,2)" in rendered
+    assert f"∴ {constants.BOLD}{constants.YELLOW}▼{constants.R}|" not in rendered
+
+
+@pytest.mark.parametrize(("selected", "glyph"), ((9, "▼"), (11, "▲")))
+def test_each_non_stet_outcome_triangle_is_bright_yellow(monkeypatch, selected, glyph):
+    monkeypatch.setenv(tsk._ALGORITHM_ENV, v055.STRATIFIED_ALGORITHM)
+    monkeypatch.setattr(
+        v055,
+        "_ORIGINAL_FORMAT_PROGRESS_LINE",
+        lambda *_args, **_kwargs: "P2 probe_Δloss [L-1 ... L+1] = [-0.1, 4.0, +0.1]",
+    )
+
+    rendered = v055._format_progress_line_v055(
+        "run",
+        "optimizer_progress",
+        {
+            "plastic_v055_algorithm": v055.STRATIFIED_ALGORITHM,
+            "plastic_v055_sen": -0.1 if selected > 10 else 0.1,
+            "plastic_v055_ken": -1.0 if selected > 10 else 1.0,
+            "plastic_v055_adj": -0.2,
+            "plastic_v055_conclusion": "R" if selected > 10 else "L",
+            "plastic_v055_selected_count": selected,
+            "plastic_v055_current_count": 10,
+            "plastic_v055_probe_ids": (1, 2),
+        },
+    )
+
+    assert f"∴ {constants.BOLD}{constants.YELLOW}{glyph}{constants.R} (P1,2)" in rendered
 # ^^^ THOG

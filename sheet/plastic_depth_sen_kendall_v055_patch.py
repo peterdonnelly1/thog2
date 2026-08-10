@@ -11,6 +11,8 @@ import statistics
 import sys
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+import constants as _constants
+
 from . import plastic_depth_controller as _controller
 from . import plastic_depth_console_compact_layout_patch as _compact
 from . import plastic_depth_directional_coherence_patch as _directional
@@ -855,6 +857,13 @@ def _format_progress_line_v055(
     diagnostic = f"sen={_number(sen, 3)} ken={_number(ken, 2)} adj={_number(adj, 3)}"
     provenance = _compact_probe_ids(probe_ids)
     outcome = _outcome_symbol(conclusion, selected, current)
+    # vvv THOG make only committed non-STET outcomes conspicuous; the ▼|▲|? legend remains uncoloured so it cannot masquerade as a decision
+    rendered_outcome = (
+        f"{_constants.BOLD}{_constants.YELLOW}{outcome}{_constants.R}"
+        if outcome in {"▼", "▲"}
+        else outcome
+    )
+    # ^^^ THOG
 
     if algorithm == LRA_ALGORITHM:
         match = _LRA_SUMMARY.search(line)
@@ -867,16 +876,16 @@ def _format_progress_line_v055(
             )
             rendered = (
                 f"{diagnostic} ∴ ▼|▲|? =[{counts[0]}/{counts[1]}/{counts[2]}]/{total} "
-                f"∴ {outcome}"
+                f"∴ {rendered_outcome}"
             )
             line = line[: match.start()] + rendered + line[match.end() :]
         else:
-            line = f"{line}  {diagnostic} ∴ {outcome}"
+            line = f"{line}  {diagnostic} ∴ {rendered_outcome}"
     else:
         match = _LRA_SUMMARY.search(line)
         if match is not None:
             line = line[: match.start()].rstrip() + line[match.end() :]
-        line = f"{line.rstrip()}  {diagnostic} ∴ {outcome}"
+        line = f"{line.rstrip()}  {diagnostic} ∴ {rendered_outcome}"
 
     line = _PROVENANCE.sub("", line)
     if provenance:

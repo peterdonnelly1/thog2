@@ -32,7 +32,7 @@ _LOSS_DELTA = re.compile(
     r"(?P<reset>\x1b\[[0-9;]*m)?(?=\s+lr=)"
 )
 _PROBE_BLOCK = re.compile(r"(?P<probe>P\d+\s+probe_Δloss\b)")
-_PROBE_SHIFT_COLUMNS = 30
+_PROBE_SHIFT_COLUMNS = 27
 
 
 def _progress_timestamp_hhmm() -> str:

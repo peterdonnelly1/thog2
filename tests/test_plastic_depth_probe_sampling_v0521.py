@@ -156,9 +156,10 @@ def test_hybrid_probe_vector_keeps_absolute_l_and_signed_candidate_deltas() -> N
     plain = _plain(rendered)
     assert plain == "+0.023, -0.027, 4.077, +0.057, -0.017"
     assert f"{constants.BOLD_WHITE}{constants.UNDER}4.077{constants.R}" in rendered
-    assert f"{constants.BOLD_MAGENTA}-0.027{constants.R}" in rendered
+    assert f"{constants.BOLD_GREEN}-0.027{constants.R}" in rendered
     assert f"{cleanup._GREEN}-0.017{cleanup._RESET}" in rendered
-    assert constants.BOLD_MAGENTA not in rendered.split(", ")[0]
+    assert constants.BOLD_GREEN != cleanup._GREEN
+    assert constants.BOLD_GREEN not in rendered.split(", ")[0]
     assert cleanup._GREEN not in rendered.split(", ")[0]
     assert cleanup._GREEN not in rendered.split(", ")[3]
 

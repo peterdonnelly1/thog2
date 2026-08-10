@@ -94,6 +94,74 @@ def test_growth_is_held_when_grad_bearing_preflight_exceeds_reserve(monkeypatch)
     assert releases == [{"empty_cache": True}]
 
 
+# vvv THOG a trapped CUDA growth attempt must be visible on its exact T row in the established warmup-brake colour and nowhere later
+def test_cuda_growth_hold_gets_exact_console_postfix(monkeypatch) -> None:
+    recorded = []
+    trainer = SimpleNamespace(
+        state=SimpleNamespace(completed_updates=338),
+        config=SimpleNamespace(plastic__cuda_allocator_reserve_gib=1.5),
+        events=[],
+        _record=lambda name, **payload: recorded.append((name, payload)),
+    )
+    context = {
+        "current_count": 38,
+        "selected_count": 38,
+        "cuda_growth_headroom_verified": False,
+        "cuda_growth_headroom_reason": "grad_bearing_training_exceeds_cuda_reserve_barrier",
+    }
+    monkeypatch.setattr(
+        headroom,
+        "_ORIGINAL_COMMIT_INLINE_UPDATE",
+        lambda _self, _context: {"committed": True},
+    )
+
+    transition = headroom._commit_plastic_depth_inline_update_with_cuda_headroom(
+        trainer,
+        context,
+    )
+
+    assert transition == {"committed": True}
+    assert getattr(trainer, headroom._CONSOLE_MEMORY_HOLD_UPDATE_ATTRIBUTE) == 339
+    assert recorded[0][0] == headroom._EVENT_NAME
+    assert recorded[0][1]["verified"] is False
+
+    monkeypatch.setattr(
+        headroom,
+        "_ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD",
+        lambda _self, _event, payload: dict(payload),
+    )
+
+    held = headroom._stage6.Stage6Trainer._prepare_console_progress_payload(
+        trainer,
+        "optimizer_progress",
+        {"completed_updates": "   339"},
+    )
+    later = headroom._stage6.Stage6Trainer._prepare_console_progress_payload(
+        trainer,
+        "optimizer_progress",
+        {"completed_updates": "   340"},
+    )
+
+    assert held[headroom._CONSOLE_MEMORY_HOLD_KEY] is True
+    assert headroom._CONSOLE_MEMORY_HOLD_KEY not in later
+
+    monkeypatch.setattr(
+        headroom,
+        "_ORIGINAL_FORMAT_PROGRESS_LINE",
+        lambda _run_id, _event, _payload: "T 339  layers 38  ∴ ●",
+    )
+    rendered = headroom._stage6.format_progress_line(
+        "run",
+        "optimizer_progress",
+        held,
+    )
+    assert rendered.endswith(
+        f"{headroom._console_minor._PALE_CYAN}"
+        f"<<< stopped by memory limit{headroom._console_minor._RESET}"
+    )
+# ^^^ THOG
+
+
 # vvv THOG reproduce the field failure: a raw adjacent GROW rejected by CUDA headroom must replay as a framework HOLD instead of contradicting the committed count
 def test_cuda_growth_hold_replays_v055_audit_without_mismatch() -> None:
     current_count = 38
