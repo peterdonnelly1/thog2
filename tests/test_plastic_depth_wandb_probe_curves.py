@@ -47,6 +47,28 @@ def test_curve_history_is_rolling_300_probes() -> None:
     assert history[0]["probe_id"] == "P5"
 
 
+def test_bounded_rows_drop_oldest_complete_probes_before_wandb_limit() -> None:
+    points = tuple((distance, float(distance), 10 + distance, distance) for distance in range(40))
+    history = tuple(
+        {
+            "probe_id": f"P{probe_index}",
+            "optimizer_update": probe_index,
+            "active_layers": 10,
+            "selected_layers": 10,
+            "growth": points,
+        }
+        for probe_index in range(300)
+    )
+
+    rows = curves._bounded_rows_for_side(history, "growth")
+
+    assert len(rows) <= curves._MAX_TABLE_ROWS
+    assert rows[-1][2] == "P299"
+    assert rows[0][2] != "P0"
+    first_probe = rows[0][2]
+    assert sum(row[2] == first_probe for row in rows) == len(points)
+
+
 class _FakeTable:
     def __init__(self, *, data, columns):
         self.data = data
