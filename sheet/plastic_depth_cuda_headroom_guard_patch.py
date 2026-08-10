@@ -115,6 +115,13 @@ def _same_batch_training_memory_preflight(
     prior_probe_report = trainer.raw_model.last_plastic_depth_inline_probe_report
     retained_materializations_active = False
     local_feasible = True
+    accumulation_steps = max(1, int(trainer.config.gradient_accumulation_steps))
+    # vvv THOG one backward from zero gradients understates an accumulated update: the first backward creates persistent gradient storage, so a second pass tests the steady peak with those gradients already resident
+    preflight_micro_steps = min(2, accumulation_steps)
+    context["cuda_growth_headroom_preflight_microsteps"] = int(preflight_micro_steps)
+    context["cuda_growth_headroom_failed_preflight_microstep"] = None
+    preflight_micro_step = -1
+    # ^^^ THOG
     try:
         trainer.optimizer.zero_grad(set_to_none=True)
         setter = getattr(trainer.raw_model, "set_plastic_depth_update_layer_count", None)
@@ -124,17 +131,20 @@ def _same_batch_training_memory_preflight(
         retained_materializations_active = bool(
             trainer.raw_model.begin_optimizer_update()
         )
-        with trainer.distributed.no_sync_context(trainer.model, synchronize=False):
-            with trainer.autocast_context():
-                _, loss = trainer.model(
-                    batch.inputs,
-                    batch.targets,
-                    plastic_depth_active_layers_override=int(selected_count),
-                )
-                if loss is None:
-                    raise RuntimeError("PLASTIC CUDA headroom preflight returned no training loss")
-                scaled_loss = trainer.scaler.scale(loss)
-            scaled_loss.backward()
+        # vvv THOG reproduce the memory-relevant accumulation state under the configured reserve without paying for the complete accumulation window; after pass one gradient storage is resident and subsequent same-shaped passes do not add another gradient set
+        for preflight_micro_step in range(preflight_micro_steps):
+            with trainer.distributed.no_sync_context(trainer.model, synchronize=False):
+                with trainer.autocast_context():
+                    _, loss = trainer.model(
+                        batch.inputs,
+                        batch.targets,
+                        plastic_depth_active_layers_override=int(selected_count),
+                    )
+                    if loss is None:
+                        raise RuntimeError("PLASTIC CUDA headroom preflight returned no training loss")
+                    scaled_loss = trainer.scaler.scale(loss / accumulation_steps)
+                scaled_loss.backward()
+        # ^^^ THOG
         if retained_materializations_active:
             trainer.raw_model.finalize_optimizer_update()
             retained_materializations_active = False
@@ -143,6 +153,9 @@ def _same_batch_training_memory_preflight(
         if not is_cuda_out_of_memory(error):
             raise
         local_feasible = False
+        # vvv THOG retain the exact failing preflight ordinal for audit/diagnostics; -1 means the OOM preceded the first synthetic microstep
+        context["cuda_growth_headroom_failed_preflight_microstep"] = int(preflight_micro_step)
+        # ^^^ THOG
     finally:
         if retained_materializations_active:
             trainer.raw_model.end_optimizer_update()
@@ -173,7 +186,7 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
         return context
     # ^^^ THOG
 
-    # vvv THOG a grow decision is provisional until one real training forward/backward at the proposed count succeeds while the configured reserve remains allocated
+    # vvv THOG a grow decision is provisional until a grad-bearing accumulated-state preflight at the proposed count succeeds while the configured reserve remains allocated
     reserve, reserve_feasible = _headroom_reserve(self, context)
     if not reserve_feasible:
         _force_growth_hold(
@@ -230,6 +243,10 @@ def _commit_plastic_depth_inline_update_with_cuda_headroom(
         reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
         verified=bool(context["cuda_growth_headroom_verified"]),
         reason=str(context.get("cuda_growth_headroom_reason", "")),
+        # vvv THOG expose how far the accumulation-aware preflight ran and where an OOM was trapped without changing the established event name
+        preflight_microsteps=int(context.get("cuda_growth_headroom_preflight_microsteps", 0)),
+        failed_preflight_microstep=context.get("cuda_growth_headroom_failed_preflight_microstep"),
+        # ^^^ THOG
     )
     return transition
 
