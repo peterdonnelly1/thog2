@@ -33,7 +33,7 @@ def _learned_plastic_config():
         plastic__layer_count_probe__window_size_as_number_of_probes=19,
         plastic__layer_count_probe_noise_lambda=1.5,
         plastic__layer_count_cost_weight=0.2,
-        plastic__cuda_allocator_reserve_gib=0.75,
+        plastic__layer_count__cuda_allocator_reserve_gib=0.75,
         plastic__geometry_learning_rate_multiplier=0.25,
         plastic__freeze_geometry_during_warmup=False,
     )
@@ -53,8 +53,8 @@ def _retired_short_identity(canonical_identity: Dict[str, Any]) -> Dict[str, Any
         "probe_noise_min_observations": 3,
         "probe_noise_lambda": plastic["plastic__layer_count_probe_noise_lambda"],
         "count_cost_weight": plastic["plastic__layer_count_cost_weight"],
-        "memory_budget_gib": plastic["plastic__layer_memory_budget_gib"],
-        "cuda_allocator_reserve_gib": plastic["plastic__cuda_allocator_reserve_gib"],
+        "memory_budget_gib": plastic["plastic__layer_count__memory_budget_gib"],
+        "cuda_allocator_reserve_gib": plastic["plastic__layer_count__cuda_allocator_reserve_gib"],
         "geometry_lr_multiplier": plastic["plastic__geometry_learning_rate_multiplier"],
         "freeze_geometry_during_warmup": plastic["plastic__freeze_geometry_during_warmup"],
     }

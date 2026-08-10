@@ -87,8 +87,8 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__wall_time_equivalent_time_gain_loss_rate_window",
     "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
-    "plastic__layer_memory_budget_gib",
-    "plastic__cuda_allocator_reserve_gib",
+    "plastic__layer_count__memory_budget_gib",
+    "plastic__layer_count__cuda_allocator_reserve_gib",
     "plastic__geometry_learning_rate_multiplier",
     "plastic__freeze_geometry_during_warmup",
     "plastic__initial_active_layers",
@@ -99,6 +99,10 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
 PLASTIC_V0541_RENAMED_CONFIG_FIELDS = {
     "plastic__layer_count_extrapolation_weight": "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
     "plastic__layer_count_max_step": "plastic__layer_count__max_allowable_layer_change",
+    # vvv THOG accept the pre-namespace-cleanup names only while reconstructing checkpoints; public parsers expose only the canonical layer_count names
+    "plastic__layer_memory_budget_gib": "plastic__layer_count__memory_budget_gib",
+    "plastic__cuda_allocator_reserve_gib": "plastic__layer_count__cuda_allocator_reserve_gib",
+    # ^^^ THOG
 }
 
 def normalize_plastic_v0541_config_fields(values: Mapping[str, Any]) -> Dict[str, Any]:
@@ -245,8 +249,8 @@ class TrainingConfig:
     plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
     plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_memory_budget_gib: Optional[float] = None
-    plastic__cuda_allocator_reserve_gib: float = 0.5
+    plastic__layer_count__memory_budget_gib: Optional[float] = None
+    plastic__layer_count__cuda_allocator_reserve_gib: float = 0.5
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
@@ -471,30 +475,30 @@ class TrainingConfig:
                 f"got {self.plastic__layer_count_cost_weight!r}"
             )
         if (
-            self.plastic__layer_memory_budget_gib is not None
+            self.plastic__layer_count__memory_budget_gib is not None
             and (
-                isinstance(self.plastic__layer_memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_memory_budget_gib))
-                or float(self.plastic__layer_memory_budget_gib) <= 0.0
+                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
+                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
+                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
+                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
             )
         ):
             raise ValueError(
-                "plastic__layer_memory_budget_gib must be finite and positive or None; "
-                f"got {self.plastic__layer_memory_budget_gib!r}"
+                "plastic__layer_count__memory_budget_gib must be finite and positive or None; "
+                f"got {self.plastic__layer_count__memory_budget_gib!r}"
             )
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_memory_budget_gib is None:
-            raise ValueError("plastic__layer_memory_budget_gib is required for memory_budget")
+        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
+            raise ValueError("plastic__layer_count__memory_budget_gib is required for memory_budget")
         # vvv THOG universal CUDA safety reserve is execution state, configured in GiB and allowed to be explicitly disabled with zero
         if (
-            isinstance(self.plastic__cuda_allocator_reserve_gib, bool)
-            or not isinstance(self.plastic__cuda_allocator_reserve_gib, (int, float))
-            or not math.isfinite(float(self.plastic__cuda_allocator_reserve_gib))
-            or float(self.plastic__cuda_allocator_reserve_gib) < 0.0
+            isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, bool)
+            or not isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count__cuda_allocator_reserve_gib))
+            or float(self.plastic__layer_count__cuda_allocator_reserve_gib) < 0.0
         ):
             raise ValueError(
-                "plastic__cuda_allocator_reserve_gib must be finite and non-negative; "
-                f"got {self.plastic__cuda_allocator_reserve_gib!r}"
+                "plastic__layer_count__cuda_allocator_reserve_gib must be finite and non-negative; "
+                f"got {self.plastic__layer_count__cuda_allocator_reserve_gib!r}"
             )
         # ^^^ THOG
         if self.plastic__enabled and self.plastic__layer_count_objective == "memory_budget" and not self.device.startswith("cuda"):
@@ -885,7 +889,7 @@ class TrainingConfig:
                         "plastic__layer_count_probe__window_size_as_number_of_probes": self.plastic__layer_count_probe__window_size_as_number_of_probes,
                         "plastic__layer_count_probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
                         "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
-                        "plastic__layer_memory_budget_gib": self.plastic__layer_memory_budget_gib,
+                        "plastic__layer_count__memory_budget_gib": self.plastic__layer_count__memory_budget_gib,
                         "plastic__geometry_learning_rate_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
                         "plastic__freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
                         "plastic__sampling_seed": self.model_seed,
@@ -977,8 +981,8 @@ class TrainingConfig:
                 layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-                layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
-                cuda_allocator_reserve_gib=float(self.plastic__cuda_allocator_reserve_gib),
+                layer_memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+                cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
                 geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
                 initial_active_layers=self.plastic__initial_active_layers,

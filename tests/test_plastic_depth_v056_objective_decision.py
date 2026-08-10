@@ -72,7 +72,7 @@ def test_all_objective_decision_combinations_validate(monkeypatch, objective, al
         plastic__initial_layer_count=10,
         plastic__max_permitted_layers=20,
         plastic__layer_count_objective=objective,
-        plastic__layer_memory_budget_gib=12.0 if objective == "memory_budget" else None,
+        plastic__layer_count__memory_budget_gib=12.0 if objective == "memory_budget" else None,
         plastic__layer_count__max_allowable_layer_change=1,
         device="cuda" if objective == "memory_budget" else "cpu",
     )

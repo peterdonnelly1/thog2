@@ -109,7 +109,7 @@ def _headroom_reserve(
     trainer: Any,
     context: Dict[str, Any],
 ) -> Tuple[Optional[PlasticDepthCudaAllocatorReserve], bool]:
-    reserve_gib = float(trainer.config.plastic__cuda_allocator_reserve_gib)
+    reserve_gib = float(trainer.config.plastic__layer_count__cuda_allocator_reserve_gib)
     if reserve_gib <= 0.0:
         return None, True
     reserve = context.get("cuda_allocator_reserve")
@@ -288,7 +288,7 @@ def _commit_plastic_depth_inline_update_with_cuda_headroom(
         update_number=update_number,
         current_count=int(context["current_count"]),
         selected_count=int(context["selected_count"]),
-        reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
+        reserve_gib=float(self.config.plastic__layer_count__cuda_allocator_reserve_gib),
         verified=verified,
         reason=str(context.get("cuda_growth_headroom_reason", "")),
         # vvv THOG expose how far the accumulation-aware preflight ran and where an OOM was trapped without changing the established event name

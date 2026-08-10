@@ -56,11 +56,17 @@ def test_v0541_checkpoint_key_normalization_is_explicit():
     normalized = normalize_plastic_v0541_config_fields({
         "plastic__layer_count_max_step": 2,
         "plastic__layer_count_extrapolation_weight": 0.9,
+        "plastic__layer_memory_budget_gib": 12.0,
+        "plastic__cuda_allocator_reserve_gib": 0.5,
     })
     assert normalized["plastic__layer_count__max_allowable_layer_change"] == 2
     assert normalized["plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence"] == pytest.approx(0.9)
+    assert normalized["plastic__layer_count__memory_budget_gib"] == pytest.approx(12.0)
+    assert normalized["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.5)
     assert "plastic__layer_count_max_step" not in normalized
     assert "plastic__layer_count_extrapolation_weight" not in normalized
+    assert "plastic__layer_memory_budget_gib" not in normalized
+    assert "plastic__cuda_allocator_reserve_gib" not in normalized
 
 
 def test_v0541_probe_provenance_tracks_exact_window():

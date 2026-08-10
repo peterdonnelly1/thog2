@@ -14,13 +14,13 @@ GIB_BYTES = 1024 ** 3
 def validate_cuda_allocator_reserve_gib(value: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(
-            "plastic__cuda_allocator_reserve_gib must be a finite non-negative number; "
+            "plastic__layer_count__cuda_allocator_reserve_gib must be a finite non-negative number; "
             f"got {value!r}"
         )
     resolved = float(value)
     if not math.isfinite(resolved) or resolved < 0.0:
         raise ValueError(
-            "plastic__cuda_allocator_reserve_gib must be a finite non-negative number; "
+            "plastic__layer_count__cuda_allocator_reserve_gib must be a finite non-negative number; "
             f"got {value!r}"
         )
     return resolved

@@ -304,8 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_window", dest="plastic__wall_time_equivalent_time_gain_loss_rate_window", type=int, default=64)
     parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", dest="plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", type=int, default=16)
     parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
-    parser.add_argument("--plastic__layer_memory_budget_gib", dest="plastic__layer_memory_budget_gib", type=float)
-    parser.add_argument("--plastic__cuda_allocator_reserve_gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
+    parser.add_argument("--plastic__layer_count__memory_budget_gib", dest="plastic__layer_count__memory_budget_gib", type=float)
+    parser.add_argument("--plastic__layer_count__cuda_allocator_reserve_gib", dest="plastic__layer_count__cuda_allocator_reserve_gib", type=float, default=0.5)
     parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
     parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
     # ^^^ THOG
@@ -520,8 +520,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__wall_time_equivalent_time_gain_loss_rate_window=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_window,
         plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
-        plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
-        plastic__cuda_allocator_reserve_gib=arguments.plastic__cuda_allocator_reserve_gib,
+        plastic__layer_count__memory_budget_gib=arguments.plastic__layer_count__memory_budget_gib,
+        plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
         # ^^^ THOG

@@ -92,8 +92,8 @@ PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__wall_time_equivalent_time_gain_loss_rate_window",
     "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
-    "plastic__layer_memory_budget_gib",
-    "plastic__cuda_allocator_reserve_gib",
+    "plastic__layer_count__memory_budget_gib",
+    "plastic__layer_count__cuda_allocator_reserve_gib",
     "plastic__geometry_learning_rate_multiplier",
     "plastic__freeze_geometry_during_warmup",
     "plastic__initial_active_layers",
@@ -205,8 +205,8 @@ class OwtRunConfig:
     plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
     plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_memory_budget_gib: Optional[float] = None
-    plastic__cuda_allocator_reserve_gib: float = 0.5
+    plastic__layer_count__memory_budget_gib: Optional[float] = None
+    plastic__layer_count__cuda_allocator_reserve_gib: float = 0.5
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
@@ -399,25 +399,25 @@ class OwtRunConfig:
         ):
             raise ValueError("plastic__layer_count_cost_weight must be finite and non-negative")
         if (
-            self.plastic__layer_memory_budget_gib is not None
+            self.plastic__layer_count__memory_budget_gib is not None
             and (
-                isinstance(self.plastic__layer_memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_memory_budget_gib))
-                or float(self.plastic__layer_memory_budget_gib) <= 0.0
+                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
+                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
+                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
+                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
             )
         ):
-            raise ValueError("plastic__layer_memory_budget_gib must be finite and positive or None")
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_memory_budget_gib is None:
-            raise ValueError("plastic__layer_memory_budget_gib is required for memory_budget")
+            raise ValueError("plastic__layer_count__memory_budget_gib must be finite and positive or None")
+        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
+            raise ValueError("plastic__layer_count__memory_budget_gib is required for memory_budget")
         # vvv THOG universal CUDA safety reserve is independent of the learned-count objective and may be disabled with zero
         if (
-            isinstance(self.plastic__cuda_allocator_reserve_gib, bool)
-            or not isinstance(self.plastic__cuda_allocator_reserve_gib, (int, float))
-            or not math.isfinite(float(self.plastic__cuda_allocator_reserve_gib))
-            or float(self.plastic__cuda_allocator_reserve_gib) < 0.0
+            isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, bool)
+            or not isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, (int, float))
+            or not math.isfinite(float(self.plastic__layer_count__cuda_allocator_reserve_gib))
+            or float(self.plastic__layer_count__cuda_allocator_reserve_gib) < 0.0
         ):
-            raise ValueError("plastic__cuda_allocator_reserve_gib must be finite and non-negative")
+            raise ValueError("plastic__layer_count__cuda_allocator_reserve_gib must be finite and non-negative")
         # ^^^ THOG
         if self.plastic__enabled and self.plastic__layer_count_objective == "memory_budget" and not self.device.startswith("cuda"):
             raise ValueError("PLASTIC DEPTH memory_budget requires a CUDA device")
@@ -817,8 +817,8 @@ class OwtRunConfig:
                 layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-                layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
-                cuda_allocator_reserve_gib=float(self.plastic__cuda_allocator_reserve_gib),
+                layer_memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+                cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
                 geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
                 initial_active_layers=self.plastic__initial_active_layers,
@@ -998,8 +998,8 @@ class OwtRunConfig:
                 ])
             if float(self.plastic__layer_count_cost_weight) != 0.0:
                 plastic_fields.append(f"LW_{self._artifact_float(self.plastic__layer_count_cost_weight)}")
-            if self.plastic__layer_memory_budget_gib is not None:
-                plastic_fields.append(f"LMB_{self._artifact_float(self.plastic__layer_memory_budget_gib)}")
+            if self.plastic__layer_count__memory_budget_gib is not None:
+                plastic_fields.append(f"LMB_{self._artifact_float(self.plastic__layer_count__memory_budget_gib)}")
             if float(self.plastic__geometry_learning_rate_multiplier) != 0.1:
                 plastic_fields.append(f"LG_{self._artifact_float(self.plastic__geometry_learning_rate_multiplier)}")
             if not self.plastic__freeze_geometry_during_warmup:
@@ -1172,8 +1172,8 @@ class OwtRunConfig:
             plastic__wall_time_equivalent_time_gain_loss_rate_window=self.plastic__wall_time_equivalent_time_gain_loss_rate_window,
             plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
             plastic__layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-            plastic__layer_memory_budget_gib=self.plastic__layer_memory_budget_gib,
-            plastic__cuda_allocator_reserve_gib=float(self.plastic__cuda_allocator_reserve_gib),
+            plastic__layer_count__memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+            plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
             plastic__freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
             # ^^^ THOG
@@ -1254,8 +1254,8 @@ class OwtRunConfig:
                 "plastic__layer_count_objective",
                 "plastic__layer_count_update_brake",
                 "plastic__layer_count_cost_weight",
-                "plastic__layer_memory_budget_gib",
-                "plastic__cuda_allocator_reserve_gib",
+                "plastic__layer_count__memory_budget_gib",
+                "plastic__layer_count__cuda_allocator_reserve_gib",
                 "plastic__geometry_learning_rate_multiplier",
                 "plastic__freeze_geometry_during_warmup",
                 "plastic__initial_active_layers",

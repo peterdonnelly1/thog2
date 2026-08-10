@@ -94,7 +94,7 @@ def test_descriptor_registry_uses_actual_keys_and_explicit_missing_marker() -> N
     assert "LCS" in registry and "--plastic__phase_1_n_steps N" in registry
     assert "DLB" in registry and "--depth-compress-layer-norm-and-bias" in registry
     assert "HFC" in registry and "--hyperblock-common-family-order N" in registry
-    assert "—" in registry and "--plastic__cuda_allocator_reserve_gib VALUE" in registry
+    assert "—" in registry and "--plastic__layer_count__cuda_allocator_reserve_gib VALUE" in registry
 
 
 def test_registered_parser_help_appends_descriptor_registry_once() -> None:

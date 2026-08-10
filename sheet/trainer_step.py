@@ -287,7 +287,7 @@ class TrainerStepMixin:
                 maximum_layers=lattice.maximum_layers,
                 cost_weight=float(self.config.plastic__layer_count_cost_weight),
                 reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
+                memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
             )
             self.distributed.assert_identical_object(
                 selected.active_layers,
@@ -340,7 +340,7 @@ class TrainerStepMixin:
         if self.device.type == "cuda" and proposed_upward_count in candidates:
             allocator_reserve = PlasticDepthCudaAllocatorReserve(
                 device=self.device,
-                reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
+                reserve_gib=float(self.config.plastic__layer_count__cuda_allocator_reserve_gib),
             )
             local_preflight_feasible = allocator_reserve.acquire()
             upward_preflight_feasible = self.distributed.all_true(local_preflight_feasible)
@@ -453,7 +453,7 @@ class TrainerStepMixin:
                     maximum_layers=lattice.maximum_layers,
                     cost_weight=float(self.config.plastic__layer_count_cost_weight),
                     reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                    memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
+                    memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
                 )
             except RuntimeError as error:
                 current_count = int(context["current_count"])
