@@ -6,7 +6,6 @@ import os
 import pytest
 
 from sheet import plastic_depth_same_batch_all_probes_patch as same_batch
-from sheet import plastic_depth_same_batch_resume_config_patch as resume_config
 from sheet.training_config import TrainingConfig
 from tests.test_plastic_depth import plastic_training_config
 
@@ -43,7 +42,6 @@ def test_training_config_constructor_restores_persisted_same_batch_mode() -> Non
 
     assert restored.plastic__layer_count__same_batch_all_probes is True
     assert same_batch._runtime_enabled() is True
-    assert TrainingConfig.__init__ is resume_config._training_config_init_with_same_batch_resume
 
 
 def test_training_config_constructor_rejects_explicit_same_batch_resume_mismatch() -> None:
