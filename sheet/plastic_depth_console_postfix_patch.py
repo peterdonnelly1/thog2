@@ -12,7 +12,7 @@ from . import stage6_trainer as _stage6
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 _POSTFIX_ANNOTATION = re.compile(
     r"(?P<spacing>[ \t]*)(?P<colour>\x1b\[[0-9;]*m)?"
-    r"(?P<text><<< (?:update brake on|warmup braked? enabled))"
+    r"(?P<text><<< (?:update brake on|warmup braked? enabled|stopped by memory limit))"
     r"(?P<reset>\x1b\[[0-9;]*m)?"
 )
 _NEUTRAL_LRA = re.compile(r"(?P<prefix>L/R/A=\[[^\]]+\]/\d+)=>-(?=$|[ \t])")

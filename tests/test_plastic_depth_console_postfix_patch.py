@@ -36,4 +36,19 @@ def test_update_brake_annotation_is_also_kept_at_physical_line_end() -> None:
     rendered = postfix._finalize_plastic_postfixes(line)
     assert rendered.endswith(f"{colour}<<< update brake on{reset}")
     assert rendered.index("L/R/A=") < rendered.index("<<< update brake on")
+
+
+# vvv THOG memory-headroom veto remains the physical postfix even when a later public compatibility field is appended
+def test_memory_limit_annotation_is_kept_at_physical_line_end() -> None:
+    colour = "\033[38;2;150;220;255m"
+    reset = "\033[0m"
+    line = (
+        "T 20 layers = 38\tsampled = [1.0, 2.0]  "
+        f"{colour}<<< stopped by memory limit{reset}"
+        "\tchange_z [L-1, L+1] = [-1.00, +1.00]"
+    )
+    rendered = postfix._finalize_plastic_postfixes(line)
+    assert rendered.endswith(f"{colour}<<< stopped by memory limit{reset}")
+    assert rendered.index("change_z") < rendered.index("<<< stopped by memory limit")
+# ^^^ THOG
 # ^^^ THOG

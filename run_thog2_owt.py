@@ -53,6 +53,8 @@ _print_complete_registry_help_if_requested()
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
 import sheet.geometry_registry as _geometry_registry                                                                                                        # <<< THOG align geometry report value columns with the shared console label width
+import sheet.plastic_depth_console_postfix_patch as _plastic_depth_console_postfix                                                                          # <<< THOG let the outer public formatter restore PLASTIC annotations to the physical row end
+import sheet.plastic_depth_v056_objective_decision_patch as _plastic_depth_v056                                                                              # <<< THOG enforce final decision-algorithm ownership after the public runner's legacy compatibility wrapper
 import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
 from sheet.depth_trajectory import DepthTrajectory                                                                                                          # <<< THOG identify geometries that actually retain DEPTH matrix materialisation
 from sheet.interactive_interrupt import (                                                                                                                   # <<< THOG Ctrl-G requests one safe-boundary checkpoint and exit
@@ -182,7 +184,11 @@ def _format_progress_line_with_materialisation_last(run_id: str, event: str, pay
     if event == "optimizer_progress" and "materialisation_penalty" in payload:
         field = f"  materialisation penalty={payload['materialisation_penalty']}"
         line = f"{line.replace(field, '')}{field}"
-    return _move_sampled_values_to_progress_tail(line)
+    # vvv THOG the public runner is the outermost formatter, so it must re-finalize annotations after moving compatibility fields
+    line = _move_sampled_values_to_progress_tail(line)
+    line = _plastic_depth_console_postfix._finalize_plastic_postfixes(line)
+    # ^^^ THOG
+    return line
 
 
 _depth_materialisation_runtime._materialisation_interval_field = _materialisation_interval_field_five_decimals
@@ -425,9 +431,17 @@ _stage6._progress_timestamp = lambda: _stage6.datetime.now().strftime("%y%m%d:%H
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 
 
+def _plastic_change_z_is_retired() -> bool:
+    return _plastic_depth_v056._runtime_algorithm() in _plastic_depth_v056.SEN_KENDALL_ALGORITHMS
+
+
 def _latest_plastic_change_z(trainer: Any) -> Optional[tuple[Optional[float], Optional[float]]]:
     if not bool(getattr(getattr(trainer, "config", None), "plastic__do_learn_layer_count", False)):
         return None
+    # vvv THOG the public compatibility layer must not reconstruct retired robust-z evidence for either Sen/Kendall controller
+    if _plastic_change_z_is_retired():
+        return None
+    # ^^^ THOG
     for event in reversed(getattr(trainer, "events", ())):
         if event.name != "plastic_depth_count_decision":
             continue
@@ -454,9 +468,14 @@ def _prepare_console_progress_payload_with_precise_step(self: Any, event: str, p
         mean_step_seconds = getattr(self, "_console_latest_mean_step_seconds", None)
         if mean_step_seconds is not None:
             values["mean_step_seconds"] = f"{float(mean_step_seconds):8.4f}"
-        change_z = _latest_plastic_change_z(self)
-        if change_z is not None:
-            values["plastic_change_z"] = change_z
+        # vvv THOG make the outermost payload owner defensive: TSK removes stale input as well as refusing reconstruction
+        if _plastic_change_z_is_retired():
+            values.pop("plastic_change_z", None)
+        else:
+            change_z = _latest_plastic_change_z(self)
+            if change_z is not None:
+                values["plastic_change_z"] = change_z
+        # ^^^ THOG
     return values
 
 
