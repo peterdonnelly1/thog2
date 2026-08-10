@@ -50,6 +50,7 @@ jobs:
             sheet/plastic_depth_resume.py \
             sheet/plastic_depth_coarse_fine_patch.py \
             sheet/plastic_depth_full_radius_oom_patch.py \
+            sheet/plastic_depth_cuda_headroom_guard_patch.py \
             sheet/plastic_depth_audit_patch.py \
             sheet/plastic_depth_console_postfix_patch.py \
             sheet/plastic_depth_console_compact_layout_patch.py \
