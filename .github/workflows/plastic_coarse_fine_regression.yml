@@ -100,6 +100,7 @@ jobs:
             tests/test_plastic_depth_v056_help.py \
             tests/test_plastic_depth_sen_kendall_v055.py \
             tests/test_plastic_depth_v055_growth_side_discount.py \
+            tests/test_plastic_depth_v055_growth_side_help.py \
             tests/test_plastic_depth_v055_growth_side_persistence.py \
             tests/test_plastic_depth_v055_growth_side_startup.py \
             tests/test_plastic_depth_v055_same_batch_audit_bridge.py \
@@ -107,7 +108,8 @@ jobs:
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_plastic_depth_theil_sen_kendall.py \
             tests/test_plastic_depth_theil_sen_kendall_bootstrap_fix.py \
-            tests/test_plastic_depth_theil_sen_kendall_integration.py
+            tests/test_plastic_depth_theil_sen_kendall_integration.py \
+            tests/test_plastic_depth_wrapper_options.py
       # ^^^ THOG
 
       - name: Run full CPU test suite
