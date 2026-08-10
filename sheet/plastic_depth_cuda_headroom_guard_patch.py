@@ -30,6 +30,18 @@ def _release_context_reserve(
     context["cuda_allocator_reserve"] = None
 
 
+def _release_returned_reserve(
+    context: Dict[str, Any],
+    reserve: Any,
+    *,
+    empty_cache: bool,
+) -> None:
+    release = getattr(reserve, "release", None)
+    if callable(release):
+        release(empty_cache=empty_cache)
+    context["cuda_allocator_reserve"] = None
+
+
 def _force_growth_hold(
     trainer: Any,
     context: Dict[str, Any],
@@ -181,7 +193,7 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
         selected_count=selected_count,
     )
     if not training_feasible:
-        _release_context_reserve(context, empty_cache=True)
+        _release_returned_reserve(context, reserve, empty_cache=True)
         _force_growth_hold(
             self,
             context,
