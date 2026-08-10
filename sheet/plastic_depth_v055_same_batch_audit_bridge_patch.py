@@ -20,20 +20,35 @@ def _force_framework_hold_with_v055_audit_metadata(context: Dict[str, Any], *, r
     decision = context.get("decision")
     raw_selected_count = None if decision is None else int(decision.selected_count)
     _ORIGINAL_FORCE_FRAMEWORK_HOLD(context, reason=reason)
-    report = context.get("plastic_directional_report")
-    if not isinstance(report, dict):
-        return
-    if str(report.get("algorithm", "")) not in _v055.SEN_KENDALL_ALGORITHMS:
+    # vvv THOG v0.56 removes the compatibility directional report before commit, so preserve framework-hold metadata on the authoritative Sen/Kendall report as well
+    reports = tuple(
+        report
+        for report_key in (
+            "plastic_v055_sen_kendall_report",
+            "plastic_directional_report",
+        )
+        if isinstance((report := context.get(report_key)), dict)
+        and str(report.get("algorithm", "")) in _v055.SEN_KENDALL_ALGORITHMS
+    )
+    if not reports:
         return
     if raw_selected_count is None:
         raise RuntimeError("PLASTIC v0.55 same-batch framework hold lost the raw selected count")
-    report[_FRAMEWORK_HOLD_REASON] = str(reason)
-    report[_FRAMEWORK_RAW_SELECTED_COUNT] = int(raw_selected_count)
+    current_count = int(context["current_count"])
+    for report in reports:
+        report["selected_count"] = current_count
+        report[_FRAMEWORK_HOLD_REASON] = str(reason)
+        report[_FRAMEWORK_RAW_SELECTED_COUNT] = int(raw_selected_count)
+    # ^^^ THOG
 
 
 def _sen_kendall_winning_count_from_audit_with_framework_hold(audit: Mapping[str, Any]) -> int:
     raw_winning_count = int(_ORIGINAL_SEN_KENDALL_WINNING_COUNT_FROM_AUDIT(audit))
-    report = audit.get("directional_report")
+    # vvv THOG inspect the same authoritative report used to replay the raw decision; directional_report is only a compatibility fallback
+    report = audit.get("sen_kendall_report")
+    if not isinstance(report, Mapping):
+        report = audit.get("directional_report")
+    # ^^^ THOG
     if not isinstance(report, Mapping):
         return raw_winning_count
     hold_reason = str(report.get(_FRAMEWORK_HOLD_REASON, "")).strip()

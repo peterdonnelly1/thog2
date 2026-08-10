@@ -6,6 +6,7 @@ import pytest
 
 from sheet import plastic_depth_controller as controller
 from sheet import plastic_depth_sen_kendall_v055_patch as v055
+from sheet import plastic_depth_sen_kendall_v055_audit_fix_patch as audit_v055
 from sheet import plastic_depth_v055_same_batch_audit_bridge_patch as bridge
 
 
@@ -59,11 +60,13 @@ def _stratified_report() -> dict:
 
 
 def test_same_batch_hold_records_raw_v055_decision_and_replays_hold() -> None:
+    raw_report = _stratified_report()
     context = {
         "current_count": 10,
         "selected_count": 11,
         "decision": _decision(),
-        "plastic_directional_report": _stratified_report(),
+        "plastic_v055_sen_kendall_report": deepcopy(raw_report),
+        "plastic_directional_report": deepcopy(raw_report),
     }
 
     bridge._force_framework_hold_with_v055_audit_metadata(
@@ -74,17 +77,32 @@ def test_same_batch_hold_records_raw_v055_decision_and_replays_hold() -> None:
     assert context["selected_count"] == 10
     assert context["decision"].selected_count == 10
     assert all(not item.significant for item in context["decision"].evidence)
-    report = context["plastic_directional_report"]
-    assert report["selected_count"] == 10
-    assert report["framework_hold_reason"] == "incomplete_same_batch_window"
-    assert report["framework_raw_selected_count"] == 11
+    for report_key in (
+        "plastic_v055_sen_kendall_report",
+        "plastic_directional_report",
+    ):
+        report = context[report_key]
+        assert report["selected_count"] == 10
+        assert report["framework_hold_reason"] == "incomplete_same_batch_window"
+        assert report["framework_raw_selected_count"] == 11
 
+    # vvv THOG reproduce the live v0.56 commit state: the compatibility directional report has been removed, leaving only the authoritative Sen/Kendall report
     audit = {
         "previous_count": 10,
+        "max_step": 1,
         "brake_active": False,
-        "directional_report": report,
+        "warmup_brake_active": False,
+        "sen_kendall_report": context["plastic_v055_sen_kendall_report"],
+        "winning_probe_count": 10,
+        "committed_count": 10,
+        "decision_reason": "robust_gate_hold",
     }
-    assert bridge._sen_kendall_winning_count_from_audit_with_framework_hold(audit) == 10
+    assert audit_v055.replay_plastic_depth_count_audit_v055(audit) == {
+        "winning_probe_count": 10,
+        "committed_count": 10,
+        "decision_reason": "robust_gate_hold",
+    }
+    # ^^^ THOG
 
 
 def test_same_batch_hold_audit_rejects_tampered_raw_v055_decision() -> None:

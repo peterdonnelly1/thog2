@@ -203,8 +203,9 @@ def test_cuda_growth_hold_replays_v055_audit_without_mismatch() -> None:
         "winning_probe_count": current_count,
         "committed_count": current_count,
         "decision_reason": "robust_gate_hold",
-        "directional_report": context["plastic_directional_report"],
+        # vvv THOG v0.56 removes directional_report before commit; exercise the authoritative report that survives into immediate audit replay
         "sen_kendall_report": context["plastic_v055_sen_kendall_report"],
+        # ^^^ THOG
     }
 
     assert selected_updates == [current_count]
