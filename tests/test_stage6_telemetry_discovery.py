@@ -48,6 +48,8 @@ class FakeTelemetryModule:
 
 
 class Stage6TelemetryDiscoveryTests(unittest.TestCase):
+    # vvv THOG full diagnostic discovery is intentionally a DEBUG > 9 contract
+    @mock.patch("sheet.wandb_telemetry._constants.DEBUG", 10)
     def test_direct_backend_logs_training_evaluation_resource_and_sheet_metrics(self) -> None:
         module = FakeTelemetryModule()
         with tempfile.TemporaryDirectory() as directory:
@@ -119,6 +121,7 @@ class Stage6TelemetryDiscoveryTests(unittest.TestCase):
         self.assertTrue(any("resource/checkpoint_bytes" in row for row in module.run.logged))
         self.assertTrue(any("sheet/attention_input_weight/high_depth_order_energy_fraction" in row for row in module.run.logged))
         self.assertTrue(module.run.finished)
+        # ^^^ THOG
 
 
 if __name__ == "__main__":
