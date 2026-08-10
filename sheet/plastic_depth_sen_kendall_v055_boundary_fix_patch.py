@@ -51,6 +51,10 @@ from . import plastic_depth_sen_kendall_v055_runtime_fix_patch as _plastic_depth
 from . import plastic_depth_sen_kendall_v055_audit_fix_patch as _plastic_depth_sen_kendall_v055_audit_fix_patch
 # ^^^ THOG
 
+# vvv THOG preserve same-batch framework holds as explicit v0.55 audit state while independently replaying the pre-hold Sen/Kendall decision
+from . import plastic_depth_v055_same_batch_audit_bridge_patch as _plastic_depth_v055_same_batch_audit_bridge_patch
+# ^^^ THOG
+
 # vvv THOG let every feasible radius point inform v0.55 Sen/Kendall while asymmetrically discounting only beneficial growth-side economic evidence
 from . import plastic_depth_v055_growth_side_discount_patch as _plastic_depth_v055_growth_side_discount_patch
 # ^^^ THOG
