@@ -282,7 +282,9 @@ def _begin_plastic_depth_inline_update_with_lookahead(self: Any) -> Optional[Dic
         if upward_preflight_feasible:
             recoverable_upward_count = proposed_upward_count
         else:
-            allocator_reserve.release(empty_cache=True)
+            # vvv THOG flush only a rank whose reserve acquisition actually OOMed
+            allocator_reserve.release(empty_cache=not local_preflight_feasible)
+            # ^^^ THOG
             allocator_reserve = None
             execution_candidates = tuple(count for count in execution_candidates if count != proposed_upward_count)
             decision_candidates = tuple(count for count in decision_candidates if count != proposed_upward_count)
@@ -409,7 +411,7 @@ def _plastic_depth_inline_probe_request_with_lookahead(self: Any, targets: torch
     def synchronize_recoverable_upward(local_feasible: bool) -> bool:
         globally_feasible = self.distributed.all_true(bool(local_feasible))
         context["upward_candidate_feasible"] = globally_feasible
-        if not globally_feasible and self.device.type == "cuda" and torch.cuda.is_available():
+        if not local_feasible and self.device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.empty_cache()
         return globally_feasible
 

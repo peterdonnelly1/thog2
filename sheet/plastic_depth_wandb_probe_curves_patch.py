@@ -258,6 +258,8 @@ def _should_refresh_charts(
 
 
 def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
+    if not _wandb._debug_wandb_enabled():
+        return
     if telemetry.run is None or telemetry.module is None:
         return
     history = tuple(_ensure_curve_state(telemetry))
@@ -328,6 +330,10 @@ _ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 
 def attach_telemetry_with_plastic_probe_curves(trainer: Any, telemetry: Any) -> None:
     _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
+    # vvv THOG normal runs never install the event-scanning/chart wrapper; DEBUG>9 retains the complete historical probe visualization path
+    if not _wandb._debug_wandb_enabled():
+        return
+    # ^^^ THOG
     original_progress = trainer._print_progress
 
     def progress(run_id: str, event: str, **payload: Any) -> None:

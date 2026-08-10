@@ -750,7 +750,7 @@ _telemetry._training_metrics = _training_metrics_with_wall_time
 
 def _start_wandb_with_plastic_wall_time_metrics(self: Any) -> None:
     _ORIGINAL_START_WANDB(self)
-    if self.run is None:
+    if self.run is None or not _telemetry._debug_wandb_enabled():
         return
     define_metric = (
         self.run.define_metric

@@ -652,8 +652,10 @@ class TrainingSheetGPT(SheetGPT):
                 upward_hidden = None
                 upward_loss = None
                 upward_report = None
-                if hidden.device.type == "cuda" and torch.cuda.is_available():
+                # vvv THOG remote-rank rejection is not a local OOM and must not flush this rank's allocator cache
+                if not local_feasible and hidden.device.type == "cuda" and torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                # ^^^ THOG
                 break
             if upward_hidden is None or upward_loss is None or upward_report is None:
                 raise RuntimeError(

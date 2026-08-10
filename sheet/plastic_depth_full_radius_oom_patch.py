@@ -61,7 +61,9 @@ def _begin_plastic_depth_inline_update_with_full_radius_oom(
             local_preflight_feasible
         )
         if not globally_preflight_feasible:
-            reserve.release(empty_cache=True)
+            # vvv THOG flush only a rank whose reserve acquisition actually OOMed
+            reserve.release(empty_cache=not local_preflight_feasible)
+            # ^^^ THOG
             retained_counts = tuple(
                 int(count)
                 for count in context["candidate_counts"]
@@ -146,10 +148,8 @@ def _plastic_depth_inline_probe_request_with_full_radius_oom(
                 if higher_count > candidate_count:
                     context["upward_candidate_feasible_by_count"][higher_count] = False
             # vvv THOG a failed candidate ends upward exploration; release the barrier only after all ranks reject the candidate and before cleanup
-            _release_cuda_allocator_reserve(context, empty_cache=True)
+            _release_cuda_allocator_reserve(context, empty_cache=not local_feasible)
             # ^^^ THOG
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
         return globally_feasible
 
     # vvv THOG the reserve protects upward evidence only; if the selector stays or shrinks, release it before the real gradient-bearing update at the already-safe count
@@ -157,7 +157,7 @@ def _plastic_depth_inline_probe_request_with_full_radius_oom(
         selected_count = int(request.selector(candidates))
         current_count = int(context["current_count"])
         if selected_count <= current_count:
-            _release_cuda_allocator_reserve(context, empty_cache=True)
+            _release_cuda_allocator_reserve(context, empty_cache=False)
         return selected_count
     # ^^^ THOG
 

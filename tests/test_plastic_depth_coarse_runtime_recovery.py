@@ -5,6 +5,8 @@ import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+import constants
+
 from sheet import plastic_depth_coarse_runtime_recovery_patch as recovery
 from sheet import plastic_depth_fresh_state
 from sheet import plastic_depth_lifecycle
@@ -217,7 +219,8 @@ def _telemetry(tmp_path: Path) -> WandbTelemetry:
     return telemetry
 
 
-def test_fine_wandb_logging_does_not_rewind_after_coarse(tmp_path: Path) -> None:
+def test_fine_wandb_logging_does_not_rewind_after_coarse(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 10)
     telemetry = _telemetry(tmp_path)
     telemetry.log_plastic_coarse_fine(
         {

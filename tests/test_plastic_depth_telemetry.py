@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import constants
+
 from sheet.wandb_telemetry import WandbTelemetry
 
 
@@ -43,7 +45,8 @@ def _telemetry(tmp_path: Path) -> WandbTelemetry:
     return telemetry
 
 
-def test_coarse_trials_have_independent_local_step_axes(tmp_path) -> None:
+def test_coarse_trials_have_independent_local_step_axes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 10)
     telemetry = _telemetry(tmp_path)
     provenance = {
         "selected_layers": 8,
@@ -99,7 +102,8 @@ def test_coarse_trials_have_independent_local_step_axes(tmp_path) -> None:
     )
 
 
-def test_fine_metrics_are_mirrored_under_fine_update_axis(tmp_path) -> None:
+def test_fine_metrics_are_mirrored_under_fine_update_axis(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 10)
     telemetry = _telemetry(tmp_path)
 
     telemetry.log_event(
@@ -124,3 +128,40 @@ def test_fine_metrics_are_mirrored_under_fine_update_axis(tmp_path) -> None:
         name == "fine/train_loss" and step == 7
         for name, _, step in telemetry.writer.scalars
     )
+
+
+# vvv THOG normal W&B owns only the two loss scalars while TensorBoard retains complete diagnostics
+def test_normal_wandb_logs_only_train_and_validation_loss(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 9)
+    telemetry = _telemetry(tmp_path)
+
+    telemetry.log_event(
+        "optimizer_progress",
+        {
+            "completed_updates": 7,
+            "consumed_tokens": 700,
+            "cumulative_training_seconds": 12.0,
+            "training_loss": 3.0,
+            "learning_rate": 1.0e-3,
+            "gradient_norm": 0.5,
+        },
+    )
+    telemetry.log_event(
+        "evaluation_completed",
+        {
+            "completed_updates": 7,
+            "consumed_tokens": 700,
+            "validation_loss": 2.7,
+            "training_loss": 2.8,
+        },
+    )
+
+    assert telemetry.run.logged == [
+        ({"train/loss": 3.0}, {"step": 7}),
+        ({"val/val_loss": 2.7}, {"step": 7}),
+    ]
+    writer_names = {name for name, _, _ in telemetry.writer.scalars}
+    assert "optim/lr" in writer_names
+    assert "val/train_loss" in writer_names
+    assert not any(name.startswith("fine/") for name in telemetry.run.logged[0][0])
+# ^^^ THOG

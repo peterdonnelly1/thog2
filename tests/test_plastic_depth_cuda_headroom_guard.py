@@ -56,6 +56,7 @@ def _trainer(context, selected_updates):
     return SimpleNamespace(
         device=SimpleNamespace(type="cuda"),
         config=SimpleNamespace(plastic__cuda_allocator_reserve_gib=1.5),
+        distributed=SimpleNamespace(all_true=lambda value: bool(value)),
         raw_model=SimpleNamespace(
             set_plastic_depth_update_layer_count=lambda count: selected_updates.append(int(count))
         ),
@@ -91,7 +92,55 @@ def test_growth_is_held_when_grad_bearing_preflight_exceeds_reserve(monkeypatch)
     assert context["cuda_growth_headroom_verified"] is False
     assert context["cuda_growth_headroom_reason"] == "grad_bearing_training_exceeds_cuda_reserve_barrier"
     assert selected_updates == [12]
-    assert releases == [{"empty_cache": True}]
+    assert releases == [{"empty_cache": False}]
+    assert headroom._rejected_growth_counts(trainer) == {13}
+
+
+# vvv THOG a rejected target is paid for once per trainer process and later identical proposals become immediate framework holds
+def test_rejected_growth_count_skips_repeated_grad_bearing_preflight(monkeypatch) -> None:
+    contexts = [_context(), _context()]
+    selected_updates = []
+    trainer = _trainer(contexts[0], selected_updates)
+    reserve_releases = []
+    reserve = SimpleNamespace(
+        release=lambda **kwargs: reserve_releases.append(dict(kwargs))
+    )
+    reserve_calls = []
+    preflight_calls = []
+
+    monkeypatch.setattr(
+        headroom,
+        "_ORIGINAL_BEGIN_INLINE_UPDATE",
+        lambda _self: contexts.pop(0),
+    )
+
+    def reserve_for_growth(_self, _context):
+        reserve_calls.append(True)
+        return reserve, True
+
+    def rejected_preflight(_self, _context, selected_count):
+        preflight_calls.append(int(selected_count))
+        return False
+
+    monkeypatch.setattr(headroom, "_headroom_reserve", reserve_for_growth)
+    monkeypatch.setattr(
+        headroom,
+        "_same_batch_training_memory_preflight",
+        rejected_preflight,
+    )
+
+    first = headroom._begin_plastic_depth_inline_update_with_cuda_headroom(trainer)
+    second = headroom._begin_plastic_depth_inline_update_with_cuda_headroom(trainer)
+
+    assert first["cuda_growth_headroom_reason"] == "grad_bearing_training_exceeds_cuda_reserve_barrier"
+    assert second["cuda_growth_headroom_reason"] == "memoized_cuda_growth_rejection"
+    assert second["cuda_growth_headroom_memoized"] is True
+    assert second["cuda_growth_headroom_preflight_microsteps"] == 0
+    assert reserve_calls == [True]
+    assert preflight_calls == [13]
+    assert reserve_releases == [{"empty_cache": False}]
+    assert selected_updates == [12, 12]
+# ^^^ THOG
 
 
 # vvv THOG a trapped CUDA growth attempt must be visible on its exact T row in the established warmup-brake colour and nowhere later
@@ -258,7 +307,7 @@ def test_same_batch_stay_releases_full_radius_probe_reserve_before_training(monk
     result = headroom._begin_plastic_depth_inline_update_with_cuda_headroom(trainer)
 
     assert result is context
-    assert releases == [{"empty_cache": True}]
+    assert releases == [{"empty_cache": False}]
     assert context["cuda_allocator_reserve"] is None
     assert context["selected_count"] == 12
 
@@ -342,7 +391,7 @@ def test_full_radius_selector_releases_reserve_for_stay(monkeypatch) -> None:
         context=context,
     )
     assert request.selector(()) == 3
-    assert releases == [{"empty_cache": True}]
+    assert releases == [{"empty_cache": False}]
     assert context["cuda_allocator_reserve"] is None
 
 
@@ -456,6 +505,9 @@ def _patch_preflight_batch_state(monkeypatch) -> None:
 
 def test_accumulated_growth_preflight_runs_two_backward_passes(monkeypatch) -> None:
     _patch_preflight_batch_state(monkeypatch)
+    empty_cache_calls = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: empty_cache_calls.append(True))
     trainer, backward_calls, selected_updates, zero_grad_calls = _preflight_trainer(
         accumulation_steps=6,
     )
@@ -473,10 +525,14 @@ def test_accumulated_growth_preflight_runs_two_backward_passes(monkeypatch) -> N
     assert zero_grad_calls == [True, True]
     assert context["cuda_growth_headroom_preflight_microsteps"] == 2
     assert context["cuda_growth_headroom_failed_preflight_microstep"] is None
+    assert empty_cache_calls == []
 
 
 def test_accumulated_growth_preflight_quenches_second_backward_oom(monkeypatch) -> None:
     _patch_preflight_batch_state(monkeypatch)
+    empty_cache_calls = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: empty_cache_calls.append(True))
     trainer, backward_calls, selected_updates, zero_grad_calls = _preflight_trainer(
         accumulation_steps=6,
         fail_on_backward=2,
@@ -495,6 +551,7 @@ def test_accumulated_growth_preflight_quenches_second_backward_oom(monkeypatch) 
     assert zero_grad_calls == [True, True]
     assert context["cuda_growth_headroom_preflight_microsteps"] == 2
     assert context["cuda_growth_headroom_failed_preflight_microstep"] == 1
+    assert empty_cache_calls == [True]
 
 
 def test_single_microstep_growth_preflight_remains_single_pass(monkeypatch) -> None:

@@ -18,6 +18,7 @@ from .plastic_depth_cuda import PlasticDepthCudaAllocatorReserve, is_cuda_out_of
 _EVENT_NAME = "plastic_depth_cuda_growth_headroom"
 _CONSOLE_MEMORY_HOLD_KEY = "plastic_cuda_growth_memory_hold"
 _CONSOLE_MEMORY_HOLD_UPDATE_ATTRIBUTE = "_plastic_cuda_growth_memory_hold_update"
+_REJECTED_GROWTH_COUNTS_ATTRIBUTE = "_plastic_cuda_rejected_growth_counts"
 _ORIGINAL_BEGIN_INLINE_UPDATE = _trainer_step.TrainerStepMixin._begin_plastic_depth_inline_update
 _ORIGINAL_COMMIT_INLINE_UPDATE = _trainer_step.TrainerStepMixin._commit_plastic_depth_inline_update
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
@@ -90,6 +91,20 @@ def _force_growth_hold(
     context["upward_candidate_feasible"] = False
 
 
+# vvv THOG remember failed grad-bearing growth targets for this trainer process so identical proposals do not repeat the expensive CUDA preflight
+def _rejected_growth_counts(trainer: Any) -> set[int]:
+    rejected = getattr(trainer, _REJECTED_GROWTH_COUNTS_ATTRIBUTE, None)
+    if rejected is None:
+        rejected = set()
+        setattr(trainer, _REJECTED_GROWTH_COUNTS_ATTRIBUTE, rejected)
+    return rejected
+
+
+def _remember_rejected_growth_count(trainer: Any, selected_count: int) -> None:
+    _rejected_growth_counts(trainer).add(int(selected_count))
+# ^^^ THOG
+
+
 def _headroom_reserve(
     trainer: Any,
     context: Dict[str, Any],
@@ -107,7 +122,9 @@ def _headroom_reserve(
     local_feasible = bool(reserve.active or reserve.acquire())
     globally_feasible = bool(trainer.distributed.all_true(local_feasible))
     if not globally_feasible:
-        reserve.release(empty_cache=True)
+        # vvv THOG flush only the rank whose reserve allocation actually OOMed; successful ranks merely release their reserve tensor
+        reserve.release(empty_cache=not local_feasible)
+        # ^^^ THOG
         context["cuda_allocator_reserve"] = None
         return None, False
     return reserve, True
@@ -175,8 +192,10 @@ def _same_batch_training_memory_preflight(
         trainer.optimizer.zero_grad(set_to_none=True)
         trainer.raw_model.last_plastic_depth_inline_probe_report = prior_probe_report
         _same_batch._restore_probe_rng(trainer, rng_state)
-        if torch.cuda.is_available():
+        # vvv THOG ordinary successful preflights retain the allocator cache; only a locally trapped CUDA OOM justifies flushing it
+        if not local_feasible and torch.cuda.is_available():
             torch.cuda.empty_cache()
+        # ^^^ THOG
     return bool(trainer.distributed.all_true(local_feasible))
 
 
@@ -195,11 +214,22 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
     selected_count = int(selected)
     # vvv THOG full-radius evidence may acquire the growth reserve before same-batch window logic forces STAY; never charge that reserve to an already-safe non-growth update
     if selected_count <= current_count:
-        _release_context_reserve(context, empty_cache=True)
+        _release_context_reserve(context, empty_cache=False)
         return context
     # ^^^ THOG
 
     # vvv THOG a grow decision is provisional until a grad-bearing accumulated-state preflight at the proposed count succeeds while the configured reserve remains allocated
+    if selected_count in _rejected_growth_counts(self):
+        _release_context_reserve(context, empty_cache=False)
+        context["cuda_growth_headroom_memoized"] = True
+        context["cuda_growth_headroom_preflight_microsteps"] = 0
+        context["cuda_growth_headroom_failed_preflight_microstep"] = None
+        _force_growth_hold(
+            self,
+            context,
+            reason="memoized_cuda_growth_rejection",
+        )
+        return context
     reserve, reserve_feasible = _headroom_reserve(self, context)
     if not reserve_feasible:
         _force_growth_hold(
@@ -219,7 +249,8 @@ def _begin_plastic_depth_inline_update_with_cuda_headroom(
         selected_count=selected_count,
     )
     if not training_feasible:
-        _release_returned_reserve(context, reserve, empty_cache=True)
+        _release_returned_reserve(context, reserve, empty_cache=False)
+        _remember_rejected_growth_count(self, selected_count)
         _force_growth_hold(
             self,
             context,
@@ -263,6 +294,8 @@ def _commit_plastic_depth_inline_update_with_cuda_headroom(
         # vvv THOG expose how far the accumulation-aware preflight ran and where an OOM was trapped without changing the established event name
         preflight_microsteps=int(context.get("cuda_growth_headroom_preflight_microsteps", 0)),
         failed_preflight_microstep=context.get("cuda_growth_headroom_failed_preflight_microstep"),
+        memoized_rejection=bool(context.get("cuda_growth_headroom_memoized", False)),
+        rejected_growth_counts=tuple(sorted(_rejected_growth_counts(self))),
         # ^^^ THOG
     )
     return transition

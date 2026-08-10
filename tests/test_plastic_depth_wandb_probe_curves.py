@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import constants
 import pytest
 
 from sheet import plastic_depth_wandb_probe_curves_patch as curves
@@ -169,7 +170,8 @@ class _FakeRun:
 
 
 # vvv THOG retain both established split charts and add the joined signed-offset chart without ever touching TensorBoard
-def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer() -> None:
+def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer(monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 10)
     run = _FakeRun()
     writer = SimpleNamespace(add_scalar=lambda *_args, **_kwargs: pytest.fail("TensorBoard must not be used"))
     telemetry = SimpleNamespace(
@@ -210,6 +212,25 @@ def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer() -
         ]
         assert len(reference) == 2
         assert all(row[1] == 0.0 for row in reference)
+# ^^^ THOG
+
+
+# vvv THOG normal runs neither construct nor emit the expensive W&B PLASTIC charts
+def test_wandb_curve_logger_is_disabled_at_normal_debug(monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 9)
+    run = _FakeRun()
+    telemetry = SimpleNamespace(
+        run=run,
+        module=SimpleNamespace(Table=_FakeTable, plot=_FakePlot),
+    )
+    history = curves._ensure_curve_state(telemetry)
+    record = curves._probe_record_from_event(_event())
+    assert record is not None
+    history.append(record)
+
+    curves._log_rolling_probe_charts(telemetry, step=10)
+
+    assert run.calls == []
 # ^^^ THOG
 
 

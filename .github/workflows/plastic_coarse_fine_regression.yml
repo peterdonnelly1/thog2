@@ -107,11 +107,14 @@ jobs:
             tests/test_plastic_depth_v055_growth_side_startup.py \
             tests/test_plastic_depth_v055_same_batch_audit_bridge.py \
             tests/test_plastic_depth_cuda_headroom_guard.py \
+            tests/test_plastic_depth_coarse_runtime_recovery.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
+            tests/test_plastic_depth_telemetry.py \
             tests/test_plastic_depth_theil_sen_kendall.py \
             tests/test_plastic_depth_theil_sen_kendall_bootstrap_fix.py \
             tests/test_plastic_depth_theil_sen_kendall_integration.py \
             tests/test_plastic_depth_wandb_probe_curves.py \
+            tests/test_sheet_stage6_wandb.py \
             tests/test_plastic_depth_wrapper_options.py
       # ^^^ THOG
 

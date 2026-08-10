@@ -239,7 +239,9 @@ def _log_scalars_without_rewinding_wandb(self: Any, metrics: Mapping[str, Any], 
         return
     scalars = _telemetry._scalar_metrics(metrics)
     if self.run is not None:
-        self.run.log(scalars)
+        wandb_scalars = _telemetry._wandb_scalar_metrics(scalars)
+        if wandb_scalars:
+            self.run.log(wandb_scalars)
     if self.writer is not None:
         for name, value in scalars.items():
             self.writer.add_scalar(name, value, step)
