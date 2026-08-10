@@ -13,6 +13,7 @@ from . import wandb_telemetry as _wandb
 _WINDOW_PROBES = 300
 _REFRESH_EVERY_PROBES = 25
 _EARLY_REFRESH_PROBES = 10
+_MAX_TABLE_ROWS = 9_999
 _CHART_COLUMNS = (
     "distance",
     "delta_loss",
@@ -125,6 +126,29 @@ def _rows_for_side(history: Iterable[Mapping[str, Any]], side: str) -> List[List
     return rows
 
 
+def _bounded_rows_for_side(
+    history: Iterable[Mapping[str, Any]],
+    side: str,
+) -> List[List[Any]]:
+    records = tuple(history)
+    groups: List[List[List[Any]]] = []
+    row_count = 0
+    for record in reversed(records):
+        group = _rows_for_side((record,), side)
+        if not group:
+            continue
+        if len(group) > _MAX_TABLE_ROWS:
+            group = group[-_MAX_TABLE_ROWS:]
+        if row_count + len(group) > _MAX_TABLE_ROWS:
+            break
+        groups.append(group)
+        row_count += len(group)
+    rows: List[List[Any]] = []
+    for group in reversed(groups):
+        rows.extend(group)
+    return rows
+
+
 def _should_refresh_charts(
     telemetry: Any,
     records: Sequence[Mapping[str, Any]],
@@ -162,14 +186,9 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
             "fine/plastic_probe_growth_curves",
         ),
     ):
-        rows = _rows_for_side(history, side)
+        rows = _bounded_rows_for_side(history, side)
         if not rows:
             continue
-        if len(rows) > 10_000:
-            raise RuntimeError(
-                "PLASTIC W&B rolling probe table exceeded 10,000 rows; "
-                f"side={side}, rows={len(rows)}"
-            )
         table = telemetry.module.Table(data=rows, columns=list(_CHART_COLUMNS))
         payload[key] = telemetry.module.plot.line(
             table=table,
@@ -186,8 +205,7 @@ def _log_rolling_probe_charts(telemetry: Any, *, step: int) -> None:
         telemetry.run.log(payload)
 
 
-# vvv THOG attach the rolling charts after the established scalar telemetry wrapper; TensorBoard receives no tables, plots or figures from this path
-_ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
+# vvv THOG attach the rolling charts after the established scalar telemetry wrapper; TensorBoard receives no tables, plots or figures from this path\ n_ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 
 
 def attach_telemetry_with_plastic_probe_curves(trainer: Any, telemetry: Any) -> None:
@@ -229,6 +247,7 @@ _wandb.attach_telemetry = attach_telemetry_with_plastic_probe_curves
 
 
 __all__ = [
+    "_bounded_rows_for_side",
     "_consume_new_probe_records",
     "_log_rolling_probe_charts",
     "_probe_record_from_event",
