@@ -1,0 +1,199 @@
+THOG2 PLASTIC
+Requirements Specification
+Version 0.56
+10 August 2026  •  Objective-neutral decision algorithms, strict controller ownership and operator diagnostics
+TABLE:
+Area | Version 0.56 governing position
+Objectives | lowest_loss | layer_efficiency | relative_training_wall_time | memory_budget
+Decision algorithms | directional_coherence | theil_sen_kendall_LRA | sen_kendall__tau__stratified
+Compatibility | All 4 objectives × all 3 decision algorithms are permissible
+TSK spatial evidence | All feasible L-r ... L ... L+r points; committed movement remains exactly ±1 or STET
+Growth-side discount | Discount only beneficial growth-side decision evidence; adverse evidence remains full strength
+
+1. Governing Delta
+Version 0.56 supersedes Version 0.55. All earlier PLASTIC requirements remain normative except where this revision replaces the objective coupling, Sen/Kendall names, TSK score source, decision-algorithm ownership, decision-fit radius, growth-side confidence treatment, help/console requirements and related tests.
+Version 0.56 also incorporates the already-implemented post-v0.55-document refinements: full feasible-radius TSK evidence, the asymmetric growth-side discount, strict same-batch audit replay, CUDA growth-headroom rejection and W&B-only rolling probe-landscape curves.
+The following wall-time-prefixed decision-algorithm identifiers are retired:
+wall_time__theil_sen_kendall_LRA
+wall_time__sen_kendall__tau__stratified
+They are replaced by objective-neutral identifiers:
+theil_sen_kendall_LRA
+sen_kendall__tau__stratified
+The canonical controls are independent:
+plastic__layer_count_objective
+plastic__layer_count_decision_algorithm
+A decision-algorithm name shall never select, override or imply an objective. Retired wall-time-prefixed names shall fail clearly rather than silently setting relative_training_wall_time.
+2. Objective and Decision Algorithm Are Orthogonal
+The objective answers what quantity the controller is trying to improve. The decision algorithm answers how the spatial and temporal probe evidence is interpreted. These concerns are independent and are selected separately.
+TABLE:
+Objective | directional_coherence | TSK LRA | TSK stratified
+lowest_loss | PERMITTED | PERMITTED | PERMITTED
+layer_efficiency | PERMITTED | PERMITTED | PERMITTED
+relative_training_wall_time | PERMITTED | PERMITTED | PERMITTED
+memory_budget | PERMITTED | PERMITTED | PERMITTED
+
+Every decision algorithm consumes a canonical scalar score in which lower is better. Objective-specific feasibility is resolved before the decision algorithm receives candidate evidence.
+3. Canonical Objective Scores
+TABLE:
+Objective | Canonical y score supplied to the decision algorithm
+lowest_loss | probe loss
+layer_efficiency | existing layer-efficiency objective score: probe loss plus configured layer-cost term
+relative_training_wall_time | existing wall-time-equivalent economic score in seconds, including the established equivalent-time benefit discount and predicted compute cost
+memory_budget | probe loss for memory-feasible candidates; over-budget candidates are infeasible and excluded rather than assigned an artificial large score
+
+TSK is therefore objective-neutral. For every permitted objective:
+x = layer-count offset
+y = selected objective score, lower is better
+Only relative_training_wall_time uses the wall-time-equivalent-time-gain conversion. The other objectives must not be forced through that conversion merely because TSK is selected.
+The existing plastic__wall_time_equivalent_time_gain_discount remains an objective-specific economic control. It is not a generic TSK confidence parameter.
+4. Decision Algorithms Are Genuinely Mutually Exclusive
+Exactly one layer-count decision algorithm owns decision statistics, histories and selection at a time. Shared probe measurement, feasibility, objective scoring, brakes, transition and audit infrastructure may be reused; decision-specific statistical machinery may not run speculatively in the background.
+TABLE:
+Selected algorithm | Robust z machinery | Legacy direction gate | Sen/Kendall
+directional_coherence | ACTIVE | ACTIVE | INACTIVE
+theil_sen_kendall_LRA | INACTIVE | INACTIVE | ACTIVE
+sen_kendall__tau__stratified | INACTIVE | INACTIVE | ACTIVE
+
+When either TSK mode is selected, legacy z-oriented machinery shall not be calculated, updated, persisted as current decision state, reconstructed for console display, or allowed to influence a decision on probe or non-probe updates. A late formatter that merely hides score_z/change_z is insufficient compliance.
+When directional_coherence is selected, its existing robust-z decision semantics remain active and Sen/Kendall machinery shall not execute.
+Automated tests shall make this exclusivity structural by replacing inactive algorithm functions with fail-fast sentinels and proving they are never called through representative probe, non-probe, STET, GROW and SHRINK paths.
+5. Common Sen/Kendall Spatial Evidence
+For configured probe radius r, both TSK algorithms use every feasible finite objective-score point in the entire measured radius:
+D = {L-r, ..., L-1, L, L+1, ..., L+r}
+Bounds, memory constraints and allocator-reserve rejection may remove candidates. Current L remains the reference. TSK does not form artificial points for infeasible candidates.
+Probe radius controls the inspected landscape. It does not control commit distance. A TSK action remains one adjacent layer step or STET.
+6. Growth-Side Decision Discount
+plastic__layer_count_decision_algorithm__growth_side_discount is a decision-algorithm confidence control and remains applicable to both TSK algorithms for every objective.
+For a positive offset candidate, first form its objective-score difference relative to current L:
+delta = score(L+k) - score(L)
+If delta is beneficial (delta < 0), attenuate only that claimed benefit before TSK:
+discounted_delta = growth_side_discount * delta
+If delta is neutral or harmful (delta >= 0), leave it unchanged. Negative offsets are unchanged. The transformation is anchored to the current score; it must not multiply absolute objective values.
+Semantics: 1.0 gives growth-side beneficial evidence full credit; 0.0 collapses claimed growth benefit to the current-score anchor while preserving adverse growth evidence. This is deliberately asymmetric conservatism, not symmetric distrust of all extrapolated measurements.
+The exact adjacent action sanity check remains based on the undiscounted canonical objective score. The confidence discount may shape broad TSK direction evidence but must not manufacture an adjacent benefit that the selected objective does not actually show.
+7. Sen Slope Interpretation
+Sen slope estimates the robust direction and rate of change of selected objective score with increasing layer count. Its units are objective-score units per layer. For relative_training_wall_time those units are equivalent seconds/layer; for lowest_loss they are loss/layer.
+TABLE:
+Sen | Interpretation
+sen < 0 | y tends to decrease as x increases. Adding layers tends to improve the selected objective score.
+sen = 0 | no overall trend. Little directional objective preference.
+sen > 0 | y tends to increase as x increases. Removing layers tends to improve the selected objective score.
+
+For one-probe LRA, Sen is the median of all valid pairwise slopes within that probe. For the stratified algorithm, pool all valid within-probe pairwise slopes across the complete probe window and take their median. Cross-probe slopes are prohibited.
+8. Kendall Tau Interpretation
+Kendall tau measures how consistently the objective score moves monotonically with layer count. The v0.56 TSK algorithms retain the fixed minimum accepted absolute coherence of 0.5; there is no user tuning control.
+TABLE:
+Kendall tau | Interpretation
+tau = -1 | perfectly decreasing ordering. Extremely strong/near-perfect indication toward adding layers.
+tau ≈ -0.8 | strongly decreasing. Strong indication toward adding layers.
+tau ≈ -0.5 | moderately decreasing. Moderate / minimum accepted indication toward adding layers.
+tau ≈ 0 | little/no monotonic association. No reliable directional indication.
+tau ≈ +0.5 | moderately increasing. Moderate / minimum accepted indication toward removing layers.
+tau ≈ +0.8 | strongly increasing. Strong indication toward removing layers.
+tau = +1 | perfectly increasing ordering. Extremely strong/near-perfect indication toward removing layers.
+
+GROW requires tau <= -0.5
+SHRINK requires tau >= +0.5
+For the stratified algorithm, combine concordant-minus-discordant evidence and tau-b denominators within probe strata only. Do not compare points belonging to different probe events and do not arithmetic-average per-probe tau values.
+9. Exact Adjacent Action Sanity Check
+TSK direction evidence never authorizes an exact move contradicted by the selected objective. Use the canonical, undiscounted objective score for the adjacent candidate.
+GROW:   adj = score(L+1) - score(L)
+SHRINK: adj = score(L-1) - score(L)
+required: adj < 0
+For LRA, the current probe supplies the adjacent sanity check and the newest evidence must remain favourable when the window majority commits. For stratified TSK, adj is the median adjacent difference across the complete probe window in the Sen-indicated direction.
+10. theil_sen_kendall_LRA
+This mode computes Sen, Kendall and adjacent objective evidence separately for each probe and converts each probe into GROW, SHRINK or AMBIGUOUS. It then applies a strict full-window majority over those probe classifications.
+Per-probe SHRINK: sen > 0, tau >= +0.5 and exact L-1 adj < 0.
+Per-probe GROW: sen < 0, tau <= -0.5 and exact L+1 adj < 0.
+Otherwise: AMBIGUOUS.
+No commit before the configured probe window is full.
+The newest adjacent objective evidence in the majority direction must still be favourable.
+Committed move is exactly -1, 0 or +1.
+The algorithm contains no median/MAD/sigma/change_z/score_z candidate-history gate.
+11. sen_kendall__tau__stratified
+This is the preferred TSK mode. Each probe is one stratum/mini-curve. The complete configured probe window is the statistical sample; there are no decision-bearing per-probe L/R/A votes.
+Pool within-stratum pairwise slopes across the complete window; their median is Sen.
+Pool within-stratum Kendall signed-pair evidence using the sum of tau-b denominators.
+No cross-stratum pair comparison is permitted.
+Complete configured probe window required before a move.
+sen < 0, tau <= -0.5, median adjacent L+1 score < 0 => GROW one layer, subject to brakes/bounds.
+sen > 0, tau >= +0.5, median adjacent L-1 score < 0 => SHRINK one layer, subject to brakes/bounds.
+Otherwise STET.
+The algorithm contains no legacy L/R/A majority gate and no median/MAD/sigma/change_z/score_z gate.
+12. directional_coherence Base Decision Algorithm
+directional_coherence remains the established non-TSK algorithm and retains its existing robust candidate-local and direction-coherence semantics. It is documented explicitly so operator help makes the distinction from TSK clear.
+For each feasible candidate, retain candidate objective score minus current objective score over the configured history window.
+Use robust median and MAD-derived sigma; standardized improvement is the existing change_z/score_z quantity.
+Candidate-local qualification requires the configured window/readiness rule, sufficient median improvement relative to noise, newest paired difference favourable and a strict majority of retained paired differences favourable.
+A separate L/R/A directional-coherence gate must agree with the candidate direction.
+When multiple candidates pass, choose by strongest standardized improvement under the existing deterministic tie-break; commit movement remains bounded by the configured max allowable change.
+These robust-z calculations belong only to directional_coherence. They are not shared pre-processing for TSK.
+13. Console, Help and Operator Diagnostics
+13.1 TSK console
+When TSK is selected, normal operator output shall contain raw probe_Δloss plus sen, ken, adj and the TSK action/provenance. It shall not contain change_z or score_z. No hidden computation requirement may be satisfied merely by deleting the rendered text after calculation.
+P2  probe_Δloss [...]  sen=-1.672 ken=-0.76 adj=-0.031 ∴ ▲ (P1,2)
+13.2 directional_coherence console
+When directional_coherence is selected, its existing robust-z diagnostics remain permissible and shall not be suppressed merely because TSK exists as another algorithm.
+13.3 One-shot layer-count transition highlight
+On the optimizer-progress row where a committed layer-count transition becomes authoritative, highlight the numeric new layers value in bold bright yellow exactly once. The label itself remains normal. Subsequent rows at the same count are ordinary.
+T 455 ... layers  22 ...    # numeric 22 highlighted on this row only
+T 456 ... layers  22 ...    # ordinary display
+The highlight shall be driven from the committed transition event/state, not inferred merely by comparing previously printed rows. Restart, first-row display, validation rows and formatting changes must not create false transition highlights.
+13.4 Help registry
+The canonical help registry shall show the 4 × 3 compatibility matrix, objective-specific y meanings, the Sen and Kendall interpretation tables above, the fixed |tau|=0.5 acceptance rule, the adjacent objective check, and a concise description of directional_coherence robust-z semantics.
+14. W&B Probe-Landscape Curves
+Retain the v0.55-post-document W&B-only rolling probe curves. Maintain separate shrink/interpolation and growth/extrapolation charts using raw full-precision probe_Δloss, with a rolling 300-probe history and complete-line truncation before W&B table limits. Do not add TensorBoard equivalents.
+The charts are diagnostic observation surfaces. They do not contain growth-discounted or objective-economic values unless a future separately named chart is explicitly specified.
+15. Configuration, Persistence and Migration
+The objective and decision algorithm are independent material controls and are both persisted in new learned-count checkpoints and compact identity when applicable.
+--plastic__layer_count_objective {lowest_loss,layer_efficiency,relative_training_wall_time,memory_budget}
+--plastic__layer_count_decision_algorithm {directional_coherence,theil_sen_kendall_LRA,sen_kendall__tau__stratified}
+The retired wall-time-prefixed TSK names must fail clearly. They must not silently rewrite the selected objective. The retired configurable Kendall-threshold control remains rejected.
+plastic__layer_count_decision_algorithm__growth_side_discount is valid for both TSK algorithms regardless of objective. If directional_coherence is selected, it has no role in that algorithm and shall not alter its calculations.
+Objective-specific required controls remain objective-specific. In particular, memory_budget still requires its memory limit, while relative_training_wall_time retains its timing/loss-rate prerequisites and equivalent-time controls.
+16. Audit and Reproducibility
+Every decision event shall identify both objective and decision algorithm. The durable audit must retain enough information to reproduce the canonical candidate scores, feasibility filtering, algorithm-specific statistics, adjacent check, brakes, selected count and final transition.
+For TSK, audit records shall contain Sen/Kendall inputs and outputs but shall not contain newly computed legacy change_z/score_z as if they were decision evidence. Historical compatibility fields may be read when resuming old material, but must not become active current-state TSK machinery.
+Same-batch windows retain their current strict provenance and replay semantics. If framework-level memory/warmup/brake logic overrides an otherwise valid raw TSK selection, the audit shall record both the raw algorithm selection and the external hold so independent replay remains strict.
+17. Required Regression Tests
+Testing shall be proportionate but deliberately cross-product oriented because v0.56 expands the legal configuration surface.
+17.1 Objective × decision matrix
+Instantiate and execute representative decision fixtures for all 12 objective/decision combinations.
+Verify no TSK startup rejection solely because the objective is not relative_training_wall_time.
+Verify algorithm selection never mutates objective selection.
+Verify memory_budget excludes infeasible candidates before both decision families.
+17.2 Algorithm exclusivity
+Under each TSK algorithm, monkeypatch legacy robust-z and directional-coherence calculation functions to raise; exercise probe, non-probe, STET and at least one move path; no sentinel may fire.
+Assert no new change_z/score_z history, event or console field is generated under TSK.
+Under directional_coherence, prove robust-z machinery executes and monkeypatch TSK selectors/statistics to raise; no TSK sentinel may fire.
+17.3 TSK statistics and controls
+Full feasible-radius points affect Sen/Kendall on both sides.
+Growth-side beneficial evidence is discounted relative to current anchor; harmful growth and all shrink evidence are unchanged.
+Discount 1.0 is identity; discount 0.0 removes claimed growth benefit without hiding adverse growth evidence.
+Adjacent gate uses undiscounted objective score.
+Known Sen/Kendall sign, tie and threshold fixtures remain green for LRA and stratified modes.
+17.4 Console/help/lifecycle
+TSK probe and non-probe rows contain no change_z/score_z.
+directional_coherence retains its robust-z console diagnostics.
+Committed count transition highlights the new numeric layers value exactly once; STET, restart, validation and subsequent rows do not.
+Help registry contains the matrix and interpretation tables.
+Checkpoint/resume, same-batch audit, CUDA allocator reserve, DDP agreement and PLASTIC-disabled equivalence remain green.
+17.5 Broad regression gate
+Run focused unit tests first, then the established complete CPU regression/classifier, two-rank DDP validation and disabled-equivalence workflow. Do not expand the inherited-failure baseline to absorb v0.56 failures.
+18. Non-Goals
+Do not implement Auto in this revision.
+Do not change the mathematical definitions of the four objectives merely to share TSK.
+Do not add OLS, R-squared thresholds, weighted Kendall, cross-probe pairwise slopes or polynomial/curvature fits.
+Do not add multi-layer TSK commits.
+Do not reintroduce a user-facing Kendall threshold knob.
+Do not add TensorBoard versions of the W&B probe curves.
+19. Governing Interpretation
+The v0.56 controller pipeline is:
+probe measurements
+    -> objective-specific feasibility and canonical lower-is-better score
+    -> exactly one selected decision algorithm
+    -> algorithm-specific evidence and direction/STET
+    -> exact adjacent objective sanity check where required
+    -> brakes / bounds / CUDA headroom
+    -> one committed count step or STET
+For TSK specifically: Sen describes the robust direction and rate of the selected objective surface; Kendall describes how monotonically orderly that relationship is; the adjacent check verifies that the exact next action is itself favourable. The algorithm is statistical machinery over an objective score, not a wall-time objective in disguise.
