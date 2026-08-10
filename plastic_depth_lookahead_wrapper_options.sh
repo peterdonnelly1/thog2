@@ -2,7 +2,7 @@
 
 # vvv THOG
 # Observe core-owned PLASTIC controls for legacy environment consumers and route the
-# v0.541 Python-native wall-time controls plus v0.53 same-batch and v0.55 decision controls through the established -- extra-args channel.
+# v0.541 Python-native wall-time controls plus v0.53 same-batch and v0.56 decision controls through the established -- extra-args channel.
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES="${THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES:-false}"
@@ -185,8 +185,8 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     "  --plastic__layer_count__max_allowable_layer_change N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement" \
     '  --plastic__layer_count__same_batch_all_probes             one fixed probe batch per strict non-overlapping evidence window' \
     '  --no-plastic__layer_count__same_batch_all_probes          established rolling/multi-batch probe path; default' \
-    '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), wall_time__theil_sen_kendall_LRA, or wall_time__sen_kendall__tau__stratified' \
-    '  --plastic__layer_count_decision_algorithm__growth_side_discount X       v0.55 Sen/Kendall only; credit fraction [0,1] of beneficial growth-side economic evidence; default 1.0' \
+    '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), theil_sen_kendall_LRA, or sen_kendall__tau__stratified; objective selected separately' \
+    '  --plastic__layer_count_decision_algorithm__growth_side_discount X       Sen/Kendall only; credit fraction [0,1] of beneficial growth-side objective evidence; default 1.0' \
     '  --plastic__wall_time_equivalent_time_gain_discount X       credited fraction of positive equivalent-time gain; default 0.9' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_window N       rolling ordinary-training loss-rate window; default 64' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations N       minimum observations before loss-rate fit is usable; default 16' \
