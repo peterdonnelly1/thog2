@@ -111,6 +111,26 @@ def test_growth_remains_selected_when_grad_bearing_preflight_succeeds(monkeypatc
     assert selected_updates == []
 
 
+def test_same_batch_stay_releases_full_radius_probe_reserve_before_training(monkeypatch) -> None:
+    context = _context()
+    context["selected_count"] = 12
+    context["decision"] = _decision(selected=12)
+    releases = []
+    context["cuda_allocator_reserve"] = SimpleNamespace(
+        release=lambda **kwargs: releases.append(dict(kwargs))
+    )
+    trainer = _trainer(context, [])
+
+    monkeypatch.setattr(headroom, "_ORIGINAL_BEGIN_INLINE_UPDATE", lambda _self: context)
+
+    result = headroom._begin_plastic_depth_inline_update_with_cuda_headroom(trainer)
+
+    assert result is context
+    assert releases == [{"empty_cache": True}]
+    assert context["cuda_allocator_reserve"] is None
+    assert context["selected_count"] == 12
+
+
 def test_full_radius_reserve_stays_live_until_upward_candidate_is_rejected(monkeypatch) -> None:
     releases = []
     reserve = SimpleNamespace(
@@ -118,6 +138,7 @@ def test_full_radius_reserve_stays_live_until_upward_candidate_is_rejected(monke
         release=lambda **kwargs: releases.append(dict(kwargs)),
     )
     context = {
+        "current_count": 3,
         "recoverable_upward_counts": (4, 5),
         "candidate_counts": (2, 3, 4, 5),
         "decision_candidate_counts": (2, 3, 4, 5),
@@ -153,3 +174,79 @@ def test_full_radius_reserve_stays_live_until_upward_candidate_is_rejected(monke
     assert context["candidate_counts"] == (2, 3, 4)
     assert context["decision_candidate_counts"] == (2, 3, 4)
     assert context["cuda_allocator_reserve"] is None
+
+
+def test_full_radius_selector_releases_reserve_for_stay(monkeypatch) -> None:
+    releases = []
+    reserve = SimpleNamespace(
+        active=True,
+        release=lambda **kwargs: releases.append(dict(kwargs)),
+    )
+    context = {
+        "current_count": 3,
+        "recoverable_upward_counts": (4, 5),
+        "candidate_counts": (2, 3, 4, 5),
+        "decision_candidate_counts": (2, 3, 4, 5),
+        "upward_candidate_feasible_by_count": {4: None, 5: None},
+        "cuda_allocator_reserve": reserve,
+    }
+    base_request = PlasticDepthInlineProbeRequest(
+        candidate_counts=(2, 3, 4, 5),
+        sampled_token_indices=None,
+        selector=lambda _candidates: 3,
+    )
+    trainer = SimpleNamespace(
+        distributed=SimpleNamespace(all_true=lambda value: bool(value)),
+    )
+    monkeypatch.setattr(
+        full_radius,
+        "_ORIGINAL_INLINE_PROBE_REQUEST",
+        lambda _self, _targets, _context: base_request,
+    )
+
+    request = full_radius._plastic_depth_inline_probe_request_with_full_radius_oom(
+        trainer,
+        targets=None,
+        context=context,
+    )
+    assert request.selector(()) == 3
+    assert releases == [{"empty_cache": True}]
+    assert context["cuda_allocator_reserve"] is None
+
+
+def test_full_radius_selector_keeps_reserve_for_growth(monkeypatch) -> None:
+    releases = []
+    reserve = SimpleNamespace(
+        active=True,
+        release=lambda **kwargs: releases.append(dict(kwargs)),
+    )
+    context = {
+        "current_count": 3,
+        "recoverable_upward_counts": (4, 5),
+        "candidate_counts": (2, 3, 4, 5),
+        "decision_candidate_counts": (2, 3, 4, 5),
+        "upward_candidate_feasible_by_count": {4: None, 5: None},
+        "cuda_allocator_reserve": reserve,
+    }
+    base_request = PlasticDepthInlineProbeRequest(
+        candidate_counts=(2, 3, 4, 5),
+        sampled_token_indices=None,
+        selector=lambda _candidates: 4,
+    )
+    trainer = SimpleNamespace(
+        distributed=SimpleNamespace(all_true=lambda value: bool(value)),
+    )
+    monkeypatch.setattr(
+        full_radius,
+        "_ORIGINAL_INLINE_PROBE_REQUEST",
+        lambda _self, _targets, _context: base_request,
+    )
+
+    request = full_radius._plastic_depth_inline_probe_request_with_full_radius_oom(
+        trainer,
+        targets=None,
+        context=context,
+    )
+    assert request.selector(()) == 4
+    assert releases == []
+    assert context["cuda_allocator_reserve"] is reserve
