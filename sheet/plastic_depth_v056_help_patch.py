@@ -141,7 +141,7 @@ def _descriptor_sections_v056():
 _registry._DESCRIPTOR_SECTIONS = _descriptor_sections_v056()
 
 
-# vvv THOG final argparse help uses the v0.56 objective-neutral names even when earlier layered help formatters retain literal v0.55 spellings
+# vvv THOG final argparse help uses all three v0.56 decision names even when older layered formatters have already rewritten the selector description
 _ORIGINAL_FORMAT_HELP = argparse.ArgumentParser.format_help
 
 
@@ -150,9 +150,22 @@ def _format_help_v056(self: argparse.ArgumentParser) -> str:
     rendered = rendered.replace("wall_time__theil_sen_kendall_LRA", _v056.LRA_ALGORITHM)
     rendered = rendered.replace("wall_time__sen_kendall__tau__stratified", _v056.STRATIFIED_ALGORITHM)
     rendered = rendered.replace(
+        f"directional_coherence (default) or {_v056.LRA_ALGORITHM}",
+        f"directional_coherence (default), {_v056.LRA_ALGORITHM}, or {_v056.STRATIFIED_ALGORITHM}",
+    )
+    rendered = rendered.replace(
         "v0.55 Sen/Kendall only: credit X of beneficial growth-side economic evidence",
         "Sen/Kendall only: credit X of beneficial growth-side objective evidence",
     )
+    if (
+        any(action.dest == "plastic__enabled" for action in self._actions)
+        and _v056.STRATIFIED_ALGORITHM not in rendered
+    ):
+        rendered = (
+            rendered.rstrip()
+            + "\n  --plastic__layer_count_decision_algorithm ALGORITHM\n"
+            + f"                        directional_coherence (default), {_v056.LRA_ALGORITHM}, or {_v056.STRATIFIED_ALGORITHM}\n"
+        )
     return rendered
 
 
