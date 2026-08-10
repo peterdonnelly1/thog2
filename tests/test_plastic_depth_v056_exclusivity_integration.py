@@ -66,5 +66,10 @@ def test_real_tsk_probe_never_executes_legacy_robust_z_machinery(monkeypatch) ->
         assert tsk_events
         assert tsk_events[-1].payload["objective"] == "lowest_loss"
         assert tsk_events[-1].payload["score_units"] == "loss"
+        assert trainer.plastic_depth_count_audit
+        audit = trainer.plastic_depth_count_audit[-1]
+        assert audit["directional_report"] is None
+        assert audit["sen_kendall_report"]["algorithm"] == v056.STRATIFIED_ALGORITHM
+        assert audit["sen_kendall_report"]["objective"] == "lowest_loss"
     finally:
         trainer.close()
