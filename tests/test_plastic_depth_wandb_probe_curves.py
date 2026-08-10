@@ -33,7 +33,8 @@ def test_probe_record_preserves_raw_precision_and_splits_sides() -> None:
     assert record["active_layers"] == 10
     assert record["shrink"][0] == (0, 0.0, 10, 0)
     assert record["growth"][0] == (0, 0.0, 10, 0)
-    assert record["shrink"][1][1] == pytest.approx(0.1004567)
+    assert record["shrink"][1][1] == pytest.approx(0.2501234)
+    assert record["shrink"][2][1] == pytest.approx(0.1004567)
     assert record["growth"][1][1] == pytest.approx(-0.0012346)
     assert record["growth"][2][1] == pytest.approx(0.0043210)
 
