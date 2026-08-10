@@ -52,6 +52,9 @@ def _force_growth_hold(
     decision = context.get("decision")
     if decision is None:
         raise RuntimeError("PLASTIC CUDA headroom rejection lacks a completed count decision")
+    # vvv THOG retain the pre-veto winner so the established v0.55/v0.56 audit bridge can replay a CUDA framework hold independently of the statistical decision
+    raw_selected_count = int(decision.selected_count)
+    # ^^^ THOG
     evidence = tuple(replace(item, significant=False) for item in decision.evidence)
     held = replace(decision, selected_count=current_count, evidence=evidence)
     context["decision"] = held
@@ -68,6 +71,10 @@ def _force_growth_hold(
             report["selected_count"] = current_count
             report["cuda_growth_headroom_verified"] = False
             report["cuda_growth_headroom_reason"] = str(reason)
+            # vvv THOG use the same replay contract as incomplete same-batch holds: raw Sen/Kendall evidence remains auditable while the framework-selected count stays current
+            report["framework_hold_reason"] = str(reason)
+            report["framework_raw_selected_count"] = raw_selected_count
+            # ^^^ THOG
     setter = getattr(trainer.raw_model, "set_plastic_depth_update_layer_count", None)
     if not callable(setter):
         raise RuntimeError("PLASTIC DEPTH training model lacks update-prefix control")
