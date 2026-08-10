@@ -106,14 +106,14 @@ def test_lra_window_retains_majority_but_has_no_score_z_evidence():
 def test_stratified_window_moves_right_after_complete_window():
     first = _decision(
         v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055,
-        {8: 0.4, 9: 0.2, 10: 0.0, 11: -0.2, 12: -999.0},
+        {8: 0.4, 9: 0.2, 10: 0.0, 11: -0.2, 12: -0.4},
         window=2,
         update=1,
     )
     assert first.selected_count == 10
     second = _decision(
         v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055,
-        {8: 0.3, 9: 0.15, 10: 0.0, 11: -0.1, 12: 999.0},
+        {8: 0.3, 9: 0.15, 10: 0.0, 11: -0.1, 12: -0.2},
         histories=first.histories,
         window=2,
         update=2,
@@ -122,17 +122,18 @@ def test_stratified_window_moves_right_after_complete_window():
     assert all(item.standardized_improvement is None for item in second.evidence)
 
 
-def test_stratified_far_right_information_cannot_change_decision():
+def test_stratified_far_right_evidence_participates_in_full_radius_fit():
     base = {8: 0.4, 9: 0.2, 10: 0.0, 11: -0.2}
-    a = _decision(
+    growth_supporting = _decision(
         v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055,
         {**base, 12: -10000.0, 13: -20000.0},
     )
-    b = _decision(
+    growth_opposing = _decision(
         v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055,
         {**base, 12: 10000.0, 13: 20000.0},
     )
-    assert a.selected_count == b.selected_count == 11
+    assert growth_supporting.selected_count == 11
+    assert growth_opposing.selected_count == 10
 
 
 def test_stratified_adjacent_check_can_veto_broad_right_slope():
