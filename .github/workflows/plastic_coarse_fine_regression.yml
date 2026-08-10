@@ -89,7 +89,7 @@ jobs:
           bash -n train_OWT.sh
           bash -n plastic_depth_lookahead_wrapper_options.sh
 
-      # vvv THOG fail fast on the v0.56 matrix, strict algorithm ownership, migration/help contracts and one-shot transition display before paying for the complete suite
+      # vvv THOG fail fast on the v0.56 matrix, strict algorithm ownership including pre-replay TSK audit ownership, migration/help contracts and one-shot transition display
       - name: Run focused PLASTIC v0.56 tests
         id: focused_suite
         run: |
