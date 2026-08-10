@@ -7,6 +7,8 @@ import torch
 
 import sheet.plastic_depth_cuda_headroom_guard_patch as headroom
 import sheet.plastic_depth_full_radius_oom_patch as full_radius
+import sheet.plastic_depth_sen_kendall_v055_audit_fix_patch as audit_v055
+import sheet.plastic_depth_sen_kendall_v055_patch as v055
 from sheet.plastic_depth_controller import (
     PlasticDepthPairedDirectionEvidence,
     PlasticDepthRobustCountDecision,
@@ -82,10 +84,68 @@ def test_growth_is_held_when_grad_bearing_preflight_exceeds_reserve(monkeypatch)
     assert context["decision"].selected_count == 12
     assert context["plastic_v055_sen_kendall_report"]["selected_count"] == 12
     assert context["plastic_directional_report"]["selected_count"] == 12
+    assert context["plastic_v055_sen_kendall_report"]["framework_hold_reason"] == "grad_bearing_training_exceeds_cuda_reserve_barrier"
+    assert context["plastic_v055_sen_kendall_report"]["framework_raw_selected_count"] == 13
+    assert context["plastic_directional_report"]["framework_hold_reason"] == "grad_bearing_training_exceeds_cuda_reserve_barrier"
+    assert context["plastic_directional_report"]["framework_raw_selected_count"] == 13
     assert context["cuda_growth_headroom_verified"] is False
     assert context["cuda_growth_headroom_reason"] == "grad_bearing_training_exceeds_cuda_reserve_barrier"
     assert selected_updates == [12]
     assert releases == [{"empty_cache": True}]
+
+
+# vvv THOG reproduce the field failure: a raw adjacent GROW rejected by CUDA headroom must replay as a framework HOLD instead of contradicting the committed count
+def test_cuda_growth_hold_replays_v055_audit_without_mismatch() -> None:
+    current_count = 38
+    selected_count = 39
+    decision = _decision(current=current_count, selected=selected_count)
+    report = {
+        "algorithm": v055.STRATIFIED_ALGORITHM,
+        "window_ready": True,
+        "sen_slope_seconds_per_layer": -0.001,
+        "kendall_tau": -0.8,
+        "adjacent_score_seconds": -0.002,
+        "selected_count": selected_count,
+    }
+    context = {
+        "current_count": current_count,
+        "selected_count": selected_count,
+        "decision": decision,
+        "plastic_v055_sen_kendall_report": dict(report),
+        "plastic_directional_report": dict(report),
+    }
+    selected_updates = []
+    trainer = SimpleNamespace(
+        raw_model=SimpleNamespace(
+            set_plastic_depth_update_layer_count=lambda count: selected_updates.append(int(count))
+        )
+    )
+
+    headroom._force_growth_hold(
+        trainer,
+        context,
+        reason="grad_bearing_training_exceeds_cuda_reserve_barrier",
+    )
+
+    audit = {
+        "previous_count": current_count,
+        "max_step": 1,
+        "brake_active": False,
+        "warmup_brake_active": False,
+        "winning_probe_count": current_count,
+        "committed_count": current_count,
+        "decision_reason": "robust_gate_hold",
+        "directional_report": context["plastic_directional_report"],
+        "sen_kendall_report": context["plastic_v055_sen_kendall_report"],
+    }
+
+    assert selected_updates == [current_count]
+    assert audit_v055.replay_plastic_depth_count_audit_v055(audit) == {
+        "winning_probe_count": current_count,
+        "committed_count": current_count,
+        "decision_reason": "robust_gate_hold",
+    }
+# ^^^ THOG
 
 
 def test_growth_remains_selected_when_grad_bearing_preflight_succeeds(monkeypatch) -> None:
