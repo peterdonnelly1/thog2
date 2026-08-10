@@ -204,3 +204,7 @@ from . import plastic_depth_sen_kendall_v055_patch as _plastic_depth_sen_kendall
 # vvv THOG v0.55 ignore infeasible lower decision points without weakening the adjacent-action requirement or far-right informational probing
 from . import plastic_depth_sen_kendall_v055_boundary_fix_patch as _plastic_depth_sen_kendall_v055_boundary_fix_patch
 # ^^^ THOG
+
+# vvv THOG enforce the CUDA allocator reserve as a real growth headroom barrier after same-batch and final Sen/Kendall selection are installed
+from . import plastic_depth_cuda_headroom_guard_patch as _plastic_depth_cuda_headroom_guard_patch
+# ^^^ THOG
