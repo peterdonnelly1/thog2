@@ -6,6 +6,7 @@ from __future__ import annotations
 from . import plastic_depth_console_compact_layout_patch as _compact
 from . import plastic_depth_sen_kendall_v055_patch as _v055
 from . import plastic_depth_v055_growth_side_discount_patch as _growth
+from . import plastic_depth_v055_growth_side_help_patch as _growth_help
 
 
 _LABEL = "plastic__layer_count_decision_algorithm__growth_side_discount:"
