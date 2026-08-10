@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
+
+import torch
 
 import sheet.plastic_depth_cuda_headroom_guard_patch as headroom
 import sheet.plastic_depth_full_radius_oom_patch as full_radius
@@ -250,3 +253,135 @@ def test_full_radius_selector_keeps_reserve_for_growth(monkeypatch) -> None:
     assert request.selector(()) == 4
     assert releases == []
     assert context["cuda_allocator_reserve"] is reserve
+
+
+# vvv THOG prove the growth preflight reaches the accumulated-gradient memory state instead of validating only a zero-gradient first backward
+class _PreflightScaledLoss:
+    def __init__(self, calls, *, fail_on_backward):
+        self.calls = calls
+        self.fail_on_backward = fail_on_backward
+
+    def backward(self):
+        self.calls.append("backward")
+        if self.fail_on_backward is not None and len(self.calls) == self.fail_on_backward:
+            raise RuntimeError("CUDA out of memory during accumulated-gradient preflight")
+
+
+class _PreflightScaler:
+    def __init__(self, calls, *, fail_on_backward=None):
+        self.calls = calls
+        self.fail_on_backward = fail_on_backward
+
+    def scale(self, _loss):
+        return _PreflightScaledLoss(
+            self.calls,
+            fail_on_backward=self.fail_on_backward,
+        )
+
+
+def _preflight_trainer(*, accumulation_steps, fail_on_backward=None):
+    backward_calls = []
+    selected_updates = []
+    zero_grad_calls = []
+
+    def model(_inputs, _targets, *, plastic_depth_active_layers_override):
+        assert plastic_depth_active_layers_override == 13
+        return None, torch.tensor(1.0)
+
+    trainer = SimpleNamespace(
+        device=torch.device("cpu"),
+        config=SimpleNamespace(gradient_accumulation_steps=accumulation_steps),
+        model=model,
+        optimizer=SimpleNamespace(
+            zero_grad=lambda *, set_to_none: zero_grad_calls.append(bool(set_to_none))
+        ),
+        scaler=_PreflightScaler(
+            backward_calls,
+            fail_on_backward=fail_on_backward,
+        ),
+        raw_model=SimpleNamespace(
+            last_plastic_depth_inline_probe_report={"prior": True},
+            set_plastic_depth_update_layer_count=lambda count: selected_updates.append(int(count)),
+            begin_optimizer_update=lambda: False,
+            finalize_optimizer_update=lambda: (),
+            end_optimizer_update=lambda: None,
+        ),
+        distributed=SimpleNamespace(
+            no_sync_context=lambda _model, *, synchronize: nullcontext(),
+            all_true=lambda value: bool(value),
+        ),
+        autocast_context=lambda: nullcontext(),
+    )
+    return trainer, backward_calls, selected_updates, zero_grad_calls
+
+
+def _patch_preflight_batch_state(monkeypatch) -> None:
+    batch = SimpleNamespace(inputs=object(), targets=object())
+    monkeypatch.setattr(headroom._same_batch, "_window_state", lambda _trainer: {"active": {"window_id": 1}})
+    monkeypatch.setattr(headroom._same_batch, "_cached_probe_batch", lambda _trainer, _active: batch)
+    monkeypatch.setattr(headroom._same_batch, "_capture_probe_rng", lambda _trainer: "rng")
+    monkeypatch.setattr(headroom._same_batch, "_restore_probe_rng", lambda _trainer, _state: None)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda _device: None)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+
+def test_accumulated_growth_preflight_runs_two_backward_passes(monkeypatch) -> None:
+    _patch_preflight_batch_state(monkeypatch)
+    trainer, backward_calls, selected_updates, zero_grad_calls = _preflight_trainer(
+        accumulation_steps=6,
+    )
+    context = {}
+
+    feasible = headroom._same_batch_training_memory_preflight(
+        trainer,
+        context,
+        selected_count=13,
+    )
+
+    assert feasible is True
+    assert backward_calls == ["backward", "backward"]
+    assert selected_updates == [13]
+    assert zero_grad_calls == [True, True]
+    assert context["cuda_growth_headroom_preflight_microsteps"] == 2
+    assert context["cuda_growth_headroom_failed_preflight_microstep"] is None
+
+
+def test_accumulated_growth_preflight_quenches_second_backward_oom(monkeypatch) -> None:
+    _patch_preflight_batch_state(monkeypatch)
+    trainer, backward_calls, selected_updates, zero_grad_calls = _preflight_trainer(
+        accumulation_steps=6,
+        fail_on_backward=2,
+    )
+    context = {}
+
+    feasible = headroom._same_batch_training_memory_preflight(
+        trainer,
+        context,
+        selected_count=13,
+    )
+
+    assert feasible is False
+    assert backward_calls == ["backward", "backward"]
+    assert selected_updates == [13]
+    assert zero_grad_calls == [True, True]
+    assert context["cuda_growth_headroom_preflight_microsteps"] == 2
+    assert context["cuda_growth_headroom_failed_preflight_microstep"] == 1
+
+
+def test_single_microstep_growth_preflight_remains_single_pass(monkeypatch) -> None:
+    _patch_preflight_batch_state(monkeypatch)
+    trainer, backward_calls, _selected_updates, _zero_grad_calls = _preflight_trainer(
+        accumulation_steps=1,
+    )
+    context = {}
+
+    feasible = headroom._same_batch_training_memory_preflight(
+        trainer,
+        context,
+        selected_count=13,
+    )
+
+    assert feasible is True
+    assert backward_calls == ["backward"]
+    assert context["cuda_growth_headroom_preflight_microsteps"] == 1
+# ^^^ THOG
