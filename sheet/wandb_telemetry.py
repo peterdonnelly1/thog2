@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 import torch
+import constants as _constants
 
 from .depth_curve_diagnostics import (
     DEFAULT_DEPTH_CURVE_SAMPLE_ELEMENTS,
@@ -29,6 +30,24 @@ from .stage6_source import (
 INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "both", "none")
 # ^^^ THOG
 _BYTES_PER_GIB = float(1024 ** 3)
+_NORMAL_WANDB_SCALARS = frozenset(("train/loss", "val/val_loss"))
+
+
+# vvv THOG normal W&B runs expose only the two useful loss series; W&B itself owns the raw system/GPU memory charts
+def _debug_wandb_enabled() -> bool:
+    return int(getattr(_constants, "DEBUG", 0)) > 9
+
+
+def _wandb_scalar_metrics(metrics: Mapping[str, Any]) -> Dict[str, float | int]:
+    scalars = _scalar_metrics(metrics)
+    if _debug_wandb_enabled():
+        return scalars
+    return {
+        name: value
+        for name, value in scalars.items()
+        if name in _NORMAL_WANDB_SCALARS
+    }
+# ^^^ THOG
 
 
 def _safe_exp(value: float) -> float:
@@ -329,20 +348,28 @@ class WandbTelemetry:
             config={**self.config, "instrumentation": self.backend},
         )
         define_metric = run.define_metric if hasattr(run, "define_metric") else module.define_metric
-        define_metric("optimizer/update")
-        for metric in (
-            "tokens/*",
-            "time/*",
-            "train/*",
-            "val/*",
-            "optim/*",
-            "perf/*",
-            "model/*",
-            "resource/*",
-            "gpu/*",
-            "sheet/*",
-        ):
-            define_metric(metric, step_metric="optimizer/update")
+        # vvv THOG define the historical metric surface only for forensic DEBUG runs; normal W&B uses its native step plus two loss scalars
+        if _debug_wandb_enabled():
+            define_metric("optimizer/update")
+            for metric in (
+                "tokens/*",
+                "time/*",
+                "train/*",
+                "val/*",
+                "optim/*",
+                "perf/*",
+                "model/*",
+                "resource/*",
+                "gpu/*",
+                "sheet/*",
+            ):
+                define_metric(metric, step_metric="optimizer/update")
+            define_metric("fine/update")
+            define_metric("fine/*", step_metric="fine/update")
+        else:
+            define_metric("train/loss")
+            define_metric("val/val_loss")
+        # ^^^ THOG
         self.module = module
         self.run = run
 
@@ -374,16 +401,77 @@ class WandbTelemetry:
         if not metrics:
             return
         step = int(metrics["optimizer/update"])
-        metrics.update(self.sampler.sample(step))
+        # vvv THOG avoid custom CUDA sampling and the duplicate fine namespace during normal W&B runs; raw memory remains available from W&B system telemetry
+        if _debug_wandb_enabled():
+            metrics.update(self.sampler.sample(step))
+        if _debug_wandb_enabled() and bool(self.config.get("plastic__enabled", False)):
+            metrics["fine/update"] = step
+            for name, value in tuple(metrics.items()):
+                if name in {"optimizer/update", "fine/update"}:
+                    continue
+                metrics[f"fine/{name.replace('/', '_')}"] = value
+        # ^^^ THOG
         self._log_scalars(metrics, step)
+
+    def log_plastic_coarse_fine(self, provenance: Mapping[str, Any]) -> None:
+        if not self.enabled or self.backend == "none":
+            return
+        for trial in provenance.get("trials", ()):
+            trial_index = int(trial["trial_index"])
+            axis = f"coarse/trial_{trial_index}/step"
+            loss_name = f"coarse/trial_{trial_index}/training_loss"
+            if self.run is not None and _debug_wandb_enabled():
+                define_metric = (
+                    self.run.define_metric
+                    if hasattr(self.run, "define_metric")
+                    else self.module.define_metric
+                )
+                define_metric(axis)
+                define_metric(f"coarse/trial_{trial_index}/*", step_metric=axis)
+            for local_step, loss in enumerate(trial.get("training_losses", ()), start=1):
+                metrics = {
+                    axis: local_step,
+                    "coarse/trial_index": trial_index,
+                    f"coarse/trial_{trial_index}/layers": int(trial["layers"]),
+                    loss_name: float(loss),
+                }
+                scalars = _scalar_metrics(metrics)
+                if self.run is not None and _debug_wandb_enabled():
+                    self.run.log(scalars)
+                if self.writer is not None:
+                    self.writer.add_scalar(loss_name, float(loss), local_step)
+            summary_step = max(1, int(trial.get("training_steps", 1)))
+            summary = {
+                axis: summary_step,
+                f"coarse/trial_{trial_index}/mean_validation_loss": trial.get("mean_validation_loss"),
+                f"coarse/trial_{trial_index}/validation_loss_std": trial.get("validation_loss_std"),
+                f"coarse/trial_{trial_index}/seconds_per_step": trial.get("seconds_per_step"),
+                f"coarse/trial_{trial_index}/tokens_per_second": trial.get("tokens_per_second"),
+                f"coarse/trial_{trial_index}/score": trial.get("score"),
+            }
+            scalars = _scalar_metrics(summary)
+            if self.run is not None and _debug_wandb_enabled():
+                self.run.log(scalars)
+            if self.writer is not None:
+                for name, value in scalars.items():
+                    if name != axis:
+                        self.writer.add_scalar(name, value, summary_step)
+        selected_layers = provenance.get("selected_layers")
+        if selected_layers is not None:
+            self._log_scalars(
+                {"coarse/selected_layers": int(selected_layers)},
+                0,
+            )
 
     def _log_scalars(self, metrics: Mapping[str, Any], step: int) -> None:
         scalars = _scalar_metrics(metrics)
         if self.run is not None:
-            try:
-                self.run.log(scalars, step=step)
-            except TypeError:
-                self.run.log(scalars)
+            wandb_scalars = _wandb_scalar_metrics(scalars)
+            if wandb_scalars:
+                try:
+                    self.run.log(wandb_scalars, step=step)
+                except TypeError:
+                    self.run.log(wandb_scalars)
         if self.writer is not None:
             for name, value in scalars.items():
                 self.writer.add_scalar(name, value, step)
@@ -415,7 +503,7 @@ class WandbTelemetry:
             for summary in summaries:
                 figure = depth_curve_figure(summary)
                 try:
-                    if self.run is not None and self.module is not None:
+                    if self.run is not None and self.module is not None and _debug_wandb_enabled():
                         self.run.log({summary.tag: self.module.Image(figure)}, step=step)
                     if self.writer is not None:
                         self.writer.add_figure(summary.tag, figure, step)
@@ -461,7 +549,8 @@ class WandbTelemetry:
     def add_final_result(self, result: Mapping[str, Any]) -> None:
         metrics = _final_metrics(result)
         step = int(metrics["optimizer/update"])
-        metrics.update(self.sampler.sample(step, force=True))
+        if _debug_wandb_enabled():
+            metrics.update(self.sampler.sample(step, force=True))
         self._log_scalars(metrics, step)
         if self.run is not None:
             evaluations = result.get("evaluations", [])
@@ -530,5 +619,11 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
     trainer._print_progress = progress
 
 
-__all__ = ["INSTRUMENTATION_BACKENDS", "WandbTelemetry", "attach_telemetry"]
+__all__ = [
+    "INSTRUMENTATION_BACKENDS",
+    "WandbTelemetry",
+    "_debug_wandb_enabled",
+    "_wandb_scalar_metrics",
+    "attach_telemetry",
+]
 # ^^^ THOG

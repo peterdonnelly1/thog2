@@ -1,0 +1,68 @@
+# vvv THOG
+"""Keep infeasible lower probe points out of v0.55 stratified decision strata without hiding informational far-right probes."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping, Sequence
+
+from . import plastic_depth_sen_kendall_v055_patch as _v055
+
+
+_ORIGINAL_STRATIFIED_SELECTOR = (
+    _v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055
+)
+
+
+def _stratified_selector_with_feasible_decision_points(
+    *,
+    current_count: int,
+    score_report: Sequence[Mapping[str, object]],
+    **kwargs: Any,
+):
+    current = int(current_count)
+    finite_economic_scores = _v055._tsk._equivalent_time_scores(score_report)
+    filtered_report = tuple(
+        item
+        for item in score_report
+        if int(item.get("active_layers", current)) > current + 1
+        or int(item.get("active_layers", current)) in finite_economic_scores
+    )
+    return _ORIGINAL_STRATIFIED_SELECTOR(
+        current_count=current,
+        score_report=filtered_report,
+        **kwargs,
+    )
+
+
+_v055.choose_plastic_depth_count_with_stratified_sen_kendall_v055 = (
+    _stratified_selector_with_feasible_decision_points
+)
+# ^^^ THOG
+
+# vvv THOG install the final fixed-width operator console only after every v0.55 selector and diagnostic formatter has been installed
+from . import plastic_depth_console_alignment_v055_patch as _plastic_depth_console_alignment_v055_patch
+# ^^^ THOG
+
+# vvv THOG keep v0.55 Sen/Kendall history ownership and final operator fields authoritative after all retained legacy wrappers
+from . import plastic_depth_sen_kendall_v055_runtime_fix_patch as _plastic_depth_sen_kendall_v055_runtime_fix_patch
+# ^^^ THOG
+
+# vvv THOG replay v0.55 Sen/Kendall audit rows from their single significant adjacent candidate rather than retired score_z ranking
+from . import plastic_depth_sen_kendall_v055_audit_fix_patch as _plastic_depth_sen_kendall_v055_audit_fix_patch
+# ^^^ THOG
+
+# vvv THOG preserve same-batch framework holds as explicit v0.55 audit state while independently replaying the pre-hold Sen/Kendall decision
+from . import plastic_depth_v055_same_batch_audit_bridge_patch as _plastic_depth_v055_same_batch_audit_bridge_patch
+# ^^^ THOG
+
+# vvv THOG let every feasible radius point inform v0.55 Sen/Kendall while asymmetrically discounting only beneficial growth-side economic evidence
+from . import plastic_depth_v055_growth_side_discount_patch as _plastic_depth_v055_growth_side_discount_patch
+# ^^^ THOG
+
+# vvv THOG show the active growth-side discount alongside the selected Sen/Kendall algorithm in the existing PLASTIC startup section
+from . import plastic_depth_v055_growth_side_startup_patch as _plastic_depth_v055_growth_side_startup_patch
+# ^^^ THOG
+
+# vvv THOG add rolling W&B-only raw probe-loss spaghetti curves after the final PLASTIC decision/provenance overlays are installed
+from . import plastic_depth_wandb_probe_curves_patch as _plastic_depth_wandb_probe_curves_patch
+# ^^^ THOG

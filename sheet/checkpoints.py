@@ -90,8 +90,28 @@ def _semantic_compatibility_value(name: str, value: Any) -> Any:
 def _semantic_plastic_depth_identity(value: Any, *, maximum_layers: Any) -> Any:
     if not isinstance(value, Mapping):
         return value
+    # vvv THOG v0.52 compatibility maps both canonical identities and the retired short v0.3 identity to one semantic form
     if "plastic__enabled" not in value:
-        return value
+        return {
+            "version": value.get("version"),
+            "maximum_layers": value.get("maximum_layers", maximum_layers),
+            "initial_active_layers": value.get("initial_active_layers"),
+            "learn_layer_count": value.get("learn_layer_count"),
+            "sampling_initialisation": value.get("sampling_initialisation"),
+            "count_objective": value.get("count_objective"),
+            "count_update_brake": value.get("count_update_brake"),
+            "extrapolation_weight": value.get("extrapolation_weight", 0.8),
+            "probe_noise_window": value.get("probe_noise_window"),
+            "wall_time_discount": 0.9,
+            "wall_time_loss_rate_window": 64,
+            "wall_time_loss_rate_min_observations": 16,
+            "probe_noise_lambda": value.get("probe_noise_lambda"),
+            "count_cost_weight": value.get("count_cost_weight"),
+            "memory_budget_gib": value.get("memory_budget_gib"),
+            "cuda_allocator_reserve_gib": value.get("cuda_allocator_reserve_gib"),
+            "geometry_lr_multiplier": value.get("geometry_lr_multiplier"),
+            "freeze_geometry_during_warmup": value.get("freeze_geometry_during_warmup"),
+        }
     return {
         "version": value.get("version"),
         "maximum_layers": maximum_layers,
@@ -100,15 +120,25 @@ def _semantic_plastic_depth_identity(value: Any, *, maximum_layers: Any) -> Any:
         "sampling_initialisation": value.get("plastic__layer_sampling_initialisation"),
         "count_objective": value.get("plastic__layer_count_objective"),
         "count_update_brake": value.get("plastic__layer_count_update_brake"),
-        "probe_noise_window": value.get("plastic__layer_count_probe_noise_window"),
-        "probe_noise_min_observations": value.get("plastic__layer_count_probe_noise_min_observations"),
+        "extrapolation_weight": value.get("plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence", value.get("plastic__layer_count_extrapolation_weight", 0.8)),
+        "probe_noise_window": value.get("plastic__layer_count_probe__window_size_as_number_of_probes"),
+        "wall_time_discount": value.get("plastic__wall_time_equivalent_time_gain_discount", 0.9),
+        "wall_time_loss_rate_window": value.get("plastic__wall_time_equivalent_time_gain_loss_rate_window", 64),
+        "wall_time_loss_rate_min_observations": value.get("plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", 16),
         "probe_noise_lambda": value.get("plastic__layer_count_probe_noise_lambda"),
         "count_cost_weight": value.get("plastic__layer_count_cost_weight"),
-        "memory_budget_gib": value.get("plastic__layer_memory_budget_gib"),
-        "cuda_allocator_reserve_gib": value.get("plastic__cuda_allocator_reserve_gib"),
+        "memory_budget_gib": value.get(
+            "plastic__layer_count__memory_budget_gib",
+            value.get("plastic__layer_memory_budget_gib"),
+        ),
+        "cuda_allocator_reserve_gib": value.get(
+            "plastic__layer_count__cuda_allocator_reserve_gib",
+            value.get("plastic__cuda_allocator_reserve_gib"),
+        ),
         "geometry_lr_multiplier": value.get("plastic__geometry_learning_rate_multiplier"),
         "freeze_geometry_during_warmup": value.get("plastic__freeze_geometry_during_warmup"),
     }
+    # ^^^ THOG
 
 
 # ^^^ THOG

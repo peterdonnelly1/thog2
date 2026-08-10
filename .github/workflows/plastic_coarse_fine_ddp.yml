@@ -1,0 +1,78 @@
+name: Validate PLASTIC COARSE FINE DDP
+
+on:
+  push:
+    branches:
+      - PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+    paths:
+      - .github/workflows/plastic_coarse_fine_ddp.yml
+  pull_request:
+    branches:
+      - PLASTIC_DEPTH
+
+permissions:
+  contents: read
+
+jobs:
+  cpu_ddp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install pytest numpy
+
+      - name: Run two-rank lifecycle and FINE probe
+        env:
+          THOG2_DDP_RESULT_DIR: ${{ runner.temp }}/plastic_ddp
+          OMP_NUM_THREADS: '1'
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m torch.distributed.run \
+            --standalone \
+            --nproc_per_node=2 \
+            tests/plastic_depth_ddp_probe.py
+
+      - name: Verify rank agreement and rank-qualified samples
+        env:
+          THOG2_DDP_RESULT_DIR: ${{ runner.temp }}/plastic_ddp
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["THOG2_DDP_RESULT_DIR"])
+          rows = [json.loads((root / f"rank_{rank}.json").read_text()) for rank in (0, 1)]
+          assert [row["rank"] for row in rows] == [0, 1]
+          assert all(row["world_size"] == 2 for row in rows)
+          for key in (
+              "selected_layers",
+              "trial_scores",
+              "pause_disposition",
+              "fine_completed_updates",
+              "fine_active_layers",
+              "audit",
+          ):
+              assert rows[0][key] == rows[1][key], (key, rows[0][key], rows[1][key])
+          assert rows[0]["pause_disposition"] == "timeout"
+          assert rows[0]["fine_completed_updates"] == 1
+          audit = rows[0]["audit"]
+          assert audit["phase"] == "fine"
+          samples = audit["sampled_tokens_by_rank"]
+          assert [item["rank"] for item in samples] == [0, 1]
+          assert audit["sampled_token_count_global"] == sum(
+              item["sampled_token_count"] for item in samples
+          )
+          print(json.dumps(rows[0], indent=2, sort_keys=True))
+          PY

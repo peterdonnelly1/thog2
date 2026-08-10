@@ -19,15 +19,15 @@ def _score_report(*, lower: float = 1.1, current: float = 1.0, upper: float = 1.
     )
 
 
-def test_mad_gate_collects_required_observations_before_transition() -> None:
+def test_full_window_gate_collects_required_observations_before_transition() -> None:
     histories = {}
     for update_number in range(1, 3):
         decision = choose_plastic_depth_count_with_mad(
             current_count=3,
             score_report=_score_report(lower=0.8),
             histories=histories,
-            noise_window=8,
-            minimum_observations=3,
+            noise_window=3,
+            minimum_observations=1,
             noise_lambda=1.0,
             update_number=update_number,
             last_count_change_update=-1,
@@ -39,8 +39,8 @@ def test_mad_gate_collects_required_observations_before_transition() -> None:
         current_count=3,
         score_report=_score_report(lower=0.8),
         histories=histories,
-        noise_window=8,
-        minimum_observations=3,
+        noise_window=3,
+        minimum_observations=1,
         noise_lambda=1.0,
         update_number=3,
         last_count_change_update=-1,
@@ -50,13 +50,12 @@ def test_mad_gate_collects_required_observations_before_transition() -> None:
     assert decision.evidence[0].observation_count == 3
     assert decision.evidence[0].significant
 
-
 def test_zero_mad_uses_positive_scale_floor() -> None:
     decision = choose_plastic_depth_count_with_mad(
         current_count=3,
         score_report=_score_report(lower=0.5),
-        histories={"3:-1": (-0.5, -0.5, -0.5)},
-        noise_window=8,
+        histories={"3:-1": (-0.5,), "3:@LRA": (-1.0,)},
+        noise_window=1,
         minimum_observations=1,
         noise_lambda=1.0,
         update_number=4,
@@ -70,13 +69,12 @@ def test_zero_mad_uses_positive_scale_floor() -> None:
     assert math.isfinite(evidence.standardized_improvement)
     assert decision.selected_count == 2
 
-
 def test_update_brake_blocks_transition_but_preserves_new_evidence() -> None:
     decision = choose_plastic_depth_count_with_mad(
         current_count=3,
         score_report=_score_report(upper=0.5),
         histories={},
-        noise_window=8,
+        noise_window=1,
         minimum_observations=1,
         noise_lambda=0.0,
         update_number=12,
@@ -91,7 +89,7 @@ def test_update_brake_blocks_transition_but_preserves_new_evidence() -> None:
         current_count=3,
         score_report=_score_report(upper=0.5),
         histories=decision.histories,
-        noise_window=8,
+        noise_window=1,
         minimum_observations=1,
         noise_lambda=0.0,
         update_number=15,
@@ -101,21 +99,20 @@ def test_update_brake_blocks_transition_but_preserves_new_evidence() -> None:
     assert not released.brake_active
     assert released.selected_count == 4
 
-
-def test_exact_standardized_tie_prefers_lower_count() -> None:
+def test_equal_improvements_are_directionally_ambiguous_and_hold() -> None:
     decision = choose_plastic_depth_count_with_mad(
         current_count=3,
         score_report=_score_report(lower=0.5, upper=0.5),
         histories={},
-        noise_window=8,
+        noise_window=1,
         minimum_observations=1,
         noise_lambda=0.0,
         update_number=1,
         last_count_change_update=-1,
         update_brake=0,
     )
-    assert decision.selected_count == 2
-
+    assert decision.selected_count == 3
+    assert all(not item.significant for item in decision.evidence)
 
 def test_histories_are_count_direction_specific_and_windowed() -> None:
     decision = choose_plastic_depth_count_with_mad(
@@ -139,7 +136,7 @@ def test_infeasible_direction_does_not_create_history() -> None:
         current_count=3,
         score_report=_score_report(lower=float("inf"), upper=0.8),
         histories={},
-        noise_window=8,
+        noise_window=1,
         minimum_observations=1,
         noise_lambda=0.0,
         update_number=1,
@@ -150,9 +147,8 @@ def test_infeasible_direction_does_not_create_history() -> None:
     assert decision.evidence[0].feasible is False
     assert decision.selected_count == 4
 
-
 def test_invalid_controller_inputs_are_rejected() -> None:
-    with pytest.raises(ValueError, match="noise_window"):
+    with pytest.raises(ValueError, match="window_size_as_number_of_probes"):
         choose_plastic_depth_count_with_mad(
             current_count=3,
             score_report=_score_report(),
@@ -176,4 +172,4 @@ def test_invalid_controller_inputs_are_rejected() -> None:
             last_count_change_update=-1,
             update_brake=0,
         )
-# ^^^ THOG
+

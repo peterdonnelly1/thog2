@@ -14,10 +14,12 @@ from . import stage6_trainer as _stage6
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _PALE_RED = "\033[38;2;255;150;150m"
+_PALE_CYAN = "\033[38;2;150;220;255m"
 _RESET = "\033[0m"
-# _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                         # <<< THOG preserve the pre-public-formatter alignment field set
-_ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                              # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
+# _ALIGNMENT_LABELS = ("probe_losses", "score_z", "sampled =")                                                                                             # <<< THOG preserve the pre-public-formatter alignment field set
+_ALIGNMENT_LABELS = ("probe_losses", "score_z", "change_z", "sampled =")                                                                                   # <<< THOG align every active PLASTIC suffix spelling after the final public formatter
 _ALIGNMENT_BY_RUN_ID: Dict[str, Dict[str, int]] = {}
+_MIN_FINAL_PROBE_COLUMN = 96
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 _ORIGINAL_FORMAT_PROGRESS_LINE = _stage6.format_progress_line
 _ORIGINAL_COLOUR_POSITIVE_SCORE = _cleanup._colour_positive_score
@@ -71,6 +73,18 @@ def _row_has_active_update_brake(trainer: Any, completed_updates: int) -> bool:
 # ^^^ THOG
 
 
+# vvv THOG expose the separate warmup gate whenever learned count movement is prohibited
+def _row_has_warmup_brake(trainer: Any, completed_updates: int) -> bool:
+    config = getattr(trainer, "config", None)
+    return (
+        bool(getattr(config, "plastic__enabled", False))
+        and bool(getattr(config, "plastic__do_learn_layer_count", False))
+        and bool(getattr(config, "plastic__freeze_geometry_during_warmup", False))
+        and int(completed_updates) < int(getattr(config, "warmup_updates", 0))
+    )
+# ^^^ THOG
+
+
 def _remove_probe_fields(values: Dict[str, Any]) -> None:
     for key in (
         "plastic_probe_losses",
@@ -103,6 +117,10 @@ def _prepare_console_progress_payload_with_probe_visibility(
         values["plastic_update_brake_active"] = True
     else:
         values.pop("plastic_update_brake_active", None)
+    if _row_has_warmup_brake(self, completed_updates):
+        values["plastic_warmup_brake_active"] = True
+    else:
+        values.pop("plastic_warmup_brake_active", None)
     return values
 
 
@@ -161,8 +179,20 @@ def _align_field_to_column(line: str, label: str, target_column: int) -> str:
     return prefix + (" " * padding) + suffix
 
 
+def _align_probe_to_minimum_tab_column(line: str) -> str:
+    start = _field_start(line, "probe_losses")
+    if start is None or start >= _MIN_FINAL_PROBE_COLUMN:
+        return line
+    raw_index = line.find("probe_losses")
+    prefix = line[:raw_index].rstrip(" \t")
+    suffix = line[raw_index:]
+    while _visible_width(prefix) < _MIN_FINAL_PROBE_COLUMN:
+        prefix += "\t"
+    return prefix + suffix
+
+
 def _record_alignment(run_id: str, line: str) -> None:
-    # positions = {                                                                                                                                         # <<< THOG preserve overwrite-on-every-T-row behaviour that discarded absent probe columns
+    # positions = {                                                                                                                                        # <<< THOG preserve overwrite-on-every-T-row behaviour that discarded absent probe columns
     #     label: position
     #     for label in _ALIGNMENT_LABELS
     #     if (position := _field_start(line, label)) is not None
@@ -201,6 +231,8 @@ def _format_progress_line_with_minor_plastic_console_changes(
         line = _align_validation_row(run_id, line)
     if bool(payload.get("plastic_update_brake_active", False)):
         line = f"{line.rstrip()}  {_PALE_RED}<<< update brake on{_RESET}"
+    if bool(payload.get("plastic_warmup_brake_active", False)):
+        line = f"{line.rstrip()}  {_PALE_CYAN}<<< warmup braked enabled{_RESET}"
     return line
 
 
@@ -210,6 +242,7 @@ _stage6.format_progress_line = _format_progress_line_with_minor_plastic_console_
 
 # vvv THOG apply alignment after every later public formatter has inserted its own tabs and suffix fields
 def _align_final_progress_line(run_id: str, event: str, line: str) -> str:
+    line = _align_probe_to_minimum_tab_column(line)
     if event == "optimizer_progress":
         _record_alignment(run_id, line)
         return line

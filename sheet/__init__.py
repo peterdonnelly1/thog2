@@ -50,6 +50,14 @@ __all__ = [
 from . import argparse_underscore_alias_patch as _argparse_underscore_alias_patch
 # ^^^ THOG
 
+# vvv THOG append actual getopt and artifact descriptor keys to the complete registered help surface
+from . import help_registry_descriptor_patch as _help_registry_descriptor_patch
+# ^^^ THOG
+
+# vvv THOG make descriptor-registry help idempotent across layered argparse compatibility overlays
+from . import help_registry_descriptor_dedupe_patch as _help_registry_descriptor_dedupe_patch
+# ^^^ THOG
+
 # vvv THOG centralise explicit RGB console colours and elapsed-field layout without changing training semantics
 from . import stage6_trainer as _stage6_trainer
 
@@ -64,10 +72,10 @@ def _progress_elapsed_hh_mm_ss(value, completed_updates):
 
 
 _stage6_trainer._progress_elapsed = _progress_elapsed_hh_mm_ss
-# _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                               # <<< THOG preserve palette-dependent bright-green attempt
-_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                       # <<< THOG force explicit RGB bright green for falling loss
-# _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                            # <<< THOG preserve palette-dependent bright-yellow attempt
-_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;38;2;255;255;0m"                                                                 # <<< THOG force bold explicit RGB yellow across validation-loss label and value
+# _stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;92m"                                                                                       # <<< THOG preserve palette-dependent bright-green attempt
+_stage6_trainer._PROGRESS_LOSS_DECREASE_STYLE_START = "\033[1;38;2;0;255;0m"                                                                               # <<< THOG force explicit RGB bright green for falling loss
+# _stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[1;93m"                                                                                    # <<< THOG preserve palette-dependent bright-yellow attempt
+_stage6_trainer._PROGRESS_VALIDATION_FIELD_STYLE_START = "\033[0;1;93m"                                                                                    # <<< THOG reset then force terminal bright-yellow plus bold across validation-loss label and value
 # ^^^ THOG
 
 # vvv THOG install active-prefix PLASTIC gauge verification after DEPTH trajectory classes are loaded
@@ -108,4 +116,95 @@ from . import plastic_depth_controller_stability_patch as _plastic_depth_control
 
 # vvv THOG align PLASTIC validation suffixes, suppress stale probe fields and expose active count brakes
 from . import plastic_depth_console_minor_patch as _plastic_depth_console_minor_patch
+# ^^^ THOG
+
+# vvv THOG final COARSE/FINE overlay wins after all compatibility patches and probes every valid integer count in the configured radius
+from . import plastic_depth_coarse_fine_patch as _plastic_depth_coarse_fine_patch
+# ^^^ THOG
+
+# vvv THOG recover candidate-local CUDA OOMs across the contiguous full-radius upward suffix
+from . import plastic_depth_full_radius_oom_patch as _plastic_depth_full_radius_oom_patch
+# ^^^ THOG
+
+# vvv THOG install replayable FINE count-decision audit after final selector and commit semantics are fixed
+from . import plastic_depth_audit_patch as _plastic_depth_audit_patch
+# ^^^ THOG
+
+# vvv THOG hard-release each COARSE trainer before the next candidate or FINE state and keep telemetry phase axes independent
+from . import plastic_depth_coarse_runtime_recovery_patch as _plastic_depth_coarse_runtime_recovery_patch
+# ^^^ THOG
+
+# vvv THOG make the final console compaction and FINE warmup count guard win after every earlier compatibility overlay
+from . import plastic_depth_warmup_guard_patch as _plastic_depth_warmup_guard_patch
+# ^^^ THOG
+
+# vvv THOG set the public cost-weight default and compact long probe-offset vector labels after final console formatting
+from . import plastic_depth_cli_cost_and_label_patch as _plastic_depth_cli_cost_and_label_patch
+# ^^^ THOG
+
+# vvv THOG install v0.52 goal-agnostic directional coherence and final PLASTIC progress formatting after every earlier overlay
+from . import plastic_depth_directional_coherence_patch as _plastic_depth_directional_coherence_patch
+_plastic_depth_console_minor_patch._ALIGNMENT_LABELS = ("sampled =", "probe_losses", "score_z", "change_z")
+# ^^^ THOG
+
+# vvv THOG v0.521 makes probe-token sampling configurable and renders arbitrary-radius probe losses as signed deltas around bold-white L
+from . import plastic_depth_probe_sampling_v0521_patch as _plastic_depth_probe_sampling_v0521_patch
+# ^^^ THOG
+
+# vvv THOG v0.521 report paired per-token delta standard errors as diagnostics only; robust MAD/z-score decisions are unchanged
+from . import plastic_depth_probe_se_v0521_patch as _plastic_depth_probe_se_v0521_patch
+# ^^^ THOG
+
+# vvv THOG keep sampled immediately after layers with the single tab already inserted by the v0.52 formatter; do not reserve a fixed terminal column
+# def _align_sampled_to_minimum_tab_column(line):                                                                                                           # <<< THOG preserve the superseded fixed-column helper entry point concept
+#     ...
+def _plastic_depth_leave_sampled_after_layers(line):
+    return line
+
+
+_plastic_depth_directional_coherence_patch._align_sampled_to_minimum_tab_column = _plastic_depth_leave_sampled_after_layers
+# ^^^ THOG
+
+# vvv THOG keep postfix brake annotations at the physical end of the row and render neutral L/R/A outcomes as stet
+from . import plastic_depth_console_postfix_patch as _plastic_depth_console_postfix_patch
+# ^^^ THOG
+
+# vvv THOG v0.541 install equivalent-time wall-time economics after established FINE scoring and console overlays
+from . import plastic_depth_wall_time_equivalent_time_gain_patch as _plastic_depth_wall_time_equivalent_time_gain_patch
+# ^^^ THOG
+
+# vvv THOG v0.53 install fixed-batch non-overlapping probe windows after equivalent-time scoring so cached evidence reuses the complete selector stack
+from . import plastic_depth_same_batch_all_probes_patch as _plastic_depth_same_batch_all_probes_patch
+# ^^^ THOG
+
+# vvv THOG v0.54 install selectable Theil-Sen/Kendall gradient classification last so legacy behaviour remains the untouched default path
+from . import plastic_depth_theil_sen_kendall_patch as _plastic_depth_theil_sen_kendall_patch
+# ^^^ THOG
+
+# vvv THOG v0.54 restore synthetic gradient-control fields before the dataclass constructor during checkpoint resume
+from . import plastic_depth_theil_sen_kendall_resume_config_patch as _plastic_depth_theil_sen_kendall_resume_config_patch
+# ^^^ THOG
+
+# vvv THOG v0.54 align gradient diagnostics with the final fat-arrow/provenance console layer without altering controller semantics
+from . import plastic_depth_theil_sen_kendall_console_fix_patch as _plastic_depth_theil_sen_kendall_console_fix_patch
+# ^^^ THOG
+
+# vvv THOG v0.54 keep raw-loss bootstrap exploration active until wall-time timing/loss models can provide real TSK economic scores
+from . import plastic_depth_theil_sen_kendall_bootstrap_fix_patch as _plastic_depth_theil_sen_kendall_bootstrap_fix_patch
+# ^^^ THOG
+
+# vvv THOG final compact PLASTIC operator layout: seconds plus decimal-hour elapsed time, one-decimal step seconds, shorter labels and tighter sampled placement
+from . import plastic_depth_console_compact_layout_patch as _plastic_depth_console_compact_layout_patch
+# ^^^ THOG
+
+# vvv THOG v0.55 install renamed LRA and whole-window stratified Sen/Kendall control after every older selector and console overlay
+from . import plastic_depth_sen_kendall_v055_patch as _plastic_depth_sen_kendall_v055_patch
+# ^^^ THOG
+
+# vvv THOG v0.55 ignore infeasible lower decision points without weakening the adjacent-action requirement or far-right informational probing
+from . import plastic_depth_sen_kendall_v055_boundary_fix_patch as _plastic_depth_sen_kendall_v055_boundary_fix_patch
+# ^^^ THOG
+
+# vvv THOG enforce the CUDA allocator reserve as a real growth headroom barrier after same-batch and final Sen/Kendall selection are installed
+from . import plastic_depth_cuda_headroom_guard_patch as _plastic_depth_cuda_headroom_guard_patch
 # ^^^ THOG

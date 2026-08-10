@@ -130,11 +130,10 @@ class SheetGPTConfig:
     plastic__layer_sampling_initialisation: str = "equidistant"
     plastic__layer_count_objective: str = "lowest_loss"
     plastic__layer_count_update_brake: int = 5
-    plastic__layer_count_probe_noise_window: int = 50
-    plastic__layer_count_probe_noise_min_observations: int = 5
+    plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_memory_budget_gib: Optional[float] = None
+    plastic__layer_count__memory_budget_gib: Optional[float] = None
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__sampling_seed: int = 1337
@@ -210,23 +209,13 @@ class SheetGPTConfig:
             )
         # vvv THOG PLASTIC DEPTH robust paired-score gate controls
         if (
-            isinstance(self.plastic__layer_count_probe_noise_window, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_window, int)
-            or self.plastic__layer_count_probe_noise_window < 1
+            isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, bool)
+            or not isinstance(self.plastic__layer_count_probe__window_size_as_number_of_probes, int)
+            or self.plastic__layer_count_probe__window_size_as_number_of_probes < 1
         ):
             raise ValueError(
-                "plastic__layer_count_probe_noise_window must be a positive integer; "
-                f"got {self.plastic__layer_count_probe_noise_window!r}"
-            )
-        if (
-            isinstance(self.plastic__layer_count_probe_noise_min_observations, bool)
-            or not isinstance(self.plastic__layer_count_probe_noise_min_observations, int)
-            or self.plastic__layer_count_probe_noise_min_observations < 1
-            or self.plastic__layer_count_probe_noise_min_observations > self.plastic__layer_count_probe_noise_window
-        ):
-            raise ValueError(
-                "plastic__layer_count_probe_noise_min_observations must lie in [1, noise_window]; "
-                f"got {self.plastic__layer_count_probe_noise_min_observations!r}"
+                "plastic__layer_count_probe__window_size_as_number_of_probes must be a positive integer; "
+                f"got {self.plastic__layer_count_probe__window_size_as_number_of_probes!r}"
             )
         if (
             isinstance(self.plastic__layer_count_probe_noise_lambda, bool)
@@ -250,21 +239,21 @@ class SheetGPTConfig:
                 f"got {self.plastic__layer_count_cost_weight!r}"
             )
         if (
-            self.plastic__layer_memory_budget_gib is not None
+            self.plastic__layer_count__memory_budget_gib is not None
             and (
-                isinstance(self.plastic__layer_memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_memory_budget_gib))
-                or float(self.plastic__layer_memory_budget_gib) <= 0.0
+                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
+                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
+                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
+                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
             )
         ):
             raise ValueError(
-                "plastic__layer_memory_budget_gib must be finite and positive or None; "
-                f"got {self.plastic__layer_memory_budget_gib!r}"
+                "plastic__layer_count__memory_budget_gib must be finite and positive or None; "
+                f"got {self.plastic__layer_count__memory_budget_gib!r}"
             )
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_memory_budget_gib is None:
+        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
             raise ValueError(
-                "plastic__layer_memory_budget_gib is required for memory_budget"
+                "plastic__layer_count__memory_budget_gib is required for memory_budget"
             )
         if (
             isinstance(self.plastic__geometry_learning_rate_multiplier, bool)

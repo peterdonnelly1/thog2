@@ -136,7 +136,7 @@ class DepthMaterialisationRuntimeTests(unittest.TestCase):
             line.endswith("  materialisation penalty=0.01234±0.00123s/layer"),
             line,
         )
-        self.assertIn("Δstep= 12.0000s  tok/s= 10240", line)
+        self.assertIn("Δ= 12.0s  tok/s= 10240", line)
 
     def test_registry_help_exposes_geometry_and_runtime_controls(self) -> None:
         original_argv = list(sys.argv)

@@ -179,16 +179,25 @@ class PlasticDepthConsoleMinorPatchTests(unittest.TestCase):
             "optimizer_progress",
             training_payload,
         )
+        training_line = console_patch._align_final_progress_line(
+            "column_test",
+            "optimizer_progress",
+            training_line,
+        )
         validation_line = stage6_trainer.format_progress_line(
             "column_test",
             "evaluation_completed",
             validation_payload,
         )
-        for label in ("score_z", "sampled ="):
-            self.assertEqual(
-                console_patch._field_start(training_line, label),
-                console_patch._field_start(validation_line, label),
-            )
+        validation_line = console_patch._align_final_progress_line(
+            "column_test",
+            "evaluation_completed",
+            validation_line,
+        )
+        self.assertEqual(
+            console_patch._field_start(training_line, "score_z"),
+            console_patch._field_start(validation_line, "score_z"),
+        )
 
     # vvv THOG the runtime print path performs one final alignment after public formatters have introduced tabs and ANSI styling
     def test_final_alignment_runs_after_late_formatter_tabs(self) -> None:

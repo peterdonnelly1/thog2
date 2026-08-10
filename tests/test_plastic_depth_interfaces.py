@@ -32,7 +32,7 @@ def _plastic_cli(*extra: str):
             "8",
             "--o-depth",
             "4",
-            "--plastic-enabled",
+            "--plastic__enabled",
             "--max-iters",
             "2",
             "--warmup-iters",
@@ -49,13 +49,13 @@ def _plastic_cli(*extra: str):
 def test_plastic_fixed_cli_resolves_and_preserves_public_identity() -> None:
     config = config_from_arguments(
         _plastic_cli(
-            "--plastic-layers-to-sample",
+            "--plastic__layers_to_sample",
             "6",
-            "--plastic-layer-sampling-initialisation",
+            "--plastic__layer_sampling_initialisation",
             "random",
-            "--plastic-geometry-learning-rate-multiplier",
+            "--plastic__geometry_learning_rate_multiplier",
             "0.2",
-            "--no-plastic-freeze-geometry-during-warmup",
+            "--no-plastic__freeze_geometry_during_warmup",
         )
     )
     assert config.plastic__enabled is True
@@ -66,7 +66,7 @@ def test_plastic_fixed_cli_resolves_and_preserves_public_identity() -> None:
     assert config.plastic__freeze_geometry_during_warmup is False
     assert "_L_6__" in config.parameter_artifact_fragment()
     assert "_L_dyn__" not in config.parameter_artifact_fragment()
-    assert "PLN_6_PLM_6_PLI_random_PLO_lowest_loss" in config.artifact_name
+    assert "P__LN_6_LM_6_LI_rndm_LO_loss" in config.artifact_name
     training = config.to_training_config(vocab_size=32, world_size=1, out_dir=Path("out-test"))
     assert training.n_layer == 6
     run_identity = config.compact_identity()["plastic_depth"]
@@ -80,22 +80,20 @@ def test_plastic_fixed_cli_resolves_and_preserves_public_identity() -> None:
 def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
     config = config_from_arguments(
         _plastic_cli(
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "7",
-            "--plastic-layer-count-objective",
+            "--plastic__layer_count_objective",
             "layer_efficiency",
-            "--plastic-layer-count-cost-weight",
+            "--plastic__layer_count_cost_weight",
             "0.25",
-            "--plastic-layer-count-update-brake",
+            "--plastic__layer_count_update_brake",
             "50",
-            "--plastic-layer-count-probe-noise-window",
+            "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "20",
-            "--plastic-layer-count-probe-noise-min-observations",
-            "4",
-            "--plastic-layer-count-probe-noise-lambda",
+            "--plastic__layer_count_probe_noise_lambda",
             "2.5",
         )
     )
@@ -105,8 +103,20 @@ def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
     assert config.plastic__layer_count_objective == "layer_efficiency"
     assert "_L_dyn__" in config.parameter_artifact_fragment()
     assert "_L_7__" not in config.parameter_artifact_fragment()
-    assert "PLN_2_PLM_7" in config.artifact_name
-    assert "PLB_50_PLNW_20_PLNM_4_PLNL_250000" in config.artifact_name
+    assert "P__LN_2_LM_7" in config.artifact_name
+    assert "LB_50_LNW_20_LNL_250000" in config.artifact_name
+
+
+@pytest.mark.parametrize(
+    "retired_option",
+    (
+        "--plastic__layer_memory_budget_gib",
+        "--plastic__cuda_allocator_reserve_gib",
+    ),
+)
+def test_retired_layer_count_memory_names_are_rejected(retired_option: str) -> None:
+    with pytest.raises(SystemExit):
+        _plastic_cli(retired_option, "1")
 
 
 def test_plastic_capability_guards_are_explicit() -> None:
@@ -135,12 +145,12 @@ def test_plastic_capability_guards_are_explicit() -> None:
     with pytest.raises(ValueError, match="memory_budget"):
         config_from_arguments(
             _plastic_cli(
-                "--plastic-do-learn-layer-count",
-                "--plastic-initial-layer-count",
+                "--plastic__do_learn_layer_count",
+                "--plastic__initial_layer_count",
                 "2",
-                "--plastic-max-permitted-layers",
+                "--plastic__max_permitted_layers",
                 "4",
-                "--plastic-layer-count-objective",
+                "--plastic__layer_count_objective",
                 "memory_budget",
             )
         )
@@ -212,31 +222,33 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
         [
             "bash",
             "train_OWT.sh",
-            "--plastic-enabled",
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__enabled",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "4",
-            "--plastic-layer-sampling-initialisation",
+            "--plastic__layer_sampling_initialisation",
             "random",
-            "--plastic-layer-count-objective",
+            "--plastic__layer_count_objective",
             "layer_efficiency",
-            "--plastic-layer-count-update-brake",
+            "--plastic__layer_count_update_brake",
             "25",
-            "--plastic-layer-count-probe-noise-window",
+            "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "20",
-            "--plastic-layer-count-probe-noise-min-observations",
-            "4",
-            "--plastic-layer-count-probe-noise-lambda",
+            # vvv THOG keep the tiny 1x8 dry-run fixture inside the exact v0.521 sampled-token contract
+            "--plastic__layer_count_probe__number_of_sampled_valid_tokens",
+            "8",
+            # ^^^ THOG
+            "--plastic__layer_count_probe_noise_lambda",
             "2.5",
-            "--plastic-layer-count-cost-weight",
+            "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic-cuda-allocator-reserve-gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
-            "--plastic-geometry-learning-rate-multiplier",
+            "--plastic__geometry_learning_rate_multiplier",
             "0.15",
-            "--no-plastic-freeze-geometry-during-warmup",
+            "--no-plastic__freeze_geometry_during_warmup",
             "--select-depth",
             "-g",
             "PLASTIC_TEST",
@@ -289,20 +301,20 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
     assert "plastic depth:" in result.stdout
     dry_run = result.stdout.split("DRY RUN:", 1)[1]
     for expected in (
-        "--plastic-enabled",
-        "--plastic-do-learn-layer-count",
-        "--plastic-initial-layer-count 2",
-        "--plastic-max-permitted-layers 4",
-        "--plastic-layer-sampling-initialisation random",
-        "--plastic-layer-count-objective layer_efficiency",
-        "--plastic-layer-count-update-brake 25",
-        "--plastic-layer-count-probe-noise-window 20",
-        "--plastic-layer-count-probe-noise-min-observations 4",
-        "--plastic-layer-count-probe-noise-lambda 2.5",
-        "--plastic-layer-count-cost-weight 0.2",
-        "--plastic-cuda-allocator-reserve-gib 0.75",
-        "--plastic-geometry-learning-rate-multiplier 0.15",
-        "--no-plastic-freeze-geometry-during-warmup",
+        "--plastic__enabled",
+        "--plastic__do_learn_layer_count",
+        "--plastic__initial_layer_count 2",
+        "--plastic__max_permitted_layers 4",
+        "--plastic__layer_sampling_initialisation random",
+        "--plastic__layer_count_objective layer_efficiency",
+        "--plastic__layer_count_update_brake 25",
+        "--plastic__layer_count_probe__window_size_as_number_of_probes 20",
+        "--plastic__layer_count_probe__number_of_sampled_valid_tokens 8",
+        "--plastic__layer_count_probe_noise_lambda 2.5",
+        "--plastic__layer_count_cost_weight 0.2",
+        "--plastic__layer_count__cuda_allocator_reserve_gib 0.75",
+        "--plastic__geometry_learning_rate_multiplier 0.15",
+        "--no-plastic__freeze_geometry_during_warmup",
     ):
         assert expected in dry_run
 
@@ -317,27 +329,27 @@ def test_wrapper_help_and_shell_syntax_cover_plastic_depth() -> None:
         capture_output=True,
         check=True,
     )
-    assert "PLASTIC DEPTH:" in result.stdout
-    assert "--plastic-layers-to-sample" in result.stdout
-    assert "--plastic-do-learn-layer-count" in result.stdout
-    assert "--plastic-layer-count-objective" in result.stdout
-    assert "--plastic-layer-count-update-brake" in result.stdout
-    assert "--plastic-layer-count-probe-noise-window" in result.stdout
-    assert "--plastic-cuda-allocator-reserve-gib" in result.stdout
+    assert "PLASTIC DEPTH COARSE/FINE:" in result.stdout
+    assert "--plastic__layers_to_sample" in result.stdout
+    assert "--plastic__do_learn_layer_count" in result.stdout
+    assert "--plastic__layer_count_objective" in result.stdout
+    assert "--plastic__layer_count_update_brake" in result.stdout
+    assert "--plastic__layer_count_probe__window_size_as_number_of_probes" in result.stdout
+    assert "--plastic__layer_count__cuda_allocator_reserve_gib" in result.stdout
 
 
 def test_memory_budget_rejects_cpu_execution() -> None:
     with pytest.raises(ValueError, match="CUDA"):
         config_from_arguments(
             _plastic_cli(
-                "--plastic-do-learn-layer-count",
-                "--plastic-initial-layer-count",
+                "--plastic__do_learn_layer_count",
+                "--plastic__initial_layer_count",
                 "2",
-                "--plastic-max-permitted-layers",
+                "--plastic__max_permitted_layers",
                 "4",
-                "--plastic-layer-count-objective",
+                "--plastic__layer_count_objective",
                 "memory_budget",
-                "--plastic-layer-memory-budget-gib",
+                "--plastic__layer_count__memory_budget_gib",
                 "4",
             )
         )
@@ -349,47 +361,47 @@ def test_memory_budget_rejects_cpu_execution() -> None:
 def test_cuda_allocator_reserve_cli_propagates_without_changing_artifact_identity() -> None:
     default_config = config_from_arguments(
         _plastic_cli(
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "4",
         )
     )
     configured = config_from_arguments(
         _plastic_cli(
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "4",
-            "--plastic-cuda-allocator-reserve-gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
         )
     )
-    assert default_config.plastic__cuda_allocator_reserve_gib == pytest.approx(0.5)
-    assert configured.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert default_config.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.5)
+    assert configured.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.75)
     assert default_config.artifact_name == configured.artifact_name
     training = configured.to_training_config(
         vocab_size=32,
         world_size=1,
         out_dir=Path("out-test"),
     )
-    assert training.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
-    assert configured.compact_identity()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
-    assert training.compact_identity_metadata()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert configured.compact_identity()["plastic_depth"]["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.compact_identity_metadata()["plastic_depth"]["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
 
 
 def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
     with pytest.raises(ValueError, match="cuda_allocator_reserve"):
         config_from_arguments(
             _plastic_cli(
-                "--plastic-do-learn-layer-count",
-                "--plastic-initial-layer-count",
+                "--plastic__do_learn_layer_count",
+                "--plastic__initial_layer_count",
                 "2",
-                "--plastic-max-permitted-layers",
+                "--plastic__max_permitted_layers",
                 "4",
-                "--plastic-cuda-allocator-reserve-gib",
+                "--plastic__layer_count__cuda_allocator_reserve_gib",
                 "-0.1",
             )
         )
@@ -401,30 +413,28 @@ def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
 def test_persisted_plastic_identity_uses_only_canonical_public_control_names() -> None:
     config = config_from_arguments(
         _plastic_cli(
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "7",
-            "--plastic-layer-sampling-initialisation",
+            "--plastic__layer_sampling_initialisation",
             "random",
-            "--plastic-layer-count-objective",
+            "--plastic__layer_count_objective",
             "relative_training_wall_time",
-            "--plastic-layer-count-update-brake",
+            "--plastic__layer_count_update_brake",
             "11",
-            "--plastic-layer-count-probe-noise-window",
+            "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "19",
-            "--plastic-layer-count-probe-noise-min-observations",
-            "3",
-            "--plastic-layer-count-probe-noise-lambda",
+            "--plastic__layer_count_probe_noise_lambda",
             "1.5",
-            "--plastic-layer-count-cost-weight",
+            "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic-cuda-allocator-reserve-gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
-            "--plastic-geometry-learning-rate-multiplier",
+            "--plastic__geometry_learning_rate_multiplier",
             "0.25",
-            "--no-plastic-freeze-geometry-during-warmup",
+            "--no-plastic__freeze_geometry_during_warmup",
         )
     )
     training = config.to_training_config(vocab_size=32, world_size=1, out_dir=Path("out-test"))
@@ -463,26 +473,24 @@ def test_persisted_plastic_identity_uses_only_canonical_public_control_names() -
 def test_retired_short_identity_aliases_remain_checkpoint_compatible() -> None:
     config = config_from_arguments(
         _plastic_cli(
-            "--plastic-do-learn-layer-count",
-            "--plastic-initial-layer-count",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count",
             "2",
-            "--plastic-max-permitted-layers",
+            "--plastic__max_permitted_layers",
             "7",
-            "--plastic-layer-count-update-brake",
+            "--plastic__layer_count_update_brake",
             "11",
-            "--plastic-layer-count-probe-noise-window",
+            "--plastic__layer_count_probe__window_size_as_number_of_probes",
             "19",
-            "--plastic-layer-count-probe-noise-min-observations",
-            "3",
-            "--plastic-layer-count-probe-noise-lambda",
+            "--plastic__layer_count_probe_noise_lambda",
             "1.5",
-            "--plastic-layer-count-cost-weight",
+            "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic-cuda-allocator-reserve-gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
-            "--plastic-geometry-learning-rate-multiplier",
+            "--plastic__geometry_learning_rate_multiplier",
             "0.25",
-            "--no-plastic-freeze-geometry-during-warmup",
+            "--no-plastic__freeze_geometry_during_warmup",
         )
     )
     canonical = config.compact_identity()

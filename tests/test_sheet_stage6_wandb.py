@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import constants
+
 # from sheet.wandb_telemetry import WandbTelemetry
 from sheet.wandb_telemetry import WandbTelemetry, _final_metrics
 
@@ -49,9 +51,41 @@ class FakeWandb:
 
 
 class WandbTelemetryTests(unittest.TestCase):
+    # vvv THOG default W&B setup defines only the two application loss series; raw GPU memory remains W&B-owned system telemetry
+    def test_default_wandb_surface_is_minimal(self) -> None:
+        module = FakeWandb()
+        with mock.patch.object(constants, "DEBUG", 9), tempfile.TemporaryDirectory() as directory:
+            telemetry = WandbTelemetry(
+                enabled=True,
+                project="thog",
+                entity=None,
+                mode="offline",
+                root=Path(directory),
+                name="SHEET_scruffy__MINIMAL",
+                group="TEST",
+                job_type="sheet",
+                config={
+                    "artifact_prefix": "SHEET",
+                    "model_type": "sheet",
+                    "plastic__enabled": True,
+                },
+            )
+            with mock.patch(
+                "sheet.wandb_telemetry.importlib.import_module",
+                return_value=module,
+            ):
+                telemetry.start()
+
+        defined_names = {
+            arguments[0]
+            for arguments, _keywords in module.run.defined
+        }
+        self.assertEqual(defined_names, {"train/loss", "val/val_loss"})
+    # ^^^ THOG
+
     def test_s6_36_direct_telemetry_logs_events_and_resources(self) -> None:
         module = FakeWandb()
-        with tempfile.TemporaryDirectory() as directory:
+        with mock.patch.object(constants, "DEBUG", 10), tempfile.TemporaryDirectory() as directory:
             telemetry = WandbTelemetry(
                 enabled=True,
                 project="thog",

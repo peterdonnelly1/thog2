@@ -1,0 +1,465 @@
+THOG2 PLASTIC - REQUIREMENTS SPECIFICATION
+Version 0.55
+Date: 9 August 2026
+Status: Proposed architecture-control refinement
+
+1. GOVERNING DELTA
+
+Version 0.55 supersedes Version 0.54. All earlier requirements remain normative except where this revision replaces the v0.54 Sen/Kendall algorithm naming, temporal aggregation, score_z gating, bootstrap decision fallback, and related console/configuration surface.
+
+The v0.54 identifier:
+
+    wall_time__gradient__theil_sen_kendall_slope_tau
+
+is retired and replaced by:
+
+    wall_time__theil_sen_kendall_LRA
+
+A second, preferred whole-window algorithm is added:
+
+    wall_time__sen_kendall__tau__stratified
+
+The canonical selector remains:
+
+    plastic__layer_count_decision_algorithm
+
+The established pre-v0.54 directional_coherence algorithm remains available and retains its own behaviour. Both Sen/Kendall algorithms require:
+
+    plastic__layer_count_objective = relative_training_wall_time
+    plastic__layer_count__max_allowable_layer_change = 1
+
+An incompatible objective or max-step setting must fail at startup rather than silently changing semantics.
+
+The v0.54 public control:
+
+    plastic__layer_count_gradient__minimum_absolute_kendall_tau
+
+is removed. Passing --plastic__layer_count_gradient__minimum_absolute_kendall_tau must fail with a clear retired-control message. It must not be persisted in new checkpoints or compact identity.
+
+For reproducibility of the two v0.55 algorithms, the required absolute Kendall coherence is fixed by the algorithm definition at:
+
+    |tau| >= 0.5
+
+There is no user tuning knob for this threshold.
+
+2. PURPOSE
+
+The layer-count controller shall use probe loss as the direct observable, convert probe-loss benefit and layer-count compute cost into one wall-time economic quantity, and then use robust non-parametric trend statistics to decide whether the local economic landscape supports one adjacent layer-count step.
+
+The design deliberately separates:
+
+- observation: raw probe loss;
+- economics: equivalent wall-time score in seconds;
+- direction/magnitude: Sen slope;
+- monotonic coherence: Kendall tau;
+- action sanity: the exact adjacent +/-1 economic score;
+- temporal evidence: the configured probe window.
+
+Raw probe losses remain permanently visible in the operator console because they are direct measurements and are useful for diagnosing pathological or surprising controller decisions.
+
+3. ECONOMIC CONVERSION OCCURS BEFORE SEN/KENDALL
+
+For every probe and candidate count, reuse the existing wall_time_equivalent_time_gain economics.
+
+For current layer count L and candidate C:
+
+    probe_loss_gain = loss(L) - loss(C)
+
+    raw_equivalent_time_gain_seconds
+        = probe_loss_gain / observed_training_loss_improvement_rate
+
+For beneficial probe-loss gain only, apply the configured equivalent-time discount:
+
+    credited_equivalent_time_gain_seconds
+        = discount * raw_equivalent_time_gain_seconds
+
+For harmful probe-loss change, do not discount the harm.
+
+Over the existing wall-time decision horizon:
+
+    extra_wall_time_seconds
+        = (predicted_update_time(C) - predicted_update_time(L)) * horizon_updates
+
+Then:
+
+    economic_score_seconds(C)
+        = extra_wall_time_seconds - credited_equivalent_time_gain_seconds
+
+Lower is better. Current L has score approximately zero by construction.
+
+Sen/Kendall never receive raw probe loss as their y-axis. They receive:
+
+    x = layer-count offset
+    y = economic_score_seconds
+
+4. STARTUP STATISTICS; NO FALLBACK DECISION ALGORITHM
+
+Selecting either v0.55 Sen/Kendall algorithm must never hand layer-count authority to the legacy raw-loss directional controller merely because the economic statistics are not yet ready.
+
+Before the training loss-improvement-rate estimate is ready:
+
+    action = STET
+
+and no Sen/Kendall evidence row is added to the decision window.
+
+The ordinary-update timing model normally uses the existing empirical affine fit across observed active layer counts. Before two distinct layer counts have been observed, v0.55 may use a deterministic provisional timing statistic solely to make the economic conversion possible:
+
+- use ordinary training timing observed at the current layer count;
+- treat the measured optimizer-step component as the provisional intercept when finite and smaller than total update time;
+- assign the remaining measured update time proportionally across the current active layers to obtain provisional seconds/layer;
+- replace this provisional model automatically as soon as the ordinary two-count empirical timing fit becomes available.
+
+This is a bootstrap statistic, not a bootstrap layer-count decision algorithm.
+
+No extra optimizer update, calibration training excursion, candidate backward pass, or raw-loss decision fallback is required.
+
+5. DECISION-FIT CANDIDATES
+
+For configured probe radius r, probes may continue to evaluate/display:
+
+    L-r ... L-1, L, L+1 ... L+r
+
+For both Sen/Kendall algorithms, decision-bearing statistical points are:
+
+    D = {L-r, ..., L-1, L, L+1}
+
+subject to feasibility, bounds, and finite economic score.
+
+Thus:
+
+- all feasible lower counts are trusted interpolation evidence;
+- L is the current reference;
+- L+1 is the only decision-bearing extrapolation point;
+- L+2 ... L+r remain informational only and must not influence Sen slope, Kendall tau, adjacent-step authorization, or the selected layer count.
+
+6. THEIL-SEN / SEN SLOPE
+
+For one probe with finite points (x_i, y_i), compute every within-probe pairwise slope:
+
+    (y_j - y_i) / (x_j - x_i)
+
+for i < j.
+
+For wall_time__theil_sen_kendall_LRA, the per-probe Theil-Sen slope is the median of those pairwise slopes.
+
+For wall_time__sen_kendall__tau__stratified, do not first reduce each probe to one slope. Across the complete probe window:
+
+1. compute every valid pairwise slope within each probe stratum;
+2. never form a slope between points belonging to different probes;
+3. pool all within-probe slopes from all probe strata in the window;
+4. take their median.
+
+The resulting window statistic is the stratified/seasonal Sen slope.
+
+Interpretation in both algorithms:
+
+- sen > 0: economic score rises with layer count; downhill is SHRINK;
+- sen < 0: economic score falls with layer count; downhill is GROW;
+- sen = 0 or non-finite: no directional authorization.
+
+Units are equivalent wall-time seconds/layer.
+
+7. KENDALL TAU
+
+Within each probe, compare only pairs of candidate points from that same probe. x offsets are unique; y ties must be handled.
+
+For wall_time__theil_sen_kendall_LRA, use ordinary per-probe Kendall tau-b.
+
+For wall_time__sen_kendall__tau__stratified, combine the within-probe Kendall evidence across the complete probe window without cross-probe point comparisons.
+
+For each probe stratum p:
+
+    S_p = concordant_p - discordant_p
+
+and use that stratum's tau-b denominator, including y ties. The combined stratified Kendall statistic is:
+
+    ken = sum_p(S_p) / sum_p(tau_b_denominator_p)
+
+when the combined denominator is positive; otherwise ken is unavailable.
+
+This is the within-stratum pooled/seasonal Kendall normalization. It is not the arithmetic mean of per-probe tau values and it does not compare an observation in probe P_i with an observation in probe P_j.
+
+Interpretation:
+
+- ken near +1: coherent SHRINK ordering;
+- ken near -1: coherent GROW ordering;
+- ken near 0: weak/wiggly ordering.
+
+Required coherence is fixed:
+
+    SHRINK requires ken >= +0.5
+    GROW   requires ken <= -0.5
+
+No configurable minimum-absolute-tau control remains.
+
+8. ADJACENT +/-1 ECONOMIC SANITY CHECK
+
+The statistical landscape never authorizes a move that the exact action itself contradicts.
+
+For SHRINK:
+
+    adjacent_delta_score
+        = economic_score(L-1) - economic_score(L)
+
+For GROW:
+
+    adjacent_delta_score
+        = economic_score(L+1) - economic_score(L)
+
+The required condition is:
+
+    adjacent_delta_score < 0
+
+For the LRA algorithm this is evaluated on the current probe as part of per-probe classification, and the newest adjacent evidence must still be favourable before a full-window majority can commit.
+
+For the stratified algorithm, combine the adjacent score differences across the probe window using their median in the Sen-indicated direction. That window median is the displayed adj value and must be negative.
+
+9. wall_time__theil_sen_kendall_LRA
+
+This algorithm is the v0.54 method renamed and simplified by removing the candidate-history MAD/score_z branch.
+
+For each probe:
+
+1. obtain economic scores;
+2. compute per-probe Theil-Sen slope;
+3. compute per-probe Kendall tau-b;
+4. apply the exact adjacent-step test;
+5. classify the probe as SHRINK, GROW or AMBIGUOUS.
+
+Per-probe SHRINK requires:
+
+- L-1 feasible;
+- adjacent_delta_score(L-1) < 0;
+- sen > 0;
+- ken >= +0.5.
+
+Per-probe GROW requires:
+
+- L+1 feasible;
+- adjacent_delta_score(L+1) < 0;
+- sen < 0;
+- ken <= -0.5.
+
+Otherwise the probe is AMBIGUOUS.
+
+Across plastic__layer_count_probe__window_size_as_number_of_probes, retain the existing full-window strict-majority L/R/A semantics.
+
+No layer-count action occurs until the configured window is full. A full-window directional majority may commit only if the newest adjacent economic evidence for that direction remains negative and the normal brake/warmup/bounds checks permit the move.
+
+The old candidate-history median/MAD/sigma/score_z significance branch is not part of this algorithm.
+
+10. wall_time__sen_kendall__tau__stratified
+
+This is the preferred v0.55 algorithm.
+
+Do not convert individual probes to L/R/A votes for decision-making.
+
+The probe window itself is the statistical sample:
+
+    probe P1 -> one economic mini-curve
+    probe P2 -> one economic mini-curve
+    ...
+    probe PW -> one economic mini-curve
+
+Across those strata compute:
+
+    sen = stratified Sen slope
+    ken = stratified Kendall tau
+
+Determine the proposed direction from sen and select the matching window-median adjacent economic score:
+
+    sen > 0 -> proposed SHRINK -> adj = median[score_p(L-1)-score_p(L)]
+    sen < 0 -> proposed GROW   -> adj = median[score_p(L+1)-score_p(L)]
+
+Commit SHRINK by exactly one layer iff all are true:
+
+- complete configured probe window;
+- sen > 0;
+- ken >= +0.5;
+- adj < 0;
+- L-1 feasible;
+- warmup/count brake permits a move.
+
+Commit GROW by exactly one layer iff all are true:
+
+- complete configured probe window;
+- sen < 0;
+- ken <= -0.5;
+- adj < 0;
+- L+1 feasible;
+- warmup/count brake permits a move.
+
+Otherwise STET.
+
+The algorithm has no L/R/A majority gate and no score_z/MAD gate.
+
+11. ONE-LAYER COMMIT RULE
+
+For both v0.55 Sen/Kendall algorithms, a single decision may change active layer count by exactly one layer or not at all.
+
+Probe radius controls how much of the local landscape is inspected. It does not control commit distance.
+
+A strong trend extending several layers is evidence to take the next adjacent step, after which fresh evidence is gathered around the new operating point.
+
+12. PROBE WINDOW AND SAME-BATCH MODE
+
+plastic__layer_count_probe__window_size_as_number_of_probes remains the authoritative temporal evidence window.
+
+When plastic__layer_count__same_batch_all_probes is true, every probe stratum within one decision window must continue to use the same fixed evidence batch according to the v0.53 requirements. A completed non-overlapping same-batch window is retired whether the result is SHRINK, GROW or STET.
+
+When same_batch_all_probes is false, ordinary rolling-window history semantics remain available.
+
+Partial windows may expose provisional Sen/Kendall diagnostics but may not change active layer count.
+
+13. SCORE_Z REMOVAL
+
+score_z is baggage for the v0.55 Sen/Kendall algorithms and must not participate in either algorithm's decision.
+
+When either of the following is selected:
+
+    wall_time__theil_sen_kendall_LRA
+    wall_time__sen_kendall__tau__stratified
+
+then:
+
+- score_z must not gate a decision;
+- candidate-history MAD/sigma significance must not gate a decision;
+- score_z must not be printed in the normal operator console;
+- raw probe_Δloss must remain printed.
+
+Other non-Sen/Kendall algorithms may retain their existing score_z behaviour.
+
+14. CONSOLE DECISION OUTPUT
+
+Raw probe loss display remains unchanged and always visible, for example:
+
+    P12  probe_Δloss [L-5 ... L+5] = [...]
+
+Use the following compact statistical labels:
+
+    sen=XXX
+    ken=XXX
+    adj=XXX
+
+sen is equivalent wall-time seconds/layer. ken is dimensionless Kendall tau. adj is equivalent wall-time seconds for the exact +/-1 action under consideration. Use '-' when a value is unavailable.
+
+Use the Unicode therefore symbol:
+
+    ∴
+
+rather than the old implied-arrow/=> syntax.
+
+Use:
+
+    ▼ = SHRINK one layer
+    ▲ = GROW one layer
+    ? = AMBIGUOUS per-probe classification
+    ● = STET / no committed layer-count change
+
+For wall_time__theil_sen_kendall_LRA, retain the familiar window counts because they are decision-bearing:
+
+    sen=+0.083 ken=+0.71 adj=-0.024 ∴ ▼|▲|? =[2/0/1]/3 ∴ ▼ (P17,18,19)
+
+For wall_time__sen_kendall__tau__stratified there are no decision-bearing per-probe L/R/A votes, so do not invent or display L/R/A counts. Use:
+
+    sen=-0.083 ken=-0.71 adj=-0.024 ∴ ▲ (P17,18,19)
+
+If the statistics favour a direction but a brake prevents the actual layer change, the final action glyph is ● and the existing brake annotation remains at the physical end of the line.
+
+15. TELEMETRY AND AUDIT
+
+Persist enough information to reconstruct each Sen/Kendall decision, including as applicable:
+
+    algorithm
+    probe_id
+    update_number
+    current_count
+    selected_count
+    candidate_offsets
+    decision_fit_offsets
+    sen_slope_seconds_per_layer
+    kendall_tau
+    adjacent_score_seconds
+    left_adjacent_score_seconds
+    right_adjacent_score_seconds
+    strata_count
+    concordant_pairs
+    discordant_pairs
+    y_tied_pairs
+    direction_window_probe_ids
+    L/R/A counts for LRA mode only
+    direction_conclusion
+    brake_active
+    timing model provisional/empirical state
+
+Retain the underlying economic score reports and raw probe-loss audit information.
+
+16. REQUIRED TESTS
+
+At minimum cover:
+
+A. common economics and startup
+1. raw bootstrap rows never authorize a Sen/Kendall move;
+2. no fallback decision controller is used by either v0.55 algorithm;
+3. provisional one-count timing statistic is finite and positive when ordinary timing exists;
+4. empirical two-count timing fit supersedes the provisional statistic;
+5. no move before loss-improvement-rate statistics are ready;
+6. raw probe_Δloss remains visible.
+
+B. renamed LRA algorithm
+7. exact identifier wall_time__theil_sen_kendall_LRA;
+8. retired v0.54 identifier rejected;
+9. tau CLI option rejected as removed;
+10. clean LEFT/SHRINK probe;
+11. clean RIGHT/GROW probe;
+12. wiggly per-probe tau below 0.5 becomes ambiguous;
+13. strict-majority window=3 behaves as specified;
+14. no move before full window;
+15. newest adjacent score must remain favourable;
+16. score_z absent from decision and console;
+17. committed move exactly one layer.
+
+C. stratified algorithm
+18. exact identifier wall_time__sen_kendall__tau__stratified;
+19. known pooled within-stratum Sen median;
+20. no cross-stratum slope is ever formed;
+21. perfect increasing stratified Kendall = +1;
+22. perfect decreasing stratified Kendall = -1;
+23. opposed strata can cancel toward zero;
+24. y ties handled;
+25. partial window cannot move;
+26. complete coherent SHRINK window moves -1;
+27. complete coherent GROW window moves +1;
+28. |ken| below 0.5 holds;
+29. adjacent median >= 0 holds even with coherent broader slope;
+30. L+2...L+r cannot affect decision;
+31. missing/infeasible required point does not corrupt stratum alignment;
+32. committed move exactly one layer;
+33. score_z absent from decision and console.
+
+D. lifecycle
+34. warmup freeze;
+35. update brake;
+36. lower/upper bounds;
+37. same_batch_all_probes complete-window retirement;
+38. probe provenance P identifiers;
+39. checkpoint/resume continuation;
+40. DDP deterministic agreement;
+41. PLASTIC-disabled equivalence;
+42. legacy directional_coherence regression.
+
+17. NON-GOALS
+
+Do not add OLS, R-squared decision thresholds, weighted Sen, cross-probe pairwise slopes, arithmetic averaging of per-probe taus, polynomial fitting, curvature fitting, isotonic regression, automatic multi-layer jumps, candidate backward timing calibration, or a new user-facing Kendall threshold knob.
+
+18. GOVERNING INTERPRETATION
+
+For the preferred stratified algorithm:
+
+    Observe probe losses.
+    Convert loss and compute consequences into equivalent seconds.
+    Treat each probe as one stratum/mini-curve.
+    Use stratified Sen to estimate the robust economic direction and magnitude across the whole probe window.
+    Use stratified Kendall to require coherent ordering across that same window.
+    Double-check that the exact adjacent +/-1 action is itself economically downhill.
+    Then take exactly one layer step, or STET.

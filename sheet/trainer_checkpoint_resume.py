@@ -26,6 +26,7 @@ from .training_config import (
     CHECKPOINT_SCHEMA_VERSION,
     EXECUTION_OVERRIDE_FIELDS,
     TrainingConfig,
+    normalize_plastic_v0541_config_fields,
 )
 
 
@@ -268,7 +269,7 @@ class TrainerCheckpointResumeMixin:
         # vvv THOG reject ambiguous or v0.1 PLASTIC geometry before TrainingConfig, model, or optimizer restoration
         validate_plastic_depth_checkpoint_format(payload)
         # ^^^ THOG
-        checkpoint_config = TrainingConfig(**payload["trainer_config"])
+        checkpoint_config = TrainingConfig(**normalize_plastic_v0541_config_fields(payload["trainer_config"]))
         if expected_config is not None:
             validate_compatibility(payload, expected_config)
         # override_values = dict(overrides or {})
@@ -317,6 +318,13 @@ class TrainerCheckpointResumeMixin:
             )
         trainer.batch_source.load_state_dict(payload["batch_source"])
         restore_rng_state(payload["rng_state"])
+        # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
+        trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_depth_count_audit = list(
+            payload.get("plastic_depth_count_audit", ())
+        )
+        # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record("checkpoint_resumed", path=str(path))
         return trainer
@@ -363,6 +371,13 @@ class TrainerCheckpointResumeMixin:
             raise ValueError("checkpoint completed update counters disagree")
         trainer.batch_source.load_state_dict(payload["batch_source"])
         restore_rng_state(payload["rng_state"])
+        # vvv THOG restore optional COARSE/FINE phase state without changing legacy checkpoint semantics
+        trainer.plastic_coarse_fine_state = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_coarse_provenance = payload.get("plastic_coarse_fine_state")
+        trainer.plastic_depth_count_audit = list(
+            payload.get("plastic_depth_count_audit", ())
+        )
+        # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record(
             "legacy_sheet_checkpoint_resumed",

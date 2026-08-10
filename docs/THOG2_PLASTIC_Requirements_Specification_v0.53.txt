@@ -1,0 +1,631 @@
+THOG2 PLASTIC - REQUIREMENTS SPECIFICATION
+THOG2 Version 0.53
+
+PLASTIC REQUIREMENTS SPECIFICATION
+THOG2 Plastic
+Coarse-to-fine DEPTH discovery with supervised global MLP expansion, directionally coherent FINE count control, and controlled same-batch probe windows
+
+VERSION: 0.53
+DATE: 9 August 2026
+STATUS: Proposed architecture-control refinement
+
+SCOPE
+Retain Version 0.52 and add an optional framework-level same_batch_all_probes mode in which every probe event contributing to one DEPTH layer-count decision uses exactly one fixed probe batch, evidence windows are strictly non-overlapping, and a fresh batch is selected for each subsequent window.
+
+VERSION 0.53 DELTA
+Version 0.53 is a +0.01 probe-framework revision over Version 0.52. It adds --plastic__layer_count__same_batch_all_probes, defines fixed-batch non-overlapping window semantics, separates decision-loss evidence probes from ordinary training batches, makes those evidence probes explicitly no-grad, and specifies cache/checkpoint/DDP/provenance requirements. Version 0.52 full-window readiness, canonical probe-control semantics, candidate/directional rules and MLP rules are unchanged.
+
+1. Executive Summary
+
+CORE DECISION
+
+PLASTIC remains a shared architecture controller with optional DEPTH and global MLP-width modes. Version 0.53 retains the Version 0.52 DEPTH FINE controller rules - including full-window readiness, canonical probe controls and the Version 0.51 candidate-local/directional-coherence machinery - and adds a framework-level controlled-probe mode: when same_batch_all_probes is enabled, every probe event that contributes to one DEPTH layer-count decision uses exactly the same probe batch, and probe evidence windows become strictly non-overlapping.
+
+The motivation is variance reduction. Loss can differ materially from batch to batch. If successive probe events use unrelated batches, part of the apparent temporal movement in the candidate surface is data-composition noise rather than evidence about layer count. Holding the probe batch fixed within one decision window removes that nuisance source while still allowing the model itself to evolve between probe events.
+
+A fresh probe batch is selected for every new window. Ordinary training batches continue normally and the cached probe batch is not repeatedly used for training. The model therefore moves between probes, which is unavoidable when a decision deliberately uses evidence collected over multiple optimizer updates, but the data presented to the probe machinery does not.
+
+Decision area | Version 0.53 position
+Shared controller | One PLASTIC framework with optional DEPTH and global MLP-width modes.
+DEPTH candidate evidence | Retain Version 0.52 full-window per-offset robust evidence and directional-coherence gate.
+Controlled probe mode | --plastic__layer_count__same_batch_all_probes enables one fixed probe batch per complete decision window.
+Window semantics | When enabled, evidence windows are strict, contiguous in probe-number space and non-overlapping.
+Batch lifecycle | Acquire one fresh batch at window start; reuse it for every probe event in that window; discard it after the window decision; acquire a new batch for the next window.
+Training separation | Ordinary training continues on its normal fresh batches. The cached probe batch is evidence-only.
+Decision timing | No layer-count decision may be made from an incomplete same-batch window.
+Count movement | A completed-window decision may still move by more than one layer when permitted, but the committed change remains bounded by plastic__layer_count__max_allowable_layer_change.
+Traceability | Existing P provenance is retained and becomes window-local in same-batch mode.
+Compatibility | Default false preserves the existing rolling/multi-batch probe behaviour.
+
+2. Background
+
+2.1 Architectural context
+
+A GPT-style decoder-only language model carries each token representation through a residual stream of fixed width D. Each Transformer block applies attention and an MLP branch and returns an update with the same residual width. PLASTIC supervises two global architectural quantities: active DEPTH count N and, optionally, global MLP intermediate width F.
+
+DEPTH controls how many sequential block samples are executed. MLP width controls the temporary nonlinear expansion inside every active block. Both quantities are conventionally fixed before training. PLASTIC makes them discrete, auditable architecture variables while keeping the residual-stream interface fixed.
+
+2.2 Motivation and intended improvements
+
+The controller replaces part of the up-front architecture guess with supervised adaptation under an explicit goal: lower loss, architecture efficiency, relative training wall time or a memory ceiling. It must not react to every noisy local fluctuation. Paired comparisons, robust history, directional coherence, brakes and bounded movement are therefore deliberate parts of the design.
+
+2.3 DEPTH FINE evidence rules retained from Version 0.52
+
+Version 0.52 is the immediate governing baseline for DEPTH FINE evidence: canonical probe cadence and window-size controls are distinct, decision readiness requires the complete configured probe window, and the Version 0.51 candidate-local robust evidence plus one LEFT, RIGHT or AMBIGUOUS directional vote remains in force. Simultaneous majority support on both sides is treated as ambiguity rather than selecting whichever side is numerically larger.
+
+2.4 Why batch identity matters across probe events
+
+The inherited Version 0.52 controller already requires every candidate count inside one probe event to use identical examples and selected token positions. That pairing removes within-event batch noise. It does not remove batch-to-batch variation across the several probe events used to build a temporal decision history.
+
+same_batch_all_probes extends the pairing principle across the whole evidence window. The batch becomes a controlled experimental condition for one decision. The intended interpretation is: hold the data fixed while collecting evidence for one architecture decision; then resample the data for the next decision.
+
+2.5 Model motion is retained deliberately
+
+The model parameters and learned geometry continue to change under ordinary training between probe events. There is no compatible way to freeze that evolution while also basing the decision on multiple probes collected during ongoing training. Version 0.53 therefore controls batch composition, not model time. The resulting observations are repeated measurements on one fixed batch along an evolving model trajectory.
+
+2.6 Statistical interpretation
+
+The same-batch observations are not independent draws from the data distribution and shall not be represented as such in formal significance calculations. This is not a defect for the intended controller: batch variation is a nuisance variable inside a decision window. Fresh batch selection between windows restores sampling across the data distribution over successive decisions.
+
+3. Scope, Terms and Governing Decisions
+
+3.1 Scope
+
+This specification covers the shared PLASTIC controller, optional DEPTH COARSE discovery, DEPTH FINE full-radius probing, Version 0.52 full-window directional-coherence semantics, Version 0.53 same-batch decision windows, supervised global MLP intermediate-width plasticity, serial cross-mode scheduling, common goals, configuration, checkpoint identity, diagnostics and acceptance criteria.
+
+3.2 Terms
+
+Term | Definition
+PLASTIC | Shared controller for discrete global architectural variables.
+Joint architecture state A | Ordered pair (N,F): active DEPTH layer count N and global active MLP intermediate width F.
+DEPTH probe event | One scheduled FINE evidence event at which every feasible count in the configured radius is compared against current L using one probe batch.
+Probe evidence window | The configured number of probe events used to inform one DEPTH count-decision event.
+same_batch_all_probes | Framework mode in which all probe events in one evidence window reuse exactly one probe batch and windows are strictly non-overlapping.
+Fixed probe batch | The complete rank-local/global set of probe inputs, targets and associated token-selection context retained unchanged for a same-batch window.
+Candidate-local history | Recent paired goal-score differences for one exact candidate offset, keyed by current joint state and, in same-batch mode, by the current probe window.
+Directional vote | LEFT, RIGHT or AMBIGUOUS classification produced once per complete probe event.
+Window provenance | Ordered probe identifiers belonging to the current decision window, displayed using the established P provenance convention.
+Maximum allowable layer change | plastic__layer_count__max_allowable_layer_change; hard bound on the committed movement produced by one completed-window decision.
+
+3.3 Governing decisions
+
+- PLASTIC remains disabled by default; disabled paths preserve established numerical behaviour.
+
+- Version 0.52 DEPTH FINE candidate-local, full-window-readiness and directional-coherence rules remain normative unless Version 0.53 explicitly changes window/batch semantics.
+
+- --plastic__layer_count__same_batch_all_probes is a framework-level DEPTH FINE control, not a property of any one decision algorithm.
+
+- When same_batch_all_probes=false, the existing rolling/multi-batch behaviour is preserved.
+
+- When same_batch_all_probes=true, the configured evidence window becomes strictly non-overlapping. Rolling-window overlap is prohibited.
+
+- One newly selected probe batch is assigned to each new same-batch window and reused unchanged by every probe event in that window.
+
+- A completed window is retired after its decision even when the result is STAY. The next window always starts with a newly selected probe batch.
+
+- Ordinary training batches are not replaced by the cached probe batch. Repeatedly training on the cached probe batch is prohibited.
+
+- A same-batch layer-count decision is prohibited until the complete configured number of valid probe events has been collected.
+
+- The decision event is singular; its committed layer change remains independently bounded by plastic__layer_count__max_allowable_layer_change.
+
+- Any N or F architecture change invalidates any partial DEPTH probe window tied to the previous joint state.
+
+- Existing provenance display remains; in same-batch mode it shall show only probes from the current non-overlapping window.
+
+4. Shared PLASTIC Architecture Controller
+
+4.1 Joint architecture state
+
+The shared controller treats the plastic architecture as A=(N,F). N is active DEPTH count; F is global MLP intermediate width. A committed architecture event changes exactly one coordinate at a time.
+
+A = (N, F)
+r = F / D
+accepted transition: (N,F) -> (N',F) or (N,F')
+
+4.2 Shared goal catalogue
+
+Goal | Shared score basis
+lowest_loss | Paired validation/probe loss for the complete candidate state.
+architecture_efficiency | Loss plus configured cost weight times normalized analytic ordinary-update compute.
+relative_training_wall_time | Goal derived from loss and clean ordinary-update time according to the selected wall-time decision algorithm.
+memory_budget | Reject states exceeding the shared memory limit; among valid states use loss or the selected goal rule.
+
+Directional support is computed from the configured goal score, not raw loss unless lowest_loss is the configured goal. same_batch_all_probes changes evidence acquisition only; it does not redefine the selected goal.
+
+4.3 State-keyed measurements
+
+Clean update time, throughput, peak allocated memory and timing observations are keyed by joint state. Probe work, transition work, compilation, validation, checkpointing and instrumentation are reported separately and do not contaminate clean ordinary-update measurements.
+
+4.4 Shared and mode-local brakes
+
+Each mode retains a local brake. Every accepted architecture change also starts the shared cross-mode brake. Evidence tied to the prior state is archived. In same-batch mode, a state change additionally destroys the active probe-window cache and partial provenance.
+
+4.5 Serial control invariant
+
+ONE LEVER AT A TIME
+
+A DEPTH probe and an MLP audition never overlap. If both are due together, the established priority remains MLP first, followed by the shared brake before DEPTH can collect new decision evidence.
+
+4.6 Shared audit identity
+
+Every architecture event records previous/resulting joint state, active mode, goal, bounds, brakes, candidate calculations, directional calculations when DEPTH is active, batch/window identity when same_batch_all_probes is active, reasons, discarded state and retained state. Console summaries may remain compact; structured logs and checkpoint metadata are authoritative.
+
+5. DEPTH Plasticity
+
+VERSION 0.53 DEPTH PROBE-FRAMEWORK REFINEMENT
+
+Version 0.52 is the immediate baseline: probe cadence and evidence-window size have distinct canonical controls; no decision is eligible before the full configured probe window exists; and existing probe/provenance console diagnostics remain visible. Version 0.53 does not relax or rename those rules.
+
+The Version 0.4 COARSE/FINE lifecycle, Version 0.5 shared-controller integration and Version 0.52 DEPTH FINE decision/readiness rules remain normative. Version 0.53 changes only how a DEPTH FINE evidence window may acquire and retain probe data when same_batch_all_probes is enabled.
+
+5.1 Fixed-Capacity DEPTH Ruler and Sampling Geometry
+
+The existing fixed-order coefficient tensors generate the continuous canonical Transformer-block weight field. Learned-count PLASTIC DEPTH owns one ordered maximum-capacity ruler of M potential positions. The active model executes the first N positions. Growth reveals dormant tail positions; shrink hides tail positions. Surviving positions are not remapped merely because N changes.
+
+NO SURVIVOR REMAP
+
+A count transition changes active-prefix membership only. It does not rescale or re-gauge surviving sampling coordinates as a side effect of changing N.
+
+5.2 Two-Phase Training Lifecycle
+
+COARSE enabled:
+  fresh deterministic fixed-count trials
+  final K-batch evaluation
+  discard trained trial state
+  select winner and review
+  fresh FINE step zero at selected N
+
+COARSE disabled:
+  fresh FINE step zero at plastic__initial_layer_count
+
+Only measurements and selected count cross from COARSE to FINE; trial-trained model/optimizer/RNG/data position do not.
+
+5.3 COARSE phase
+
+COARSE candidate and evaluation rules remain unchanged. COARSE performs no FINE probe windows, no same_batch_all_probes caching and no FINE controller history.
+
+5.4 FINE full-radius probe event
+
+For current count N and probe radius R, every valid integer count in [N-R,N+R] is evaluated, clipped by count bounds and feasibility guards. Current N is included. Endpoint-only probing remains prohibited. Within one event, all candidates use exactly the same examples and selected token positions.
+
+5.5 Candidate-local and directional decision rule
+
+Version 0.52 remains authoritative: every feasible non-current candidate contributes a paired goal-score difference; robust median/MAD/sigma/z_score statistics are maintained; candidate-local qualification is conjunctive with the LEFT/RIGHT/AMBIGUOUS directional gate; among candidates surviving both gates the existing largest-z_score and fewer-layers tie rule remains authoritative.
+
+5.6 Probe evidence windows
+
+5.6.1 Existing mode
+
+With same_batch_all_probes=false, existing probe scheduling, batch acquisition, history retention and rolling-window semantics remain unchanged.
+
+5.6.2 same_batch_all_probes mode
+
+With --plastic__layer_count__same_batch_all_probes enabled, one decision window consists of exactly plastic__layer_count_probe__window_size_as_number_of_probes completed valid probe events. All of those events use the same fixed probe batch.
+
+The window is not a rolling history. It begins empty, fills from 1 through W probe events, produces one decision event when W is reached, and is then retired. A new window begins with a new probe batch. Evidence from the retired window is not retained as current-window evidence even when the decision is STAY.
+
+W = 4
+window A / batch A:  P1   P2   P3   P4 -> decision -> retire
+window B / batch B:  P5   P6   P7   P8 -> decision -> retire
+window C / batch C:  P9   ...
+
+Permitted provenance: (P1), (P1,2), (P1,2,3), (P1,2,3,4)
+Next window starts:  (P5)
+Prohibited: rolling (P2,3,4,5) under same_batch_all_probes
+
+5.6.3 Batch identity
+
+The fixed batch includes the complete probe inputs and targets and every data-dependent selection required to make the observations comparable: sequence positions, ignore masks and any sampled valid-token indices used by the probe head. Recomputing a different random token subset from the same sequences does not satisfy same_batch_all_probes.
+
+5.6.4 Runtime cache
+
+The implementation shall retain the batch in the most convenient reusable runtime form. GPU-resident tensors are acceptable when convenient; a pinned-host or equivalent representation is also acceptable. Version 0.53 imposes no memory-optimization requirement for this cache beyond correctness and clean lifecycle management.
+
+5.6.5 Fresh batch between windows
+
+The first eligible probe event of each new window selects a fresh probe batch from the normal probe data source. That batch remains fixed until the window is retired. A fresh batch is selected after both CHANGE and STAY decisions.
+
+5.6.6 Ordinary training is separate
+
+Training batches continue according to the established training data stream. The fixed probe batch is not substituted for the first training microbatch on every probe event and is not repeatedly backpropagated. This is a hard semantic requirement, not merely an optimization preference.
+
+5.6.7 Decision readiness
+
+Intermediate probes may display provisional evidence and provenance, but no layer-count decision or commit may occur before the same-batch window reaches W completed valid probe events. The completed window then generates one decision event. That decision may produce STAY or a count movement bounded by plastic__layer_count__max_allowable_layer_change.
+
+5.6.8 Window invalidation
+
+Any change to N or F invalidates partial DEPTH evidence tied to the previous joint state. If a partial same-batch window exists, its cached batch, candidate histories, directional votes and provenance are discarded or archived as incomplete. The next eligible DEPTH probe starts a fresh window with a fresh batch.
+
+5.6.9 Valid probe-event counting
+
+A probe event advances the same-batch window only after the normal probe report is successfully produced for current L and every globally feasible candidate. Candidates legitimately excluded by bounds or global feasibility remain omitted with reason and do not by themselves invalidate the event. A failed/non-finite probe event does not silently consume a window slot.
+
+5.7 Probe gradient and optimizer semantics
+
+5.7.1 Decision-loss probes are observation-only
+
+Every forward whose loss exists solely to provide layer-count decision evidence shall run without autograd recording and shall perform no backward pass, gradient accumulation, optimizer-state modification or parameter update. torch.no_grad() or equivalent semantics are the expected implementation.
+
+5.7.2 Ordinary training remains ordinary training
+
+The normal training forward/backward for the authoritative model is not a probe. It remains differentiable and updates model parameters as usual. In same_batch_all_probes mode the evidence batch and ordinary training batch are distinct roles even when they happen to be processed on the same optimizer-update boundary.
+
+5.7.3 Resource probes are a separate class
+
+Timing or memory probes that intentionally execute backward work to measure forward/backward cost are not decision-loss probes. They may use backward when required for the resource measurement, but they shall not step the optimizer and their incidental loss values shall not be substituted for no-grad decision-loss evidence.
+
+5.7.4 Consequence for the current inline design
+
+An implementation that currently derives DEPTH decision evidence from the first training microbatch cannot satisfy same_batch_all_probes by simply retaining that microbatch across probe events: doing so would repeatedly train on the same batch. The same-batch mode therefore requires a decoupled evidence-forward path, or an equivalent design that keeps the cached probe batch observation-only while ordinary training consumes its normal fresh microbatches.
+
+5.8 Count transition and max movement
+
+The completed-window winner determines desired direction/distance according to the selected decision algorithm. The committed movement is then clamped independently by plastic__layer_count__max_allowable_layer_change. same_batch_all_probes does not force +/-1 movement.
+
+desired_delta = winning_probe_count - N
+committed_delta = clip(desired_delta, -max_allowable_layer_change, +max_allowable_layer_change)
+committed_count = N + committed_delta
+
+5.9 Provenance and display semantics
+
+The established P provenance remains visible. In same-batch mode the provenance list is exactly the current non-overlapping window and therefore grows monotonically from one probe identifier to W identifiers, then restarts at the next probe identifier after the window is retired. Structured diagnostics additionally record a stable window identifier and batch identity/reconstruction identity.
+
+5.10 Runtime cost, VRAM and geometry learning
+
+same_batch_all_probes reduces statistical noise but does not make probes free. Decoupling probe evidence from training may add an explicit observation-only forward on scheduled probe events. Probe overhead remains excluded from clean ordinary-update timing used by wall-time objectives. Geometry continues to learn from ordinary training according to its existing LR multiplier and warmup policy.
+
+6. MLP Plasticity
+
+UNCHANGED BY 0.53
+
+Version 0.53 does not alter the Version 0.5 supervised global MLP-width audition design. same_batch_all_probes applies to DEPTH layer-count probe windows only.
+
+6.1 Global intermediate width
+
+The plastic MLP variable is global intermediate width F, not hidden weights. Residual-stream width D remains fixed and expansion ratio r=F/D is derived. All active Transformer blocks use the same F.
+
+6.2 Active-prefix and physical-state rules
+
+Active channels are an ordered prefix. Growth appends a quantum; shrink removes only the tail quantum. Surviving channel identities, parameters and optimizer state are not remapped merely because F changes. Committed states must realize actual shape, compute and memory changes rather than maximum-width masked execution.
+
+6.3 Function-preserving widening and audition
+
+An upward candidate is created by a tested function-preserving widening transform. Immediate upward loss probing remains prohibited because a preserving split begins with essentially the same function. Candidate branches train from the same complete snapshot for the configured audition horizon, use identical examples and final validation batches, and are compared with paired robust evidence.
+
+6.4 MLP decision audit
+
+Every accepted or rejected audition retains width, expansion ratio, parameter count, clean seconds/update, throughput, peak memory, per-batch losses, goal score, paired robust statistics, branch order, retained/discarded state and a plain-language reason. Accepted growth additionally records parent mapping and function-preservation checks.
+
+7. Integrating DEPTH and MLP Plasticity
+
+7.1 Architectural ordering
+
+MLP WIDTH BEFORE DEPTH
+
+Resolve active MLP width before DEPTH sampling/materialisation so inactive intermediate channels do not generate unused trajectories or layer weights.
+
+7.2 Serial scheduling and credit assignment
+
+Controllers operate as serial coordinate descent over A=(N,F). An MLP audition fixes N; a DEPTH probe fixes F. They never overlap or commit diagonally.
+
+7.3 Cross-mode brake and same-batch invalidation
+
+After any N or F change, DEPTH candidate histories, directional votes and any active same-batch window tied to the old joint state are archived/cleared. A new probe batch is not selected until DEPTH next becomes eligible.
+
+7.4 Shared-goal consistency and DDP
+
+The same selected goal determines candidate-local scores and side win indicators. All ranks share joint state, candidate feasibility, goal aggregates, directional aggregates, probe-window position, winner and committed transition. In same-batch mode, the global distributed probe batch is fixed across the window: each rank retains its own deterministic slice and the set of rank-local slices is unchanged from probe to probe.
+
+7.5 No automatic joint move
+
+A simultaneous (N,F)->(N+1,F+Q) transition remains prohibited. The resulting state must be remeasured before the other coordinate is considered.
+
+8. Configuration and Resolution
+
+8.1 Shared canonical controls
+
+Parameter | Default | Required meaning
+plastic__enabled | false | Enable shared PLASTIC framework.
+plastic__objective | lowest_loss | Shared goal.
+plastic__memory_budget_gib | unset | Peak allocated GiB limit required by memory_budget.
+plastic__cuda_allocator_reserve_gib | 0.5 | Universal device headroom guard.
+plastic__cross_mode_update_brake | existing default | Completed authoritative updates after a change before the other mode may collect evidence.
+
+8.2 DEPTH controls
+
+Parameter | Default | Required meaning
+plastic__do_learn_layer_count | false | Enable FINE discrete DEPTH controller.
+plastic__initial_layer_count | n_layer | FINE initial N when COARSE disabled.
+plastic__max_permitted_layers | required | Maximum DEPTH capacity M.
+plastic__layer_count_update_brake | existing default | Minimum completed updates after a count change before another commit.
+plastic__layer_count_probe__probe_every_n_steps | existing default | Spacing in optimizer updates between scheduled DEPTH probe events.
+plastic__layer_count_probe__window_size_as_number_of_probes | existing default | Number of probe events used to inform a layer-count decision.
+plastic__layer_count_probe_radius | 1 | Full integer DEPTH probe radius.
+plastic__layer_count__max_allowable_layer_change | 1 | Maximum committed DEPTH count movement from one decision event.
+plastic__layer_count__same_batch_all_probes | false | If true, use one fixed probe batch for every probe in a strict non-overlapping evidence window; select a fresh batch for the next window.
+
+Public CLI spelling is exactly --plastic__layer_count__same_batch_all_probes. The shorter same_batch_all_probes name may be used in prose.
+
+8.3 Resolution rules for same_batch_all_probes
+
+- The value is boolean and checkpoint-authoritative.
+
+- false preserves the existing batching and rolling-window semantics.
+
+- true makes non-overlap intrinsic; no independent overlap/rolling option is valid.
+
+- window_size_as_number_of_probes must remain a positive integer. A value of 1 is legal and means each probe is its own window with a fresh batch.
+
+- A full same-batch window is mandatory before a layer-count decision. No separate min-probe override may reduce that requirement.
+
+- The maximum allowable layer change remains independent of window size and same-batch mode.
+
+8.4 Startup report
+
+DEPTH
+  plastic__layer_count_probe__probe_every_n_steps: 4
+  plastic__layer_count_probe__window_size_as_number_of_probes: 4
+  plastic__layer_count_probe_radius: 1
+  plastic__layer_count__max_allowable_layer_change: 1
+  plastic__layer_count__same_batch_all_probes: true
+  probe window policy: fixed_batch_non_overlapping
+  decision readiness: complete_window_only
+
+8.5 Validation
+
+Configuration validation shall reject internally contradictory semantics rather than silently degrading same_batch_all_probes to rolling history. Unsupported combinations that would cause a cached probe batch to be repeatedly trained shall fail or be routed through the dedicated observation-only probe path.
+
+8.6 Artifact and checkpoint identity
+
+Complete canonical configuration and controller state remain checkpoint-authoritative. Run-name abbreviations may stay compact, but metadata shall retain plastic__layer_count__same_batch_all_probes, current window position, provenance, batch reconstruction identity and any partial window evidence required for exact resume.
+
+9. Training, Checkpoint, Resume and Instrumentation
+
+9.1 Optimizer and scheduler lifetime
+
+COARSE and MLP audition lifetime rules remain unchanged. FINE ordinary training and probe-only work remain separated for timing/accounting purposes. Decision-loss probe forwards do not modify optimizer or gradient state.
+
+9.2 Checkpoint during FINE same-batch window
+
+A checkpoint taken after probe j of a W-probe same-batch window shall resume with the same batch and the same partial window. It shall not draw a replacement batch, renumber provenance or reinterpret the partial evidence as a new window.
+
+The checkpoint shall persist either the exact probe batch contents or sufficient deterministic source identity to reconstruct them bit-for-bit, including selected token indices/masks when those are part of the probe. Runtime caching may remain GPU-resident, but checkpoint representation should be portable and need not persist device-specific tensor placement.
+
+9.3 Checkpoint after a completed-window decision
+
+The completed window audit is retained, but its runtime batch cache and active evidence state are retired. Resume begins before the next window with no cached probe batch. If the decision changed N or F, the normal state-change brake and evidence reset also apply.
+
+9.4 Checkpoint after external/joint-state invalidation
+
+If N or F changes before a partial DEPTH same-batch window completes because of another authoritative architecture event, the checkpoint records that the partial window was invalidated and does not revive it on resume.
+
+9.5 DDP exactness
+
+Each rank persists/reconstructs its own rank-local slice of the fixed distributed probe batch. The aggregate distributed batch, sampled positions and reduction semantics shall remain identical across all probe events in the window and across exact resume.
+
+9.6 W&B and structured metrics
+
+Recommended fields include probe_window_id, probe_window_index, probe_window_size, probe_window_complete, same_batch_all_probes, probe_batch_identity, provenance, and window_disposition={stay,change,invalidated}. The batch identity may be a deterministic digest or source descriptor; raw batch tensors need not be logged to W&B.
+
+9.7 Interrupt behaviour
+
+Established Ctrl-F/Ctrl-G/Ctrl-C and pause/audition semantics remain unchanged. A safe checkpoint must preserve an incomplete same-batch window exactly as specified above.
+
+10. Diagnostics and Required Implementation Work
+
+10.1 Required DEPTH FINE diagnostics
+
+Diagnostic | Required content
+Probe row | All counts in full radius; current absolute score/loss; signed candidate deltas; existing robust/directional fields; current provenance.
+Window state | same_batch_all_probes flag, window id, current probe ordinal j/W, batch identity and complete/incomplete status.
+Batch lifecycle | New-batch acquisition, reuse, retirement and invalidation reasons in structured diagnostics.
+Candidate noise state | Median, MAD, sigma, newest sign, favourable count, observations, threshold and pass/fail per exact offset.
+Directional history | Retained L/R/A votes for the current window and strict-majority result at window completion.
+Decision readiness | Explicit collecting state before j=W; no commit-eligible result shall be displayed as final before window completion.
+Count change | Complete audit including winning probe count, committed count, max allowable change and window provenance.
+Training separation | Probe-only work and ordinary training work separately accounted so clean update timing remains uncontaminated.
+
+10.2 Required implementation work
+
+Work item | Required result
+Configuration plumbing | Expose --plastic__layer_count__same_batch_all_probes, default false, and persist it in authoritative configuration.
+Window state machine | When enabled, collect exactly W probes, prohibit overlap, decide once, retire the window and start a new one.
+Probe batch owner | Acquire one fresh batch per window and retain it in a convenient reusable form.
+Observation-only probe path | Evaluate the cached batch without backward or optimizer mutation; do not repeatedly train on it.
+Training decoupling | Allow ordinary training microbatches to continue normally on probe updates.
+History lifecycle | Make candidate/directional histories window-local in same-batch mode and clear/retire after every completed decision.
+State invalidation | Drop partial same-batch evidence on N/F changes.
+Checkpoint schema | Resume the same partial window and batch exactly.
+DDP | Preserve the same distributed batch slices and window state on all ranks.
+Audit/provenance | Keep established P provenance and add structured window/batch identity.
+Tests | Cover fixed-batch reuse, fresh batch between windows, non-overlap, no early decision, no-grad evidence, training-data separation, reset, resume, DDP and disabled regression.
+
+10.3 Source-change discipline
+
+All inherited nanoGPT modifications retain the project THOG marking/no-deletion discipline.
+
+11. Requirements and Acceptance Criteria
+
+11.1 Inherited requirements
+
+All Version 0.4/0.5 COARSE, MLP and integration requirements and all Version 0.52 DEPTH FINE controller requirements remain normative except where Version 0.53 explicitly replaces evidence-window batching/lifecycle semantics.
+
+11.2 Version 0.52 controller requirements retained
+
+Version 0.52 full-window readiness remains mandatory: the configured plastic__layer_count_probe__window_size_as_number_of_probes is both the retained evidence-window size and the decision-readiness requirement; no separate minimum-probes override is restored by Version 0.53. The canonical probe cadence/window controls and established normal/DEBUG probe diagnostics also remain normative.
+
+ID | Requirement
+PD51-001 | Every completed full-radius DEPTH probe shall produce exactly one directional vote: LEFT, RIGHT or AMBIGUOUS.
+PD51-002 | Side wins shall be determined from the configured goal score, not raw loss unless lowest_loss is active.
+PD51-003 | Every feasible L- candidate shall have equal weight in S_left.
+PD51-004 | For L+k, raw directional weight shall be e**(k-1), with the configured extrapolation evidence discount.
+PD51-005 | S_right shall equal the extrapolation discount times the normalized weighted favourable fraction.
+PD51-006 | If both sides exceed the strict-majority threshold, the event shall be AMBIGUOUS.
+PD51-009 | Directional vote history shall be bounded by the configured probe-evidence window.
+PD51-012 | A lower-count candidate shall be commit-eligible only when candidate-local evidence and LEFT direction both pass.
+PD51-013 | A higher-count candidate shall be commit-eligible only when candidate-local evidence and RIGHT direction both pass.
+PD51-015 | The configured maximum layer change shall continue to bound committed movement after winner selection.
+PD51-018 | Any N or F change shall archive/clear DEPTH evidence tied to the previous joint state.
+PD51-020 | Checkpoint resume and DDP shall reproduce the same side supports, vote, directional majority and count decision.
+
+11.3 Version 0.53 same-batch requirements
+
+ID | Requirement
+PD53-001 | The public CLI argument shall be exactly --plastic__layer_count__same_batch_all_probes; prose may use same_batch_all_probes.
+PD53-002 | same_batch_all_probes shall default false and false shall preserve established batching/window behaviour.
+PD53-003 | When true, one newly selected probe batch shall be reused by every probe event contributing to one layer-count decision window.
+PD53-004 | Batch identity shall include inputs, targets and every data-dependent sampled token/mask selection used by the probe.
+PD53-005 | When true, probe evidence windows shall be strictly non-overlapping; rolling overlap is prohibited.
+PD53-006 | After every completed window decision, including STAY, the current batch/evidence window shall be retired and the next window shall use a fresh batch.
+PD53-007 | No layer-count decision or commit shall occur before the full configured number of probes has been collected in a same-batch window.
+PD53-008 | A completed-window decision may request a multi-layer change; the commit shall remain bounded by plastic__layer_count__max_allowable_layer_change.
+PD53-009 | Ordinary training shall continue to consume its normal training batches; repeatedly training on the cached probe batch is prohibited.
+PD53-010 | Every loss forward used solely for layer-count decision evidence shall be no-grad and shall not backward, accumulate gradients, modify optimizer state or update parameters.
+PD53-011 | Resource timing/memory probes that intentionally exercise backward shall remain a distinct probe class and shall not substitute their incidental losses for decision-loss evidence.
+PD53-012 | The implementation shall cache the window batch in any convenient reusable runtime form; correctness takes priority over unnecessary memory optimization.
+PD53-013 | Any N or F change shall invalidate a partial same-batch window and its cached batch before further DEPTH evidence is collected.
+PD53-014 | Checkpoint resume inside a partial same-batch window shall reproduce the same batch, sampled token positions, provenance and next decision exactly.
+PD53-015 | DDP shall retain the same rank-local batch slices and aggregate distributed probe batch across all probe events in the window.
+PD53-016 | Established P provenance shall remain visible and shall contain only probes belonging to the current non-overlapping window.
+PD53-017 | A failed probe event shall not silently consume a same-batch window slot.
+
+12. Known Issues and Limitations
+
+Issue or limitation | Version 0.53 position
+Model changes between probes | same_batch_all_probes removes batch-composition noise, not temporal model motion. This is inherent in any decision based on multiple probes collected during continuing training.
+One batch is not the data distribution | Within-window observations are conditional on one batch and are not independent dataset samples. Fresh batches between windows provide distributional resampling over successive decisions.
+Batch-specific decision risk | A particular fixed batch can be atypical. Non-overlapping fresh-window resampling reduces persistent bias, but a single completed window may still favour a batch-specific architecture move.
+Extra probe-forward cost | Decoupling evidence from ordinary training can require an explicit no-grad forward on scheduled probe events. The gain is cleaner evidence, not lower probe cost.
+Cached-batch memory | Retaining one probe batch consumes memory. For the intended batch sizes this is expected to be small relative to model/activation memory; Version 0.53 deliberately does not add a memory-tuning knob.
+Checkpoint payload | Exact resume may store probe tensors or source indices. This adds modest checkpoint state.
+Directional weighting remains empirical | The Version 0.51 extrapolation weighting remains an engineering choice requiring ablation.
+Probe-event outcomes remain correlated | Fixed-batch reuse increases intentional within-window correlation. Temporal dependence from the evolving model remains.
+Both sides can genuinely improve | A non-monotone objective can make current L a real local bump. Directional ambiguity still causes the controller to wait.
+Full-radius probing costs more | Probe cadence and window size must keep exploration overhead tolerable.
+Local FINE remains path-dependent | COARSE and controlled probing do not prove global optimality.
+MLP auditions remain expensive | Version 0.53 does not reduce their branch cost.
+
+13. Acceptance Scenarios and Out of Scope
+
+13.1 Acceptance scenarios
+
+Scenario | Pass condition
+Disabled regression | same_batch_all_probes=false reproduces established probe batching, histories, decisions and numerical paths.
+Four-probe fixed window | W=4 uses one batch for P1..P4, makes no decision at P1/P2/P3, decides at P4, then retires the window.
+No overlap | After P1..P4, the next provenance is P5, not P2..P5.
+Fresh next batch | The batch used by P5 differs from the retired P1..P4 batch according to the probe source while remaining deterministic under exact replay.
+STAY refresh | A P1..P4 STAY decision still retires batch A and P5 begins a new window on batch B.
+CHANGE refresh | A P1..P4 count change retires batch A, clears old-state evidence and the next eligible probe uses a fresh batch.
+Training separation | Probe updates do not cause the cached batch to appear repeatedly in the ordinary training batch stream.
+No-grad evidence | Decision-loss probe forwards leave all .grad tensors, optimizer state and parameter values unchanged.
+Resource-probe distinction | Timing/memory backward probes remain functional but cannot leak their incidental loss into decision evidence.
+Max movement independent | W=4 and max_allowable_layer_change=2 permits a completed decision to commit at most two layers, not one and not four.
+Partial checkpoint | Checkpoint after P2 resumes with the exact same batch and completes P3/P4 before deciding.
+Invalidation | An F change after P2 invalidates P1/P2 and the next DEPTH probe starts a new batch/window.
+DDP | All ranks preserve their rank-local fixed slices and reproduce the same completed-window decision after resume.
+Provenance | Console/structured output shows (P1), (P1,2), (P1,2,3), (P1,2,3,4), then (P5).
+
+13.2 Explicitly out of scope
+
+- Freezing model parameters between probes in order to create repeated measurements on an identical model state.
+
+- Treating the W within-window probes as W independent samples from the data distribution.
+
+- Training repeatedly on the cached probe batch.
+
+- Overlapping same-batch windows or sharing one cached batch across multiple decision windows.
+
+- Learning the probe batch or selecting it adversarially from candidate outcomes.
+
+- Changing Version 0.52 inherited candidate-local, full-window-readiness or directional formulas as part of this revision.
+
+- Changing the MLP audition design.
+
+- Simultaneous diagonal N/F moves, input-dependent layer count, or automatic re-COARSE.
+
+Appendix A. Resolved Examples
+
+A.1 Four-probe same-batch window
+
+--plastic__layer_count_probe__probe_every_n_steps 4
+--plastic__layer_count_probe__window_size_as_number_of_probes 4
+--plastic__layer_count__same_batch_all_probes
+
+probe updates: 5, 9, 13, 17
+probe batch: A for all four events
+provenance: P1 -> P1,2 -> P1,2,3 -> P1,2,3,4
+update 17: one layer-count decision
+next eligible probe: P5 on fresh batch B
+
+A.2 No early decision
+
+With W=4, candidate statistics and directional votes may be shown after the first three probes, but score_z/decision readiness remains incomplete and no count transition is allowed. The fourth valid probe closes the window and permits the decision algorithm to act.
+
+A.3 STAY still advances the experiment
+
+window A: P11,P12,P13,P14 -> STAY at N=22
+retire A
+window B: P15,P16,P17,P18 -> new evidence on fresh batch B
+
+The controller does not keep P12,P13,P14 and append P15. Doing so would reintroduce an overlapping rolling window and mix fixed-batch experiments.
+
+A.4 Multi-layer commit remains independent
+
+current N = 22
+probe radius = 5
+completed fixed-batch window winner = L+4
+plastic__layer_count__max_allowable_layer_change = 2
+commit = 22 -> 24
+
+A.5 Checkpoint in mid-window
+
+saved state after P21,P22 of W=4:
+  window_id = 6
+  batch_identity = B6
+  provenance = [P21,P22]
+  evidence_count = 2
+resume:
+  reuse B6 for P23 and P24
+  decision only after P24
+
+A.6 DDP interpretation
+
+On four ranks, batch B consists of fixed slices B0,B1,B2,B3. Rank r reuses Br for every probe in the window. The distributed reduction therefore sees the same aggregate batch B at P1, P2, ... PW. It is not required that every rank process identical tokens to every other rank.
+
+Appendix B. Implementation Sequence and Migration
+
+B.1 Recommended implementation order
+
+Add plastic__layer_count__same_batch_all_probes to canonical configuration, CLI help, startup reporting, checkpoint metadata and compatibility identity; default false.
+
+Introduce an explicit DEPTH probe-window state owner containing window id, probe ordinals/provenance, evidence count and cached-batch state.
+
+Implement fresh-batch acquisition at the first eligible probe of a new window and retain the batch in a convenient reusable runtime representation.
+
+Decouple decision-loss evidence from the ordinary first training microbatch so the fixed batch can remain observation-only while training continues on fresh batches.
+
+Enforce no-grad/no-backward semantics for decision-loss probe forwards and add invariance tests for gradients, optimizer state and parameters.
+
+When same_batch_all_probes is true, replace rolling-window update logic with exact W-probe fill -> one decision -> retire semantics.
+
+Preserve existing Version 0.52 candidate-local, full-window-readiness and directional calculations inside the window; prohibit commit readiness before W probes.
+
+Retire batch/evidence after every completed decision including STAY; invalidate partial windows on N/F changes.
+
+Persist/reconstruct partial-window batch identity, sampled token positions, evidence and provenance for exact checkpoint resume.
+
+Synchronize same-batch window lifecycle and rank-local batch slices under DDP.
+
+Extend console/structured diagnostics and decision audit while retaining established P provenance.
+
+Run focused unit tests, exact-resume tests, single-GPU smoke, DDP tests and disabled-mode regression before enabling the option in serious runs.
+
+B.2 Implementation note: preserve existing paths
+
+The cleanest implementation is additive: the existing rolling/multi-batch path remains untouched when same_batch_all_probes=false. The new state machine should branch only when the new flag is enabled. This minimizes regression risk and makes A/B testing direct.
+
+B.3 Checkpoint compatibility
+
+Version 0.53 adds authoritative configuration and transient window state only when the mode is enabled. Existing checkpoints without the field resolve to false unless the project checkpoint-version policy requires an explicit migration. A checkpoint saved with same_batch_all_probes=true must never resume by silently selecting a different mid-window batch.

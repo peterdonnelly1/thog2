@@ -1,0 +1,118 @@
+# PLASTIC same_batch_all_probes implementation tasks
+
+Governing specification: `docs/THOG2_PLASTIC_Requirements_Specification_v0.53.txt`
+Branch: `PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION`
+PR: #33
+Started: 2026-08-09
+Implementation code head validated: `da43638b2266ed7122618400299e768af3edb52d`
+Corrected CUDA-smoke test head: `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f`
+Public-wrapper routing fix: `b60524d820d86db5eb4b14292806cb880a926d02`
+Wrapper regression test: `4e23cc98c78228b14f1a37e34f1899a42a28fda6`
+
+## Status
+
+Overall: IMPLEMENTED; CPU/DDP VALIDATED; PUBLIC WRAPPER ROUTING DEFECT FIXED; CORRECTED REAL CUDA RERUN OUTSTANDING
+
+## Task list
+
+- [x] Confirm governing branch/spec and preserve existing disabled path.
+- [x] Create takeover-safe task list and implementation log before runtime edits.
+- [x] Map current FINE probe call chain, batch ownership, decision-history ownership, checkpoint serialization, DDP and console provenance.
+- [x] Add public `plastic__layer_count__same_batch_all_probes`, default `false`, help exposure, enabled-mode persistent identity and checkpoint compatibility.
+- [x] Add explicit same-batch probe-window runtime state with strict non-overlapping `W`-probe lifecycle.
+- [x] Add one fresh cached probe batch per window, including stable sampled-token selection.
+- [x] Decouple decision-loss evidence from ordinary training microbatches in same-batch mode.
+- [x] Enforce no-grad/no-backward semantics for decision-loss evidence while preserving distinct resource/timing probes.
+- [x] Enforce complete-window-only decision/commit and retire the window after both CHANGE and STAY.
+- [x] Invalidate partial same-batch windows after a relevant active-count/joint-state mismatch.
+- [x] Preserve/extend P provenance and structured window/batch diagnostics.
+- [x] Persist/reconstruct partial-window batch/evidence/provenance for exact checkpoint resume.
+- [x] Synchronize same-batch window semantics under DDP.
+- [x] Add focused unit/regression tests, including disabled-path regression and final overlay ownership.
+- [x] Run available CPU validation / CI.
+- [x] Update PR implementation summary and finalize this task list/log.
+- [x] Run the first external real-CUDA smoke attempt on scruffy; it reached COARSE, fresh FINE construction and one successful optimizer update, then the test failed because its inherited `warmup_updates=1` correctly suppressed the first FINE probe while the stale assertion expected an audit row.
+- [x] Correct the CUDA smoke so it disables warmup for the probe check, explicitly enables same-batch mode, completes a four-probe fixed-batch window and validates non-overlap/provenance/audit semantics.
+- [x] Reproduce and diagnose the public `train_OWT.sh` `Unknown option: --` failure with same-batch plus wall-time controls.
+- [x] Route `--plastic__layer_count__same_batch_all_probes` and its negative form through the existing Python-extra-argument channel after the wrapper delimiter.
+- [x] Add a wrapper regression covering same-batch plus all three equivalent-time wall-time controls.
+- [ ] Rerun the corrected external real-CUDA smoke before relying on this mode for a serious GPU run.
+
+## Public wrapper routing defect
+
+The user run stanza correctly supplied:
+
+```bash
+--plastic__layer_count__same_batch_all_probes \
+--plastic__wall_time_equivalent_time_gain_discount 0.9 \
+--plastic__wall_time_equivalent_time_gain_loss_rate_window 64 \
+--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations 16 \
+```
+
+The v0.541 shell shim already extracted the three Python-native wall-time controls and placed them after the wrapper's literal `--` delimiter. The new v0.53 same-batch Boolean had not been added to that pass-through list, so it remained before the delimiter. `train_OWT_core.sh` then handed it to `getopts`, which interpreted the first character of the long option as an invalid short option and emitted `Unknown option: --`.
+
+Fix `b60524d820d86db5eb4b14292806cb880a926d02` extracts both the positive and negative same-batch flags and inserts them after the same delimiter as the wall-time controls. Public syntax is unchanged. Regression `4e23cc98c78228b14f1a37e34f1899a42a28fda6` invokes `train_OWT.sh -h` with the same-batch flag and all three wall-time controls and requires success with no `Unknown option: --` output.
+
+## Validation at code head `da43638b2266ed7122618400299e768af3edb52d`
+
+- `Validate PLASTIC COARSE FINE regression` run `31289904430`: SUCCESS.
+  - explicit `py_compile`, including `sheet/plastic_depth_same_batch_all_probes_patch.py`: passed;
+  - shell syntax: passed;
+  - full CPU suite completed;
+  - untouched-`PLASTIC_DEPTH` inherited-failure classifier: passed with no new branch-only failures.
+- `Validate PLASTIC disabled equivalence` run `31289904395`: SUCCESS, exact disabled equivalence.
+- `Validate PLASTIC COARSE FINE DDP` run `31289904420`: SUCCESS with `same_batch_all_probes=true`; two ranks agreed on the fixed-batch/window audit.
+
+Wrapper-fix CI for head `4e23cc98c78228b14f1a37e34f1899a42a28fda6` is running as of this update.
+
+## External CUDA gate
+
+First attempt on scruffy at branch head `a23636f090c3cb0e21f9eb30f41dec10d29dbb49`:
+
+- CUDA device: NVIDIA GeForce RTX 4090 Laptop GPU;
+- PyTorch 2.12.1+cu126 / CUDA runtime 12.6;
+- COARSE trial and fresh FINE construction completed;
+- first authoritative FINE optimizer update completed without being skipped;
+- failure was `AttributeError: SharedTrainer has no attribute plastic_depth_count_audit` in the smoke assertion, because the fixture inherited `warmup_updates=1` and the warmup guard correctly created no probe/audit on update 1.
+
+This was a smoke-test defect, not an observed CUDA allocator/OOM failure.
+
+Corrected smoke commit: `e5bd20485ac1bb463b2eca0b5e244932e5f6ae3f`.
+
+The corrected smoke now explicitly exercises `same_batch_all_probes=true` for a complete four-probe window and checks:
+
+- four successful real CUDA optimizer updates;
+- active layer count unchanged before the full window decision;
+- one fixed `probe_batch_digest` across all four probes;
+- window ordinals 1,2,3,4;
+- provenance `(P1)`, `(P1,2)`, `(P1,2,3)`, `(P1,2,3,4)`;
+- final STAY retirement and cleared window histories;
+- full-radius candidate counts and audit replay;
+- nonzero CUDA peak allocation.
+
+Rerun:
+
+```bash
+cd ~/git/thog2
+git fetch origin PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+git checkout PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+git reset --hard origin/PLASTIC_DEPTH_COARSE_FINE_IMPLEMENTATION
+bash tools/run_plastic_coarse_fine_gpu_smoke.sh
+```
+
+## Non-negotiable semantics
+
+1. `--plastic__layer_count__same_batch_all_probes` is the public option; short prose name is `same_batch_all_probes`.
+2. Default `false` preserves current behaviour.
+3. `true` means one fixed probe batch per complete decision window and strictly non-overlapping windows.
+4. The next window always gets a fresh probe batch, including after STAY.
+5. Ordinary training continues on normal fresh training batches; the cached probe batch is evidence-only.
+6. No layer-count decision/commit before the full configured probe window is complete.
+7. One completed-window decision may still move multiple layers, bounded independently by `plastic__layer_count__max_allowable_layer_change`.
+8. Decision-loss probes are no-grad and perform no backward/optimizer mutation; resource probes remain a separate class.
+9. Existing P provenance remains visible and is window-local.
+10. Partial-window exact resume reproduces the same batch, sampled-token selection, evidence and next decision.
+
+## THOG source-history discipline
+
+Do not delete inherited nanoGPT/THOG lines. Preserve superseded lines as comments where required. New or replaced larger blocks use `# vvv THOG` / `# ^^^ THOG`; single-line edits use the project trailing `# <<< THOG ...` convention at column 156 where practical.

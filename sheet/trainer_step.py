@@ -287,7 +287,7 @@ class TrainerStepMixin:
                 maximum_layers=lattice.maximum_layers,
                 cost_weight=float(self.config.plastic__layer_count_cost_weight),
                 reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
+                memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
             )
             self.distributed.assert_identical_object(
                 selected.active_layers,
@@ -319,6 +319,8 @@ class TrainerStepMixin:
     def _begin_plastic_depth_inline_update(self) -> Optional[Dict[str, Any]]:
         if not self.config.plastic__enabled or not self.config.plastic__do_learn_layer_count:
             return None
+        if getattr(self.config, "plastic__runtime_phase", "fine") == "coarse":
+            return None
         lattice = self._plastic_depth_lattice()
         if lattice is None:
             raise RuntimeError("PLASTIC DEPTH lattice unexpectedly absent")
@@ -338,14 +340,16 @@ class TrainerStepMixin:
         if self.device.type == "cuda" and proposed_upward_count in candidates:
             allocator_reserve = PlasticDepthCudaAllocatorReserve(
                 device=self.device,
-                reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
+                reserve_gib=float(self.config.plastic__layer_count__cuda_allocator_reserve_gib),
             )
             local_preflight_feasible = allocator_reserve.acquire()
             upward_preflight_feasible = self.distributed.all_true(local_preflight_feasible)
             if upward_preflight_feasible:
                 recoverable_upward_count = proposed_upward_count
             else:
-                allocator_reserve.release(empty_cache=True)
+                # vvv THOG flush only a rank whose reserve acquisition actually OOMed
+                allocator_reserve.release(empty_cache=not local_preflight_feasible)
+                # ^^^ THOG
                 allocator_reserve = None
                 candidates = tuple(count for count in candidates if count != proposed_upward_count)
         # ^^^ THOG
@@ -449,7 +453,7 @@ class TrainerStepMixin:
                     maximum_layers=lattice.maximum_layers,
                     cost_weight=float(self.config.plastic__layer_count_cost_weight),
                     reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                    memory_budget_gib=self.config.plastic__layer_memory_budget_gib,
+                    memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
                 )
             except RuntimeError as error:
                 current_count = int(context["current_count"])
@@ -471,8 +475,7 @@ class TrainerStepMixin:
                 current_count=int(context["current_count"]),
                 score_report=score_report,
                 histories=self.state.plastic_depth_probe_histories,
-                noise_window=self.config.plastic__layer_count_probe_noise_window,
-                minimum_observations=self.config.plastic__layer_count_probe_noise_min_observations,
+                noise_window=self.config.plastic__layer_count_probe__window_size_as_number_of_probes,
                 noise_lambda=float(self.config.plastic__layer_count_probe_noise_lambda),
                 update_number=int(self.state.completed_updates) + 1,
                 last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
@@ -502,7 +505,7 @@ class TrainerStepMixin:
         def synchronize_recoverable_upward(local_feasible: bool) -> bool:
             globally_feasible = self.distributed.all_true(bool(local_feasible))
             context["upward_candidate_feasible"] = globally_feasible
-            if not globally_feasible and self.device.type == "cuda" and torch.cuda.is_available():
+            if not local_feasible and self.device.type == "cuda" and torch.cuda.is_available():
                 torch.cuda.empty_cache()
             return globally_feasible
 
@@ -1050,7 +1053,10 @@ class TrainerStepMixin:
                 and self.state.completed_updates >= self.config.warmup_updates
             )
             # vvv THOG fixed-count PLASTIC DEPTH reports timing without creating or checkpointing dormant controller statistics
-            if self.config.plastic__do_learn_layer_count:
+            if (
+                self.config.plastic__do_learn_layer_count
+                and getattr(self.config, "plastic__runtime_phase", "fine") == "fine"
+            ):
                 lattice.record_training_time(
                     active_layers,
                     training_only_seconds,

@@ -16,7 +16,7 @@ import torch
 
 from sheet.basis import BASIS_VERSION
 from sheet.bases import BASIS_FAMILIES
-from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                             # <<< THOG lapped CLI defaults
+from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                          # <<< THOG lapped CLI defaults
 # from sheet.checkpoints import load_payload
 # vvv THOG resume-control preflight uses the same PLASTIC geometry-format guard as full trainer resume
 from sheet.checkpoints import load_payload, validate_plastic_depth_checkpoint_format
@@ -44,7 +44,7 @@ from sheet.run_config import (
 )
 from sheet.run_naming import compact_log_timestamp
 from sheet.stage6_trainer import Stage6Trainer
-from sheet.training_config import TrainingConfig
+from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
@@ -125,7 +125,7 @@ class OwtTrainer(Stage6Trainer):
         if "session_consumed_tokens" in values:
             values["session_consumed_tokens"] = int(values["session_consumed_tokens"]) * int(self.distributed.world_size)
         # ^^^ THOG
-        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))  # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
+        super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))                                   # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
         result = super().run_pilot(**arguments)
@@ -139,10 +139,10 @@ class OwtTrainer(Stage6Trainer):
         # ^^^ THOG
         for row in result["updates"]:
             row["consumed_tokens"] *= multiplier
-            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier                                                                                                   # <<< THOG resumed-session token counts are global under DDP
         for row in result["evaluations"]:
             row["consumed_tokens"] *= multiplier
-            row["session_consumed_tokens"] *= multiplier                                                                                                 # <<< THOG resumed-session token counts are global under DDP
+            row["session_consumed_tokens"] *= multiplier                                                                                                   # <<< THOG resumed-session token counts are global under DDP
         result["timing"]["tokens_per_training_second"] *= multiplier
         target = Path(arguments["result_path"])
         if self.distributed.is_primary:
@@ -200,12 +200,13 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
     # ^^^ THOG
     if "trainer_config" not in payload:
         return
-    stored = TrainingConfig(**payload["trainer_config"])
+    stored = TrainingConfig(**normalize_plastic_v0541_config_fields(payload["trainer_config"]))
     # vvv THOG layer-dropout execution policy must not silently change across normal resume
     control_fields = (
         "batch_size", "gradient_accumulation_steps", "learning_rate", "min_learning_rate", "warmup_updates", "weight_decay", "beta1", "beta2", "grad_clip",
         "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed",
         "layer_dropout_stratum_size", "layer_dropout_active_per_stratum", "layer_dropout_resample_steps",
+        "plastic__layer_count_probe__number_of_sampled_valid_tokens",
     )
     # ^^^ THOG
     mismatches = [f"{name}: checkpoint={getattr(stored, name)!r}, requested={getattr(expected, name)!r}" for name in control_fields if getattr(stored, name) != getattr(expected, name)]
@@ -230,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--result-root", default="results")
     parser.add_argument("--wandb-root", default="wandb")
     parser.add_argument("--max-iters", type=int, default=100)
-    parser.add_argument("--max-wall-minutes", type=int, default=0)                                                                                   # <<< THOG soft wall-clock budget; zero preserves existing update-count runs
+    parser.add_argument("--max-wall-minutes", type=int, default=0)                                                                                         # <<< THOG soft wall-clock budget; zero preserves existing update-count runs
     parser.add_argument("--eval-interval", type=int, default=50)
     parser.add_argument("--eval-iters", type=int, default=5)
     parser.add_argument("--log-interval", type=int, default=10)
@@ -254,7 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
     parser.add_argument("--mlp-hidden-group-size", type=int, default=DEFAULT_MLP_HIDDEN_GROUP_SIZE)
     parser.add_argument("--mlp-hidden-compressor", choices=BASIS_FAMILIES, default=DEFAULT_MLP_HIDDEN_COMPRESSOR)
-    parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                  # <<< THOG DEPTH-only vector participation control
+    parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
@@ -277,22 +278,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hyperblock-loop-decay", type=float, default=1.0)
     # ^^^ THOG
     # vvv THOG PLASTIC DEPTH public controls map directly to the canonical double-underscore configuration fields
-    parser.add_argument("--plastic-enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--plastic-layers-to-sample", dest="plastic__layers_to_sample", type=int)
-    parser.add_argument("--plastic-do-learn-layer-count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--plastic-initial-layer-count", dest="plastic__initial_layer_count", type=int)
-    parser.add_argument("--plastic-max-permitted-layers", dest="plastic__max_permitted_layers", type=int)
-    parser.add_argument("--plastic-layer-sampling-initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
-    parser.add_argument("--plastic-layer-count-objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
-    parser.add_argument("--plastic-layer-count-update-brake", dest="plastic__layer_count_update_brake", type=int, default=5)
-    parser.add_argument("--plastic-layer-count-probe-noise-window", dest="plastic__layer_count_probe_noise_window", type=int, default=50)
-    parser.add_argument("--plastic-layer-count-probe-noise-min-observations", dest="plastic__layer_count_probe_noise_min_observations", type=int, default=5)
-    parser.add_argument("--plastic-layer-count-probe-noise-lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
-    parser.add_argument("--plastic-layer-count-cost-weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
-    parser.add_argument("--plastic-layer-memory-budget-gib", dest="plastic__layer_memory_budget_gib", type=float)
-    parser.add_argument("--plastic-cuda-allocator-reserve-gib", dest="plastic__cuda_allocator_reserve_gib", type=float, default=0.5)
-    parser.add_argument("--plastic-geometry-learning-rate-multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
-    parser.add_argument("--plastic-freeze-geometry-during-warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--plastic__enabled", dest="plastic__enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__coarse_phase", dest="plastic__coarse_phase", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--plastic__coarse_phase_roll_through", dest="plastic__coarse_phase_roll_through", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__log_interval_coarse", dest="plastic__log_interval_coarse", type=int, default=10)
+    parser.add_argument("--plastic__phase_1_n_steps", dest="plastic__phase_1_n_steps", type=int)
+    parser.add_argument("--plastic__phase_1_starting_layer_count", dest="plastic__phase_1_starting_layer_count", type=int)
+    parser.add_argument("--plastic__phase_1__number_of_trials", dest="plastic__phase_1__number_of_trials", type=int)
+    parser.add_argument("--plastic__phase_1_evaluation_steps_count", dest="plastic__phase_1_evaluation_steps_count", type=int)
+    parser.add_argument("--plastic__layers_to_sample", dest="plastic__layers_to_sample", type=int)
+    parser.add_argument("--plastic__do_learn_layer_count", dest="plastic__do_learn_layer_count", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--plastic__initial_layer_count", dest="plastic__initial_layer_count", type=int)
+    parser.add_argument("--plastic__max_permitted_layers", dest="plastic__max_permitted_layers", type=int)
+    parser.add_argument("--plastic__layer_sampling_initialisation", dest="plastic__layer_sampling_initialisation", choices=PLASTIC_LAYER_SAMPLING_INITIALISATIONS, default="equidistant")
+    parser.add_argument("--plastic__layer_count_objective", dest="plastic__layer_count_objective", choices=PLASTIC_LAYER_COUNT_OBJECTIVES, default="lowest_loss")
+    parser.add_argument("--plastic__layer_count_update_brake", dest="plastic__layer_count_update_brake", type=int, default=5)
+    parser.add_argument("--plastic__layer_count_probe__probe_every_n_steps", dest="plastic__layer_count_probe__probe_every_n_steps", type=int)
+    parser.add_argument("--plastic__layer_count_probe__number_of_sampled_valid_tokens", dest="plastic__layer_count_probe__number_of_sampled_valid_tokens", type=int, default=1024)
+    parser.add_argument("--plastic__layer_count_probe_radius", dest="plastic__layer_count_probe_radius", type=int, default=1)
+    parser.add_argument("--plastic__layer_count__max_allowable_layer_change", dest="plastic__layer_count__max_allowable_layer_change", type=int, default=1)
+    parser.add_argument("--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence", dest="plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence", type=float, default=0.8)
+    parser.add_argument("--plastic__layer_count_probe__window_size_as_number_of_probes", dest="plastic__layer_count_probe__window_size_as_number_of_probes", type=int, default=50)
+    parser.add_argument("--plastic__layer_count_probe_noise_lambda", dest="plastic__layer_count_probe_noise_lambda", type=float, default=3.0)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_discount", dest="plastic__wall_time_equivalent_time_gain_discount", type=float, default=0.9)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_window", dest="plastic__wall_time_equivalent_time_gain_loss_rate_window", type=int, default=64)
+    parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", dest="plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", type=int, default=16)
+    parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
+    parser.add_argument("--plastic__layer_count__memory_budget_gib", dest="plastic__layer_count__memory_budget_gib", type=float)
+    parser.add_argument("--plastic__layer_count__cuda_allocator_reserve_gib", dest="plastic__layer_count__cuda_allocator_reserve_gib", type=float, default=0.5)
+    parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
+    parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
     # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
@@ -313,8 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.95)
     parser.add_argument("--grad-clip", type=float, default=1.0)
-    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                    # <<< THOG bounded recovery policy
-    parser.add_argument("--max-nonfinite-update-skips", type=int, default=10)                                                                         # <<< THOG bounded recovery limit
+    parser.add_argument("--nonfinite-update-policy", choices=("raise", "skip"), default="skip")                                                            # <<< THOG bounded recovery policy
+    parser.add_argument("--max-nonfinite-update-skips", type=int, default=99999)                                                                           # <<< THOG bounded recovery limit
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--bias", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--model-seed", type=int, default=1337)
@@ -455,7 +470,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         o_mlp_hidden=selected_mlp_hidden_order,
         mlp_hidden_group_size=arguments.mlp_hidden_group_size if adapter is None or adapter.legacy_mlp_hidden_group_size is None else adapter.legacy_mlp_hidden_group_size,
         mlp_hidden_compressor=arguments.mlp_hidden_compressor if adapter is None or adapter.legacy_mlp_hidden_compressor is None else adapter.legacy_mlp_hidden_compressor,
-        depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                 # <<< THOG CLI vector mode
+        depth_compress_layer_norm_and_bias=arguments.depth_compress_layer_norm_and_bias,                                                                   # <<< THOG CLI vector mode
         geometry_preset=None if arguments.hyperblock else (arguments.geometry_preset if adapter is None else adapter.legacy_geometry_preset),
         attention_geometry=None if arguments.hyperblock else (arguments.attention_geometry if adapter is None else None),
         mlp_geometry=None if arguments.hyperblock else (arguments.mlp_geometry if adapter is None else None),
@@ -480,6 +495,13 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         # ^^^ THOG
         # vvv THOG pass PLASTIC DEPTH CLI controls into resolved run identity
         plastic__enabled=arguments.plastic__enabled,
+        plastic__coarse_phase=arguments.plastic__coarse_phase,
+        plastic__coarse_phase_roll_through=arguments.plastic__coarse_phase_roll_through,
+        plastic__log_interval_coarse=arguments.plastic__log_interval_coarse,
+        plastic__phase_1_n_steps=arguments.plastic__phase_1_n_steps,
+        plastic__phase_1_starting_layer_count=arguments.plastic__phase_1_starting_layer_count,
+        plastic__phase_1__number_of_trials=arguments.plastic__phase_1__number_of_trials,
+        plastic__phase_1_evaluation_steps_count=arguments.plastic__phase_1_evaluation_steps_count,
         plastic__layers_to_sample=arguments.plastic__layers_to_sample,
         plastic__do_learn_layer_count=arguments.plastic__do_learn_layer_count,
         plastic__initial_layer_count=arguments.plastic__initial_layer_count,
@@ -487,12 +509,19 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_sampling_initialisation=arguments.plastic__layer_sampling_initialisation,
         plastic__layer_count_objective=arguments.plastic__layer_count_objective,
         plastic__layer_count_update_brake=arguments.plastic__layer_count_update_brake,
-        plastic__layer_count_probe_noise_window=arguments.plastic__layer_count_probe_noise_window,
-        plastic__layer_count_probe_noise_min_observations=arguments.plastic__layer_count_probe_noise_min_observations,
+        plastic__layer_count_probe__probe_every_n_steps=arguments.plastic__layer_count_probe__probe_every_n_steps,
+        plastic__layer_count_probe__number_of_sampled_valid_tokens=arguments.plastic__layer_count_probe__number_of_sampled_valid_tokens,
+        plastic__layer_count_probe_radius=arguments.plastic__layer_count_probe_radius,
+        plastic__layer_count__max_allowable_layer_change=arguments.plastic__layer_count__max_allowable_layer_change,
+        plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=arguments.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence,
+        plastic__layer_count_probe__window_size_as_number_of_probes=arguments.plastic__layer_count_probe__window_size_as_number_of_probes,
         plastic__layer_count_probe_noise_lambda=arguments.plastic__layer_count_probe_noise_lambda,
+        plastic__wall_time_equivalent_time_gain_discount=arguments.plastic__wall_time_equivalent_time_gain_discount,
+        plastic__wall_time_equivalent_time_gain_loss_rate_window=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_window,
+        plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
-        plastic__layer_memory_budget_gib=arguments.plastic__layer_memory_budget_gib,
-        plastic__cuda_allocator_reserve_gib=arguments.plastic__cuda_allocator_reserve_gib,
+        plastic__layer_count__memory_budget_gib=arguments.plastic__layer_count__memory_budget_gib,
+        plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
         # ^^^ THOG
@@ -568,8 +597,8 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         _print_model_option(
             "plastic objective:",
             f"{config.plastic__layer_count_objective}  update_brake={config.plastic__layer_count_update_brake}  "
-            f"noise_window={config.plastic__layer_count_probe_noise_window}  "
-            f"min_observations={config.plastic__layer_count_probe_noise_min_observations}  "
+            f"noise_window={config.plastic__layer_count_probe__window_size_as_number_of_probes}  "
+            f"probe_tokens={config.plastic__layer_count_probe__number_of_sampled_valid_tokens}  "
             f"lambda={float(config.plastic__layer_count_probe_noise_lambda):g}",
         )
         public_coordinates = plastic_report.get("active_public_coordinates", ())
@@ -656,7 +685,7 @@ def main() -> int:
             if geometry_plan is not None:
                 print(format_geometry_plan(geometry_plan), flush=True)
                 print(flush=True)
-            print_model_parameters_and_options(config, trainer)                                                                                         # <<< THOG show the complete effective training setup before the first update
+            print_model_parameters_and_options(config, trainer)                                                                                            # <<< THOG show the complete effective training setup before the first update
         result = trainer.run_pilot(run_id=config.artifact_name, protocol_sha256=run_digest(config, dataset, world_size), dataset=dataset, result_path=result_path)
         result["artifact"] = {"name": config.artifact_name, "prefix": config.artifact_prefix, "paths": {name: str(path) for name, path in paths.items()}}
         result["canonical_config"] = canonical

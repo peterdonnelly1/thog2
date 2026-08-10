@@ -53,6 +53,8 @@ _print_complete_registry_help_if_requested()
 import run_thog2_lifecycle as _lifecycle                                                                                                                     # <<< THOG public lifecycle entry owns compatibility routing plus final material-policy registration
 import run_thog2_owt_core as _core                                                                                                                          # <<< THOG keep the preserved runner as the implementation substrate
 import sheet.geometry_registry as _geometry_registry                                                                                                        # <<< THOG align geometry report value columns with the shared console label width
+import sheet.plastic_depth_console_postfix_patch as _plastic_depth_console_postfix                                                                          # <<< THOG let the outer public formatter restore PLASTIC annotations to the physical row end
+import sheet.plastic_depth_v056_objective_decision_patch as _plastic_depth_v056                                                                              # <<< THOG enforce final decision-algorithm ownership after the public runner's legacy compatibility wrapper
 import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
 from sheet.depth_trajectory import DepthTrajectory                                                                                                          # <<< THOG identify geometries that actually retain DEPTH matrix materialisation
 from sheet.interactive_interrupt import (                                                                                                                   # <<< THOG Ctrl-G requests one safe-boundary checkpoint and exit
@@ -182,7 +184,11 @@ def _format_progress_line_with_materialisation_last(run_id: str, event: str, pay
     if event == "optimizer_progress" and "materialisation_penalty" in payload:
         field = f"  materialisation penalty={payload['materialisation_penalty']}"
         line = f"{line.replace(field, '')}{field}"
-    return _move_sampled_values_to_progress_tail(line)
+    # vvv THOG the public runner is the outermost formatter, so it must re-finalize annotations after moving compatibility fields
+    line = _move_sampled_values_to_progress_tail(line)
+    line = _plastic_depth_console_postfix._finalize_plastic_postfixes(line)
+    # ^^^ THOG
+    return line
 
 
 _depth_materialisation_runtime._materialisation_interval_field = _materialisation_interval_field_five_decimals
@@ -248,6 +254,15 @@ def _startup_public_indices(values: Any) -> str:
 
 _PLASTIC_STARTUP_LABELS = (
     "plastic__enabled:",
+    "plastic__runtime_phase:",
+    "plastic__coarse_phase:",
+    "plastic__coarse_phase_roll_through:",
+    "plastic__log_interval_coarse:",
+    "plastic__phase_1_n_steps:",
+    "plastic__phase_1_starting_layer_count:",
+    "plastic__phase_1__number_of_trials:",
+    "plastic__phase_1_evaluation_steps_count:",
+    "coarse candidate layers:",
     "resolved count mode:",
     "current active layers:",
     "plastic__layers_to_sample:",
@@ -258,14 +273,19 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__layer_sampling_initialisation:",
     "plastic__layer_count_objective:",
     "plastic__layer_count_update_brake:",
+    "plastic__layer_count_probe__probe_every_n_steps:",
+    "plastic__layer_count_probe__number_of_sampled_valid_tokens:",
     "plastic__layer_count_probe_radius:",
-    "plastic__layer_count_max_step:",
-    "plastic__layer_count_probe_noise_window:",
-    "plastic__layer_count_probe_noise_min_observations:",
+    "plastic__layer_count__max_allowable_layer_change:",
+    "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:",
+    "plastic__layer_count_probe__window_size_as_number_of_probes:",
     "plastic__layer_count_probe_noise_lambda:",
+    "plastic__wall_time_equivalent_time_gain_discount:",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_window:",
+    "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:",
     "plastic__layer_count_cost_weight:",
-    "plastic__layer_memory_budget_gib:",
-    "plastic__cuda_allocator_reserve_gib:",
+    "plastic__layer_count__memory_budget_gib:",
+    "plastic__layer_count__cuda_allocator_reserve_gib:",
     "plastic__geometry_learning_rate_multiplier:",
     "plastic__freeze_geometry_during_warmup:",
     "active sample_layer:",
@@ -285,10 +305,38 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     current_layers = int(report.get("active_layers", config.plastic__initial_active_layers))
     public_coordinates = tuple(report.get("active_sample_layer_coordinates", report.get("active_public_coordinates", ())))
     full_coordinates = tuple(report.get("sample_layer_coordinates", report.get("public_coordinates", ())))
+    probe_interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)
+    probe_token_count = int(getattr(config, "plastic__layer_count_probe__number_of_sampled_valid_tokens", 1024))
     probe_radius = int(getattr(config, "plastic__layer_count_probe_radius", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", 1)))
-    max_step = int(getattr(config, "plastic__layer_count_max_step", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
+    max_step = int(getattr(config, "plastic__layer_count__max_allowable_layer_change", os.environ.get("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", 1)))
     print("plastic", flush=True)
     _print_plastic_option("plastic__enabled:", _startup_bool(config.plastic__enabled))
+    _print_plastic_option("plastic__runtime_phase:", str(getattr(config, "plastic__runtime_phase", "fine")))
+    coarse_phase = str(getattr(config, "plastic__coarse_phase", "disabled"))
+    phase_1_n_steps = getattr(config, "plastic__phase_1_n_steps", None)
+    phase_1_starting_layer_count = getattr(config, "plastic__phase_1_starting_layer_count", None)
+    phase_1_number_of_trials = getattr(config, "plastic__phase_1__number_of_trials", None)
+    phase_1_evaluation_steps_count = getattr(config, "plastic__phase_1_evaluation_steps_count", None)
+    _print_plastic_option("plastic__coarse_phase:", coarse_phase)
+    _print_plastic_option("plastic__coarse_phase_roll_through:", _startup_bool(getattr(config, "plastic__coarse_phase_roll_through", False)))
+    _print_plastic_option("plastic__log_interval_coarse:", str(int(getattr(config, "plastic__log_interval_coarse", 10))))
+    _print_plastic_option("plastic__phase_1_n_steps:", _startup_optional(phase_1_n_steps))
+    _print_plastic_option("plastic__phase_1_starting_layer_count:", _startup_optional(phase_1_starting_layer_count))
+    _print_plastic_option("plastic__phase_1__number_of_trials:", _startup_optional(phase_1_number_of_trials))
+    _print_plastic_option("plastic__phase_1_evaluation_steps_count:", _startup_optional(phase_1_evaluation_steps_count))
+    if coarse_phase == "enabled":
+        from sheet.plastic_depth_coarse import resolve_plastic_coarse_config
+        coarse = resolve_plastic_coarse_config(
+            coarse_phase=coarse_phase,
+            plastic_enabled=config.plastic__enabled,
+            do_learn_layer_count=config.plastic__do_learn_layer_count,
+            n_steps=phase_1_n_steps,
+            starting_layer_count=phase_1_starting_layer_count,
+            number_of_trials=phase_1_number_of_trials,
+            evaluation_steps_count=phase_1_evaluation_steps_count,
+            max_permitted_layers=config.plastic__max_permitted_layers,
+        )
+        _print_plastic_option("coarse candidate layers:", ", ".join(str(value) for value in coarse.candidate_layers))
     _print_plastic_option("resolved count mode:", "learned" if config.plastic__do_learn_layer_count else "fixed")
     _print_plastic_option("current active layers:", f"{current_layers}/{config.n_layer}")
     _print_plastic_option("plastic__layers_to_sample:", _startup_optional(config.plastic__layers_to_sample))
@@ -299,14 +347,19 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__layer_sampling_initialisation:", str(config.plastic__layer_sampling_initialisation))
     _print_plastic_option("plastic__layer_count_objective:", str(config.plastic__layer_count_objective))
     _print_plastic_option("plastic__layer_count_update_brake:", str(config.plastic__layer_count_update_brake))
+    _print_plastic_option("plastic__layer_count_probe__probe_every_n_steps:", _startup_optional(probe_interval))
+    _print_plastic_option("plastic__layer_count_probe__number_of_sampled_valid_tokens:", str(probe_token_count))
     _print_plastic_option("plastic__layer_count_probe_radius:", str(probe_radius))
-    _print_plastic_option("plastic__layer_count_max_step:", str(max_step))
-    _print_plastic_option("plastic__layer_count_probe_noise_window:", str(config.plastic__layer_count_probe_noise_window))
-    _print_plastic_option("plastic__layer_count_probe_noise_min_observations:", str(config.plastic__layer_count_probe_noise_min_observations))
+    _print_plastic_option("plastic__layer_count__max_allowable_layer_change:", str(max_step))
+    _print_plastic_option("plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence:", _startup_float(config.plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence))
+    _print_plastic_option("plastic__layer_count_probe__window_size_as_number_of_probes:", str(config.plastic__layer_count_probe__window_size_as_number_of_probes))
     _print_plastic_option("plastic__layer_count_probe_noise_lambda:", _startup_float(config.plastic__layer_count_probe_noise_lambda))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_discount:", _startup_float(getattr(config, "plastic__wall_time_equivalent_time_gain_discount", 0.9)))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_window:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_window", 64)))
+    _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", 16)))
     _print_plastic_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
-    _print_plastic_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
-    _print_plastic_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))
+    _print_plastic_option("plastic__layer_count__memory_budget_gib:", _startup_float(config.plastic__layer_count__memory_budget_gib))
+    _print_plastic_option("plastic__layer_count__cuda_allocator_reserve_gib:", _startup_float(config.plastic__layer_count__cuda_allocator_reserve_gib))
     _print_plastic_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
     _print_plastic_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
     if public_coordinates:
@@ -378,9 +431,17 @@ _stage6._progress_timestamp = lambda: _stage6.datetime.now().strftime("%y%m%d:%H
 _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_console_progress_payload
 
 
+def _plastic_change_z_is_retired() -> bool:
+    return _plastic_depth_v056._runtime_algorithm() in _plastic_depth_v056.SEN_KENDALL_ALGORITHMS
+
+
 def _latest_plastic_change_z(trainer: Any) -> Optional[tuple[Optional[float], Optional[float]]]:
     if not bool(getattr(getattr(trainer, "config", None), "plastic__do_learn_layer_count", False)):
         return None
+    # vvv THOG the public compatibility layer must not reconstruct retired robust-z evidence for either Sen/Kendall controller
+    if _plastic_change_z_is_retired():
+        return None
+    # ^^^ THOG
     for event in reversed(getattr(trainer, "events", ())):
         if event.name != "plastic_depth_count_decision":
             continue
@@ -407,9 +468,14 @@ def _prepare_console_progress_payload_with_precise_step(self: Any, event: str, p
         mean_step_seconds = getattr(self, "_console_latest_mean_step_seconds", None)
         if mean_step_seconds is not None:
             values["mean_step_seconds"] = f"{float(mean_step_seconds):8.4f}"
-        change_z = _latest_plastic_change_z(self)
-        if change_z is not None:
-            values["plastic_change_z"] = change_z
+        # vvv THOG make the outermost payload owner defensive: TSK removes stale input as well as refusing reconstruction
+        if _plastic_change_z_is_retired():
+            values.pop("plastic_change_z", None)
+        else:
+            change_z = _latest_plastic_change_z(self)
+            if change_z is not None:
+                values["plastic_change_z"] = change_z
+        # ^^^ THOG
     return values
 
 

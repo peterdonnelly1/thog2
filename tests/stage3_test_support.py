@@ -46,6 +46,13 @@ def stage3_config(model_type: str, **overrides: Any) -> TrainingConfig:
         dtype="float32",
     )
     values.update(overrides)
+    if (
+        bool(values.get("plastic__enabled", False))
+        and "plastic__layer_count_probe__number_of_sampled_valid_tokens" not in overrides
+    ):
+        values["plastic__layer_count_probe__number_of_sampled_valid_tokens"] = (
+            int(values["batch_size"]) * int(values["block_size"])
+        )
     return TrainingConfig(**values)
 
 

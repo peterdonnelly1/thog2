@@ -1,0 +1,235 @@
+THOG2 PLASTIC - REQUIREMENTS SPECIFICATION
+Version 0.54
+Date: 9 August 2026
+Status: Proposed architecture-control refinement
+
+1. GOVERNING DELTA
+
+Version 0.54 supersedes Version 0.53. All v0.53 requirements remain normative except where this revision adds a selectable alternative FINE per-probe directional classifier.
+
+New exact algorithm identifier:
+
+    wall_time__gradient__theil_sen_kendall_slope_tau
+
+Canonical selector:
+
+    plastic__layer_count_decision_algorithm
+
+The established directional-coherence algorithm remains the default and must retain unchanged behaviour. The gradient algorithm is selected explicitly. It requires:
+
+    plastic__layer_count_objective = relative_training_wall_time
+
+An incompatible objective must fail at startup rather than silently falling back.
+
+New parameter:
+
+    plastic__layer_count_gradient__minimum_absolute_kendall_tau
+
+Default: 0.5
+Valid: 0.0 <= value <= 1.0
+Acceptance uses >=, not >.
+
+The current canonical max-step control is plastic__layer_count__max_allowable_layer_change. The older name plastic__layer_count_max_step denotes the same governing concept and must not create a second control.
+
+The current canonical extrapolation-confidence control is plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence. It remains part of the old directional algorithm and is not used to weight Theil-Sen or Kendall tau.
+
+2. PURPOSE AND INTERPRETATION
+
+The new algorithm preserves wall_time_equivalent_time_gain economics and replaces only the way one FINE probe becomes LEFT, RIGHT or AMBIGUOUS.
+
+Its three tests are deliberately separate:
+
+- adjacent score: does the next step pay?
+- Theil-Sen: which way is economically downhill?
+- Kendall tau-b: is the downhill direction coherent rather than wiggly?
+
+A move requires all three to agree. Existing temporal aggregation and final safety gates remain authoritative.
+
+3. ECONOMIC SCORE; NEVER RAW PROBE LOSS
+
+The displayed probe_delta_loss remains diagnostic only. For each candidate offset k, use the existing wall_time_equivalent_time_gain score s_k. Lower is better and current L should have s_0 = 0 apart from insignificant floating-point error.
+
+Do not duplicate or alter the equivalent-time calculation. Reuse its existing score_seconds output.
+
+Bootstrap rows that merely expose raw probe loss are not economic scores and must not authorize a gradient vote. Until genuine equivalent-time scores are available, vote A.
+
+4. DECISION-FIT AND LOOKAHEAD SETS
+
+For configured radius r, candidates may still be probed/displayed over:
+
+    L-r ... L-1, L, L+1 ... L+r
+
+The statistical decision-fit set is:
+
+    D = {L-r, ..., L-1, L, L+1}
+
+subject to feasibility/bounds and finite economic scores.
+
+Thus all lower candidates are interpolation evidence; current L is the origin; exactly one higher candidate L+1 is decision-bearing extrapolation.
+
+L+2...L+r remain probed, displayed and logged, but MUST NOT affect Theil-Sen slope, Kendall tau, the per-probe L/R/A vote, or authorization of a RIGHT move.
+
+Changing only L+2...L+r while D is unchanged must leave the directional decision unchanged.
+
+5. THEIL-SEN SLOPE
+
+For finite decision-fit pairs (x_i, y_i), with x_i = integer layer offset and y_i = economic score seconds, compute every pairwise slope:
+
+    (y_j - y_i) / (x_j - x_i)
+
+for i < j, and take their median.
+
+Interpretation:
+
+- slope > 0: objective worsens with layer count; downhill is LEFT.
+- slope < 0: objective improves with layer count; downhill is RIGHT.
+- zero/non-finite: ambiguous.
+
+Units are equivalent wall-time seconds/layer. Do not use OLS, R-squared, a p-value, or a new minimum-slope knob.
+
+6. KENDALL TAU-B
+
+Compute standard Kendall tau-b on exactly the same decision-fit points.
+
+Interpretation:
+
+- tau = +1: perfectly coherent LEFT gradient.
+- tau = -1: perfectly coherent RIGHT gradient.
+- tau near zero: weak monotonic structure / substantial wiggle.
+
+Use tau-b so y ties are handled correctly. x offsets are unique. Do not invent a statistical near-tie tolerance; statistical noise remains the responsibility of the existing significance machinery.
+
+If fewer than two finite decision-fit points exist, vote A. Exactly two points are allowed. If slope or tau is non-finite, vote A.
+
+No SciPy dependency is permitted solely for this feature. Candidate sets are tiny; direct pairwise slopes/median and direct concordant/discordant/tied pair counting are required.
+
+7. MANDATORY ADJACENT-STEP TEST
+
+A fitted gradient alone never authorizes a move.
+
+LEFT requires L-1 to exist and:
+
+    s_-1 < s_0
+
+RIGHT requires L+1 to exist and:
+
+    s_+1 < s_0
+
+Both adjacent candidates worse implies A/stet regardless of broader slope.
+
+8. PER-PROBE CLASSIFICATION
+
+Vote LEFT iff all are true:
+
+1. L-1 feasible.
+2. s_-1 < s_0.
+3. Theil-Sen slope > 0.
+4. Kendall tau >= plastic__layer_count_gradient__minimum_absolute_kendall_tau.
+
+Vote RIGHT iff all are true:
+
+1. L+1 feasible.
+2. s_+1 < s_0.
+3. Theil-Sen slope < 0.
+4. Kendall tau <= -plastic__layer_count_gradient__minimum_absolute_kendall_tau.
+
+Otherwise vote A.
+
+There is no radius-dependent candidate-winner majority rule in this algorithm. Increasing radius collects more landscape information; it does not mechanically raise the hurdle. Additional LEFT interpolation points may legitimately alter slope/tau. RIGHT points beyond L+1 may not alter the decision.
+
+9. TEMPORAL WINDOW AND FINAL GATES
+
+Each probe first produces one L/R/A vote using the gradient classifier. plastic__layer_count_probe__window_size_as_number_of_probes then retains its existing full-window strict-majority semantics. Examples:
+
+    window 1: [R]       => R
+    window 3: [A,R,R]   => R
+
+No layer-count change may occur before the complete configured probe window is ready.
+
+Preserve existing final machinery:
+
+- warmup freeze;
+- update brake;
+- minimum/maximum layer bounds;
+- feasibility;
+- candidate-history robust noise/significance checks;
+- latest candidate evidence favourable where currently required;
+- plastic__layer_count__max_allowable_layer_change;
+- history reset after a committed count change;
+- checkpoint/resume state;
+- DDP consistency.
+
+For RIGHT, L+2... candidates are informational only and must never become final passing candidates for this algorithm. For LEFT, lower candidates remain trusted interpolation evidence; existing max-step behaviour remains available rather than hard-wiring max_step=1. The intended normal configuration remains one-layer movement.
+
+10. PROVENANCE, CONSOLE AND TELEMETRY
+
+Existing monotonically increasing probe IDs P1, P2, ... remain authoritative and survive checkpoint/resume. Decision provenance names probe IDs, not optimizer update numbers.
+
+Normal probe diagnostics for the gradient algorithm must include at least:
+
+    P16 probe_delta_loss [...] = [...] ts=+0.183s/layer tau=+0.73 L/R/A=[1/0/0]/1=>L (P16)
+
+The ts value is economic score slope in seconds/layer, never loss/layer.
+
+Record enough telemetry to reconstruct each decision, including:
+
+    algorithm
+    probe_id
+    update_number
+    current_count
+    candidate_offsets
+    decision_fit_offsets
+    theil_sen_slope_seconds_per_layer
+    kendall_tau
+    minimum_absolute_kendall_tau
+    left_adjacent_score_seconds
+    current_score_seconds
+    right_adjacent_score_seconds
+    per_probe_vote
+    direction_window_probe_ids
+    direction_window_votes
+    direction_conclusion
+    selected_count
+    brake_active
+
+Retain existing score reports as well. Pair counts may also be logged for debugging.
+
+11. REQUIRED TESTS
+
+At minimum cover:
+
+1. clean 3-point LEFT;
+2. clean 3-point RIGHT;
+3. both adjacent candidates worse -> A;
+4. adjacent LEFT better but gradient RIGHT -> A;
+5. adjacent RIGHT better but gradient LEFT -> A;
+6. adequate slope but |tau| below threshold -> A;
+7. tau exactly equal to threshold -> accepted;
+8. wiggly landscape rejected;
+9. monotonic interpolation landscape accepted;
+10. changing L+2...L+r alone cannot change the decision;
+11. increasing radius with consistent LEFT interpolation evidence retains direction;
+12. finite/non-finite candidate handling;
+13. lower boundary;
+14. upper boundary;
+15. temporal window = 1;
+16. temporal window > 1;
+17. probe provenance;
+18. probe ID checkpoint/resume continuation;
+19. warmup freeze;
+20. update brake;
+21. max_step=1;
+22. existing non-1 max-step support;
+23. old algorithm regression/equivalence;
+24. DDP deterministic agreement;
+25. console slope units seconds/layer.
+
+Statistics unit tests must additionally cover perfect increasing/decreasing tau, a known y-tied tau-b sequence, a known Theil-Sen median pairwise slope, and an extreme outlier that does not flip the robust slope direction.
+
+12. NON-GOALS
+
+Do not add weighted Theil-Sen, weighted Kendall, Kendall p-values, OLS, R-squared thresholds, polynomial/curvature fitting, isotonic regression, a new slope-magnitude threshold, decision use of L+2...L+r, automatic max-step changes, or coarse-phase changes.
+
+13. GOVERNING INTERPRETATION
+
+Take the next one-layer step only when that step is economically beneficial, the robust local wall-time gradient points the same way, and the surrounding interpolation landscape is sufficiently monotonic to trust that gradient.
