@@ -104,11 +104,14 @@ def _plastic_depth_inline_probe_request_with_full_radius_oom(
     if not upward_counts:
         return request
 
+    # vvv THOG keep the configured allocator reserve live while upward candidates execute so reserve means hard headroom, not temporary preflight memory
     def prepare_upward_counts() -> None:
         reserve = context.get("cuda_allocator_reserve")
-        release = getattr(reserve, "release", None)
-        if callable(release):
-            release()
+        if reserve is None or not bool(getattr(reserve, "active", False)):
+            raise RuntimeError(
+                "PLASTIC DEPTH upward-radius probe lost its CUDA allocator reserve before candidate execution"
+            )
+    # ^^^ THOG
 
     def synchronize_candidate(count: int, local_feasible: bool) -> bool:
         candidate_count = int(count)
@@ -130,6 +133,13 @@ def _plastic_depth_inline_probe_request_with_full_radius_oom(
             for higher_count in upward_counts:
                 if higher_count > candidate_count:
                     context["upward_candidate_feasible_by_count"][higher_count] = False
+            # vvv THOG a failed candidate ends upward exploration; release the barrier only after all ranks reject the candidate and before cleanup
+            reserve = context.get("cuda_allocator_reserve")
+            release = getattr(reserve, "release", None)
+            if callable(release):
+                release(empty_cache=True)
+            context["cuda_allocator_reserve"] = None
+            # ^^^ THOG
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         return globally_feasible
