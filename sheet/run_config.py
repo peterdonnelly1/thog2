@@ -19,6 +19,12 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .geometry_registry import validate_resolved_geometry_plan
+# vvv THOG sampling-only chaos bump configuration and run identity
+from .chaos_bump_sampling import (
+    CHAOS_BUMP_SAMPLING_CONFIG_FIELDS,
+    resolve_chaos_bump_sampling_config,
+)
+# ^^^ THOG
 # vvv THOG coupled field machine HYPERBLOCK run identity is separate from selector-based BLOCK geometry
 from .hyperblock import (
     HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE,
@@ -211,6 +217,17 @@ class OwtRunConfig:
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
     # ^^^ THOG
+    # vvv THOG v1.3 sampling-only chaos bump controls
+    chaos_bump__sampling__enabled: bool = False
+    chaos_bump__sampling__initial_lockout__steps: int = 16
+    chaos_bump__sampling__maximum_bumps: int = 1
+    chaos_bump__sampling__interlude__min_steps: int = 128
+    chaos_bump__sampling__interlude__max_steps: int = 256
+    chaos_bump__sampling__duration__min_steps: int = 16
+    chaos_bump__sampling__duration__max_steps: int = 256
+    chaos_bump__sampling__duration__max_fraction_of_elapsed_steps: float = 0.05
+    chaos_bump__sampling__max_movement_fraction_of_local_gap: float = 0.10
+    # ^^^ THOG
     lapped_cosine_window_length: int = DEFAULT_LAPPED_COSINE_WINDOW_LENGTH                                                                                 # <<< THOG locality control
     lapped_cosine_overlap_fraction: float = DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION                                                                         # <<< THOG overlap control
     attention_backend: str = "auto"
@@ -286,6 +303,20 @@ class OwtRunConfig:
             raise ValueError("plastic__do_learn_layer_count must be bool")
         if not isinstance(self.plastic__freeze_geometry_during_warmup, bool):
             raise ValueError("plastic__freeze_geometry_during_warmup must be bool")
+        # vvv THOG validate sampling-only chaos bumps against the public PLASTIC switch
+        resolve_chaos_bump_sampling_config(
+            enabled=self.chaos_bump__sampling__enabled,
+            plastic_enabled=self.plastic__enabled,
+            initial_lockout_steps=self.chaos_bump__sampling__initial_lockout__steps,
+            maximum_bumps=self.chaos_bump__sampling__maximum_bumps,
+            interlude_min_steps=self.chaos_bump__sampling__interlude__min_steps,
+            interlude_max_steps=self.chaos_bump__sampling__interlude__max_steps,
+            duration_min_steps=self.chaos_bump__sampling__duration__min_steps,
+            duration_max_steps=self.chaos_bump__sampling__duration__max_steps,
+            duration_max_fraction_of_elapsed_steps=self.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+            max_movement_fraction_of_local_gap=self.chaos_bump__sampling__max_movement_fraction_of_local_gap,
+        )
+        # ^^^ THOG
         # vvv THOG resolve one-shot COARSE scheduling and canonical FINE lookahead controls before active-count construction
         resolved_coarse = resolve_plastic_coarse_config(
             coarse_phase=self.plastic__coarse_phase,
@@ -823,6 +854,21 @@ class OwtRunConfig:
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
                 initial_active_layers=self.plastic__initial_active_layers,
             )
+            # vvv THOG sampling bump identity exists only when explicitly enabled
+            if self.chaos_bump__sampling__enabled:
+                identity["chaos_bump_sampling"] = resolve_chaos_bump_sampling_config(
+                    enabled=True,
+                    plastic_enabled=True,
+                    initial_lockout_steps=self.chaos_bump__sampling__initial_lockout__steps,
+                    maximum_bumps=self.chaos_bump__sampling__maximum_bumps,
+                    interlude_min_steps=self.chaos_bump__sampling__interlude__min_steps,
+                    interlude_max_steps=self.chaos_bump__sampling__interlude__max_steps,
+                    duration_min_steps=self.chaos_bump__sampling__duration__min_steps,
+                    duration_max_steps=self.chaos_bump__sampling__duration__max_steps,
+                    duration_max_fraction_of_elapsed_steps=self.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+                    max_movement_fraction_of_local_gap=self.chaos_bump__sampling__max_movement_fraction_of_local_gap,
+                ).identity()
+            # ^^^ THOG
             # ^^^ THOG
         # ^^^ THOG
         return identity
@@ -1176,6 +1222,17 @@ class OwtRunConfig:
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
             plastic__freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
+            # vvv THOG pass sampling-only chaos bump controls into the trainer
+            chaos_bump__sampling__enabled=self.chaos_bump__sampling__enabled,
+            chaos_bump__sampling__initial_lockout__steps=self.chaos_bump__sampling__initial_lockout__steps,
+            chaos_bump__sampling__maximum_bumps=self.chaos_bump__sampling__maximum_bumps,
+            chaos_bump__sampling__interlude__min_steps=self.chaos_bump__sampling__interlude__min_steps,
+            chaos_bump__sampling__interlude__max_steps=self.chaos_bump__sampling__interlude__max_steps,
+            chaos_bump__sampling__duration__min_steps=self.chaos_bump__sampling__duration__min_steps,
+            chaos_bump__sampling__duration__max_steps=self.chaos_bump__sampling__duration__max_steps,
+            chaos_bump__sampling__duration__max_fraction_of_elapsed_steps=self.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+            chaos_bump__sampling__max_movement_fraction_of_local_gap=self.chaos_bump__sampling__max_movement_fraction_of_local_gap,
+            # ^^^ THOG
             # ^^^ THOG
             layer_dropout_stratum_size=self.layer_dropout_stratum_size,                                                                                    # <<< THOG pass stratified layer-dropout controls into trainer config
             layer_dropout_active_per_stratum=self.layer_dropout_active_per_stratum,                                                                        # <<< THOG pass active cardinality per stratum
@@ -1207,6 +1264,9 @@ class OwtRunConfig:
     # vvv THOG persistent disabled-run metadata excludes all dormant PLASTIC DEPTH controls
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        if not self.chaos_bump__sampling__enabled:
+            for name in CHAOS_BUMP_SAMPLING_CONFIG_FIELDS:
+                values.pop(name, None)
         if not self.plastic__enabled:
             for name in PLASTIC_RUN_CONFIG_FIELDS:
                 values.pop(name, None)

@@ -93,6 +93,17 @@ PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="0.1"
 PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true
 PLASTIC_LOG_INTERVAL_COARSE=10
 PLASTIC_COARSE_PHASE_ROLL_THROUGH=false
+# vvv THOG v1.3 sampling-only chaos bump wrapper defaults
+CHAOS_BUMP_SAMPLING_ENABLED=false
+CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS=16
+CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS=1
+CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS=128
+CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS=256
+CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS=16
+CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS=256
+CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS="0.05"
+CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP="0.10"
+# ^^^ THOG
 MAX_NONFINITE_UPDATE_SKIPS=99999
 # ^^^ THOG
 LAPPED_COSINE_WINDOW_LENGTH=36                                                                                                                             # <<< THOG default lapped locality scale
@@ -244,6 +255,17 @@ PLASTIC DEPTH:
   --plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup
   --plastic__log_interval_coarse N=${PLASTIC_LOG_INTERVAL_COARSE}
   --plastic__coarse_phase_roll_through | --no-plastic__coarse_phase_roll_through
+
+Sampling-only chaos bump:
+  --chaos_bump__sampling__enabled | --no-chaos_bump__sampling__enabled
+  --chaos_bump__sampling__initial_lockout__steps N=${CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS}
+  --chaos_bump__sampling__maximum_bumps N=${CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS}
+  --chaos_bump__sampling__interlude__min_steps N=${CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS}
+  --chaos_bump__sampling__interlude__max_steps N=${CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS}
+  --chaos_bump__sampling__duration__min_steps N=${CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS}
+  --chaos_bump__sampling__duration__max_steps N=${CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS}
+  --chaos_bump__sampling__duration__max_fraction_of_elapsed_steps VALUE=${CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS}
+  --chaos_bump__sampling__max_movement_fraction_of_local_gap VALUE=${CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP}
 
 Compact geometry:
   -B BASIS_FAMILY=${BASIS_FAMILY}                   canonical: chebyshev | dct | haar | lapped_cosine; single, comma, or quoted space list
@@ -399,6 +421,39 @@ while (( $# > 0 )); do
     --no-plastic__do_learn_layer_count) PLASTIC_DO_LEARN_LAYER_COUNT=false; shift ;;
     --plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true; shift ;;
     --no-plastic__freeze_geometry_during_warmup) PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=false; shift ;;
+    # vvv THOG consume the exact sampling-only chaos bump namespace
+    --chaos_bump__sampling__enabled) CHAOS_BUMP_SAMPLING_ENABLED=true; shift ;;
+    --no-chaos_bump__sampling__enabled) CHAOS_BUMP_SAMPLING_ENABLED=false; shift ;;
+    --chaos_bump__sampling__initial_lockout__steps|--chaos_bump__sampling__maximum_bumps|--chaos_bump__sampling__interlude__min_steps|--chaos_bump__sampling__interlude__max_steps|--chaos_bump__sampling__duration__min_steps|--chaos_bump__sampling__duration__max_steps|--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps|--chaos_bump__sampling__max_movement_fraction_of_local_gap)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --chaos_bump__sampling__initial_lockout__steps) CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS="$2" ;;
+        --chaos_bump__sampling__maximum_bumps) CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS="$2" ;;
+        --chaos_bump__sampling__interlude__min_steps) CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS="$2" ;;
+        --chaos_bump__sampling__interlude__max_steps) CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS="$2" ;;
+        --chaos_bump__sampling__duration__min_steps) CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS="$2" ;;
+        --chaos_bump__sampling__duration__max_steps) CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS="$2" ;;
+        --chaos_bump__sampling__duration__max_fraction_of_elapsed_steps) CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS="$2" ;;
+        --chaos_bump__sampling__max_movement_fraction_of_local_gap) CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP="$2" ;;
+      esac
+      shift 2
+      ;;
+    --chaos_bump__sampling__initial_lockout__steps=*|--chaos_bump__sampling__maximum_bumps=*|--chaos_bump__sampling__interlude__min_steps=*|--chaos_bump__sampling__interlude__max_steps=*|--chaos_bump__sampling__duration__min_steps=*|--chaos_bump__sampling__duration__max_steps=*|--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps=*|--chaos_bump__sampling__max_movement_fraction_of_local_gap=*)
+      chaos_name="${1%%=*}"; chaos_value="${1#*=}"
+      case "$chaos_name" in
+        --chaos_bump__sampling__initial_lockout__steps) CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__maximum_bumps) CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS="$chaos_value" ;;
+        --chaos_bump__sampling__interlude__min_steps) CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__interlude__max_steps) CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__duration__min_steps) CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__duration__max_steps) CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__duration__max_fraction_of_elapsed_steps) CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS="$chaos_value" ;;
+        --chaos_bump__sampling__max_movement_fraction_of_local_gap) CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP="$chaos_value" ;;
+      esac
+      unset chaos_name chaos_value
+      shift
+      ;;
+    # ^^^ THOG
     # --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__geometry_learning_rate_multiplier)
     --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__probe_every_n_steps|--plastic__layer_count_probe__number_of_sampled_valid_tokens|--plastic__layer_count_probe_radius|--plastic__layer_count__max_allowable_layer_change|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence|--plastic__layer_count_cost_weight|--plastic__layer_count__memory_budget_gib|--plastic__layer_count__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
@@ -639,6 +694,14 @@ validate_nonnegative_number() {
   }
 }
 # ^^^ THOG
+# vvv THOG sampling bump elapsed-duration fraction is any finite positive scalar
+validate_positive_number() {
+  awk -v value="$1" 'BEGIN { numeric = value + 0; exit !(value != "" && numeric > 0.0 && numeric == numeric && numeric < 1.0e100) }' || {
+    echo "Invalid $2: $1; expected a finite positive number." >&2
+    exit 2
+  }
+}
+# ^^^ THOG
 # vvv THOG HYPERBLOCK recurrence decay is one finite scalar in the closed upper interval
 validate_open_closed_unit_float() {
   awk -v value="$1" 'BEGIN { numeric = value + 0; exit !(value != "" && numeric > 0.0 && numeric <= 1.0) }' || {
@@ -802,6 +865,20 @@ if [[ "$PLASTIC_ENABLED" == true ]]; then
   [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false ]] || { echo "PLASTIC DEPTH requires every selected preset to be depth." >&2; exit 2; }
   [[ "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" == "" || "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" == "${LAYER_DROPOUT_STRATUM_SIZE:-$N_LAYER}" ]] || { echo "PLASTIC DEPTH v0.1 may not be combined with layer dropout." >&2; exit 2; }
 fi
+# vvv THOG validate sampling-only bump controls and their PLASTIC dependency
+validate_true_false "$CHAOS_BUMP_SAMPLING_ENABLED" "CHAOS_BUMP_SAMPLING_ENABLED"
+validate_nonnegative_uint "$CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS" "CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS"
+validate_positive_uint "$CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS" "CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS"
+validate_nonnegative_uint "$CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS" "CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS"
+validate_nonnegative_uint "$CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS" "CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS"
+validate_positive_uint "$CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS" "CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS"
+validate_positive_uint "$CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS" "CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS"
+validate_positive_number "$CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS" "CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS"
+validate_open_closed_unit_float "$CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP" "CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP"
+(( CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS <= CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS )) || { echo "sampling chaos bump interlude min must not exceed max." >&2; exit 2; }
+(( CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS <= CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS )) || { echo "sampling chaos bump duration min must not exceed max." >&2; exit 2; }
+[[ "$CHAOS_BUMP_SAMPLING_ENABLED" == false || "$PLASTIC_ENABLED" == true ]] || { echo "--chaos_bump__sampling__enabled requires --plastic__enabled." >&2; exit 2; }
+# ^^^ THOG
 # ^^^ THOG
 
 case "$RUN_MODE" in fresh|resume) ;; *) echo "RUN_MODE must be fresh or resume." >&2; exit 2 ;; esac
@@ -997,6 +1074,19 @@ run_grid_point() {
     optional_args+=(--plastic__layer_count__cuda_allocator_reserve_gib "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB")
     optional_args+=(--plastic__geometry_learning_rate_multiplier "$PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER")
     if [[ "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" == true ]]; then optional_args+=(--plastic__freeze_geometry_during_warmup); else optional_args+=(--no-plastic__freeze_geometry_during_warmup); fi
+    # vvv THOG emit sampling-only chaos bump controls only when enabled
+    if [[ "$CHAOS_BUMP_SAMPLING_ENABLED" == true ]]; then
+      optional_args+=(--chaos_bump__sampling__enabled)
+      optional_args+=(--chaos_bump__sampling__initial_lockout__steps "$CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS")
+      optional_args+=(--chaos_bump__sampling__maximum_bumps "$CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS")
+      optional_args+=(--chaos_bump__sampling__interlude__min_steps "$CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS")
+      optional_args+=(--chaos_bump__sampling__interlude__max_steps "$CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS")
+      optional_args+=(--chaos_bump__sampling__duration__min_steps "$CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS")
+      optional_args+=(--chaos_bump__sampling__duration__max_steps "$CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS")
+      optional_args+=(--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps "$CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS")
+      optional_args+=(--chaos_bump__sampling__max_movement_fraction_of_local_gap "$CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP")
+    fi
+    # ^^^ THOG
   fi
   # ^^^ THOG
   # vvv THOG layer dropout is architecture-level and therefore applies to dense and compact runs alike
@@ -1122,6 +1212,7 @@ scruffy OWT train
   plastic depth:      enabled=$PLASTIC_ENABLED fixed=${PLASTIC_LAYERS_TO_SAMPLE:-N_LAYER} learn_count=$PLASTIC_DO_LEARN_LAYER_COUNT initial=${PLASTIC_INITIAL_LAYER_COUNT:-N_LAYER} max=${PLASTIC_MAX_PERMITTED_LAYERS:-N_LAYER} init=$PLASTIC_LAYER_SAMPLING_INITIALISATION objective=$PLASTIC_LAYER_COUNT_OBJECTIVE
   plastic coarse:     phase=$PLASTIC_COARSE_PHASE start=${PLASTIC_PHASE_1_STARTING_LAYER_COUNT:--} trials=${PLASTIC_PHASE_1_NUMBER_OF_TRIALS:--} steps=${PLASTIC_PHASE_1_N_STEPS:--} eval=${PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT:--} log=$PLASTIC_LOG_INTERVAL_COARSE roll_through=$PLASTIC_COARSE_PHASE_ROLL_THROUGH
   plastic fine:       probe_every=${PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS:-update_brake} window=$PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES radius=$PLASTIC_LAYER_COUNT_PROBE_RADIUS max_step=$PLASTIC_LAYER_COUNT_MAX_STEP brake=$PLASTIC_LAYER_COUNT_UPDATE_BRAKE extrap_w=$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT
+  chaos bump sampling: enabled=$CHAOS_BUMP_SAMPLING_ENABLED lockout=$CHAOS_BUMP_SAMPLING_INITIAL_LOCKOUT_STEPS bumps=$CHAOS_BUMP_SAMPLING_MAXIMUM_BUMPS interlude=$CHAOS_BUMP_SAMPLING_INTERLUDE_MIN_STEPS..$CHAOS_BUMP_SAMPLING_INTERLUDE_MAX_STEPS duration=$CHAOS_BUMP_SAMPLING_DURATION_MIN_STEPS..$CHAOS_BUMP_SAMPLING_DURATION_MAX_STEPS elapsed_fraction=$CHAOS_BUMP_SAMPLING_DURATION_MAX_FRACTION_OF_ELAPSED_STEPS movement_fraction=$CHAOS_BUMP_SAMPLING_MAX_MOVEMENT_FRACTION_OF_LOCAL_GAP
 $depth_curve_console
   schedule:           steps=$STEPS eval_every=$EVAL_INTERVAL eval_iters=$EVAL_ITERS log_every=$LOG_INTERVAL ckpt_every=$CHECKPOINT_INTERVAL warmup=$WARMUP_ITERS
   shape:              $shape_summary

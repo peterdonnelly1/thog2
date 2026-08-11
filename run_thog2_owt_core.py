@@ -22,6 +22,9 @@ from sheet.bases.lapped_cosine import DEFAULT_LAPPED_COSINE_OVERLAP_FRACTION, DE
 from sheet.checkpoints import load_payload, validate_plastic_depth_checkpoint_format
 # ^^^ THOG
 from sheet.compact_identity import ATTENTION_GEOMETRIES, BASIS_FAMILY_CHEBYSHEV, DEFAULT_MLP_HIDDEN_COMPRESSOR, DEFAULT_MLP_HIDDEN_GROUP_SIZE, GEOMETRY_PRESET_DEPTH, GEOMETRY_PRESETS, MLP_GEOMETRIES
+# vvv THOG sampling-only chaos bump resume-control identity
+from sheet.chaos_bump_sampling import CHAOS_BUMP_SAMPLING_CONFIG_FIELDS
+# ^^^ THOG
 from sheet.geometry_registry import AXIS_MLP_HIDDEN, format_geometry_plan, resolve_geometry_plan
 # vvv THOG v0 exposes HYPERBLOCK as a Boolean mode while retaining explicit topology identity internally
 from sheet.hyperblock import HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE
@@ -207,6 +210,9 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
         "nonfinite_update_policy", "max_nonfinite_update_skips", "model_seed", "data_seed",
         "layer_dropout_stratum_size", "layer_dropout_active_per_stratum", "layer_dropout_resample_steps",
         "plastic__layer_count_probe__number_of_sampled_valid_tokens",
+        # vvv THOG a resumed bump schedule must retain every material control
+        *CHAOS_BUMP_SAMPLING_CONFIG_FIELDS,
+        # ^^^ THOG
     )
     # ^^^ THOG
     mismatches = [f"{name}: checkpoint={getattr(stored, name)!r}, requested={getattr(expected, name)!r}" for name in control_fields if getattr(stored, name) != getattr(expected, name)]
@@ -308,6 +314,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__layer_count__cuda_allocator_reserve_gib", dest="plastic__layer_count__cuda_allocator_reserve_gib", type=float, default=0.5)
     parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
     parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
+    # ^^^ THOG
+    # vvv THOG v1.3 sampling-only chaos bump public namespace
+    parser.add_argument("--chaos_bump__sampling__enabled", dest="chaos_bump__sampling__enabled", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--chaos_bump__sampling__initial_lockout__steps", dest="chaos_bump__sampling__initial_lockout__steps", type=int, default=16)
+    parser.add_argument("--chaos_bump__sampling__maximum_bumps", dest="chaos_bump__sampling__maximum_bumps", type=int, default=1)
+    parser.add_argument("--chaos_bump__sampling__interlude__min_steps", dest="chaos_bump__sampling__interlude__min_steps", type=int, default=128)
+    parser.add_argument("--chaos_bump__sampling__interlude__max_steps", dest="chaos_bump__sampling__interlude__max_steps", type=int, default=256)
+    parser.add_argument("--chaos_bump__sampling__duration__min_steps", dest="chaos_bump__sampling__duration__min_steps", type=int, default=16)
+    parser.add_argument("--chaos_bump__sampling__duration__max_steps", dest="chaos_bump__sampling__duration__max_steps", type=int, default=256)
+    parser.add_argument("--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps", dest="chaos_bump__sampling__duration__max_fraction_of_elapsed_steps", type=float, default=0.05)
+    parser.add_argument("--chaos_bump__sampling__max_movement_fraction_of_local_gap", dest="chaos_bump__sampling__max_movement_fraction_of_local_gap", type=float, default=0.10)
     # ^^^ THOG
     # vvv THOG explicit lapped cosine controls
     parser.add_argument("--lapped-cosine-window-length", type=int, default=DEFAULT_LAPPED_COSINE_WINDOW_LENGTH)
@@ -524,6 +541,17 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
+        # ^^^ THOG
+        # vvv THOG pass sampling-only chaos bump controls into resolved run identity
+        chaos_bump__sampling__enabled=arguments.chaos_bump__sampling__enabled,
+        chaos_bump__sampling__initial_lockout__steps=arguments.chaos_bump__sampling__initial_lockout__steps,
+        chaos_bump__sampling__maximum_bumps=arguments.chaos_bump__sampling__maximum_bumps,
+        chaos_bump__sampling__interlude__min_steps=arguments.chaos_bump__sampling__interlude__min_steps,
+        chaos_bump__sampling__interlude__max_steps=arguments.chaos_bump__sampling__interlude__max_steps,
+        chaos_bump__sampling__duration__min_steps=arguments.chaos_bump__sampling__duration__min_steps,
+        chaos_bump__sampling__duration__max_steps=arguments.chaos_bump__sampling__duration__max_steps,
+        chaos_bump__sampling__duration__max_fraction_of_elapsed_steps=arguments.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+        chaos_bump__sampling__max_movement_fraction_of_local_gap=arguments.chaos_bump__sampling__max_movement_fraction_of_local_gap,
         # ^^^ THOG
         lapped_cosine_window_length=arguments.lapped_cosine_window_length,                                                                                 # <<< THOG CLI locality control
         lapped_cosine_overlap_fraction=arguments.lapped_cosine_overlap_fraction,                                                                           # <<< THOG CLI overlap control

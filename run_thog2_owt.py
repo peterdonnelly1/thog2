@@ -290,6 +290,15 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__freeze_geometry_during_warmup:",
     "active sample_layer:",
     "capacity sample_layer:",
+    "chaos_bump__sampling__enabled:",
+    "chaos_bump__sampling__initial_lockout__steps:",
+    "chaos_bump__sampling__maximum_bumps:",
+    "chaos_bump__sampling__interlude__min_steps:",
+    "chaos_bump__sampling__interlude__max_steps:",
+    "chaos_bump__sampling__duration__min_steps:",
+    "chaos_bump__sampling__duration__max_steps:",
+    "chaos_bump__sampling__duration__max_fraction_of_elapsed_steps:",
+    "chaos_bump__sampling__max_movement_fraction_of_local_gap:",
 )
 _PLASTIC_STARTUP_LABEL_WIDTH = max(len(label) for label in _PLASTIC_STARTUP_LABELS) + 3
 
@@ -367,6 +376,20 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     if full_coordinates and full_coordinates != public_coordinates:
         _print_plastic_option("capacity sample_layer:", _startup_public_indices(full_coordinates))
     print(flush=True)
+    # vvv THOG sampling-only chaos bump startup report is explicit and namespace-complete
+    if bool(getattr(config, "chaos_bump__sampling__enabled", False)):
+        print("chaos bump - sampling", flush=True)
+        _print_plastic_option("chaos_bump__sampling__enabled:", _startup_bool(config.chaos_bump__sampling__enabled))
+        _print_plastic_option("chaos_bump__sampling__initial_lockout__steps:", str(config.chaos_bump__sampling__initial_lockout__steps))
+        _print_plastic_option("chaos_bump__sampling__maximum_bumps:", str(config.chaos_bump__sampling__maximum_bumps))
+        _print_plastic_option("chaos_bump__sampling__interlude__min_steps:", str(config.chaos_bump__sampling__interlude__min_steps))
+        _print_plastic_option("chaos_bump__sampling__interlude__max_steps:", str(config.chaos_bump__sampling__interlude__max_steps))
+        _print_plastic_option("chaos_bump__sampling__duration__min_steps:", str(config.chaos_bump__sampling__duration__min_steps))
+        _print_plastic_option("chaos_bump__sampling__duration__max_steps:", str(config.chaos_bump__sampling__duration__max_steps))
+        _print_plastic_option("chaos_bump__sampling__duration__max_fraction_of_elapsed_steps:", _startup_float(config.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps))
+        _print_plastic_option("chaos_bump__sampling__max_movement_fraction_of_local_gap:", _startup_float(config.chaos_bump__sampling__max_movement_fraction_of_local_gap))
+        print(flush=True)
+    # ^^^ THOG
 
 
 def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None:

@@ -17,6 +17,12 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .checkpointing import validate_checkpoint_segment_size
+# vvv THOG sampling-only chaos bump configuration and checkpoint identity
+from .chaos_bump_sampling import (
+    CHAOS_BUMP_SAMPLING_CONFIG_FIELDS,
+    resolve_chaos_bump_sampling_config,
+)
+# ^^^ THOG
 from .compact_identity import (
     DEFAULT_MLP_HIDDEN_COMPRESSOR,
     DEFAULT_MLP_HIDDEN_GROUP_SIZE,
@@ -254,6 +260,17 @@ class TrainingConfig:
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
+    # ^^^ THOG
+    # vvv THOG v1.3 sampling-only chaos bump controls; disabled is the exact established path
+    chaos_bump__sampling__enabled: bool = False
+    chaos_bump__sampling__initial_lockout__steps: int = 16
+    chaos_bump__sampling__maximum_bumps: int = 1
+    chaos_bump__sampling__interlude__min_steps: int = 128
+    chaos_bump__sampling__interlude__max_steps: int = 256
+    chaos_bump__sampling__duration__min_steps: int = 16
+    chaos_bump__sampling__duration__max_steps: int = 256
+    chaos_bump__sampling__duration__max_fraction_of_elapsed_steps: float = 0.05
+    chaos_bump__sampling__max_movement_fraction_of_local_gap: float = 0.10
     # ^^^ THOG
     checkpoint_segment_size: int = 0
     batch_size: int = 4
@@ -517,6 +534,20 @@ class TrainingConfig:
             raise ValueError("PLASTIC DEPTH requires model_type='thog2_sheet'")
         if self.plastic__enabled and self.hyperblock_enabled:
             raise ValueError("PLASTIC DEPTH may not be combined with HYPERBLOCK")
+        # vvv THOG validate sampling-only chaos bumps after PLASTIC resolution
+        resolve_chaos_bump_sampling_config(
+            enabled=self.chaos_bump__sampling__enabled,
+            plastic_enabled=self.plastic__enabled,
+            initial_lockout_steps=self.chaos_bump__sampling__initial_lockout__steps,
+            maximum_bumps=self.chaos_bump__sampling__maximum_bumps,
+            interlude_min_steps=self.chaos_bump__sampling__interlude__min_steps,
+            interlude_max_steps=self.chaos_bump__sampling__interlude__max_steps,
+            duration_min_steps=self.chaos_bump__sampling__duration__min_steps,
+            duration_max_steps=self.chaos_bump__sampling__duration__max_steps,
+            duration_max_fraction_of_elapsed_steps=self.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+            max_movement_fraction_of_local_gap=self.chaos_bump__sampling__max_movement_fraction_of_local_gap,
+        )
+        # ^^^ THOG
         # ^^^ THOG
 
         # vvv THOG HYPERBLOCK and legacy selector geometries are mutually exclusive persistent parameterisations
@@ -812,6 +843,9 @@ class TrainingConfig:
     # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        if not self.chaos_bump__sampling__enabled:
+            for name in CHAOS_BUMP_SAMPLING_CONFIG_FIELDS:
+                values.pop(name, None)
         if not self.plastic__enabled:
             for name in PLASTIC_TRAINING_CONFIG_FIELDS:
                 values.pop(name, None)
@@ -987,6 +1021,21 @@ class TrainingConfig:
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
                 initial_active_layers=self.plastic__initial_active_layers,
             )
+            # vvv THOG sampling bump identity exists only when explicitly enabled
+            if self.chaos_bump__sampling__enabled:
+                identity["chaos_bump_sampling"] = resolve_chaos_bump_sampling_config(
+                    enabled=True,
+                    plastic_enabled=True,
+                    initial_lockout_steps=self.chaos_bump__sampling__initial_lockout__steps,
+                    maximum_bumps=self.chaos_bump__sampling__maximum_bumps,
+                    interlude_min_steps=self.chaos_bump__sampling__interlude__min_steps,
+                    interlude_max_steps=self.chaos_bump__sampling__interlude__max_steps,
+                    duration_min_steps=self.chaos_bump__sampling__duration__min_steps,
+                    duration_max_steps=self.chaos_bump__sampling__duration__max_steps,
+                    duration_max_fraction_of_elapsed_steps=self.chaos_bump__sampling__duration__max_fraction_of_elapsed_steps,
+                    max_movement_fraction_of_local_gap=self.chaos_bump__sampling__max_movement_fraction_of_local_gap,
+                ).identity()
+            # ^^^ THOG
             # ^^^ THOG
         # ^^^ THOG
         return identity

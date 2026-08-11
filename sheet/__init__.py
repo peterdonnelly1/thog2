@@ -208,3 +208,7 @@ from . import plastic_depth_sen_kendall_v055_boundary_fix_patch as _plastic_dept
 # vvv THOG enforce the CUDA allocator reserve as a real growth headroom barrier after same-batch and final Sen/Kendall selection are installed
 from . import plastic_depth_cuda_headroom_guard_patch as _plastic_depth_cuda_headroom_guard_patch
 # ^^^ THOG
+
+# vvv THOG v1.3 install sampling-only chaos bumps last so count freeze, console and checkpoint semantics are authoritative
+from . import chaos_bump_sampling_patch as _chaos_bump_sampling_patch
+# ^^^ THOG

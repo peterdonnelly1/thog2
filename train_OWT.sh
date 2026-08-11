@@ -14,7 +14,7 @@ thog2_normalize_nonplastic_long_option() {
 THOG2_STRICT_LONG_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic__*|--no-plastic__*)
+    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*)
       THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;
@@ -22,6 +22,12 @@ while (( $# > 0 )); do
       echo "Non-canonical PLASTIC option rejected: $1; use the exact --plastic__... or --no-plastic__... spelling." >&2
       exit 2
       ;;
+    # vvv THOG sampling-only chaos bump names are exact public namespace, never hyphen-normalized aliases
+    --chaos-bump-*|--no-chaos-bump-*|--chaos_bump_[!_]*|--no-chaos_bump_[!_]*)
+      echo "Non-canonical sampling chaos bump option rejected: $1; use the exact --chaos_bump__sampling__... spelling." >&2
+      exit 2
+      ;;
+    # ^^^ THOG
     --*=*)
       THOG2_LONG_NAME="${1%%=*}"
       THOG2_LONG_VALUE="${1#*=}"

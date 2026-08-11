@@ -551,6 +551,11 @@ class Stage6Trainer(Stage4Trainer):
                 log_interval=self.config.log_interval,
                 sampled_values=sampled_values,
             )
+            # vvv THOG sampling chaos bump entry and exact restoration always receive a visible optimizer row
+            report_update = report_update or bool(
+                metrics.get("chaos_bump__sampling__transition")
+            )
+            # ^^^ THOG
             if report_update:
                 # self._print_progress(
                 #     run_id,
