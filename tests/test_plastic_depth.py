@@ -675,7 +675,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
             "plastic__layer_count_probe__window_size_as_number_of_probes",
             "plastic__layer_count_probe_noise_lambda",
             "plastic__layer_count_cost_weight",
-            "plastic__layer_memory_budget_gib",
+            "plastic__layer_count__memory_budget_gib",
             "plastic__geometry_learning_rate_multiplier",
             "plastic__freeze_geometry_during_warmup",
             "plastic__initial_active_layers",

@@ -54,7 +54,7 @@ def _begin_plastic_depth_inline_update_with_full_radius_oom(
     if reserve is None:
         reserve = PlasticDepthCudaAllocatorReserve(
             device=self.device,
-            reserve_gib=float(self.config.plastic__cuda_allocator_reserve_gib),
+            reserve_gib=float(self.config.plastic__layer_count__cuda_allocator_reserve_gib),
         )
         local_preflight_feasible = reserve.acquire()
         globally_preflight_feasible = self.distributed.all_true(

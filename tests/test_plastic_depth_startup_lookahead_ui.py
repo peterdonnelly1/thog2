@@ -30,8 +30,8 @@ class PlasticDepthStartupLookaheadUiTests(unittest.TestCase):
             "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence": 0.8,
             "plastic__layer_count_probe_noise_lambda": 0.5,
             "plastic__layer_count_cost_weight": 0.03,
-            "plastic__layer_memory_budget_gib": None,
-            "plastic__cuda_allocator_reserve_gib": 1.5,
+            "plastic__layer_count__memory_budget_gib": None,
+            "plastic__layer_count__cuda_allocator_reserve_gib": 1.5,
             "plastic__geometry_learning_rate_multiplier": 0.25,
             "plastic__freeze_geometry_during_warmup": True,
         }

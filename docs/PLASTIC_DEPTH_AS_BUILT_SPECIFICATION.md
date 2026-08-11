@@ -29,8 +29,8 @@ Core controls:
 - `plastic__layer_count_extrapolation_weight`: right/up directional-credibility and distance discount; default 0.8.
 - `plastic__layer_count_probe_noise_lambda`: robust MAD significance multiplier.
 - `plastic__layer_count_cost_weight`: cost penalty for count objectives that use it.
-- `plastic__layer_memory_budget_gib`: memory-budget objective input.
-- `plastic__cuda_allocator_reserve_gib`: CUDA upward-probe safety reserve.
+- `plastic__layer_count__memory_budget_gib`: memory-budget objective input.
+- `plastic__layer_count__cuda_allocator_reserve_gib`: CUDA upward-probe safety reserve.
 - `plastic__geometry_learning_rate_multiplier`: sampling-geometry optimizer multiplier.
 - `plastic__freeze_geometry_during_warmup`: disables geometry updates during warmup when set.
 

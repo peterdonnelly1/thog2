@@ -284,8 +284,8 @@ _PLASTIC_STARTUP_LABELS = (
     "plastic__wall_time_equivalent_time_gain_loss_rate_window:",
     "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:",
     "plastic__layer_count_cost_weight:",
-    "plastic__layer_memory_budget_gib:",
-    "plastic__cuda_allocator_reserve_gib:",
+    "plastic__layer_count__memory_budget_gib:",
+    "plastic__layer_count__cuda_allocator_reserve_gib:",
     "plastic__geometry_learning_rate_multiplier:",
     "plastic__freeze_geometry_during_warmup:",
     "active sample_layer:",
@@ -358,8 +358,8 @@ def _print_plastic_depth_section(config: Any, trainer: Any) -> None:
     _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_window:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_window", 64)))
     _print_plastic_option("plastic__wall_time_equivalent_time_gain_loss_rate_min_observations:", str(getattr(config, "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", 16)))
     _print_plastic_option("plastic__layer_count_cost_weight:", _startup_float(config.plastic__layer_count_cost_weight))
-    _print_plastic_option("plastic__layer_memory_budget_gib:", _startup_float(config.plastic__layer_memory_budget_gib))
-    _print_plastic_option("plastic__cuda_allocator_reserve_gib:", _startup_float(config.plastic__cuda_allocator_reserve_gib))
+    _print_plastic_option("plastic__layer_count__memory_budget_gib:", _startup_float(config.plastic__layer_count__memory_budget_gib))
+    _print_plastic_option("plastic__layer_count__cuda_allocator_reserve_gib:", _startup_float(config.plastic__layer_count__cuda_allocator_reserve_gib))
     _print_plastic_option("plastic__geometry_learning_rate_multiplier:", _startup_float(config.plastic__geometry_learning_rate_multiplier))
     _print_plastic_option("plastic__freeze_geometry_during_warmup:", _startup_bool(config.plastic__freeze_geometry_during_warmup))
     if public_coordinates:

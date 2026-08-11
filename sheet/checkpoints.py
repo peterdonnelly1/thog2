@@ -127,8 +127,14 @@ def _semantic_plastic_depth_identity(value: Any, *, maximum_layers: Any) -> Any:
         "wall_time_loss_rate_min_observations": value.get("plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", 16),
         "probe_noise_lambda": value.get("plastic__layer_count_probe_noise_lambda"),
         "count_cost_weight": value.get("plastic__layer_count_cost_weight"),
-        "memory_budget_gib": value.get("plastic__layer_memory_budget_gib"),
-        "cuda_allocator_reserve_gib": value.get("plastic__cuda_allocator_reserve_gib"),
+        "memory_budget_gib": value.get(
+            "plastic__layer_count__memory_budget_gib",
+            value.get("plastic__layer_memory_budget_gib"),
+        ),
+        "cuda_allocator_reserve_gib": value.get(
+            "plastic__layer_count__cuda_allocator_reserve_gib",
+            value.get("plastic__cuda_allocator_reserve_gib"),
+        ),
         "geometry_lr_multiplier": value.get("plastic__geometry_learning_rate_multiplier"),
         "freeze_geometry_during_warmup": value.get("plastic__freeze_geometry_during_warmup"),
     }

@@ -107,6 +107,18 @@ def test_plastic_learned_count_cli_resolves_maximum_and_initial_count() -> None:
     assert "LB_50_LNW_20_LNL_250000" in config.artifact_name
 
 
+@pytest.mark.parametrize(
+    "retired_option",
+    (
+        "--plastic__layer_memory_budget_gib",
+        "--plastic__cuda_allocator_reserve_gib",
+    ),
+)
+def test_retired_layer_count_memory_names_are_rejected(retired_option: str) -> None:
+    with pytest.raises(SystemExit):
+        _plastic_cli(retired_option, "1")
+
+
 def test_plastic_capability_guards_are_explicit() -> None:
     with pytest.raises(ValueError, match="Chebyshev"):
         OwtRunConfig(
@@ -232,7 +244,7 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
             "2.5",
             "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic__cuda_allocator_reserve_gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
             "--plastic__geometry_learning_rate_multiplier",
             "0.15",
@@ -300,7 +312,7 @@ def test_public_wrapper_dry_run_propagates_plastic_controls() -> None:
         "--plastic__layer_count_probe__number_of_sampled_valid_tokens 8",
         "--plastic__layer_count_probe_noise_lambda 2.5",
         "--plastic__layer_count_cost_weight 0.2",
-        "--plastic__cuda_allocator_reserve_gib 0.75",
+        "--plastic__layer_count__cuda_allocator_reserve_gib 0.75",
         "--plastic__geometry_learning_rate_multiplier 0.15",
         "--no-plastic__freeze_geometry_during_warmup",
     ):
@@ -323,7 +335,7 @@ def test_wrapper_help_and_shell_syntax_cover_plastic_depth() -> None:
     assert "--plastic__layer_count_objective" in result.stdout
     assert "--plastic__layer_count_update_brake" in result.stdout
     assert "--plastic__layer_count_probe__window_size_as_number_of_probes" in result.stdout
-    assert "--plastic__cuda_allocator_reserve_gib" in result.stdout
+    assert "--plastic__layer_count__cuda_allocator_reserve_gib" in result.stdout
 
 
 def test_memory_budget_rejects_cpu_execution() -> None:
@@ -337,7 +349,7 @@ def test_memory_budget_rejects_cpu_execution() -> None:
                 "4",
                 "--plastic__layer_count_objective",
                 "memory_budget",
-                "--plastic__layer_memory_budget_gib",
+                "--plastic__layer_count__memory_budget_gib",
                 "4",
             )
         )
@@ -363,21 +375,21 @@ def test_cuda_allocator_reserve_cli_propagates_without_changing_artifact_identit
             "2",
             "--plastic__max_permitted_layers",
             "4",
-            "--plastic__cuda_allocator_reserve_gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
         )
     )
-    assert default_config.plastic__cuda_allocator_reserve_gib == pytest.approx(0.5)
-    assert configured.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert default_config.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.5)
+    assert configured.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.75)
     assert default_config.artifact_name == configured.artifact_name
     training = configured.to_training_config(
         vocab_size=32,
         world_size=1,
         out_dir=Path("out-test"),
     )
-    assert training.plastic__cuda_allocator_reserve_gib == pytest.approx(0.75)
-    assert configured.compact_identity()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
-    assert training.compact_identity_metadata()["plastic_depth"]["plastic__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.plastic__layer_count__cuda_allocator_reserve_gib == pytest.approx(0.75)
+    assert configured.compact_identity()["plastic_depth"]["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
+    assert training.compact_identity_metadata()["plastic_depth"]["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.75)
 
 
 def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
@@ -389,7 +401,7 @@ def test_cuda_allocator_reserve_rejects_negative_cli_value() -> None:
                 "2",
                 "--plastic__max_permitted_layers",
                 "4",
-                "--plastic__cuda_allocator_reserve_gib",
+                "--plastic__layer_count__cuda_allocator_reserve_gib",
                 "-0.1",
             )
         )
@@ -418,7 +430,7 @@ def test_persisted_plastic_identity_uses_only_canonical_public_control_names() -
             "1.5",
             "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic__cuda_allocator_reserve_gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
             "--plastic__geometry_learning_rate_multiplier",
             "0.25",
@@ -474,7 +486,7 @@ def test_retired_short_identity_aliases_remain_checkpoint_compatible() -> None:
             "1.5",
             "--plastic__layer_count_cost_weight",
             "0.2",
-            "--plastic__cuda_allocator_reserve_gib",
+            "--plastic__layer_count__cuda_allocator_reserve_gib",
             "0.75",
             "--plastic__geometry_learning_rate_multiplier",
             "0.25",

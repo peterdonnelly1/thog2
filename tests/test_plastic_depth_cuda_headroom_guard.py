@@ -55,7 +55,7 @@ def _context() -> dict:
 def _trainer(context, selected_updates):
     return SimpleNamespace(
         device=SimpleNamespace(type="cuda"),
-        config=SimpleNamespace(plastic__cuda_allocator_reserve_gib=1.5),
+        config=SimpleNamespace(plastic__layer_count__cuda_allocator_reserve_gib=1.5),
         distributed=SimpleNamespace(all_true=lambda value: bool(value)),
         raw_model=SimpleNamespace(
             set_plastic_depth_update_layer_count=lambda count: selected_updates.append(int(count))
@@ -148,7 +148,7 @@ def test_cuda_growth_hold_gets_exact_console_postfix(monkeypatch) -> None:
     recorded = []
     trainer = SimpleNamespace(
         state=SimpleNamespace(completed_updates=338),
-        config=SimpleNamespace(plastic__cuda_allocator_reserve_gib=1.5),
+        config=SimpleNamespace(plastic__layer_count__cuda_allocator_reserve_gib=1.5),
         events=[],
         _record=lambda name, **payload: recorded.append((name, payload)),
     )
