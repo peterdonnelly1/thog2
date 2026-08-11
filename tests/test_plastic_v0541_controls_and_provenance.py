@@ -52,6 +52,28 @@ def test_v0541_training_config_validates_wall_time_controls():
         TrainingConfig(plastic__wall_time_equivalent_time_gain_loss_rate_window=8, plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=9)
 
 
+@pytest.mark.parametrize("config_type", [OwtRunConfig, TrainingConfig])
+def test_relative_wall_time_rejects_an_every_update_probe_schedule(config_type):
+    values = {
+        "plastic__enabled": True,
+        "plastic__do_learn_layer_count": True,
+        "plastic__initial_layer_count": 2,
+        "plastic__max_permitted_layers": 4,
+        "plastic__layer_count_objective": "relative_training_wall_time",
+        "plastic__layer_count_probe__probe_every_n_steps": 1,
+    }
+    if config_type is TrainingConfig:
+        values.update(
+            model_type="thog2_sheet",
+            batch_size=1,
+            block_size=1024,
+        )
+    else:
+        values["model_type"] = "sheet"
+    with pytest.raises(ValueError, match="ordinary-training loss-rate model cannot collect observations"):
+        config_type(**values)
+
+
 def test_v0541_checkpoint_key_normalization_is_explicit():
     normalized = normalize_plastic_v0541_config_fields({
         "plastic__layer_count_max_step": 2,

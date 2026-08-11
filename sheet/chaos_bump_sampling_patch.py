@@ -9,6 +9,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import torch
 
 from . import plastic_depth as _plastic_depth
+from . import plastic_depth_console_minor_patch as _console_minor
 from . import plastic_depth_same_batch_all_probes_patch as _same_batch
 from . import stage6_trainer as _stage6
 from . import trainer_checkpoint_resume as _checkpoint_resume
@@ -551,7 +552,10 @@ def _format_progress_line_with_sampling_bump(
         status = f"B{bump_number} {int(marker['step'])}/{int(marker['duration'])}"
     else:
         status = f"B{bump_number} ended"
-    return f"{line}  <<< chaos bump sampling {status}"
+    return (
+        f"{line.rstrip()}  {_console_minor._PALE_CYAN}"
+        f"<<< chaos bump sampling {status}{_console_minor._RESET}"
+    )
 
 
 _plastic_depth.PlasticDepthSamplingLattice.public_coordinates = _public_coordinates_with_sampling_bump

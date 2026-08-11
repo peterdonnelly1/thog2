@@ -548,6 +548,7 @@ class PlasticDepthControllerTests(unittest.TestCase):
                 plastic__initial_layer_count=2,
                 plastic__max_permitted_layers=4,
                 plastic__layer_count_update_brake=0,
+                plastic__layer_count_probe__probe_every_n_steps=2,
                 plastic__layer_count_objective="relative_training_wall_time",
                 plastic__layer_count_cost_weight=0.1,
                 eval_batches=1,

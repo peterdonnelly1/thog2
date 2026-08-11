@@ -49,6 +49,7 @@ from .plastic_depth import (
     plastic_depth_identity_metadata,
     resolve_plastic_depth_counts,
     validate_plastic_layer_count_objective,
+    validate_plastic_layer_count_objective_effectiveness,
     validate_plastic_sampling_initialisation,
 )
 # ^^^ THOG
@@ -421,6 +422,12 @@ class OwtRunConfig:
             raise ValueError(
                 "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations must lie in [2, plastic__wall_time_equivalent_time_gain_loss_rate_window]"
             )
+        validate_plastic_layer_count_objective_effectiveness(
+            enabled=self.plastic__enabled,
+            do_learn_layer_count=self.plastic__do_learn_layer_count,
+            objective=self.plastic__layer_count_objective,
+            probe_interval=self.plastic__layer_count_probe__probe_every_n_steps,
+        )
         # ^^^ THOG
         if (
             isinstance(self.plastic__layer_count_cost_weight, bool)

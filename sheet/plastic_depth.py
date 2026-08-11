@@ -177,6 +177,28 @@ def validate_plastic_layer_count_objective(value: str) -> str:
     return value
 
 
+def validate_plastic_layer_count_objective_effectiveness(
+    *,
+    enabled: bool,
+    do_learn_layer_count: bool,
+    objective: str,
+    probe_interval: Optional[int],
+) -> None:
+    """Reject learned objectives whose sampling schedule cannot produce evidence."""
+    if (
+        enabled
+        and do_learn_layer_count
+        and objective == "relative_training_wall_time"
+        and probe_interval == 1
+    ):
+        raise ValueError(
+            "learned plastic__layer_count_objective=relative_training_wall_time is ineffective "
+            "with plastic__layer_count_probe__probe_every_n_steps=1: every eligible update "
+            "is a PLASTIC probe, so the ordinary-training loss-rate model cannot collect "
+            "observations; use a probe interval >= 2"
+        )
+
+
 def validate_plastic_sampling_initialisation(value: str) -> str:
     if value not in PLASTIC_LAYER_SAMPLING_INITIALISATIONS:
         raise ValueError(

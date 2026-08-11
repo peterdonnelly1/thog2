@@ -13,9 +13,49 @@ _SECTION = "PLASTIC DEPTH decision algorithms"
 _GROWTH_DISCOUNT_OPTION = "--plastic__layer_count_decision_algorithm__growth_side_discount VALUE"
 _ROWS = (
     (
-        "—",
+        "LDA",
         "--plastic__layer_count_decision_algorithm ALGORITHM",
         "directional_coherence | theil_sen_kendall_LRA | sen_kendall__tau__stratified; selected independently of the objective",
+    ),
+    ("", "    For Sen slope:", ""),
+    (
+        "",
+        "        sen < 0",
+        "y tends to decrease as x increases. Adding layers tends to improve the wall-time-equivalent economic score",
+    ),
+    (
+        "",
+        "        sen = 0",
+        "no overall trend. Little directional economic preference",
+    ),
+    (
+        "",
+        "        sen > 0",
+        "y tends to increase as x increases. Removing layers tends to improve the wall-time-equivalent economic score",
+    ),
+    ("", "    For Kendall tau:", ""),
+    (
+        "",
+        "        tau = -1",
+        "perfectly decreasing ordering. Extremely strong/near-perfect indication toward adding layers",
+    ),
+    ("", "        tau ≈ -0.8", "strongly decreasing. Strong indication toward adding layers"),
+    (
+        "",
+        "        tau ≈ -0.5",
+        "moderately decreasing. Moderate / minimum accepted indication toward adding layer",
+    ),
+    ("", "        tau ≈  0", "little/no monotonic association. No reliable directional indication"),
+    (
+        "",
+        "        tau ≈ +0.5",
+        "moderately increasing. Moderate / minimum accepted indication toward removing layers",
+    ),
+    ("", "        tau ≈ +0.8", "strongly increasing. Strong indication toward removing layers"),
+    (
+        "",
+        "        tau = +1",
+        "perfectly increasing ordering. Extremely strong/near-perfect indication toward removing layers",
     ),
     (
         "—",
@@ -56,56 +96,6 @@ _ROWS = (
         "—",
         "sen_kendall__tau__stratified",
         "pool only within-probe Sen slopes and Kendall pair evidence over the complete probe window; no L/R/A vote and no legacy z machinery",
-    ),
-    (
-        "—",
-        "Sen slope: sen < 0",
-        "y tends to decrease as x increases; adding layers tends to improve the selected objective score",
-    ),
-    (
-        "—",
-        "Sen slope: sen = 0",
-        "no overall trend; little directional objective preference",
-    ),
-    (
-        "—",
-        "Sen slope: sen > 0",
-        "y tends to increase as x increases; removing layers tends to improve the selected objective score",
-    ),
-    (
-        "—",
-        "Kendall tau = -1",
-        "perfectly decreasing ordering; extremely strong/near-perfect indication toward adding layers",
-    ),
-    (
-        "—",
-        "Kendall tau ≈ -0.8",
-        "strongly decreasing; strong indication toward adding layers",
-    ),
-    (
-        "—",
-        "Kendall tau ≈ -0.5",
-        "moderately decreasing; moderate / minimum accepted indication toward adding layers",
-    ),
-    (
-        "—",
-        "Kendall tau ≈ 0",
-        "little/no monotonic association; no reliable directional indication",
-    ),
-    (
-        "—",
-        "Kendall tau ≈ +0.5",
-        "moderately increasing; moderate / minimum accepted indication toward removing layers",
-    ),
-    (
-        "—",
-        "Kendall tau ≈ +0.8",
-        "strongly increasing; strong indication toward removing layers",
-    ),
-    (
-        "—",
-        "Kendall tau = +1",
-        "perfectly increasing ordering; extremely strong/near-perfect indication toward removing layers",
     ),
     (
         "—",

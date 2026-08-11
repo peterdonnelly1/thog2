@@ -16,6 +16,8 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
         environment.pop("THOG2_PLASTIC_LAYER_COUNT_PROBE__PROBE_EVERY_N_STEPS", None)
         environment.pop("THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS", None)
         environment.pop("THOG2_PLASTIC_LAYER_COUNT_MAX_STEP", None)
+        environment.pop("THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW", None)
+        environment.pop("THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS", None)
         return subprocess.run(
             ("bash", *arguments),
             cwd=_REPOSITORY_ROOT,
@@ -49,6 +51,10 @@ class PlasticDepthWrapperOptionsTests(unittest.TestCase):
         self.assertIn("theil_sen_kendall_LRA", result.stdout)
         self.assertIn("sen_kendall__tau__stratified", result.stdout)
         self.assertIn("objective selected separately", result.stdout)
+        self.assertIn("      For Sen slope:", result.stdout)
+        self.assertIn("        sen < 0", result.stdout)
+        self.assertIn("      For Kendall tau:", result.stdout)
+        self.assertIn("        tau ≈ +0.5", result.stdout)
         self.assertIn("--plastic__layer_count_decision_algorithm__growth_side_discount X", result.stdout)
         self.assertIn("beneficial growth-side objective evidence", result.stdout)
         self.assertNotIn("wall_time__theil_sen_kendall_LRA", result.stdout)
@@ -117,6 +123,39 @@ source ./plastic_depth_lookahead_wrapper_options.sh
         self.assertEqual(result.returncode, 2)
         self.assertIn("expected a positive integer", result.stderr)
         self.assertNotIn("Unknown option", result.stdout + result.stderr)
+
+    def test_relative_wall_time_rejects_every_update_probe_schedule(self) -> None:
+        result = self._run_bash(
+            "./train_OWT.sh",
+            "--plastic__enabled",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count", "12",
+            "--plastic__max_permitted_layers", "48",
+            "--plastic__layer_count_objective", "relative_training_wall_time",
+            "--plastic__layer_count_probe__probe_every_n_steps", "1",
+            "-x", "true",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("THOG2 WARNING", result.stderr)
+        self.assertIn("ordinary-training loss-rate model cannot collect observations", result.stderr)
+        self.assertIn("probe interval >= 2", result.stderr)
+
+    def test_relative_wall_time_rejects_impossible_loss_rate_window(self) -> None:
+        result = self._run_bash(
+            "./train_OWT.sh",
+            "--plastic__enabled",
+            "--plastic__do_learn_layer_count",
+            "--plastic__initial_layer_count", "12",
+            "--plastic__max_permitted_layers", "48",
+            "--plastic__layer_count_objective", "relative_training_wall_time",
+            "--plastic__layer_count_probe__probe_every_n_steps", "2",
+            "--plastic__wall_time_equivalent_time_gain_loss_rate_window", "8",
+            "--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", "9",
+            "-x", "true",
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("THOG2 WARNING", result.stderr)
+        self.assertIn("minimum loss-rate observations (9) exceed", result.stderr)
 
 
 if __name__ == "__main__":

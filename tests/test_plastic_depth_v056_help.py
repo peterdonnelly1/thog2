@@ -17,15 +17,19 @@ def test_help_registry_contains_v056_decision_section() -> None:
     assert "directional_coherence" in text
     assert v056.LRA_ALGORITHM in text
     assert v056.STRATIFIED_ALGORITHM in text
-    assert "Sen slope: sen < 0" in text
-    assert "adding layers tends to improve the selected objective score" in text
-    assert "Kendall tau ≈ -0.5" in text
-    assert "minimum accepted indication toward adding layers" in text
-    assert "Kendall tau ≈ +0.5" in text
+    assert "For Sen slope:" in text
+    assert "sen < 0" in text
+    assert "Adding layers tends to improve the wall-time-equivalent economic score" in text
+    assert "tau ≈ -0.5" in text
+    assert "minimum accepted indication toward adding layer" in text
+    assert "tau ≈ +0.5" in text
     assert "minimum accepted indication toward removing layers" in text
     assert "fixed |tau| >= 0.5" in text
     assert "undiscounted objective-score delta adj < 0" in text
     assert "change_z/score_z" in text
+    selector_index = next(index for index, row in enumerate(section) if row[0] == "LDA")
+    assert section[selector_index + 1] == ("", "    For Sen slope:", "")
+    assert section[selector_index + 5] == ("", "    For Kendall tau:", "")
 
 
 def test_growth_discount_registry_entry_is_unique_and_objective_neutral() -> None:

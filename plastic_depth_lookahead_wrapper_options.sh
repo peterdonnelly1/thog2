@@ -6,6 +6,8 @@
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES="${THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES:-false}"
+THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW="${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW:-64}"
+THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS="${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS:-16}"
 THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS=("$@")
 THOG2_PLASTIC_LOOKAHEAD_FILTERED_ARGS=()
 THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS=()
@@ -84,11 +86,27 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
         "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT"
         "${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$((THOG2_PLASTIC_LOOKAHEAD_INDEX + 1))]}"
       )
+      case "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT" in
+        --plastic__wall_time_equivalent_time_gain_loss_rate_window)
+          THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW="${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$((THOG2_PLASTIC_LOOKAHEAD_INDEX + 1))]}"
+          ;;
+        --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations)
+          THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS="${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$((THOG2_PLASTIC_LOOKAHEAD_INDEX + 1))]}"
+          ;;
+      esac
       ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 2))
       continue
       ;;
     --plastic__wall_time_equivalent_time_gain_discount=*|--plastic__wall_time_equivalent_time_gain_loss_rate_window=*|--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=*)
       THOG2_PLASTIC_WALL_TIME_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
+      case "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT" in
+        --plastic__wall_time_equivalent_time_gain_loss_rate_window=*)
+          THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW="${THOG2_PLASTIC_LOOKAHEAD_ARGUMENT#*=}"
+          ;;
+        --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=*)
+          THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS="${THOG2_PLASTIC_LOOKAHEAD_ARGUMENT#*=}"
+          ;;
+      esac
       ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
       continue
       ;;
@@ -168,6 +186,8 @@ esac
 export THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS
 export THOG2_PLASTIC_LAYER_COUNT_MAX_STEP
 export THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES
+export THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW
+export THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS
 
 if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
   printf '%s\n' \
@@ -186,6 +206,18 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '  --plastic__layer_count__same_batch_all_probes             one fixed probe batch per strict non-overlapping evidence window' \
     '  --no-plastic__layer_count__same_batch_all_probes          established rolling/multi-batch probe path; default' \
     '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), theil_sen_kendall_LRA, or sen_kendall__tau__stratified; objective selected separately' \
+    '      For Sen slope:' \
+    '        sen < 0    y tends to decrease as x increases. Adding layers tends to improve the wall-time-equivalent economic score' \
+    '        sen = 0    no overall trend. Little directional economic preference' \
+    '        sen > 0    y tends to increase as x increases. Removing layers tends to improve the wall-time-equivalent economic score' \
+    '      For Kendall tau:' \
+    '        tau = -1    perfectly decreasing ordering. Extremely strong/near-perfect indication toward adding layers' \
+    '        tau ≈ -0.8  strongly decreasing. Strong indication toward adding layers' \
+    '        tau ≈ -0.5  moderately decreasing. Moderate / minimum accepted indication toward adding layer' \
+    '        tau ≈  0    little/no monotonic association. No reliable directional indication' \
+    '        tau ≈ +0.5  moderately increasing. Moderate / minimum accepted indication toward removing layers' \
+    '        tau ≈ +0.8  strongly increasing. Strong indication toward removing layers' \
+    '        tau = +1    perfectly increasing ordering. Extremely strong/near-perfect indication toward removing layers' \
     '  --plastic__layer_count_decision_algorithm__growth_side_discount X       Sen/Kendall only; credit fraction [0,1] of beneficial growth-side objective evidence; default 1.0' \
     '  --plastic__wall_time_equivalent_time_gain_discount X       credited fraction of positive equivalent-time gain; default 0.9' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_window N       rolling ordinary-training loss-rate window; default 64' \

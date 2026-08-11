@@ -853,6 +853,23 @@ else
   [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" && -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "initial/max layer count controls require --plastic__do_learn_layer_count." >&2; exit 2; }
 fi
 [[ "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_count__memory_budget_gib." >&2; exit 2; }
+# vvv THOG relative wall-time learning needs ordinary (non-probe) updates from which to fit its loss-rate model
+if [[ "$PLASTIC_ENABLED" == true && "$PLASTIC_DO_LEARN_LAYER_COUNT" == true && "$PLASTIC_LAYER_COUNT_OBJECTIVE" == relative_training_wall_time ]]; then
+  PLASTIC_EFFECTIVE_PROBE_INTERVAL="${PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS:-$PLASTIC_LAYER_COUNT_UPDATE_BRAKE}"
+  PLASTIC_EFFECTIVE_PROBE_INTERVAL=$((10#$PLASTIC_EFFECTIVE_PROBE_INTERVAL))
+  (( PLASTIC_EFFECTIVE_PROBE_INTERVAL > 0 )) || PLASTIC_EFFECTIVE_PROBE_INTERVAL=1
+  if (( PLASTIC_EFFECTIVE_PROBE_INTERVAL == 1 )); then
+    echo "THOG2 WARNING: learned relative_training_wall_time is ineffective with plastic__layer_count_probe__probe_every_n_steps=1: every eligible update is a PLASTIC probe, so the ordinary-training loss-rate model cannot collect observations. Use a probe interval >= 2." >&2
+    exit 2
+  fi
+  if [[ "${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW:-64}" =~ ^[0-9]+$ && "${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS:-16}" =~ ^[0-9]+$ ]] &&
+     (( 10#$THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS > 10#$THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW )); then
+    echo "THOG2 WARNING: learned relative_training_wall_time is ineffective because its minimum loss-rate observations (${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_MIN_OBSERVATIONS}) exceed its rolling loss-rate window (${THOG2_PLASTIC_WALL_TIME_LOSS_RATE_WINDOW})." >&2
+    exit 2
+  fi
+  unset PLASTIC_EFFECTIVE_PROBE_INTERVAL
+fi
+# ^^^ THOG
 python - "$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT" <<'PY'
 import math, sys
 value = float(sys.argv[1])

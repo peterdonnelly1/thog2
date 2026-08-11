@@ -395,6 +395,10 @@ def test_progress_formatter_appends_active_and_exit_markers() -> None:
             },
         },
     )
-    assert "<<< chaos bump sampling B1 1/3" in active
-    assert "<<< chaos bump sampling B1 ended" in ended
+    assert active.endswith(
+        "\033[38;2;150;220;255m<<< chaos bump sampling B1 1/3\033[0m"
+    )
+    assert ended.endswith(
+        "\033[38;2;150;220;255m<<< chaos bump sampling B1 ended\033[0m"
+    )
 # ^^^ THOG
