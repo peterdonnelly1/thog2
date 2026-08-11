@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import constants
 import pytest
+import torch
 
 from sheet import plastic_depth_wandb_probe_curves_patch as curves
 from sheet.trainer_state import TrainerEvent
@@ -94,6 +95,84 @@ def test_curve_history_is_rolling_300_probes() -> None:
     assert history[0]["probe_id"] == "P5"
 
 
+def _coefficient_record(
+    *,
+    update: int,
+    active_layers: int = 3,
+    maximum_layers: int = 8,
+):
+    return {
+        "step_id": f"U{update}",
+        "optimizer_update": update,
+        "active_layers": active_layers,
+        "maximum_layers": maximum_layers,
+        "capacity_layer_sample_numbers": tuple(
+            1.0 + index * (maximum_layers - 1.0) / max(1, active_layers - 1)
+            for index in range(active_layers)
+        ),
+        "coefficients": tuple(update + index / 10.0 for index in range(active_layers)),
+    }
+
+
+def test_coefficient_history_is_rolling_300_steps() -> None:
+    telemetry = SimpleNamespace()
+    history = curves._ensure_coefficient_curve_state(telemetry)
+    for update in range(1, 306):
+        history.append(_coefficient_record(update=update))
+    assert len(history) == 300
+    assert history[0]["step_id"] == "U6"
+
+
+def test_coefficient_record_uses_extended_capacity_layer_sample_numbers() -> None:
+    class _Lattice:
+        current_active_layers = 3
+        maximum_layers = 8
+
+        @staticmethod
+        def interval_report():
+            return {"active_sample_layer_coordinates": (1.0, 3.75, 8.0)}
+
+    class _Materializer:
+        @staticmethod
+        def direct_matrix_value(name, layer_index, output_row, row_index):
+            assert name == "attention_query_weight"
+            assert output_row == row_index == 0
+            return torch.tensor((0.25, -0.50, 0.75)[layer_index])
+
+    lattice = _Lattice()
+    trainer = SimpleNamespace(
+        _plastic_depth_lattice=lambda: lattice,
+        raw_model=SimpleNamespace(semantic_materializer=_Materializer()),
+    )
+
+    record = curves._coefficient_record_from_trainer(
+        trainer,
+        optimizer_update=17,
+    )
+
+    assert record["step_id"] == "U17"
+    assert record["capacity_layer_sample_numbers"] == (1.0, 3.75, 8.0)
+    assert record["coefficients"] == pytest.approx((0.25, -0.50, 0.75))
+
+
+def test_bounded_coefficient_rows_drop_oldest_complete_steps() -> None:
+    history = tuple(
+        _coefficient_record(update=update, active_layers=48, maximum_layers=48)
+        for update in range(1, 301)
+    )
+
+    rows = curves._bounded_rows_for_coefficients(history)
+
+    assert len(rows) <= curves._MAX_TABLE_ROWS
+    assert rows[-1][2] == "U300"
+    assert rows[0][2] != "U1"
+    first_step = rows[0][2]
+    assert sum(row[2] == first_step for row in rows) == 48
+    assert [row[0] for row in rows[-48:]] == pytest.approx(
+        history[-1]["capacity_layer_sample_numbers"]
+    )
+
+
 def test_bounded_rows_drop_oldest_complete_probes_before_wandb_limit() -> None:
     points = tuple((distance, float(distance), 10 + distance, distance) for distance in range(40))
     history = tuple(
@@ -169,9 +248,9 @@ class _FakeRun:
         self.calls.append((payload, step))
 
 
-# vvv THOG retain both established split charts and add the joined signed-offset chart without ever touching TensorBoard
-def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer(monkeypatch) -> None:
-    monkeypatch.setattr(constants, "DEBUG", 10)
+# vvv THOG retain the three probe charts, add the sampled-coefficients chart and group all four under plastic without touching TensorBoard
+def test_wandb_curve_logger_emits_four_plastic_line_charts_and_never_touches_writer(monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 3)
     run = _FakeRun()
     writer = SimpleNamespace(add_scalar=lambda *_args, **_kwargs: pytest.fail("TensorBoard must not be used"))
     telemetry = SimpleNamespace(
@@ -183,6 +262,11 @@ def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer(mon
     record = curves._probe_record_from_event(_event())
     assert record is not None
     history.append(record)
+    coefficient_history = curves._ensure_coefficient_curve_state(telemetry)
+    coefficient_history.extend(
+        (_coefficient_record(update=9), _coefficient_record(update=10))
+    )
+    telemetry._plastic_coefficient_curve_total = 2
 
     curves._log_rolling_probe_charts(telemetry, step=10)
 
@@ -190,17 +274,28 @@ def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer(mon
     payload, step = run.calls[0]
     assert step == 10
     assert set(payload) == {
-        "fine/plastic_probe_shrink_curves",
-        "fine/plastic_probe_growth_curves",
-        "fine/plastic_probe_combined_curves",
+        "plastic/probe_shrink_curves",
+        "plastic/probe_growth_curves",
+        "plastic/probe_combined_curves",
+        "plastic/sampled_coefficients_curves",
     }
-    assert payload["fine/plastic_probe_shrink_curves"]["x"] == "distance"
-    assert payload["fine/plastic_probe_growth_curves"]["x"] == "distance"
-    assert payload["fine/plastic_probe_combined_curves"]["x"] == "offset"
-    assert "shrink/interpolation side" in payload["fine/plastic_probe_shrink_curves"]["title"]
-    assert "grow/extrapolation side" in payload["fine/plastic_probe_growth_curves"]["title"]
-    assert "shrink/interpolation : grow/extrapolation" in payload["fine/plastic_probe_combined_curves"]["title"]
-    for chart in payload.values():
+    assert payload["plastic/probe_shrink_curves"]["x"] == "distance"
+    assert payload["plastic/probe_growth_curves"]["x"] == "distance"
+    assert payload["plastic/probe_combined_curves"]["x"] == "offset"
+    assert "shrink/interpolation side" in payload["plastic/probe_shrink_curves"]["title"]
+    assert "grow/extrapolation side" in payload["plastic/probe_growth_curves"]["title"]
+    assert "shrink/interpolation : grow/extrapolation" in payload["plastic/probe_combined_curves"]["title"]
+    coefficients = payload["plastic/sampled_coefficients_curves"]
+    assert coefficients["x"] == "capacity_layer_sample_number"
+    assert coefficients["y"] == "sampled_coefficient"
+    assert coefficients["stroke"] == "step_id"
+    assert "coefficients" in coefficients["title"]
+    assert {row[2] for row in coefficients["table"].data} == {"U9", "U10"}
+    assert coefficients["table"].columns == list(curves._COEFFICIENT_CHART_COLUMNS)
+    assert all(key.startswith("plastic/") for key in payload)
+    for key, chart in payload.items():
+        if key == "plastic/sampled_coefficients_curves":
+            continue
         assert chart["y"] == "delta_loss"
         assert chart["stroke"] == "probe_id"
         assert chart["table"].columns == list(curves._CHART_COLUMNS)
@@ -215,9 +310,10 @@ def test_wandb_curve_logger_emits_three_line_charts_and_never_touches_writer(mon
 # ^^^ THOG
 
 
-# vvv THOG normal runs neither construct nor emit the expensive W&B PLASTIC charts
-def test_wandb_curve_logger_is_disabled_at_normal_debug(monkeypatch) -> None:
-    monkeypatch.setattr(constants, "DEBUG", 9)
+# vvv THOG the PLASTIC chart surface is enabled exactly above DEBUG 2 and remains independent of the broader DEBUG>9 forensic telemetry gate
+@pytest.mark.parametrize("debug", (0, 1, 2))
+def test_wandb_curve_logger_is_disabled_at_debug_two_or_lower(monkeypatch, debug) -> None:
+    monkeypatch.setattr(constants, "DEBUG", debug)
     run = _FakeRun()
     telemetry = SimpleNamespace(
         run=run,
@@ -232,6 +328,86 @@ def test_wandb_curve_logger_is_disabled_at_normal_debug(monkeypatch) -> None:
 
     assert run.calls == []
 # ^^^ THOG
+
+
+def test_coefficient_refresh_uses_early_then_twenty_five_step_cadence() -> None:
+    telemetry = SimpleNamespace()
+    history = curves._ensure_coefficient_curve_state(telemetry)
+    for update in range(1, 11):
+        history.append(_coefficient_record(update=update))
+        telemetry._plastic_coefficient_curve_total = update
+        assert curves._should_refresh_coefficient_chart(
+            telemetry,
+            evaluation=False,
+        )
+        telemetry._plastic_coefficient_curve_last_logged_total = update
+
+    for update in range(11, 35):
+        history.append(_coefficient_record(update=update))
+        telemetry._plastic_coefficient_curve_total = update
+        assert not curves._should_refresh_coefficient_chart(
+            telemetry,
+            evaluation=False,
+        )
+
+    history.append(_coefficient_record(update=35))
+    telemetry._plastic_coefficient_curve_total = 35
+    assert curves._should_refresh_coefficient_chart(
+        telemetry,
+        evaluation=False,
+    )
+
+
+def test_attachment_captures_every_successful_update_outside_console_cadence(monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 3)
+
+    class _Lattice:
+        current_active_layers = 2
+        maximum_layers = 4
+
+        @staticmethod
+        def interval_report():
+            return {"active_sample_layer_coordinates": (1.0, 4.0)}
+
+    class _Materializer:
+        @staticmethod
+        def direct_matrix_value(_name, layer_index, _output_row, _row_index):
+            return torch.tensor((0.125, -0.25)[layer_index])
+
+    state = SimpleNamespace(completed_updates=0)
+
+    def train_one_update():
+        state.completed_updates += 1
+        return {"skipped_update": 0.0}
+
+    def timed(function):
+        return function(), 0.5
+
+    lattice = _Lattice()
+    trainer = SimpleNamespace(
+        _timed=timed,
+        train_one_update=train_one_update,
+        _print_progress=lambda *_args, **_kwargs: None,
+        _plastic_depth_lattice=lambda: lattice,
+        raw_model=SimpleNamespace(semantic_materializer=_Materializer()),
+        distributed=SimpleNamespace(is_primary=True),
+        config=SimpleNamespace(plastic__enabled=True),
+        state=state,
+        events=[],
+    )
+    telemetry = SimpleNamespace(
+        run=_FakeRun(),
+        module=SimpleNamespace(Table=_FakeTable, plot=_FakePlot),
+        log_event=lambda *_args, **_kwargs: None,
+        log_depth_curve_figures=lambda *_args, **_kwargs: None,
+    )
+
+    curves.attach_telemetry_with_plastic_probe_curves(trainer, telemetry)
+    metrics, elapsed = trainer._timed(trainer.train_one_update)
+
+    assert metrics["skipped_update"] == 0.0
+    assert elapsed == 0.5
+    assert [row["step_id"] for row in telemetry._plastic_coefficient_curve_history] == ["U1"]
 
 
 def test_new_probe_events_are_consumed_once() -> None:
