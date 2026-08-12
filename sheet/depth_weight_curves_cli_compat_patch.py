@@ -20,6 +20,17 @@ def _normalized_options(canonical: str) -> tuple[str, str]:
 # ^^^ THOG
 
 
+# vvv THOG public boolean spelling is explicit true|false; the old valueless true form remains accepted only as a compatibility bridge for already-saved launch stanzas
+def _explicit_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false; got {value!r}")
+# ^^^ THOG
+
+
 def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParser) -> None:
     if bool(getattr(parser, _depth._CLI_INSTALLED_ATTRIBUTE, False)):
         return
@@ -68,8 +79,11 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
         parser_normalized,
         wrapper_normalized,
         dest=destination,
-        action=argparse.BooleanOptionalAction,
+        nargs="?",
+        const=True,
+        type=_explicit_bool,
         default=False,
+        metavar="true|false",
     )
     setattr(parser, _depth._CLI_INSTALLED_ATTRIBUTE, True)
 
