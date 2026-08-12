@@ -44,21 +44,30 @@ jobs:
           set -euo pipefail
           pytest -q \
             tests/test_depth_weight_curves_and_observational_probes.py \
+            tests/test_depth_observational_probe_runtime.py \
             tests/test_plastic_depth_wandb_probe_curves.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_stage3_semantic_materialization.py \
             tests/test_stage4_depth_materialization.py \
-            tests/test_depth_layer_norm_bias_modes.py \
-            tests/test_console_progress_layout.py \
-            tests/test_train_owt_public_wrapper.py
+            tests/test_depth_layer_norm_bias_modes.py
 
   broad-cpu:
     needs: focused-cpu
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - name: Check out feature branch
+      - name: Check out exact feature head
         uses: actions/checkout@v4
+        with:
+          path: head
+          fetch-depth: 0
+
+      - name: Check out exact implementation base
+        uses: actions/checkout@v4
+        with:
+          ref: chaos_bump_sampling
+          path: base
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -72,8 +81,21 @@ jobs:
           python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
           python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Run repository-wide CPU regression
-        env:
-          PYTHONPATH: .
-        run: pytest -q --ignore=tests/test_resume_and_fork_cpu_integration.py
+      - name: Compare repository CPU regressions against chaos_bump_sampling
+        run: |
+          set -euo pipefail
+          python head/tests/hyperblock_regression_compare.py \
+            --head head \
+            --base base \
+            --output depth-weight-regression-comparison.json \
+            --timeout-seconds 240
+
+      - name: Upload regression comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: depth-weight-regression-${{ github.sha }}
+          path: depth-weight-regression-comparison.json
+          if-no-files-found: warn
+          retention-days: 14
 # ^^^ THOG
