@@ -102,3 +102,7 @@ _plastic_depth_same_batch_visibility_patch._align_probe_section = _align_probe_s
 # vvv THOG install continuous DEPTH scalar-weight charts, DEBUG-gated legacy coefficient charts, darker RHS gains and fixed-run observational probes
 from . import depth_weight_curves_and_observational_probes_patch as _depth_weight_curves_and_observational_probes_patch
 # ^^^ THOG
+
+# vvv THOG let fixed-count observational probe events reach the established W&B probe-landscape charts even when PLASTIC itself is disabled
+from . import depth_observational_probe_wandb_patch as _depth_observational_probe_wandb_patch
+# ^^^ THOG
