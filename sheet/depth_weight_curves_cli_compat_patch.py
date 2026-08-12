@@ -8,9 +8,16 @@ import argparse
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 
 
-# vvv THOG the established CLI normalizer collapses underscore runs to one hyphen before argparse matching; keep canonical user spelling visible and add only hidden normalized aliases
-def _normalized_option(canonical: str) -> str:
-    return canonical.replace("_", "-").replace("--", "-") if not canonical.startswith("--") else "--" + canonical[2:].replace("_", "-").replace("--", "-")
+# vvv THOG accept canonical, argparse-normalized double-hyphen, and train_OWT single-hyphen spellings without changing the public destination name
+def _normalized_options(canonical: str) -> tuple[str, str]:
+    body = canonical[2:] if canonical.startswith("--") else canonical
+    parser_normalized = "--" + body.replace("_", "-")
+    wrapper_body = parser_normalized[2:]
+    while "--" in wrapper_body:
+        wrapper_body = wrapper_body.replace("--", "-")
+    wrapper_normalized = "--" + wrapper_body
+    return parser_normalized, wrapper_normalized
+# ^^^ THOG
 
 
 def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParser) -> None:
@@ -44,19 +51,22 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
     )
     for destination, kwargs in controls:
         canonical = f"--{destination}"
+        parser_normalized, wrapper_normalized = _normalized_options(canonical)
         parser.add_argument(
             canonical,
-            _normalized_option(canonical),
+            parser_normalized,
+            wrapper_normalized,
             dest=destination,
             **kwargs,
         )
 
     destination = "instrumentation__depth_weight_curves__same_coordinates_all_runs"
     canonical = f"--{destination}"
-    normalized = _normalized_option(canonical)
+    parser_normalized, wrapper_normalized = _normalized_options(canonical)
     parser.add_argument(
         canonical,
-        normalized,
+        parser_normalized,
+        wrapper_normalized,
         dest=destination,
         action=argparse.BooleanOptionalAction,
         default=False,
