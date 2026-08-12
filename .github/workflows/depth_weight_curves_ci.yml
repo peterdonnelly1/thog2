@@ -45,6 +45,7 @@ jobs:
           pytest -q \
             tests/test_depth_weight_curves_and_observational_probes.py \
             tests/test_depth_observational_probe_runtime.py \
+            tests/test_depth_observational_probe_console.py \
             tests/test_plastic_depth_wandb_probe_curves.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_stage3_semantic_materialization.py \
