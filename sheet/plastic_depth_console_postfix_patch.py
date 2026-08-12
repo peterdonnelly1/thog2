@@ -119,6 +119,10 @@ from . import depth_observational_probe_config_patch as _depth_observational_pro
 from . import depth_weight_curves_row_limit_patch as _depth_weight_curves_row_limit_patch
 # ^^^ THOG
 
+# vvv THOG render depth diagnostics on executed layer indices, add K/V/OUT head-family curves, executed-layer markers and interactive age-emphasised Plotly history
+from . import depth_weight_curves_v2_patch as _depth_weight_curves_v2_patch
+# ^^^ THOG
+
 # vvv THOG replace the compatibility candidate hook with a direct no-grad logical-layer executor for arbitrary observational layer counts
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
