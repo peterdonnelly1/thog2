@@ -9,6 +9,7 @@ import torch
 
 import constants
 from run_thog2_owt_core import build_parser, config_from_arguments
+from sheet import depth_weight_curves_and_observational_probes_patch as depth_curves
 from sheet import plastic_depth_console_cleanup_patch as cleanup
 from sheet import plastic_depth_probe_sampling_v0521_patch as probe_v0521
 from sheet.run_config import OwtRunConfig
@@ -157,11 +158,11 @@ def test_hybrid_probe_vector_keeps_absolute_l_and_signed_candidate_deltas() -> N
     assert plain == "+0.023, -0.027, 4.077, +0.057, -0.017"
     assert f"{constants.BOLD_WHITE}{constants.UNDER}4.077{constants.R}" in rendered
     assert f"{constants.BOLD_GREEN}-0.027{constants.R}" in rendered
-    assert f"{cleanup._GREEN}-0.017{cleanup._RESET}" in rendered
-    assert constants.BOLD_GREEN != cleanup._GREEN
+    assert f"{depth_curves._DARKER_RHS_GREEN}-0.017{constants.R}" in rendered
+    assert constants.BOLD_GREEN != depth_curves._DARKER_RHS_GREEN
     assert constants.BOLD_GREEN not in rendered.split(", ")[0]
-    assert cleanup._GREEN not in rendered.split(", ")[0]
-    assert cleanup._GREEN not in rendered.split(", ")[3]
+    assert depth_curves._DARKER_RHS_GREEN not in rendered.split(", ")[0]
+    assert depth_curves._DARKER_RHS_GREEN not in rendered.split(", ")[3]
 
 
 def test_final_console_renames_probe_vector_to_probe_delta_loss() -> None:
