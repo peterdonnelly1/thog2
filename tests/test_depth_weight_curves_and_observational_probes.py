@@ -7,11 +7,10 @@ import constants
 import pytest
 import torch
 
-from sheet import depth_observational_probe_wandb_patch as observational_wandb
 from sheet import depth_weight_curves_and_observational_probes_patch as depth_curves
+from sheet import plastic_depth_wandb_probe_curves_patch as probe_wandb
 from sheet.depth_trajectory import DepthTrajectory
 from sheet.geometry import SheetGeometryConfig
-from sheet.semantic_materializer import MLP_EXPANSION_WEIGHT
 
 
 # vvv THOG small public DEPTH fixture exercises the real coefficient representation without allocating a training-size model
@@ -47,8 +46,7 @@ def _telemetry(name: str):
     return SimpleNamespace(name=name, group="test-group")
 
 
-# vvv THOG instrumentation CLI controls are discoverable yet remain execution-only environment controls rather than model identity fields
-def test_depth_weight_curve_cli_controls_publish_environment(monkeypatch) -> None:
+def _clear_depth_curve_environment(monkeypatch) -> None:
     for suffix in (
         "SCALAR_WEIGHTS_PER_MATRIX",
         "DEPTH_EVALUATION_POINTS",
@@ -59,6 +57,10 @@ def test_depth_weight_curve_cli_controls_publish_environment(monkeypatch) -> Non
     ):
         monkeypatch.delenv(depth_curves._environment_name(suffix), raising=False)
 
+
+# vvv THOG canonical instrumentation CLI controls publish execution-only environment controls rather than model identity fields
+def test_depth_weight_curve_cli_controls_publish_environment(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
     parser = argparse.ArgumentParser(add_help=False)
     values, remaining = parser.parse_known_args(
         [
@@ -87,18 +89,9 @@ def test_depth_weight_curve_cli_controls_publish_environment(monkeypatch) -> Non
 # ^^^ THOG
 
 
-# vvv THOG train_OWT normalizes underscore runs to single hyphens before forwarding, so the hidden aliases must accept the exact wrapper-produced spellings
+# vvv THOG train_OWT collapses underscore runs to single hyphens before forwarding, so exact wrapper-produced spellings must parse
 def test_depth_weight_curve_cli_controls_accept_wrapper_normalized_spellings(monkeypatch) -> None:
-    for suffix in (
-        "SCALAR_WEIGHTS_PER_MATRIX",
-        "DEPTH_EVALUATION_POINTS",
-        "TIME_MODE",
-        "HISTORY_LENGTH",
-        "LOG_EVERY_N_STEPS",
-        "SAME_COORDINATES_ALL_RUNS",
-    ):
-        monkeypatch.delenv(depth_curves._environment_name(suffix), raising=False)
-
+    _clear_depth_curve_environment(monkeypatch)
     parser = argparse.ArgumentParser(add_help=False)
     values, remaining = parser.parse_known_args(
         [
@@ -127,16 +120,41 @@ def test_depth_weight_curve_cli_controls_accept_wrapper_normalized_spellings(mon
 # ^^^ THOG
 
 
+# vvv THOG the established argparse compatibility layer may preserve double hyphens created from double underscores, so that spelling is accepted too
+def test_depth_weight_curve_cli_controls_accept_parser_normalized_spellings(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
+    parser = argparse.ArgumentParser(add_help=False)
+    values, remaining = parser.parse_known_args(
+        [
+            "--instrumentation--depth-weight-curves--scalar-weights-per-matrix",
+            "2",
+            "--instrumentation--depth-weight-curves--depth-evaluation-points",
+            "32",
+            "--instrumentation--depth-weight-curves--time-mode",
+            "latest",
+            "--instrumentation--depth-weight-curves--history-length",
+            "4",
+            "--instrumentation--depth-weight-curves--log-every-n-steps",
+            "3",
+            "--instrumentation--depth-weight-curves--same-coordinates-all-runs",
+        ]
+    )
+
+    assert remaining == []
+    assert values.instrumentation__depth_weight_curves__scalar_weights_per_matrix == 2
+    assert depth_curves._scalar_weights_per_matrix() == 2
+    assert depth_curves._depth_evaluation_points() == 32
+    assert depth_curves._time_mode() == "latest"
+    assert depth_curves._history_length() == 4
+    assert depth_curves._log_every_n_steps() == 3
+    assert depth_curves._same_coordinates_all_runs() is True
+# ^^^ THOG
+
+
 # vvv THOG default selection is deterministic within one run but deliberately changes its seed with run identity
 def test_scalar_selection_is_fixed_per_run_and_run_specific(monkeypatch) -> None:
-    monkeypatch.setenv(
-        depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"),
-        "false",
-    )
-    monkeypatch.setenv(
-        depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"),
-        "3",
-    )
+    monkeypatch.setenv(depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"), "false")
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "3")
     trajectory = _trajectory()
     trainer = _trainer(trajectory)
     telemetry_a = _telemetry("run-a")
@@ -162,14 +180,8 @@ def test_scalar_selection_is_fixed_per_run_and_run_specific(monkeypatch) -> None
 
 # vvv THOG cross-run fixed mode ignores run identity and therefore selects the same scalar coordinates across runs
 def test_scalar_selection_can_be_fixed_across_runs(monkeypatch) -> None:
-    monkeypatch.setenv(
-        depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"),
-        "true",
-    )
-    monkeypatch.setenv(
-        depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"),
-        "3",
-    )
+    monkeypatch.setenv(depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"), "true")
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "3")
     trajectory = _trajectory()
     trainer = _trainer(trajectory)
     first = depth_curves._selected_scalar_coordinates(trainer, _telemetry("run-a"))
@@ -178,20 +190,23 @@ def test_scalar_selection_can_be_fixed_across_runs(monkeypatch) -> None:
 # ^^^ THOG
 
 
-# vvv THOG continuous scalar evaluation returns the requested dense public-depth ruler rather than only active integer layers
+# vvv THOG continuous scalar snapshot uses the requested dense public-depth ruler rather than only active integer layers
 def test_continuous_scalar_curve_uses_dense_public_depth_ruler(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "17")
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
     trajectory = _trajectory()
-    family = depth_curves._evaluate_scalar_family(
-        trajectory,
-        MLP_EXPANSION_WEIGHT,
-        ((0, 0),),
+    snapshot = depth_curves._depth_weight_snapshot(
+        _trainer(trajectory),
+        _telemetry("run-a"),
+        optimizer_update=1,
     )
+    family = snapshot["families"]["mlp_up"]
     coordinates = family["depth_coordinates"]
     assert len(coordinates) == 17
     assert coordinates[0] == pytest.approx(1.0)
     assert coordinates[-1] == pytest.approx(100.0)
-    assert family["values"].shape == (1, 17)
+    assert len(family["curves"]) == 1
+    assert len(family["curves"][0]["values"]) == 17
 # ^^^ THOG
 
 
@@ -204,22 +219,32 @@ def test_observational_probe_enablement_requires_explicit_cadence() -> None:
 # ^^^ THOG
 
 
-# vvv THOG DEBUG thresholds separate the new depth charts from the legacy sampled-coefficient forensic chart
+# vvv THOG DEBUG thresholds separate new depth chart work from the legacy sampled-coefficient forensic chart
 def test_depth_chart_debug_thresholds(monkeypatch) -> None:
+    calls = []
+    trainer = _trainer(_trajectory())
+    telemetry = SimpleNamespace(run=object(), module=object())
+
+    def fake_snapshot(*_args, **_kwargs):
+        calls.append(1)
+        return {}
+
+    monkeypatch.setattr(depth_curves, "_depth_weight_snapshot", fake_snapshot)
     monkeypatch.setattr(constants, "DEBUG", 2)
-    assert depth_curves._depth_weight_charts_enabled() is False
-    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+    depth_curves._log_depth_weight_snapshot(trainer, telemetry, optimizer_update=1)
+    assert calls == []
+    assert depth_curves._legacy_coefficient_chart_enabled() is False
 
     monkeypatch.setattr(constants, "DEBUG", 3)
-    assert depth_curves._depth_weight_charts_enabled() is True
-    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+    depth_curves._log_depth_weight_snapshot(trainer, telemetry, optimizer_update=1)
+    assert calls == [1]
+    assert depth_curves._legacy_coefficient_chart_enabled() is False
 
     monkeypatch.setattr(constants, "DEBUG", 9)
-    assert depth_curves._depth_weight_charts_enabled() is True
-    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+    assert depth_curves._legacy_coefficient_chart_enabled() is False
 
     monkeypatch.setattr(constants, "DEBUG", 10)
-    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is True
+    assert depth_curves._legacy_coefficient_chart_enabled() is True
 # ^^^ THOG
 
 
@@ -239,14 +264,20 @@ def test_accumulated_chart_rows_fit_wandb_table_limit(monkeypatch) -> None:
     telemetry = _telemetry("run-a")
     snapshots = []
     for update in range(20):
-        snapshots.append(depth_curves._depth_snapshot(trainer, telemetry, update))
+        snapshots.append(
+            depth_curves._depth_weight_snapshot(
+                trainer,
+                telemetry,
+                optimizer_update=update,
+            )
+        )
     rows = depth_curves._depth_chart_rows(snapshots, "mlp_up")
     assert len(rows) <= 9_999
     assert len(rows) % 256 == 0
 # ^^^ THOG
 
 
-# vvv THOG observational probe events are converted into W&B probe records even when PLASTIC itself is disabled
+# vvv THOG observational probe events use the established W&B record conversion even when the selected layer count is unchanged
 def test_observational_probe_events_are_wandb_visible() -> None:
     event = SimpleNamespace(
         name="plastic_depth_count_decision",
@@ -262,7 +293,7 @@ def test_observational_probe_events_are_wandb_visible() -> None:
             ),
         },
     )
-    record = observational_wandb._probe_record_from_event(event)
+    record = probe_wandb._probe_record_from_event(event)
     assert record is not None
     assert record["active_layers"] == 4
     assert record["selected_layers"] == 4
