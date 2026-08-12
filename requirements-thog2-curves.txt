@@ -1,4 +1,7 @@
 tensorboard
+# vvv THOG DEPTH W&B figures use Plotly directly
+plotly
+# ^^^ THOG
 # Optional local system metrics for future curve backends:
 # psutil
 # pynvml

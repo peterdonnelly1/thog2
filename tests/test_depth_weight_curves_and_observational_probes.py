@@ -31,11 +31,19 @@ def _trajectory() -> DepthTrajectory:
 # ^^^ THOG
 
 
-def _trainer(trajectory: DepthTrajectory, *, run_seed: int = 1234, cadence=5, learn=False):
+def _trainer(
+    trajectory: DepthTrajectory,
+    *,
+    run_seed: int = 1234,
+    cadence=5,
+    learn=False,
+    plastic=False,
+):
     return SimpleNamespace(
         raw_model=SimpleNamespace(trajectory=trajectory),
         config=SimpleNamespace(
             model_seed=run_seed,
+            plastic__enabled=plastic,
             plastic__do_learn_layer_count=learn,
             plastic__layer_count_probe__probe_every_n_steps=cadence,
         ),
@@ -216,7 +224,9 @@ def test_observational_probe_enablement_requires_explicit_cadence() -> None:
     trajectory = _trajectory()
     assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=None)) is False
     assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5)) is True
-    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5, learn=True)) is False
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5, plastic=True)) is True
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5, learn=True, plastic=True)) is False
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5, learn=True, plastic=False)) is True
 # ^^^ THOG
 
 

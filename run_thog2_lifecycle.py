@@ -93,6 +93,9 @@ _OPERATIONAL_CONFIG_DESTINATIONS = {
     "wandb_entity",
     "wandb_mode",
     "wandb_root",
+    "instrumentation__delta_loss_v_layer_heatmap",
+    "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
+    "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
 }
 _ARGUMENT_TO_CONFIG = {
     "model_type": "model_type",
@@ -140,6 +143,11 @@ _ARGUMENT_TO_CONFIG = {
     "bias": "bias",
     "model_seed": "model_seed",
     "data_seed": "data_seed",
+    # vvv THOG heatmap instrumentation remains operational across resume/fork and independent of PLASTIC mutation state
+    "instrumentation__delta_loss_v_layer_heatmap": "instrumentation__delta_loss_v_layer_heatmap",
+    "instrumentation__delta_loss_v_layer_heatmap_abs_limit": "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
+    "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes": "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
+    # ^^^ THOG
     "plastic__coarse_phase": "plastic__coarse_phase",
     "plastic__phase_1_n_steps": "plastic__phase_1_n_steps",
     "plastic__phase_1_starting_layer_count": "plastic__phase_1_starting_layer_count",

@@ -656,7 +656,10 @@ def _observational_probe_enabled(trainer: Any) -> bool:
     config = getattr(trainer, "config", None)
     if config is None:
         return False
-    if bool(getattr(config, "plastic__do_learn_layer_count", False)):
+    if (
+        bool(getattr(config, "plastic__enabled", False))
+        and bool(getattr(config, "plastic__do_learn_layer_count", False))
+    ):
         return False
     if _depth_trajectory_from_model(getattr(trainer, "raw_model", None)) is None:
         return False

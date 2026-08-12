@@ -124,6 +124,23 @@ source ./plastic_depth_lookahead_wrapper_options.sh
         self.assertIn("expected a positive integer", result.stderr)
         self.assertNotIn("Unknown option", result.stdout + result.stderr)
 
+    # vvv THOG reusable run strings may retain learned-count initial/max controls while count mutation is disabled
+    def test_dormant_initial_and_max_controls_do_not_block_instrumentation_modes(self) -> None:
+        for plastic_toggle in ("--no-plastic__enabled", "--plastic__enabled"):
+            result = self._run_bash(
+                "./train_OWT.sh",
+                plastic_toggle,
+                "--no-plastic__do_learn_layer_count",
+                "--plastic__initial_layer_count",
+                "48",
+                "--plastic__max_permitted_layers",
+                "144",
+                "-h",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertNotIn("initial/max layer count controls require", result.stderr)
+    # ^^^ THOG
+
     def test_relative_wall_time_rejects_every_update_probe_schedule(self) -> None:
         result = self._run_bash(
             "./train_OWT.sh",

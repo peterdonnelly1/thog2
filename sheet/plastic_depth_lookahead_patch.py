@@ -467,6 +467,7 @@ def _commit_plastic_depth_inline_update_with_lookahead(self: Any, context: Optio
         last_count_change_update=int(self.state.plastic_depth_last_count_change_update),
         objective=self.config.plastic__layer_count_objective,
         sampled_token_count=context["sampled_token_count"],
+        probe_sequence=int(context.get("plastic_probe_sequence", lattice.count_decision_number.item())),
         public_coordinates=lattice.interval_report()["active_public_coordinates"],
         transition=transition_report,
     )

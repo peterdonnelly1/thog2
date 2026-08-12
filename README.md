@@ -19,7 +19,10 @@ Because the code is so simple, it is very easy to hack to your needs, train new 
 ## install
 
 ```
-pip install torch numpy transformers datasets tiktoken wandb tqdm
+# vvv THOG include the Plotly renderer used by DEPTH W&B instrumentation
+# pip install torch numpy transformers datasets tiktoken wandb tqdm
+pip install torch numpy transformers datasets tiktoken wandb tqdm plotly
+# ^^^ THOG
 ```
 
 Dependencies:

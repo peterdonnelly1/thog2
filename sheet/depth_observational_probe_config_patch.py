@@ -18,7 +18,10 @@ _OBSERVATIONAL_PROBE_FIELDS = (
 
 def _observational_probe_requested(config: Any) -> bool:
     return (
-        not bool(getattr(config, "plastic__do_learn_layer_count", False))
+        not (
+            bool(getattr(config, "plastic__enabled", False))
+            and bool(getattr(config, "plastic__do_learn_layer_count", False))
+        )
         and getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None) is not None
     )
 

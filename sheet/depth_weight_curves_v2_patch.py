@@ -448,22 +448,24 @@ def _log_depth_weight_snapshot_v2(
     except TypeError:
         telemetry.run.log(payload)
 
-    if not bool(getattr(telemetry, "_thog_depth_weight_curve_selection_logged", False)):
-        selection = _selected_scalar_coordinates_v2(trainer, telemetry)
-        metadata = {
-            "depth/selection_seed": int(selection["seed"]),
-            "depth/attention_head": int(selection["attention_head"]),
-            "depth/same_coordinates_all_runs": bool(_depth._same_coordinates_all_runs()),
-            "depth/scalar_weights_per_matrix": int(_depth._scalar_weights_per_matrix()),
-            "depth/evaluation_points": int(_depth._depth_evaluation_points()),
-            "depth/x_axis": "executed_layer_index",
-            "depth/chart_renderer": "plotly",
-        }
-        try:
-            telemetry.run.log(metadata, step=int(optimizer_update))
-        except TypeError:
-            telemetry.run.log(metadata)
-        telemetry._thog_depth_weight_curve_selection_logged = True
+    # vvv THOG W&B receives only the six requested depth figures; selection metadata remains in run configuration and must not create scalar panels
+    # if not bool(getattr(telemetry, "_thog_depth_weight_curve_selection_logged", False)):
+    #     selection = _selected_scalar_coordinates_v2(trainer, telemetry)
+    #     metadata = {
+    #         "depth/selection_seed": int(selection["seed"]),
+    #         "depth/attention_head": int(selection["attention_head"]),
+    #         "depth/same_coordinates_all_runs": bool(_depth._same_coordinates_all_runs()),
+    #         "depth/scalar_weights_per_matrix": int(_depth._scalar_weights_per_matrix()),
+    #         "depth/evaluation_points": int(_depth._depth_evaluation_points()),
+    #         "depth/x_axis": "executed_layer_index",
+    #         "depth/chart_renderer": "plotly",
+    #     }
+    #     try:
+    #         telemetry.run.log(metadata, step=int(optimizer_update))
+    #     except TypeError:
+    #         telemetry.run.log(metadata)
+    #     telemetry._thog_depth_weight_curve_selection_logged = True
+    # ^^^ THOG
 # ^^^ THOG
 
 

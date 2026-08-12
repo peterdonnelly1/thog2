@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from array import array
 from collections import deque
 from typing import Any, Deque, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -20,6 +21,14 @@ _EARLY_REFRESH_PROBES = 10
 _REFRESH_EVERY_STEPS = 25
 _EARLY_REFRESH_STEPS = 10
 _MAX_TABLE_ROWS = 9_999
+_DELTA_LOSS_HEATMAP_KEY = "depth/delta_loss_v_layer_heatmap"
+_DELTA_LOSS_HEATMAP_MAX_RENDERED_ROWS = 512
+_DELTA_LOSS_HEATMAP_EARLY_REFRESH_PROBES = frozenset((1, 2, 3, 5, 10, 25, 50, 100))
+_DELTA_LOSS_HEATMAP_COLOUR_SCALE = (
+    (0.0, "rgb(0,255,0)"),
+    (0.5, "rgb(88,88,88)"),
+    (1.0, "rgb(255,0,0)"),
+)
 _ZERO_LOSS_REFERENCE_ID = "Δloss = 0 reference"
 _ZERO_LOSS_REFERENCE_MAX_ROWS = 2
 _CHART_COLUMNS = (
@@ -76,7 +85,12 @@ def _probe_record_from_event(event: Any) -> Optional[Dict[str, Any]]:
         return None
 
     update = int(getattr(event, "completed_updates", 0)) + 1
-    probe_id = f"U{update}"
+    raw_probe_sequence = payload.get("probe_sequence")
+    probe_id = (
+        f"P{int(raw_probe_sequence)}"
+        if raw_probe_sequence is not None and int(raw_probe_sequence) > 0
+        else f"U{update}"
+    )
     shrink = [(0, 0.0, current, 0)]
     growth = [(0, 0.0, current, 0)]
     for count in sorted(losses):
@@ -417,14 +431,259 @@ def _should_refresh_coefficient_chart(
     return total - last_logged >= _REFRESH_EVERY_STEPS
 
 
+# vvv THOG retain every probe compactly, render at most 512 exact rows, and upload only on an explicitly rate-limited W&B cadence
+def _delta_loss_heatmap_enabled(telemetry: Any) -> bool:
+    config = getattr(telemetry, "config", {})
+    return bool(
+        isinstance(config, Mapping)
+        and config.get("instrumentation__delta_loss_v_layer_heatmap", False)
+        and not bool(getattr(telemetry, "_delta_loss_heatmap_disabled", False))
+    )
+
+
+def _ensure_delta_loss_heatmap_state(telemetry: Any) -> List[Dict[str, Any]]:
+    history = getattr(telemetry, "_delta_loss_heatmap_history", None)
+    if history is None:
+        history = []
+        setattr(telemetry, "_delta_loss_heatmap_history", history)
+        setattr(telemetry, "_delta_loss_heatmap_last_event_index", -1)
+        setattr(telemetry, "_delta_loss_heatmap_last_logged_total", 0)
+        setattr(telemetry, "_delta_loss_heatmap_maximum_layers", None)
+    return history
+
+
+def _consume_new_delta_loss_heatmap_records(
+    trainer: Any,
+    telemetry: Any,
+) -> Tuple[Dict[str, Any], ...]:
+    _ensure_delta_loss_heatmap_state(telemetry)
+    events = tuple(getattr(trainer, "events", ()))
+    start = int(getattr(telemetry, "_delta_loss_heatmap_last_event_index", -1)) + 1
+    records = tuple(
+        record
+        for event in events[start:]
+        if (record := _probe_record_from_event(event)) is not None
+    )
+    telemetry._delta_loss_heatmap_last_event_index = len(events) - 1
+    return records
+
+
+def _maximum_candidate_layer(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    minimum: int,
+) -> int:
+    maximum = max(1, int(minimum))
+    for record in records:
+        for side in ("shrink", "growth"):
+            for _distance, _delta, candidate, _offset in record.get(side, ()):
+                maximum = max(maximum, int(candidate))
+    return maximum
+
+
+def _delta_loss_heatmap_record(
+    record: Mapping[str, Any],
+    *,
+    maximum_layers: int,
+) -> Dict[str, Any]:
+    if maximum_layers < 1:
+        raise ValueError("delta-loss heatmap maximum_layers must be positive")
+    values = array("d", (math.nan for _ in range(maximum_layers)))
+    for side in ("shrink", "growth"):
+        for _distance, delta, candidate, _offset in record.get(side, ()):
+            candidate_index = int(candidate) - 1
+            if 0 <= candidate_index < maximum_layers:
+                values[candidate_index] = float(delta)
+    return {
+        "probe_id": str(record["probe_id"]),
+        "optimizer_update": int(record["optimizer_update"]),
+        "active_layers": int(record["active_layers"]),
+        "values": values,
+    }
+
+
+def _append_delta_loss_heatmap_records(
+    telemetry: Any,
+    records: Sequence[Mapping[str, Any]],
+    *,
+    maximum_layers: int,
+) -> None:
+    history = _ensure_delta_loss_heatmap_state(telemetry)
+    established_maximum = getattr(telemetry, "_delta_loss_heatmap_maximum_layers", None)
+    resolved_maximum = int(maximum_layers)
+    if established_maximum is None:
+        telemetry._delta_loss_heatmap_maximum_layers = resolved_maximum
+    elif resolved_maximum > int(established_maximum):
+        extension = resolved_maximum - int(established_maximum)
+        for record in history:
+            record["values"].extend(math.nan for _ in range(extension))
+        telemetry._delta_loss_heatmap_maximum_layers = resolved_maximum
+    else:
+        resolved_maximum = int(established_maximum)
+    history.extend(
+        _delta_loss_heatmap_record(record, maximum_layers=resolved_maximum)
+        for record in records
+    )
+
+
+def _evenly_spaced_record_indices(count: int, limit: int) -> Tuple[int, ...]:
+    if count <= limit:
+        return tuple(range(count))
+    if limit < 2:
+        return (count - 1,)
+    denominator = limit - 1
+    return tuple(
+        (position * (count - 1) + denominator // 2) // denominator
+        for position in range(limit)
+    )
+
+
+def _delta_loss_heatmap_render_data(
+    history: Sequence[Mapping[str, Any]],
+    *,
+    maximum_layers: int,
+    rendered_row_limit: int = _DELTA_LOSS_HEATMAP_MAX_RENDERED_ROWS,
+) -> Dict[str, Any]:
+    indices = _evenly_spaced_record_indices(len(history), int(rendered_row_limit))
+    selected = tuple(history[index] for index in indices)
+    y_labels = tuple(
+        f"{record['probe_id']} | update {int(record['optimizer_update'])} | active {int(record['active_layers'])}"
+        for record in selected
+    )
+    z_rows = tuple(
+        tuple(
+            None if not math.isfinite(float(value)) else float(value)
+            for value in record["values"]
+        )
+        for record in selected
+    )
+    return {
+        "x": tuple(range(1, int(maximum_layers) + 1)),
+        "y": y_labels,
+        "z": z_rows,
+        "active_layers": tuple(int(record["active_layers"]) for record in selected),
+        "optimizer_updates": tuple(int(record["optimizer_update"]) for record in selected),
+        "source_rows": len(history),
+        "rendered_rows": len(selected),
+    }
+
+
+def _delta_loss_heatmap_figure(
+    history: Sequence[Mapping[str, Any]],
+    *,
+    maximum_layers: int,
+    abs_limit: float,
+    go_module: Any = None,
+) -> Any:
+    if go_module is None:
+        import plotly.graph_objects as go_module
+
+    rendered = _delta_loss_heatmap_render_data(
+        history,
+        maximum_layers=int(maximum_layers),
+    )
+    figure = go_module.Figure()
+    figure.add_trace(
+        go_module.Heatmap(
+            x=rendered["x"],
+            y=rendered["y"],
+            z=rendered["z"],
+            zmin=-float(abs_limit),
+            zmax=float(abs_limit),
+            zmid=0.0,
+            colorscale=list(_DELTA_LOSS_HEATMAP_COLOUR_SCALE),
+            colorbar={"title": "candidate loss − current loss"},
+            connectgaps=False,
+            hovertemplate=(
+                "%{y}<br>candidate layers=%{x}<br>"
+                "Δloss=%{z:.8f}<extra></extra>"
+            ),
+            xgap=0,
+            ygap=0,
+        )
+    )
+    figure.add_trace(
+        go_module.Scatter(
+            x=rendered["active_layers"],
+            y=rendered["y"],
+            mode="lines",
+            line={"color": "white", "width": 1.25},
+            name="active layer count",
+            hovertemplate="%{y}<br>active layers=%{x}<extra></extra>",
+        )
+    )
+    tick_count = min(12, int(rendered["rendered_rows"]))
+    tick_indices = _evenly_spaced_record_indices(
+        int(rendered["rendered_rows"]),
+        tick_count,
+    )
+    figure.update_layout(
+        title=(
+            "DEPTH Δloss vs absolute candidate layer — "
+            f"{rendered['source_rows']} probes captured; "
+            f"{rendered['rendered_rows']} exact rows shown"
+        ),
+        paper_bgcolor="black",
+        plot_bgcolor="black",
+        font={"color": "rgb(220,220,220)"},
+        height=760,
+        margin={"l": 85, "r": 45, "t": 75, "b": 75},
+        showlegend=True,
+        uirevision="depth_delta_loss_v_layer_heatmap",
+        xaxis={
+            "title": "absolute candidate layer count",
+            "range": (0.5, int(maximum_layers) + 0.5),
+            "tickmode": "linear",
+            "tick0": 1,
+            "dtick": max(1, int(maximum_layers) // 12),
+        },
+        yaxis={
+            "title": "optimizer update — earliest at bottom; newest at top",
+            "type": "category",
+            "categoryorder": "array",
+            "categoryarray": list(rendered["y"]),
+            "tickmode": "array",
+            "tickvals": [rendered["y"][index] for index in tick_indices],
+            "ticktext": [
+                str(rendered["optimizer_updates"][index]) for index in tick_indices
+            ],
+        },
+    )
+    return figure
+
+
+def _should_refresh_delta_loss_heatmap(
+    telemetry: Any,
+    *,
+    force: bool = False,
+) -> bool:
+    history = _ensure_delta_loss_heatmap_state(telemetry)
+    total = len(history)
+    last_logged = int(getattr(telemetry, "_delta_loss_heatmap_last_logged_total", 0))
+    if total <= last_logged:
+        return False
+    if force or total in _DELTA_LOSS_HEATMAP_EARLY_REFRESH_PROBES:
+        return True
+    config = getattr(telemetry, "config", {})
+    cadence = int(
+        config.get(
+            "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
+            250,
+        )
+    )
+    return total // cadence > last_logged // cadence
+# ^^^ THOG
+
+
 def _log_rolling_probe_charts(
     telemetry: Any,
     *,
     step: int,
     include_probe_charts: bool = True,
     include_coefficient_chart: bool = True,
+    include_delta_loss_heatmap: bool = False,
 ) -> None:
-    if not _plastic_wandb_charts_enabled():
+    if not _plastic_wandb_charts_enabled() and not include_delta_loss_heatmap:
         return
     if telemetry.run is None or telemetry.module is None:
         return
@@ -505,6 +764,22 @@ def _log_rolling_probe_charts(
             )
     # ^^^ THOG
 
+    # vvv THOG log the explicitly enabled absolute-layer heatmap independently of PLASTIC mutation state
+    if include_delta_loss_heatmap:
+        heatmap_history = tuple(_ensure_delta_loss_heatmap_state(telemetry))
+        maximum_layers = int(telemetry._delta_loss_heatmap_maximum_layers)
+        abs_limit = float(
+            telemetry.config[
+                "instrumentation__delta_loss_v_layer_heatmap_abs_limit"
+            ]
+        )
+        payload[_DELTA_LOSS_HEATMAP_KEY] = _delta_loss_heatmap_figure(
+            heatmap_history,
+            maximum_layers=maximum_layers,
+            abs_limit=abs_limit,
+        )
+    # ^^^ THOG
+
     if not payload:
         return
     try:
@@ -514,6 +789,10 @@ def _log_rolling_probe_charts(
     if include_coefficient_chart and "plastic/sampled_coefficients_curves" in payload:
         telemetry._plastic_coefficient_curve_last_logged_total = int(
             getattr(telemetry, "_plastic_coefficient_curve_total", 0)
+        )
+    if include_delta_loss_heatmap and _DELTA_LOSS_HEATMAP_KEY in payload:
+        telemetry._delta_loss_heatmap_last_logged_total = len(
+            _ensure_delta_loss_heatmap_state(telemetry)
         )
 
 
@@ -616,14 +895,23 @@ __all__ = [
     "_capture_coefficient_record",
     "_coefficient_record_from_trainer",
     "_consume_new_probe_records",
+    "_consume_new_delta_loss_heatmap_records",
+    "_delta_loss_heatmap_enabled",
+    "_delta_loss_heatmap_figure",
+    "_delta_loss_heatmap_record",
+    "_delta_loss_heatmap_render_data",
+    "_append_delta_loss_heatmap_records",
     "_ensure_coefficient_curve_state",
+    "_ensure_delta_loss_heatmap_state",
     "_log_rolling_probe_charts",
+    "_maximum_candidate_layer",
     "_plastic_wandb_charts_enabled",
     "_probe_record_from_event",
     "_rows_for_coefficients",
     "_rows_for_combined",
     "_rows_for_side",
     "_rows_with_zero_loss_reference",
+    "_should_refresh_delta_loss_heatmap",
     "attach_telemetry_with_plastic_probe_curves",
 ]
 # ^^^ THOG

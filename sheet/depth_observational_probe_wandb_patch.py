@@ -61,7 +61,9 @@ _ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: Any) -> None:
     _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
     setattr(telemetry, _RUNTIME_GATE_ATTRIBUTE, True)
-    if not _depth._observational_probe_enabled(trainer):
+    observational_enabled = _depth._observational_probe_enabled(trainer)
+    heatmap_enabled = _probe_wandb._delta_loss_heatmap_enabled(telemetry)
+    if not observational_enabled and not heatmap_enabled:
         return
     original_progress = trainer._print_progress
 
@@ -71,15 +73,47 @@ def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: A
             return
         if telemetry.run is None or telemetry.module is None:
             return
-        if event not in {"optimizer_progress", "evaluation_completed"}:
+        if event not in {"optimizer_progress", "evaluation_completed", "run_completed"}:
             return
-        records = _probe_wandb._consume_new_probe_records(trainer, telemetry)
+        records = (
+            _probe_wandb._consume_new_probe_records(trainer, telemetry)
+            if observational_enabled and event != "run_completed"
+            else ()
+        )
+        heatmap_records = (
+            _probe_wandb._consume_new_delta_loss_heatmap_records(trainer, telemetry)
+            if heatmap_enabled
+            else ()
+        )
+        if heatmap_records:
+            maximum_layers = _probe_wandb._maximum_candidate_layer(
+                heatmap_records,
+                minimum=int(trainer.config.n_layer),
+            )
+            _probe_wandb._append_delta_loss_heatmap_records(
+                telemetry,
+                heatmap_records,
+                maximum_layers=maximum_layers,
+            )
         evaluation = event == "evaluation_completed"
-        if not _probe_wandb._should_refresh_charts(
-            telemetry,
-            records,
-            evaluation=evaluation,
-        ):
+        probe_charts_due = bool(
+            observational_enabled
+            and _probe_wandb._plastic_wandb_charts_enabled()
+            and event != "run_completed"
+            and _probe_wandb._should_refresh_charts(
+                telemetry,
+                records,
+                evaluation=evaluation,
+            )
+        )
+        heatmap_due = bool(
+            heatmap_enabled
+            and _probe_wandb._should_refresh_delta_loss_heatmap(
+                telemetry,
+                force=event == "run_completed",
+            )
+        )
+        if not probe_charts_due and not heatmap_due:
             return
         try:
             step = int(
@@ -95,12 +129,15 @@ def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: A
             _probe_wandb._log_rolling_probe_charts(
                 telemetry,
                 step=step,
-                include_probe_charts=True,
+                include_probe_charts=probe_charts_due,
                 include_coefficient_chart=False,
+                include_delta_loss_heatmap=heatmap_due,
             )
         except Exception as error:
+            if heatmap_due:
+                telemetry._delta_loss_heatmap_disabled = True
             print(
-                "THOG2 WARNING: W&B observational DEPTH probe chart logging failed; "
+                "THOG2 WARNING: W&B observational DEPTH chart logging failed; "
                 f"continuing without this refresh: {error}",
                 flush=True,
             )

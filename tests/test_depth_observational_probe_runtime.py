@@ -83,8 +83,11 @@ def _chart_telemetry():
     )
 
 
-# vvv THOG the three effective read-only probe controls survive run/trainer persistence even when every PLASTIC growth switch is off
-def test_observational_probe_controls_persist_with_plastic_disabled() -> None:
+# vvv THOG the three effective read-only probe controls survive run/trainer persistence whenever PLASTIC itself is disabled
+@pytest.mark.parametrize("do_learn_layer_count", (False, True))
+def test_observational_probe_controls_persist_with_plastic_disabled(
+    do_learn_layer_count: bool,
+) -> None:
     run = OwtRunConfig(
         model_type="sheet",
         n_layer=4,
@@ -98,7 +101,7 @@ def test_observational_probe_controls_persist_with_plastic_disabled() -> None:
         device="cpu",
         dtype="float32",
         plastic__enabled=False,
-        plastic__do_learn_layer_count=False,
+        plastic__do_learn_layer_count=do_learn_layer_count,
         plastic__layer_count_probe__probe_every_n_steps=7,
         plastic__layer_count_probe__number_of_sampled_valid_tokens=5,
         plastic__layer_count_probe_radius=2,
@@ -115,7 +118,7 @@ def test_observational_probe_controls_persist_with_plastic_disabled() -> None:
         out_dir=Path("out-observational-probe-test"),
     )
     assert training.plastic__enabled is False
-    assert training.plastic__do_learn_layer_count is False
+    assert training.plastic__do_learn_layer_count is do_learn_layer_count
     assert training.plastic__layer_count_probe__probe_every_n_steps == 7
     assert training.plastic__layer_count_probe__number_of_sampled_valid_tokens == 5
     assert training.plastic__layer_count_probe_radius == 2
@@ -171,7 +174,7 @@ def test_observational_probe_token_capacity_is_validated_when_plastic_disabled(k
 # ^^^ THOG
 
 
-# vvv THOG DEBUG=2 emits none of the new charts, DEBUG=3 emits only depth-group chart keys plus depth-group metadata
+# vvv THOG DEBUG=2 emits no depth charts; DEBUG=3 emits exactly the six requested depth figures and no scalar metadata panels
 def test_depth_weight_charts_are_visible_iff_debug_exceeds_two(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
     monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "8")
@@ -186,10 +189,9 @@ def test_depth_weight_charts_are_visible_iff_debug_exceeds_two(monkeypatch) -> N
     visible = _chart_telemetry()
     monkeypatch.setattr(constants, "DEBUG", 3)
     depth_curves._log_depth_weight_snapshot(trainer, visible, optimizer_update=1)
-    assert len(visible.run.calls) == 2
+    assert len(visible.run.calls) == 1
     chart_payload, chart_step = visible.run.calls[0]
-    metadata_payload, metadata_step = visible.run.calls[1]
-    assert chart_step == metadata_step == 1
+    assert chart_step == 1
     assert set(chart_payload) == {
         "depth/attn_q_head_N",
         "depth/attn_k_head_N",
@@ -199,7 +201,6 @@ def test_depth_weight_charts_are_visible_iff_debug_exceeds_two(monkeypatch) -> N
         "depth/mlp_down",
     }
     assert all(key.startswith("depth/") for key in chart_payload)
-    assert all(key.startswith("depth/") for key in metadata_payload)
 # ^^^ THOG
 
 

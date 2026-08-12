@@ -265,6 +265,11 @@ class OwtRunConfig:
     wandb_project: str = "thog"
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"
+    # vvv THOG explicit, rate-limited W&B DEPTH response instrumentation is independent of PLASTIC mutation controls
+    instrumentation__delta_loss_v_layer_heatmap: bool = False
+    instrumentation__delta_loss_v_layer_heatmap_abs_limit: float = 0.05
+    instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes: int = 250
+    # ^^^ THOG
 
     artifact_suffix: Optional[str] = None
     artifact_name_limit: int = DEFAULT_COMPONENT_LIMIT
@@ -280,6 +285,34 @@ class OwtRunConfig:
             raise ValueError("wandb_mode must be online, offline, or disabled")
         if self.wandb_mode == "disabled" and self.wandb_enabled:
             object.__setattr__(self, "wandb_enabled", False)
+        # vvv THOG validate heatmap controls without coupling them to PLASTIC enablement or layer-count learning
+        if not isinstance(self.instrumentation__delta_loss_v_layer_heatmap, bool):
+            raise ValueError("instrumentation__delta_loss_v_layer_heatmap must be bool")
+        if (
+            isinstance(self.instrumentation__delta_loss_v_layer_heatmap_abs_limit, bool)
+            or not isinstance(self.instrumentation__delta_loss_v_layer_heatmap_abs_limit, (int, float))
+            or not math.isfinite(float(self.instrumentation__delta_loss_v_layer_heatmap_abs_limit))
+            or float(self.instrumentation__delta_loss_v_layer_heatmap_abs_limit) <= 0.0
+        ):
+            raise ValueError(
+                "instrumentation__delta_loss_v_layer_heatmap_abs_limit must be finite and positive"
+            )
+        if (
+            isinstance(self.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes, bool)
+            or not isinstance(self.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes, int)
+            or self.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes < 1
+        ):
+            raise ValueError(
+                "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes must be a positive integer"
+            )
+        if (
+            self.instrumentation__delta_loss_v_layer_heatmap
+            and (not self.wandb_enabled or self.wandb_mode == "disabled")
+        ):
+            raise ValueError(
+                "instrumentation__delta_loss_v_layer_heatmap requires W&B instrumentation"
+            )
+        # ^^^ THOG
         if self.dtype not in ("float32", "float16", "bfloat16"):
             raise ValueError("dtype must be float32, float16, or bfloat16")
         if self.device.startswith("cpu") and self.dtype == "float16":

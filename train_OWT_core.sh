@@ -132,6 +132,11 @@ LAYER_DROPOUT_RESAMPLE_STEPS=1
 N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
+# vvv THOG explicit W&B DEPTH response heatmap controls; conservative cadence protects free-tier storage and upload volume
+INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP:-false}"
+INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT:-0.05}"
+INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES:-250}"
+# ^^^ THOG
 O_DEPTH=32
 O_ATTN_D_MODEL=64
 O_ATTN_QKV_PER_CHANNEL=6
@@ -202,6 +207,9 @@ Schedule/logging:
   -N DEPTH_CURVE_SAMPLE_ELEMENTS=${DEPTH_CURVE_SAMPLE_ELEMENTS}
   -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
+  --instrumentation__delta_loss_v_layer_heatmap true|false=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP}
+  --instrumentation__delta_loss_v_layer_heatmap_abs_limit VALUE=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT}
+  --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes N=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES}
 
 Systematic geometry (repeat --select-element as needed):
   --select-depth
@@ -413,6 +421,33 @@ while (( $# > 0 )); do
       ;;
     # ^^^ THOG
     # vvv THOG consume PLASTIC DEPTH controls before getopts and emit one canonical Python configuration
+    # vvv THOG consume the exact heatmap instrumentation namespace before ordinary getopts parsing
+    --instrumentation__delta_loss_v_layer_heatmap|--instrumentation__delta_loss_v_layer_heatmap_abs_limit|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --instrumentation__delta_loss_v_layer_heatmap)
+          case "$2" in true|false) ;; *) echo "$1 requires true or false; got: $2" >&2; exit 2 ;; esac
+          INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="$2"
+          ;;
+        --instrumentation__delta_loss_v_layer_heatmap_abs_limit) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="$2" ;;
+        --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="$2" ;;
+      esac
+      shift 2
+      ;;
+    --instrumentation__delta_loss_v_layer_heatmap=*|--instrumentation__delta_loss_v_layer_heatmap_abs_limit=*|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=*)
+      instrumentation_name="${1%%=*}"; instrumentation_value="${1#*=}"
+      case "$instrumentation_name" in
+        --instrumentation__delta_loss_v_layer_heatmap)
+          case "$instrumentation_value" in true|false) ;; *) echo "$instrumentation_name requires true or false; got: $instrumentation_value" >&2; exit 2 ;; esac
+          INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="$instrumentation_value"
+          ;;
+        --instrumentation__delta_loss_v_layer_heatmap_abs_limit) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="$instrumentation_value" ;;
+        --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="$instrumentation_value" ;;
+      esac
+      unset instrumentation_name instrumentation_value
+      shift
+      ;;
+    # ^^^ THOG
     --plastic__enabled) PLASTIC_ENABLED=true; shift ;;
     --plastic__coarse_phase_roll_through) PLASTIC_COARSE_PHASE_ROLL_THROUGH=true; shift ;;
     --no-plastic__coarse_phase_roll_through) PLASTIC_COARSE_PHASE_ROLL_THROUGH=false; shift ;;
@@ -846,13 +881,13 @@ if [[ "$PLASTIC_COARSE_PHASE" == enabled ]]; then
   [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]] || { echo "--plastic__coarse_phase enabled requires --plastic__do_learn_layer_count." >&2; exit 2; }
   [[ -n "$PLASTIC_PHASE_1_N_STEPS" && -n "$PLASTIC_PHASE_1_STARTING_LAYER_COUNT" && -n "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS" && -n "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT" ]] || { echo "enabled COARSE requires every plastic__phase_1 control." >&2; exit 2; }
 fi
-if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
+# vvv THOG learned-count-only controls are required only while the mutation path is active; dormant reusable controls do not block instrumentation-only runs
+if [[ "$PLASTIC_ENABLED" == true && "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
   [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || { echo "--plastic__layers_to_sample conflicts with learned layer count." >&2; exit 2; }
   [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "--plastic__max_permitted_layers is required for learned layer count." >&2; exit 2; }
-else
-  [[ -z "$PLASTIC_INITIAL_LAYER_COUNT" && -z "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "initial/max layer count controls require --plastic__do_learn_layer_count." >&2; exit 2; }
 fi
-[[ "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_count__memory_budget_gib." >&2; exit 2; }
+[[ "$PLASTIC_ENABLED" == false || "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_count__memory_budget_gib." >&2; exit 2; }
+# ^^^ THOG
 # vvv THOG relative wall-time learning needs ordinary (non-probe) updates from which to fit its loss-rate model
 if [[ "$PLASTIC_ENABLED" == true && "$PLASTIC_DO_LEARN_LAYER_COUNT" == true && "$PLASTIC_LAYER_COUNT_OBJECTIVE" == relative_training_wall_time ]]; then
   PLASTIC_EFFECTIVE_PROBE_INTERVAL="${PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS:-$PLASTIC_LAYER_COUNT_UPDATE_BRAKE}"
@@ -1056,13 +1091,23 @@ run_grid_point() {
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
   optional_args=(); compact_args=(); compact_order_args=()
+  # vvv THOG instrumentation and read-only observational probes are forwarded independently of both PLASTIC mutation switches
+  optional_args+=(--instrumentation__delta_loss_v_layer_heatmap "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP")
+  optional_args+=(--instrumentation__delta_loss_v_layer_heatmap_abs_limit "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT")
+  optional_args+=(--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES")
+  if [[ "$PLASTIC_ENABLED" == true ]]; then optional_args+=(--plastic__enabled); else optional_args+=(--no-plastic__enabled); fi
+  if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then optional_args+=(--plastic__do_learn_layer_count); else optional_args+=(--no-plastic__do_learn_layer_count); fi
+  [[ -n "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS" ]] && optional_args+=(--plastic__layer_count_probe__probe_every_n_steps "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS")
+  optional_args+=(--plastic__layer_count_probe__number_of_sampled_valid_tokens "$PLASTIC_LAYER_COUNT_PROBE_NUMBER_OF_SAMPLED_VALID_TOKENS")
+  optional_args+=(--plastic__layer_count_probe_radius "$PLASTIC_LAYER_COUNT_PROBE_RADIUS")
+  # ^^^ THOG
   # vvv THOG PLASTIC DEPTH is emitted only on its selected DEPTH run and otherwise introduces no argument or naming changes
   if [[ "$PLASTIC_ENABLED" == true ]]; then
-    optional_args+=(--plastic__enabled)
     [[ -n "$PLASTIC_LAYERS_TO_SAMPLE" ]] && optional_args+=(--plastic__layers_to_sample "$PLASTIC_LAYERS_TO_SAMPLE")
-    if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then optional_args+=(--plastic__do_learn_layer_count); else optional_args+=(--no-plastic__do_learn_layer_count); fi
-    [[ -n "$PLASTIC_INITIAL_LAYER_COUNT" ]] && optional_args+=(--plastic__initial_layer_count "$PLASTIC_INITIAL_LAYER_COUNT")
-    [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] && optional_args+=(--plastic__max_permitted_layers "$PLASTIC_MAX_PERMITTED_LAYERS")
+    if [[ "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; then
+      [[ -n "$PLASTIC_INITIAL_LAYER_COUNT" ]] && optional_args+=(--plastic__initial_layer_count "$PLASTIC_INITIAL_LAYER_COUNT")
+      [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] && optional_args+=(--plastic__max_permitted_layers "$PLASTIC_MAX_PERMITTED_LAYERS")
+    fi
     optional_args+=(--plastic__layer_sampling_initialisation "$PLASTIC_LAYER_SAMPLING_INITIALISATION")
     optional_args+=(--plastic__layer_count_objective "$PLASTIC_LAYER_COUNT_OBJECTIVE")
     optional_args+=(--plastic__coarse_phase "$PLASTIC_COARSE_PHASE")
@@ -1072,9 +1117,6 @@ run_grid_point() {
       optional_args+=(--plastic__phase_1__number_of_trials "$PLASTIC_PHASE_1_NUMBER_OF_TRIALS")
       optional_args+=(--plastic__phase_1_evaluation_steps_count "$PLASTIC_PHASE_1_EVALUATION_STEPS_COUNT")
     fi
-    [[ -n "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS" ]] && optional_args+=(--plastic__layer_count_probe__probe_every_n_steps "$PLASTIC_LAYER_COUNT_PROBE_EVERY_N_STEPS")
-    optional_args+=(--plastic__layer_count_probe__number_of_sampled_valid_tokens "$PLASTIC_LAYER_COUNT_PROBE_NUMBER_OF_SAMPLED_VALID_TOKENS")
-    optional_args+=(--plastic__layer_count_probe_radius "$PLASTIC_LAYER_COUNT_PROBE_RADIUS")
     optional_args+=(--plastic__layer_count__max_allowable_layer_change "$PLASTIC_LAYER_COUNT_MAX_STEP")
     optional_args+=(--plastic__layer_count_update_brake "$PLASTIC_LAYER_COUNT_UPDATE_BRAKE")
     optional_args+=(--plastic__log_interval_coarse "$PLASTIC_LOG_INTERVAL_COARSE")
@@ -1219,6 +1261,7 @@ scruffy OWT train
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
+  delta-loss heatmap: enabled=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP abs_limit=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT log_every_probes=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES rendered_rows_max=512
   non-finite updates: policy=skip max_skips=$MAX_NONFINITE_UPDATE_SKIPS
   fast discard:       $FAST_DISCARD
   semantic adapter bypass:                $BYPASS_SEMANTIC_QKV_ADAPTER
