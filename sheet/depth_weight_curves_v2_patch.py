@@ -402,7 +402,17 @@ def _build_depth_plotly_figure(
         template="plotly_white",
     )
     if layer_count >= 1:
-        figure.update_xaxes(range=[1.0, float(layer_count)], dtick=1)
+        xaxis_options = {
+            "range": [1.0, float(layer_count)],
+            "tickangle": 0,
+            "tickformat": ".0f",
+            "automargin": True,
+        }
+        if layer_count <= 18:
+            xaxis_options.update({"tickmode": "linear", "tick0": 1, "dtick": 1})
+        else:
+            xaxis_options.update({"tickmode": "auto", "nticks": 18})
+        figure.update_xaxes(**xaxis_options)
     return figure
 # ^^^ THOG
 

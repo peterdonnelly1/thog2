@@ -13,9 +13,9 @@ from sheet.geometry import SheetGeometryConfig
 
 
 # vvv THOG compact public DEPTH fixture exercises all six semantic matrix families without allocating a training-size model
-def _trajectory() -> DepthTrajectory:
+def _trajectory(*, n_layer: int = 4) -> DepthTrajectory:
     geometry = SheetGeometryConfig(
-        n_layer=4,
+        n_layer=n_layer,
         n_embd=8,
         n_head=2,
         depth_order=4,
@@ -131,7 +131,34 @@ def test_plotly_history_emphasises_newest_and_oldest(monkeypatch) -> None:
     assert line_traces[0].line.color == line_traces[1].line.color
     assert tuple(marker_traces[0].x) == (1.0, 2.0, 3.0, 4.0)
     assert figure.layout.hovermode == "closest"
+    assert figure.layout.xaxis.dtick == 1
+    assert figure.layout.xaxis.tickangle == 0
+    assert figure.layout.xaxis.automargin is True
     assert f"attn_q_head_{snapshots[-1]['attention_head']}" in figure.layout.title.text
+# ^^^ THOG
+
+
+# vvv THOG large DEPTH charts retain every layer coordinate in the data while limiting the visible ruler to readable, unclipped integer ticks
+def test_plotly_large_layer_ruler_limits_visible_tick_density(monkeypatch) -> None:
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
+    monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "145")
+    trajectory = _trajectory(n_layer=144)
+    snapshot = depth_curves_v2._depth_weight_snapshot_v2(
+        _trainer(trajectory),
+        _telemetry("run-a"),
+        optimizer_update=12,
+    )
+    figure = depth_curves_v2._build_depth_plotly_figure((snapshot,), "mlp_down")
+
+    marker_trace = next(trace for trace in figure.data if trace.mode == "markers")
+    assert len(marker_trace.x) == 144
+    assert tuple(figure.layout.xaxis.range) == (1.0, 144.0)
+    assert figure.layout.xaxis.tickmode == "auto"
+    assert figure.layout.xaxis.nticks == 18
+    assert figure.layout.xaxis.dtick is None
+    assert figure.layout.xaxis.tickformat == ".0f"
+    assert figure.layout.xaxis.tickangle == 0
+    assert figure.layout.xaxis.automargin is True
 # ^^^ THOG
 
 
