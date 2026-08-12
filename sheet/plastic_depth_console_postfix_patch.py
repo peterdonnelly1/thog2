@@ -123,6 +123,10 @@ from . import depth_weight_curves_row_limit_patch as _depth_weight_curves_row_li
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
 
+# vvv THOG expose just-generated observational probe losses on the fixed-run console row without creating count-decision state
+from . import depth_observational_probe_console_patch as _depth_observational_probe_console_patch
+# ^^^ THOG
+
 # vvv THOG let fixed-count observational probe events reach the established W&B probe-landscape charts even when PLASTIC itself is disabled
 from . import depth_observational_probe_wandb_patch as _depth_observational_probe_wandb_patch
 # ^^^ THOG
