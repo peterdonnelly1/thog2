@@ -192,6 +192,9 @@ def test_depth_weight_charts_are_visible_iff_debug_exceeds_two(monkeypatch) -> N
     assert chart_step == metadata_step == 1
     assert set(chart_payload) == {
         "depth/attn_q_head_N",
+        "depth/attn_k_head_N",
+        "depth/attn_v_head_N",
+        "depth/attn_out_head_N",
         "depth/mlp_up",
         "depth/mlp_down",
     }
