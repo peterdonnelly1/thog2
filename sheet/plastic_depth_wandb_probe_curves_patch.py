@@ -546,26 +546,34 @@ def _delta_loss_heatmap_render_data(
 ) -> Dict[str, Any]:
     indices = _evenly_spaced_record_indices(len(history), int(rendered_row_limit))
     selected = tuple(history[index] for index in indices)
-    y_labels = tuple(
+    probe_labels = tuple(
         f"{record['probe_id']} | update {int(record['optimizer_update'])} | active {int(record['active_layers'])}"
         for record in selected
     )
-    z_rows = tuple(
+    probe_rows = tuple(
         tuple(
             None if not math.isfinite(float(value)) else float(value)
             for value in record["values"]
         )
         for record in selected
     )
+    # vvv THOG steps run left-to-right and absolute layer counts bottom-to-top; unit-spaced numeric coordinates permit a true square-cell aspect lock
+    z_by_layer = tuple(
+        tuple(probe_rows[probe_index][layer_index] for probe_index in range(len(selected)))
+        for layer_index in range(int(maximum_layers))
+    )
     return {
-        "x": tuple(range(1, int(maximum_layers) + 1)),
-        "y": y_labels,
-        "z": z_rows,
+        "x": tuple(range(1, len(selected) + 1)),
+        "x_steps": tuple(int(record["optimizer_update"]) for record in selected),
+        "y": tuple(range(1, int(maximum_layers) + 1)),
+        "z": z_by_layer,
+        "probe_labels": probe_labels,
         "active_layers": tuple(int(record["active_layers"]) for record in selected),
         "optimizer_updates": tuple(int(record["optimizer_update"]) for record in selected),
         "source_rows": len(history),
         "rendered_rows": len(selected),
     }
+    # ^^^ THOG
 
 
 def _delta_loss_heatmap_figure(
@@ -595,21 +603,26 @@ def _delta_loss_heatmap_figure(
             colorbar={"title": "candidate loss − current loss"},
             connectgaps=False,
             hovertemplate=(
-                "%{y}<br>candidate layers=%{x}<br>"
+                "step=%{customdata}<br>candidate layers=%{y}<br>"
                 "Δloss=%{z:.8f}<extra></extra>"
             ),
+            customdata=[
+                list(rendered["x_steps"])
+                for _layer in rendered["y"]
+            ],
             xgap=0,
             ygap=0,
         )
     )
     figure.add_trace(
         go_module.Scatter(
-            x=rendered["active_layers"],
-            y=rendered["y"],
+            x=rendered["x"],
+            y=rendered["active_layers"],
             mode="lines",
-            line={"color": "white", "width": 1.25},
+            line={"color": "black", "width": 1.25},
             name="active layer count",
-            hovertemplate="%{y}<br>active layers=%{x}<extra></extra>",
+            customdata=rendered["x_steps"],
+            hovertemplate="step=%{customdata}<br>active layers=%{y}<extra></extra>",
         )
     )
     tick_count = min(12, int(rendered["rendered_rows"]))
@@ -619,35 +632,37 @@ def _delta_loss_heatmap_figure(
     )
     figure.update_layout(
         title=(
-            "DEPTH Δloss vs absolute candidate layer — "
+            "DEPTH Δloss by step and absolute candidate layer — "
             f"{rendered['source_rows']} probes captured; "
             f"{rendered['rendered_rows']} exact rows shown"
         ),
-        paper_bgcolor="black",
-        plot_bgcolor="black",
-        font={"color": "rgb(220,220,220)"},
+        # vvv THOG white canvas and equal numeric axis scales keep unprobed cells white and every rendered heatmap cell square
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        font={"color": "rgb(32,32,32)"},
         height=760,
         margin={"l": 85, "r": 45, "t": 75, "b": 75},
         showlegend=True,
-        uirevision="depth_delta_loss_v_layer_heatmap",
+        uirevision="depth_delta_loss_v_layer_heatmap_step_x_square_cells_v2",
         xaxis={
+            "title": "step",
+            "range": (0.5, int(rendered["rendered_rows"]) + 0.5),
+            "tickmode": "array",
+            "tickvals": [int(rendered["x"][index]) for index in tick_indices],
+            "ticktext": [str(rendered["x_steps"][index]) for index in tick_indices],
+            "constrain": "domain",
+        },
+        yaxis={
             "title": "absolute candidate layer count",
             "range": (0.5, int(maximum_layers) + 0.5),
             "tickmode": "linear",
             "tick0": 1,
             "dtick": max(1, int(maximum_layers) // 12),
+            "scaleanchor": "x",
+            "scaleratio": 1,
+            "constrain": "domain",
         },
-        yaxis={
-            "title": "optimizer update — earliest at bottom; newest at top",
-            "type": "category",
-            "categoryorder": "array",
-            "categoryarray": list(rendered["y"]),
-            "tickmode": "array",
-            "tickvals": [rendered["y"][index] for index in tick_indices],
-            "ticktext": [
-                str(rendered["optimizer_updates"][index]) for index in tick_indices
-            ],
-        },
+        # ^^^ THOG
     )
     return figure
 

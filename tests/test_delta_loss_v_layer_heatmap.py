@@ -172,12 +172,14 @@ def test_heatmap_uses_absolute_layers_and_expands_to_observed_growth_candidates(
         maximum_layers=telemetry._delta_loss_heatmap_maximum_layers,
     )
 
-    assert rendered["x"] == tuple(range(1, 61))
-    assert len(rendered["z"][0]) == 60
-    assert rendered["z"][0][8:] == (None,) * 52
-    assert rendered["z"][1][35] == pytest.approx(-0.12)
-    assert rendered["z"][1][47] == pytest.approx(0.0)
-    assert rendered["z"][1][59] == pytest.approx(0.12)
+    assert rendered["x"] == (1, 2)
+    assert rendered["x_steps"] == (9, 19)
+    assert rendered["y"] == tuple(range(1, 61))
+    assert len(rendered["z"]) == 60
+    assert rendered["z"][8] == (None, None)
+    assert rendered["z"][35][1] == pytest.approx(-0.12)
+    assert rendered["z"][47][1] == pytest.approx(0.0)
+    assert rendered["z"][59][1] == pytest.approx(0.12)
 
 
 def test_heatmap_progressively_decimates_to_512_exact_rows_and_keeps_endpoints() -> None:
@@ -196,12 +198,12 @@ def test_heatmap_progressively_decimates_to_512_exact_rows_and_keeps_endpoints()
 
     assert rendered["source_rows"] == 700
     assert rendered["rendered_rows"] == 512
-    assert rendered["y"][0].startswith("P1 | update 2")
-    assert rendered["y"][-1].startswith("P700 | update 1400")
-    assert len(set(rendered["y"])) == 512
+    assert rendered["probe_labels"][0].startswith("P1 | update 2")
+    assert rendered["probe_labels"][-1].startswith("P700 | update 1400")
+    assert len(set(rendered["probe_labels"])) == 512
 
 
-def test_plotly_figure_has_fixed_scale_palette_and_active_trace() -> None:
+def test_plotly_figure_has_fixed_scale_white_square_step_layout_and_active_trace() -> None:
     plotly = pytest.importorskip("plotly.graph_objects")
     record = curves._probe_record_from_event(
         _event(completed_updates=8, probe_sequence=7)
@@ -223,8 +225,17 @@ def test_plotly_figure_has_fixed_scale_palette_and_active_trace() -> None:
     assert heatmap.colorscale[0][1] == "rgb(0,255,0)"
     assert heatmap.colorscale[1][1] == "rgb(88,88,88)"
     assert heatmap.colorscale[-1][1] == "rgb(255,0,0)"
-    assert active.line.color == "white"
-    assert tuple(active.x) == (4,)
+    assert figure.layout.paper_bgcolor == "white"
+    assert figure.layout.plot_bgcolor == "white"
+    assert figure.layout.xaxis.title.text == "step"
+    assert figure.layout.yaxis.title.text == "absolute candidate layer count"
+    assert figure.layout.yaxis.scaleanchor == "x"
+    assert figure.layout.yaxis.scaleratio == pytest.approx(1.0)
+    assert len(heatmap.z) == 8
+    assert all(len(layer_row) == 1 for layer_row in heatmap.z)
+    assert active.line.color == "black"
+    assert tuple(active.x) == (1,)
+    assert tuple(active.y) == (4,)
 
 
 def test_heatmap_upload_cadence_is_early_then_every_250_probes() -> None:
