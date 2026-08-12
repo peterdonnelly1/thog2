@@ -78,6 +78,8 @@ export WANDB_CONSOLE=off
   --option DEPTH.compressor=chebyshev \
   --option DEPTH.order=16 \
   --no-depth-compress-layer-norm-and-bias \
-  --torch-compile "$THOG2_TORCH_COMPILE" \
+  --depth-materialisation-matmul false \
+  --materialisation-profiling    false \
+  --torch-compile                false \
   -- \
   --host-label "$THOG2_HOST_LABEL"
