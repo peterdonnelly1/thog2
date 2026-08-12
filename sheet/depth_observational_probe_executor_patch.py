@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Tuple
 
 import torch
 from torch.nn import functional as F
@@ -21,7 +21,7 @@ def _observational_candidate_loss(
     batch: Any,
     probe_targets: torch.Tensor,
     candidate: int,
-) -> float:
+) -> Tuple[float, int]:
     raw_model = trainer.raw_model
     positions = torch.arange(
         batch.inputs.shape[1],
@@ -32,7 +32,7 @@ def _observational_candidate_loss(
         raw_model.transformer.wte(batch.inputs)
         + raw_model.transformer.wpe(positions)
     )
-    hidden, _execution_report = execute_logical_layers(
+    hidden, execution_report = execute_logical_layers(
         hidden,
         n_layer=int(candidate),
         segment_size=int(raw_model.checkpoint_segment_size),
@@ -47,8 +47,8 @@ def _observational_candidate_loss(
         ignore_index=-1,
     )
     if not bool(torch.isfinite(loss).item()):
-        return float("inf")
-    return trainer.distributed.mean_float(loss.detach())
+        return float("inf"), int(execution_report.logical_layers)
+    return trainer.distributed.mean_float(loss.detach()), int(execution_report.logical_layers)
 
 
 @torch.no_grad()
@@ -77,9 +77,10 @@ def _run_observational_probe_final(trainer: Any, *, update: int) -> None:
                 device=trajectory.coefficients[ATTENTION_QUERY_WEIGHT].device,
             )
             trajectory._thog_observational_depth_coordinates = coordinates
+            executed_logical_layers = 0
             try:
                 with trainer.autocast_context():
-                    value = _observational_candidate_loss(
+                    value, executed_logical_layers = _observational_candidate_loss(
                         trainer,
                         trajectory,
                         batch,
@@ -100,6 +101,7 @@ def _run_observational_probe_final(trainer: Any, *, update: int) -> None:
                     "feasible": math.isfinite(float(value)),
                     "score": float(value),
                     "observational_only": True,
+                    "executed_logical_layers": int(executed_logical_layers),
                 }
             )
     finally:
