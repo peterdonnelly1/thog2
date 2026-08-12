@@ -190,8 +190,8 @@ def test_scalar_selection_can_be_fixed_across_runs(monkeypatch) -> None:
 # ^^^ THOG
 
 
-# vvv THOG continuous scalar snapshot uses the requested dense public-depth ruler rather than only active integer layers
-def test_continuous_scalar_curve_uses_dense_public_depth_ruler(monkeypatch) -> None:
+# vvv THOG continuous scalar snapshot is relabelled onto the executed 1..L layer-index ruler and separately records exact integer layer positions
+def test_continuous_scalar_curve_uses_executed_layer_index_ruler(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "17")
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
     trajectory = _trajectory()
@@ -204,7 +204,8 @@ def test_continuous_scalar_curve_uses_dense_public_depth_ruler(monkeypatch) -> N
     coordinates = family["depth_coordinates"]
     assert len(coordinates) == 17
     assert coordinates[0] == pytest.approx(1.0)
-    assert coordinates[-1] == pytest.approx(100.0)
+    assert coordinates[-1] == pytest.approx(4.0)
+    assert family["executed_layer_coordinates"] == (1.0, 2.0, 3.0, 4.0)
     assert len(family["curves"]) == 1
     assert len(family["curves"][0]["values"]) == 17
 # ^^^ THOG
