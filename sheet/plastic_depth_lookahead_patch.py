@@ -456,6 +456,7 @@ def _commit_plastic_depth_inline_update_with_lookahead(self: Any, context: Optio
         "plastic_depth_count_decision",
         previous_active_layers=current_count,
         selected_active_layers=selected_count,
+        probe_sequence=int(context.get("plastic_probe_sequence", lattice.count_decision_number.item())),
         candidates=context["score_report"],
         paired_evidence=context["paired_evidence"],
         score_evidence=context["score_evidence"],

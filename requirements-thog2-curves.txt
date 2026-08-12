@@ -1,4 +1,5 @@
 tensorboard
+plotly
 # Optional local system metrics for future curve backends:
 # psutil
 # pynvml
