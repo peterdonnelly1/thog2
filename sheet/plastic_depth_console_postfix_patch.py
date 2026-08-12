@@ -107,6 +107,10 @@ from . import depth_observational_probe_prepatch as _depth_observational_probe_p
 from . import depth_weight_curves_and_observational_probes_patch as _depth_weight_curves_and_observational_probes_patch
 # ^^^ THOG
 
+# vvv THOG preserve canonical instrumentation spellings through the repository-wide CLI underscore normalizer
+from . import depth_weight_curves_cli_compat_patch as _depth_weight_curves_cli_compat_patch
+# ^^^ THOG
+
 # vvv THOG replace the compatibility candidate hook with a direct no-grad logical-layer executor for arbitrary observational layer counts
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
