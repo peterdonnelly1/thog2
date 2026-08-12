@@ -4,3 +4,11 @@
 2026-08-12 13:18 AEST | 12% | Traced W&B DEBUG gating, final PLASTIC probe formatter, DEPTH arbitrary-coordinate basis machinery and fixed/learned count execution paths.
 2026-08-12 13:31 AEST | 20% | Resolved continuous scalar evaluation exactly from DEPTH coefficient vectors; selected non-mutating interpolation policy for conventional LN/bias during fixed-run observational candidate views.
 2026-08-12 13:43 AEST | 31% | Added continuous depth-weight charts, configurable deterministic selections, DEBUG>9 legacy coefficient gate, darker RHS favourable green and observational candidate execution. Review found remaining non-PLASTIC W&B event-consumption gate; fixing before tests.
+2026-08-12 13:54 AEST | 48% | First focused CI compiled successfully and ran 69 tests: 62 passed, 7 failed. Two failures were feature-caused (CLI normalization and intentional RHS colour assertion); five were pre-existing branch/test drift.
+2026-08-12 14:02 AEST | 58% | Fixed feature-caused CI failures, added exact CLI compatibility, direct arbitrary-count DEPTH executor, disabled-PLASTIC probe persistence/validation and bounded accumulated W&B rows.
+2026-08-12 14:14 AEST | 74% | Focused gate clean at 68 passed + 9 subtests; real four-layer model smoke executed candidate logical depths 2,3,4,5,6 and verified every learned parameter bit-for-bit unchanged.
+2026-08-12 14:24 AEST | 82% | Source audit found fixed-run probes were visible to W&B but not the ordinary console; added observational-only console overlay without L/R decision or commit semantics.
+2026-08-12 14:28 AEST | 89% | Final focused feature gate clean at 71 passed + 9 subtests, including console visibility only on the generating update.
+2026-08-12 14:34 AEST | 94% | Verified probe_every_n_steps defaults to None, so fixed observational probing is opt-in and ordinary runs incur no hidden probe cost.
+2026-08-12 14:40 AEST | 96% | Final exact-head broad comparison completed across 205 CPU test files against chaos_bump_sampling: head_passed=173, head_nonpass=32, new_regressions=0.
+2026-08-12 14:41 AEST | 100% | THOG marker/source audit complete; task list and implementation log finalized. Validated code commit is 87266d942b3eb62207f58de9bc723a2c31f43a98; subsequent commits are note-only [skip ci] finalization.
