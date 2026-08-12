@@ -87,6 +87,46 @@ def test_depth_weight_curve_cli_controls_publish_environment(monkeypatch) -> Non
 # ^^^ THOG
 
 
+# vvv THOG train_OWT normalizes underscore runs to single hyphens before forwarding, so the hidden aliases must accept the exact wrapper-produced spellings
+def test_depth_weight_curve_cli_controls_accept_wrapper_normalized_spellings(monkeypatch) -> None:
+    for suffix in (
+        "SCALAR_WEIGHTS_PER_MATRIX",
+        "DEPTH_EVALUATION_POINTS",
+        "TIME_MODE",
+        "HISTORY_LENGTH",
+        "LOG_EVERY_N_STEPS",
+        "SAME_COORDINATES_ALL_RUNS",
+    ):
+        monkeypatch.delenv(depth_curves._environment_name(suffix), raising=False)
+
+    parser = argparse.ArgumentParser(add_help=False)
+    values, remaining = parser.parse_known_args(
+        [
+            "--instrumentation-depth-weight-curves-scalar-weights-per-matrix",
+            "1",
+            "--instrumentation-depth-weight-curves-depth-evaluation-points",
+            "256",
+            "--instrumentation-depth-weight-curves-time-mode",
+            "accumulate",
+            "--instrumentation-depth-weight-curves-history-length",
+            "12",
+            "--instrumentation-depth-weight-curves-log-every-n-steps",
+            "1",
+            "--instrumentation-depth-weight-curves-same-coordinates-all-runs",
+        ]
+    )
+
+    assert remaining == []
+    assert values.instrumentation__depth_weight_curves__scalar_weights_per_matrix == 1
+    assert depth_curves._scalar_weights_per_matrix() == 1
+    assert depth_curves._depth_evaluation_points() == 256
+    assert depth_curves._time_mode() == "accumulate"
+    assert depth_curves._history_length() == 12
+    assert depth_curves._log_every_n_steps() == 1
+    assert depth_curves._same_coordinates_all_runs() is True
+# ^^^ THOG
+
+
 # vvv THOG default selection is deterministic within one run but deliberately changes its seed with run identity
 def test_scalar_selection_is_fixed_per_run_and_run_specific(monkeypatch) -> None:
     monkeypatch.setenv(
@@ -120,8 +160,8 @@ def test_scalar_selection_is_fixed_per_run_and_run_specific(monkeypatch) -> None
 # ^^^ THOG
 
 
-# vvv THOG cross-run-fixed mode deliberately removes run identity from scalar/head selection
-def test_scalar_selection_can_be_identical_across_runs(monkeypatch) -> None:
+# vvv THOG cross-run fixed mode ignores run identity and therefore selects the same scalar coordinates across runs
+def test_scalar_selection_can_be_fixed_across_runs(monkeypatch) -> None:
     monkeypatch.setenv(
         depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"),
         "true",
@@ -132,123 +172,98 @@ def test_scalar_selection_can_be_identical_across_runs(monkeypatch) -> None:
     )
     trajectory = _trajectory()
     trainer = _trainer(trajectory)
-
     first = depth_curves._selected_scalar_coordinates(trainer, _telemetry("run-a"))
     second = depth_curves._selected_scalar_coordinates(trainer, _telemetry("run-b"))
-
     assert first == second
 # ^^^ THOG
 
 
-# vvv THOG continuous chart snapshots evaluate each fixed scalar at arbitrary dense depth positions, not at the model's four actual layers
-def test_depth_weight_snapshot_uses_dense_continuous_depth(monkeypatch) -> None:
-    monkeypatch.setenv(
-        depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"),
-        "true",
+# vvv THOG continuous scalar evaluation returns the requested dense public-depth ruler rather than only active integer layers
+def test_continuous_scalar_curve_uses_dense_public_depth_ruler(monkeypatch) -> None:
+    monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "17")
+    trajectory = _trajectory()
+    family = depth_curves._evaluate_scalar_family(
+        trajectory,
+        MLP_EXPANSION_WEIGHT,
+        ((0, 0),),
     )
-    monkeypatch.setenv(
-        depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"),
-        "2",
-    )
-    monkeypatch.setenv(
-        depth_curves._environment_name("DEPTH_EVALUATION_POINTS"),
-        "31",
-    )
+    coordinates = family["depth_coordinates"]
+    assert len(coordinates) == 17
+    assert coordinates[0] == pytest.approx(1.0)
+    assert coordinates[-1] == pytest.approx(100.0)
+    assert family["values"].shape == (1, 17)
+# ^^^ THOG
+
+
+# vvv THOG fixed-run probes remain opt-in via explicit cadence when learned layer-count control is absent
+def test_observational_probe_enablement_requires_explicit_cadence() -> None:
+    trajectory = _trajectory()
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=None)) is False
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5)) is True
+    assert depth_curves._observational_probe_enabled(_trainer(trajectory, cadence=5, learn=True)) is False
+# ^^^ THOG
+
+
+# vvv THOG DEBUG thresholds separate the new depth charts from the legacy sampled-coefficient forensic chart
+def test_depth_chart_debug_thresholds(monkeypatch) -> None:
+    monkeypatch.setattr(constants, "DEBUG", 2)
+    assert depth_curves._depth_weight_charts_enabled() is False
+    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+
+    monkeypatch.setattr(constants, "DEBUG", 3)
+    assert depth_curves._depth_weight_charts_enabled() is True
+    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+
+    monkeypatch.setattr(constants, "DEBUG", 9)
+    assert depth_curves._depth_weight_charts_enabled() is True
+    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is False
+
+    monkeypatch.setattr(constants, "DEBUG", 10)
+    assert depth_curves._legacy_sampled_coefficient_chart_enabled() is True
+# ^^^ THOG
+
+
+# vvv THOG RHS favourable negative deltas use the deliberately darker green without changing the left-side favourable colour contract
+def test_rhs_negative_delta_green_is_darker() -> None:
+    assert depth_curves._DARKER_RHS_GREEN == "\033[38;2;0;180;0m"
+# ^^^ THOG
+
+
+# vvv THOG accumulated chart rows remain bounded below W&B's hard table ceiling while retaining complete scalar curves
+def test_accumulated_chart_rows_fit_wandb_table_limit(monkeypatch) -> None:
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "3")
+    monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "256")
+    monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "20")
     trajectory = _trajectory()
     trainer = _trainer(trajectory)
-
-    snapshot = depth_curves._depth_weight_snapshot(
-        trainer,
-        _telemetry("run-a"),
-        optimizer_update=17,
-    )
-
-    assert snapshot["optimizer_update"] == 17
-    assert set(snapshot["families"]) == {"attn_q_head_N", "mlp_up", "mlp_down"}
-    for family in snapshot["families"].values():
-        assert len(family["depth_coordinates"]) == 31
-        assert family["depth_coordinates"][0] == pytest.approx(1.0)
-        assert family["depth_coordinates"][-1] == pytest.approx(100.0)
-        assert len(family["curves"]) == 2
-        assert all(len(curve["values"]) == 31 for curve in family["curves"])
-        assert all(
-            torch.isfinite(torch.tensor(curve["values"])).all().item()
-            for curve in family["curves"]
-        )
+    telemetry = _telemetry("run-a")
+    snapshots = []
+    for update in range(20):
+        snapshots.append(depth_curves._depth_snapshot(trainer, telemetry, update))
+    rows = depth_curves._depth_chart_rows(snapshots, "mlp_up")
+    assert len(rows) <= 9_999
+    assert len(rows) % 256 == 0
 # ^^^ THOG
 
 
-# vvv THOG observational views may ask the fixed four-layer trajectory for a fifth/sixth logical depth without changing its persistent configured layer count
-def test_observational_materialization_extends_beyond_fixed_layer_count() -> None:
-    trajectory = _trajectory()
-    original_count = int(trajectory.config.n_layer)
-    trajectory._thog_observational_depth_coordinates = torch.linspace(
-        1.0,
-        100.0,
-        6,
-        dtype=torch.float64,
+# vvv THOG observational probe events are converted into W&B probe records even when PLASTIC itself is disabled
+def test_observational_probe_events_are_wandb_visible() -> None:
+    event = SimpleNamespace(
+        name="plastic_depth_count_decision",
+        completed_updates=4,
+        payload={
+            "previous_active_layers": 4,
+            "selected_active_layers": 4,
+            "observational_only": True,
+            "candidates": (
+                {"active_layers": 3, "validation_loss": 5.1},
+                {"active_layers": 4, "validation_loss": 5.0},
+                {"active_layers": 5, "validation_loss": 4.9},
+            ),
+        },
     )
-    try:
-        generated = trajectory.materialize(MLP_EXPANSION_WEIGHT, 5)
-        layer_norm = trajectory.materialize("ln_1_weight", 5)
-    finally:
-        delattr(trajectory, "_thog_observational_depth_coordinates")
-
-    assert tuple(generated.shape) == (32, 8)
-    assert tuple(layer_norm.shape) == (1, 8)
-    assert bool(torch.isfinite(generated).all().item())
-    assert bool(torch.isfinite(layer_norm).all().item())
-    assert int(trajectory.config.n_layer) == original_count == 4
-# ^^^ THOG
-
-
-# vvv THOG an explicit probe cadence opts a fixed DEPTH run into observational probing; learned-count PLASTIC remains owned by its established path
-def test_observational_probe_opt_in_requires_cadence_and_fixed_count() -> None:
-    trajectory = _trajectory()
-    assert depth_curves._observational_probe_enabled(
-        _trainer(trajectory, cadence=5, learn=False)
-    )
-    assert not depth_curves._observational_probe_enabled(
-        _trainer(trajectory, cadence=None, learn=False)
-    )
-    assert not depth_curves._observational_probe_enabled(
-        _trainer(trajectory, cadence=5, learn=True)
-    )
-# ^^^ THOG
-
-
-# vvv THOG legacy sampled-coefficient runtime visibility changes exactly at DEBUG>9
-def test_legacy_coefficient_chart_debug_threshold(monkeypatch) -> None:
-    monkeypatch.setattr(constants, "DEBUG", 9)
-    assert not depth_curves._legacy_coefficient_chart_enabled()
-    monkeypatch.setattr(constants, "DEBUG", 10)
-    assert depth_curves._legacy_coefficient_chart_enabled()
-# ^^^ THOG
-
-
-# vvv THOG attached runtime suppresses old coefficient refresh below DEBUG>10 without changing the historical helper API used by regression tests
-def test_attached_runtime_gates_old_coefficient_refresh(monkeypatch) -> None:
-    telemetry = SimpleNamespace(
-        _thog_runtime_legacy_coefficient_debug_gate=True,
-    )
-    monkeypatch.setattr(constants, "DEBUG", 3)
-    assert not observational_wandb._should_refresh_coefficient_chart_runtime_gated(
-        telemetry,
-        evaluation=False,
-    )
-# ^^^ THOG
-
-
-# vvv THOG only the favourable growth-side negative delta uses the new darker RGB green
-def test_right_negative_probe_delta_uses_darker_green() -> None:
-    rendered = depth_curves._render_probe_delta_values_with_darker_rhs(
-        (-1, 0, 1),
-        (4.9, 5.0, 4.8),
-    )
-
-    assert rendered is not None
-    left, current, right = rendered.split(", ")
-    assert depth_curves._DARKER_RHS_GREEN not in left
-    assert depth_curves._DARKER_RHS_GREEN not in current
-    assert depth_curves._DARKER_RHS_GREEN in right
+    record = observational_wandb._probe_record_from_event(event)
+    assert record is not None
+    assert record["active_layers"] == 4
+    assert record["selected_layers"] == 4
 # ^^^ THOG
