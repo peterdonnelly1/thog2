@@ -83,7 +83,7 @@ def test_observational_probe_is_visible_on_fixed_run_console_row(monkeypatch) ->
     assert values["plastic_probe_losses"] == (5.20, 5.10, 5.00, 4.98, 5.03)
 
     rendered = _plain(stage6.format_progress_line("fixed", "optimizer_progress", values))
-    assert "probe_Δloss [L-2, L-1, L, L+1, L+2]" in rendered
+    assert "probe_Δloss [L-2 .. L+2]" in rendered
     assert "+0.200, +0.100, 5.000, -0.020, +0.030" in rendered
 # ^^^ THOG
 
