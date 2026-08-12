@@ -111,6 +111,10 @@ from . import depth_weight_curves_and_observational_probes_patch as _depth_weigh
 from . import depth_weight_curves_cli_compat_patch as _depth_weight_curves_cli_compat_patch
 # ^^^ THOG
 
+# vvv THOG keep observational cadence/radius/token controls effective and checkpoint-persistent even when PLASTIC and count learning are disabled
+from . import depth_observational_probe_config_patch as _depth_observational_probe_config_patch
+# ^^^ THOG
+
 # vvv THOG replace the compatibility candidate hook with a direct no-grad logical-layer executor for arbitrary observational layer counts
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
