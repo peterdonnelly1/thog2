@@ -10,11 +10,57 @@ from . import plastic_depth_wandb_probe_curves_patch as _probe_wandb
 from . import wandb_telemetry as _wandb
 
 
+_RUNTIME_GATE_ATTRIBUTE = "_thog_runtime_legacy_coefficient_debug_gate"
+
+
+# vvv THOG keep private helper semantics intact for established tests while attached runs skip all old coefficient sampling/refresh work below DEBUG>9
+def _capture_coefficient_record_runtime_gated(
+    trainer: Any,
+    telemetry: Any,
+    *,
+    optimizer_update: int,
+):
+    if (
+        bool(getattr(telemetry, _RUNTIME_GATE_ATTRIBUTE, False))
+        and not _depth._legacy_coefficient_chart_enabled()
+    ):
+        return {}
+    return _depth._ORIGINAL_CAPTURE_COEFFICIENT_RECORD(
+        trainer,
+        telemetry,
+        optimizer_update=optimizer_update,
+    )
+
+
+def _should_refresh_coefficient_chart_runtime_gated(
+    telemetry: Any,
+    *,
+    evaluation: bool,
+) -> bool:
+    if (
+        bool(getattr(telemetry, _RUNTIME_GATE_ATTRIBUTE, False))
+        and not _depth._legacy_coefficient_chart_enabled()
+    ):
+        return False
+    return bool(
+        _depth._ORIGINAL_SHOULD_REFRESH_COEFFICIENT_CHART(
+            telemetry,
+            evaluation=evaluation,
+        )
+    )
+
+
+_probe_wandb._capture_coefficient_record = _capture_coefficient_record_runtime_gated
+_probe_wandb._should_refresh_coefficient_chart = _should_refresh_coefficient_chart_runtime_gated
+# ^^^ THOG
+
+
 _ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 
 
 def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: Any) -> None:
     _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
+    setattr(telemetry, _RUNTIME_GATE_ATTRIBUTE, True)
     if not _depth._observational_probe_enabled(trainer):
         return
     original_progress = trainer._print_progress
