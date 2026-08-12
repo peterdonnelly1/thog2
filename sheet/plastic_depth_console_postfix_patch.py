@@ -115,6 +115,10 @@ from . import depth_weight_curves_cli_compat_patch as _depth_weight_curves_cli_c
 from . import depth_observational_probe_config_patch as _depth_observational_probe_config_patch
 # ^^^ THOG
 
+# vvv THOG keep accumulate-mode W&B depth tables below the established table-row ceiling by dropping oldest complete snapshots first
+from . import depth_weight_curves_row_limit_patch as _depth_weight_curves_row_limit_patch
+# ^^^ THOG
+
 # vvv THOG replace the compatibility candidate hook with a direct no-grad logical-layer executor for arbitrary observational layer counts
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
