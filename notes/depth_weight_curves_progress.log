@@ -1,3 +1,6 @@
 2026-08-12 13:03 AEST | 0% | User requirements accepted; implementation starting.
 2026-08-12 13:04 AEST | 3% | Confirmed base branch chaos_bump_sampling at 33f89809354cf9075b71498c0549dfb8d4b4ad9f.
 2026-08-12 13:04 AEST | 4% | Created implementation branch depth_weight_curves_and_observational_probes and persistent task list.
+2026-08-12 13:18 AEST | 12% | Traced W&B DEBUG gating, final PLASTIC probe formatter, DEPTH arbitrary-coordinate basis machinery and fixed/learned count execution paths.
+2026-08-12 13:31 AEST | 20% | Resolved continuous scalar evaluation exactly from DEPTH coefficient vectors; selected non-mutating interpolation policy for conventional LN/bias during fixed-run observational candidate views.
+2026-08-12 13:43 AEST | 31% | Added continuous depth-weight charts, configurable deterministic selections, DEBUG>9 legacy coefficient gate, darker RHS favourable green and observational candidate execution. Review found remaining non-PLASTIC W&B event-consumption gate; fixing before tests.
