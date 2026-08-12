@@ -123,6 +123,10 @@ from . import depth_weight_curves_row_limit_patch as _depth_weight_curves_row_li
 from . import depth_weight_curves_v2_patch as _depth_weight_curves_v2_patch
 # ^^^ THOG
 
+# vvv THOG preserve the established runtime snapshot replacement seam while the v2 renderer owns the visible six-chart Plotly output
+from . import depth_weight_curves_v2_runtime_seam_patch as _depth_weight_curves_v2_runtime_seam_patch
+# ^^^ THOG
+
 # vvv THOG replace the compatibility candidate hook with a direct no-grad logical-layer executor for arbitrary observational layer counts
 from . import depth_observational_probe_executor_patch as _depth_observational_probe_executor_patch
 # ^^^ THOG
