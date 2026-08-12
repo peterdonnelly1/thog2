@@ -8,9 +8,9 @@ import argparse
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 
 
-# vvv THOG the established CLI normalizer rewrites underscores to hyphens before argparse matching; keep canonical user spelling visible and add only hidden normalized aliases
+# vvv THOG the established CLI normalizer collapses underscore runs to one hyphen before argparse matching; keep canonical user spelling visible and add only hidden normalized aliases
 def _normalized_option(canonical: str) -> str:
-    return canonical.replace("__", "--").replace("_", "-")
+    return canonical.replace("_", "-").replace("--", "-") if not canonical.startswith("--") else "--" + canonical[2:].replace("_", "-").replace("--", "-")
 
 
 def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParser) -> None:
