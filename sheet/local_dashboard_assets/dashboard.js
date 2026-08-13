@@ -25,6 +25,8 @@ const plot_config = {
   toImageButtonOptions: {format: "png", scale: 2},
 };
 
+const panel_layout_version = "heatmap-row-and-three-by-two-curves-v1";
+
 const app = {
   runs: [],
   requested_run: null,
@@ -393,11 +395,25 @@ function transpose_matrix(matrix) {
   );
 }
 
+function evenly_spaced_indices(length, limit) {
+  if (length <= 0 || limit <= 0) return [];
+  if (length <= limit) return Array.from({length}, (_unused, index) => index);
+  if (limit === 1) return [length - 1];
+  const stride = Math.ceil((length - 1) / (limit - 1));
+  const indices = [];
+  for (let index = 0; index < length; index += stride) indices.push(index);
+  if (indices.at(-1) !== length - 1) indices.push(length - 1);
+  return indices;
+}
+
 function transpose_heatmap(prepared) {
   const original_xaxis = {...(prepared.layout.xaxis || {})};
   const original_yaxis = {...(prepared.layout.yaxis || {})};
+  let heatmap_trace = null;
+  let active_layer_trace = null;
   for (const trace of prepared.data || []) {
     if (trace.type === "heatmap") {
+      heatmap_trace = trace;
       const original_x = trace.x;
       trace.x = trace.y;
       trace.y = original_x;
@@ -411,22 +427,58 @@ function transpose_heatmap(prepared) {
       trace.colorbar.thickness = 12;
       trace.colorbar.len = 0.82;
     } else if (trace.x && trace.y) {
+      active_layer_trace = trace;
       const original_x = trace.x;
       trace.x = trace.y;
       trace.y = original_x;
+      const y_min = Number(original_xaxis.range?.[0] ?? 0.5);
+      const initial_layer_count = Number(trace.x?.[0]);
+      if (Number.isFinite(y_min) && Number.isFinite(initial_layer_count)) {
+        trace.x = [initial_layer_count, ...trace.x];
+        trace.y = [y_min, ...trace.y];
+        if (Array.isArray(trace.customdata) && trace.customdata.length) {
+          trace.customdata = [trace.customdata[0], ...trace.customdata];
+        }
+      }
+      trace.line = {...(trace.line || {}), color: "white", width: 2};
       trace.hovertemplate = "step=%{customdata}<br>active layers=%{x}<extra></extra>";
     }
   }
   prepared.layout.xaxis = original_yaxis;
   prepared.layout.yaxis = original_xaxis;
-  prepared.layout.xaxis.title = {text: "absolute candidate layer count"};
+  prepared.layout.xaxis.title = {text: "absolute candidate layer count", standoff: 46};
   prepared.layout.yaxis.title = {text: "step"};
   delete prepared.layout.xaxis.scaleanchor;
   delete prepared.layout.xaxis.scaleratio;
   prepared.layout.xaxis.constrain = "domain";
   prepared.layout.yaxis.constrain = "domain";
+  prepared.layout.yaxis.constraintoward = "bottom";
   prepared.layout.yaxis.scaleanchor = "x";
   prepared.layout.yaxis.scaleratio = 1;
+
+  const row_coordinates = heatmap_trace?.y || [];
+  const step_values = (heatmap_trace?.customdata || []).map((row, index) =>
+    Array.isArray(row) && row.length ? row[0] : row_coordinates[index]
+  );
+  const tick_indices = evenly_spaced_indices(row_coordinates.length, 20);
+  prepared.layout.yaxis.tickmode = "array";
+  prepared.layout.yaxis.tickvals = tick_indices.map(index => row_coordinates[index]);
+  prepared.layout.yaxis.ticktext = tick_indices.map(index => String(step_values[index]));
+
+  const initial_layer_count = Number(active_layer_trace?.x?.[0]);
+  if (Number.isFinite(initial_layer_count)) {
+    prepared.layout.annotations = [...(prepared.layout.annotations || []), {
+      x: initial_layer_count,
+      xref: "x",
+      y: 0,
+      yref: "paper",
+      yshift: -27,
+      yanchor: "top",
+      text: `<b>${initial_layer_count}</b>`,
+      showarrow: false,
+      font: {size: 14, color: "#30343b"},
+    }];
+  }
 }
 
 function prepare_figure(figure, chart_name) {
@@ -442,7 +494,7 @@ function prepare_figure(figure, chart_name) {
   delete prepared.layout.height;
   delete prepared.layout.title;
   prepared.layout.margin = chart_name === "heatmap"
-    ? {l: 67, r: 82, t: 18, b: 54}
+    ? {l: 67, r: 82, t: 18, b: 104}
     : {l: 61, r: 18, t: 23, b: 50};
 
   if (chart_name === "heatmap") {
@@ -672,6 +724,13 @@ function apply_saved_panel_sizes() {
     if (Number(size.width) > 0) card.style.flex = `0 0 ${Number(size.width)}px`;
     if (Number(size.height) > 0) card.style.height = `${Number(size.height)}px`;
   });
+}
+
+function migrate_panel_layout() {
+  if (localStorage.getItem("thog2_local_panel_layout_version") === panel_layout_version) return;
+  app.panel_sizes = {};
+  save_json("thog2_local_panel_sizes", app.panel_sizes);
+  localStorage.setItem("thog2_local_panel_layout_version", panel_layout_version);
 }
 
 function reset_panel_sizes() {
@@ -1193,6 +1252,7 @@ function bind_events() {
 }
 
 async function start() {
+  migrate_panel_layout();
   ensure_depth_cards();
   build_swatches();
   bind_events();

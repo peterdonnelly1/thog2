@@ -191,6 +191,7 @@ def test_delete_run_removes_only_local_chart_database_files(
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
+    stylesheet = (dashboard._ASSET_ROOT / "dashboard.css").read_text(encoding="utf-8")
 
     assert 'id="heatmap_placeholder"' in html
     assert 'id="heatmap_plot"' in html
@@ -207,7 +208,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "Plotly.newPlot" in javascript
     assert "transpose_heatmap" in javascript
     assert 'scaleanchor = "x"' in javascript
+    assert 'constraintoward = "bottom"' in javascript
+    assert 'color: "white"' in javascript
+    assert "migrate_panel_layout" in javascript
     assert "toggle_maximized_chart" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
+    assert '.chart-card[data-chart="heatmap"] { flex: 1 1 100%; }' in stylesheet
+    assert '.chart-card:not([data-chart="heatmap"]) { flex: 1 1 calc(33.333% - 10px); }' in stylesheet
 # ^^^ THOG
