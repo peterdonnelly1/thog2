@@ -832,8 +832,9 @@ class TrainerStepMixin:
     # ^^^ THOG
 
     def train_one_update(self) -> Dict[str, Any]:
-        # vvv THOG stale transition samples never survive into another optimizer attempt
+        # vvv THOG stale transition samples and per-probe heatmap progress never survive into another optimizer attempt
         self._plastic_depth_pending_console_sampled_values = None
+        self._depth_probe_optimizer_update = None
         # ^^^ THOG
         if self.state.completed_updates >= self.config.max_updates:
             raise RuntimeError("maximum completed updates already reached")
@@ -1095,6 +1096,10 @@ class TrainerStepMixin:
         }
         metrics.update(plastic_metrics)
         self._record("optimizer_step_completed", **metrics)
+        # vvv THOG this transient marker lets linear heatmap mode publish every learned-count probe without exposing another metric
+        if plastic_inline_context is not None:
+            self._depth_probe_optimizer_update = int(self.state.completed_updates)
+        # ^^^ THOG
         return metrics
 # ^^^ THOG
 

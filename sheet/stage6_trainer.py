@@ -147,6 +147,26 @@ def _optimizer_progress_due(
 # ^^^ THOG
 
 
+# vvv THOG linear heatmap mode promotes only completed probe updates to progress events, using the inclusive optimizer-step cap when supplied
+def _linear_heatmap_probe_progress_due(
+    *,
+    config: Any,
+    completed_updates: int,
+    probe_update: Optional[int],
+) -> bool:
+    if getattr(config, "instrumentation__delta_loss_v_layer_heatmap", None) != "linear":
+        return False
+    if probe_update is None or int(probe_update) != int(completed_updates):
+        return False
+    maximum_step = getattr(
+        config,
+        "instrumentation__delta_loss_v_layer_heatmap_linear",
+        None,
+    )
+    return maximum_step is None or int(completed_updates) <= int(maximum_step)
+# ^^^ THOG
+
+
 # vvv THOG step one remains immediately legible in seconds; all later elapsed values use compact HHMM
 # def _progress_elapsed_seconds(value: Any) -> str:
 #     return f"{value}s"
@@ -551,6 +571,13 @@ class Stage6Trainer(Stage4Trainer):
                 log_interval=self.config.log_interval,
                 sampled_values=sampled_values,
             )
+            # vvv THOG linear heatmap mode emits one progress/W&B opportunity for every probe, even between ordinary log intervals
+            report_update = report_update or _linear_heatmap_probe_progress_due(
+                config=self.config,
+                completed_updates=completed_updates,
+                probe_update=getattr(self, "_depth_probe_optimizer_update", None),
+            )
+            # ^^^ THOG
             # vvv THOG sampling chaos bump entry and exact restoration always receive a visible optimizer row
             report_update = report_update or bool(
                 metrics.get("chaos_bump__sampling__transition")

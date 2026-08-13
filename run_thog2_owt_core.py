@@ -220,17 +220,6 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
         raise ValueError("resume control mismatch: " + "; ".join(mismatches))
 
 
-# vvv THOG exact true|false values keep instrumentation switches explicit in reusable run strings
-def parse_true_false(value: str) -> bool:
-    normalized = str(value).strip().lower()
-    if normalized == "true":
-        return True
-    if normalized == "false":
-        return False
-    raise argparse.ArgumentTypeError("expected true or false")
-# ^^^ THOG
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     parser.add_argument("--model-type", choices=("dense", "sheet"))
@@ -368,13 +357,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wandb-project", default="thog")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-mode", choices=("online", "offline", "disabled"), default="online")
-    # vvv THOG fixed-scale, rate-limited W&B DEPTH response heatmap controls are accepted in every PLASTIC mode
+    # vvv THOG fixed-scale sparse/per-probe W&B DEPTH response heatmap controls are accepted in every PLASTIC mode
     parser.add_argument(
         "--instrumentation__delta_loss_v_layer_heatmap",
         dest="instrumentation__delta_loss_v_layer_heatmap",
-        type=parse_true_false,
-        default=False,
-        metavar="true|false",
+        choices=("log", "linear"),
+        default=None,
+    )
+    parser.add_argument(
+        "--instrumentation__delta_loss_v_layer_heatmap_linear",
+        dest="instrumentation__delta_loss_v_layer_heatmap_linear",
+        type=int,
+        default=None,
+        metavar="MAX_STEP",
     )
     parser.add_argument(
         "--instrumentation__delta_loss_v_layer_heatmap_abs_limit",
@@ -615,6 +610,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         wandb_entity=arguments.wandb_entity,
         wandb_mode=arguments.wandb_mode,
         instrumentation__delta_loss_v_layer_heatmap=arguments.instrumentation__delta_loss_v_layer_heatmap,
+        instrumentation__delta_loss_v_layer_heatmap_linear=arguments.instrumentation__delta_loss_v_layer_heatmap_linear,
         instrumentation__delta_loss_v_layer_heatmap_abs_limit=arguments.instrumentation__delta_loss_v_layer_heatmap_abs_limit,
         instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=arguments.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes,
         artifact_suffix=arguments.artifact_suffix,

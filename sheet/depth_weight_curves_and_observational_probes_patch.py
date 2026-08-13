@@ -793,6 +793,9 @@ def _train_one_update_with_observational_probe(self: Any) -> Dict[str, Any]:
     if not _observational_probe_due(self, update):
         return metrics
     _run_observational_probe(self, update=update)
+    # vvv THOG this transient marker lets linear heatmap mode publish the completed observational probe even off the ordinary log interval
+    self._depth_probe_optimizer_update = int(update)
+    # ^^^ THOG
     return metrics
 
 

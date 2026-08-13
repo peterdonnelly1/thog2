@@ -431,12 +431,12 @@ def _should_refresh_coefficient_chart(
     return total - last_logged >= _REFRESH_EVERY_STEPS
 
 
-# vvv THOG retain every probe compactly, render at most 512 exact rows, and upload only on an explicitly rate-limited W&B cadence
+# vvv THOG retain every probe compactly, render at most 512 exact rows, and upload either sparsely or once per probe
 def _delta_loss_heatmap_enabled(telemetry: Any) -> bool:
     config = getattr(telemetry, "config", {})
     return bool(
         isinstance(config, Mapping)
-        and config.get("instrumentation__delta_loss_v_layer_heatmap", False)
+        and config.get("instrumentation__delta_loss_v_layer_heatmap") in {"log", "linear"}
         and not bool(getattr(telemetry, "_delta_loss_heatmap_disabled", False))
     )
 
@@ -677,9 +677,18 @@ def _should_refresh_delta_loss_heatmap(
     last_logged = int(getattr(telemetry, "_delta_loss_heatmap_last_logged_total", 0))
     if total <= last_logged:
         return False
+    config = getattr(telemetry, "config", {})
+    mode = config.get("instrumentation__delta_loss_v_layer_heatmap")
+    if mode == "linear":
+        maximum_step = config.get(
+            "instrumentation__delta_loss_v_layer_heatmap_linear"
+        )
+        latest_probe_step = int(history[-1]["optimizer_update"])
+        if maximum_step is not None and latest_probe_step > int(maximum_step):
+            return False
+        return True
     if force or total in _DELTA_LOSS_HEATMAP_EARLY_REFRESH_PROBES:
         return True
-    config = getattr(telemetry, "config", {})
     cadence = int(
         config.get(
             "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",

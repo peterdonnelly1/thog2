@@ -133,7 +133,8 @@ N_HEAD=12
 N_EMBD=768
 BLOCK_SIZE=1024
 # vvv THOG explicit W&B DEPTH response heatmap controls; conservative cadence protects free-tier storage and upload volume
-INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP:-false}"
+INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP:-}"
+INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP_LINEAR:-}"
 INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT:-0.05}"
 INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="${THOG2_INSTRUMENTATION__DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES:-250}"
 # ^^^ THOG
@@ -207,7 +208,8 @@ Schedule/logging:
   -N DEPTH_CURVE_SAMPLE_ELEMENTS=${DEPTH_CURVE_SAMPLE_ELEMENTS}
   -U DEPTH_CURVE_RENDERER=${DEPTH_CURVE_RENDERER}   matplotlib | plotly | both
   -V DEPTH_CURVE_LOCAL_HTML=${DEPTH_CURVE_LOCAL_HTML}  true | false
-  --instrumentation__delta_loss_v_layer_heatmap true|false=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP}
+  --instrumentation__delta_loss_v_layer_heatmap log|linear     absent means disabled; log uses sparse uploads; linear uploads every probe
+  --instrumentation__delta_loss_v_layer_heatmap_linear MAX_STEP=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR:-uncapped}
   --instrumentation__delta_loss_v_layer_heatmap_abs_limit VALUE=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT}
   --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes N=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES}
 
@@ -422,25 +424,27 @@ while (( $# > 0 )); do
     # ^^^ THOG
     # vvv THOG consume PLASTIC DEPTH controls before getopts and emit one canonical Python configuration
     # vvv THOG consume the exact heatmap instrumentation namespace before ordinary getopts parsing
-    --instrumentation__delta_loss_v_layer_heatmap|--instrumentation__delta_loss_v_layer_heatmap_abs_limit|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes)
+    --instrumentation__delta_loss_v_layer_heatmap|--instrumentation__delta_loss_v_layer_heatmap_linear|--instrumentation__delta_loss_v_layer_heatmap_abs_limit|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --instrumentation__delta_loss_v_layer_heatmap)
-          case "$2" in true|false) ;; *) echo "$1 requires true or false; got: $2" >&2; exit 2 ;; esac
+          case "$2" in log|linear) ;; *) echo "$1 requires log or linear; got: $2" >&2; exit 2 ;; esac
           INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="$2"
           ;;
+        --instrumentation__delta_loss_v_layer_heatmap_linear) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR="$2" ;;
         --instrumentation__delta_loss_v_layer_heatmap_abs_limit) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="$2" ;;
         --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="$2" ;;
       esac
       shift 2
       ;;
-    --instrumentation__delta_loss_v_layer_heatmap=*|--instrumentation__delta_loss_v_layer_heatmap_abs_limit=*|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=*)
+    --instrumentation__delta_loss_v_layer_heatmap=*|--instrumentation__delta_loss_v_layer_heatmap_linear=*|--instrumentation__delta_loss_v_layer_heatmap_abs_limit=*|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=*)
       instrumentation_name="${1%%=*}"; instrumentation_value="${1#*=}"
       case "$instrumentation_name" in
         --instrumentation__delta_loss_v_layer_heatmap)
-          case "$instrumentation_value" in true|false) ;; *) echo "$instrumentation_name requires true or false; got: $instrumentation_value" >&2; exit 2 ;; esac
+          case "$instrumentation_value" in log|linear) ;; *) echo "$instrumentation_name requires log or linear; got: $instrumentation_value" >&2; exit 2 ;; esac
           INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP="$instrumentation_value"
           ;;
+        --instrumentation__delta_loss_v_layer_heatmap_linear) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR="$instrumentation_value" ;;
         --instrumentation__delta_loss_v_layer_heatmap_abs_limit) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT="$instrumentation_value" ;;
         --instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes) INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES="$instrumentation_value" ;;
       esac
@@ -1092,7 +1096,8 @@ run_grid_point() {
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
   optional_args=(); compact_args=(); compact_order_args=()
   # vvv THOG instrumentation and read-only observational probes are forwarded independently of both PLASTIC mutation switches
-  optional_args+=(--instrumentation__delta_loss_v_layer_heatmap "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP")
+  [[ -n "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP" ]] && optional_args+=(--instrumentation__delta_loss_v_layer_heatmap "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP")
+  [[ -n "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR" ]] && optional_args+=(--instrumentation__delta_loss_v_layer_heatmap_linear "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR")
   optional_args+=(--instrumentation__delta_loss_v_layer_heatmap_abs_limit "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT")
   optional_args+=(--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES")
   if [[ "$PLASTIC_ENABLED" == true ]]; then optional_args+=(--plastic__enabled); else optional_args+=(--no-plastic__enabled); fi
@@ -1261,7 +1266,7 @@ scruffy OWT train
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
-  delta-loss heatmap: enabled=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP abs_limit=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT log_every_probes=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES rendered_rows_max=512
+  delta-loss heatmap: mode=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP:-disabled} linear_max_step=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LINEAR:-uncapped} abs_limit=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT log_every_probes=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES rendered_rows_max=512
   non-finite updates: policy=skip max_skips=$MAX_NONFINITE_UPDATE_SKIPS
   fast discard:       $FAST_DISCARD
   semantic adapter bypass:                $BYPASS_SEMANTIC_QKV_ADAPTER
