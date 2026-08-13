@@ -60,8 +60,8 @@
               <option value="created">Created timestamp</option>
               <option value="updated">Recently updated</option>
               <option value="name">Name</option>
-              <option value="heatmap">Heatmap probes</option>
-              <option value="depth">Curve snapshots</option>
+              <option value="heatmap">Probes</option>
+              <option value="depth">Curves</option>
             </select>
           </label>
         </div>
@@ -77,9 +77,9 @@
               <th>W&amp;B ID</th>
               <th>State</th>
               <th>Host</th>
-              <th class="numeric-column heatmap-column">Heatmap probes</th>
-              <th class="numeric-column curve-column">Curve snapshots</th>
-              <th class="numeric-column step-column">Latest logged step</th>
+              <th class="numeric-column heatmap-column" title="Number of retained layer-count heatmap probes">Probes</th>
+              <th class="numeric-column curve-column" title="Number of retained coefficient-curve time points">Curves</th>
+              <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">Logged</th>
               <th>Updated</th>
               <th class="menu-column"><span class="visually-hidden">Run menu</span></th>
             </tr>
@@ -132,21 +132,31 @@
       </div>
 
       <div class="charts-scroll" id="charts_scroll" hidden>
-        <div class="chart-grid" id="chart_grid">
-          <article class="chart-card" data-chart="heatmap">
-            <header class="chart-card-header">
-              <div class="chart-heading-copy"><h2>Layer-count Δloss heatmap</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
-              <button class="maximize-button" data-maximize="heatmap" type="button" aria-label="Maximize heatmap" title="Maximize chart">⛶</button>
-            </header>
-            <div class="plot-shell heatmap-shell">
-              <div class="plot-placeholder" id="heatmap_placeholder">Waiting for the first layer-count probe.</div>
-              <div class="plot-mount" id="heatmap_plot"></div>
-            </div>
-            <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
-            <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
-            <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
-          </article>
-        </div>
+        <section class="chart-group" id="depth_chart_group" data-chart-group="depth">
+          <header class="chart-group-header">
+            <button class="chart-group-toggle" id="depth_group_toggle" type="button" aria-expanded="true" aria-controls="chart_grid">
+              <span class="group-grip" aria-hidden="true">⠿</span>
+              <span class="group-caret" aria-hidden="true">⌄</span>
+              <strong>depth</strong>
+              <span class="group-count" id="depth_group_count">7</span>
+            </button>
+          </header>
+          <div class="chart-grid" id="chart_grid">
+            <article class="chart-card" data-chart="heatmap">
+              <header class="chart-card-header">
+                <div class="chart-heading-copy"><h2>Layer-count Δloss heatmap</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
+                <button class="maximize-button" data-maximize="heatmap" type="button" aria-label="Maximize heatmap" title="Maximize chart">⛶</button>
+              </header>
+              <div class="plot-shell heatmap-shell">
+                <div class="plot-placeholder" id="heatmap_placeholder">Waiting for the first layer-count probe.</div>
+                <div class="plot-mount" id="heatmap_plot"></div>
+              </div>
+              <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+              <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+              <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
+            </article>
+          </div>
+        </section>
       </div>
     </section>
   </main>

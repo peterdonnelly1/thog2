@@ -11,6 +11,10 @@ const chart_titles = {
   mlp_down: "MLP contraction scalar trajectories",
 };
 
+const chart_groups = {
+  depth: Object.keys(chart_titles),
+};
+
 const default_palette = [
   "#865ed6", "#e76f38", "#f4ab83", "#ffb73d", "#91bf57", "#4d9d71",
   "#218d80", "#78c2b6", "#48b4cf", "#578adb", "#7a59d1", "#df79d9",
@@ -140,6 +144,21 @@ function text_cell(value, class_name = "") {
   return cell;
 }
 
+function icon_svg(kind) {
+  const markup = {
+    eye_open: '<path d="M1.5 8s2.8-4.5 8.5-4.5S18.5 8 18.5 8s-2.8 4.5-8.5 4.5S1.5 8 1.5 8Z"/><circle cx="10" cy="8" r="2.3"/>',
+    eye_closed: '<path d="M2 6.4c2.4 2.8 5 4 8 4s5.6-1.2 8-4"/><path d="M4.5 9.1 3.3 11M8 10.2l-.4 2.2M12 10.2l.4 2.2M15.5 9.1l1.2 1.9"/>',
+    running: '<path d="M4.2 4.6A4.4 4.4 0 0 1 11.7 3L13 4.4M11.8 9.4A4.4 4.4 0 0 1 4.3 11L3 9.6"/><path d="M13 1.8v2.6h-2.6M3 12.2V9.6h2.6"/>',
+    finished: '<circle cx="8" cy="8" r="5.2"/><path d="m5.2 8 1.8 1.8 3.8-4"/>',
+    crashed: '<circle cx="8" cy="8" r="5.2"/><path d="m6 6 4 4M10 6l-4 4"/>',
+    unknown: '<circle cx="8" cy="8" r="5.2"/><path d="M6.6 6.2A1.6 1.6 0 0 1 8.1 5c1 0 1.8.6 1.8 1.5 0 1.4-1.9 1.4-1.9 2.7M8 11.2h.01"/>',
+  }[kind];
+  const template = document.createElement("template");
+  const view_box = kind.startsWith("eye_") ? "0 0 20 16" : "0 0 16 16";
+  template.innerHTML = `<svg viewBox="${view_box}" aria-hidden="true">${markup}</svg>`;
+  return template.content.firstElementChild;
+}
+
 function filtered_runs() {
   const query = by_id("run_search").value.trim().toLowerCase();
   const filter = by_id("state_filter").value;
@@ -192,6 +211,7 @@ function append_run_row(body, run) {
   eye.type = "button";
   eye.className = "eye-button";
   eye.classList.toggle("off", !is_visible(run_id));
+  eye.appendChild(icon_svg(is_visible(run_id) ? "eye_open" : "eye_closed"));
   eye.title = is_visible(run_id) ? "Hide run" : "Show run";
   eye.setAttribute("aria-label", eye.title);
   eye.addEventListener("click", () => {
@@ -247,7 +267,11 @@ function append_run_row(body, run) {
   const badge = document.createElement("span");
   const shown_state = display_run_state(run);
   badge.className = `state-badge ${shown_state}`;
-  badge.textContent = shown_state;
+  const state_icon = document.createElement("span");
+  state_icon.className = "state-icon";
+  const state_icon_name = ["running", "finished", "crashed"].includes(shown_state) ? shown_state : "unknown";
+  state_icon.appendChild(icon_svg(state_icon_name));
+  badge.append(state_icon, document.createTextNode(shown_state));
   if (shown_state === "crashed") {
     badge.title = `No local chart data for more than ${app.crash_timeout_minutes} minutes`;
   }
@@ -576,6 +600,7 @@ function ensure_depth_cards() {
   for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
     if (!by_id(`${chart_name}_plot`)) grid.appendChild(depth_card(chart_name));
   }
+  by_id("depth_group_count").textContent = String(chart_groups.depth.length);
   apply_saved_panel_sizes();
 }
 
@@ -632,7 +657,7 @@ function render_run_heading() {
     {text: display_run_state(run)},
     {text: run.host_label ? `host ${run.host_label}` : ""},
     {text: `${format_integer(run.heatmap_count)} probes`},
-    {text: `${format_integer(run.depth_snapshot_count)} curve snapshots`},
+    {text: `${format_integer(run.depth_snapshot_count)} curves`},
     {text: `latest step ${format_integer(run.maximum_update)}`},
     {text: format_bytes(run.database_bytes)},
   ].filter(value => value.text);
@@ -786,9 +811,12 @@ function toggle_maximized_chart(chart_name) {
     restore_maximized_chart();
     return;
   }
+  const selected_card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
+  const grid = selected_card?.closest(".chart-grid");
+  if (!selected_card || !grid) return;
   app.maximized_chart = chart_name;
-  const grid = by_id("chart_grid");
   grid.classList.add("is-maximized");
+  selected_card?.closest(".chart-group")?.classList.add("maximized");
   by_id("charts_scroll").classList.add("maximized-mode");
   document.querySelectorAll(".chart-card").forEach(card => {
     const selected = card.dataset.chart === chart_name;
@@ -804,7 +832,8 @@ function toggle_maximized_chart(chart_name) {
 function restore_maximized_chart() {
   if (!app.maximized_chart) return;
   app.maximized_chart = null;
-  by_id("chart_grid").classList.remove("is-maximized");
+  document.querySelectorAll(".chart-grid.is-maximized").forEach(grid => grid.classList.remove("is-maximized"));
+  document.querySelectorAll(".chart-group.maximized").forEach(group => group.classList.remove("maximized"));
   by_id("charts_scroll").classList.remove("maximized-mode");
   document.querySelectorAll(".chart-card").forEach(card => {
     card.classList.remove("maximized");
@@ -814,6 +843,18 @@ function restore_maximized_chart() {
     button.setAttribute("aria-label", `Maximize ${chart_titles[card.dataset.chart]}`);
   });
   requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
+}
+
+function toggle_chart_group(button) {
+  const group = button.closest(".chart-group");
+  const grid = group?.querySelector(".chart-grid");
+  if (!group || !grid) return;
+  const collapsed = !group.classList.contains("collapsed");
+  if (collapsed && app.maximized_chart) restore_maximized_chart();
+  group.classList.toggle("collapsed", collapsed);
+  grid.hidden = collapsed;
+  button.setAttribute("aria-expanded", String(!collapsed));
+  if (!collapsed) requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
 }
 
 function set_runs_pane_width(width) {
@@ -1110,6 +1151,29 @@ function show_toast(message) {
 }
 
 function bind_events() {
+  by_id("charts_scroll").addEventListener("click", event => {
+    const group_button = event.target.closest(".chart-group-toggle");
+    if (group_button) {
+      toggle_chart_group(group_button);
+      return;
+    }
+    const maximize_button = event.target.closest(".maximize-button");
+    if (maximize_button) toggle_maximized_chart(maximize_button.dataset.maximize);
+  });
+  by_id("charts_scroll").addEventListener("pointerdown", event => {
+    const handle = event.target.closest(".panel-resizer");
+    if (handle) start_chart_resize(event, handle);
+  });
+  by_id("charts_scroll").addEventListener("dblclick", event => {
+    const handle = event.target.closest(".panel-resizer");
+    if (!handle) return;
+    const card = handle.closest(".chart-card");
+    delete app.panel_sizes[card.dataset.chart];
+    save_json("thog2_local_panel_sizes", app.panel_sizes);
+    card.style.removeProperty("flex");
+    card.style.removeProperty("height");
+    requestAnimationFrame(() => resize_plot_in_card(card));
+  });
   by_id("run_search").addEventListener("input", reset_pagination);
   by_id("state_filter").addEventListener("change", reset_pagination);
   by_id("run_sort").addEventListener("change", reset_pagination);
@@ -1176,24 +1240,6 @@ function bind_events() {
     requestAnimationFrame(resize_visible_plots);
   });
   by_id("restore_panels").addEventListener("click", reset_panel_sizes);
-  by_id("chart_grid").addEventListener("click", event => {
-    const button = event.target.closest(".maximize-button");
-    if (button) toggle_maximized_chart(button.dataset.maximize);
-  });
-  by_id("chart_grid").addEventListener("pointerdown", event => {
-    const handle = event.target.closest(".panel-resizer");
-    if (handle) start_chart_resize(event, handle);
-  });
-  by_id("chart_grid").addEventListener("dblclick", event => {
-    const handle = event.target.closest(".panel-resizer");
-    if (!handle) return;
-    const card = handle.closest(".chart-card");
-    delete app.panel_sizes[card.dataset.chart];
-    save_json("thog2_local_panel_sizes", app.panel_sizes);
-    card.style.removeProperty("flex");
-    card.style.removeProperty("height");
-    requestAnimationFrame(() => resize_plot_in_card(card));
-  });
   by_id("colour_hue").addEventListener("input", event => {
     app.picker_hue = Number(event.target.value);
     set_picker_colour(hsv_to_rgb(app.picker_hue, app.picker_saturation, app.picker_value));

@@ -202,8 +202,11 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="page_size"' in html
     assert 'id="sort_direction"' in html
     assert 'id="run_menu"' in html
-    assert "Heatmap probes" in html
-    assert "Latest logged step" in html
+    assert 'id="depth_chart_group"' in html
+    assert 'id="depth_group_toggle"' in html
+    assert ">Probes</th>" in html
+    assert ">Curves</th>" in html
+    assert ">Logged</th>" in html
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
     assert "transpose_heatmap" in javascript
@@ -211,6 +214,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'constraintoward = "bottom"' in javascript
     assert 'color: "white"' in javascript
     assert "migrate_panel_layout" in javascript
+    assert "toggle_chart_group" in javascript
+    assert "eye_closed:" in javascript
+    assert "crashed:" in javascript
     assert "toggle_maximized_chart" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
