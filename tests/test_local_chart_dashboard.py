@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import run_thog2_local_dashboard as dashboard
 from sheet.local_chart_store import (
+    LocalChartStore,
     LocalChartReader,
     close_local_chart_store,
     ensure_local_chart_store,
@@ -38,6 +39,7 @@ def test_viewer_catalog_waits_when_started_before_training(tmp_path: Path) -> No
 
     assert before["runs"] == []
     assert before["waiting"] is True
+    assert before["recommended_run_id"] is None
 
 
 def test_wandb_run_id_separates_repeated_artifact_names(
@@ -113,14 +115,67 @@ def test_requested_run_can_appear_after_catalog_creation(
     close_local_chart_store(telemetry)
 
 
-def test_dashboard_mounts_placeholders_outside_clean_plot_nodes() -> None:
+def test_artifact_request_recommends_active_wandb_run_over_legacy_data(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    legacy = LocalChartStore(
+        tmp_path / "reused_artifact" / "charts.sqlite3",
+        run_name="reused_artifact",
+        config={},
+    )
+    legacy.append_heatmap_records((_heatmap_record(38),))
+    legacy.close()
+
+    active = _telemetry(artifact="reused_artifact", run_id="fresh_wandb_id")
+    active_store = ensure_local_chart_store(active)
+    active_store.append_heatmap_records((_heatmap_record(3),))
+
+    catalog = dashboard.DashboardCatalog(
+        root=tmp_path,
+        requested_run="reused_artifact",
+    ).runs()
+
+    assert len(catalog["runs"]) == 2
+    assert catalog["recommended_run_id"] == "fresh_wandb_id"
+    by_id = {run["local_run_id"]: run for run in catalog["runs"]}
+    assert by_id["reused_artifact"]["is_legacy_layout"] is True
+    assert by_id["reused_artifact"]["dashboard_run_id"] == "legacy:reused_artifact"
+    assert by_id["fresh_wandb_id"]["is_legacy_layout"] is False
+    assert (
+        dashboard.DashboardCatalog(root=tmp_path)
+        .state_for_run("reused_artifact")
+        .status()["maximum_update"]
+        == 3
+    )
+    assert (
+        dashboard.DashboardCatalog(root=tmp_path)
+        .state_for_run("legacy:reused_artifact")
+        .status()["maximum_update"]
+        == 38
+    )
+    assert (
+        dashboard.DashboardCatalog(root=tmp_path)
+        .state_for_run("fresh_wandb_id")
+        .status()["maximum_update"]
+        == 3
+    )
+    close_local_chart_store(active)
+
+
+def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
 
     assert 'id="heatmap_placeholder"' in html
     assert 'id="heatmap_plot"' in html
+    assert 'id="runs_pane"' in html
+    assert 'id="workspace_divider"' in html
+    assert 'class="icon-rail"' in html
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
-    assert "open_modal" in javascript
-    assert "modal_square_heatmap" in javascript
+    assert "toggle_maximized_chart" in javascript
+    assert "start_chart_resize" in javascript
+    assert "should_follow_recommendation" in javascript
 # ^^^ THOG

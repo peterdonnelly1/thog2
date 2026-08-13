@@ -79,20 +79,29 @@ class RunDashboardState:
             default=None,
         )
         modified_at = _timestamp_from_epoch(_modified_time(self.database_path))
+        artifact_name = metadata.get(
+            "artifact_name",
+            metadata.get("run_name", self.database_path.parent.name),
+        )
+        local_run_id = metadata.get("local_run_id", self.database_path.parent.name)
+        wandb_run_id = metadata.get("wandb_run_id", "")
+        is_legacy_layout = bool(
+            not wandb_run_id
+            and local_run_id == artifact_name
+            and self.database_path.parent.name == artifact_name
+        )
         return {
             **status,
-            "run_name": metadata.get(
-                "artifact_name",
-                metadata.get("run_name", self.database_path.parent.name),
+            "run_name": artifact_name,
+            "artifact_name": artifact_name,
+            "local_run_id": local_run_id,
+            "dashboard_run_id": (
+                f"legacy:{local_run_id}" if is_legacy_layout else local_run_id
             ),
-            "artifact_name": metadata.get(
-                "artifact_name",
-                metadata.get("run_name", self.database_path.parent.name),
-            ),
-            "local_run_id": metadata.get("local_run_id", self.database_path.parent.name),
-            "wandb_run_id": metadata.get("wandb_run_id", ""),
+            "wandb_run_id": wandb_run_id,
             "wandb_url": metadata.get("wandb_url", ""),
             "run_state": metadata.get("run_state", "unknown"),
+            "is_legacy_layout": is_legacy_layout,
             "created_at": metadata.get("created_at", modified_at),
             "updated_at": metadata.get("updated_at", modified_at),
             "host_label": str(configuration.get("host_label", "")),
@@ -211,22 +220,91 @@ class DashboardCatalog:
             "runs": runs,
             "waiting": not bool(runs),
             "requested_run": self.requested_run,
+            "recommended_run_id": self._recommended_run_id(runs),
             "root": str(self.root.resolve()),
         }
 
+    def _recommended_run_id(self, runs: list[Dict[str, Any]]) -> Optional[str]:
+        if not runs:
+            return None
+        candidates = list(runs)
+        if self.requested_run:
+            artifact_matches = [
+                run
+                for run in runs
+                if self.requested_run
+                in {str(run["artifact_name"]), str(run["run_name"])}
+            ]
+            exact = [
+                run
+                for run in runs
+                if self.requested_run
+                in {str(run["local_run_id"]), str(run["wandb_run_id"])}
+                and not (artifact_matches and bool(run["is_legacy_layout"]))
+            ]
+            candidates = exact or artifact_matches or candidates
+
+        preferred = max(
+            candidates,
+            key=lambda run: (
+                str(run["run_state"]) == "running",
+                bool(run["wandb_run_id"]),
+                not bool(run["is_legacy_layout"]),
+                str(run["updated_at"]),
+            ),
+        )
+        return str(preferred["dashboard_run_id"])
+
     def state_for_run(self, run_name: str) -> RunDashboardState:
+        artifact_matches = []
+        dashboard_matches = []
+        exact_matches = []
         for path in self._candidate_paths():
             state = self._state_for_path(path)
             try:
                 status = state.status()
             except (OSError, sqlite3.DatabaseError, ValueError, json.JSONDecodeError):
                 continue
+            if run_name == str(status["dashboard_run_id"]):
+                dashboard_matches.append((state, status))
+                continue
             if run_name in {
-                str(status["run_name"]),
                 str(status["local_run_id"]),
                 str(status["wandb_run_id"]),
             }:
-                return state
+                exact_matches.append((state, status))
+                continue
+            if run_name in {
+                str(status["run_name"]),
+                str(status["artifact_name"]),
+            }:
+                artifact_matches.append((state, status))
+        if dashboard_matches:
+            return dashboard_matches[0][0]
+        if exact_matches:
+            if not (
+                all(bool(item[1]["is_legacy_layout"]) for item in exact_matches)
+                and any(not bool(item[1]["is_legacy_layout"]) for item in artifact_matches)
+            ):
+                return max(
+                    exact_matches,
+                    key=lambda item: (
+                        str(item[1]["run_state"]) == "running",
+                        bool(item[1]["wandb_run_id"]),
+                        not bool(item[1]["is_legacy_layout"]),
+                        str(item[1]["updated_at"]),
+                    ),
+                )[0]
+        if artifact_matches:
+            return max(
+                artifact_matches,
+                key=lambda item: (
+                    str(item[1]["run_state"]) == "running",
+                    bool(item[1]["wandb_run_id"]),
+                    not bool(item[1]["is_legacy_layout"]),
+                    str(item[1]["updated_at"]),
+                ),
+            )[0]
         raise KeyError(f"local chart run not found: {run_name}")
 
 
