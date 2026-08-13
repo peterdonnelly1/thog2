@@ -40,10 +40,15 @@ const app = {
   colours: load_json("thog2_local_run_colours", {}),
   visibility: load_json("thog2_local_run_visibility", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
+  page_size: load_number("thog2_local_page_size", 50),
+  current_page: 1,
+  sort_descending: localStorage.getItem("thog2_local_sort_descending") !== "0",
+  crash_timeout_minutes: load_number("thog2_local_crash_timeout_minutes", 15),
   selected: new Set(),
   group_by_host: false,
   maximized_chart: null,
   colour_run_id: null,
+  menu_run_id: null,
   picker_hue: 250,
   picker_saturation: 56,
   picker_value: 84,
@@ -62,13 +67,18 @@ function load_json(key, fallback) {
 
 function save_json(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
+function load_number(key, fallback) {
+  const value = Number(localStorage.getItem(key));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function route_run_id() {
   const match = /^\/runs\/([^/]+)$/.exec(window.location.pathname);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-async function fetch_json(url) {
-  const response = await fetch(url, {cache: "no-store"});
+async function fetch_json(url, options = {}) {
+  const response = await fetch(url, {cache: "no-store", ...options});
   const value = await response.json();
   if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
   return value;
@@ -90,6 +100,14 @@ function colour_for_run(run_id) {
 function is_visible(run_id) { return app.visibility[run_id] !== false; }
 function run_identifier(run) { return String(run.dashboard_run_id || run.local_run_id || run.wandb_run_id || run.run_name); }
 function current_run() { return app.runs.find(run => run_identifier(run) === app.current_run_id) || app.current_status; }
+
+function display_run_state(run) {
+  if (run.run_state !== "running") return run.run_state;
+  const last_write = Date.parse(run.updated_at || run.created_at || "");
+  if (!Number.isFinite(last_write)) return "running";
+  const timeout_ms = app.crash_timeout_minutes * 60 * 1000;
+  return Date.now() - last_write > timeout_ms ? "crashed" : "running";
+}
 
 function format_integer(value) {
   return value === null || value === undefined ? "—" : Number(value).toLocaleString();
@@ -126,15 +144,24 @@ function filtered_runs() {
   const sort = by_id("run_sort").value;
   const runs = app.runs.filter(run => {
     const searchable = `${run.artifact_name} ${run.wandb_run_id} ${run.local_run_id} ${run.host_label}`.toLowerCase();
-    return (!query || searchable.includes(query)) && (filter === "all" || run.run_state === filter);
+    return (!query || searchable.includes(query)) && (filter === "all" || display_run_state(run) === filter);
   });
   runs.sort((left, right) => {
-    if (sort === "name") return String(left.artifact_name).localeCompare(String(right.artifact_name));
-    if (sort === "heatmap") return Number(right.heatmap_count) - Number(left.heatmap_count);
-    if (sort === "depth") return Number(right.depth_snapshot_count) - Number(left.depth_snapshot_count);
-    return String(right.updated_at).localeCompare(String(left.updated_at));
+    let comparison = 0;
+    if (sort === "name") comparison = String(left.artifact_name).localeCompare(String(right.artifact_name));
+    else if (sort === "heatmap") comparison = Number(left.heatmap_count) - Number(right.heatmap_count);
+    else if (sort === "depth") comparison = Number(left.depth_snapshot_count) - Number(right.depth_snapshot_count);
+    else if (sort === "updated") comparison = String(left.updated_at).localeCompare(String(right.updated_at));
+    else comparison = String(left.created_at).localeCompare(String(right.created_at));
+    if (!comparison) comparison = run_identifier(left).localeCompare(run_identifier(right));
+    return app.sort_descending ? -comparison : comparison;
   });
   return runs;
+}
+
+function reset_pagination() {
+  app.current_page = 1;
+  render_runs();
 }
 
 function append_run_row(body, run) {
@@ -216,8 +243,12 @@ function append_run_row(body, run) {
 
   const state_cell = document.createElement("td");
   const badge = document.createElement("span");
-  badge.className = `state-badge ${run.run_state}`;
-  badge.textContent = run.run_state;
+  const shown_state = display_run_state(run);
+  badge.className = `state-badge ${shown_state}`;
+  badge.textContent = shown_state;
+  if (shown_state === "crashed") {
+    badge.title = `No local chart data for more than ${app.crash_timeout_minutes} minutes`;
+  }
   state_cell.appendChild(badge);
   row.appendChild(state_cell);
   row.appendChild(text_cell(run.host_label || "—"));
@@ -225,6 +256,21 @@ function append_run_row(body, run) {
   row.appendChild(text_cell(format_integer(run.depth_snapshot_count), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_time(run.updated_at)));
+  const menu_cell = document.createElement("td");
+  menu_cell.className = "menu-column";
+  const menu_button = document.createElement("button");
+  menu_button.type = "button";
+  menu_button.className = "run-menu-button";
+  menu_button.textContent = "…";
+  menu_button.title = "Run actions";
+  menu_button.setAttribute("aria-label", `Actions for ${run.artifact_name}`);
+  menu_button.setAttribute("aria-expanded", "false");
+  menu_button.addEventListener("click", event => {
+    event.stopPropagation();
+    open_run_menu(run_id, menu_button);
+  });
+  menu_cell.appendChild(menu_button);
+  row.appendChild(menu_cell);
   row.addEventListener("click", event => {
     if (!event.target.closest("button, input, a")) select_run(run_id, {manual: true});
   });
@@ -235,8 +281,18 @@ function render_runs() {
   const body = by_id("runs_body");
   body.replaceChildren();
   const runs = filtered_runs();
+  const page_count = Math.max(1, Math.ceil(runs.length / app.page_size));
+  app.current_page = Math.max(1, Math.min(app.current_page, page_count));
+  const page_start = (app.current_page - 1) * app.page_size;
+  const page_runs = runs.slice(page_start, page_start + app.page_size);
   by_id("run_count").textContent = String(app.runs.length);
   by_id("listed_count").textContent = `${runs.length} listed`;
+  by_id("page_size").value = String(app.page_size);
+  by_id("page_range").textContent = runs.length
+    ? `${page_start + 1}-${page_start + page_runs.length} of ${runs.length}`
+    : "0 of 0";
+  by_id("previous_page").disabled = app.current_page <= 1;
+  by_id("next_page").disabled = app.current_page >= page_count;
   const empty = by_id("empty_runs");
   empty.hidden = runs.length !== 0;
   if (!runs.length) {
@@ -247,13 +303,13 @@ function render_runs() {
     return;
   }
   let previous_group = null;
-  for (const run of runs) {
+  for (const run of page_runs) {
     const group = run.host_label || "Unlabelled host";
     if (app.group_by_host && group !== previous_group) {
       const group_row = document.createElement("tr");
       group_row.className = "group-row";
       const group_cell = document.createElement("td");
-      group_cell.colSpan = 10;
+      group_cell.colSpan = 11;
       group_cell.textContent = group;
       group_row.appendChild(group_cell);
       body.appendChild(group_row);
@@ -329,6 +385,50 @@ function clear_plot(mount) {
 
 function clone_figure(figure) { return JSON.parse(JSON.stringify(figure)); }
 
+function transpose_matrix(matrix) {
+  if (!Array.isArray(matrix) || !matrix.length) return matrix;
+  const width = Math.max(...matrix.map(row => Array.isArray(row) ? row.length : 0));
+  return Array.from({length: width}, (_unused, column) =>
+    matrix.map(row => Array.isArray(row) ? row[column] : null)
+  );
+}
+
+function transpose_heatmap(prepared) {
+  const original_xaxis = {...(prepared.layout.xaxis || {})};
+  const original_yaxis = {...(prepared.layout.yaxis || {})};
+  for (const trace of prepared.data || []) {
+    if (trace.type === "heatmap") {
+      const original_x = trace.x;
+      trace.x = trace.y;
+      trace.y = original_x;
+      trace.z = transpose_matrix(trace.z);
+      if (trace.customdata) trace.customdata = transpose_matrix(trace.customdata);
+      trace.zsmooth = false;
+      trace.xgap = 0;
+      trace.ygap = 0;
+      trace.hovertemplate = "step=%{customdata}<br>candidate layers=%{x}<br>Δloss=%{z:.8f}<extra></extra>";
+      trace.colorbar = trace.colorbar || {};
+      trace.colorbar.thickness = 12;
+      trace.colorbar.len = 0.82;
+    } else if (trace.x && trace.y) {
+      const original_x = trace.x;
+      trace.x = trace.y;
+      trace.y = original_x;
+      trace.hovertemplate = "step=%{customdata}<br>active layers=%{x}<extra></extra>";
+    }
+  }
+  prepared.layout.xaxis = original_yaxis;
+  prepared.layout.yaxis = original_xaxis;
+  prepared.layout.xaxis.title = {text: "absolute candidate layer count"};
+  prepared.layout.yaxis.title = {text: "step"};
+  delete prepared.layout.xaxis.scaleanchor;
+  delete prepared.layout.xaxis.scaleratio;
+  prepared.layout.xaxis.constrain = "domain";
+  prepared.layout.yaxis.constrain = "domain";
+  prepared.layout.yaxis.scaleanchor = "x";
+  prepared.layout.yaxis.scaleratio = 1;
+}
+
 function prepare_figure(figure, chart_name) {
   const prepared = clone_figure(figure);
   prepared.layout = prepared.layout || {};
@@ -346,20 +446,7 @@ function prepare_figure(figure, chart_name) {
     : {l: 61, r: 18, t: 23, b: 50};
 
   if (chart_name === "heatmap") {
-    prepared.layout.yaxis = prepared.layout.yaxis || {};
-    prepared.layout.xaxis = prepared.layout.xaxis || {};
-    delete prepared.layout.yaxis.scaleanchor;
-    delete prepared.layout.yaxis.scaleratio;
-    delete prepared.layout.yaxis.constrain;
-    delete prepared.layout.xaxis.constrain;
-    if (prepared.data[0]) {
-      prepared.data[0].zsmooth = false;
-      prepared.data[0].xgap = 0;
-      prepared.data[0].ygap = 0;
-      prepared.data[0].colorbar = prepared.data[0].colorbar || {};
-      prepared.data[0].colorbar.thickness = 12;
-      prepared.data[0].colorbar.len = 0.82;
-    }
+    transpose_heatmap(prepared);
   } else {
     const colour = colour_for_run(app.current_run_id);
     for (const trace of prepared.data || []) {
@@ -490,7 +577,7 @@ function render_run_heading() {
   subtitle.replaceChildren();
   const values = [
     {text: run.wandb_run_id ? `W&B ID ${run.wandb_run_id}` : `Local ID ${run.local_run_id}`, class_name: "identity"},
-    {text: run.run_state},
+    {text: display_run_state(run)},
     {text: run.host_label ? `host ${run.host_label}` : ""},
     {text: `${format_integer(run.heatmap_count)} probes`},
     {text: `${format_integer(run.depth_snapshot_count)} curve snapshots`},
@@ -711,6 +798,121 @@ function start_runs_pane_resize(event) {
   divider.addEventListener("pointercancel", finish);
 }
 
+function update_sort_direction_ui() {
+  const button = by_id("sort_direction");
+  button.textContent = app.sort_descending ? "↓" : "↑";
+  button.title = app.sort_descending ? "Descending; click for ascending" : "Ascending; click for descending";
+  button.setAttribute("aria-pressed", String(app.sort_descending));
+}
+
+function run_for_id(run_id) {
+  return app.runs.find(run => run_identifier(run) === run_id) || null;
+}
+
+function open_run_menu(run_id, anchor) {
+  app.menu_run_id = run_id;
+  document.querySelectorAll(".run-menu-button").forEach(button => button.setAttribute("aria-expanded", "false"));
+  anchor.setAttribute("aria-expanded", "true");
+  const menu = by_id("run_menu");
+  menu.hidden = false;
+  const anchor_rect = anchor.getBoundingClientRect();
+  const menu_width = 204;
+  const menu_height = 130;
+  menu.style.left = `${Math.max(8, Math.min(anchor_rect.right - menu_width, window.innerWidth - menu_width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(anchor_rect.bottom + 4, window.innerHeight - menu_height - 8))}px`;
+}
+
+function close_run_menu() {
+  by_id("run_menu").hidden = true;
+  app.menu_run_id = null;
+  document.querySelectorAll(".run-menu-button").forEach(button => button.setAttribute("aria-expanded", "false"));
+}
+
+async function copy_text(value, description) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      if (!document.execCommand("copy")) throw new Error("clipboard copy was rejected");
+      textarea.remove();
+    }
+    show_toast(`${description} copied.`);
+  } catch (error) {
+    show_toast(`Copy failed: ${error.message}`);
+  }
+}
+
+async function delete_menu_run() {
+  const run = run_for_id(app.menu_run_id);
+  if (!run) return;
+  const run_id = run_identifier(run);
+  const state = display_run_state(run);
+  const active_warning = state === "running"
+    ? "\n\nThis run still appears to be running. Its training process may recreate or continue writing the database."
+    : "";
+  const confirmed = window.confirm(
+    `Delete local chart data for:\n\n${run.artifact_name}\n\nPath: ${run.run_directory}${active_warning}\n\nThis does not delete checkpoints, other logs, or the W&B run.`
+  );
+  if (!confirmed) return;
+  close_run_menu();
+  try {
+    await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}`, {method: "DELETE"});
+    delete app.colours[run_id];
+    delete app.visibility[run_id];
+    save_json("thog2_local_run_colours", app.colours);
+    save_json("thog2_local_run_visibility", app.visibility);
+    if (app.current_run_id === run_id) {
+      restore_maximized_chart();
+      app.current_run_id = null;
+      app.current_status = null;
+      app.figures = null;
+      app.figure_revision = null;
+      app.manual_selection = false;
+      reset_run_charts();
+      history.replaceState({}, "", "/runs");
+    }
+    show_toast("Local chart run deleted.");
+    await refresh_catalog();
+  } catch (error) {
+    show_toast(`Delete failed: ${error.message}`);
+  }
+}
+
+function open_settings() {
+  close_run_menu();
+  close_colour_picker();
+  by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
+  by_id("settings_overlay").hidden = false;
+  by_id("settings_nav").classList.add("selected");
+  by_id("runs_nav").classList.remove("selected");
+  by_id("crash_timeout_minutes").focus();
+}
+
+function close_settings() {
+  by_id("settings_overlay").hidden = true;
+  by_id("settings_nav").classList.remove("selected");
+  by_id("runs_nav").classList.add("selected");
+}
+
+function save_settings() {
+  const value = Number(by_id("crash_timeout_minutes").value);
+  if (!Number.isFinite(value) || value < 1 || value > 10080) {
+    show_toast("Crash timeout must be between 1 and 10,080 minutes.");
+    return;
+  }
+  app.crash_timeout_minutes = Math.round(value);
+  localStorage.setItem("thog2_local_crash_timeout_minutes", String(app.crash_timeout_minutes));
+  reset_pagination();
+  render_run_heading();
+  close_settings();
+}
+
 function hsv_to_rgb(hue, saturation, value) {
   const chroma = value * saturation;
   const component = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
@@ -849,12 +1051,31 @@ function show_toast(message) {
 }
 
 function bind_events() {
-  by_id("run_search").addEventListener("input", render_runs);
-  by_id("state_filter").addEventListener("change", render_runs);
-  by_id("run_sort").addEventListener("change", render_runs);
+  by_id("run_search").addEventListener("input", reset_pagination);
+  by_id("state_filter").addEventListener("change", reset_pagination);
+  by_id("run_sort").addEventListener("change", reset_pagination);
+  by_id("sort_direction").addEventListener("click", () => {
+    app.sort_descending = !app.sort_descending;
+    localStorage.setItem("thog2_local_sort_descending", app.sort_descending ? "1" : "0");
+    update_sort_direction_ui();
+    reset_pagination();
+  });
   by_id("group_button").addEventListener("click", () => {
     app.group_by_host = !app.group_by_host;
     by_id("group_button").setAttribute("aria-pressed", String(app.group_by_host));
+    reset_pagination();
+  });
+  by_id("page_size").addEventListener("change", event => {
+    app.page_size = Number(event.target.value);
+    localStorage.setItem("thog2_local_page_size", String(app.page_size));
+    reset_pagination();
+  });
+  by_id("previous_page").addEventListener("click", () => {
+    app.current_page = Math.max(1, app.current_page - 1);
+    render_runs();
+  });
+  by_id("next_page").addEventListener("click", () => {
+    app.current_page += 1;
     render_runs();
   });
   by_id("select_all").addEventListener("change", event => {
@@ -865,6 +1086,26 @@ function bind_events() {
     render_runs();
   });
   by_id("runs_nav").addEventListener("click", () => toggle_runs_pane(true));
+  by_id("settings_nav").addEventListener("click", open_settings);
+  by_id("close_settings").addEventListener("click", close_settings);
+  by_id("cancel_settings").addEventListener("click", close_settings);
+  by_id("save_settings").addEventListener("click", save_settings);
+  by_id("settings_overlay").addEventListener("pointerdown", event => {
+    if (event.target === by_id("settings_overlay")) close_settings();
+  });
+  by_id("copy_run_name").addEventListener("click", () => {
+    const run = run_for_id(app.menu_run_id);
+    if (!run) return;
+    close_run_menu();
+    copy_text(run.artifact_name, "Run name");
+  });
+  by_id("copy_run_path").addEventListener("click", () => {
+    const run = run_for_id(app.menu_run_id);
+    if (!run) return;
+    close_run_menu();
+    copy_text(run.run_directory, "Run path");
+  });
+  by_id("delete_run").addEventListener("click", delete_menu_run);
   by_id("toggle_runs").addEventListener("click", () => toggle_runs_pane());
   by_id("toggle_runs_top").addEventListener("click", () => toggle_runs_pane());
   by_id("workspace_divider").addEventListener("pointerdown", start_runs_pane_resize);
@@ -928,6 +1169,8 @@ function bind_events() {
   document.addEventListener("pointerdown", event => {
     const popover = by_id("colour_popover");
     if (!popover.hidden && !popover.contains(event.target) && !event.target.classList.contains("colour-dot")) close_colour_picker();
+    const menu = by_id("run_menu");
+    if (!menu.hidden && !menu.contains(event.target) && !event.target.classList.contains("run-menu-button")) close_run_menu();
   });
   document.addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key === ".") {
@@ -936,7 +1179,10 @@ function bind_events() {
       return;
     }
     if (event.key === "Escape") {
-      if (app.maximized_chart) restore_maximized_chart(); else close_colour_picker();
+      if (!by_id("settings_overlay").hidden) close_settings();
+      else if (!by_id("run_menu").hidden) close_run_menu();
+      else if (app.maximized_chart) restore_maximized_chart();
+      else close_colour_picker();
     }
   });
   window.addEventListener("resize", () => requestAnimationFrame(resize_visible_plots));
@@ -950,6 +1196,9 @@ async function start() {
   ensure_depth_cards();
   build_swatches();
   bind_events();
+  by_id("page_size").value = String(app.page_size);
+  by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
+  update_sort_direction_ui();
   const saved_width = Number(localStorage.getItem("thog2_local_runs_width"));
   if (Number.isFinite(saved_width) && saved_width > 0) set_runs_pane_width(saved_width);
   if (localStorage.getItem("thog2_local_runs_collapsed") === "1") toggle_runs_pane();

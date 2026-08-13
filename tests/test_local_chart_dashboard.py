@@ -71,10 +71,12 @@ def test_wandb_run_id_separates_repeated_artifact_names(
     assert LocalChartReader(second_store.path).status()["heatmap_maximum_update"] == 20
 
     runs = dashboard.DashboardCatalog(root=tmp_path).runs()["runs"]
+    assert runs[0]["local_run_id"] == "wandb_b2"
     assert {run["local_run_id"] for run in runs} == {"wandb_a1", "wandb_b2"}
     assert {run["artifact_name"] for run in runs} == {"same_artifact"}
     assert {run["run_state"] for run in runs} == {"finished"}
     assert {run["host_label"] for run in runs} == {"scruffy"}
+    assert all(Path(run["run_directory"]).is_dir() for run in runs)
 
 
 def test_same_wandb_run_id_intentionally_continues_local_history(
@@ -164,6 +166,28 @@ def test_artifact_request_recommends_active_wandb_run_over_legacy_data(
     close_local_chart_store(active)
 
 
+def test_delete_run_removes_only_local_chart_database_files(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    telemetry = _telemetry(artifact="delete_artifact", run_id="delete_me")
+    store = ensure_local_chart_store(telemetry)
+    store.append_heatmap_records((_heatmap_record(7),))
+    close_local_chart_store(telemetry)
+    sibling = store.path.parent / "keep_this_file.txt"
+    sibling.write_text("not dashboard data", encoding="utf-8")
+
+    catalog = dashboard.DashboardCatalog(root=tmp_path)
+    result = catalog.delete_run("delete_me")
+
+    assert result["deleted_run_id"] == "delete_me"
+    assert not store.path.exists()
+    assert sibling.read_text(encoding="utf-8") == "not dashboard data"
+    assert result["removed_directory"] is False
+    assert catalog.runs()["runs"] == []
+
+
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
@@ -173,8 +197,16 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="runs_pane"' in html
     assert 'id="workspace_divider"' in html
     assert 'class="icon-rail"' in html
+    assert 'id="settings_nav"' in html
+    assert 'id="page_size"' in html
+    assert 'id="sort_direction"' in html
+    assert 'id="run_menu"' in html
+    assert "Heatmap probes" in html
+    assert "Latest logged step" in html
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
+    assert "transpose_heatmap" in javascript
+    assert 'scaleanchor = "x"' in javascript
     assert "toggle_maximized_chart" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript

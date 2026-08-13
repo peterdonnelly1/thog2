@@ -108,6 +108,7 @@ class RunDashboardState:
             "model_type": str(configuration.get("model_type", "")),
             "maximum_update": maximum_update,
             "database_bytes": int(self.database_path.stat().st_size),
+            "run_directory": str(self.database_path.parent.resolve()),
             "revision": revision,
         }
 
@@ -215,7 +216,10 @@ class DashboardCatalog:
             except (OSError, sqlite3.DatabaseError, ValueError, json.JSONDecodeError):
                 continue
             runs.append(status)
-        runs.sort(key=lambda run: str(run["updated_at"]), reverse=True)
+        runs.sort(
+            key=lambda run: (str(run["created_at"]), str(run["updated_at"])),
+            reverse=True,
+        )
         return {
             "runs": runs,
             "waiting": not bool(runs),
@@ -307,6 +311,47 @@ class DashboardCatalog:
             )[0]
         raise KeyError(f"local chart run not found: {run_name}")
 
+    def delete_run(self, run_name: str) -> Dict[str, Any]:
+        state = self.state_for_run(run_name)
+        database_path = state.database_path.resolve()
+        root = self.root.resolve()
+        try:
+            database_path.relative_to(root)
+        except ValueError as error:
+            raise PermissionError(
+                "refusing to delete a local chart database outside the configured root"
+            ) from error
+        if database_path.name != LOCAL_CHART_DATABASE_NAME:
+            raise ValueError(f"unexpected local chart database name: {database_path.name}")
+
+        status = state.status()
+        deleted = []
+        with state.lock:
+            for candidate in (
+                database_path,
+                Path(f"{database_path}-wal"),
+                Path(f"{database_path}-shm"),
+            ):
+                if not candidate.exists():
+                    continue
+                candidate.unlink()
+                deleted.append(str(candidate))
+
+        removed_directory = False
+        if not bool(status["is_legacy_layout"]):
+            try:
+                database_path.parent.rmdir()
+                removed_directory = True
+            except OSError:
+                pass
+        with self.lock:
+            self.states.pop(database_path, None)
+        return {
+            "deleted_run_id": status["dashboard_run_id"],
+            "deleted_files": deleted,
+            "removed_directory": removed_directory,
+        }
+
 
 def _handler_for(catalog: DashboardCatalog):
     plotly_javascript = get_plotlyjs().encode("utf-8")
@@ -395,6 +440,37 @@ def _handler_for(catalog: DashboardCatalog):
                 )
             except (FileNotFoundError, KeyError) as error:
                 self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            except Exception as error:
+                self._send_json(
+                    {"error": str(error)},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+
+        def do_DELETE(self) -> None:
+            parsed = urlparse(self.path)
+            query = parse_qs(parsed.query)
+            try:
+                if parsed.path != "/api/run":
+                    self._send(
+                        b"not found\n",
+                        content_type="text/plain; charset=utf-8",
+                        status=HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                run_name = query.get("run", [""])[0]
+                if not run_name:
+                    self._send_json(
+                        {"error": "run query parameter is required"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._send_json(catalog.delete_run(run_name))
+            except (FileNotFoundError, KeyError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            except PermissionError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.FORBIDDEN)
+            except ValueError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             except Exception as error:
                 self._send_json(
                     {"error": str(error)},
