@@ -7,14 +7,20 @@ import json
 import math
 import os
 import sqlite3
+import uuid
 import zlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 1
+LOCAL_CHART_SCHEMA_VERSION = 2
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def normalize_chart_destination(value: Any, *, label: str) -> str:
@@ -32,11 +38,24 @@ def local_chart_root() -> Path:
     return Path(configured)
 
 
-def local_chart_database_path(run_name: str, *, root: Optional[Path] = None) -> Path:
-    normalized_name = Path(str(run_name)).name
-    if normalized_name in {"", ".", ".."}:
-        raise ValueError(f"invalid local chart run name: {run_name!r}")
+def _safe_path_component(value: Any, *, label: str) -> str:
+    normalized = Path(str(value)).name.strip()
+    if normalized in {"", ".", ".."}:
+        raise ValueError(f"invalid local chart {label}: {value!r}")
+    return normalized
+
+
+def local_chart_database_path(
+    run_name: str,
+    *,
+    run_id: Optional[str] = None,
+    root: Optional[Path] = None,
+) -> Path:
+    normalized_name = _safe_path_component(run_name, label="run name")
     resolved_root = local_chart_root() if root is None else Path(root)
+    if run_id is not None:
+        normalized_id = _safe_path_component(run_id, label="run ID")
+        return resolved_root / normalized_name / normalized_id / LOCAL_CHART_DATABASE_NAME
     return resolved_root / normalized_name / LOCAL_CHART_DATABASE_NAME
 
 
@@ -91,6 +110,9 @@ class LocalChartStore:
         path: Path,
         *,
         run_name: str,
+        run_id: Optional[str] = None,
+        wandb_run_id: Optional[str] = None,
+        wandb_url: Optional[str] = None,
         config: Mapping[str, Any],
     ) -> None:
         self.path = Path(path)
@@ -117,6 +139,12 @@ class LocalChartStore:
         metadata = {
             "schema_version": str(LOCAL_CHART_SCHEMA_VERSION),
             "run_name": str(run_name),
+            "artifact_name": str(run_name),
+            "local_run_id": str(run_id or run_name),
+            "wandb_run_id": str(wandb_run_id or ""),
+            "wandb_url": str(wandb_url or ""),
+            "run_state": "running",
+            "updated_at": _utc_timestamp(),
             "config_json": json.dumps(
                 _json_compatible(config),
                 ensure_ascii=False,
@@ -128,7 +156,20 @@ class LocalChartStore:
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
             tuple(metadata.items()),
         )
+        self.connection.execute(
+            "INSERT OR IGNORE INTO metadata(key, value) VALUES (?, ?)",
+            ("created_at", _utc_timestamp()),
+        )
         self.connection.commit()
+
+    def _touch(self) -> None:
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            (
+                ("run_state", "running"),
+                ("updated_at", _utc_timestamp()),
+            ),
+        )
 
     def append_heatmap_records(
         self,
@@ -175,6 +216,7 @@ class LocalChartStore:
             """,
             rows,
         )
+        self._touch()
         self.connection.commit()
         return len(rows)
 
@@ -204,11 +246,20 @@ class LocalChartStore:
             """,
             (max(1, int(history_length)),),
         )
+        self._touch()
         self.connection.commit()
 
     def close(self) -> None:
         if self.connection is None:
             return
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            (
+                ("run_state", "finished"),
+                ("updated_at", _utc_timestamp()),
+            ),
+        )
+        self.connection.commit()
         self.connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
         self.connection.close()
         self.connection = None
@@ -319,10 +370,24 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
     existing = getattr(telemetry, "_thog_local_chart_store", None)
     if existing is not None:
         return existing
-    path = local_chart_database_path(str(telemetry.name))
+    run = getattr(telemetry, "run", None)
+    wandb_run_id = str(getattr(run, "id", "") or "").strip()
+    local_run_id = wandb_run_id or str(
+        getattr(telemetry, "_thog_local_chart_run_id", "") or ""
+    ).strip()
+    if not local_run_id:
+        local_run_id = f"local-{uuid.uuid4().hex[:8]}"
+        setattr(telemetry, "_thog_local_chart_run_id", local_run_id)
+    path = local_chart_database_path(
+        str(telemetry.name),
+        run_id=local_run_id,
+    )
     store = LocalChartStore(
         path,
         run_name=str(telemetry.name),
+        run_id=local_run_id,
+        wandb_run_id=wandb_run_id or None,
+        wandb_url=str(getattr(run, "url", "") or "") or None,
         config=getattr(telemetry, "config", {}),
     )
     setattr(telemetry, "_thog_local_chart_store", store)
@@ -333,7 +398,7 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
         )
         print(
             "THOG2 local chart viewer: "
-            f"python -m run_thog2_local_dashboard --run {telemetry.name}",
+            f"python -m run_thog2_local_dashboard --run {local_run_id}",
             flush=True,
         )
         setattr(telemetry, "_thog_local_chart_store_announced", True)

@@ -1,0 +1,150 @@
+<!-- vvv THOG -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>THOG2 local instrumentation</title>
+  <link rel="stylesheet" href="/assets/dashboard.css">
+  <script src="/plotly.min.js"></script>
+  <script src="/assets/dashboard.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark" aria-hidden="true">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <div class="breadcrumbs">
+      <strong>THOG2</strong><span>›</span><span>Local instrumentation</span><span>›</span><span id="breadcrumb_leaf">Runs</span>
+    </div>
+  </header>
+
+  <aside class="sidebar" aria-label="Instrumentation sections">
+    <button class="sidebar-item selected" id="runs_nav" type="button" title="Runs">
+      <span class="runs-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Runs</span>
+    </button>
+  </aside>
+
+  <main class="app-content">
+    <section id="runs_view">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Local workspace</p>
+          <h1>Runs <span class="count-pill" id="run_count">0</span></h1>
+        </div>
+        <div class="watch-status" id="watch_status">Connecting…</div>
+      </div>
+
+      <div class="search-row">
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input id="run_search" type="search" autocomplete="off" placeholder="Search runs" aria-label="Search runs">
+        </label>
+      </div>
+
+      <div class="toolbar">
+        <label class="toolbar-select"><span>Filter</span>
+          <select id="state_filter" aria-label="Filter by state">
+            <option value="all">All states</option>
+            <option value="running">Running</option>
+            <option value="finished">Finished</option>
+          </select>
+        </label>
+        <button class="toolbar-button" id="group_button" type="button" aria-pressed="false">Group by host</button>
+        <label class="toolbar-select"><span>Sort</span>
+          <select id="run_sort" aria-label="Sort runs">
+            <option value="updated">Recently updated</option>
+            <option value="name">Name</option>
+            <option value="heatmap">Heatmap probes</option>
+            <option value="depth">Curve snapshots</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="runs-table-wrap">
+        <table class="runs-table">
+          <thead>
+            <tr>
+              <th class="check-column"><input id="select_all" type="checkbox" aria-label="Select all listed runs"></th>
+              <th class="visibility-column"><span class="eye-icon" aria-hidden="true"></span></th>
+              <th class="name-column">Name <span class="listed-pill" id="listed_count">0 listed</span></th>
+              <th>W&amp;B ID</th>
+              <th>State</th>
+              <th>Host</th>
+              <th class="numeric-column">Heatmap probes</th>
+              <th class="numeric-column">Curve snapshots</th>
+              <th class="numeric-column">Last step</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody id="runs_body"></tbody>
+        </table>
+        <div class="empty-runs" id="empty_runs" hidden>
+          <div class="waiting-orbit" aria-hidden="true"><i></i></div>
+          <h2 id="empty_runs_title">Waiting for a local run</h2>
+          <p id="empty_runs_detail">The viewer is ready. Start training and the run will appear here automatically.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="run_view" hidden>
+      <div class="run-heading">
+        <button class="back-button" id="back_to_runs" type="button">‹ Runs</button>
+        <div class="run-title-row">
+          <span class="run-colour-large" id="run_colour_large"></span>
+          <div class="run-title-copy">
+            <h1 id="run_title"></h1>
+            <div class="run-subtitle" id="run_subtitle"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <article class="chart-card heatmap-card" data-chart="heatmap">
+          <header class="chart-card-header">
+            <div><h2>Layer-count Δloss heatmap</h2><p>Fit-to-card overview; square cells are available when enlarged.</p></div>
+            <button class="maximize-button" data-maximize="heatmap" type="button" aria-label="Enlarge heatmap">↗ Enlarge</button>
+          </header>
+          <div class="plot-shell heatmap-shell">
+            <div class="plot-placeholder" id="heatmap_placeholder">Waiting for the first layer-count probe.</div>
+            <div class="plot-mount" id="heatmap_plot"></div>
+          </div>
+        </article>
+
+        <section class="depth-grid" id="depth_grid"></section>
+      </div>
+    </section>
+  </main>
+
+  <div class="colour-popover" id="colour_popover" hidden role="dialog" aria-label="Run colour picker">
+    <canvas id="colour_plane" width="252" height="132" aria-label="Colour saturation and brightness"></canvas>
+    <input id="colour_hue" class="hue-slider" type="range" min="0" max="360" value="250" aria-label="Hue">
+    <div class="colour-values">
+      <label>Hex<input id="colour_hex" type="text" maxlength="7" spellcheck="false"></label>
+      <label>R<input id="colour_r" type="text" readonly></label>
+      <label>G<input id="colour_g" type="text" readonly></label>
+      <label>B<input id="colour_b" type="text" readonly></label>
+    </div>
+    <div class="colour-swatches" id="colour_swatches"></div>
+    <button id="reset_colour" class="reset-colour" type="button">↶ Reset colour</button>
+  </div>
+
+  <div class="chart-modal" id="chart_modal" hidden role="dialog" aria-modal="true" aria-label="Enlarged chart">
+    <header class="modal-header">
+      <div>
+        <h2 id="modal_title"></h2>
+        <span id="modal_detail"></span>
+      </div>
+      <div class="modal-actions">
+        <button id="heatmap_aspect_toggle" type="button" hidden>Fit width</button>
+        <button id="close_modal" type="button" aria-label="Close enlarged chart">×</button>
+      </div>
+    </header>
+    <div class="modal-scroll" id="modal_scroll"><div class="modal-plot" id="modal_plot"></div></div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+</body>
+</html>
+<!-- ^^^ THOG -->

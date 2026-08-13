@@ -1,16 +1,19 @@
 # vvv THOG
-"""Serve live, interactive THOG heatmap and DEPTH charts from compact local data."""
+"""Serve live THOG chart runs and interactive figures from compact local data."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
+import sqlite3
 import threading
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from plotly.offline import get_plotlyjs
 from plotly.utils import PlotlyJSONEncoder
@@ -20,125 +23,38 @@ from sheet import plastic_depth_wandb_probe_curves_patch as probe_curves
 from sheet.local_chart_store import (
     LOCAL_CHART_DATABASE_NAME,
     LocalChartReader,
-    local_chart_database_path,
 )
 
 
-_PAGE = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>THOG2 local instrumentation</title>
-  <script src="/plotly.min.js"></script>
-  <style>
-    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #f4f6f8; color: #202124; }
-    header { position: sticky; top: 0; z-index: 4; padding: 14px 22px; background: rgba(255,255,255,.96); border-bottom: 1px solid #dfe3e7; }
-    h1 { display: inline; margin: 0; font-size: 20px; font-weight: 650; }
-    #status { float: right; padding-top: 3px; color: #5f6368; font-size: 13px; }
-    main { padding: 18px; }
-    .panel { margin-bottom: 18px; overflow: hidden; background: white; border: 1px solid #dfe3e7; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-    .plot { min-height: 420px; width: 100%; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); gap: 18px; }
-    .empty { padding: 48px 24px; color: #6b7280; text-align: center; }
-    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } #status { float: none; display: block; } }
-  </style>
-</head>
-<body>
-  <header><h1>THOG2 local instrumentation</h1><span id="status">connecting...</span></header>
-  <main>
-    <section class="panel"><div id="heatmap" class="plot"><div class="empty">Waiting for the first layer-count probe.</div></div></section>
-    <section id="depth_grid" class="grid"></section>
-  </main>
-  <script>
-    const plot_config = {
-      responsive: true,
-      scrollZoom: true,
-      displaylogo: false,
-      toImageButtonOptions: {format: 'png', scale: 2}
-    };
-    let revision = null;
-
-    function render_figure(element_id, figure) {
-      const node = document.getElementById(element_id);
-      if (!figure) {
-        return;
-      }
-      figure.layout = figure.layout || {};
-      figure.layout.uirevision = figure.layout.uirevision || element_id;
-      Plotly.react(node, figure.data, figure.layout, plot_config);
-    }
-
-    function depth_element(chart_name) {
-      const element_id = `depth_${chart_name}`;
-      let node = document.getElementById(element_id);
-      if (node) {
-        return node;
-      }
-      const panel = document.createElement('section');
-      panel.className = 'panel';
-      node = document.createElement('div');
-      node.id = element_id;
-      node.className = 'plot';
-      panel.appendChild(node);
-      document.getElementById('depth_grid').appendChild(panel);
-      return node;
-    }
-
-    async function refresh() {
-      try {
-        const status_response = await fetch('/api/status', {cache: 'no-store'});
-        const status = await status_response.json();
-        document.getElementById('status').textContent =
-          `${status.run_name} · heatmap ${status.heatmap_count} probes · depth ${status.depth_snapshot_count} snapshots`;
-        const next_revision = JSON.stringify(status.revision);
-        if (next_revision === revision) {
-          return;
-        }
-        revision = next_revision;
-        const figure_response = await fetch('/api/figures', {cache: 'no-store'});
-        const figures = await figure_response.json();
-        render_figure('heatmap', figures.heatmap);
-        for (const [chart_name, figure] of Object.entries(figures.depth)) {
-          depth_element(chart_name);
-          render_figure(`depth_${chart_name}`, figure);
-        }
-      } catch (error) {
-        document.getElementById('status').textContent = `viewer error: ${error}`;
-      }
-    }
-
-    refresh();
-    setInterval(refresh, 3000);
-  </script>
-</body>
-</html>
-"""
+_ASSET_ROOT = Path(__file__).resolve().parent / "sheet" / "local_dashboard_assets"
+_ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js"))
 
 
-def _resolve_database(run: Optional[str], *, root: Path) -> Path:
-    if run:
-        supplied = Path(run)
-        if supplied.is_file():
-            return supplied
-        candidate = local_chart_database_path(run, root=root)
-        if candidate.is_file():
-            return candidate
-        raise FileNotFoundError(f"local chart database not found: {candidate}")
-    candidates = tuple(root.glob(f"*/{LOCAL_CHART_DATABASE_NAME}"))
-    if not candidates:
-        raise FileNotFoundError(f"no local chart databases found below {root}")
-    return max(candidates, key=lambda path: path.stat().st_mtime_ns)
+def _modified_time(path: Path) -> float:
+    candidates = (path, Path(f"{path}-wal"), Path(f"{path}-shm"))
+    return max(
+        (candidate.stat().st_mtime for candidate in candidates if candidate.exists()),
+        default=0.0,
+    )
 
 
-class DashboardState:
+def _timestamp_from_epoch(value: float) -> str:
+    if value <= 0.0:
+        return ""
+    return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+class RunDashboardState:
     def __init__(self, database_path: Path) -> None:
         self.database_path = Path(database_path)
         self.reader = LocalChartReader(self.database_path)
         self.lock = threading.Lock()
         self.cached_revision: Optional[Tuple[Any, ...]] = None
-        self.cached_figures: Dict[str, Any] = {"heatmap": None, "depth": {}}
+        self.cached_figures: Dict[str, Any] = {
+            "heatmap": None,
+            "heatmap_dimensions": {"layers": 0, "probes": 0},
+            "depth": {},
+        }
 
     def status(self) -> Dict[str, Any]:
         status = self.reader.status()
@@ -148,10 +64,41 @@ class DashboardState:
             status["heatmap_maximum_update"],
             status["depth_snapshot_count"],
             status["depth_maximum_update"],
+            metadata.get("updated_at"),
         )
+        configuration = json.loads(metadata.get("config_json", "{}"))
+        maximum_update = max(
+            (
+                value
+                for value in (
+                    status["heatmap_maximum_update"],
+                    status["depth_maximum_update"],
+                )
+                if value is not None
+            ),
+            default=None,
+        )
+        modified_at = _timestamp_from_epoch(_modified_time(self.database_path))
         return {
             **status,
-            "run_name": metadata.get("run_name", self.database_path.parent.name),
+            "run_name": metadata.get(
+                "artifact_name",
+                metadata.get("run_name", self.database_path.parent.name),
+            ),
+            "artifact_name": metadata.get(
+                "artifact_name",
+                metadata.get("run_name", self.database_path.parent.name),
+            ),
+            "local_run_id": metadata.get("local_run_id", self.database_path.parent.name),
+            "wandb_run_id": metadata.get("wandb_run_id", ""),
+            "wandb_url": metadata.get("wandb_url", ""),
+            "run_state": metadata.get("run_state", "unknown"),
+            "created_at": metadata.get("created_at", modified_at),
+            "updated_at": metadata.get("updated_at", modified_at),
+            "host_label": str(configuration.get("host_label", "")),
+            "model_type": str(configuration.get("model_type", "")),
+            "maximum_update": maximum_update,
+            "database_bytes": int(self.database_path.stat().st_size),
             "revision": revision,
         }
 
@@ -163,12 +110,13 @@ class DashboardState:
                 return self.cached_figures
             heatmap_history = self.reader.heatmap_history()
             heatmap_figure = None
+            maximum_layers = 0
             if heatmap_history:
                 maximum_layers = max(len(record["values"]) for record in heatmap_history)
                 metadata = self.reader.metadata()
-                config = json.loads(metadata.get("config_json", "{}"))
+                configuration = json.loads(metadata.get("config_json", "{}"))
                 abs_limit = float(
-                    config.get(
+                    configuration.get(
                         "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
                         0.05,
                     )
@@ -192,20 +140,114 @@ class DashboardState:
             self.cached_revision = revision
             self.cached_figures = {
                 "heatmap": heatmap_figure,
+                "heatmap_dimensions": {
+                    "layers": maximum_layers,
+                    "probes": min(len(heatmap_history), 512),
+                },
                 "depth": depth_figures,
             }
             return self.cached_figures
 
 
-def _handler_for(state: DashboardState):
+class DashboardCatalog:
+    def __init__(self, *, root: Path, requested_run: Optional[str] = None) -> None:
+        self.root = Path(root)
+        self.requested_run = requested_run
+        self.lock = threading.Lock()
+        self.states: Dict[Path, RunDashboardState] = {}
+
+    def _candidate_paths(self) -> Tuple[Path, ...]:
+        if not self.root.is_dir():
+            return ()
+        candidates = tuple(
+            sorted(
+                self.root.glob(f"**/{LOCAL_CHART_DATABASE_NAME}"),
+                key=_modified_time,
+                reverse=True,
+            )
+        )
+        if not self.requested_run:
+            return candidates
+        supplied = Path(self.requested_run)
+        if supplied.is_file():
+            return (supplied,)
+        matches = []
+        for path in candidates:
+            if self.requested_run in {path.parent.name, path.parent.parent.name}:
+                matches.append(path)
+                continue
+            try:
+                metadata = LocalChartReader(path).metadata()
+            except (OSError, sqlite3.DatabaseError):
+                continue
+            if self.requested_run in {
+                metadata.get("local_run_id"),
+                metadata.get("wandb_run_id"),
+                metadata.get("artifact_name"),
+                metadata.get("run_name"),
+            }:
+                matches.append(path)
+        return tuple(matches)
+
+    def _state_for_path(self, path: Path) -> RunDashboardState:
+        resolved = path.resolve()
+        with self.lock:
+            state = self.states.get(resolved)
+            if state is None:
+                state = RunDashboardState(resolved)
+                self.states[resolved] = state
+            return state
+
+    def runs(self) -> Dict[str, Any]:
+        runs = []
+        for path in self._candidate_paths():
+            try:
+                status = self._state_for_path(path).status()
+            except (OSError, sqlite3.DatabaseError, ValueError, json.JSONDecodeError):
+                continue
+            runs.append(status)
+        runs.sort(key=lambda run: str(run["updated_at"]), reverse=True)
+        return {
+            "runs": runs,
+            "waiting": not bool(runs),
+            "requested_run": self.requested_run,
+            "root": str(self.root.resolve()),
+        }
+
+    def state_for_run(self, run_name: str) -> RunDashboardState:
+        for path in self._candidate_paths():
+            state = self._state_for_path(path)
+            try:
+                status = state.status()
+            except (OSError, sqlite3.DatabaseError, ValueError, json.JSONDecodeError):
+                continue
+            if run_name in {
+                str(status["run_name"]),
+                str(status["local_run_id"]),
+                str(status["wandb_run_id"]),
+            }:
+                return state
+        raise KeyError(f"local chart run not found: {run_name}")
+
+
+def _handler_for(catalog: DashboardCatalog):
     plotly_javascript = get_plotlyjs().encode("utf-8")
+    index_html = (_ASSET_ROOT / "index.html").read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, body: bytes, *, content_type: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+        def _send(
+            self,
+            body: bytes,
+            *,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+            cache_control: str = "no-store",
+        ) -> None:
             self.send_response(int(status))
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
 
@@ -228,21 +270,53 @@ def _handler_for(state: DashboardState):
             )
 
         def do_GET(self) -> None:
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = parse_qs(parsed.query)
             try:
-                if path == "/":
-                    self._send(_PAGE.encode("utf-8"), content_type="text/html; charset=utf-8")
+                if path in {"/", "/runs"} or path.startswith("/runs/"):
+                    self._send(index_html, content_type="text/html; charset=utf-8")
                     return
                 if path == "/plotly.min.js":
-                    self._send(plotly_javascript, content_type="text/javascript; charset=utf-8")
+                    self._send(
+                        plotly_javascript,
+                        content_type="text/javascript; charset=utf-8",
+                        cache_control="public, max-age=86400",
+                    )
                     return
-                if path == "/api/status":
-                    self._send_json(state.status())
+                if path.startswith("/assets/"):
+                    asset_name = Path(path).name
+                    if asset_name not in _ASSET_NAMES:
+                        raise FileNotFoundError(asset_name)
+                    asset_path = _ASSET_ROOT / asset_name
+                    content_type = mimetypes.guess_type(asset_path.name)[0]
+                    self._send(
+                        asset_path.read_bytes(),
+                        content_type=f"{content_type or 'application/octet-stream'}; charset=utf-8",
+                    )
                     return
-                if path == "/api/figures":
-                    self._send_json(state.figures())
+                if path == "/api/runs":
+                    self._send_json(catalog.runs())
                     return
-                self._send(b"not found\n", content_type="text/plain; charset=utf-8", status=HTTPStatus.NOT_FOUND)
+                if path in {"/api/status", "/api/figures"}:
+                    run_name = query.get("run", [""])[0]
+                    if not run_name:
+                        self._send_json(
+                            {"error": "run query parameter is required"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    state = catalog.state_for_run(run_name)
+                    value = state.status() if path == "/api/status" else state.figures()
+                    self._send_json(value)
+                    return
+                self._send(
+                    b"not found\n",
+                    content_type="text/plain; charset=utf-8",
+                    status=HTTPStatus.NOT_FOUND,
+                )
+            except (FileNotFoundError, KeyError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
             except Exception as error:
                 self._send_json(
                     {"error": str(error)},
@@ -256,8 +330,13 @@ def _handler_for(state: DashboardState):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Serve live THOG2 charts from local compact data")
-    parser.add_argument("--run", help="artifact name or charts.sqlite3 path; default is latest")
+    parser = argparse.ArgumentParser(
+        description="Serve live THOG2 charts from compact local run data"
+    )
+    parser.add_argument(
+        "--run",
+        help="optional artifact name or charts.sqlite3 path to wait for and show",
+    )
     parser.add_argument("--root", type=Path, default=Path("logs"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=6007)
@@ -266,15 +345,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     arguments = build_parser().parse_args(argv)
-    database_path = _resolve_database(arguments.run, root=arguments.root)
-    state = DashboardState(database_path)
+    catalog = DashboardCatalog(root=arguments.root, requested_run=arguments.run)
     server = ThreadingHTTPServer(
         (str(arguments.host), int(arguments.port)),
-        _handler_for(state),
+        _handler_for(catalog),
     )
     url = f"http://{arguments.host}:{arguments.port}/"
     print(f"THOG2 local instrumentation: {url}", flush=True)
-    print(f"data: {database_path.resolve()}", flush=True)
+    if arguments.run:
+        print(f"waiting for local chart run: {arguments.run}", flush=True)
+    else:
+        print(f"watching for local chart runs below: {arguments.root.resolve()}", flush=True)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
