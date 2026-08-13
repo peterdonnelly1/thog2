@@ -19,6 +19,9 @@ from .depth_curve_diagnostics import (
     normalize_depth_curve_renderer,
     write_depth_curve_local_viewer,
 )
+# vvv THOG local chart WAL state closes and checkpoints with the established telemetry lifecycle
+from .local_chart_store import close_local_chart_store
+# ^^^ THOG
 from .stage6_source import (
     evaluation_metric_payload,
     init_resilient_telemetry,
@@ -26,8 +29,8 @@ from .stage6_source import (
 )
 
 
-# vvv THOG simultaneous TensorBoard and W&B is a first-class instrumentation mode
-INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "both", "none")
+# vvv THOG simultaneous TensorBoard and W&B remains first-class while local reserves a chart-only sink independent of scalar telemetry
+INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "both", "local", "none")
 # ^^^ THOG
 _BYTES_PER_GIB = float(1024 ** 3)
 _NORMAL_WANDB_SCALARS = frozenset(("train/loss", "val/val_loss"))
@@ -80,7 +83,7 @@ def _selected_backend() -> str:
     if selected in INSTRUMENTATION_BACKENDS:
         return selected
     raise ValueError(
-        "THOG2_INSTRUMENTATION must be tensorboard, wandb, both, or none; "
+        "THOG2_INSTRUMENTATION must be tensorboard, wandb, both, local, or none; "
         f"got {selected!r}"
     )
 
@@ -318,7 +321,7 @@ class WandbTelemetry:
 
     # vvv THOG start both telemetry sinks when requested while preserving existing single-sink behaviour
     def start(self) -> None:
-        if not self.enabled or self.backend == "none":
+        if not self.enabled or self.backend in {"local", "none"}:
             return
         if self.backend == "both":
             self._start_tensorboard()
@@ -574,6 +577,7 @@ class WandbTelemetry:
 
     # vvv THOG allow the runner to tell W&B that an intentional Ctrl-C finished cleanly
     def finish(self, *, exit_code: Optional[int] = None) -> None:
+        close_local_chart_store(self)
         if self.run is not None:
             if exit_code is None:
                 self.run.finish()

@@ -357,12 +357,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wandb-project", default="thog")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-mode", choices=("online", "offline", "disabled"), default="online")
-    # vvv THOG fixed-scale sparse/per-probe W&B DEPTH response heatmap controls are accepted in every PLASTIC mode
+    # vvv THOG fixed-scale sparse/per-probe DEPTH response heatmap controls are accepted in every PLASTIC mode and route independently of scalar telemetry
     parser.add_argument(
         "--instrumentation__delta_loss_v_layer_heatmap",
         dest="instrumentation__delta_loss_v_layer_heatmap",
         choices=("log", "linear"),
         default=None,
+    )
+    parser.add_argument(
+        "--instrumentation__delta_loss_v_layer_heatmap__destination",
+        dest="instrumentation__delta_loss_v_layer_heatmap__destination",
+        choices=("wandb", "local", "none"),
+        default="local",
     )
     parser.add_argument(
         "--instrumentation__delta_loss_v_layer_heatmap_linear",
@@ -610,6 +616,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         wandb_entity=arguments.wandb_entity,
         wandb_mode=arguments.wandb_mode,
         instrumentation__delta_loss_v_layer_heatmap=arguments.instrumentation__delta_loss_v_layer_heatmap,
+        instrumentation__delta_loss_v_layer_heatmap__destination=arguments.instrumentation__delta_loss_v_layer_heatmap__destination,
         instrumentation__delta_loss_v_layer_heatmap_linear=arguments.instrumentation__delta_loss_v_layer_heatmap_linear,
         instrumentation__delta_loss_v_layer_heatmap_abs_limit=arguments.instrumentation__delta_loss_v_layer_heatmap_abs_limit,
         instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=arguments.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes,

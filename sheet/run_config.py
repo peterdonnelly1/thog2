@@ -19,6 +19,9 @@ from .bases.lapped_cosine import (
 )
 # ^^^ THOG
 from .geometry_registry import validate_resolved_geometry_plan
+# vvv THOG heavy chart media can be routed to compact local storage independently of scalar telemetry
+from .local_chart_store import normalize_chart_destination
+# ^^^ THOG
 # vvv THOG sampling-only chaos bump configuration and run identity
 from .chaos_bump_sampling import (
     CHAOS_BUMP_SAMPLING_CONFIG_FIELDS,
@@ -265,8 +268,9 @@ class OwtRunConfig:
     wandb_project: str = "thog"
     wandb_entity: Optional[str] = None
     wandb_mode: str = "online"
-    # vvv THOG explicit sparse/per-probe W&B DEPTH response instrumentation is independent of PLASTIC mutation controls
+    # vvv THOG explicit sparse/per-probe DEPTH response instrumentation is independent of PLASTIC mutation controls and defaults away from cloud media
     instrumentation__delta_loss_v_layer_heatmap: Optional[str] = None
+    instrumentation__delta_loss_v_layer_heatmap__destination: str = "local"
     instrumentation__delta_loss_v_layer_heatmap_linear: Optional[int] = None
     instrumentation__delta_loss_v_layer_heatmap_abs_limit: float = 0.05
     instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes: int = 250
@@ -286,11 +290,20 @@ class OwtRunConfig:
             raise ValueError("wandb_mode must be online, offline, or disabled")
         if self.wandb_mode == "disabled" and self.wandb_enabled:
             object.__setattr__(self, "wandb_enabled", False)
-        # vvv THOG validate heatmap controls without coupling them to PLASTIC enablement or layer-count learning
+        # vvv THOG validate heatmap controls without coupling them to PLASTIC enablement, count learning or W&B when the compact local sink is selected
         if self.instrumentation__delta_loss_v_layer_heatmap not in (None, "log", "linear"):
             raise ValueError(
                 "instrumentation__delta_loss_v_layer_heatmap must be log, linear, or None"
             )
+        destination = normalize_chart_destination(
+            self.instrumentation__delta_loss_v_layer_heatmap__destination,
+            label="instrumentation__delta_loss_v_layer_heatmap__destination",
+        )
+        object.__setattr__(
+            self,
+            "instrumentation__delta_loss_v_layer_heatmap__destination",
+            destination,
+        )
         if (
             self.instrumentation__delta_loss_v_layer_heatmap_linear is not None
             and (
@@ -321,10 +334,11 @@ class OwtRunConfig:
             )
         if (
             self.instrumentation__delta_loss_v_layer_heatmap is not None
+            and destination == "wandb"
             and (not self.wandb_enabled or self.wandb_mode == "disabled")
         ):
             raise ValueError(
-                "instrumentation__delta_loss_v_layer_heatmap requires W&B instrumentation"
+                "W&B heatmap destination requires W&B instrumentation"
             )
         # ^^^ THOG
         if self.dtype not in ("float32", "float16", "bfloat16"):

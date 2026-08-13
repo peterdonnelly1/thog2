@@ -59,6 +59,13 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
             "instrumentation__depth_weight_curves__log_every_n_steps",
             {"type": int, "default": _depth._DEFAULT_LOG_EVERY_N_STEPS},
         ),
+        (
+            "instrumentation__depth_weight_curves__destination",
+            {
+                "choices": ("wandb", "local", "none"),
+                "default": _depth._DEFAULT_DESTINATION,
+            },
+        ),
     )
     for destination, kwargs in controls:
         canonical = f"--{destination}"

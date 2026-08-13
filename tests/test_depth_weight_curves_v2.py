@@ -8,8 +8,10 @@ import torch
 
 from sheet import depth_weight_curves_and_observational_probes_patch as depth_curves
 from sheet import depth_weight_curves_v2_patch as depth_curves_v2
+from sheet import depth_weight_curves_v2_runtime_seam_patch as runtime_seam
 from sheet.depth_trajectory import DepthTrajectory
 from sheet.geometry import SheetGeometryConfig
+from sheet.local_chart_store import LocalChartReader, close_local_chart_store
 
 
 # vvv THOG compact public DEPTH fixture exercises all six semantic matrix families without allocating a training-size model
@@ -188,4 +190,57 @@ def test_same_coordinates_cli_accepts_explicit_true_false(monkeypatch) -> None:
     assert remaining_true == []
     assert values_true.instrumentation__depth_weight_curves__same_coordinates_all_runs is True
     assert depth_curves._same_coordinates_all_runs() is True
+# ^^^ THOG
+
+
+# vvv THOG destination selection is independent of W&B and local depth snapshots remain bounded by history length
+def test_depth_curve_destination_defaults_local_and_accepts_explicit_none(monkeypatch) -> None:
+    environment = depth_curves._environment_name("DESTINATION")
+    monkeypatch.delenv(environment, raising=False)
+    parser = argparse.ArgumentParser(add_help=False)
+    defaults, remaining = parser.parse_known_args([])
+    assert remaining == []
+    assert defaults.instrumentation__depth_weight_curves__destination == "local"
+    assert depth_curves._destination() == "local"
+
+    explicit, remaining = parser.parse_known_args(
+        ["--instrumentation__depth_weight_curves__destination", "none"]
+    )
+    assert remaining == []
+    assert explicit.instrumentation__depth_weight_curves__destination == "none"
+    assert depth_curves._destination() == "none"
+
+
+def test_local_depth_curve_sink_uses_no_wandb_and_bounds_history(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    monkeypatch.setenv(depth_curves._environment_name("DESTINATION"), "local")
+    monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "2")
+    monkeypatch.setenv(depth_curves._environment_name("TIME_MODE"), "accumulate")
+    monkeypatch.setattr(depth_curves._constants, "DEBUG", 3)
+    trajectory = _trajectory()
+    trainer = _trainer(trajectory)
+    telemetry = SimpleNamespace(
+        name="local_depth_test",
+        group="test-group",
+        config={},
+        run=None,
+        module=None,
+    )
+
+    for step in (10, 20, 30):
+        runtime_seam._log_depth_weight_snapshot_with_patchable_snapshot(
+            trainer,
+            telemetry,
+            optimizer_update=step,
+        )
+
+    store = telemetry._thog_local_chart_store
+    reader = LocalChartReader(store.path)
+    snapshots = reader.depth_weight_snapshots()
+    assert tuple(snapshot["optimizer_update"] for snapshot in snapshots) == (20, 30)
+    assert set(snapshots[-1]["families"]) == set(depth_curves_v2._CHART_FAMILIES)
+    close_local_chart_store(telemetry)
 # ^^^ THOG

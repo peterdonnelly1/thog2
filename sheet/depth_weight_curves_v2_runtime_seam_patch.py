@@ -9,6 +9,9 @@ import constants as _constants
 
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 from . import depth_weight_curves_v2_patch as _v2
+# vvv THOG local destination persists exact snapshots without constructing or versioning Plotly media in the training process
+from .local_chart_store import ensure_local_chart_store
+# ^^^ THOG
 
 
 # vvv THOG runtime dispatch intentionally resolves _depth._depth_weight_snapshot at call time so tests and later overlays can replace snapshot generation without replacing telemetry wiring
@@ -20,7 +23,8 @@ def _log_depth_weight_snapshot_with_patchable_snapshot(
 ) -> None:
     if int(getattr(_constants, "DEBUG", 0)) <= 2:
         return
-    if telemetry.run is None:
+    destination = _depth._destination()
+    if destination == "none":
         return
 
     snapshot = _depth._depth_weight_snapshot(
@@ -30,6 +34,18 @@ def _log_depth_weight_snapshot_with_patchable_snapshot(
     )
     if not snapshot:
         return
+    if destination == "local":
+        ensure_local_chart_store(telemetry).append_depth_weight_snapshot(
+            snapshot,
+            history_length=(
+                1 if _depth._time_mode() == "latest" else _depth._history_length()
+            ),
+        )
+        return
+    if telemetry.run is None:
+        raise RuntimeError(
+            "DEPTH weight-curve destination wandb requires active W&B instrumentation"
+        )
     history = _depth._depth_weight_history(telemetry)
     history.append(snapshot)
     snapshots = (snapshot,) if _depth._time_mode() == "latest" else tuple(history)

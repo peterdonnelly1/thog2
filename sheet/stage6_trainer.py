@@ -156,6 +156,15 @@ def _linear_heatmap_probe_progress_due(
 ) -> bool:
     if getattr(config, "instrumentation__delta_loss_v_layer_heatmap", None) != "linear":
         return False
+    if (
+        getattr(
+            config,
+            "instrumentation__delta_loss_v_layer_heatmap__destination",
+            "local",
+        )
+        == "none"
+    ):
+        return False
     if probe_update is None or int(probe_update) != int(completed_updates):
         return False
     maximum_step = getattr(

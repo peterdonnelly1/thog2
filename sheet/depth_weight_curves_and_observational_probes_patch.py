@@ -40,6 +40,7 @@ _DEFAULT_DEPTH_POINTS = 256
 _DEFAULT_TIME_MODE = "latest"
 _DEFAULT_HISTORY_LENGTH = 20
 _DEFAULT_LOG_EVERY_N_STEPS = 100
+_DEFAULT_DESTINATION = "local"
 _SAME_ALL_RUNS_SEED = 0x54484F4732
 _DARKER_RHS_GREEN = "\033[38;2;0;180;0m"
 _DEPTH_CHART_COLUMNS = (
@@ -111,6 +112,18 @@ def _same_coordinates_all_runs() -> bool:
     )
 
 
+def _destination() -> str:
+    value = os.environ.get(
+        _environment_name("DESTINATION"),
+        _DEFAULT_DESTINATION,
+    ).strip().lower()
+    if value not in {"wandb", "local", "none"}:
+        raise ValueError(
+            f"{_environment_name('DESTINATION')} must be wandb, local, or none; got {value!r}"
+        )
+    return value
+
+
 def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
     if bool(getattr(parser, _CLI_INSTALLED_ATTRIBUTE, False)):
         return
@@ -144,6 +157,11 @@ def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    parser.add_argument(
+        "--instrumentation__depth_weight_curves__destination",
+        choices=("wandb", "local", "none"),
+        default=_DEFAULT_DESTINATION,
+    )
     setattr(parser, _CLI_INSTALLED_ATTRIBUTE, True)
 
 
@@ -155,6 +173,7 @@ def _publish_cli_environment(namespace: argparse.Namespace) -> None:
         "HISTORY_LENGTH": "instrumentation__depth_weight_curves__history_length",
         "LOG_EVERY_N_STEPS": "instrumentation__depth_weight_curves__log_every_n_steps",
         "SAME_COORDINATES_ALL_RUNS": "instrumentation__depth_weight_curves__same_coordinates_all_runs",
+        "DESTINATION": "instrumentation__depth_weight_curves__destination",
     }
     for suffix, attribute in mapping.items():
         if not hasattr(namespace, attribute):
@@ -524,7 +543,7 @@ def _attach_telemetry_with_depth_weight_curves(trainer: Any, telemetry: Any) -> 
             )
         except Exception as error:
             print(
-                "THOG2 WARNING: W&B continuous DEPTH weight curves failed; "
+                "THOG2 WARNING: continuous DEPTH weight-curve logging failed; "
                 f"continuing without this refresh: {error}",
                 flush=True,
             )

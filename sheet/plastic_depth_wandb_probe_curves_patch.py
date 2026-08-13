@@ -431,13 +431,33 @@ def _should_refresh_coefficient_chart(
     return total - last_logged >= _REFRESH_EVERY_STEPS
 
 
-# vvv THOG retain every probe compactly, render at most 512 exact rows, and upload either sparsely or once per probe
+# vvv THOG retain every probe compactly and route the heatmap independently of scalar telemetry; only explicit W&B destination constructs versioned media
+def _delta_loss_heatmap_destination(telemetry: Any) -> str:
+    config = getattr(telemetry, "config", {})
+    if not isinstance(config, Mapping):
+        return "none"
+    return str(
+        config.get(
+            "instrumentation__delta_loss_v_layer_heatmap__destination",
+            "local",
+        )
+    ).strip().lower()
+
+
 def _delta_loss_heatmap_enabled(telemetry: Any) -> bool:
     config = getattr(telemetry, "config", {})
     return bool(
         isinstance(config, Mapping)
         and config.get("instrumentation__delta_loss_v_layer_heatmap") in {"log", "linear"}
+        and _delta_loss_heatmap_destination(telemetry) in {"wandb", "local"}
         and not bool(getattr(telemetry, "_delta_loss_heatmap_disabled", False))
+    )
+
+
+def _delta_loss_heatmap_wandb_enabled(telemetry: Any) -> bool:
+    return bool(
+        _delta_loss_heatmap_enabled(telemetry)
+        and _delta_loss_heatmap_destination(telemetry) == "wandb"
     )
 
 
@@ -920,7 +940,9 @@ __all__ = [
     "_coefficient_record_from_trainer",
     "_consume_new_probe_records",
     "_consume_new_delta_loss_heatmap_records",
+    "_delta_loss_heatmap_destination",
     "_delta_loss_heatmap_enabled",
+    "_delta_loss_heatmap_wandb_enabled",
     "_delta_loss_heatmap_figure",
     "_delta_loss_heatmap_record",
     "_delta_loss_heatmap_render_data",

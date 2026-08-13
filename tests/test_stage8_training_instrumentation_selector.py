@@ -6,15 +6,14 @@ from pathlib import Path
 
 
 TRAINING_WRAPPERS = (
-    "train_OWT.sh",
-    "train_OWT.sh",
+    "train_OWT_core.sh",
 )
 
 
 def test_stage8_training_wrappers_expose_one_unambiguous_instrumentation_selector() -> None:
     for wrapper in TRAINING_WRAPPERS:
         text = Path(wrapper).read_text(encoding="utf-8")
-        assert "tensorboard | wandb | wandb_offline | none" in text
+        assert "tensorboard | wandb | both | wandb_offline | local | none" in text
         assert "-M WANDB_MODE" not in text
         assert "-W WANDB_ENABLED" not in text
         assert "M:" not in text.split("getopts", 1)[1].split(" option", 1)[0]
@@ -27,6 +26,7 @@ def test_stage8_training_wrappers_derive_consistent_wandb_flags_and_modes_from_i
         'tensorboard) INSTRUMENTATION_BACKEND="tensorboard"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled"',
         'wandb) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="online"',
         'wandb_offline) INSTRUMENTATION_BACKEND="wandb"; WANDB_FLAG="--wandb"; WANDB_MODE="offline"',
+        'local) INSTRUMENTATION_BACKEND="local"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled"',
         'none) INSTRUMENTATION_BACKEND="none"; WANDB_FLAG="--no-wandb"; WANDB_MODE="disabled"',
     )
     for wrapper in TRAINING_WRAPPERS:

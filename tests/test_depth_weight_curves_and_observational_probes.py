@@ -235,6 +235,7 @@ def test_depth_chart_debug_thresholds(monkeypatch) -> None:
     calls = []
     trainer = _trainer(_trajectory())
     telemetry = SimpleNamespace(run=object(), module=object())
+    monkeypatch.setenv(depth_curves._environment_name("DESTINATION"), "wandb")
 
     def fake_snapshot(*_args, **_kwargs):
         calls.append(1)
