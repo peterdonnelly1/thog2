@@ -804,3 +804,182 @@ const local_base_select_run = select_run;
 select_run = function(run_id, options = {}) { local_active_detail_tab = "charts"; return local_base_select_run(run_id, options); };
 local_install_detail_tabs();
 // ^^^ THOG
+
+// vvv THOG literal heatmap row pitch/fitted width plus a robust signed-log trajectory view biased toward small coefficients
+window.addEventListener("load", () => {
+  const trajectory_chart_names_refined = new Set([
+    "attn_q_head_N",
+    "attn_k_head_N",
+    "attn_v_head_N",
+    "attn_out_head_N",
+    "mlp_up",
+    "mlp_down",
+  ]);
+  const trajectory_scale_settings_key_refined = "thog2_local_trajectory_scale_modes";
+  const trajectory_scale_mode_refined = chart_name => (
+    load_json(trajectory_scale_settings_key_refined, {})[chart_name] === "log" ? "log" : "linear"
+  );
+
+  const quantile = (sorted_values, fraction) => {
+    if (!sorted_values.length) return 0;
+    const position = Math.max(0, Math.min(sorted_values.length - 1, fraction * (sorted_values.length - 1)));
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    if (lower === upper) return sorted_values[lower];
+    const interpolation = position - lower;
+    return sorted_values[lower] * (1 - interpolation) + sorted_values[upper] * interpolation;
+  };
+
+  const signed_log_refined = (value, linear_threshold) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric === 0) return numeric;
+    return Math.sign(numeric) * Math.log10(1 + Math.abs(numeric) / linear_threshold);
+  };
+
+  const trajectory_tick_label_refined = value => {
+    const numeric = Number(value);
+    const magnitude = Math.abs(numeric);
+    if (!Number.isFinite(magnitude)) return "";
+    if (magnitude === 0) return "0";
+    if (magnitude >= 1000 || magnitude < 0.001) return numeric.toExponential(0);
+    return String(Number(numeric.toPrecision(3)));
+  };
+
+  const trajectory_log_figure_refined = figure => {
+    const transformed = clone_figure(figure);
+    const finite_values = [];
+    for (const trace of transformed.data || []) {
+      if (!Array.isArray(trace.y)) continue;
+      for (const value of trace.y) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) finite_values.push(numeric);
+      }
+    }
+    const magnitudes = finite_values
+      .map(value => Math.abs(value))
+      .filter(value => value > 0)
+      .sort((left, right) => left - right);
+    if (!magnitudes.length) return transformed;
+
+    // The lower tail, not the largest outlier, defines the symlog knee. Using a quarter
+    // of P10 deliberately gives very small coefficients appreciable visual room while
+    // still retaining arbitrarily large excursions on the same axis.
+    const lower_tail = quantile(magnitudes, 0.10);
+    const linear_threshold = Math.max(1e-15, lower_tail * 0.25);
+    const minimum_exponent = Math.floor(Math.log10(magnitudes[0]));
+    const maximum_exponent = Math.ceil(Math.log10(magnitudes[magnitudes.length - 1]));
+
+    for (const trace of transformed.data || []) {
+      if (!Array.isArray(trace.y)) continue;
+      const original_y = trace.y.map(value => Number(value));
+      trace.customdata = original_y;
+      trace.y = original_y.map(value => signed_log_refined(value, linear_threshold));
+      if (typeof trace.hovertemplate === "string") {
+        trace.hovertemplate = trace.hovertemplate
+          .replaceAll("%{y:.7g}", "%{customdata:.7g}")
+          .replaceAll("%{y}", "%{customdata}");
+      }
+    }
+
+    const exponent_span = Math.max(0, maximum_exponent - minimum_exponent);
+    const exponent_step = Math.max(1, Math.ceil((exponent_span + 1) / 7));
+    const tick_magnitudes = [];
+    for (let exponent = minimum_exponent; exponent <= maximum_exponent; exponent += exponent_step) {
+      tick_magnitudes.push(10 ** exponent);
+    }
+    if (tick_magnitudes[tick_magnitudes.length - 1] < 10 ** maximum_exponent) {
+      tick_magnitudes.push(10 ** maximum_exponent);
+    }
+    const negative_magnitudes = [...tick_magnitudes].reverse().map(value => -value);
+    transformed.layout = transformed.layout || {};
+    transformed.layout.yaxis = {
+      ...(transformed.layout.yaxis || {}),
+      type: "linear",
+      tickmode: "array",
+      tickvals: [
+        ...negative_magnitudes.map(value => signed_log_refined(value, linear_threshold)),
+        0,
+        ...tick_magnitudes.map(value => signed_log_refined(value, linear_threshold)),
+      ],
+      ticktext: [
+        ...negative_magnitudes.map(trajectory_tick_label_refined),
+        "0",
+        ...tick_magnitudes.map(trajectory_tick_label_refined),
+      ],
+      title: {text: "weight value · signed log"},
+      automargin: true,
+    };
+    return transformed;
+  };
+
+  const base_transpose_heatmap_refined = transpose_heatmap;
+  transpose_heatmap = function(prepared) {
+    base_transpose_heatmap_refined(prepared);
+    const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+    if (!heatmap_trace) return;
+    heatmap_trace.hovertemplate = (
+      "step=%{customdata[0]}<br>"
+      + "layer count (abs) = %{customdata[1]}<br>"
+      + "layer count (rel) = %{customdata[2]}<br>"
+      + "Δloss=%{customdata[3]:.8f}<extra></extra>"
+    );
+  };
+
+  const base_plot_mount_dimensions_refined = plot_mount_dimensions;
+  plot_mount_dimensions = function(mount, chart_name, figure) {
+    if (chart_name !== "heatmap") return base_plot_mount_dimensions_refined(mount, chart_name, figure);
+    const shell = mount.closest(".plot-shell");
+    const viewport = shell?.querySelector(":scope > .heatmap-inner-viewport");
+    const viewport_width = Math.max(1, viewport?.clientWidth || shell?.clientWidth || 1);
+    const probe_count = Math.max(1, heatmap_probe_count(figure));
+    const row_height = heatmap_probe_row_height_px();
+    return {
+      // Fit every candidate-offset column to the current heatmap viewport. This removes
+      // horizontal travel in the initial/restored view while retaining the H scroll rail.
+      width: Math.max(1, viewport_width - 1),
+      // Plotly's heatmap domain is the total figure height minus the fixed 18px/76px
+      // margins below. Therefore every probe row is literally row_height CSS pixels.
+      height: 18 + 76 + probe_count * row_height,
+    };
+  };
+
+  render_plot = async function(mount, figure, chart_name) {
+    if (chart_name === "heatmap") ensure_plot_scroll_canvas(mount);
+    const shown_figure = (
+      trajectory_chart_names_refined.has(chart_name)
+      && trajectory_scale_mode_refined(chart_name) === "log"
+    ) ? trajectory_log_figure_refined(figure) : figure;
+    const prepared = prepare_figure(shown_figure, chart_name);
+    const dimensions = plot_mount_dimensions(mount, chart_name, figure);
+    set_plot_dimensions(mount, dimensions);
+    prepared.layout.autosize = false;
+    prepared.layout.width = Math.round(dimensions.width);
+    prepared.layout.height = Math.round(dimensions.height);
+    if (chart_name === "heatmap") {
+      prepared.layout.margin = {...(prepared.layout.margin || {}), t: 18, b: 76};
+      prepared.layout.yaxis = {...(prepared.layout.yaxis || {}), domain: [0, 1], automargin: false};
+    }
+    if (mount.dataset.plotReady === "true") {
+      await Plotly.react(mount, prepared.data, prepared.layout, fixed_plot_config);
+    } else {
+      mount.replaceChildren();
+      await Plotly.newPlot(mount, prepared.data, prepared.layout, fixed_plot_config);
+      mount.dataset.plotReady = "true";
+    }
+    if (chart_name === "heatmap") sync_heatmap_scale_control();
+  };
+
+  const base_restore_maximized_chart_refined = restore_maximized_chart;
+  restore_maximized_chart = function() {
+    base_restore_maximized_chart_refined();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const viewport = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-inner-viewport');
+      if (viewport) viewport.scrollLeft = 0;
+      const card = document.querySelector('.chart-card[data-chart="heatmap"]');
+      if (card && card.offsetParent !== null) resize_plot_in_card(card);
+    }));
+  };
+
+  if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
+});
+// ^^^ THOG
