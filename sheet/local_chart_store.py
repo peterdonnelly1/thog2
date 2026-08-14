@@ -297,6 +297,16 @@ class LocalChartReader:
                 FROM depth_weight_snapshots
                 """
             ).fetchone()
+            # vvv THOG expose the already-recorded full run configuration to local dashboard consumers without duplicating storage
+            config_row = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'config_json'"
+            ).fetchone()
+            configuration = (
+                json.loads(str(config_row["value"]))
+                if config_row is not None
+                else {}
+            )
+            # ^^^ THOG
         finally:
             connection.close()
         return {
@@ -308,6 +318,9 @@ class LocalChartReader:
             "depth_maximum_update": (
                 None if depth["maximum_update"] is None else int(depth["maximum_update"])
             ),
+            # vvv THOG consumed by the W&B-like local artifact Overview tab
+            "configuration": configuration,
+            # ^^^ THOG
         }
 
     def heatmap_history(self) -> Tuple[Dict[str, Any], ...]:
