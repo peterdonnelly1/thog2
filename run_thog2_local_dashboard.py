@@ -366,13 +366,18 @@ def _handler_for(catalog: DashboardCatalog):
             status: HTTPStatus = HTTPStatus.OK,
             cache_control: str = "no-store",
         ) -> None:
-            self.send_response(int(status))
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", cache_control)
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.end_headers()
-            self.wfile.write(body)
+            # vvv THOG browser navigation/refresh can close a response socket while this worker is writing; treat that as a normal client disconnect
+            try:
+                self.send_response(int(status))
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", cache_control)
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
+            # ^^^ THOG
 
         def _send_json(
             self,
