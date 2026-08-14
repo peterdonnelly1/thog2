@@ -1084,3 +1084,156 @@ window.addEventListener("load", () => {
   if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
 });
 // ^^^ THOG
+
+// vvv THOG auto-scale each heatmap colour band from the strongest currently retained value while preserving manual limits for later restoration
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    const auto_setting_name = "auto_colour_saturation";
+    const auto_enabled = () => heatmap_settings_for_current_run()[auto_setting_name] === true;
+    const clamp_01 = value => Math.max(0, Math.min(1, value));
+    const manual_limit_ids = [
+      "heatmap_setting_negative_limit",
+      "heatmap_setting_blue_limit",
+      "heatmap_setting_yellow_limit",
+      "heatmap_setting_positive_limit",
+    ];
+
+    const auto_limits = heatmap_trace => {
+      const limits = {green: 0, blue: 0, yellow: 0, red: 0};
+      for (const row of heatmap_trace.customdata || []) {
+        if (!Array.isArray(row)) continue;
+        for (const cell of row) {
+          const delta = Number(Array.isArray(cell) ? cell[3] : NaN);
+          if (!Number.isFinite(delta)) continue;
+          if (delta <= -1.0) limits.yellow = Math.max(limits.yellow, Math.abs(delta));
+          else if (delta <= -0.1) limits.blue = Math.max(limits.blue, Math.abs(delta));
+          else if (delta < 0) limits.green = Math.max(limits.green, Math.abs(delta));
+          else if (delta > 0) limits.red = Math.max(limits.red, delta);
+        }
+      }
+      return limits;
+    };
+
+    const auto_band_value = (delta, limits) => {
+      if (delta <= -1.0) {
+        const intensity = limits.yellow > 0 ? clamp_01(Math.abs(delta) / limits.yellow) : 1;
+        return -0.76 - 0.24 * intensity;
+      }
+      if (delta <= -0.1) {
+        const intensity = limits.blue > 0 ? clamp_01(Math.abs(delta) / limits.blue) : 1;
+        return -0.51 - 0.23 * intensity;
+      }
+      if (delta < 0) {
+        const intensity = limits.green > 0 ? clamp_01(Math.abs(delta) / limits.green) : 1;
+        return -0.01 - 0.48 * intensity;
+      }
+      if (delta > 0) {
+        const intensity = limits.red > 0 ? clamp_01(delta / limits.red) : 1;
+        return 0.01 + 0.99 * intensity;
+      }
+      return 0;
+    };
+
+    const format_auto_limit = (value, sign) => (
+      value > 0 ? `${sign}${Number(value).toPrecision(3)}` : "—"
+    );
+
+    const base_transpose_heatmap_auto = transpose_heatmap;
+    transpose_heatmap = function(prepared) {
+      base_transpose_heatmap_auto(prepared);
+      if (!auto_enabled()) return;
+      const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+      if (!heatmap_trace) return;
+      const limits = auto_limits(heatmap_trace);
+      const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+      heatmap_trace.z = (heatmap_trace.z || []).map((row, row_index) => (
+        Array.isArray(row)
+          ? row.map((_value, column_index) => {
+              const delta = Number(customdata[row_index]?.[column_index]?.[3]);
+              return Number.isFinite(delta) ? auto_band_value(delta, limits) : null;
+            })
+          : row
+      ));
+      heatmap_trace.zmin = -1;
+      heatmap_trace.zmax = 1;
+      heatmap_trace.zmid = 0;
+      heatmap_trace.colorbar = {
+        ...(heatmap_trace.colorbar || {}),
+        tickmode: "array",
+        tickvals: [-1, -0.76, -0.74, -0.51, -0.49, 0, 1],
+        ticktext: [
+          `auto yellow ${format_auto_limit(limits.yellow, "−")}`,
+          "yellow ≤ −1.0",
+          `auto blue ${format_auto_limit(limits.blue, "−")}`,
+          "blue ≤ −0.1",
+          `auto green ${format_auto_limit(limits.green, "−")}`,
+          "0",
+          `auto red ${format_auto_limit(limits.red, "+")}`,
+        ],
+        title: "Δloss bands · auto",
+      };
+    };
+
+    const style = document.createElement("style");
+    style.textContent = `
+      .chart-card[data-chart="heatmap"] .ytick:last-of-type text {
+        transform: translate(-5px, 4px) !important;
+      }
+      #heatmap_setting_auto_colour {
+        width: 18px !important;
+        height: 18px !important;
+        min-width: 18px !important;
+        justify-self: start;
+        accent-color: #1995ad;
+      }
+    `;
+    document.head.appendChild(style);
+
+    const settings_grid = document.querySelector("#heatmap_settings_section .heatmap-settings-grid");
+    let checkbox = by_id("heatmap_setting_auto_colour");
+    if (settings_grid && !checkbox) {
+      const label = document.createElement("label");
+      label.htmlFor = "heatmap_setting_auto_colour";
+      label.textContent = "viewer auto colour saturation";
+      checkbox = document.createElement("input");
+      checkbox.id = "heatmap_setting_auto_colour";
+      checkbox.type = "checkbox";
+      checkbox.title = "Independently scale red, green, blue and yellow so each band's strongest retained value is fully saturated";
+      settings_grid.append(label, checkbox);
+    }
+
+    const sync_auto_controls = () => {
+      if (!checkbox) return;
+      const active = Boolean(app.current_run_id);
+      checkbox.disabled = !active;
+      checkbox.checked = active && auto_enabled();
+      for (const id of manual_limit_ids) {
+        const input = by_id(id);
+        if (input) input.disabled = !active || checkbox.checked;
+      }
+    };
+
+    const rerender_heatmap_auto = async () => {
+      const figure = figure_for_chart("heatmap");
+      const mount = by_id("heatmap_plot");
+      if (figure && mount && app.current_run_id) await render_plot(mount, figure, "heatmap");
+    };
+
+    checkbox?.addEventListener("change", async () => {
+      save_heatmap_viewer_setting(auto_setting_name, checkbox.checked);
+      sync_auto_controls();
+      await rerender_heatmap_auto();
+    });
+    by_id("settings_nav")?.addEventListener("click", sync_auto_controls);
+
+    const settings_note = document.querySelector("#heatmap_settings_section .heatmap-settings-note");
+    if (settings_note && !settings_note.dataset.autoColourNote) {
+      settings_note.dataset.autoColourNote = "true";
+      settings_note.textContent += " Auto colour saturation independently rescales each colour band from the strongest currently retained value on every heatmap update; manual limits are preserved while Auto is enabled.";
+    }
+
+    sync_auto_controls();
+    if (auto_enabled()) rerender_heatmap_auto();
+  }, 0);
+});
+// ^^^ THOG
