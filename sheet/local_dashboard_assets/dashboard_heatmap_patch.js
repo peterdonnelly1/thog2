@@ -193,6 +193,23 @@ function transpose_heatmap_relative(prepared) {
   heatmap_trace.zmin = -colour_limit;
   heatmap_trace.zmax = colour_limit;
   heatmap_trace.zmid = 0;
+  // vvv THOG use a perceptually richer piecewise diverging ramp; values outside abs_limit still clip intentionally at the endpoint colour
+  heatmap_trace.colorscale = [
+    [0.00, "rgb(0,255,0)"],
+    [0.08, "rgb(0,220,0)"],
+    [0.16, "rgb(0,182,0)"],
+    [0.24, "rgb(0,150,0)"],
+    [0.32, "rgb(28,122,28)"],
+    [0.40, "rgb(58,103,58)"],
+    [0.50, "rgb(88,88,88)"],
+    [0.60, "rgb(112,76,76)"],
+    [0.68, "rgb(138,64,64)"],
+    [0.76, "rgb(168,52,52)"],
+    [0.84, "rgb(198,40,40)"],
+    [0.92, "rgb(228,24,24)"],
+    [1.00, "rgb(255,0,0)"],
+  ];
+  // ^^^ THOG
   heatmap_trace.zsmooth = false;
   heatmap_trace.xgap = 0;
   heatmap_trace.ygap = 0;
@@ -435,6 +452,75 @@ resize_plot_in_card = function(card) {
     height: Math.round(dimensions.height),
   });
 };
+
+// vvv THOG give each chart an explicit oversized inner canvas so the card itself, not the whole dashboard, owns horizontal and vertical scrolling
+const plot_scroll_overflow_px = 120;
+const fixed_plot_config = {...plot_config, responsive: false};
+
+function ensure_plot_scroll_canvas(mount) {
+  const shell = mount.closest(".plot-shell");
+  if (!shell) return null;
+  if (mount.parentElement?.classList.contains("plot-scroll-canvas")) {
+    return mount.parentElement;
+  }
+  const canvas = document.createElement("div");
+  canvas.className = "plot-scroll-canvas";
+  shell.insertBefore(canvas, mount);
+  canvas.appendChild(mount);
+  return canvas;
+}
+
+function scroll_canvas_dimensions(mount, chart_name, figure) {
+  const shell = mount.closest(".plot-shell");
+  const dimensions = plot_mount_dimensions(mount, chart_name, figure);
+  const shell_width = Math.max(1, shell?.clientWidth || 0);
+  const shell_height = Math.max(1, shell?.clientHeight || 0);
+  return {
+    width: Math.max(dimensions.width, shell_width + plot_scroll_overflow_px),
+    height: Math.max(dimensions.height, shell_height + plot_scroll_overflow_px),
+  };
+}
+
+render_plot = async function(mount, figure, chart_name) {
+  const prepared = prepare_figure(figure, chart_name);
+  const canvas = ensure_plot_scroll_canvas(mount);
+  const dimensions = scroll_canvas_dimensions(mount, chart_name, figure);
+  if (canvas) {
+    canvas.style.width = `${Math.round(dimensions.width)}px`;
+    canvas.style.height = `${Math.round(dimensions.height)}px`;
+  }
+  mount.style.width = "100%";
+  mount.style.height = "100%";
+  prepared.layout.autosize = false;
+  prepared.layout.width = Math.round(dimensions.width);
+  prepared.layout.height = Math.round(dimensions.height);
+  if (mount.dataset.plotReady === "true") {
+    await Plotly.react(mount, prepared.data, prepared.layout, fixed_plot_config);
+  } else {
+    mount.replaceChildren();
+    await Plotly.newPlot(mount, prepared.data, prepared.layout, fixed_plot_config);
+    mount.dataset.plotReady = "true";
+  }
+};
+
+resize_plot_in_card = function(card) {
+  const mount = card.querySelector(".plot-mount");
+  if (!mount || mount.dataset.plotReady !== "true") return;
+  const chart_name = card.dataset.chart;
+  const figure = figure_for_chart(chart_name);
+  if (!figure) return;
+  const canvas = ensure_plot_scroll_canvas(mount);
+  const dimensions = scroll_canvas_dimensions(mount, chart_name, figure);
+  if (canvas) {
+    canvas.style.width = `${Math.round(dimensions.width)}px`;
+    canvas.style.height = `${Math.round(dimensions.height)}px`;
+  }
+  Plotly.relayout(mount, {
+    width: Math.round(dimensions.width),
+    height: Math.round(dimensions.height),
+  });
+};
+// ^^^ THOG
 
 install_dashboard_ui_patch();
 
