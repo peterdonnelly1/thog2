@@ -209,6 +209,214 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+
+  <!-- vvv THOG bottom-anchor the local heatmap, give it a dedicated inner scroll viewport, and allow independent negative/positive colour saturation -->
+  <script>
+    window.addEventListener("load", () => {
+      const base_transpose_heatmap = transpose_heatmap;
+      const base_ensure_plot_scroll_canvas = ensure_plot_scroll_canvas;
+
+      const viewer_colour_limit = (name, fallback) => {
+        const value = Number(heatmap_settings_for_current_run()[name]);
+        return Number.isFinite(value) && value > 0 ? value : fallback;
+      };
+
+      const split_colour_limits = () => {
+        const base_limit = heatmap_abs_limit(0.05);
+        return {
+          negative: viewer_colour_limit("negative_abs_limit", base_limit),
+          positive: viewer_colour_limit("positive_abs_limit", base_limit),
+        };
+      };
+
+      transpose_heatmap = function(prepared) {
+        base_transpose_heatmap(prepared);
+        const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+        if (!heatmap_trace) return;
+
+        const limits = split_colour_limits();
+        const source_z = Array.isArray(heatmap_trace.z) ? heatmap_trace.z : [];
+        const source_customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+        heatmap_trace.z = source_z.map((row, row_index) => (
+          Array.isArray(row)
+            ? row.map((value, column_index) => {
+                if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
+                const delta = Number(value);
+                const custom = Array.isArray(source_customdata[row_index]?.[column_index])
+                  ? [...source_customdata[row_index][column_index]]
+                  : [];
+                custom[3] = delta;
+                if (!Array.isArray(heatmap_trace.customdata[row_index])) heatmap_trace.customdata[row_index] = [];
+                heatmap_trace.customdata[row_index][column_index] = custom;
+                return delta < 0
+                  ? Math.max(-1, delta / limits.negative)
+                  : Math.min(1, delta / limits.positive);
+              })
+            : row
+        ));
+        heatmap_trace.zmin = -1;
+        heatmap_trace.zmax = 1;
+        heatmap_trace.zmid = 0;
+        heatmap_trace.hovertemplate = (
+          "step=%{customdata[0]}<br>candidate offset=%{customdata[2]}<br>"
+          + "candidate layers=%{customdata[1]}<br>Δloss=%{customdata[3]:.8f}<extra></extra>"
+        );
+        heatmap_trace.colorbar = {
+          ...(heatmap_trace.colorbar || {}),
+          tickmode: "array",
+          tickvals: [-1, -0.5, 0, 0.5, 1],
+          ticktext: [
+            `-${limits.negative.toPrecision(3)}`,
+            `-${(limits.negative / 2).toPrecision(3)}`,
+            "0",
+            `+${(limits.positive / 2).toPrecision(3)}`,
+            `+${limits.positive.toPrecision(3)}`,
+          ],
+          title: "candidate loss − current loss",
+        };
+
+        const xaxis = prepared.layout.xaxis || {};
+        const yaxis = prepared.layout.yaxis || {};
+        prepared.layout.xaxis = {
+          title: xaxis.title,
+          range: xaxis.range,
+          tickmode: xaxis.tickmode,
+          tickvals: xaxis.tickvals,
+          ticktext: xaxis.ticktext,
+          anchor: "free",
+          position: 0,
+          side: "bottom",
+          domain: [0, 1],
+          automargin: false,
+          fixedrange: false,
+        };
+        prepared.layout.yaxis = {
+          title: yaxis.title,
+          range: yaxis.range,
+          tickmode: yaxis.tickmode,
+          tickvals: yaxis.tickvals,
+          ticktext: yaxis.ticktext,
+          domain: [0, 1],
+          anchor: "x",
+          automargin: false,
+          fixedrange: false,
+        };
+        prepared.layout.margin = {...(prepared.layout.margin || {}), t: 18, b: 76};
+      };
+
+      ensure_plot_scroll_canvas = function(mount) {
+        const canvas = base_ensure_plot_scroll_canvas(mount);
+        const shell = mount.closest(".plot-shell");
+        if (!canvas || !shell?.classList.contains("heatmap-shell")) return canvas;
+
+        let viewport = shell.querySelector(":scope > .heatmap-inner-viewport");
+        if (!viewport) {
+          viewport = document.createElement("div");
+          viewport.className = "heatmap-inner-viewport";
+          const content = document.createElement("div");
+          content.className = "heatmap-inner-content";
+          viewport.appendChild(content);
+          shell.appendChild(viewport);
+        }
+        const content = viewport.querySelector(":scope > .heatmap-inner-content");
+        if (canvas.parentElement !== content) content.appendChild(canvas);
+        return canvas;
+      };
+
+      const style = document.createElement("style");
+      style.textContent = `
+        .heatmap-shell { overflow: hidden !important; }
+        .heatmap-inner-viewport {
+          position: absolute;
+          z-index: 3;
+          inset: 0;
+          overflow: scroll;
+          scrollbar-gutter: stable both-edges;
+          scrollbar-width: auto;
+          scrollbar-color: #73808f #e6e9ed;
+          overscroll-behavior: contain;
+          background: #fff;
+        }
+        .heatmap-inner-content {
+          min-width: 100%;
+          min-height: 100%;
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-start;
+        }
+        .heatmap-inner-content > .plot-scroll-canvas { flex: 0 0 auto; }
+        .heatmap-inner-viewport::-webkit-scrollbar { width: 14px; height: 14px; }
+        .heatmap-inner-viewport::-webkit-scrollbar-track { background: #e6e9ed; border: 1px solid #d5d9df; }
+        .heatmap-inner-viewport::-webkit-scrollbar-thumb {
+          min-width: 34px;
+          min-height: 34px;
+          border: 3px solid #e6e9ed;
+          border-radius: 8px;
+          background: #73808f;
+        }
+        .heatmap-inner-viewport::-webkit-scrollbar-corner { background: #e6e9ed; }
+      `;
+      document.head.appendChild(style);
+
+      const settings_grid = document.querySelector("#heatmap_settings_section .heatmap-settings-grid");
+      const settings_actions = document.querySelector("#heatmap_settings_section .heatmap-settings-actions");
+      if (settings_grid && !by_id("heatmap_setting_negative_limit")) {
+        const negative_limit = make_heatmap_settings_row(
+          settings_grid,
+          "viewer negative saturation limit (green)",
+          "heatmap_setting_negative_limit",
+          {type: "number", min: 0.000000001, step: 0.01},
+        );
+        const positive_limit = make_heatmap_settings_row(
+          settings_grid,
+          "viewer positive saturation limit (red)",
+          "heatmap_setting_positive_limit",
+          {type: "number", min: 0.000000001, step: 0.01},
+        );
+        const reset_split = document.createElement("button");
+        reset_split.id = "heatmap_setting_split_limit_reset";
+        reset_split.type = "button";
+        reset_split.textContent = "Reset green/red limits to base abs limit";
+        settings_actions?.appendChild(reset_split);
+
+        const sync_split_limits = () => {
+          const limits = split_colour_limits();
+          negative_limit.value = String(limits.negative);
+          positive_limit.value = String(limits.positive);
+          const active = Boolean(app.current_run_id);
+          negative_limit.disabled = !active;
+          positive_limit.disabled = !active;
+          reset_split.disabled = !active;
+        };
+        const rerender = () => {
+          if (app.figures && app.current_run_id) render_figures();
+        };
+        negative_limit.addEventListener("input", () => {
+          const value = Number(negative_limit.value);
+          if (!Number.isFinite(value) || value <= 0) return;
+          save_heatmap_viewer_setting("negative_abs_limit", value);
+          rerender();
+        });
+        positive_limit.addEventListener("input", () => {
+          const value = Number(positive_limit.value);
+          if (!Number.isFinite(value) || value <= 0) return;
+          save_heatmap_viewer_setting("positive_abs_limit", value);
+          rerender();
+        });
+        reset_split.addEventListener("click", () => {
+          reset_heatmap_viewer_setting("negative_abs_limit");
+          reset_heatmap_viewer_setting("positive_abs_limit");
+          sync_split_limits();
+          rerender();
+        });
+        by_id("settings_nav")?.addEventListener("click", sync_split_limits);
+        sync_split_limits();
+      }
+
+      if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
+    });
+  </script>
+  <!-- ^^^ THOG -->
 </body>
 </html>
 <!-- ^^^ THOG -->
