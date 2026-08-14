@@ -234,6 +234,30 @@
         const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
         if (!heatmap_trace) return;
 
+        // vvv THOG extend the active-layer zero reference from probe-row centres to the exact first/last heatmap cell boundaries
+        const active_layer_trace = (prepared.data || []).find(
+          trace => trace !== heatmap_trace && Array.isArray(trace.x) && Array.isArray(trace.y)
+        );
+        if (active_layer_trace && active_layer_trace.y.length) {
+          const y_range = prepared.layout?.yaxis?.range || [0.5, active_layer_trace.y.length + 0.5];
+          const lower_edge = Number(y_range[0]);
+          const upper_edge = Number(y_range[1]);
+          const first_custom = Array.isArray(active_layer_trace.customdata)
+            ? active_layer_trace.customdata[0]
+            : null;
+          const last_custom = Array.isArray(active_layer_trace.customdata)
+            ? active_layer_trace.customdata[active_layer_trace.customdata.length - 1]
+            : null;
+          active_layer_trace.x = [0, ...active_layer_trace.x, 0];
+          active_layer_trace.y = [lower_edge, ...active_layer_trace.y, upper_edge];
+          active_layer_trace.customdata = [
+            first_custom,
+            ...(Array.isArray(active_layer_trace.customdata) ? active_layer_trace.customdata : []),
+            last_custom,
+          ];
+        }
+        // ^^^ THOG
+
         const limits = split_colour_limits();
         const source_z = Array.isArray(heatmap_trace.z) ? heatmap_trace.z : [];
         const source_customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
