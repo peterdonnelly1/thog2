@@ -574,3 +574,233 @@ if (app.figures && app.current_run_id) {
   queueMicrotask(() => render_figures());
 }
 // ^^^ THOG
+
+// vvv THOG
+// W&B-like per-artifact navigation and Overview. Charts remains the default;
+// Logs, Files and Artifacts are intentionally blank placeholders for now.
+const local_detail_tabs = Object.freeze(["charts", "overview", "logs", "files", "artifacts"]);
+let local_active_detail_tab = "charts";
+
+function local_first_present(object, keys, fallback = "—") {
+  for (const key of keys) {
+    const value = object?.[key];
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return fallback;
+}
+
+function local_overview_value(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return Number.isInteger(value) ? value.toLocaleString() : String(value);
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function local_overview_timestamp(value) {
+  if (!value) return "—";
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return String(value);
+  return timestamp.toLocaleString(undefined, {
+    year: "numeric", month: "long", day: "numeric",
+    hour: "numeric", minute: "2-digit", second: "2-digit",
+  });
+}
+
+function local_overview_duration(run) {
+  const start = Date.parse(run?.created_at || "");
+  const end = display_run_state(run) === "running" ? Date.now() : Date.parse(run?.updated_at || "");
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
+  let seconds = Math.floor((end - start) / 1000);
+  const days = Math.floor(seconds / 86400); seconds -= days * 86400;
+  const hours = Math.floor(seconds / 3600); seconds -= hours * 3600;
+  const minutes = Math.floor(seconds / 60); seconds -= minutes * 60;
+  return [days ? `${days}d` : "", (days || hours) ? `${hours}h` : "", (days || hours || minutes) ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+}
+
+function local_wandb_owner(run) {
+  try { return new URL(run?.wandb_url || "").pathname.split("/").filter(Boolean)[0] || "—"; }
+  catch (_error) { return "—"; }
+}
+
+function local_run_path(run) {
+  try {
+    const parts = new URL(run?.wandb_url || "").pathname.split("/").filter(Boolean);
+    if (parts.length >= 4 && parts[2] === "runs") return `${parts[0]}/${parts[1]}/${parts[3]}`;
+  } catch (_error) {}
+  return run?.run_directory || "—";
+}
+
+function local_state_badge(run) {
+  const state = display_run_state(run);
+  const badge = document.createElement("span");
+  badge.className = `state-badge ${state}`;
+  const icon = document.createElement("span");
+  icon.className = "state-icon";
+  icon.appendChild(icon_svg(["running", "finished", "crashed"].includes(state) ? state : "unknown"));
+  badge.append(icon, document.createTextNode(state));
+  return badge;
+}
+
+function local_append_meta(container, label_text, value) {
+  const label = document.createElement("div");
+  label.className = "overview-meta-label";
+  label.textContent = label_text;
+  const body = document.createElement("div");
+  body.className = "overview-meta-value";
+  if (value instanceof Node) body.appendChild(value); else body.textContent = local_overview_value(value);
+  container.append(label, body);
+}
+
+function local_hardware(configuration) {
+  const block = document.createElement("div");
+  block.className = "overview-hardware-grid";
+  for (const [label_text, keys] of [
+    ["CPU count", ["cpu_count", "physical_cpu_count"]],
+    ["Logical CPU count", ["logical_cpu_count", "cpu_logical_count"]],
+    ["GPU count", ["gpu_count"]],
+    ["GPU type", ["gpu_type", "gpu_name"]],
+  ]) {
+    const label = document.createElement("span"); label.textContent = label_text;
+    const value = document.createElement("span"); value.textContent = local_overview_value(local_first_present(configuration, keys));
+    block.append(label, value);
+  }
+  return block;
+}
+
+function local_value_node(value) {
+  if (!value || typeof value !== "object") {
+    const span = document.createElement("span"); span.textContent = local_overview_value(value); return span;
+  }
+  const details = document.createElement("details"); details.className = "overview-object-details";
+  const summary = document.createElement("summary");
+  summary.textContent = Array.isArray(value) ? `[ ${value.length} items ]` : `{ ${Object.keys(value).length} keys }`;
+  const pre = document.createElement("pre"); pre.textContent = JSON.stringify(value, null, 2);
+  details.append(summary, pre); return details;
+}
+
+function local_filter(query) {
+  const text = query.trim();
+  if (!text) return () => true;
+  try { const regex = new RegExp(text, "i"); return value => regex.test(value); }
+  catch (_error) { const lowered = text.toLowerCase(); return value => value.toLowerCase().includes(lowered); }
+}
+
+function local_render_key_panel(container, title_text, values) {
+  container.replaceChildren();
+  const heading = document.createElement("div"); heading.className = "overview-panel-heading";
+  const title = document.createElement("h3"); title.textContent = title_text;
+  const count = document.createElement("span"); count.textContent = `${Object.keys(values).length} keys`;
+  heading.append(title, count);
+  const search = document.createElement("label"); search.className = "overview-search";
+  const glyph = document.createElement("span"); glyph.textContent = "⌕";
+  const input = document.createElement("input"); input.type = "search"; input.placeholder = "Search keys with regex";
+  search.append(glyph, input);
+  const rows = document.createElement("div"); rows.className = "overview-key-rows";
+  for (const [key, value] of Object.entries(values).sort(([a], [b]) => a.localeCompare(b))) {
+    const row = document.createElement("div"); row.className = "overview-key-row";
+    const name = document.createElement("div"); name.className = "overview-key-name"; name.textContent = key;
+    const shown = document.createElement("div"); shown.className = "overview-key-value"; shown.appendChild(local_value_node(value));
+    row.dataset.searchText = `${key} ${local_overview_value(value)}`; row.append(name, shown); rows.appendChild(row);
+  }
+  input.addEventListener("input", () => { const accepts = local_filter(input.value); for (const row of rows.children) row.hidden = !accepts(row.dataset.searchText || ""); });
+  container.append(heading, search, rows);
+}
+
+function local_summary(run, configuration) {
+  return {
+    artifact_name: run?.artifact_name ?? "—",
+    artifact_prefix: local_first_present(configuration, ["artifact_prefix"]),
+    comparison_group: local_first_present(configuration, ["comparison_group", "experiment_prefix", "group"]),
+    dense_equivalent_parameters: local_first_present(configuration, ["dense_equivalent_parameters", "dense_equivalent_total_parameters"]),
+    model_type: local_first_present(configuration, ["model_type"], run?.model_type || "—"),
+    persistent_parameters: local_first_present(configuration, ["persistent_parameters"]),
+    "train/loss": local_first_present(configuration, ["train/loss", "train_loss", "training_loss"]),
+    "val/val_loss": local_first_present(configuration, ["val/val_loss", "validation_loss", "val_loss"]),
+  };
+}
+
+function local_render_artifacts(container, run) {
+  container.replaceChildren();
+  const title = document.createElement("h3"); title.textContent = "Artifact Outputs";
+  const note = document.createElement("p"); note.className = "overview-artifact-note"; note.textContent = "This run produced these artifacts as outputs. Total: 1.";
+  const table = document.createElement("table"); table.className = "overview-artifact-table";
+  table.innerHTML = "<thead><tr><th>Type</th><th>Name</th><th>Size</th><th>Consumer count</th></tr></thead>";
+  const body = document.createElement("tbody"); const row = document.createElement("tr");
+  for (const value of ["local-charts", "charts.sqlite3", format_bytes(run?.database_bytes), "—"]) { const cell = document.createElement("td"); cell.textContent = value; row.appendChild(cell); }
+  row.title = run?.run_directory || ""; body.appendChild(row); table.appendChild(body); container.append(title, note, table);
+}
+
+function local_render_overview() {
+  const run = current_run(); if (!run || !by_id("run_overview_pane")) return;
+  const configuration = run.configuration || {};
+  const metadata = by_id("overview_metadata"); metadata.replaceChildren();
+  local_append_meta(metadata, "Notes", local_first_present(configuration, ["notes", "note"]));
+  local_append_meta(metadata, "Tags", local_first_present(configuration, ["tags"]));
+  local_append_meta(metadata, "Author", local_first_present(configuration, ["author", "wandb_entity"], local_wandb_owner(run)));
+  local_append_meta(metadata, "State", local_state_badge(run));
+  local_append_meta(metadata, "Start time", local_overview_timestamp(run.created_at));
+  local_append_meta(metadata, "Runtime", local_overview_duration(run));
+  local_append_meta(metadata, "Run path", local_run_path(run));
+  local_append_meta(metadata, "Hostname", local_first_present(configuration, ["hostname", "host"], run.host_label || "—"));
+  local_append_meta(metadata, "OS", local_first_present(configuration, ["os", "platform", "platform_string"]));
+  local_append_meta(metadata, "Python version", local_first_present(configuration, ["python_version"]));
+  local_append_meta(metadata, "Git repository", local_first_present(configuration, ["git_repository", "repository", "repo"]));
+  local_append_meta(metadata, "Git state", local_first_present(configuration, ["git_state", "git_commit", "git_hash", "commit_hash"]));
+  local_append_meta(metadata, "Python executable", local_first_present(configuration, ["python_executable"]));
+  local_append_meta(metadata, "Command", local_first_present(configuration, ["command", "run_command"]));
+  local_append_meta(metadata, "System Hardware", local_hardware(configuration));
+  local_append_meta(metadata, "W&B CLI Version", local_first_present(configuration, ["wandb_version", "wandb_cli_version"]));
+  local_append_meta(metadata, "Group", local_first_present(configuration, ["comparison_group", "experiment_prefix", "group"]));
+  local_append_meta(metadata, "Job Type", local_first_present(configuration, ["job_type"], run.model_type || "—"));
+  local_render_key_panel(by_id("overview_config_panel"), "Config", configuration);
+  local_render_key_panel(by_id("overview_summary_panel"), "Summary", local_summary(run, configuration));
+  local_render_artifacts(by_id("overview_artifact_outputs"), run);
+}
+
+function local_apply_detail_tab() {
+  const has_run = Boolean(app.current_run_id);
+  by_id("run_detail_tabs").hidden = !has_run;
+  document.querySelectorAll(".run-detail-tab").forEach(button => {
+    const active = button.dataset.detailTab === local_active_detail_tab;
+    button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
+  });
+  const charts = local_active_detail_tab === "charts";
+  const overview = local_active_detail_tab === "overview";
+  by_id("charts_empty").hidden = has_run || !charts;
+  by_id("charts_scroll").hidden = !has_run || !charts;
+  by_id("run_overview_pane").hidden = !has_run || !overview;
+  by_id("run_blank_detail_pane").hidden = !has_run || charts || overview;
+  if (overview && has_run) local_render_overview();
+  if (charts && has_run) requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
+}
+
+function local_set_detail_tab(tab_name) {
+  if (!local_detail_tabs.includes(tab_name)) return;
+  if (app.maximized_chart) restore_maximized_chart();
+  local_active_detail_tab = tab_name; local_apply_detail_tab();
+}
+
+function local_install_detail_tabs() {
+  const toolbar = document.querySelector(".charts-toolbar");
+  if (!toolbar || by_id("run_detail_tabs")) return;
+  const tabs = document.createElement("nav"); tabs.id = "run_detail_tabs"; tabs.className = "run-detail-tabs"; tabs.setAttribute("role", "tablist");
+  for (const name of local_detail_tabs) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "run-detail-tab"; button.dataset.detailTab = name; button.setAttribute("role", "tab"); button.textContent = name[0].toUpperCase() + name.slice(1); button.addEventListener("click", () => local_set_detail_tab(name)); tabs.appendChild(button);
+  }
+  toolbar.insertAdjacentElement("afterend", tabs);
+  const overview = document.createElement("section"); overview.id = "run_overview_pane"; overview.className = "run-overview-pane"; overview.hidden = true;
+  overview.innerHTML = '<div class="overview-metadata" id="overview_metadata"></div><div class="overview-data-grid"><section class="overview-key-panel" id="overview_config_panel"></section><section class="overview-key-panel" id="overview_summary_panel"></section></div><section class="overview-artifact-outputs" id="overview_artifact_outputs"></section>';
+  const blank = document.createElement("section"); blank.id = "run_blank_detail_pane"; blank.className = "run-blank-detail-pane"; blank.hidden = true;
+  by_id("charts_pane").append(overview, blank); local_apply_detail_tab();
+}
+
+const local_base_render_run_heading = render_run_heading;
+render_run_heading = function() { local_base_render_run_heading(); if (by_id("run_detail_tabs")) local_apply_detail_tab(); };
+const local_base_render_empty_state = render_empty_state;
+render_empty_state = function() { local_base_render_empty_state(); if (by_id("run_detail_tabs")) local_apply_detail_tab(); };
+const local_base_select_run = select_run;
+select_run = function(run_id, options = {}) { local_active_detail_tab = "charts"; return local_base_select_run(run_id, options); };
+local_install_detail_tabs();
+// ^^^ THOG
