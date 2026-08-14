@@ -1,9 +1,9 @@
 // vvv THOG
 "use strict";
 
-// The base dashboard remains deliberately generic.  This patch owns the local
-// heatmap coordinate remap and the native-size Plotly canvases that make each
-// chart card a genuine scroll viewport.
+// The base dashboard remains deliberately generic. This patch owns the local
+// heatmap coordinate remap and the native-size Plotly canvases used by the
+// chart-card scroll viewports.
 
 function signed_layer_offset(value) {
   const offset = Number(value);
@@ -13,6 +13,13 @@ function signed_layer_offset(value) {
 
 function populated_heatmap_cell(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value));
+}
+
+function latest_finite_value(values) {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    if (Number.isFinite(values[index])) return values[index];
+  }
+  return null;
 }
 
 function relative_heatmap_bounds(figure) {
@@ -55,6 +62,7 @@ function transpose_heatmap_relative(prepared) {
   const probe_coordinates = Array.isArray(heatmap_trace.x) ? [...heatmap_trace.x] : [];
   const candidate_layers = Array.isArray(heatmap_trace.y) ? heatmap_trace.y.map(Number) : [];
   const active_layers = Array.isArray(active_layer_trace?.y) ? active_layer_trace.y.map(Number) : [];
+  const latest_active_layer_count = latest_finite_value(active_layers);
   const original_z = Array.isArray(heatmap_trace.z) ? heatmap_trace.z : [];
   const original_customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
   const step_values = probe_coordinates.map((_coordinate, probe_index) => {
@@ -158,11 +166,16 @@ function transpose_heatmap_relative(prepared) {
 
   prepared.layout.xaxis = {
     ...original_yaxis,
-    title: {text: "candidate layer-count offset from active layer count", standoff: 46},
+    title: {text: "candidate layer-count offset from active layer count", standoff: 16},
     range: [minimum_offset - 0.5, maximum_offset + 0.5],
     tickmode: "array",
     tickvals: offsets,
-    ticktext: offsets.map(signed_layer_offset),
+    ticktext: offsets.map(offset => (
+      offset === 0 && Number.isFinite(latest_active_layer_count)
+        ? `0<br><b>L=${latest_active_layer_count}</b>`
+        : signed_layer_offset(offset)
+    )),
+    automargin: false,
   };
   prepared.layout.yaxis = {
     ...original_xaxis,
@@ -174,6 +187,10 @@ function transpose_heatmap_relative(prepared) {
     delete axis.constrain;
     delete axis.constraintoward;
   }
+
+  // Keep the x-axis physically attached to the heatmap body. The previous
+  // 104px bottom margin plus 46px title standoff made the separation conspicuous.
+  prepared.layout.margin = {...(prepared.layout.margin || {}), b: 76};
 
   const tick_indices = evenly_spaced_indices(probe_coordinates.length, 20);
   prepared.layout.yaxis.tickmode = "array";
@@ -191,7 +208,7 @@ function plot_mount_dimensions(mount, chart_name, figure) {
     const column_count = Math.max(1, bounds.maximum - bounds.minimum + 1);
     return {
       width: Math.max(shell_width, 190 + column_count * 34),
-      height: Math.max(shell_height, 760),
+      height: Math.max(shell_height, 640),
     };
   }
   return {
@@ -203,6 +220,22 @@ function plot_mount_dimensions(mount, chart_name, figure) {
 function figure_for_chart(chart_name) {
   if (!app.figures) return null;
   return chart_name === "heatmap" ? app.figures.heatmap : app.figures.depth?.[chart_name];
+}
+
+function install_dashboard_ui_patch() {
+  if (!document.querySelector('link[href="/assets/dashboard_ui_patch.css"]')) {
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = "/assets/dashboard_ui_patch.css";
+    document.head.appendChild(stylesheet);
+  }
+
+  const header_eye = document.querySelector(".runs-table thead .visibility-column .eye-icon");
+  if (header_eye) {
+    header_eye.className = "visibility-header-eye";
+    header_eye.replaceChildren(icon_svg("eye_open"));
+    header_eye.title = "Run visibility";
+  }
 }
 
 transpose_heatmap = transpose_heatmap_relative;
@@ -238,6 +271,8 @@ resize_plot_in_card = function(card) {
     height: Math.round(dimensions.height),
   });
 };
+
+install_dashboard_ui_patch();
 
 if (app.figures && app.current_run_id) {
   queueMicrotask(() => render_figures());
