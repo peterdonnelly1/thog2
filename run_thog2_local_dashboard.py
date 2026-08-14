@@ -27,7 +27,10 @@ from sheet.local_chart_store import (
 
 
 _ASSET_ROOT = Path(__file__).resolve().parent / "sheet" / "local_dashboard_assets"
-_ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js"))
+# _ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js"))
+# vvv THOG serve the local heatmap/view-size patch after the established dashboard script
+_ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js", "dashboard_heatmap_patch.js"))
+# ^^^ THOG
 
 
 def _modified_time(path: Path) -> float:
