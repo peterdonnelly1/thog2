@@ -440,4 +440,25 @@
 }
 /* ^^^ THOG */
 
+/* vvv THOG make heatmap layer-index and step ticks legible at dense vertical scales; emphasize the always-present newest/highest step */
+.chart-card[data-chart="heatmap"] .xtick text {
+  font-size: 13px !important;
+}
+
+.chart-card[data-chart="heatmap"] .ytick text {
+  font-size: 12px !important;
+}
+
+.chart-card[data-chart="heatmap"] .ytick:last-of-type text {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  transform: translateX(-5px);
+}
+
+.chart-card[data-chart="heatmap"] .xtitle,
+.chart-card[data-chart="heatmap"] .ytitle {
+  font-size: 13px !important;
+}
+/* ^^^ THOG */
+
 /* ^^^ THOG */
