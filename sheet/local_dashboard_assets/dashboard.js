@@ -826,7 +826,23 @@ function toggle_maximized_chart(chart_name) {
     button.title = selected ? "Restore chart grid" : "Maximize chart";
     button.setAttribute("aria-label", selected ? "Restore chart grid" : `Maximize ${chart_titles[card.dataset.chart]}`);
   });
-  requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    position_restore_button();
+    resize_visible_plots();
+  }));
+}
+
+function position_restore_button() {
+  const card = document.querySelector(".chart-card.maximized");
+  const button = card?.querySelector(".maximize-button");
+  const header = card?.querySelector(".chart-card-header");
+  const pane = by_id("charts_pane");
+  if (!button || !header || !pane) return;
+  const header_rect = header.getBoundingClientRect();
+  const pane_rect = pane.getBoundingClientRect();
+  if (header_rect.width <= 0 || header_rect.height <= 0 || pane_rect.width <= 0) return;
+  button.style.top = `${Math.round(header_rect.top + Math.max(6, (header_rect.height - button.offsetHeight) / 2))}px`;
+  button.style.right = `${Math.round(Math.max(12, window.innerWidth - pane_rect.right + 12))}px`;
 }
 
 function restore_maximized_chart() {
@@ -841,6 +857,8 @@ function restore_maximized_chart() {
     button.textContent = "⛶";
     button.title = "Maximize chart";
     button.setAttribute("aria-label", `Maximize ${chart_titles[card.dataset.chart]}`);
+    button.style.removeProperty("top");
+    button.style.removeProperty("right");
   });
   requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
 }
@@ -1290,7 +1308,10 @@ function bind_events() {
       else close_colour_picker();
     }
   });
-  window.addEventListener("resize", () => requestAnimationFrame(resize_visible_plots));
+  window.addEventListener("resize", () => requestAnimationFrame(() => {
+    position_restore_button();
+    resize_visible_plots();
+  }));
   window.addEventListener("popstate", () => {
     const run_id = route_run_id();
     if (run_id && app.runs.some(run => run_identifier(run) === run_id)) select_run(run_id, {manual: true, replace_history: true});

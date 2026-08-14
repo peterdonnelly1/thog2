@@ -218,8 +218,11 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "eye_closed:" in javascript
     assert "crashed:" in javascript
     assert "toggle_maximized_chart" in javascript
+    assert "position_restore_button" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
     assert '.chart-card[data-chart="heatmap"] { flex: 1 1 100%; }' in stylesheet
     assert '.chart-card:not([data-chart="heatmap"]) { flex: 1 1 calc(33.333% - 10px); }' in stylesheet
+    assert ".plot-shell { position: absolute; inset: 52px 0 0 0; overflow: auto;" in stylesheet
+    assert ".chart-card.maximized .maximize-button { position: fixed;" in stylesheet
 # ^^^ THOG

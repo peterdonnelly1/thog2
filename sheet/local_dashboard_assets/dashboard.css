@@ -226,9 +226,10 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .chart-card-header p { margin: 3px 0 0; color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .maximize-button { flex: 0 0 auto; width: 31px; height: 29px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #5e6671; font-size: 18px; line-height: 1; cursor: pointer; }
 .maximize-button:hover { border-color: var(--border); background: #f1f2f4; color: #4532ad; }
-.plot-shell { position: absolute; inset: 52px 0 0 0; overflow: hidden; background: #fff; }
+.plot-shell { position: absolute; inset: 52px 0 0 0; overflow: auto; overscroll-behavior: contain; background: #fff; }
 .plot-placeholder { position: absolute; z-index: 1; inset: 0; display: flex; align-items: center; justify-content: center; padding: 22px; color: var(--muted); text-align: center; }
-.plot-mount { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; }
+.plot-mount { position: relative; z-index: 2; width: max(100%, 360px); height: max(100%, 280px); }
+.chart-card[data-chart="heatmap"] .plot-mount { width: max(100%, 480px); height: max(100%, 300px); }
 .plot-mount .heatmaplayer image { image-rendering: pixelated; image-rendering: crisp-edges; }
 
 .panel-resizer { position: absolute; z-index: 9; opacity: 0; transition: opacity .1s; }
@@ -241,7 +242,7 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .chart-grid.is-maximized .chart-card { display: none; }
 .chart-grid.is-maximized .chart-card.maximized { display: block; flex: 1 1 100% !important; width: 100% !important; max-width: none !important; height: 100% !important; min-height: 0; }
 .chart-card.maximized .panel-resizer { display: none; }
-.chart-card.maximized .maximize-button { color: #4732b7; background: #eeebff; }
+.chart-card.maximized .maximize-button { position: fixed; z-index: 70; top: calc(var(--topbar-height) + 115px); right: 14px; color: #4732b7; border-color: #bdb5ed; background: #eeebff; box-shadow: 0 2px 7px rgba(29,24,68,.2); }
 
 .colour-popover { position: fixed; z-index: 80; width: 282px; padding: 14px; border: 1px solid #cfd2d8; border-radius: 7px; background: #fff; box-shadow: 0 8px 28px rgba(23,25,30,.2); }
 #colour_plane { width: 252px; height: 132px; display: block; border-radius: 3px; cursor: crosshair; }
