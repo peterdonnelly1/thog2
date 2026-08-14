@@ -983,3 +983,104 @@ window.addEventListener("load", () => {
   if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
 });
 // ^^^ THOG
+
+// vvv THOG avoid expensive trajectory redraws on heatmap-only revisions and use WebGL for dense trajectory history without dropping any points
+window.addEventListener("load", () => {
+  const trajectory_chart_names_fast = [
+    "attn_q_head_N",
+    "attn_k_head_N",
+    "attn_v_head_N",
+    "attn_out_head_N",
+    "mlp_up",
+    "mlp_down",
+  ];
+  const trajectory_scale_settings_key_fast = "thog2_local_trajectory_scale_modes";
+  let rendered_run_id = null;
+  let rendered_heatmap_revision = null;
+  let rendered_depth_revision = null;
+  let rendered_heatmap_viewer_signature = null;
+  let rendered_depth_viewer_signature = null;
+
+  const base_render_plot_fast = render_plot;
+  render_plot = async function(mount, figure, chart_name) {
+    if (!trajectory_chart_names_fast.includes(chart_name)) {
+      return base_render_plot_fast(mount, figure, chart_name);
+    }
+    const webgl_figure = {
+      ...figure,
+      data: (figure?.data || []).map(trace => (
+        trace?.type === "scatter" ? {...trace, type: "scattergl"} : trace
+      )),
+    };
+    return base_render_plot_fast(mount, webgl_figure, chart_name);
+  };
+
+  const heatmap_viewer_signature = () => JSON.stringify({
+    colour: colour_for_run(app.current_run_id),
+    settings: heatmap_settings_for_current_run(),
+  });
+  const depth_viewer_signature = () => JSON.stringify({
+    colour: colour_for_run(app.current_run_id),
+    scales: load_json(trajectory_scale_settings_key_fast, {}),
+  });
+
+  render_figures = async function() {
+    if (!app.figures || !app.current_run_id) return;
+    const status = app.current_status || current_run();
+    const heatmap_revision = JSON.stringify([
+      status?.heatmap_count ?? null,
+      status?.heatmap_maximum_update ?? null,
+    ]);
+    const depth_revision = JSON.stringify([
+      status?.depth_snapshot_count ?? null,
+      status?.depth_maximum_update ?? null,
+    ]);
+    const heatmap_signature = heatmap_viewer_signature();
+    const depth_signature = depth_viewer_signature();
+
+    if (rendered_run_id !== app.current_run_id) {
+      rendered_run_id = app.current_run_id;
+      rendered_heatmap_revision = null;
+      rendered_depth_revision = null;
+      rendered_heatmap_viewer_signature = null;
+      rendered_depth_viewer_signature = null;
+    }
+
+    const heatmap_changed = (
+      rendered_heatmap_revision !== heatmap_revision
+      || rendered_heatmap_viewer_signature !== heatmap_signature
+    );
+    const depth_changed = (
+      rendered_depth_revision !== depth_revision
+      || rendered_depth_viewer_signature !== depth_signature
+    );
+
+    if (app.figures.heatmap && heatmap_changed) {
+      by_id("heatmap_placeholder").hidden = true;
+      await render_plot(by_id("heatmap_plot"), app.figures.heatmap, "heatmap");
+      rendered_heatmap_revision = heatmap_revision;
+      rendered_heatmap_viewer_signature = heatmap_signature;
+    }
+    by_id("heatmap_card_detail").textContent = status
+      ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)} · discrete cells`
+      : "Layer-count probes";
+
+    if (depth_changed) {
+      for (const chart_name of trajectory_chart_names_fast) {
+        const figure = app.figures.depth?.[chart_name];
+        const detail = by_id(`${chart_name}_detail`);
+        if (!figure) continue;
+        by_id(`${chart_name}_placeholder`).hidden = true;
+        if (detail) {
+          detail.textContent = `${format_integer(status?.depth_snapshot_count)} retained snapshots · latest step ${format_integer(status?.depth_maximum_update)}`;
+        }
+        await render_plot(by_id(`${chart_name}_plot`), figure, chart_name);
+      }
+      rendered_depth_revision = depth_revision;
+      rendered_depth_viewer_signature = depth_signature;
+    }
+  };
+
+  if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
+});
+// ^^^ THOG
