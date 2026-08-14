@@ -441,6 +441,381 @@
     });
   </script>
   <!-- ^^^ THOG -->
+
+  <!-- vvv THOG add one-pixel larger body text, per-trajectory linear/signed-log display controls, and three independently saturated negative Δloss colour bands -->
+  <script>
+    window.addEventListener("load", () => {
+      const trajectory_chart_names = new Set([
+        "attn_q_head_N",
+        "attn_k_head_N",
+        "attn_v_head_N",
+        "attn_out_head_N",
+        "mlp_up",
+        "mlp_down",
+      ]);
+      const trajectory_scale_settings_key = "thog2_local_trajectory_scale_modes";
+
+      const display_style = document.createElement("style");
+      display_style.textContent = `
+        body { font-size: 14px !important; }
+        .trajectory-scale-toggle {
+          flex: 0 0 auto;
+          height: 29px;
+          min-width: 62px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 0 8px;
+          border: 1px solid #cfd3d8;
+          border-radius: 5px;
+          background: #f6f7f8;
+          color: #505862;
+          font-size: 10px;
+          cursor: pointer;
+        }
+        .trajectory-scale-toggle:hover { background: #eef0f2; }
+        .trajectory-scale-glyph {
+          width: 16px;
+          height: 13px;
+          display: inline-flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+        .trajectory-scale-glyph i {
+          display: block;
+          height: 1.5px;
+          border-radius: 2px;
+          background: currentColor;
+        }
+        .trajectory-scale-toggle[data-scale="log"] {
+          border-color: #a8a0df;
+          background: #efecff;
+          color: #5140b7;
+        }
+      `;
+      document.head.appendChild(display_style);
+
+      const trajectory_scale_modes = () => load_json(trajectory_scale_settings_key, {});
+      const trajectory_scale_mode = chart_name => trajectory_scale_modes()[chart_name] === "log" ? "log" : "linear";
+      const save_trajectory_scale_mode = (chart_name, mode) => {
+        const modes = trajectory_scale_modes();
+        modes[chart_name] = mode;
+        save_json(trajectory_scale_settings_key, modes);
+      };
+
+      const trajectory_numeric_values = figure => {
+        const values = [];
+        for (const trace of figure?.data || []) {
+          if (!Array.isArray(trace.y)) continue;
+          for (const value of trace.y) {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) values.push(numeric);
+          }
+        }
+        return values;
+      };
+
+      const trajectory_signed_log = (value, linear_threshold) => {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric) || numeric === 0) return numeric;
+        return Math.sign(numeric) * Math.log10(1 + Math.abs(numeric) / linear_threshold);
+      };
+
+      const trajectory_tick_label = value => {
+        const magnitude = Math.abs(Number(value));
+        if (!Number.isFinite(magnitude)) return "";
+        if (magnitude === 0) return "0";
+        if (magnitude >= 1000 || magnitude < 0.001) return Number(value).toExponential(0);
+        return String(Number(value.toPrecision(3)));
+      };
+
+      const trajectory_log_figure = figure => {
+        const transformed = clone_figure(figure);
+        const values = trajectory_numeric_values(transformed);
+        const maximum_abs = Math.max(...values.map(value => Math.abs(value)), 0);
+        if (!(maximum_abs > 0)) return transformed;
+
+        const maximum_exponent = Math.ceil(Math.log10(maximum_abs));
+        const linear_exponent = maximum_exponent - 4;
+        const linear_threshold = Math.max(1e-12, 10 ** linear_exponent);
+
+        for (const trace of transformed.data || []) {
+          if (!Array.isArray(trace.y)) continue;
+          const original_y = trace.y.map(value => Number(value));
+          trace.customdata = original_y;
+          trace.y = original_y.map(value => trajectory_signed_log(value, linear_threshold));
+          if (typeof trace.hovertemplate === "string") {
+            trace.hovertemplate = trace.hovertemplate
+              .replaceAll("%{y:.7g}", "%{customdata:.7g}")
+              .replaceAll("%{y}", "%{customdata}");
+          }
+        }
+
+        const magnitudes = [];
+        for (let exponent = linear_exponent; exponent <= maximum_exponent; exponent += 1) {
+          magnitudes.push(10 ** exponent);
+        }
+        const negative_magnitudes = [...magnitudes].reverse().map(value => -value);
+        const tick_values = [
+          ...negative_magnitudes.map(value => trajectory_signed_log(value, linear_threshold)),
+          0,
+          ...magnitudes.map(value => trajectory_signed_log(value, linear_threshold)),
+        ];
+        const tick_text = [
+          ...negative_magnitudes.map(trajectory_tick_label),
+          "0",
+          ...magnitudes.map(trajectory_tick_label),
+        ];
+        transformed.layout = transformed.layout || {};
+        transformed.layout.yaxis = {
+          ...(transformed.layout.yaxis || {}),
+          type: "linear",
+          tickmode: "array",
+          tickvals: tick_values,
+          ticktext: tick_text,
+          title: {text: "weight value · signed log"},
+          automargin: true,
+        };
+        return transformed;
+      };
+
+      const base_render_plot_for_scale = render_plot;
+      render_plot = async function(mount, figure, chart_name) {
+        const shown_figure = trajectory_chart_names.has(chart_name) && trajectory_scale_mode(chart_name) === "log"
+          ? trajectory_log_figure(figure)
+          : figure;
+        return base_render_plot_for_scale(mount, shown_figure, chart_name);
+      };
+
+      const sync_trajectory_scale_button = chart_name => {
+        const button = document.querySelector(`.chart-card[data-chart="${chart_name}"] .trajectory-scale-toggle`);
+        if (!button) return;
+        const mode = trajectory_scale_mode(chart_name);
+        button.dataset.scale = mode;
+        button.querySelector(".trajectory-scale-label").textContent = mode === "log" ? "Log" : "Lin";
+        button.title = mode === "log"
+          ? "Signed-log Y scale; click for linear. Negative and zero values are retained."
+          : "Linear Y scale; click for signed-log. Negative and zero values are retained.";
+        button.setAttribute("aria-label", button.title);
+      };
+
+      const rerender_trajectory = async chart_name => {
+        const figure = figure_for_chart(chart_name);
+        const mount = by_id(`${chart_name}_plot`);
+        if (!figure || !mount) return;
+        await render_plot(mount, figure, chart_name);
+      };
+
+      const install_trajectory_scale_controls = () => {
+        for (const chart_name of trajectory_chart_names) {
+          const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
+          const header = card?.querySelector(".chart-card-header");
+          const maximize = header?.querySelector(".maximize-button");
+          if (!header || !maximize || header.querySelector(".trajectory-scale-toggle")) continue;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "trajectory-scale-toggle";
+          const glyph = document.createElement("span");
+          glyph.className = "trajectory-scale-glyph";
+          glyph.setAttribute("aria-hidden", "true");
+          glyph.innerHTML = "<i></i><i></i><i></i>";
+          const label = document.createElement("span");
+          label.className = "trajectory-scale-label";
+          button.append(glyph, label);
+          button.addEventListener("click", async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const next = trajectory_scale_mode(chart_name) === "linear" ? "log" : "linear";
+            save_trajectory_scale_mode(chart_name, next);
+            sync_trajectory_scale_button(chart_name);
+            await rerender_trajectory(chart_name);
+          });
+          header.insertBefore(button, maximize);
+          sync_trajectory_scale_button(chart_name);
+        }
+      };
+
+      install_trajectory_scale_controls();
+
+      const viewer_limit = (name, fallback) => {
+        const value = Number(heatmap_settings_for_current_run()[name]);
+        return Number.isFinite(value) && value > 0 ? value : fallback;
+      };
+
+      const heatmap_band_limits = () => {
+        const base_limit = heatmap_abs_limit(0.05);
+        return {
+          green: Math.min(0.1, viewer_limit("negative_abs_limit", Math.min(0.1, base_limit))),
+          blue: Math.min(1.0, Math.max(0.100000001, viewer_limit("blue_abs_limit", 1.0))),
+          yellow: Math.max(1.000000001, viewer_limit("yellow_abs_limit", 2.0)),
+          red: viewer_limit("positive_abs_limit", base_limit),
+        };
+      };
+
+      const clamp_01 = value => Math.max(0, Math.min(1, value));
+      const heatmap_band_value = (delta, limits) => {
+        if (delta <= -1.0) {
+          const intensity = clamp_01((Math.abs(delta) - 1.0) / Math.max(1e-12, limits.yellow - 1.0));
+          return -0.76 - 0.24 * intensity;
+        }
+        if (delta <= -0.1) {
+          const intensity = clamp_01((Math.abs(delta) - 0.1) / Math.max(1e-12, limits.blue - 0.1));
+          return -0.51 - 0.23 * intensity;
+        }
+        if (delta < 0) {
+          const intensity = clamp_01(Math.abs(delta) / limits.green);
+          return -0.01 - 0.48 * intensity;
+        }
+        if (delta > 0) {
+          const intensity = clamp_01(delta / limits.red);
+          return 0.01 + 0.99 * intensity;
+        }
+        return 0;
+      };
+
+      const base_transpose_heatmap_for_bands = transpose_heatmap;
+      transpose_heatmap = function(prepared) {
+        base_transpose_heatmap_for_bands(prepared);
+        const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+        if (!heatmap_trace) return;
+        const limits = heatmap_band_limits();
+        const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+        heatmap_trace.z = (heatmap_trace.z || []).map((row, row_index) => (
+          Array.isArray(row)
+            ? row.map((value, column_index) => {
+                if (value === null || value === undefined) return null;
+                const raw_delta = Number(customdata[row_index]?.[column_index]?.[3]);
+                if (!Number.isFinite(raw_delta)) return null;
+                return heatmap_band_value(raw_delta, limits);
+              })
+            : row
+        ));
+        heatmap_trace.zmin = -1;
+        heatmap_trace.zmax = 1;
+        heatmap_trace.zmid = 0;
+        heatmap_trace.colorscale = [
+          [0.000, "rgb(255,226,0)"],
+          [0.120, "rgb(108,96,43)"],
+          [0.130, "rgb(0,126,255)"],
+          [0.245, "rgb(48,72,104)"],
+          [0.255, "rgb(0,255,0)"],
+          [0.495, "rgb(72,96,72)"],
+          [0.500, "rgb(88,88,88)"],
+          [0.505, "rgb(112,76,76)"],
+          [1.000, "rgb(255,0,0)"],
+        ];
+        heatmap_trace.hovertemplate = (
+          "step=%{customdata[0]}<br>candidate offset=%{customdata[2]}<br>"
+          + "candidate layers=%{customdata[1]}<br>Δloss=%{customdata[3]:.8f}<extra></extra>"
+        );
+        heatmap_trace.colorbar = {
+          ...(heatmap_trace.colorbar || {}),
+          tickmode: "array",
+          tickvals: [-1, -0.76, -0.74, -0.51, -0.49, 0, 1],
+          ticktext: [
+            `yellow sat −${limits.yellow.toPrecision(3)}`,
+            "yellow starts −1.0",
+            `blue sat −${limits.blue.toPrecision(3)}`,
+            "blue starts −0.1",
+            `green sat −${limits.green.toPrecision(3)}`,
+            "0",
+            `red sat +${limits.red.toPrecision(3)}`,
+          ],
+          title: "Δloss bands",
+        };
+      };
+
+      const settings_grid = document.querySelector("#heatmap_settings_section .heatmap-settings-grid");
+      const settings_actions = document.querySelector("#heatmap_settings_section .heatmap-settings-actions");
+      const green_input = by_id("heatmap_setting_negative_limit");
+      const red_input = by_id("heatmap_setting_positive_limit");
+      const green_label = document.querySelector('label[for="heatmap_setting_negative_limit"]');
+      const red_label = document.querySelector('label[for="heatmap_setting_positive_limit"]');
+      if (green_label) green_label.textContent = "viewer green saturation limit (−0.1 < Δloss < 0)";
+      if (red_label) red_label.textContent = "viewer red saturation limit (Δloss > 0)";
+      if (green_input) {
+        green_input.max = "0.1";
+        green_input.step = "0.005";
+      }
+
+      let blue_input = by_id("heatmap_setting_blue_limit");
+      let yellow_input = by_id("heatmap_setting_yellow_limit");
+      if (settings_grid && !blue_input) {
+        blue_input = make_heatmap_settings_row(
+          settings_grid,
+          "viewer blue saturation limit (−1.0 < Δloss ≤ −0.1)",
+          "heatmap_setting_blue_limit",
+          {type: "number", min: 0.100000001, max: 1.0, step: 0.05},
+        );
+        yellow_input = make_heatmap_settings_row(
+          settings_grid,
+          "viewer yellow saturation limit (Δloss ≤ −1.0)",
+          "heatmap_setting_yellow_limit",
+          {type: "number", min: 1.000000001, step: 0.1},
+        );
+        const reset_bands = document.createElement("button");
+        reset_bands.id = "heatmap_setting_negative_band_reset";
+        reset_bands.type = "button";
+        reset_bands.textContent = "Reset blue/yellow limits";
+        settings_actions?.appendChild(reset_bands);
+
+        const sync_band_inputs = () => {
+          const limits = heatmap_band_limits();
+          if (green_input) green_input.value = String(limits.green);
+          if (red_input) red_input.value = String(limits.red);
+          blue_input.value = String(limits.blue);
+          yellow_input.value = String(limits.yellow);
+          const active = Boolean(app.current_run_id);
+          blue_input.disabled = !active;
+          yellow_input.disabled = !active;
+          reset_bands.disabled = !active;
+        };
+        const rerender_heatmap_bands = () => {
+          if (app.figures && app.current_run_id) render_figures();
+        };
+        blue_input.addEventListener("input", () => {
+          const value = Number(blue_input.value);
+          if (!Number.isFinite(value) || value <= 0.1 || value > 1.0) return;
+          save_heatmap_viewer_setting("blue_abs_limit", value);
+          rerender_heatmap_bands();
+        });
+        yellow_input.addEventListener("input", () => {
+          const value = Number(yellow_input.value);
+          if (!Number.isFinite(value) || value <= 1.0) return;
+          save_heatmap_viewer_setting("yellow_abs_limit", value);
+          rerender_heatmap_bands();
+        });
+        green_input?.addEventListener("change", () => {
+          const value = Math.min(0.1, Math.max(1e-9, Number(green_input.value)));
+          if (!Number.isFinite(value)) return;
+          green_input.value = String(value);
+          save_heatmap_viewer_setting("negative_abs_limit", value);
+          rerender_heatmap_bands();
+        });
+        reset_bands.addEventListener("click", () => {
+          reset_heatmap_viewer_setting("blue_abs_limit");
+          reset_heatmap_viewer_setting("yellow_abs_limit");
+          sync_band_inputs();
+          rerender_heatmap_bands();
+        });
+        by_id("settings_nav")?.addEventListener("click", sync_band_inputs);
+        sync_band_inputs();
+      }
+
+      const settings_note = document.querySelector("#heatmap_settings_section .heatmap-settings-note");
+      if (settings_note) {
+        settings_note.textContent = (
+          "Colour-band saturation limits and vertical pixels/step are live viewer overrides. "
+          + "Yellow is Δloss ≤ −1.0; blue is −1.0 < Δloss ≤ −0.1; green is −0.1 < Δloss < 0; red is Δloss > 0. "
+          + "Mode, destination and linear max-step remain capture/routing controls."
+        );
+      }
+
+      if (app.figures && app.current_run_id) queueMicrotask(() => render_figures());
+    });
+  </script>
+  <!-- ^^^ THOG -->
 </body>
 </html>
 <!-- ^^^ THOG -->
