@@ -1,10 +1,49 @@
 /* vvv THOG */
 /* Local dashboard presentation corrections: explicit per-chart scrollbars, W&B-style header eye, discoverable heatmap full-screen control, and live heatmap display settings. */
 
+/* vvv THOG native scrollbars stay inside every chart card and remain visually obvious on Firefox/Linux as well as WebKit browsers */
 .plot-shell {
-  overflow: scroll;
+  overflow: scroll !important;
   scrollbar-gutter: stable both-edges;
+  scrollbar-width: auto;
+  scrollbar-color: #73808f #e6e9ed;
 }
+
+.plot-shell::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.plot-shell::-webkit-scrollbar-track {
+  background: #e6e9ed;
+  border: 1px solid #d5d9df;
+}
+
+.plot-shell::-webkit-scrollbar-thumb {
+  min-width: 34px;
+  min-height: 34px;
+  border: 3px solid #e6e9ed;
+  border-radius: 8px;
+  background: #73808f;
+}
+
+.plot-shell::-webkit-scrollbar-corner {
+  background: #e6e9ed;
+}
+
+.plot-scroll-canvas {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.plot-scroll-canvas > .plot-mount {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+/* ^^^ THOG */
 
 .visibility-header-eye {
   width: 25px;
