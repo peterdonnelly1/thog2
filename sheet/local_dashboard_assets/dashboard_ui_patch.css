@@ -195,4 +195,46 @@
   }
 }
 
+/* vvv THOG keep the heatmap's own scrollbars and controls usable independently of the outer dashboard scroller */
+.heatmap-inner-viewport {
+  overflow-x: scroll !important;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable both-edges !important;
+  scrollbar-width: auto !important;
+}
+
+/* Firefox can suppress a scroll rail when content is exactly viewport-sized; retain a 2px real vertical range without changing heatmap geometry. */
+.heatmap-inner-content {
+  min-height: calc(100% + 2px) !important;
+}
+
+/* Plotly places the colourbar against the SVG's extreme right edge. Pull it inward so labels/title remain visible before horizontal scrolling. */
+.heatmap-shell g.colorbar,
+.heatmap-shell .colorbar {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translateX(-56px) !important;
+}
+
+/* A maximized heatmap may scroll its own header out of view; the restore control must remain viewport-fixed and clickable. */
+.chart-card[data-chart="heatmap"].maximized .maximize-button {
+  position: fixed !important;
+  z-index: 1000 !important;
+  top: calc(var(--topbar-height) + 10px) !important;
+  right: 14px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  min-width: 94px !important;
+  height: 31px !important;
+  border-color: #aaa0e8 !important;
+  background: #efecff !important;
+  color: #4732b7 !important;
+  box-shadow: 0 2px 7px rgba(29,24,68,.20);
+}
+/* ^^^ THOG */
+
 /* ^^^ THOG */
