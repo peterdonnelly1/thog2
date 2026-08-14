@@ -22,6 +22,27 @@ function latest_finite_value(values) {
   return null;
 }
 
+function robust_heatmap_colour_limit(source_z, configured_limit) {
+  const absolute_values = [];
+  for (const row of source_z || []) {
+    if (!Array.isArray(row)) continue;
+    for (const value of row) {
+      if (!populated_heatmap_cell(value)) continue;
+      absolute_values.push(Math.abs(Number(value)));
+    }
+  }
+  absolute_values.sort((left, right) => left - right);
+  const configured = Number.isFinite(configured_limit) && configured_limit > 0
+    ? configured_limit
+    : 0.05;
+  if (!absolute_values.length) return configured;
+  const percentile_index = Math.min(
+    absolute_values.length - 1,
+    Math.max(0, Math.ceil(absolute_values.length * 0.95) - 1),
+  );
+  return Math.max(configured, absolute_values[percentile_index]);
+}
+
 function relative_heatmap_bounds(figure) {
   const heatmap_trace = (figure?.data || []).find(trace => trace.type === "heatmap");
   const active_layer_trace = (figure?.data || []).find(
@@ -65,6 +86,11 @@ function transpose_heatmap_relative(prepared) {
   const latest_active_layer_count = latest_finite_value(active_layers);
   const original_z = Array.isArray(heatmap_trace.z) ? heatmap_trace.z : [];
   const original_customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+  const configured_colour_limit = Math.max(
+    Math.abs(Number(heatmap_trace.zmin) || 0),
+    Math.abs(Number(heatmap_trace.zmax) || 0),
+  );
+  const colour_limit = robust_heatmap_colour_limit(original_z, configured_colour_limit);
   const step_values = probe_coordinates.map((_coordinate, probe_index) => {
     if (
       Array.isArray(active_layer_trace?.customdata)
@@ -137,6 +163,9 @@ function transpose_heatmap_relative(prepared) {
   heatmap_trace.y = probe_coordinates;
   heatmap_trace.z = relative_z;
   heatmap_trace.customdata = relative_customdata;
+  heatmap_trace.zmin = -colour_limit;
+  heatmap_trace.zmax = colour_limit;
+  heatmap_trace.zmid = 0;
   heatmap_trace.zsmooth = false;
   heatmap_trace.xgap = 0;
   heatmap_trace.ygap = 0;
@@ -147,6 +176,7 @@ function transpose_heatmap_relative(prepared) {
   heatmap_trace.colorbar = heatmap_trace.colorbar || {};
   heatmap_trace.colorbar.thickness = 12;
   heatmap_trace.colorbar.len = 0.82;
+  heatmap_trace.colorbar.title = `Δloss · auto ±${colour_limit.toPrecision(3)}`;
 
   if (active_layer_trace) {
     active_layer_trace.x = probe_coordinates.map(() => 0);
