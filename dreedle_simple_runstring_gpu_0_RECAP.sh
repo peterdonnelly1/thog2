@@ -13,7 +13,6 @@ cd "$(dirname "$0")"
 # Numerical safety (necessary for NVIDIA TITAN RTX) Non-finite update policy: current code defaults to skip with max_nonfinite_update_skips=99999.
 
 export THOG2_DREEDLE_GPU=0
-export THOG2_DREEDLE_RUN_KIND="LEADER_RECAP_CURRENT_CODE"
 export THOG2_DREEDLE_POWER_LIMIT_W=320
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 export THOG2_NUM_GPUS=1

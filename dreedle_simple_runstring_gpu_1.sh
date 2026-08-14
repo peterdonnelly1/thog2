@@ -67,7 +67,7 @@ cd "$(dirname "$0")"
 # Execution optimisation/debug:
 #    --depth-materialisation-matmul true|false      DEPTH matrix materialisation; default true
 #    --materialisation-profiling true|false         pure DEPTH timing; default false
-#    --torch-compile false|true|regional            eager | whole-model compile | checkpoint-segment regional compile
+#    --torch-compile true | regional | false        torch.compile execution wrapper; default false
 # Residual init:
 #    -r RESIDUAL_INIT_POLICY                        depth_scaled | unscaled
 #    -z RESIDUAL_INIT_DEPTH_SOURCE                  true_layer_depth | dof_implied_depth | user_forced_depth
@@ -82,13 +82,11 @@ cd "$(dirname "$0")"
 
 # vvv THOG host profile consumed by the canonical train_OWT.sh wrapper
 export THOG2_DREEDLE_GPU=1
-export THOG2_DREEDLE_RUN_KIND="C1024_L32_D1024_P16_A6_S4_REGIONAL_COMPILE"
 export THOG2_DREEDLE_POWER_LIMIT_W="${THOG2_DREEDLE_POWER_LIMIT_W:-220}"
 export THOG2_OWT_DATA_DIR="${THOG2_OWT_DATA_DIR:-$HOME/git/thog/data/openwebtext}"
 export THOG2_NUM_GPUS=1
 export THOG2_DTYPE="${THOG2_DTYPE:-float16}"
 export THOG2_ATTENTION_BACKEND="${THOG2_ATTENTION_BACKEND:-sdpa}"
-export THOG2_TORCH_COMPILE="${THOG2_TORCH_COMPILE:-regional}"
 # ^^^ THOG
 
 source ./dreedle_gpu_common.sh
@@ -100,7 +98,7 @@ export THOG2_WANDB_FINISH_TIMEOUT=7200
 export WANDB_CONSOLE=off
 
 ./train_OWT.sh \
-  -g DREEDLE_GPU${THOG2_DREEDLE_GPU}_${THOG2_DREEDLE_POWER_TAG}_LEADER_CLONE_REGIONAL_COMPILE \
+  -g DREEDLE_GPU${THOG2_DREEDLE_GPU}_${THOG2_DREEDLE_POWER_TAG}_LEADER_CLONE_MOD_FAST_DISCARD_FALSE \
   -n 40000 \
   -b 16 \
   -A 6 \
@@ -110,7 +108,7 @@ export WANDB_CONSOLE=off
   -e 250 \
   -l 10 \
   -w 100 \
-  -k 500 \
+  -k 250 \
   -y adamw \
   -c 90 \
   -f 9 \
@@ -132,7 +130,7 @@ export WANDB_CONSOLE=off
   --option DEPTH.order=16 \
   --no-depth-compress-layer-norm-and-bias \
   --depth-materialisation-matmul false \
-  --materialisation-profiling false \
-  --torch-compile "$THOG2_TORCH_COMPILE" \
+  --materialisation-profiling    false \
+  --torch-compile                false \
   -- \
-  --host-label "$THOG2_HOST_LABEL"
+

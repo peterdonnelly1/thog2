@@ -48,7 +48,7 @@ export WANDB_CONSOLE=off
 
 ./train_OWT.sh \
   -g DREEDLE_GPU${THOG2_DREEDLE_GPU}_${THOG2_DREEDLE_POWER_TAG}_CTX1024_L32_D1024_P16 \
-  -n 10000 \
+  -n 40000 \
   -b 16 \
   -A 6 \
   -G "$THOG2_NUM_GPUS" \
@@ -57,7 +57,7 @@ export WANDB_CONSOLE=off
   -e 250 \
   -l 10 \
   -w 100 \
-  -k 1000 \
+  -k 500 \
   -y adamw \
   -c 90 \
   -f 9 \
@@ -78,6 +78,8 @@ export WANDB_CONSOLE=off
   --option DEPTH.compressor=chebyshev \
   --option DEPTH.order=16 \
   --no-depth-compress-layer-norm-and-bias \
-  --torch-compile "$THOG2_TORCH_COMPILE" \
+  --depth-materialisation-matmul false \
+  --materialisation-profiling    false \
+  --torch-compile                false \
   -- \
   --host-label "$THOG2_HOST_LABEL"

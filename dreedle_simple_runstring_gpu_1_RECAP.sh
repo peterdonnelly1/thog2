@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 # GPU: physical GPU1
 # Power cap: explicit TITAN RTX maximum, 320 W
 # Plastic capabilities present in codebase but not enabled
-# Numerical safety (necessary for NVIDIA TITAN RTV) Non-finite update policy: current code defaults to skip with max_nonfinite_update_skips=99999.
+# Numerical safety (necessary for NVIDIA TITAN RTX) Non-finite update policy: current code defaults to skip with max_nonfinite_update_skips=99999.
 
 export THOG2_DREEDLE_GPU=1
 export THOG2_DREEDLE_RUN_KIND="LEADER_RECAP_CURRENT_CODE"
@@ -38,7 +38,7 @@ export WANDB_CONSOLE=off
   -e 250 \
   -l 10 \
   -w 100 \
-  -k 500 \
+  -k 250 \
   -y adamw \
   -c 90 \
   -f 9 \
