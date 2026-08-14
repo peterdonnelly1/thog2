@@ -11,18 +11,36 @@ function signed_layer_offset(value) {
   return offset > 0 ? `+${offset}` : String(offset);
 }
 
+function populated_heatmap_cell(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value));
+}
+
 function relative_heatmap_bounds(figure) {
   const heatmap_trace = (figure?.data || []).find(trace => trace.type === "heatmap");
   const active_layer_trace = (figure?.data || []).find(
     trace => trace !== heatmap_trace && Array.isArray(trace.x) && Array.isArray(trace.y)
   );
-  const candidate_layers = (heatmap_trace?.y || []).map(Number).filter(Number.isFinite);
-  const active_layers = (active_layer_trace?.y || []).map(Number).filter(Number.isFinite);
-  if (!candidate_layers.length || !active_layers.length) return {minimum: 0, maximum: 0};
-  return {
-    minimum: Math.min(...candidate_layers) - Math.max(...active_layers),
-    maximum: Math.max(...candidate_layers) - Math.min(...active_layers),
-  };
+  const candidate_layers = Array.isArray(heatmap_trace?.y) ? heatmap_trace.y.map(Number) : [];
+  const active_layers = Array.isArray(active_layer_trace?.y) ? active_layer_trace.y.map(Number) : [];
+  const source_z = Array.isArray(heatmap_trace?.z) ? heatmap_trace.z : [];
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (let probe_index = 0; probe_index < active_layers.length; probe_index += 1) {
+    const active_layers_at_probe = active_layers[probe_index];
+    if (!Number.isFinite(active_layers_at_probe)) continue;
+    for (let candidate_index = 0; candidate_index < candidate_layers.length; candidate_index += 1) {
+      const candidate_layers_at_probe = candidate_layers[candidate_index];
+      const cell = Array.isArray(source_z[candidate_index])
+        ? source_z[candidate_index][probe_index]
+        : null;
+      if (!Number.isFinite(candidate_layers_at_probe) || !populated_heatmap_cell(cell)) continue;
+      const offset = candidate_layers_at_probe - active_layers_at_probe;
+      minimum = Math.min(minimum, offset);
+      maximum = Math.max(maximum, offset);
+    }
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return {minimum: 0, maximum: 0};
+  return {minimum: Math.floor(minimum), maximum: Math.ceil(maximum)};
 }
 
 function transpose_heatmap_relative(prepared) {
@@ -60,8 +78,12 @@ function transpose_heatmap_relative(prepared) {
   for (let probe_index = 0; probe_index < probe_coordinates.length; probe_index += 1) {
     const active_layers_at_probe = active_layers[probe_index];
     if (!Number.isFinite(active_layers_at_probe)) continue;
-    for (const candidate_layers_at_probe of candidate_layers) {
-      if (!Number.isFinite(candidate_layers_at_probe)) continue;
+    for (let candidate_index = 0; candidate_index < candidate_layers.length; candidate_index += 1) {
+      const candidate_layers_at_probe = candidate_layers[candidate_index];
+      const cell = Array.isArray(original_z[candidate_index])
+        ? original_z[candidate_index][probe_index]
+        : null;
+      if (!Number.isFinite(candidate_layers_at_probe) || !populated_heatmap_cell(cell)) continue;
       const offset = candidate_layers_at_probe - active_layers_at_probe;
       minimum_offset = Math.min(minimum_offset, offset);
       maximum_offset = Math.max(maximum_offset, offset);
@@ -87,13 +109,14 @@ function transpose_heatmap_relative(prepared) {
     if (!Number.isFinite(active_layers_at_probe)) continue;
     for (let candidate_index = 0; candidate_index < candidate_layers.length; candidate_index += 1) {
       const candidate_layers_at_probe = candidate_layers[candidate_index];
-      if (!Number.isFinite(candidate_layers_at_probe)) continue;
+      const cell = Array.isArray(original_z[candidate_index])
+        ? original_z[candidate_index][probe_index]
+        : null;
+      if (!Number.isFinite(candidate_layers_at_probe) || !populated_heatmap_cell(cell)) continue;
       const offset = candidate_layers_at_probe - active_layers_at_probe;
       const destination = offset_index.get(offset);
       if (destination === undefined) continue;
-      relative_z[probe_index][destination] = Array.isArray(original_z[candidate_index])
-        ? original_z[candidate_index][probe_index]
-        : null;
+      relative_z[probe_index][destination] = Number(cell);
       relative_customdata[probe_index][destination] = [
         step_values[probe_index],
         candidate_layers_at_probe,
