@@ -2,8 +2,12 @@
 "use strict";
 
 // The base dashboard remains deliberately generic. This patch owns the local
-// heatmap coordinate remap and the native-size Plotly canvases used by the
-// chart-card scroll viewports.
+// heatmap coordinate remap, fixed per-probe row height, and viewer-only heatmap
+// display overrides.
+
+const heatmap_viewer_settings_key = "thog2_local_heatmap_viewer_settings";
+const heatmap_probe_row_height_px = 12;
+const heatmap_plot_chrome_height_px = 132;
 
 function signed_layer_offset(value) {
   const offset = Number(value);
@@ -22,25 +26,43 @@ function latest_finite_value(values) {
   return null;
 }
 
-function robust_heatmap_colour_limit(source_z, configured_limit) {
-  const absolute_values = [];
-  for (const row of source_z || []) {
-    if (!Array.isArray(row)) continue;
-    for (const value of row) {
-      if (!populated_heatmap_cell(value)) continue;
-      absolute_values.push(Math.abs(Number(value)));
-    }
+function heatmap_viewer_settings() {
+  return load_json(heatmap_viewer_settings_key, {});
+}
+
+function heatmap_run_settings() {
+  return current_run()?.heatmap_settings || {};
+}
+
+function heatmap_abs_limit(default_limit) {
+  const settings = heatmap_viewer_settings();
+  const override = Number(settings[app.current_run_id]?.abs_limit);
+  if (Number.isFinite(override) && override > 0) return override;
+  const run_limit = Number(heatmap_run_settings().abs_limit);
+  if (Number.isFinite(run_limit) && run_limit > 0) return run_limit;
+  return Number.isFinite(default_limit) && default_limit > 0 ? default_limit : 0.05;
+}
+
+function save_heatmap_abs_limit(value) {
+  if (!app.current_run_id) return;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return;
+  const settings = heatmap_viewer_settings();
+  settings[app.current_run_id] = {
+    ...(settings[app.current_run_id] || {}),
+    abs_limit: numeric,
+  };
+  save_json(heatmap_viewer_settings_key, settings);
+}
+
+function reset_heatmap_abs_limit() {
+  if (!app.current_run_id) return;
+  const settings = heatmap_viewer_settings();
+  if (settings[app.current_run_id]) {
+    delete settings[app.current_run_id].abs_limit;
+    if (!Object.keys(settings[app.current_run_id]).length) delete settings[app.current_run_id];
+    save_json(heatmap_viewer_settings_key, settings);
   }
-  absolute_values.sort((left, right) => left - right);
-  const configured = Number.isFinite(configured_limit) && configured_limit > 0
-    ? configured_limit
-    : 0.05;
-  if (!absolute_values.length) return configured;
-  const percentile_index = Math.min(
-    absolute_values.length - 1,
-    Math.max(0, Math.ceil(absolute_values.length * 0.95) - 1),
-  );
-  return Math.max(configured, absolute_values[percentile_index]);
 }
 
 function relative_heatmap_bounds(figure) {
@@ -71,6 +93,11 @@ function relative_heatmap_bounds(figure) {
   return {minimum: Math.floor(minimum), maximum: Math.ceil(maximum)};
 }
 
+function heatmap_probe_count(figure) {
+  const heatmap_trace = (figure?.data || []).find(trace => trace.type === "heatmap");
+  return Array.isArray(heatmap_trace?.x) ? heatmap_trace.x.length : 0;
+}
+
 function transpose_heatmap_relative(prepared) {
   const original_xaxis = {...(prepared.layout.xaxis || {})};
   const original_yaxis = {...(prepared.layout.yaxis || {})};
@@ -90,7 +117,7 @@ function transpose_heatmap_relative(prepared) {
     Math.abs(Number(heatmap_trace.zmin) || 0),
     Math.abs(Number(heatmap_trace.zmax) || 0),
   );
-  const colour_limit = robust_heatmap_colour_limit(original_z, configured_colour_limit);
+  const colour_limit = heatmap_abs_limit(configured_colour_limit);
   const step_values = probe_coordinates.map((_coordinate, probe_index) => {
     if (
       Array.isArray(active_layer_trace?.customdata)
@@ -176,7 +203,7 @@ function transpose_heatmap_relative(prepared) {
   heatmap_trace.colorbar = heatmap_trace.colorbar || {};
   heatmap_trace.colorbar.thickness = 12;
   heatmap_trace.colorbar.len = 0.82;
-  heatmap_trace.colorbar.title = `Δloss · auto ±${colour_limit.toPrecision(3)}`;
+  heatmap_trace.colorbar.title = `candidate loss − current loss · ±${colour_limit.toPrecision(3)}`;
 
   if (active_layer_trace) {
     active_layer_trace.x = probe_coordinates.map(() => 0);
@@ -218,8 +245,6 @@ function transpose_heatmap_relative(prepared) {
     delete axis.constraintoward;
   }
 
-  // Keep the x-axis physically attached to the heatmap body. The previous
-  // 104px bottom margin plus 46px title standoff made the separation conspicuous.
   prepared.layout.margin = {...(prepared.layout.margin || {}), b: 76};
 
   const tick_indices = evenly_spaced_indices(probe_coordinates.length, 20);
@@ -236,20 +261,127 @@ function plot_mount_dimensions(mount, chart_name, figure) {
   if (chart_name === "heatmap") {
     const bounds = relative_heatmap_bounds(figure);
     const column_count = Math.max(1, bounds.maximum - bounds.minimum + 1);
+    const probe_count = heatmap_probe_count(figure);
     return {
-      width: Math.max(shell_width, 190 + column_count * 34),
-      height: Math.max(shell_height, 640),
+      width: Math.max(shell_width + 1, 190 + column_count * 34),
+      height: Math.max(
+        shell_height + 1,
+        heatmap_plot_chrome_height_px + Math.max(1, probe_count) * heatmap_probe_row_height_px,
+      ),
     };
   }
   return {
-    width: Math.max(shell_width, 620),
-    height: Math.max(shell_height, 320),
+    width: Math.max(shell_width + 1, 620),
+    height: Math.max(shell_height + 1, 320),
   };
 }
 
 function figure_for_chart(chart_name) {
   if (!app.figures) return null;
   return chart_name === "heatmap" ? app.figures.heatmap : app.figures.depth?.[chart_name];
+}
+
+function make_heatmap_settings_row(grid, label_text, id, options = {}) {
+  const label = document.createElement("label");
+  label.htmlFor = id;
+  label.textContent = label_text;
+  const input = document.createElement("input");
+  input.id = id;
+  input.type = options.type || "text";
+  if (options.readonly) input.readOnly = true;
+  if (options.step !== undefined) input.step = String(options.step);
+  if (options.min !== undefined) input.min = String(options.min);
+  grid.append(label, input);
+  return input;
+}
+
+function sync_heatmap_settings_panel() {
+  const mode = by_id("heatmap_setting_mode");
+  if (!mode) return;
+  const settings = heatmap_run_settings();
+  mode.value = settings.mode ?? "—";
+  by_id("heatmap_setting_destination").value = settings.destination ?? "—";
+  by_id("heatmap_setting_linear").value = settings.linear_max_step ?? "—";
+  const run_limit = Number(settings.abs_limit);
+  by_id("heatmap_setting_abs_limit").value = String(
+    heatmap_abs_limit(Number.isFinite(run_limit) ? run_limit : 0.05)
+  );
+  const active = Boolean(app.current_run_id);
+  by_id("heatmap_setting_abs_limit").disabled = !active;
+  by_id("heatmap_setting_reset").disabled = !active;
+}
+
+function install_heatmap_settings_panel() {
+  const settings_content = document.querySelector(".settings-content");
+  if (!settings_content || by_id("heatmap_settings_section")) return;
+
+  const section = document.createElement("section");
+  section.id = "heatmap_settings_section";
+  section.className = "heatmap-settings-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "Layer-count Δloss heatmap";
+  const grid = document.createElement("div");
+  grid.className = "heatmap-settings-grid";
+
+  make_heatmap_settings_row(
+    grid,
+    "instrumentation__delta_loss_v_layer_heatmap",
+    "heatmap_setting_mode",
+    {readonly: true},
+  );
+  make_heatmap_settings_row(
+    grid,
+    "instrumentation__delta_loss_v_layer_heatmap__destination",
+    "heatmap_setting_destination",
+    {readonly: true},
+  );
+  make_heatmap_settings_row(
+    grid,
+    "instrumentation__delta_loss_v_layer_heatmap_linear",
+    "heatmap_setting_linear",
+    {readonly: true},
+  );
+  const abs_limit = make_heatmap_settings_row(
+    grid,
+    "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
+    "heatmap_setting_abs_limit",
+    {type: "number", min: 0.000000001, step: 0.01},
+  );
+
+  const note = document.createElement("p");
+  note.className = "heatmap-settings-note";
+  note.textContent = (
+    "abs_limit is a live viewer override. Mode, destination and linear max-step are capture/routing controls from the selected run; the viewer cannot recreate probes that were not recorded."
+  );
+
+  const actions = document.createElement("div");
+  actions.className = "heatmap-settings-actions";
+  const reset = document.createElement("button");
+  reset.id = "heatmap_setting_reset";
+  reset.type = "button";
+  reset.textContent = "Reset abs limit to run value";
+  actions.appendChild(reset);
+  section.append(heading, grid, note, actions);
+  settings_content.appendChild(section);
+
+  let render_timer = null;
+  const apply_abs_limit = () => {
+    const numeric = Number(abs_limit.value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return;
+    save_heatmap_abs_limit(numeric);
+    clearTimeout(render_timer);
+    render_timer = setTimeout(() => {
+      if (app.figures && app.current_run_id) render_figures();
+    }, 120);
+  };
+  abs_limit.addEventListener("input", apply_abs_limit);
+  reset.addEventListener("click", () => {
+    reset_heatmap_abs_limit();
+    sync_heatmap_settings_panel();
+    if (app.figures && app.current_run_id) render_figures();
+  });
+  by_id("settings_nav")?.addEventListener("click", sync_heatmap_settings_panel);
+  sync_heatmap_settings_panel();
 }
 
 function install_dashboard_ui_patch() {
@@ -266,6 +398,8 @@ function install_dashboard_ui_patch() {
     header_eye.replaceChildren(icon_svg("eye_open"));
     header_eye.title = "Run visibility";
   }
+
+  install_heatmap_settings_panel();
 }
 
 transpose_heatmap = transpose_heatmap_relative;
