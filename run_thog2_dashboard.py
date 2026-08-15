@@ -6,6 +6,7 @@ from __future__ import annotations
 import ctypes
 import sys
 
+from sheet import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metadata_patch
 from run_thog2_local_dashboard import main
 
 
