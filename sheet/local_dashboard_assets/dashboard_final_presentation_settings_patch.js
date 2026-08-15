@@ -7,7 +7,7 @@
 // panel separators, and reserve sufficient axis room for coefficient charts.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 94;
+    const heatmap_chrome_height_px = 124;
     const colour_key_floor_px = 64;
     const colour_key_normal_cap_px = 220;
     const overview_default_storage_key = "thog2_local_overview_default_font_size";
@@ -62,6 +62,22 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace || !prepared.layout?.yaxis) return;
 
+      // The x axis was moved from the bottom to the top by the newest-first layout.
+      // Give its title an explicit top-axis standoff and enough top chrome that the
+      // title cannot collapse onto the tick row at short heatmap heights.
+      const x_title = prepared.layout?.xaxis?.title;
+      prepared.layout.xaxis = {
+        ...(prepared.layout.xaxis || {}),
+        title: typeof x_title === "string"
+          ? {text: x_title, standoff: 24}
+          : {...(x_title || {}), standoff: 24},
+      };
+      prepared.layout.margin = {
+        ...(prepared.layout.margin || {}),
+        t: Math.max(106, Number(prepared.layout?.margin?.t || 0)),
+        b: Math.max(18, Number(prepared.layout?.margin?.b || 0)),
+      };
+
       const mount = by_id("heatmap_plot");
       const probe_count = Math.max(1, Array.isArray(heatmap_trace.y) ? heatmap_trace.y.length : 1);
       const body_height = probe_count * heatmap_probe_row_height_px();
@@ -83,10 +99,12 @@ window.addEventListener("load", () => {
       );
       const key_cap = Math.max(colour_key_normal_cap_px, key_minimum);
       const key_height = Math.min(desired_key_height, key_cap);
+      const existing_colourbar = heatmap_trace.colorbar || {};
+      const existing_colourbar_title = existing_colourbar.title;
 
       heatmap_trace.showscale = true;
       heatmap_trace.colorbar = {
-        ...(heatmap_trace.colorbar || {}),
+        ...existing_colourbar,
         x: 1.025,
         xanchor: "left",
         xpad: 8,
@@ -96,6 +114,19 @@ window.addEventListener("load", () => {
         lenmode: "pixels",
         thickness: 13,
         thicknessmode: "pixels",
+        tickfont: {
+          ...(existing_colourbar.tickfont || {}),
+          size: 10.5,
+        },
+        title: typeof existing_colourbar_title === "string"
+          ? {text: existing_colourbar_title, side: "top", font: {size: 10.5}}
+          : {
+              ...(existing_colourbar_title || {}),
+              font: {
+                ...(existing_colourbar_title?.font || {}),
+                size: 10.5,
+              },
+            },
       };
     };
 
