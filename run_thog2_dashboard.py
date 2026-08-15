@@ -34,6 +34,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_heatmap_flip_log_reset_patch.js",
     "dashboard_heatmap_top_anchor_pencil_patch.js",
     "dashboard_maximize_lband_patch.js",
+    "dashboard_final_presentation_settings_patch.js",
 )
 
 
