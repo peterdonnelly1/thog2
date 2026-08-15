@@ -12,7 +12,9 @@ window.addEventListener("load", () => {
     const centre_text_glyph_count = 17;
     const centre_text_width_factor = 0.61;
     const centre_band_padding_px = 10;
-    const top_tick_padding_px = 2;
+    const minimum_top_whitespace_px = 7;
+    const maximum_top_whitespace_px = 24;
+    const target_y_tick_count = 10;
 
     const finite_number = value => {
       if (value === null || value === undefined || value === "") return null;
@@ -205,7 +207,79 @@ window.addEventListener("load", () => {
       return Math.max(0.08, desired_text_width_px / (2 * Math.max(1e-6, pixels_per_x_unit)));
     };
 
-    const align_top_visible_y_tick = mount => {
+    const nice_tick_interval = span => {
+      if (!(span > 0)) return 1;
+      const raw_interval = span / target_y_tick_count;
+      const exponent = Math.floor(Math.log10(raw_interval));
+      const scale = 10 ** exponent;
+      const fraction = raw_interval / scale;
+      const nice_fraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+      return nice_fraction * scale;
+    };
+
+    const interpolate_step_coordinate = (pairs, target_step) => {
+      if (!pairs.length) return null;
+      if (target_step <= pairs[0].step) return pairs[0].coordinate;
+      if (target_step >= pairs[pairs.length - 1].step) return pairs[pairs.length - 1].coordinate;
+      for (let index = 1; index < pairs.length; index += 1) {
+        const left = pairs[index - 1];
+        const right = pairs[index];
+        if (target_step < left.step || target_step > right.step) continue;
+        const step_span = right.step - left.step;
+        if (!(step_span > 0)) return left.coordinate;
+        const fraction = (target_step - left.step) / step_span;
+        return left.coordinate + fraction * (right.coordinate - left.coordinate);
+      }
+      return null;
+    };
+
+    const conventional_y_ticks = geometry => {
+      const pairs = geometry?.rows
+        ?.filter(row => Number.isFinite(row.step) && Number.isFinite(row.coordinate))
+        .map(row => ({step: Number(row.step), coordinate: Number(row.coordinate)}))
+        .sort((left, right) => left.step - right.step) || [];
+      if (pairs.length < 2) return null;
+
+      const minimum_step = pairs[0].step;
+      const maximum_step = pairs[pairs.length - 1].step;
+      const step_span = maximum_step - minimum_step;
+      if (!(step_span > 0)) return null;
+
+      // Small spans are clearer with the actual retained probe steps. Once the
+      // visible span becomes substantial, switch to conventional 1-2-5×10^n ticks.
+      if (step_span <= 20 && pairs.length <= 20) {
+        return {
+          tickvals: pairs.map(pair => pair.coordinate),
+          ticktext: pairs.map(pair => String(pair.step)),
+        };
+      }
+
+      const interval = nice_tick_interval(step_span);
+      const first_tick = Math.ceil(minimum_step / interval) * interval;
+      const tickvals = [];
+      const ticktext = [];
+      for (
+        let step = first_tick;
+        step <= maximum_step + interval * 1e-9;
+        step += interval
+      ) {
+        const coordinate = interpolate_step_coordinate(pairs, step);
+        if (!Number.isFinite(coordinate)) continue;
+        tickvals.push(coordinate);
+        ticktext.push(String(Number(step.toPrecision(12))));
+      }
+      return tickvals.length ? {tickvals, ticktext} : null;
+    };
+
+    const top_whitespace_px = geometry => Math.max(
+      minimum_top_whitespace_px,
+      Math.min(
+        maximum_top_whitespace_px,
+        Math.round(geometry?.row_pitch_px ? geometry.row_pitch_px * 0.35 : minimum_top_whitespace_px),
+      ),
+    );
+
+    const align_top_visible_y_tick = (mount, geometry) => {
       if (!mount?._fullLayout?._size) return;
       const mount_rect = mount.getBoundingClientRect();
       const plot_top = mount_rect.top + Number(mount._fullLayout._size.t || 0);
@@ -235,7 +309,8 @@ window.addEventListener("load", () => {
       top_tick.style.setProperty("transform-box", "fill-box", "important");
       top_tick.style.setProperty("transform-origin", "center", "important");
       const rect = top_tick.getBoundingClientRect();
-      const minimum_center = plot_top + rect.height / 2 + top_tick_padding_px;
+      const padding = top_whitespace_px(geometry);
+      const minimum_center = plot_top + rect.height / 2 + padding;
       const current_center = rect.top + rect.height / 2;
       const shift_y = Math.max(0, minimum_center - current_center);
       const shift_x = top_tick.classList.contains("thog2-latest-y-tick") ? -7 : 0;
@@ -285,13 +360,20 @@ window.addEventListener("load", () => {
         update["xaxis.autorange"] = false;
       }
 
+      const y_ticks = conventional_y_ticks(geometry);
+      if (y_ticks) {
+        update["yaxis.tickmode"] = "array";
+        update["yaxis.tickvals"] = y_ticks.tickvals;
+        update["yaxis.ticktext"] = y_ticks.ticktext;
+      }
+
       state.applying = true;
       try {
         await Plotly.relayout(mount, update);
       } finally {
         state.applying = false;
       }
-      requestAnimationFrame(() => requestAnimationFrame(() => align_top_visible_y_tick(mount)));
+      requestAnimationFrame(() => requestAnimationFrame(() => align_top_visible_y_tick(mount, geometry)));
     };
 
     const schedule_reflow = (mount, normalise_x = false) => {
