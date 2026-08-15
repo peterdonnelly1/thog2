@@ -281,6 +281,7 @@ window.addEventListener("load", () => {
 
     const align_top_visible_y_tick = (mount, geometry) => {
       if (!mount?._fullLayout?._size) return;
+      const resolved_geometry = visible_row_geometry(mount) || geometry;
       const mount_rect = mount.getBoundingClientRect();
       const plot_top = mount_rect.top + Number(mount._fullLayout._size.t || 0);
       const plot_bottom = plot_top + Number(mount._fullLayout._size.h || 0);
@@ -309,8 +310,8 @@ window.addEventListener("load", () => {
       top_tick.style.setProperty("transform-box", "fill-box", "important");
       top_tick.style.setProperty("transform-origin", "center", "important");
       const rect = top_tick.getBoundingClientRect();
-      const padding = top_whitespace_px(geometry);
-      const minimum_center = plot_top + rect.height / 2 + padding;
+      const padding = top_whitespace_px(resolved_geometry);
+      const minimum_center = plot_top + rect.height / 2 + Math.max(2, Math.round(padding * 0.30));
       const current_center = rect.top + rect.height / 2;
       const shift_y = Math.max(0, minimum_center - current_center);
       const shift_x = top_tick.classList.contains("thog2-latest-y-tick") ? -7 : 0;
@@ -321,10 +322,25 @@ window.addEventListener("load", () => {
       );
     };
 
+    const ensure_state = mount => {
+      let state = state_by_mount.get(mount);
+      if (!state) {
+        state = {
+          applying: false,
+          frame: null,
+          normalise_x: false,
+          handler: null,
+          base_top_margin: null,
+        };
+        state_by_mount.set(mount, state);
+      }
+      return state;
+    };
+
     const reflow_heatmap_viewport = async (mount, normalise_x) => {
       if (!mount || mount.dataset.plotReady !== "true") return;
-      const state = state_by_mount.get(mount);
-      if (!state || state.applying) return;
+      const state = ensure_state(mount);
+      if (state.applying) return;
 
       const current_x = axis_range(mount, "xaxis");
       const current_y = axis_range(mount, "yaxis");
@@ -367,6 +383,11 @@ window.addEventListener("load", () => {
         update["yaxis.ticktext"] = y_ticks.ticktext;
       }
 
+      if (state.base_top_margin === null) {
+        state.base_top_margin = Math.max(0, finite_number(mount.layout?.margin?.t) ?? 0);
+      }
+      update["margin.t"] = state.base_top_margin + top_whitespace_px(geometry);
+
       state.applying = true;
       try {
         await Plotly.relayout(mount, update);
@@ -377,11 +398,7 @@ window.addEventListener("load", () => {
     };
 
     const schedule_reflow = (mount, normalise_x = false) => {
-      let state = state_by_mount.get(mount);
-      if (!state) {
-        state = {applying: false, frame: null, normalise_x: false, handler: null};
-        state_by_mount.set(mount, state);
-      }
+      const state = ensure_state(mount);
       state.normalise_x = state.normalise_x || normalise_x;
       if (state.frame !== null) return;
       state.frame = requestAnimationFrame(() => {
@@ -394,11 +411,7 @@ window.addEventListener("load", () => {
 
     const bind_heatmap_relayout = mount => {
       if (!mount || typeof mount.on !== "function") return;
-      let state = state_by_mount.get(mount);
-      if (!state) {
-        state = {applying: false, frame: null, normalise_x: false, handler: null};
-        state_by_mount.set(mount, state);
-      }
+      const state = ensure_state(mount);
       if (!state.handler) {
         state.handler = event => {
           if (state.applying) return;
@@ -419,6 +432,8 @@ window.addEventListener("load", () => {
     render_plot = async function(mount, figure, chart_name) {
       const result = await base_render_plot_heatmap_zoom(mount, figure, chart_name);
       if (chart_name === "heatmap") {
+        const state = ensure_state(mount);
+        state.base_top_margin = Math.max(0, finite_number(mount.layout?.margin?.t) ?? 0);
         bind_heatmap_relayout(mount);
         schedule_reflow(mount, false);
       }
@@ -427,6 +442,8 @@ window.addEventListener("load", () => {
 
     const heatmap_mount = by_id("heatmap_plot");
     if (heatmap_mount?.dataset.plotReady === "true") {
+      const state = ensure_state(heatmap_mount);
+      state.base_top_margin = Math.max(0, finite_number(heatmap_mount.layout?.margin?.t) ?? 0);
       bind_heatmap_relayout(heatmap_mount);
       schedule_reflow(heatmap_mount, false);
     }
