@@ -13,12 +13,14 @@ from sheet import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metad
 from sheet import local_dashboard_logs_patch as _local_dashboard_logs_patch
 from sheet import local_dashboard_wandb_charts_patch as _local_dashboard_wandb_charts_patch
 from sheet import local_dashboard_wandb_catchup_patch as _local_dashboard_wandb_catchup_patch
+from sheet import local_dashboard_performance_patch as _local_dashboard_performance_patch
 import run_thog2_local_dashboard as _dashboard
 
 
 _local_dashboard_logs_patch.install(_dashboard)
 _local_dashboard_wandb_charts_patch.install(_dashboard)
 _local_dashboard_wandb_catchup_patch.install(_local_dashboard_wandb_charts_patch)
+_local_dashboard_performance_patch.install(_dashboard)
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
@@ -36,6 +38,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_maximize_lband_patch.js",
     "dashboard_final_presentation_settings_patch.js",
     "dashboard_heatmap_dom_alignment_patch.js",
+    "dashboard_performance_patch.js",
 )
 
 
