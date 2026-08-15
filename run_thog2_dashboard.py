@@ -42,6 +42,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_heatmap_dom_alignment_patch.js",
     "dashboard_performance_patch.js",
     "dashboard_heatmap_zoom_geometry_patch.js",
+    "dashboard_heatmap_y_axis_refinement_patch.js",
 )
 
 
