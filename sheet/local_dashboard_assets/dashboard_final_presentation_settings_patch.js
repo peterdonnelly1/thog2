@@ -7,7 +7,7 @@
 // panel separators, and reserve sufficient axis room for coefficient charts.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 124;
+    const heatmap_chrome_height_px = 138;
     const colour_key_floor_px = 64;
     const colour_key_normal_cap_px = 220;
     const overview_default_storage_key = "thog2_local_overview_default_font_size";
@@ -62,21 +62,43 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace || !prepared.layout?.yaxis) return;
 
-      // The x axis was moved from the bottom to the top by the newest-first layout.
-      // Give its title an explicit top-axis standoff and enough top chrome that the
-      // title cannot collapse onto the tick row at short heatmap heights.
-      const x_title = prepared.layout?.xaxis?.title;
+      // Plotly's top-axis title standoff remains coupled to its tick-label layout in
+      // this compressed heatmap geometry. Remove the native title entirely and draw
+      // our own paper annotation well above the top tick row instead.
+      const native_x_title = prepared.layout?.xaxis?.title;
+      const x_title_text = typeof native_x_title === "string"
+        ? native_x_title
+        : String(native_x_title?.text || "candidate layer-count offset from active layer count");
       prepared.layout.xaxis = {
         ...(prepared.layout.xaxis || {}),
-        title: typeof x_title === "string"
-          ? {text: x_title, standoff: 24}
-          : {...(x_title || {}), standoff: 24},
+        title: {text: ""},
       };
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: Math.max(106, Number(prepared.layout?.margin?.t || 0)),
+        t: Math.max(120, Number(prepared.layout?.margin?.t || 0)),
         b: Math.max(18, Number(prepared.layout?.margin?.b || 0)),
       };
+      prepared.layout.annotations = (prepared.layout.annotations || []).filter(
+        annotation => annotation?.name !== "thog2-heatmap-x-title"
+      );
+      prepared.layout.annotations.push({
+        name: "thog2-heatmap-x-title",
+        x: 0.5,
+        y: 1,
+        xref: "paper",
+        yref: "paper",
+        text: x_title_text,
+        showarrow: false,
+        xanchor: "center",
+        yanchor: "bottom",
+        yshift: 42,
+        font: {
+          family: "Inter, ui-sans-serif, system-ui, sans-serif",
+          size: 11,
+          color: "#30343b",
+        },
+        captureevents: false,
+      });
 
       const mount = by_id("heatmap_plot");
       const probe_count = Math.max(1, Array.isArray(heatmap_trace.y) ? heatmap_trace.y.length : 1);
@@ -116,15 +138,15 @@ window.addEventListener("load", () => {
         thicknessmode: "pixels",
         tickfont: {
           ...(existing_colourbar.tickfont || {}),
-          size: 10.5,
+          size: 12,
         },
         title: typeof existing_colourbar_title === "string"
-          ? {text: existing_colourbar_title, side: "top", font: {size: 10.5}}
+          ? {text: existing_colourbar_title, side: "top", font: {size: 12}}
           : {
               ...(existing_colourbar_title || {}),
               font: {
                 ...(existing_colourbar_title?.font || {}),
-                size: 10.5,
+                size: 12,
               },
             },
       };
