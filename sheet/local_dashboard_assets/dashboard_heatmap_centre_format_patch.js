@@ -1,9 +1,8 @@
 // vvv THOG
 "use strict";
 
-// Final presentation correction for the centre/L datum. Legacy rows have no
-// stored centre loss and must remain blank rather than allowing Number(null)
-// to fabricate 0.00. Genuine rows mirror the compact CLI loss/delta layout.
+// Final presentation correction for the centre/L datum, newest-step emphasis,
+// and a colour key that remains outside the heatmap body at very small row counts.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const strict_finite_number = value => {
@@ -19,13 +18,12 @@ window.addEventListener("load", () => {
     };
 
     const delta_colour = value => {
-      if (!Number.isFinite(value) || value === 0) return "rgb(220,220,220)";
-      return value < 0 ? "rgb(102,255,0)" : "rgb(255,0,0)";
+      if (!Number.isFinite(value) || value === 0) return "#dcdcdc";
+      return value < 0 ? "#66ff00" : "#ff0000";
     };
 
     const is_old_centre_annotation = annotation => (
       annotation
-      && Number(annotation.x) === 0
       && annotation.xref === "x"
       && annotation.yref === "y"
       && annotation.showarrow === false
@@ -34,21 +32,33 @@ window.addEventListener("load", () => {
       && String(annotation.font?.family || "").includes("DejaVu Sans Mono")
     );
 
-    const centre_font_size_px = row_height => Math.max(
-      7,
-      Math.min(13, Math.round(Number(row_height) * 0.85)),
-    );
+    const centre_cell_width_px = (prepared, heatmap_trace) => {
+      const shell = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-shell');
+      const shell_width = Number(shell?.clientWidth || prepared.layout?.width || 0);
+      const margin = prepared.layout?.margin || {};
+      const plot_width = Math.max(
+        1,
+        shell_width - Number(margin.l || 0) - Number(margin.r || 0),
+      );
+      const column_count = Math.max(1, Array.isArray(heatmap_trace.x) ? heatmap_trace.x.length : 1);
+      return plot_width / column_count;
+    };
+
+    const centre_font_size_px = (prepared, heatmap_trace, row_height) => {
+      const row_limited = Math.max(7, Math.min(13, Math.round(Number(row_height) * 0.85)));
+      const cell_width = centre_cell_width_px(prepared, heatmap_trace);
+      // "11.000  Δ= -0.303" is the widest normal datum: 17 monospace glyphs.
+      const width_limited = Math.max(6, Math.floor((cell_width - 3) / (17 * 0.60)));
+      return Math.min(row_limited, width_limited);
+    };
 
     const centre_annotations = (prepared, heatmap_trace, current_losses) => {
       const coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
       const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
       const row_height = heatmap_probe_row_height_px();
-      const font_size = centre_font_size_px(row_height);
+      const font_size = centre_font_size_px(prepared, heatmap_trace, row_height);
       const retained_indices = new Set();
 
-      // Dense heatmaps cannot physically carry one readable text row per pixel.
-      // Below 10 px/step, reuse the already-sampled y-axis rows; at larger pitch,
-      // every probe row gets its centre loss/delta annotation.
       if (row_height >= 10) {
         for (let index = 0; index < coordinates.length; index += 1) retained_indices.add(index);
       } else {
@@ -77,34 +87,143 @@ window.addEventListener("load", () => {
         const step = Array.isArray(customdata[index]?.[0])
           ? customdata[index][0][0]
           : customdata[index]?.[0]?.[0];
-        const common = {
-          x: 0,
+        const loss_text = loss.toFixed(3).padStart(6, " ").replace(/^ /, "&nbsp;");
+        const delta_text = delta === null ? "Δ=      —" : `Δ= ${signed_fixed_3(delta)}`;
+        annotations.push({
+          x: -0.5,
           y: coordinates[index],
           xref: "x",
           yref: "y",
+          text: `${loss_text}&nbsp;&nbsp;<span style="color:${delta_colour(delta)};font-weight:700">${delta_text}</span>`,
           showarrow: false,
+          xanchor: "left",
           yanchor: "middle",
-          font: {family: "DejaVu Sans Mono, monospace", size: font_size},
+          xshift: 1,
+          font: {
+            family: "DejaVu Sans Mono, monospace",
+            size: font_size,
+            color: "#ffffff",
+          },
+          align: "left",
           captureevents: false,
           hovertext: step === undefined ? undefined : `step=${step}`,
-        };
-
-        annotations.push({
-          ...common,
-          text: loss.toFixed(4),
-          xanchor: "right",
-          xshift: -20,
-          font: {...common.font, color: "rgb(255,255,255)"},
-        });
-        annotations.push({
-          ...common,
-          text: delta === null ? "Δ=      —" : `Δ= ${signed_fixed_3(delta)}`,
-          xanchor: "left",
-          xshift: -12,
-          font: {...common.font, color: delta_colour(delta)},
         });
       }
       return annotations;
+    };
+
+    const centre_background_shape = prepared => {
+      const range = Array.isArray(prepared.layout?.yaxis?.range)
+        ? prepared.layout.yaxis.range.map(Number)
+        : [0.5, 1.5];
+      const finite = range.filter(Number.isFinite);
+      const y0 = finite.length ? Math.min(...finite) : 0.5;
+      const y1 = finite.length ? Math.max(...finite) : 1.5;
+      return {
+        type: "rect",
+        xref: "x",
+        yref: "y",
+        x0: -0.5,
+        x1: 0.5,
+        y0,
+        y1,
+        line: {width: 0},
+        fillcolor: "#000000",
+        layer: "above",
+        name: "thog2-centre-datum-background",
+      };
+    };
+
+    const emphasize_latest_step = (prepared, heatmap_trace, annotations) => {
+      const coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
+      const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+      if (!coordinates.length) return;
+      const latest_coordinate = coordinates[coordinates.length - 1];
+      const latest_step = Array.isArray(customdata[customdata.length - 1]?.[0])
+        ? customdata[customdata.length - 1][0][0]
+        : customdata[customdata.length - 1]?.[0]?.[0];
+      if (latest_step === undefined || latest_step === null) return;
+
+      const tickvals = Array.isArray(prepared.layout?.yaxis?.tickvals)
+        ? [...prepared.layout.yaxis.tickvals]
+        : [];
+      const ticktext = Array.isArray(prepared.layout?.yaxis?.ticktext)
+        ? [...prepared.layout.yaxis.ticktext]
+        : tickvals.map(String);
+      const match = tickvals.findIndex(value => Number(value) === Number(latest_coordinate));
+      if (match >= 0) {
+        ticktext[match] = "";
+        prepared.layout.yaxis.ticktext = ticktext;
+      }
+      annotations.push({
+        x: 0,
+        y: latest_coordinate,
+        xref: "paper",
+        yref: "y",
+        text: `<b>${latest_step}</b>`,
+        showarrow: false,
+        xanchor: "right",
+        yanchor: "middle",
+        xshift: -9,
+        yshift: -2,
+        font: {size: 15, color: "#20252c"},
+        captureevents: false,
+      });
+    };
+
+    const compact_colourbar = (prepared, heatmap_trace) => {
+      const colourbar = {...(heatmap_trace.colorbar || {})};
+      const row_count = Math.max(1, Array.isArray(heatmap_trace.y) ? heatmap_trace.y.length : 1);
+      const body_height_px = row_count * heatmap_probe_row_height_px();
+      const percent_mode = heatmap_settings_for_current_run().delta_loss_display_mode === "percent";
+      const suffix = percent_mode ? "%" : "";
+      const text = Array.isArray(colourbar.ticktext) ? colourbar.ticktext.map(String) : [];
+      const yellow = text.find(value => value.includes("yellow") && !value.includes("≤")) || "yellow";
+      const blue = text.find(value => value.includes("blue") && !value.includes("≤")) || "blue";
+      const green = text.find(value => value.includes("green") && !value.includes("start")) || "green";
+      const red = text.find(value => value.includes("red")) || "red";
+
+      // At one or two literal pixel rows there is no honest way to draw a legible
+      // vertical key inside the heatmap body. Hide it until enough body exists.
+      if (body_height_px < 36) {
+        heatmap_trace.showscale = false;
+        return;
+      }
+      heatmap_trace.showscale = true;
+
+      const domain = Array.isArray(prepared.layout?.yaxis?.domain)
+        ? prepared.layout.yaxis.domain.map(Number)
+        : [0, 1];
+      const lower = Number.isFinite(domain[0]) ? domain[0] : 0;
+      const upper = Number.isFinite(domain[1]) ? domain[1] : 1;
+      const span = Math.max(0.02, Math.abs(upper - lower));
+
+      colourbar.x = 1.01;
+      colourbar.xanchor = "left";
+      colourbar.xpad = 5;
+      colourbar.y = (lower + upper) / 2;
+      colourbar.yanchor = "middle";
+      colourbar.len = span;
+      colourbar.lenmode = "fraction";
+      colourbar.thickness = 13;
+      colourbar.thicknessmode = "pixels";
+      colourbar.tickfont = {size: body_height_px < 110 ? 8 : 9};
+      colourbar.title = {text: `${percent_mode ? "Δloss (%)" : "Δloss"} bands`, side: "top", font: {size: 9}};
+
+      if (body_height_px < 110) {
+        colourbar.tickmode = "array";
+        colourbar.tickvals = [-0.72, 0, 1];
+        colourbar.ticktext = [
+          `Y/B/G negative${suffix}`,
+          "0",
+          red,
+        ];
+      } else {
+        colourbar.tickmode = "array";
+        colourbar.tickvals = [-0.88, -0.625, -0.25, 0, 1];
+        colourbar.ticktext = [yellow, blue, green, "0", red];
+      }
+      heatmap_trace.colorbar = colourbar;
     };
 
     const base_transpose_heatmap_centre_format = transpose_heatmap;
@@ -113,16 +232,29 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace) return;
 
+      // Reserve real room for the colour key instead of dragging it left over the
+      // rightmost heatmap cells with a CSS transform.
+      prepared.layout.margin = {
+        ...(prepared.layout.margin || {}),
+        r: Math.max(150, Number(prepared.layout?.margin?.r || 0)),
+      };
+
       const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
         ? prepared.layout.meta.thog2_current_losses
         : [];
       const existing_annotations = Array.isArray(prepared.layout.annotations)
         ? prepared.layout.annotations
         : [];
-      prepared.layout.annotations = [
-        ...existing_annotations.filter(annotation => !is_old_centre_annotation(annotation)),
-        ...centre_annotations(prepared, heatmap_trace, current_losses),
-      ];
+      const annotations = existing_annotations.filter(annotation => !is_old_centre_annotation(annotation));
+      annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));
+      emphasize_latest_step(prepared, heatmap_trace, annotations);
+      prepared.layout.annotations = annotations;
+
+      const existing_shapes = Array.isArray(prepared.layout.shapes)
+        ? prepared.layout.shapes.filter(shape => shape?.name !== "thog2-centre-datum-background")
+        : [];
+      prepared.layout.shapes = [...existing_shapes, centre_background_shape(prepared)];
+      compact_colourbar(prepared, heatmap_trace);
     };
 
     const style = document.createElement("style");
@@ -132,12 +264,18 @@ window.addEventListener("load", () => {
         height: 19px !important;
         stroke-width: 1.9 !important;
       }
+      /* The Plotly layout now reserves a real right margin for the key. */
+      .heatmap-shell g.colorbar,
+      .heatmap-shell .colorbar {
+        transform: none !important;
+      }
     `;
     document.head.appendChild(style);
 
     // The original px/step slider only changes the Plotly canvas dimensions via
     // relayout(). Re-render just the heatmap after each slider move so annotation
-    // font size/density is recalculated without touching the six trajectory charts.
+    // font size/density and the compact colour key are recalculated without
+    // touching the six trajectory charts.
     const vertical_scale = by_id("heatmap_vertical_scale");
     let scale_render_frame = null;
     vertical_scale?.addEventListener("input", () => {
