@@ -1,9 +1,9 @@
 // vvv THOG
 "use strict";
 
-// Final presentation correction for the centre/L datum.  Legacy rows have no
+// Final presentation correction for the centre/L datum. Legacy rows have no
 // stored centre loss and must remain blank rather than allowing Number(null)
-// to fabricate 0.00.  Genuine rows mirror the compact CLI loss/delta layout.
+// to fabricate 0.00. Genuine rows mirror the compact CLI loss/delta layout.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const strict_finite_number = value => {
@@ -34,12 +34,21 @@ window.addEventListener("load", () => {
       && String(annotation.font?.family || "").includes("DejaVu Sans Mono")
     );
 
+    const centre_font_size_px = row_height => Math.max(
+      7,
+      Math.min(13, Math.round(Number(row_height) * 0.85)),
+    );
+
     const centre_annotations = (prepared, heatmap_trace, current_losses) => {
       const coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
       const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
       const row_height = heatmap_probe_row_height_px();
+      const font_size = centre_font_size_px(row_height);
       const retained_indices = new Set();
 
+      // Dense heatmaps cannot physically carry one readable text row per pixel.
+      // Below 10 px/step, reuse the already-sampled y-axis rows; at larger pitch,
+      // every probe row gets its centre loss/delta annotation.
       if (row_height >= 10) {
         for (let index = 0; index < coordinates.length; index += 1) retained_indices.add(index);
       } else {
@@ -75,7 +84,7 @@ window.addEventListener("load", () => {
           yref: "y",
           showarrow: false,
           yanchor: "middle",
-          font: {family: "DejaVu Sans Mono, monospace", size: 10},
+          font: {family: "DejaVu Sans Mono, monospace", size: font_size},
           captureevents: false,
           hovertext: step === undefined ? undefined : `step=${step}`,
         };
@@ -125,6 +134,22 @@ window.addEventListener("load", () => {
       }
     `;
     document.head.appendChild(style);
+
+    // The original px/step slider only changes the Plotly canvas dimensions via
+    // relayout(). Re-render just the heatmap after each slider move so annotation
+    // font size/density is recalculated without touching the six trajectory charts.
+    const vertical_scale = by_id("heatmap_vertical_scale");
+    let scale_render_frame = null;
+    vertical_scale?.addEventListener("input", () => {
+      if (scale_render_frame !== null) cancelAnimationFrame(scale_render_frame);
+      scale_render_frame = requestAnimationFrame(async () => {
+        scale_render_frame = null;
+        const mount = by_id("heatmap_plot");
+        const figure = app.figures?.heatmap;
+        if (!mount || !figure || !app.current_run_id) return;
+        await render_plot(mount, figure, "heatmap");
+      });
+    });
 
     if (app.figures && app.current_run_id) render_figures();
   }, 5);
