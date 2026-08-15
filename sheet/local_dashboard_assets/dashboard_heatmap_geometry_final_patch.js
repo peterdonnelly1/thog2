@@ -8,6 +8,8 @@ window.addEventListener("load", () => {
   setTimeout(() => {
     const heatmap_vertical_chrome_px = 94; // 18 top + 76 bottom; cell body is probes * px/step.
     const heatmap_right_key_margin_px = 220;
+    const heatmap_colour_key_min_height_px = 90;
+    const heatmap_colour_key_max_height_px = 220;
 
     const base_plot_mount_dimensions_geometry = plot_mount_dimensions;
     plot_mount_dimensions = function(mount, chart_name, figure) {
@@ -131,6 +133,10 @@ window.addEventListener("load", () => {
         return;
       }
       heatmap_trace.showscale = true;
+      const colour_key_height_px = Math.min(
+        heatmap_colour_key_max_height_px,
+        Math.max(heatmap_colour_key_min_height_px, Math.round(body_height_px * 0.55)),
+      );
       heatmap_trace.colorbar = {
         ...(heatmap_trace.colorbar || {}),
         x: 1.025,
@@ -138,8 +144,10 @@ window.addEventListener("load", () => {
         xpad: 8,
         y: 0.5,
         yanchor: "middle",
-        len: Math.min(0.86, Math.max(0.52, body_height_px / Math.max(1, body_height_px + 94))),
-        lenmode: "fraction",
+        // A pixel-bounded key scales with the chart without ever becoming a
+        // full-height bar on tall or maximized heatmaps.
+        len: colour_key_height_px,
+        lenmode: "pixels",
         thickness: 13,
         thicknessmode: "pixels",
       };
