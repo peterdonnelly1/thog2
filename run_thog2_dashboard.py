@@ -15,7 +15,10 @@ import run_thog2_local_dashboard as _dashboard
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
-_EXTRA_ASSET_NAME = "dashboard_heatmap_loss_patch.js"
+_EXTRA_ASSET_NAMES = (
+    "dashboard_heatmap_loss_patch.js",
+    "dashboard_heatmap_centre_format_patch.js",
+)
 
 
 def _set_process_name() -> None:
@@ -47,13 +50,16 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
 
     index_path = runtime_root / "index.html"
     index_html = index_path.read_text(encoding="utf-8")
-    script_tag = f'  <script src="/assets/{_EXTRA_ASSET_NAME}" defer></script>\n'
-    if script_tag not in index_html:
-        index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
-        index_path.write_text(index_html, encoding="utf-8")
+    for asset_name in _EXTRA_ASSET_NAMES:
+        script_tag = f'  <script src="/assets/{asset_name}" defer></script>\n'
+        if script_tag not in index_html:
+            index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
+    index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
-    _dashboard._ASSET_NAMES = frozenset((*_dashboard._ASSET_NAMES, _EXTRA_ASSET_NAME))
+    _dashboard._ASSET_NAMES = frozenset(
+        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES)
+    )
     return temporary
 
 
