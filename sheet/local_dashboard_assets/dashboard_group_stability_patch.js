@@ -2,8 +2,8 @@
 "use strict";
 
 // Keep W&B-like group navigation structurally stable while a mature run's local
-// .wandb file is still catching up. Train is always present first and expanded;
-// the temporary shell disappears as soon as the real train group is discovered.
+// .wandb file is still catching up. Train is always present first, but remains
+// collapsed so startup does not imply chart materialisation/render work.
 window.addEventListener("load", () => {
   const placeholder_id = "thog2_pending_train_group";
 
@@ -28,7 +28,7 @@ window.addEventListener("load", () => {
     if (!section) {
       section = document.createElement("section");
       section.id = placeholder_id;
-      section.className = "chart-group thog2-pending-train-group";
+      section.className = "chart-group thog2-pending-train-group collapsed";
       section.dataset.chartGroup = "train";
 
       const header = document.createElement("header");
@@ -37,7 +37,7 @@ window.addEventListener("load", () => {
       button.type = "button";
       button.className = "chart-group-toggle";
       button.disabled = true;
-      button.setAttribute("aria-expanded", "true");
+      button.setAttribute("aria-expanded", "false");
       button.innerHTML = (
         '<span class="group-grip" aria-hidden="true">⠿</span>'
         + '<span class="group-caret" aria-hidden="true">⌄</span>'
@@ -45,11 +45,7 @@ window.addEventListener("load", () => {
         + '<span class="group-count">…</span>'
       );
       header.appendChild(button);
-
-      const body = document.createElement("div");
-      body.className = "thog2-pending-train-body";
-      body.textContent = "Scanning local W&B history…";
-      section.append(header, body);
+      section.appendChild(header);
     }
 
     const first_metric_group = charts_scroll.querySelector(":scope > .local-metric-group");
@@ -67,16 +63,6 @@ window.addEventListener("load", () => {
       opacity: 1;
       color: #49515b;
       cursor: default;
-    }
-    .thog2-pending-train-body {
-      height: 34px;
-      display: flex;
-      align-items: center;
-      padding: 0 12px 0 41px;
-      border-bottom: 1px solid #e7eaee;
-      background: #fafbfc;
-      color: #7a828c;
-      font-size: 10px;
     }
   `;
   document.head.appendChild(style);
