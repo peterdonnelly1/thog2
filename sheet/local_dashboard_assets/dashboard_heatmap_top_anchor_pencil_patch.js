@@ -113,3 +113,111 @@ window.addEventListener("load", () => {
   }, 0);
 });
 // ^^^ THOG
+
+// vvv THOG pin the natural heatmap canvas itself to the viewport top and make ordinary chart scrollbars contingency UI rather than permanent fat separators
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    const pin_heatmap_canvas_to_top = () => {
+      const mount = by_id("heatmap_plot");
+      const canvas = mount?.closest(".plot-scroll-canvas");
+      const content = mount?.closest(".heatmap-inner-content");
+      const viewport = mount?.closest(".heatmap-inner-viewport");
+      if (!mount || !canvas || !content || !viewport) return;
+
+      const canvas_height = Math.max(
+        1,
+        Math.round(Number.parseFloat(canvas.style.height) || canvas.getBoundingClientRect().height || 1),
+      );
+      const canvas_width = Math.max(
+        1,
+        Math.round(Number.parseFloat(canvas.style.width) || canvas.getBoundingClientRect().width || 1),
+      );
+
+      content.style.setProperty("display", "block", "important");
+      content.style.setProperty("position", "relative", "important");
+      content.style.setProperty("min-height", "0", "important");
+      content.style.setProperty("height", `${canvas_height}px`, "important");
+      content.style.setProperty("min-width", "0", "important");
+      content.style.setProperty("width", `${Math.max(canvas_width, viewport.clientWidth)}px`, "important");
+
+      canvas.style.setProperty("position", "absolute", "important");
+      canvas.style.setProperty("top", "0", "important");
+      canvas.style.setProperty("left", "0", "important");
+      canvas.style.setProperty("margin", "0", "important");
+
+      if (!viewport.dataset.thog2NaturalTopPinned) {
+        viewport.scrollTop = 0;
+        viewport.dataset.thog2NaturalTopPinned = "true";
+      }
+    };
+
+    const base_render_plot_natural_top = render_plot;
+    render_plot = async function(mount, figure, chart_name) {
+      const result = await base_render_plot_natural_top(mount, figure, chart_name);
+      if (chart_name === "heatmap") pin_heatmap_canvas_to_top();
+      return result;
+    };
+
+    const base_select_run_natural_top = select_run;
+    select_run = function(run_id, options = {}) {
+      const changing_run = String(run_id || "") !== String(app.current_run_id || "");
+      if (changing_run) {
+        const viewport = document.querySelector(
+          '.chart-card[data-chart="heatmap"] .heatmap-inner-viewport'
+        );
+        if (viewport) delete viewport.dataset.thog2NaturalTopPinned;
+      }
+      return base_select_run_natural_top(run_id, options);
+    };
+
+    const style = document.createElement("style");
+    style.textContent = `
+      .heatmap-inner-content {
+        min-height: 0 !important;
+      }
+
+      /* Ordinary chart scrollbars appear only when a resized plot genuinely
+         overflows its card. This removes the dark Firefox rails that looked
+         like thick borders between adjacent charts. */
+      .plot-shell:not(.heatmap-shell) {
+        overflow: auto !important;
+        scrollbar-width: thin !important;
+      }
+      .plot-shell:not(.heatmap-shell)::-webkit-scrollbar {
+        width: 7px !important;
+        height: 7px !important;
+      }
+      .plot-shell:not(.heatmap-shell)::-webkit-scrollbar-thumb {
+        min-width: 20px !important;
+        min-height: 20px !important;
+        border: 1px solid #e6e9ed !important;
+      }
+
+      /* Preserve resize hit areas while drawing only a pencil line. */
+      .panel-resizer-east {
+        width: 5px !important;
+        border-right: 1px solid #aab3be !important;
+      }
+      .panel-resizer-south {
+        height: 5px !important;
+        border-bottom: 1px solid #aab3be !important;
+      }
+      .panel-resizer-corner {
+        width: 10px !important;
+        height: 10px !important;
+      }
+    `;
+    document.head.appendChild(style);
+
+    pin_heatmap_canvas_to_top();
+    if (app.figures?.heatmap && app.current_run_id) {
+      queueMicrotask(async () => {
+        const mount = by_id("heatmap_plot");
+        if (!mount) return;
+        await render_plot(mount, app.figures.heatmap, "heatmap");
+        pin_heatmap_canvas_to_top();
+      });
+    }
+  }, 0);
+});
+// ^^^ THOG
