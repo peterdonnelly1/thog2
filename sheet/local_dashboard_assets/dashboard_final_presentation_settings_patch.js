@@ -91,7 +91,7 @@ window.addEventListener("load", () => {
         showarrow: false,
         xanchor: "center",
         yanchor: "bottom",
-        yshift: 42,
+        yshift: 50,
         font: {
           family: "Inter, ui-sans-serif, system-ui, sans-serif",
           size: 11,
@@ -341,7 +341,7 @@ window.addEventListener("load", () => {
         font-size: 15px !important;
         font-weight: 800 !important;
         fill: #171a1f !important;
-        transform: translate(-7px, 6px) !important;
+        transform: translate(-7px, 10px) !important;
       }
     `;
     document.head.appendChild(style);
