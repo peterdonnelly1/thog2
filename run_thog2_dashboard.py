@@ -25,6 +25,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_heatmap_centre_format_patch.js",
     "dashboard_heatmap_geometry_final_patch.js",
     "dashboard_logs_modes_patch.js",
+    "dashboard_navigation_polish_patch.js",
     "dashboard_wandb_groups_patch.js",
 )
 
