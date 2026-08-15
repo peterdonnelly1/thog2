@@ -7,6 +7,7 @@ from typing import Any
 
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 from . import plastic_depth_wandb_probe_curves_patch as _probe_wandb
+from . import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metadata_patch
 from . import wandb_telemetry as _wandb
 # vvv THOG local heatmaps persist raw probe records through a concurrent compact store instead of versioned Plotly media
 from .local_chart_store import ensure_local_chart_store
