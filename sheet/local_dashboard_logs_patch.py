@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 _DEFAULT_INITIAL_BYTES = 1024 * 1024
 _MAXIMUM_BYTES = 2 * 1024 * 1024
+_HASH_TRUNCATION_PREFIX = "__h_"
 
 
 def _timestamped_artifact_suffix(directory_name: str) -> str:
@@ -19,6 +20,13 @@ def _timestamped_artifact_suffix(directory_name: str) -> str:
         if stamp.isdigit():
             return directory_name[12:]
     return directory_name
+
+
+def _artifact_prefix_from_log_directory(directory_name: str) -> str:
+    suffix = _timestamped_artifact_suffix(directory_name)
+    if _HASH_TRUNCATION_PREFIX in suffix:
+        return suffix.split(_HASH_TRUNCATION_PREFIX, 1)[0]
+    return suffix
 
 
 def _matching_train_logs(catalog: Any, state: Any) -> tuple[Path, ...]:
@@ -35,11 +43,11 @@ def _matching_train_logs(catalog: Any, state: Any) -> tuple[Path, ...]:
         except OSError:
             continue
         directory_name = candidate.parent.name
-        suffix = _timestamped_artifact_suffix(directory_name)
+        artifact_prefix = _artifact_prefix_from_log_directory(directory_name)
         if (
             directory_name == artifact_name
             or directory_name.endswith(f"_{artifact_name}")
-            or artifact_name.startswith(suffix)
+            or (artifact_prefix and artifact_name.startswith(artifact_prefix))
         ):
             candidates.append(candidate)
     return tuple(candidates)
