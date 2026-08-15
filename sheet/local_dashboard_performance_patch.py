@@ -1,9 +1,9 @@
 # vvv THOG
 """Performance patch for the local THOG2 dashboard.
 
-Avoid repeated run-catalog walks, cache heatmap/depth Plotly figures independently,
-and expose family-sized figure payloads so a heatmap update does not serialize all
-six coefficient charts again.
+Avoid repeated run-catalog walks, cache unchanged run status reads, cache
+heatmap/depth Plotly figures independently, and expose family-sized figure
+payloads so a heatmap update does not serialize all six coefficient charts again.
 """
 
 from __future__ import annotations
@@ -18,6 +18,19 @@ def install(dashboard: Any) -> None:
     if getattr(dashboard, "_thog2_dashboard_performance_patch_installed", False):
         return
     dashboard._thog2_dashboard_performance_patch_installed = True
+
+    original_status = dashboard.RunDashboardState.status
+
+    def status_mtime_cached(self: Any) -> dict[str, Any]:
+        modified = dashboard._modified_time(self.database_path)
+        cached = getattr(self, "_thog2_status_cache", None)
+        if cached is not None and cached[0] == modified:
+            return cached[1]
+        value = original_status(self)
+        self._thog2_status_cache = (modified, value)
+        return value
+
+    dashboard.RunDashboardState.status = status_mtime_cached
 
     original_runs = dashboard.DashboardCatalog.runs
     original_state_for_run = dashboard.DashboardCatalog.state_for_run
