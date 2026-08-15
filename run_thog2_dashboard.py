@@ -31,6 +31,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_wandb_groups_patch.js",
     "dashboard_group_stability_patch.js",
     "dashboard_heatmap_flip_log_reset_patch.js",
+    "dashboard_heatmap_top_anchor_pencil_patch.js",
 )
 
 
