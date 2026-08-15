@@ -110,5 +110,19 @@
     startup_gated_fetch_json.__thog2_synthetic_startup_gate = true;
     fetch_json = startup_gated_fetch_json;
   }
+
+  // Cover the short interval before the late performance overlay attaches its
+  // family-specific wake handlers. Once that overlay exists, these listeners are
+  // intentionally inert and the optimised stale-family logic owns the refresh.
+  const early_wake = name => {
+    queueMicrotask(() => {
+      if (!group_is_open(name) || window.__thog2_dashboard_performance) return;
+      if (!app.current_run_id) return;
+      app.figure_revision = null;
+      refresh_current_run();
+    });
+  };
+  source_toggle.addEventListener("click", () => early_wake("heatmap"));
+  coefficients_toggle.addEventListener("click", () => early_wake("coefficients"));
 })();
 // ^^^ THOG
