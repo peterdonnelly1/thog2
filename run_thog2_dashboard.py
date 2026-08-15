@@ -18,6 +18,7 @@ _PR_SET_NAME = 15
 _EXTRA_ASSET_NAMES = (
     "dashboard_heatmap_loss_patch.js",
     "dashboard_heatmap_centre_format_patch.js",
+    "dashboard_heatmap_geometry_final_patch.js",
 )
 
 
