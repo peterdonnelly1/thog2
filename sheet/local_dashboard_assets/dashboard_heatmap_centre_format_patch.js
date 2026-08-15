@@ -22,6 +22,12 @@ window.addEventListener("load", () => {
       return value < 0 ? "#66ff00" : "#ff0000";
     };
 
+    const step_from_custom_row = row => {
+      if (!Array.isArray(row)) return undefined;
+      const populated_cell = row.find(cell => Array.isArray(cell));
+      return populated_cell?.[0];
+    };
+
     const is_old_centre_annotation = annotation => (
       annotation
       && annotation.xref === "x"
@@ -84,9 +90,7 @@ window.addEventListener("load", () => {
           ? strict_finite_number(current_losses[index - 1])
           : null;
         const delta = previous_loss === null ? null : loss - previous_loss;
-        const step = Array.isArray(customdata[index]?.[0])
-          ? customdata[index][0][0]
-          : customdata[index]?.[0]?.[0];
+        const step = step_from_custom_row(customdata[index]);
         const loss_text = loss.toFixed(3).padStart(6, " ").replace(/^ /, "&nbsp;");
         const delta_text = delta === null ? "Δ=      —" : `Δ= ${signed_fixed_3(delta)}`;
         annotations.push({
@@ -139,9 +143,7 @@ window.addEventListener("load", () => {
       const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
       if (!coordinates.length) return;
       const latest_coordinate = coordinates[coordinates.length - 1];
-      const latest_step = Array.isArray(customdata[customdata.length - 1]?.[0])
-        ? customdata[customdata.length - 1][0][0]
-        : customdata[customdata.length - 1]?.[0]?.[0];
+      const latest_step = step_from_custom_row(customdata[customdata.length - 1]);
       if (latest_step === undefined || latest_step === null) return;
 
       const tickvals = Array.isArray(prepared.layout?.yaxis?.tickvals)
@@ -176,7 +178,6 @@ window.addEventListener("load", () => {
       const row_count = Math.max(1, Array.isArray(heatmap_trace.y) ? heatmap_trace.y.length : 1);
       const body_height_px = row_count * heatmap_probe_row_height_px();
       const percent_mode = heatmap_settings_for_current_run().delta_loss_display_mode === "percent";
-      const suffix = percent_mode ? "%" : "";
       const text = Array.isArray(colourbar.ticktext) ? colourbar.ticktext.map(String) : [];
       const yellow = text.find(value => value.includes("yellow") && !value.includes("≤")) || "yellow";
       const blue = text.find(value => value.includes("blue") && !value.includes("≤")) || "blue";
@@ -214,7 +215,7 @@ window.addEventListener("load", () => {
         colourbar.tickmode = "array";
         colourbar.tickvals = [-0.72, 0, 1];
         colourbar.ticktext = [
-          `Y/B/G negative${suffix}`,
+          percent_mode ? "Y/B/G negative (%)" : "Y/B/G negative",
           "0",
           red,
         ];
