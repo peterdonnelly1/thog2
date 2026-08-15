@@ -12,11 +12,13 @@ from pathlib import Path
 from sheet import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metadata_patch
 from sheet import local_dashboard_logs_patch as _local_dashboard_logs_patch
 from sheet import local_dashboard_wandb_charts_patch as _local_dashboard_wandb_charts_patch
+from sheet import local_dashboard_wandb_catchup_patch as _local_dashboard_wandb_catchup_patch
 import run_thog2_local_dashboard as _dashboard
 
 
 _local_dashboard_logs_patch.install(_dashboard)
 _local_dashboard_wandb_charts_patch.install(_dashboard)
+_local_dashboard_wandb_catchup_patch.install(_local_dashboard_wandb_charts_patch)
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
@@ -27,6 +29,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_logs_modes_patch.js",
     "dashboard_navigation_polish_patch.js",
     "dashboard_wandb_groups_patch.js",
+    "dashboard_group_stability_patch.js",
 )
 
 
