@@ -30,6 +30,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_navigation_polish_patch.js",
     "dashboard_wandb_groups_patch.js",
     "dashboard_group_stability_patch.js",
+    "dashboard_heatmap_flip_log_reset_patch.js",
 )
 
 
