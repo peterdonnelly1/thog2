@@ -10,8 +10,11 @@ import tempfile
 from pathlib import Path
 
 from sheet import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metadata_patch
+from sheet import local_dashboard_logs_patch as _local_dashboard_logs_patch
 import run_thog2_local_dashboard as _dashboard
 
+
+_local_dashboard_logs_patch.install(_dashboard)
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
@@ -19,6 +22,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_heatmap_loss_patch.js",
     "dashboard_heatmap_centre_format_patch.js",
     "dashboard_heatmap_geometry_final_patch.js",
+    "dashboard_logs_modes_patch.js",
 )
 
 
