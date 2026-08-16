@@ -293,6 +293,9 @@ def test_wandb_files_are_exposed_as_a_folder_manifest(
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
+    heatmap_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_patch.js"
+    ).read_text(encoding="utf-8")
     stylesheet = (dashboard._ASSET_ROOT / "dashboard.css").read_text(encoding="utf-8")
 
     assert 'id="heatmap_placeholder"' in html
@@ -312,7 +315,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="depth_chart_group"' in html
     assert 'id="depth_group_toggle"' in html
     assert "instra · THOG2 instrumentation" in html
-    assert 'id="files_tab"' in html
+    assert 'class="run-tabs"' not in html
     assert 'id="files_workspace"' in html
     assert 'id="instra_files_tab"' in html
     assert 'id="wandb_files_tab"' in html
@@ -342,8 +345,15 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "reset_chart_settings" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
-    assert "set_workspace_view" in javascript
+    assert "set_workspace_view" not in javascript
     assert "set_file_source" in javascript
+    assert 'const local_detail_tabs = Object.freeze(["charts", "overview", "logs", "files", "artifacts"]);' in heatmap_patch
+    assert 'by_id("files_workspace").hidden = !has_run || !files;' in heatmap_patch
+    assert 'if (tab_name === "files") refresh_files();' in heatmap_patch
+    assert "actions.insertBefore(control, maximize);" in heatmap_patch
+    assert "header.insertBefore(control, maximize);" not in heatmap_patch
+    assert 'name_button.addEventListener("click", () => set_file_path(entry.path));' in javascript
+    assert 'window.open(local_file_url(entry.path), "_blank", "noopener")' in javascript
     assert '"/api/local-files"' in javascript
     assert '"/api/wandb-files"' in javascript
     assert '.chart-card[data-chart="heatmap"] { flex: 1 1 100%; }' in stylesheet

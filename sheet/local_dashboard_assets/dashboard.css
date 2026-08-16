@@ -198,12 +198,6 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .run-subtitle .identity { color: #3e4350; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 650; }
 .run-subtitle .stale-warning { color: #a45517; font-weight: 650; }
 .charts-toolbar-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.run-tabs { flex: 0 0 39px; display: flex; align-items: flex-end; gap: 21px; padding: 0 15px; border-bottom: 1px solid var(--border); background: #fff; }
-.run-tab { position: relative; height: 39px; padding: 0 2px; border: 0; background: transparent; color: #69717c; font-size: 11px; font-weight: 620; cursor: pointer; }
-.run-tab::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px 2px 0 0; background: transparent; }
-.run-tab:hover { color: #363c45; }
-.run-tab.selected { color: #262b32; }
-.run-tab.selected::after { background: linear-gradient(90deg, #735de0, #00a2b8); }
 .charts-empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; text-align: center; }
 .empty-chart-icon { color: #9b91d9; font-size: 44px; line-height: 1; }
 

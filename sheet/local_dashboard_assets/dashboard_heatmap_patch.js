@@ -398,7 +398,8 @@ function sync_heatmap_scale_control() {
 function install_heatmap_scale_control() {
   const header = document.querySelector('.chart-card[data-chart="heatmap"] .chart-card-header');
   const maximize = header?.querySelector(".maximize-button");
-  if (!header || !maximize || by_id("heatmap_vertical_scale")) return;
+  const actions = maximize?.parentElement;
+  if (!header || !maximize || !actions || by_id("heatmap_vertical_scale")) return;
 
   const control = document.createElement("label");
   control.className = "heatmap-vertical-scale-control";
@@ -416,7 +417,7 @@ function install_heatmap_scale_control() {
   const value = document.createElement("span");
   value.id = "heatmap_vertical_scale_value";
   control.append(glyph, range, value);
-  header.insertBefore(control, maximize);
+  actions.insertBefore(control, maximize);
 
   range.addEventListener("input", () => {
     const numeric = Number(range.value);
@@ -577,7 +578,7 @@ if (app.figures && app.current_run_id) {
 
 // vvv THOG
 // W&B-like per-artifact navigation and Overview. Charts remains the default;
-// Logs, Files and Artifacts are intentionally blank placeholders for now.
+// Files is the navigable instra/W&B browser; Logs and Artifacts remain placeholders.
 const local_detail_tabs = Object.freeze(["charts", "overview", "logs", "files", "artifacts"]);
 let local_active_detail_tab = "charts";
 
@@ -768,11 +769,14 @@ function local_apply_detail_tab() {
   });
   const charts = local_active_detail_tab === "charts";
   const overview = local_active_detail_tab === "overview";
+  const files = local_active_detail_tab === "files";
   by_id("charts_empty").hidden = has_run || !charts;
   by_id("charts_scroll").hidden = !has_run || !charts;
   by_id("run_overview_pane").hidden = !has_run || !overview;
-  by_id("run_blank_detail_pane").hidden = !has_run || charts || overview;
+  by_id("files_workspace").hidden = !has_run || !files;
+  by_id("run_blank_detail_pane").hidden = !has_run || charts || overview || files;
   if (overview && has_run) local_render_overview();
+  if (files && has_run) render_files();
   if (charts && has_run) requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
 }
 
@@ -780,6 +784,7 @@ function local_set_detail_tab(tab_name) {
   if (!local_detail_tabs.includes(tab_name)) return;
   if (app.maximized_chart) restore_maximized_chart();
   local_active_detail_tab = tab_name; local_apply_detail_tab();
+  if (tab_name === "files") refresh_files();
 }
 
 function local_install_detail_tabs() {

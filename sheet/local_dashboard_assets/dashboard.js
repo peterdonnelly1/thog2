@@ -47,7 +47,6 @@ const app = {
   visibility: load_json("thog2_local_run_visibility", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
   axis_ranges: load_json("thog2_local_chart_axis_ranges", {}),
-  workspace_view: "charts",
   file_source: localStorage.getItem("instra_file_source") === "wandb" ? "wandb" : "instra",
   file_path: "",
   file_payload: null,
@@ -796,40 +795,22 @@ function render_run_heading() {
 
 function render_empty_state() {
   const has_run = Boolean(app.current_run_id);
-  const charts_visible = app.workspace_view === "charts";
-  by_id("charts_empty").hidden = !charts_visible || has_run;
-  by_id("charts_scroll").hidden = !charts_visible || !has_run;
-  by_id("files_workspace").hidden = app.workspace_view !== "files";
+  by_id("charts_empty").hidden = has_run;
+  by_id("charts_scroll").hidden = !has_run;
   if (!has_run) {
     by_id("charts_empty_title").textContent = app.runs.length ? "Select a run" : "Waiting for a local run";
     by_id("charts_empty_detail").textContent = app.runs.length
       ? "Choose a run from the persistent panel on the left."
       : "This page can stay open before training starts; the active W&B-linked run will appear automatically.";
   }
-  render_files();
 }
 
-function update_workspace_tabs() {
-  document.querySelectorAll(".run-tab").forEach(button => {
-    const selected = button.dataset.workspaceView === app.workspace_view;
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-selected", String(selected));
-  });
+function update_file_source_tabs() {
   document.querySelectorAll(".file-source-tab").forEach(button => {
     const selected = button.dataset.fileSource === app.file_source;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-selected", String(selected));
   });
-}
-
-function set_workspace_view(view) {
-  if (!["charts", "files"].includes(view) || app.workspace_view === view) return;
-  if (view === "files") restore_maximized_chart();
-  app.workspace_view = view;
-  update_workspace_tabs();
-  render_empty_state();
-  if (view === "files") refresh_files();
-  else requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
 }
 
 function set_file_source(source) {
@@ -838,7 +819,7 @@ function set_file_source(source) {
   app.file_path = "";
   app.file_payload = null;
   localStorage.setItem("instra_file_source", source);
-  update_workspace_tabs();
+  update_file_source_tabs();
   render_files();
   refresh_files();
 }
@@ -960,7 +941,7 @@ function append_file_row(body, entry) {
 }
 
 function render_files() {
-  update_workspace_tabs();
+  update_file_source_tabs();
   const body = by_id("files_body");
   body.replaceChildren();
   const empty = by_id("files_empty");
@@ -1017,7 +998,7 @@ function render_files() {
 }
 
 async function refresh_files(force = false) {
-  if (app.workspace_view !== "files" || !app.current_run_id) {
+  if (!app.current_run_id) {
     render_files();
     return;
   }
@@ -1104,7 +1085,6 @@ function select_run(run_id, options = {}) {
   render_run_heading();
   render_empty_state();
   refresh_current_run();
-  if (app.workspace_view === "files") refresh_files();
 }
 
 function resize_plot_in_card(card) {
@@ -1637,9 +1617,6 @@ function show_toast(message) {
 }
 
 function bind_events() {
-  document.querySelectorAll(".run-tab").forEach(button => {
-    button.addEventListener("click", () => set_workspace_view(button.dataset.workspaceView));
-  });
   document.querySelectorAll(".file-source-tab").forEach(button => {
     button.addEventListener("click", () => set_file_source(button.dataset.fileSource));
   });
@@ -1820,7 +1797,7 @@ async function start() {
   by_id("page_size").value = String(app.page_size);
   by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
   update_sort_direction_ui();
-  update_workspace_tabs();
+  update_file_source_tabs();
   const saved_width = Number(localStorage.getItem("thog2_local_runs_width"));
   if (Number.isFinite(saved_width) && saved_width > 0) set_runs_pane_width(saved_width);
   if (localStorage.getItem("thog2_local_runs_collapsed") === "1") toggle_runs_pane();
