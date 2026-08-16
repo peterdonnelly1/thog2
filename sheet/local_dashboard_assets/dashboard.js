@@ -68,6 +68,9 @@ const app = {
   chart_settings_render_override: null,
   chart_settings_preview_serial: 0,
   chart_settings_preview_timer: null,
+  chart_settings_observer: null,
+  dynamic_chart_figures: {},
+  dynamic_chart_metadata: {},
 };
 if (!app.axis_ranges || typeof app.axis_ranges !== "object" || Array.isArray(app.axis_ranges)) app.axis_ranges = {};
 
@@ -521,6 +524,15 @@ function transpose_heatmap(prepared) {
 }
 
 function chart_default_labels(chart_name) {
+  const dynamic = app.dynamic_chart_metadata?.[chart_name];
+  if (dynamic) {
+    return {
+      x_source: dynamic.x_source || "Step",
+      x_label: dynamic.x_label || "step",
+      y_source: dynamic.y_source || chart_titles[chart_name] || "Metric value",
+      y_label: dynamic.y_label || chart_titles[chart_name] || "metric value",
+    };
+  }
   return chart_name === "heatmap"
     ? {x_source: "Candidate layer count", x_label: "absolute candidate layer count", y_source: "Optimizer step", y_label: "optimizer step"}
     : {x_source: "Layer sample number", x_label: "layer sample number", y_source: "Generated weight value", y_label: "weight value"};
@@ -764,7 +776,9 @@ function prepare_figure(figure, chart_name) {
   prepared.layout.autosize = true;
   prepared.layout.paper_bgcolor = "white";
   prepared.layout.plot_bgcolor = "white";
-  prepared.layout.hovermode = "closest";
+  prepared.layout.hovermode = app.dynamic_chart_figures?.[chart_name]
+    ? (prepared.layout.hovermode || "closest")
+    : "closest";
   prepared.layout.colorway = [colour_for_run(app.current_run_id)];
   delete prepared.layout.width;
   delete prepared.layout.height;
@@ -775,7 +789,7 @@ function prepare_figure(figure, chart_name) {
 
   if (chart_name === "heatmap") {
     transpose_heatmap(prepared);
-  } else {
+  } else if (!app.dynamic_chart_figures?.[chart_name]) {
     const colour = colour_for_run(app.current_run_id);
     for (const trace of prepared.data || []) {
       if (trace.type && trace.type !== "scatter" && trace.type !== "scattergl") continue;
@@ -812,16 +826,65 @@ function add_panel_resizers(article) {
   }
 }
 
+function chart_settings_icon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = `
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.09a2 2 0 0 1 1 1.74v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+    <circle cx="12" cy="12" r="3"></circle>
+  `;
+  return svg;
+}
+
 function chart_settings_button(chart_name, title) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "chart-settings-button";
   button.dataset.chartSettings = chart_name;
-  button.textContent = "⚙";
+  button.appendChild(chart_settings_icon());
   button.title = "Chart settings";
   button.setAttribute("aria-label", `Settings for ${title}`);
   button.classList.toggle("active", has_chart_axis_settings(chart_name));
   return button;
+}
+
+function ensure_chart_settings_button(card) {
+  if (!(card instanceof Element) || !card.matches(".chart-card[data-chart]")) return;
+  const chart_name = card.dataset.chart;
+  const header = card.querySelector(":scope > .chart-card-header");
+  const heading = header?.querySelector(".chart-heading-copy h2");
+  if (!chart_name || !header || !heading) return;
+  if (!chart_titles[chart_name]) chart_titles[chart_name] = heading.textContent.trim() || chart_name;
+  if (header.querySelector(".chart-settings-button")) return;
+
+  let actions = header.querySelector(":scope > .chart-card-actions");
+  const maximize = header.querySelector(":scope > .maximize-button, :scope > .chart-card-actions > .maximize-button");
+  if (!actions) {
+    actions = document.createElement("div");
+    actions.className = "chart-card-actions";
+    if (maximize) actions.appendChild(maximize);
+    header.appendChild(actions);
+  }
+  const button = chart_settings_button(chart_name, heading.textContent.trim() || chart_titles[chart_name]);
+  actions.insertBefore(button, maximize?.parentElement === actions ? maximize : actions.firstChild);
+}
+
+function install_universal_chart_settings() {
+  const root = by_id("charts_scroll");
+  if (!root) return;
+  root.querySelectorAll(".chart-card[data-chart]").forEach(ensure_chart_settings_button);
+  app.chart_settings_observer?.disconnect();
+  app.chart_settings_observer = new MutationObserver(records => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(".chart-card[data-chart]")) ensure_chart_settings_button(node);
+        node.querySelectorAll?.(".chart-card[data-chart]").forEach(ensure_chart_settings_button);
+      }
+    }
+  });
+  app.chart_settings_observer.observe(root, {childList: true, subtree: true});
 }
 
 function depth_card(chart_name) {
@@ -1724,7 +1787,7 @@ function close_chart_settings() {
 
 function render_axis_settings_change(chart_name = null) {
   update_chart_settings_buttons();
-  if (!app.figures) return;
+  if (!app.figures && !app.dynamic_chart_figures?.[chart_name]) return;
   const figure = chart_name ? figure_for_chart(chart_name) : null;
   const mount = chart_name ? by_id(`${chart_name}_plot`) : null;
   if (figure && mount) {
@@ -2110,6 +2173,7 @@ function bind_events() {
 async function start() {
   migrate_panel_layout();
   ensure_depth_cards();
+  install_universal_chart_settings();
   update_chart_settings_buttons();
   build_swatches();
   bind_events();

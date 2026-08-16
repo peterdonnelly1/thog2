@@ -320,6 +320,7 @@ function plot_mount_dimensions(mount, chart_name, figure) {
 }
 
 function figure_for_chart(chart_name) {
+  if (app.dynamic_chart_figures?.[chart_name]) return app.dynamic_chart_figures[chart_name];
   if (!app.figures) return null;
   return chart_name === "heatmap" ? app.figures.heatmap : app.figures.depth?.[chart_name];
 }

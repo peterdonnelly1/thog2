@@ -655,7 +655,6 @@ class DashboardCatalog:
 
 def _handler_for(catalog: DashboardCatalog):
     plotly_javascript = get_plotlyjs().encode("utf-8")
-    index_html = (_ASSET_ROOT / "index.html").read_bytes()
 
     class Handler(BaseHTTPRequestHandler):
         def _send(
@@ -720,7 +719,10 @@ def _handler_for(catalog: DashboardCatalog):
             query = parse_qs(parsed.query)
             try:
                 if path in {"/", "/runs"} or path.startswith("/runs/"):
-                    self._send(index_html, content_type="text/html; charset=utf-8")
+                    self._send(
+                        (_ASSET_ROOT / "index.html").read_bytes(),
+                        content_type="text/html; charset=utf-8",
+                    )
                     return
                 if path == "/plotly.min.js":
                     self._send(

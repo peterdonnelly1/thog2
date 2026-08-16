@@ -296,6 +296,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_patch.js"
     ).read_text(encoding="utf-8")
+    wandb_groups_patch = (
+        dashboard._ASSET_ROOT / "dashboard_wandb_groups_patch.js"
+    ).read_text(encoding="utf-8")
     stylesheet = (dashboard._ASSET_ROOT / "dashboard.css").read_text(encoding="utf-8")
 
     assert 'id="heatmap_placeholder"' in html
@@ -355,10 +358,18 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "reset_chart_settings" in javascript
     assert "render_chart_settings_preview" in javascript
     assert "apply_chart_display_settings" in javascript
+    assert "dynamic_chart_figures" in javascript
+    assert "dynamic_chart_metadata" in javascript
     assert "limit_curve_snapshots" in javascript
     assert "apply_outlier_resistant_y_range" in javascript
     assert "smoothed_values" in javascript
-    assert 'button.textContent = "⚙"' in javascript
+    assert "function chart_settings_icon()" in javascript
+    assert 'button.appendChild(chart_settings_icon())' in javascript
+    assert "function install_universal_chart_settings()" in javascript
+    assert 'root.querySelectorAll(".chart-card[data-chart]").forEach(ensure_chart_settings_button);' in javascript
+    assert "app.chart_settings_observer.observe(root, {childList: true, subtree: true});" in javascript
+    assert "install_universal_chart_settings();" in javascript
+    assert '<svg viewBox="0 0 24 24" aria-hidden="true">' in html
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
     assert "set_workspace_view" not in javascript
@@ -369,6 +380,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "actions.insertBefore(control, maximize);" in heatmap_patch
     assert "header.insertBefore(control, maximize);" not in heatmap_patch
     assert 'chart: stored_chart_settings("heatmap")' in heatmap_patch
+    assert "app.dynamic_chart_figures?.[chart_name]" in heatmap_patch
     assert "trajectory_chart_names_fast.map(chart_name => [chart_name, stored_chart_settings(chart_name)])" in heatmap_patch
     assert 'name_button.addEventListener("click", () => set_file_path(entry.path));' in javascript
     assert 'window.open(local_file_url(entry.path), "_blank", "noopener")' in javascript
@@ -388,4 +400,16 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert ".chart-settings-workspace { min-height: 0; display: grid;" in stylesheet
     assert ".chart-settings-preview-pane { min-width: 0; min-height: 0;" in stylesheet
     assert ".chart-settings-controls { min-width: 0; min-height: 0;" in stylesheet
+    assert ".chart-settings-button svg { display: block; width: 17px; height: 17px;" in stylesheet
+    assert "actions.append(chart_settings_button(key, title.textContent), maximize);" in wandb_groups_patch
+    assert "app.dynamic_chart_figures[key] = figure;" in wandb_groups_patch
+    assert "await render_plot(mount, figure, key);" in wandb_groups_patch
+
+
+def test_dashboard_html_is_read_for_each_page_request() -> None:
+    server_source = Path(dashboard.__file__).read_text(encoding="utf-8")
+
+    handler_body = server_source.split("def _handler_for", 1)[1]
+    assert 'index_html = (_ASSET_ROOT / "index.html").read_bytes()' not in handler_body
+    assert '(_ASSET_ROOT / "index.html").read_bytes(),' in handler_body
 # ^^^ THOG

@@ -39,6 +39,12 @@ window.addEventListener("load", () => {
         for (const mount of section.querySelectorAll(".plot-mount")) {
           if (mount.dataset.plotReady === "true") Plotly.purge(mount);
         }
+        for (const card of section.querySelectorAll(".local-metric-card")) {
+          const key = card.dataset.chart;
+          delete app.dynamic_chart_figures[key];
+          delete app.dynamic_chart_metadata[key];
+          delete chart_titles[key];
+        }
         section.remove();
       }
       group_revisions.clear();
@@ -123,6 +129,12 @@ window.addEventListener("load", () => {
     const make_metric_card = (group_name, chart) => {
       const key = chart_key(group_name, chart.id);
       chart_titles[key] = chart.title || chart.id;
+      app.dynamic_chart_metadata[key] = {
+        x_source: chart.x_title || "Step",
+        x_label: chart.x_title || "step",
+        y_source: chart.title || chart.id,
+        y_label: chart.y_title || chart.title || chart.id,
+      };
 
       const article = document.createElement("article");
       article.className = "chart-card local-metric-card";
@@ -135,7 +147,7 @@ window.addEventListener("load", () => {
       const copy = document.createElement("div");
       copy.className = "chart-heading-copy";
       const title = document.createElement("h2");
-      title.textContent = chart.title || chart.id;
+      title.textContent = normalize_chart_settings(key).title;
       const detail = document.createElement("p");
       detail.className = "local-metric-detail";
       copy.append(title, detail);
@@ -146,7 +158,10 @@ window.addEventListener("load", () => {
       maximize.textContent = "⛶";
       maximize.title = "Maximize chart";
       maximize.setAttribute("aria-label", `Maximize ${title.textContent}`);
-      header.append(copy, maximize);
+      const actions = document.createElement("div");
+      actions.className = "chart-card-actions";
+      actions.append(chart_settings_button(key, title.textContent), maximize);
+      header.append(copy, actions);
 
       const shell = document.createElement("div");
       shell.className = "plot-shell";
@@ -161,9 +176,7 @@ window.addEventListener("load", () => {
 
     const point_count = chart => Math.max(0, ...(chart.series || []).map(series => Number(series.points || series.x?.length || 0)));
 
-    const render_metric_chart = async (article, chart) => {
-      const mount = article.querySelector(".plot-mount");
-      if (!mount) return;
+    const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
         type: "scattergl",
         mode: "lines",
@@ -206,21 +219,27 @@ window.addEventListener("load", () => {
         uirevision: `${app.current_run_id}-${article.dataset.chart}`,
         font: {family: "Inter, ui-sans-serif, system-ui, sans-serif", size: 10, color: "#35404c"},
       };
-      const config = {
-        ...plot_config,
-        scrollZoom: true,
-        displaylogo: false,
+      return {data: traces, layout};
+    };
+
+    const render_metric_chart = async (article, chart) => {
+      const mount = article.querySelector(".plot-mount");
+      if (!mount) return;
+      const key = article.dataset.chart;
+      app.dynamic_chart_metadata[key] = {
+        x_source: chart.x_title || "Step",
+        x_label: chart.x_title || "step",
+        y_source: chart.title || chart.id,
+        y_label: chart.y_title || chart.title || chart.id,
       };
-      if (mount.dataset.plotReady === "true") {
-        await Plotly.react(mount, traces, layout, config);
-      } else {
-        await Plotly.newPlot(mount, traces, layout, config);
-        mount.dataset.plotReady = "true";
-      }
+      const figure = metric_figure(article, chart);
+      app.dynamic_chart_figures[key] = figure;
+      await render_plot(mount, figure, key);
       const detail = article.querySelector(".local-metric-detail");
       if (detail) {
         const count = point_count(chart);
-        detail.textContent = `${format_integer(count)} sample${count === 1 ? "" : "s"}${multi_series ? ` · ${traces.length} series` : ""}`;
+        const series_count = figure.data.length;
+        detail.textContent = `${format_integer(count)} sample${count === 1 ? "" : "s"}${series_count > 1 ? ` · ${series_count} series` : ""}`;
       }
     };
 
@@ -236,6 +255,10 @@ window.addEventListener("load", () => {
         if (!wanted.has(card.dataset.metricChartId)) {
           const mount = card.querySelector(".plot-mount");
           if (mount?.dataset.plotReady === "true") Plotly.purge(mount);
+          const key = card.dataset.chart;
+          delete app.dynamic_chart_figures[key];
+          delete app.dynamic_chart_metadata[key];
+          delete chart_titles[key];
           card.remove();
         }
       }
