@@ -318,6 +318,10 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="chart_settings_preview"' in html
     assert 'id="chart_title_value"' in html
     assert 'id="chart_x_label"' in html
+    assert 'id="chart_x_axis_mode"' in html
+    assert '>Relative Time (Wall)</option>' in html
+    assert '>Relative Time (Process)</option>' in html
+    assert '>Wall Time</option>' in html
     assert 'id="chart_y_label"' in html
     assert 'id="chart_max_snapshots"' in html
     assert 'id="chart_exclude_outliers"' in html
@@ -358,6 +362,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "reset_chart_settings" in javascript
     assert "render_chart_settings_preview" in javascript
     assert "apply_chart_display_settings" in javascript
+    assert "function apply_chart_x_axis_mode" in javascript
+    assert "value / 3600.0" in javascript
+    assert "value * 1000.0" in javascript
     assert "dynamic_chart_figures" in javascript
     assert "dynamic_chart_metadata" in javascript
     assert "limit_curve_snapshots" in javascript
@@ -403,6 +410,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert ".chart-settings-button svg { display: block; width: 17px; height: 17px;" in stylesheet
     assert "actions.append(chart_settings_button(key, title.textContent), maximize);" in wandb_groups_patch
     assert "app.dynamic_chart_figures[key] = figure;" in wandb_groups_patch
+    assert "thog2_x_variants: series.x_variants || {}" in wandb_groups_patch
     assert "await render_plot(mount, figure, key);" in wandb_groups_patch
 
 

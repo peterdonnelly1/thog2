@@ -134,6 +134,8 @@ window.addEventListener("load", () => {
         x_label: chart.x_title || "step",
         y_source: chart.title || chart.id,
         y_label: chart.y_title || chart.title || chart.id,
+        default_x_axis_mode: chart.default_x_axis_mode || null,
+        available_x_axis_modes: chart.available_x_axis_modes || [],
       };
 
       const article = document.createElement("article");
@@ -181,6 +183,7 @@ window.addEventListener("load", () => {
         type: "scattergl",
         mode: "lines",
         x: Array.isArray(series.x) ? series.x : [],
+        thog2_x_variants: series.x_variants || {},
         y: Array.isArray(series.y) ? series.y : [],
         name: series.name || chart.title || chart.id,
         hovertemplate: "%{y:.6g}<extra>%{fullData.name}</extra>",
@@ -231,6 +234,8 @@ window.addEventListener("load", () => {
         x_label: chart.x_title || "step",
         y_source: chart.title || chart.id,
         y_label: chart.y_title || chart.title || chart.id,
+        default_x_axis_mode: chart.default_x_axis_mode || null,
+        available_x_axis_modes: chart.available_x_axis_modes || [],
       };
       const figure = metric_figure(article, chart);
       app.dynamic_chart_figures[key] = figure;

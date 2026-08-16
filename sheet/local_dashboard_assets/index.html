@@ -281,9 +281,18 @@
 
               <section class="chart-axis-editor" aria-labelledby="x_axis_settings_title">
                 <h3 id="x_axis_settings_title">X axis</h3>
-                <label class="chart-editor-field chart-editor-field-wide" for="chart_x_source">
+                <label class="chart-editor-field chart-editor-field-wide" id="chart_x_source_field" for="chart_x_source">
                   <span>Data</span>
                   <input id="chart_x_source" type="text" readonly>
+                </label>
+                <label class="chart-editor-field chart-editor-field-wide" id="chart_x_axis_mode_field" for="chart_x_axis_mode" hidden>
+                  <span>Data</span>
+                  <select class="chart-setting-input" id="chart_x_axis_mode">
+                    <option value="step">Step</option>
+                    <option value="relative_wall">Relative Time (Wall)</option>
+                    <option value="relative_process">Relative Time (Process)</option>
+                    <option value="wall_time">Wall Time</option>
+                  </select>
                 </label>
                 <div class="chart-axis-range">
                   <span>Range</span>

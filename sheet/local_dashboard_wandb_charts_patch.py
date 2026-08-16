@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 
 _MAX_POINTS_PER_SERIES = 1600
 _SCAN_TIME_BUDGET_SECONDS = 0.22
+_X_AXIS_MODE_ORDER = ("step", "relative_wall", "relative_process", "wall_time")
 _GPU_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
 _GPU_PROCESS_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./]process[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
 
@@ -128,12 +129,14 @@ def _history_chart_identity(metric_name: str) -> tuple[str, str, str, str]:
     return group, metric_name, _pretty_metric_name(title), metric_name
 
 
-def _downsample_points(points: list[tuple[float, float]], limit: int = _MAX_POINTS_PER_SERIES) -> tuple[list[float], list[float]]:
+def _downsample_points(
+    points: list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]],
+    limit: int = _MAX_POINTS_PER_SERIES,
+) -> list[tuple[float, float, Optional[float], Optional[float], Optional[float], Optional[float]]]:
     if len(points) <= limit:
-        return [point[0] for point in points], [point[1] for point in points]
+        return list(points)
     if limit <= 2:
-        chosen = (points[0], points[-1])
-        return [point[0] for point in chosen], [point[1] for point in chosen]
+        return [points[0], points[-1]]
 
     # Preserve endpoints plus local extrema from each bucket. This retains the
     # spikes that matter in system metrics better than uniform point skipping.
@@ -158,7 +161,7 @@ def _downsample_points(points: list[tuple[float, float]], limit: int = _MAX_POIN
         selected = selected[::stride]
         if selected[-1] != points[-1]:
             selected.append(points[-1])
-    return [point[0] for point in selected], [point[1] for point in selected]
+    return selected
 
 
 class _WandbRunScanner:
@@ -170,10 +173,29 @@ class _WandbRunScanner:
         self.good_offset = 0
         self.record_count = 0
         self.history_step = 0.0
+        self.first_history_timestamp: Optional[float] = None
         self.first_stats_timestamp: Optional[float] = None
-        self.series: Dict[str, Dict[str, list[tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
+        self.process_anchor_timestamp: Optional[float] = None
+        self.process_anchor_runtime: Optional[float] = None
+        self.series: Dict[
+            str,
+            Dict[
+                str,
+                list[
+                    tuple[
+                        float,
+                        float,
+                        Optional[float],
+                        Optional[float],
+                        Optional[float],
+                        Optional[float],
+                    ]
+                ],
+            ],
+        ] = defaultdict(lambda: defaultdict(list))
         self.chart_titles: Dict[str, Dict[str, str]] = defaultdict(dict)
         self.x_titles: Dict[str, Dict[str, str]] = defaultdict(dict)
+        self.default_x_axis_modes: Dict[str, Dict[str, str]] = defaultdict(dict)
         self.group_revisions: Dict[str, int] = defaultdict(int)
         self.error = ""
         self.catching_up = True
@@ -197,19 +219,46 @@ class _WandbRunScanner:
         self.good_offset = 0
         self.record_count = 0
         self.history_step = 0.0
+        self.first_history_timestamp = None
         self.first_stats_timestamp = None
+        self.process_anchor_timestamp = None
+        self.process_anchor_runtime = None
         self.series.clear()
         self.chart_titles.clear()
         self.x_titles.clear()
+        self.default_x_axis_modes.clear()
         self.group_revisions.clear()
         self.error = ""
         self.catching_up = True
 
-    def _append(self, group: str, chart_id: str, title: str, series_name: str, x: float, y: float, x_title: str) -> None:
+    def _append(
+        self,
+        group: str,
+        chart_id: str,
+        title: str,
+        series_name: str,
+        x: float,
+        y: float,
+        x_title: str,
+        *,
+        step: Optional[float],
+        relative_wall_seconds: Optional[float],
+        relative_process_seconds: Optional[float],
+        wall_time_epoch_seconds: Optional[float],
+        default_x_axis_mode: str,
+    ) -> None:
         points = self.series[group][f"{chart_id}\0{series_name}"]
-        points.append((float(x), float(y)))
+        points.append((
+            float(x),
+            float(y),
+            step,
+            relative_wall_seconds,
+            relative_process_seconds,
+            wall_time_epoch_seconds,
+        ))
         self.chart_titles[group][chart_id] = title
         self.x_titles[group][chart_id] = x_title
+        self.default_x_axis_modes[group][chart_id] = default_x_axis_mode
         self.group_revisions[group] += 1
 
     def _consume_history(self, history: Any) -> None:
@@ -225,13 +274,38 @@ class _WandbRunScanner:
             if numeric_step is not None:
                 explicit_step = numeric_step
         self.history_step = explicit_step
+        timestamp = _finite_number(values.get("_timestamp"))
+        runtime = _finite_number(values.get("_runtime"))
+        if timestamp is not None and self.first_history_timestamp is None:
+            self.first_history_timestamp = timestamp
+        relative_wall_seconds = (
+            max(0.0, timestamp - self.first_history_timestamp)
+            if timestamp is not None and self.first_history_timestamp is not None
+            else None
+        )
+        if timestamp is not None and runtime is not None:
+            self.process_anchor_timestamp = timestamp
+            self.process_anchor_runtime = runtime
 
         for metric_name, value in values.items():
             if metric_name.startswith("_"):
                 continue
             for flattened_name, numeric in _flatten_numeric(metric_name, value):
                 group, chart_id, title, series_name = _history_chart_identity(flattened_name)
-                self._append(group, chart_id, title, series_name, explicit_step, numeric, "step")
+                self._append(
+                    group,
+                    chart_id,
+                    title,
+                    series_name,
+                    explicit_step,
+                    numeric,
+                    "step",
+                    step=explicit_step,
+                    relative_wall_seconds=relative_wall_seconds,
+                    relative_process_seconds=runtime,
+                    wall_time_epoch_seconds=timestamp,
+                    default_x_axis_mode="step",
+                )
 
     def _consume_stats(self, stats: Any) -> None:
         timestamp = getattr(stats, "timestamp", None)
@@ -240,7 +314,13 @@ class _WandbRunScanner:
         epoch = seconds + nanos / 1_000_000_000.0
         if self.first_stats_timestamp is None:
             self.first_stats_timestamp = epoch
-        elapsed_minutes = max(0.0, (epoch - self.first_stats_timestamp) / 60.0)
+        relative_wall_seconds = max(0.0, epoch - self.first_stats_timestamp)
+        elapsed_minutes = relative_wall_seconds / 60.0
+        relative_process_seconds = (
+            max(0.0, self.process_anchor_runtime + epoch - self.process_anchor_timestamp)
+            if self.process_anchor_timestamp is not None and self.process_anchor_runtime is not None
+            else None
+        )
 
         for item in getattr(stats, "item", ()):
             key = _metric_key(item)
@@ -249,7 +329,20 @@ class _WandbRunScanner:
             value = _json_value(getattr(item, "value_json", "null"))
             for flattened_name, numeric in _flatten_numeric(key, value):
                 chart_id, title, series_name = _system_chart_identity(flattened_name)
-                self._append("system", chart_id, title, series_name, elapsed_minutes, numeric, "Time (minutes)")
+                self._append(
+                    "system",
+                    chart_id,
+                    title,
+                    series_name,
+                    elapsed_minutes,
+                    numeric,
+                    "Time (minutes)",
+                    step=None,
+                    relative_wall_seconds=relative_wall_seconds,
+                    relative_process_seconds=relative_process_seconds,
+                    wall_time_epoch_seconds=epoch,
+                    default_x_axis_mode="relative_wall",
+                )
 
     def _consume_record(self, record: Any) -> None:
         record_type = record.WhichOneof("record_type")
@@ -313,20 +406,34 @@ class _WandbRunScanner:
             chart_series: Dict[str, list[dict[str, Any]]] = defaultdict(list)
             for encoded, points in self.series.get(group, {}).items():
                 chart_id, series_name = encoded.split("\0", 1)
-                x_values, y_values = _downsample_points(points)
+                selected = _downsample_points(points)
+                x_variants = {}
+                for mode_index, mode_name in enumerate(_X_AXIS_MODE_ORDER, start=2):
+                    values = [point[mode_index] for point in selected]
+                    if any(value is not None for value in values):
+                        x_variants[mode_name] = values
                 chart_series[chart_id].append({
                     "name": series_name,
-                    "x": x_values,
-                    "y": y_values,
+                    "x": [point[0] for point in selected],
+                    "x_variants": x_variants,
+                    "y": [point[1] for point in selected],
                     "points": len(points),
                 })
             charts = []
             for chart_id in sorted(chart_series, key=lambda value: self.chart_titles[group].get(value, value).lower()):
+                series = chart_series[chart_id]
+                available_modes = [
+                    mode_name
+                    for mode_name in _X_AXIS_MODE_ORDER
+                    if all(mode_name in item["x_variants"] for item in series)
+                ]
                 charts.append({
                     "id": chart_id,
                     "title": self.chart_titles[group].get(chart_id, _pretty_metric_name(chart_id)),
                     "x_title": self.x_titles[group].get(chart_id, "step"),
-                    "series": chart_series[chart_id],
+                    "default_x_axis_mode": self.default_x_axis_modes[group].get(chart_id, "step"),
+                    "available_x_axis_modes": available_modes,
+                    "series": series,
                 })
             return {
                 "name": group,

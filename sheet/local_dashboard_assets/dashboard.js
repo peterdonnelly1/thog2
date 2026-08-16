@@ -29,6 +29,13 @@ const plot_config = {
   toImageButtonOptions: {format: "png", scale: 2},
 };
 
+const chart_x_axis_modes = Object.freeze({
+  step: {source: "Step", label: "step"},
+  relative_wall: {source: "Relative Time (Wall)", label: "time (hours)"},
+  relative_process: {source: "Relative Time (Process)", label: "time (hours)"},
+  wall_time: {source: "Wall Time", label: "wall time"},
+});
+
 const panel_layout_version = "heatmap-row-and-three-by-two-curves-v1";
 
 const app = {
@@ -523,12 +530,25 @@ function transpose_heatmap(prepared) {
   }
 }
 
-function chart_default_labels(chart_name) {
+function chart_x_axis_mode(chart_name, supplied_mode = null) {
+  const dynamic = app.dynamic_chart_metadata?.[chart_name];
+  const available = Array.isArray(dynamic?.available_x_axis_modes)
+    ? dynamic.available_x_axis_modes
+    : [];
+  if (!available.length) return null;
+  if (available.includes(supplied_mode)) return supplied_mode;
+  if (available.includes(dynamic.default_x_axis_mode)) return dynamic.default_x_axis_mode;
+  return available[0];
+}
+
+function chart_default_labels(chart_name, supplied_mode = null) {
   const dynamic = app.dynamic_chart_metadata?.[chart_name];
   if (dynamic) {
+    const mode = chart_x_axis_mode(chart_name, supplied_mode);
+    const mode_labels = chart_x_axis_modes[mode];
     return {
-      x_source: dynamic.x_source || "Step",
-      x_label: dynamic.x_label || "step",
+      x_source: mode_labels?.source || dynamic.x_source || "Step",
+      x_label: mode_labels?.label || dynamic.x_label || "step",
       y_source: dynamic.y_source || chart_titles[chart_name] || "Metric value",
       y_label: dynamic.y_label || chart_titles[chart_name] || "metric value",
     };
@@ -547,7 +567,8 @@ function stored_chart_settings(chart_name) {
 
 function normalize_chart_settings(chart_name, supplied = null) {
   const stored = supplied || stored_chart_settings(chart_name);
-  const labels = chart_default_labels(chart_name);
+  const x_axis_mode = chart_x_axis_mode(chart_name, stored.x_axis_mode);
+  const labels = chart_default_labels(chart_name, x_axis_mode);
   const normalized = {
     title: typeof stored.title === "string" && stored.title.trim() ? stored.title.trim() : chart_titles[chart_name],
     x_label: typeof stored.x_label === "string" && stored.x_label.trim() ? stored.x_label.trim() : labels.x_label,
@@ -558,6 +579,7 @@ function normalize_chart_settings(chart_name, supplied = null) {
     line_width: 1,
     chart_type: ["lines", "lines_markers", "markers"].includes(stored.chart_type) ? stored.chart_type : "lines",
     show_grid: stored.show_grid !== false,
+    x_axis_mode,
   };
   for (const field of ["x_min", "x_max", "y_min", "y_max"]) {
     const value = Number(stored[field]);
@@ -734,9 +756,43 @@ function apply_outlier_resistant_y_range(prepared) {
   prepared.layout.yaxis = {...(prepared.layout.yaxis || {}), autorange: false, range: [minimum - padding, maximum + padding]};
 }
 
+function apply_chart_x_axis_mode(prepared, chart_name, settings) {
+  const mode = chart_x_axis_mode(chart_name, settings.x_axis_mode);
+  let applied = false;
+  for (const trace of prepared.data || []) {
+    const variants = trace?.thog2_x_variants;
+    if (variants && mode && Array.isArray(variants[mode])) {
+      trace.x = variants[mode].map(raw_value => {
+        if (raw_value === null || raw_value === undefined) return null;
+        const value = Number(raw_value);
+        if (!Number.isFinite(value)) return null;
+        if (mode === "relative_wall" || mode === "relative_process") return value / 3600.0;
+        if (mode === "wall_time") return value * 1000.0;
+        return value;
+      });
+      applied = true;
+    }
+    if (trace && Object.prototype.hasOwnProperty.call(trace, "thog2_x_variants")) {
+      delete trace.thog2_x_variants;
+    }
+  }
+  if (!applied) return;
+  prepared.layout.xaxis = {...(prepared.layout.xaxis || {})};
+  if (mode === "wall_time") {
+    prepared.layout.xaxis.type = "date";
+    prepared.layout.xaxis.tickformat = "%d %b\n%H:%M";
+    prepared.layout.xaxis.hoverformat = "%Y-%m-%d %H:%M:%S";
+  } else {
+    prepared.layout.xaxis.type = "linear";
+    delete prepared.layout.xaxis.tickformat;
+    delete prepared.layout.xaxis.hoverformat;
+  }
+}
+
 function apply_chart_display_settings(prepared, chart_name, settings) {
   prepared.layout.xaxis = {...(prepared.layout.xaxis || {})};
   prepared.layout.yaxis = {...(prepared.layout.yaxis || {})};
+  apply_chart_x_axis_mode(prepared, chart_name, settings);
   const x_title = prepared.layout.xaxis.title && typeof prepared.layout.xaxis.title === "object" ? prepared.layout.xaxis.title : {};
   const y_title = prepared.layout.yaxis.title && typeof prepared.layout.yaxis.title === "object" ? prepared.layout.yaxis.title : {};
   prepared.layout.xaxis.title = {...x_title, text: settings.x_label};
@@ -1590,17 +1646,32 @@ function update_chart_settings_buttons() {
   });
 }
 
-function optional_chart_number(input_id) {
+function optional_chart_bound(input_id, field_name, x_axis_mode) {
   const raw_value = by_id(input_id).value.trim();
   if (!raw_value) return null;
+  if (field_name.startsWith("x_") && x_axis_mode === "wall_time") {
+    const milliseconds = Date.parse(raw_value);
+    return Number.isFinite(milliseconds) ? milliseconds : NaN;
+  }
   const value = Number(raw_value);
   return Number.isFinite(value) ? value : NaN;
+}
+
+function chart_datetime_input_value(milliseconds) {
+  const date = new Date(milliseconds);
+  if (!Number.isFinite(date.getTime())) return "";
+  const pad = value => String(value).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
 }
 
 function chart_settings_form_state() {
   const chart_name = app.axis_chart_name;
   if (!chart_name) return {settings: null, error: "No chart is selected."};
-  const labels = chart_default_labels(chart_name);
+  const x_axis_mode = chart_x_axis_mode(chart_name, by_id("chart_x_axis_mode").value);
+  const labels = chart_default_labels(chart_name, x_axis_mode);
   const settings = {
     title: by_id("chart_title_value").value.trim() || chart_titles[chart_name],
     x_label: by_id("chart_x_label").value.trim() || labels.x_label,
@@ -1614,10 +1685,11 @@ function chart_settings_form_state() {
       : (document.querySelector('input[name="chart_type"]:checked')?.value || "lines"),
     show_grid: by_id("chart_show_grid").checked,
     heatmap_row_height: chart_name === "heatmap" ? Number(by_id("chart_heatmap_row_height").value) : 12,
+    x_axis_mode,
   };
   for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
-    const value = optional_chart_number(`chart_${field_name}`);
-    if (Number.isNaN(value)) return {settings: null, error: "Axis limits must be finite numbers or blank for automatic."};
+    const value = optional_chart_bound(`chart_${field_name}`, field_name, x_axis_mode);
+    if (Number.isNaN(value)) return {settings: null, error: "Axis limits must be valid numbers or dates, or blank for automatic."};
     if (value !== null) settings[field_name] = value;
   }
   if (Number.isFinite(settings.x_min) && Number.isFinite(settings.x_max) && settings.x_min >= settings.x_max) {
@@ -1633,7 +1705,7 @@ function chart_settings_form_state() {
 }
 
 function compact_chart_settings(chart_name, settings) {
-  const labels = chart_default_labels(chart_name);
+  const labels = chart_default_labels(chart_name, settings.x_axis_mode);
   const compact = {};
   for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
     if (Number.isFinite(settings[field_name])) compact[field_name] = settings[field_name];
@@ -1641,6 +1713,13 @@ function compact_chart_settings(chart_name, settings) {
   if (settings.title !== chart_titles[chart_name]) compact.title = settings.title;
   if (settings.x_label !== labels.x_label) compact.x_label = settings.x_label;
   if (settings.y_label !== labels.y_label) compact.y_label = settings.y_label;
+  const default_x_axis_mode = chart_x_axis_mode(
+    chart_name,
+    app.dynamic_chart_metadata?.[chart_name]?.default_x_axis_mode,
+  );
+  if (settings.x_axis_mode && settings.x_axis_mode !== default_x_axis_mode) {
+    compact.x_axis_mode = settings.x_axis_mode;
+  }
   if (chart_name !== "heatmap") {
     if (settings.max_snapshots > 0) compact.max_snapshots = settings.max_snapshots;
     if (settings.exclude_outliers) compact.exclude_outliers = true;
@@ -1677,9 +1756,35 @@ function sync_chart_setting_outputs() {
   by_id("chart_heatmap_display_options").hidden = chart_name !== "heatmap";
 }
 
+function configure_chart_x_axis_mode(chart_name, mode) {
+  const metadata = app.dynamic_chart_metadata?.[chart_name];
+  const available = Array.isArray(metadata?.available_x_axis_modes)
+    ? metadata.available_x_axis_modes
+    : [];
+  const selector_field = by_id("chart_x_axis_mode_field");
+  const source_field = by_id("chart_x_source_field");
+  selector_field.hidden = !available.length;
+  source_field.hidden = Boolean(available.length);
+  for (const option of by_id("chart_x_axis_mode").options) {
+    option.disabled = !available.includes(option.value);
+    option.hidden = !available.includes(option.value);
+  }
+  const selected_mode = chart_x_axis_mode(chart_name, mode);
+  if (selected_mode) by_id("chart_x_axis_mode").value = selected_mode;
+  const wall_time = selected_mode === "wall_time";
+  for (const input_id of ["chart_x_min", "chart_x_max"]) {
+    const input = by_id(input_id);
+    input.type = wall_time ? "datetime-local" : "number";
+    input.step = wall_time ? "1" : "any";
+    input.placeholder = "Automatic";
+  }
+  return selected_mode;
+}
+
 function populate_chart_settings_form(chart_name, supplied = null) {
   const settings = normalize_chart_settings(chart_name, supplied);
-  const labels = chart_default_labels(chart_name);
+  const selected_mode = configure_chart_x_axis_mode(chart_name, settings.x_axis_mode);
+  const labels = chart_default_labels(chart_name, selected_mode);
   if (chart_name === "heatmap" && !Number.isFinite(Number(supplied?.heatmap_row_height))) {
     settings.heatmap_row_height = typeof heatmap_probe_row_height_px === "function" ? heatmap_probe_row_height_px() : 12;
   }
@@ -1689,7 +1794,11 @@ function populate_chart_settings_form(chart_name, supplied = null) {
   by_id("chart_x_label").value = settings.x_label;
   by_id("chart_y_label").value = settings.y_label;
   for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
-    by_id(`chart_${field_name}`).value = Number.isFinite(settings[field_name]) ? String(settings[field_name]) : "";
+    const numeric = settings[field_name];
+    const is_wall_time = field_name.startsWith("x_") && selected_mode === "wall_time";
+    by_id(`chart_${field_name}`).value = Number.isFinite(numeric)
+      ? (is_wall_time ? chart_datetime_input_value(numeric) : String(numeric))
+      : "";
   }
   const snapshot_count = chart_name === "heatmap" ? 0 : available_snapshot_updates(figure_for_chart(chart_name)).length;
   by_id("chart_max_snapshots").max = String(Math.max(1, snapshot_count));
@@ -1991,6 +2100,18 @@ function show_toast(message) {
   show_toast.timer = setTimeout(() => { toast.hidden = true; }, 4500);
 }
 
+function change_chart_x_axis_mode() {
+  const chart_name = app.axis_chart_name;
+  if (!chart_name) return;
+  const mode = configure_chart_x_axis_mode(chart_name, by_id("chart_x_axis_mode").value);
+  const labels = chart_default_labels(chart_name, mode);
+  by_id("chart_x_source").value = labels.x_source;
+  by_id("chart_x_label").value = labels.x_label;
+  by_id("chart_x_min").value = "";
+  by_id("chart_x_max").value = "";
+  schedule_chart_settings_preview();
+}
+
 function bind_events() {
   document.querySelectorAll(".file-source-tab").forEach(button => {
     button.addEventListener("click", () => set_file_source(button.dataset.fileSource));
@@ -2078,7 +2199,9 @@ function bind_events() {
   document.querySelectorAll("[data-chart-settings-tab]").forEach(button => {
     button.addEventListener("click", () => set_chart_settings_tab(button.dataset.chartSettingsTab));
   });
+  by_id("chart_x_axis_mode").addEventListener("change", change_chart_x_axis_mode);
   document.querySelectorAll(".chart-setting-input").forEach(input => {
+    if (input.id === "chart_x_axis_mode") return;
     input.addEventListener("input", schedule_chart_settings_preview);
     input.addEventListener("change", schedule_chart_settings_preview);
   });
