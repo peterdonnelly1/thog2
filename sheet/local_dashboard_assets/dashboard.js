@@ -65,6 +65,9 @@ const app = {
   picker_saturation: 56,
   picker_value: 84,
   axis_chart_name: null,
+  chart_settings_render_override: null,
+  chart_settings_preview_serial: 0,
+  chart_settings_preview_timer: null,
 };
 if (!app.axis_ranges || typeof app.axis_ranges !== "object" || Array.isArray(app.axis_ranges)) app.axis_ranges = {};
 
@@ -517,20 +520,59 @@ function transpose_heatmap(prepared) {
   }
 }
 
-function chart_axis_settings(chart_name) {
+function chart_default_labels(chart_name) {
+  return chart_name === "heatmap"
+    ? {x_source: "Candidate layer count", x_label: "absolute candidate layer count", y_source: "Optimizer step", y_label: "optimizer step"}
+    : {x_source: "Layer sample number", x_label: "layer sample number", y_source: "Generated weight value", y_label: "weight value"};
+}
+
+function stored_chart_settings(chart_name) {
   const stored = app.axis_ranges && typeof app.axis_ranges === "object"
     ? app.axis_ranges[chart_name]
     : null;
-  const normalized = {};
+  return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+}
+
+function normalize_chart_settings(chart_name, supplied = null) {
+  const stored = supplied || stored_chart_settings(chart_name);
+  const labels = chart_default_labels(chart_name);
+  const normalized = {
+    title: typeof stored.title === "string" && stored.title.trim() ? stored.title.trim() : chart_titles[chart_name],
+    x_label: typeof stored.x_label === "string" && stored.x_label.trim() ? stored.x_label.trim() : labels.x_label,
+    y_label: typeof stored.y_label === "string" && stored.y_label.trim() ? stored.y_label.trim() : labels.y_label,
+    max_snapshots: 0,
+    exclude_outliers: stored.exclude_outliers === true,
+    smoothing: 0,
+    line_width: 1,
+    chart_type: ["lines", "lines_markers", "markers"].includes(stored.chart_type) ? stored.chart_type : "lines",
+    show_grid: stored.show_grid !== false,
+  };
   for (const field of ["x_min", "x_max", "y_min", "y_max"]) {
-    const value = Number(stored?.[field]);
-    if (stored?.[field] !== null && stored?.[field] !== "" && Number.isFinite(value)) normalized[field] = value;
+    const value = Number(stored[field]);
+    if (stored[field] !== null && stored[field] !== "" && Number.isFinite(value)) normalized[field] = value;
   }
+  const max_snapshots = Number(stored.max_snapshots);
+  if (Number.isInteger(max_snapshots) && max_snapshots > 0) normalized.max_snapshots = max_snapshots;
+  const smoothing = Number(stored.smoothing);
+  if (Number.isFinite(smoothing)) normalized.smoothing = Math.min(0.95, Math.max(0, smoothing));
+  const line_width = Number(stored.line_width);
+  if (Number.isFinite(line_width)) normalized.line_width = Math.min(3, Math.max(0.5, line_width));
+  const heatmap_row_height = Number(stored.heatmap_row_height);
+  if (Number.isFinite(heatmap_row_height)) normalized.heatmap_row_height = Math.min(24, Math.max(1, heatmap_row_height));
   return normalized;
 }
 
+function chart_axis_settings(chart_name, supplied = null) {
+  const normalized = normalize_chart_settings(chart_name, supplied);
+  const axes = {};
+  for (const field of ["x_min", "x_max", "y_min", "y_max"]) {
+    if (Number.isFinite(normalized[field])) axes[field] = normalized[field];
+  }
+  return axes;
+}
+
 function has_chart_axis_settings(chart_name) {
-  return Object.keys(chart_axis_settings(chart_name)).length > 0;
+  return Object.keys(stored_chart_settings(chart_name)).length > 0;
 }
 
 function numeric_trace_bounds(prepared, axis_name) {
@@ -608,11 +650,117 @@ function apply_chart_axis_settings(prepared, chart_name, settings) {
   }
 }
 
+function trace_optimizer_update(trace) {
+  const description = `${trace?.name || ""} ${trace?.hovertemplate || ""}`;
+  const match = description.match(/(?:^|[^A-Za-z0-9])U(\d+)(?:\D|$)/);
+  return match ? Number(match[1]) : null;
+}
+
+function available_snapshot_updates(figure) {
+  const updates = [];
+  const seen = new Set();
+  for (const trace of figure?.data || []) {
+    const update = trace_optimizer_update(trace);
+    if (!Number.isFinite(update) || seen.has(update)) continue;
+    seen.add(update);
+    updates.push(update);
+  }
+  return updates;
+}
+
+function limit_curve_snapshots(prepared, maximum) {
+  if (!Number.isInteger(maximum) || maximum < 1) return;
+  const updates = available_snapshot_updates(prepared);
+  if (updates.length <= maximum) return;
+  const retained = new Set(updates.slice(-maximum));
+  prepared.data = (prepared.data || []).filter(trace => {
+    const update = trace_optimizer_update(trace);
+    return !Number.isFinite(update) || retained.has(update);
+  });
+}
+
+function smoothed_values(values, smoothing) {
+  if (!(smoothing > 0)) return values;
+  const output = [];
+  let previous = null;
+  for (const raw_value of values || []) {
+    const value = Number(raw_value);
+    if (!Number.isFinite(value)) {
+      output.push(raw_value);
+      continue;
+    }
+    previous = previous === null ? value : smoothing * previous + (1 - smoothing) * value;
+    output.push(previous);
+  }
+  return output;
+}
+
+function numeric_quantile(sorted_values, fraction) {
+  if (!sorted_values.length) return null;
+  const position = Math.min(sorted_values.length - 1, Math.max(0, fraction * (sorted_values.length - 1)));
+  const left = Math.floor(position);
+  const right = Math.ceil(position);
+  if (left === right) return sorted_values[left];
+  const weight = position - left;
+  return sorted_values[left] * (1 - weight) + sorted_values[right] * weight;
+}
+
+function apply_outlier_resistant_y_range(prepared) {
+  const values = [];
+  for (const trace of prepared.data || []) {
+    for (const raw_value of trace.y || []) {
+      const value = Number(raw_value);
+      if (Number.isFinite(value)) values.push(value);
+    }
+  }
+  if (values.length < 20) return;
+  values.sort((left, right) => left - right);
+  const minimum = numeric_quantile(values, 0.01);
+  const maximum = numeric_quantile(values, 0.99);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || !(minimum < maximum)) return;
+  const padding = Math.max((maximum - minimum) * 0.06, Math.abs(maximum) * 1e-6, 1e-12);
+  prepared.layout.yaxis = {...(prepared.layout.yaxis || {}), autorange: false, range: [minimum - padding, maximum + padding]};
+}
+
+function apply_chart_display_settings(prepared, chart_name, settings) {
+  prepared.layout.xaxis = {...(prepared.layout.xaxis || {})};
+  prepared.layout.yaxis = {...(prepared.layout.yaxis || {})};
+  const x_title = prepared.layout.xaxis.title && typeof prepared.layout.xaxis.title === "object" ? prepared.layout.xaxis.title : {};
+  const y_title = prepared.layout.yaxis.title && typeof prepared.layout.yaxis.title === "object" ? prepared.layout.yaxis.title : {};
+  prepared.layout.xaxis.title = {...x_title, text: settings.x_label};
+  prepared.layout.yaxis.title = {...y_title, text: settings.y_label};
+  prepared.layout.xaxis.showgrid = settings.show_grid;
+  prepared.layout.yaxis.showgrid = settings.show_grid;
+  prepared.layout.xaxis.gridcolor = "#e7e9ed";
+  prepared.layout.yaxis.gridcolor = "#e7e9ed";
+  if (chart_name === "heatmap") return;
+  limit_curve_snapshots(prepared, settings.max_snapshots);
+  for (const trace of prepared.data || []) {
+    if (!trace || !["scatter", "scattergl", undefined].includes(trace.type)) continue;
+    const original_mode = String(trace.mode || "lines");
+    if (!original_mode.includes("lines")) continue;
+    trace.y = smoothed_values(trace.y || [], settings.smoothing);
+    trace.mode = settings.chart_type === "lines_markers" ? "lines+markers" : settings.chart_type;
+    trace.line = {...(trace.line || {}), width: Math.max(0.5, Number(trace.line?.width || 1) * settings.line_width)};
+    if (settings.chart_type !== "lines") {
+      trace.marker = {...(trace.marker || {}), size: Math.max(3, Number(trace.marker?.size || 4))};
+    }
+  }
+  if (settings.exclude_outliers && !Number.isFinite(settings.y_min) && !Number.isFinite(settings.y_max)) {
+    apply_outlier_resistant_y_range(prepared);
+  }
+}
+
 function prepare_figure(figure, chart_name) {
   const prepared = clone_figure(figure);
-  const axis_settings = chart_axis_settings(chart_name);
+  const override = app.chart_settings_render_override;
+  const settings = normalize_chart_settings(
+    chart_name,
+    override?.chart_name === chart_name ? override.settings : null,
+  );
+  const axis_settings = chart_axis_settings(chart_name, settings);
   prepared.layout = prepared.layout || {};
-  prepared.layout.uirevision = `${app.current_run_id}-${chart_name}-${JSON.stringify(axis_settings)}`;
+  prepared.layout.uirevision = `${app.current_run_id}-${chart_name}-${JSON.stringify(settings)}`;
   prepared.layout.autosize = true;
   prepared.layout.paper_bgcolor = "white";
   prepared.layout.plot_bgcolor = "white";
@@ -638,6 +786,7 @@ function prepare_figure(figure, chart_name) {
       }
     }
   }
+  apply_chart_display_settings(prepared, chart_name, settings);
   apply_chart_axis_settings(prepared, chart_name, axis_settings);
   return prepared;
 }
@@ -684,7 +833,7 @@ function depth_card(chart_name) {
   const copy = document.createElement("div");
   copy.className = "chart-heading-copy";
   const title = document.createElement("h2");
-  title.textContent = chart_titles[chart_name] || chart_name;
+  title.textContent = normalize_chart_settings(chart_name).title;
   const detail = document.createElement("p");
   detail.id = `${chart_name}_detail`;
   detail.textContent = "Waiting for the first DEPTH weight snapshot.";
@@ -1369,15 +1518,175 @@ async function delete_menu_run() {
 
 function update_chart_settings_buttons() {
   document.querySelectorAll(".chart-settings-button").forEach(button => {
-    button.classList.toggle("active", has_chart_axis_settings(button.dataset.chartSettings));
+    const chart_name = button.dataset.chartSettings;
+    button.classList.toggle("active", has_chart_axis_settings(chart_name));
+    const heading = button.closest(".chart-card")?.querySelector(".chart-heading-copy h2");
+    const title = normalize_chart_settings(chart_name).title;
+    if (heading) heading.textContent = title;
+    button.setAttribute("aria-label", `Settings for ${title}`);
   });
 }
 
-function axis_input_value(field_name) {
-  const raw_value = by_id(`chart_${field_name}`).value.trim();
+function optional_chart_number(input_id) {
+  const raw_value = by_id(input_id).value.trim();
   if (!raw_value) return null;
   const value = Number(raw_value);
   return Number.isFinite(value) ? value : NaN;
+}
+
+function chart_settings_form_state() {
+  const chart_name = app.axis_chart_name;
+  if (!chart_name) return {settings: null, error: "No chart is selected."};
+  const labels = chart_default_labels(chart_name);
+  const settings = {
+    title: by_id("chart_title_value").value.trim() || chart_titles[chart_name],
+    x_label: by_id("chart_x_label").value.trim() || labels.x_label,
+    y_label: by_id("chart_y_label").value.trim() || labels.y_label,
+    max_snapshots: chart_name === "heatmap" ? 0 : Number(by_id("chart_max_snapshots").value),
+    exclude_outliers: chart_name !== "heatmap" && by_id("chart_exclude_outliers").checked,
+    smoothing: chart_name === "heatmap" ? 0 : Number(by_id("chart_smoothing").value),
+    line_width: chart_name === "heatmap" ? 1 : Number(by_id("chart_line_width").value),
+    chart_type: chart_name === "heatmap"
+      ? "lines"
+      : (document.querySelector('input[name="chart_type"]:checked')?.value || "lines"),
+    show_grid: by_id("chart_show_grid").checked,
+    heatmap_row_height: chart_name === "heatmap" ? Number(by_id("chart_heatmap_row_height").value) : 12,
+  };
+  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
+    const value = optional_chart_number(`chart_${field_name}`);
+    if (Number.isNaN(value)) return {settings: null, error: "Axis limits must be finite numbers or blank for automatic."};
+    if (value !== null) settings[field_name] = value;
+  }
+  if (Number.isFinite(settings.x_min) && Number.isFinite(settings.x_max) && settings.x_min >= settings.x_max) {
+    return {settings: null, error: "X minimum must be less than X maximum."};
+  }
+  if (Number.isFinite(settings.y_min) && Number.isFinite(settings.y_max) && settings.y_min >= settings.y_max) {
+    return {settings: null, error: "Y minimum must be less than Y maximum."};
+  }
+  if (!Number.isInteger(settings.max_snapshots) || settings.max_snapshots < 0) {
+    return {settings: null, error: "Maximum snapshots must be zero for all, or a positive whole number."};
+  }
+  return {settings: normalize_chart_settings(chart_name, settings), error: ""};
+}
+
+function compact_chart_settings(chart_name, settings) {
+  const labels = chart_default_labels(chart_name);
+  const compact = {};
+  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
+    if (Number.isFinite(settings[field_name])) compact[field_name] = settings[field_name];
+  }
+  if (settings.title !== chart_titles[chart_name]) compact.title = settings.title;
+  if (settings.x_label !== labels.x_label) compact.x_label = settings.x_label;
+  if (settings.y_label !== labels.y_label) compact.y_label = settings.y_label;
+  if (chart_name !== "heatmap") {
+    if (settings.max_snapshots > 0) compact.max_snapshots = settings.max_snapshots;
+    if (settings.exclude_outliers) compact.exclude_outliers = true;
+    if (settings.smoothing > 0) compact.smoothing = settings.smoothing;
+    if (settings.line_width !== 1) compact.line_width = settings.line_width;
+    if (settings.chart_type !== "lines") compact.chart_type = settings.chart_type;
+  }
+  if (!settings.show_grid) compact.show_grid = false;
+  return compact;
+}
+
+function set_chart_settings_tab(tab_name) {
+  if (!["data", "display"].includes(tab_name)) return;
+  document.querySelectorAll("[data-chart-settings-tab]").forEach(button => {
+    const selected = button.dataset.chartSettingsTab === tab_name;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+  document.querySelectorAll("[data-chart-settings-panel]").forEach(panel => {
+    panel.hidden = panel.dataset.chartSettingsPanel !== tab_name;
+  });
+}
+
+function sync_chart_setting_outputs() {
+  const chart_name = app.axis_chart_name;
+  const maximum = Number(by_id("chart_max_snapshots").max);
+  const snapshots = Number(by_id("chart_max_snapshots").value);
+  by_id("chart_max_snapshots_value").textContent = snapshots > 0 ? String(snapshots) : `All${maximum > 0 ? ` ${maximum}` : ""}`;
+  const smoothing = Number(by_id("chart_smoothing").value);
+  by_id("chart_smoothing_value").textContent = smoothing > 0 ? smoothing.toFixed(2) : "Off";
+  by_id("chart_line_width_value").textContent = `${Number(by_id("chart_line_width").value).toFixed(2)}×`;
+  by_id("chart_heatmap_row_height_value").textContent = `${Number(by_id("chart_heatmap_row_height").value)} px`;
+  by_id("chart_curve_display_options").hidden = chart_name === "heatmap";
+  by_id("chart_heatmap_display_options").hidden = chart_name !== "heatmap";
+}
+
+function populate_chart_settings_form(chart_name, supplied = null) {
+  const settings = normalize_chart_settings(chart_name, supplied);
+  const labels = chart_default_labels(chart_name);
+  if (chart_name === "heatmap" && !Number.isFinite(Number(supplied?.heatmap_row_height))) {
+    settings.heatmap_row_height = typeof heatmap_probe_row_height_px === "function" ? heatmap_probe_row_height_px() : 12;
+  }
+  by_id("chart_title_value").value = settings.title;
+  by_id("chart_x_source").value = labels.x_source;
+  by_id("chart_y_source").value = labels.y_source;
+  by_id("chart_x_label").value = settings.x_label;
+  by_id("chart_y_label").value = settings.y_label;
+  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
+    by_id(`chart_${field_name}`).value = Number.isFinite(settings[field_name]) ? String(settings[field_name]) : "";
+  }
+  const snapshot_count = chart_name === "heatmap" ? 0 : available_snapshot_updates(figure_for_chart(chart_name)).length;
+  by_id("chart_max_snapshots").max = String(Math.max(1, snapshot_count));
+  by_id("chart_max_snapshots").value = String(settings.max_snapshots > 0 ? Math.min(settings.max_snapshots, Math.max(1, snapshot_count)) : 0);
+  by_id("chart_exclude_outliers").checked = settings.exclude_outliers;
+  by_id("chart_smoothing").value = String(settings.smoothing);
+  by_id("chart_line_width").value = String(settings.line_width);
+  const chart_type = document.querySelector(`input[name="chart_type"][value="${settings.chart_type}"]`);
+  if (chart_type) chart_type.checked = true;
+  by_id("chart_show_grid").checked = settings.show_grid;
+  by_id("chart_heatmap_row_height").value = String(settings.heatmap_row_height || 12);
+  sync_chart_setting_outputs();
+}
+
+function reset_chart_settings_preview_mount() {
+  const shell = by_id("chart_settings_preview_shell");
+  const empty = by_id("chart_settings_preview_empty");
+  const mount = by_id("chart_settings_preview");
+  if (mount.dataset.plotReady === "true") Plotly.purge(mount);
+  mount.dataset.plotReady = "false";
+  mount.removeAttribute("style");
+  shell.replaceChildren(empty, mount);
+}
+
+async function render_chart_settings_preview() {
+  const chart_name = app.axis_chart_name;
+  if (!chart_name || by_id("chart_settings_overlay").hidden) return;
+  const state = chart_settings_form_state();
+  const error = by_id("chart_settings_error");
+  if (state.error) {
+    error.textContent = state.error;
+    error.hidden = false;
+    by_id("chart_settings_preview_status").textContent = "Fix the highlighted values";
+    return;
+  }
+  error.hidden = true;
+  const figure = figure_for_chart(chart_name);
+  const empty = by_id("chart_settings_preview_empty");
+  empty.hidden = Boolean(figure);
+  by_id("chart_settings_preview_heading").textContent = state.settings.title;
+  by_id("chart_settings_preview_status").textContent = "Unsaved settings";
+  if (!figure) return;
+  const serial = ++app.chart_settings_preview_serial;
+  app.chart_settings_render_override = {chart_name, settings: state.settings};
+  try {
+    await render_plot(by_id("chart_settings_preview"), figure, chart_name);
+  } catch (preview_error) {
+    if (serial === app.chart_settings_preview_serial) {
+      error.textContent = `Preview failed: ${preview_error.message}`;
+      error.hidden = false;
+    }
+  } finally {
+    if (serial === app.chart_settings_preview_serial) app.chart_settings_render_override = null;
+  }
+}
+
+function schedule_chart_settings_preview() {
+  sync_chart_setting_outputs();
+  clearTimeout(app.chart_settings_preview_timer);
+  app.chart_settings_preview_timer = setTimeout(render_chart_settings_preview, 90);
 }
 
 function open_chart_settings(chart_name) {
@@ -1386,67 +1695,70 @@ function open_chart_settings(chart_name) {
   close_colour_picker();
   close_settings();
   app.axis_chart_name = chart_name;
-  const settings = chart_axis_settings(chart_name);
-  by_id("chart_settings_title").textContent = chart_titles[chart_name];
+  by_id("chart_settings_title").textContent = `${normalize_chart_settings(chart_name).title} settings`;
   by_id("chart_settings_axes").textContent = chart_name === "heatmap"
-    ? "X is absolute candidate layer count; Y is optimizer step. Square heatmap cells remain enforced."
-    : "X and Y limits apply only to this curve panel. Horizontal panel resizing may distort the chart freely.";
-  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
-    by_id(`chart_${field_name}`).value = Number.isFinite(settings[field_name]) ? String(settings[field_name]) : "";
-  }
+    ? "Candidate-layer and optimizer-step controls apply only to this heatmap."
+    : "Curve history, axes and display changes apply only to this panel.";
+  populate_chart_settings_form(chart_name);
+  set_chart_settings_tab("data");
   by_id("chart_settings_error").hidden = true;
   by_id("chart_settings_overlay").hidden = false;
-  by_id("chart_x_min").focus();
+  reset_chart_settings_preview_mount();
+  requestAnimationFrame(() => {
+    render_chart_settings_preview();
+    by_id("chart_title_value").focus();
+  });
 }
 
 function close_chart_settings() {
+  const was_open = !by_id("chart_settings_overlay").hidden;
+  const chart_name = app.axis_chart_name;
+  clearTimeout(app.chart_settings_preview_timer);
+  app.chart_settings_preview_serial += 1;
+  app.chart_settings_render_override = null;
   by_id("chart_settings_overlay").hidden = true;
+  reset_chart_settings_preview_mount();
   app.axis_chart_name = null;
+  if (was_open) render_axis_settings_change(chart_name);
 }
 
-function render_axis_settings_change() {
+function render_axis_settings_change(chart_name = null) {
   update_chart_settings_buttons();
   if (!app.figures) return;
+  const figure = chart_name ? figure_for_chart(chart_name) : null;
+  const mount = chart_name ? by_id(`${chart_name}_plot`) : null;
+  if (figure && mount) {
+    render_plot(mount, figure, chart_name).catch(error => show_toast(`Chart settings failed: ${error.message}`));
+    return;
+  }
   render_figures().catch(error => show_toast(`Chart settings failed: ${error.message}`));
 }
 
 function save_chart_settings() {
   const chart_name = app.axis_chart_name;
   if (!chart_name) return;
-  const settings = {};
-  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
-    const value = axis_input_value(field_name);
-    if (Number.isNaN(value)) {
-      by_id("chart_settings_error").textContent = "Axis limits must be finite numbers or blank for automatic.";
-      by_id("chart_settings_error").hidden = false;
-      return;
-    }
-    if (value !== null) settings[field_name] = value;
-  }
-  if (Number.isFinite(settings.x_min) && Number.isFinite(settings.x_max) && settings.x_min >= settings.x_max) {
-    by_id("chart_settings_error").textContent = "X minimum must be less than X maximum.";
+  const state = chart_settings_form_state();
+  if (state.error) {
+    by_id("chart_settings_error").textContent = state.error;
     by_id("chart_settings_error").hidden = false;
     return;
   }
-  if (Number.isFinite(settings.y_min) && Number.isFinite(settings.y_max) && settings.y_min >= settings.y_max) {
-    by_id("chart_settings_error").textContent = "Y minimum must be less than Y maximum.";
-    by_id("chart_settings_error").hidden = false;
-    return;
-  }
-  if (Object.keys(settings).length) app.axis_ranges[chart_name] = settings;
+  const compact = compact_chart_settings(chart_name, state.settings);
+  if (Object.keys(compact).length) app.axis_ranges[chart_name] = compact;
   else delete app.axis_ranges[chart_name];
   save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
+  if (chart_name === "heatmap" && typeof save_heatmap_viewer_setting === "function") {
+    save_heatmap_viewer_setting("probe_row_height_px", state.settings.heatmap_row_height);
+  }
   close_chart_settings();
-  render_axis_settings_change();
 }
 
 function reset_chart_settings() {
   const chart_name = app.axis_chart_name;
   if (!chart_name) return;
-  delete app.axis_ranges[chart_name];
-  save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
-  close_chart_settings();
-  render_axis_settings_change();
+  populate_chart_settings_form(chart_name, chart_name === "heatmap" ? {heatmap_row_height: 12} : {});
+  by_id("chart_settings_error").hidden = true;
+  schedule_chart_settings_preview();
 }
 
 function open_settings() {
@@ -1700,6 +2012,13 @@ function bind_events() {
   by_id("cancel_chart_settings").addEventListener("click", close_chart_settings);
   by_id("save_chart_settings").addEventListener("click", save_chart_settings);
   by_id("reset_chart_settings").addEventListener("click", reset_chart_settings);
+  document.querySelectorAll("[data-chart-settings-tab]").forEach(button => {
+    button.addEventListener("click", () => set_chart_settings_tab(button.dataset.chartSettingsTab));
+  });
+  document.querySelectorAll(".chart-setting-input").forEach(input => {
+    input.addEventListener("input", schedule_chart_settings_preview);
+    input.addEventListener("change", schedule_chart_settings_preview);
+  });
   by_id("chart_settings_overlay").addEventListener("pointerdown", event => {
     if (event.target === by_id("chart_settings_overlay")) close_chart_settings();
   });

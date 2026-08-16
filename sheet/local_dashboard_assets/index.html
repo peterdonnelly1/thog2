@@ -239,28 +239,140 @@
 
   <div class="settings-overlay chart-settings-overlay" id="chart_settings_overlay" hidden role="dialog" aria-modal="true" aria-labelledby="chart_settings_title">
     <section class="settings-dialog chart-settings-dialog">
-      <header>
+      <header class="chart-settings-heading">
         <div>
           <h2 id="chart_settings_title">Chart settings</h2>
-          <p id="chart_settings_axes">Set explicit axis limits or leave fields blank for automatic ranges.</p>
+          <p id="chart_settings_axes">Changes are previewed live and remain local to this chart.</p>
         </div>
         <button id="close_chart_settings" type="button" aria-label="Close chart settings">×</button>
       </header>
-      <div class="settings-content chart-settings-content">
-        <section class="axis-settings-section" aria-labelledby="x_axis_settings_title">
-          <h3 id="x_axis_settings_title">X axis</h3>
-          <label for="chart_x_min">Minimum<input id="chart_x_min" type="number" step="any" placeholder="Automatic"></label>
-          <label for="chart_x_max">Maximum<input id="chart_x_max" type="number" step="any" placeholder="Automatic"></label>
+      <div class="chart-settings-workspace">
+        <section class="chart-settings-preview-pane" aria-labelledby="chart_settings_preview_heading">
+          <header>
+            <div>
+              <span class="live-preview-badge"><i aria-hidden="true"></i>Live preview</span>
+              <h3 id="chart_settings_preview_heading">Chart preview</h3>
+            </div>
+            <span id="chart_settings_preview_status">Unsaved settings</span>
+          </header>
+          <div class="chart-settings-preview-shell plot-shell" id="chart_settings_preview_shell">
+            <div class="chart-settings-preview-empty" id="chart_settings_preview_empty" hidden>No chart data is available for this run.</div>
+            <div class="plot-mount" id="chart_settings_preview"></div>
+          </div>
         </section>
-        <section class="axis-settings-section" aria-labelledby="y_axis_settings_title">
-          <h3 id="y_axis_settings_title">Y axis</h3>
-          <label for="chart_y_min">Minimum<input id="chart_y_min" type="number" step="any" placeholder="Automatic"></label>
-          <label for="chart_y_max">Maximum<input id="chart_y_max" type="number" step="any" placeholder="Automatic"></label>
+
+        <section class="chart-settings-controls" aria-label="Chart controls">
+          <nav class="chart-settings-tabs" role="tablist" aria-label="Chart setting sections">
+            <button class="selected" data-chart-settings-tab="data" type="button" role="tab" aria-selected="true">Data</button>
+            <button data-chart-settings-tab="display" type="button" role="tab" aria-selected="false">Display preferences</button>
+          </nav>
+
+          <div class="chart-settings-panels">
+            <section class="chart-settings-panel" data-chart-settings-panel="data">
+              <label class="chart-editor-field chart-editor-field-wide" for="chart_title_value">
+                <span>Chart title</span>
+                <input class="chart-setting-input" id="chart_title_value" type="text" autocomplete="off">
+              </label>
+
+              <section class="chart-axis-editor" aria-labelledby="x_axis_settings_title">
+                <h3 id="x_axis_settings_title">X axis</h3>
+                <label class="chart-editor-field chart-editor-field-wide" for="chart_x_source">
+                  <span>Data</span>
+                  <input id="chart_x_source" type="text" readonly>
+                </label>
+                <div class="chart-axis-range">
+                  <span>Range</span>
+                  <input class="chart-setting-input" id="chart_x_min" type="number" step="any" placeholder="Automatic" aria-label="X minimum">
+                  <input class="chart-setting-input" id="chart_x_max" type="number" step="any" placeholder="Automatic" aria-label="X maximum">
+                </div>
+                <label class="chart-editor-field chart-editor-field-wide" for="chart_x_label">
+                  <span>Label</span>
+                  <input class="chart-setting-input" id="chart_x_label" type="text" autocomplete="off">
+                </label>
+              </section>
+
+              <section class="chart-axis-editor" aria-labelledby="y_axis_settings_title">
+                <h3 id="y_axis_settings_title">Y axis</h3>
+                <label class="chart-editor-field chart-editor-field-wide" for="chart_y_source">
+                  <span>Data</span>
+                  <input id="chart_y_source" type="text" readonly>
+                </label>
+                <div class="chart-axis-range">
+                  <span>Range</span>
+                  <input class="chart-setting-input" id="chart_y_min" type="number" step="any" placeholder="Automatic" aria-label="Y minimum">
+                  <input class="chart-setting-input" id="chart_y_max" type="number" step="any" placeholder="Automatic" aria-label="Y maximum">
+                </div>
+                <label class="chart-editor-field chart-editor-field-wide" for="chart_y_label">
+                  <span>Label</span>
+                  <input class="chart-setting-input" id="chart_y_label" type="text" autocomplete="off">
+                </label>
+              </section>
+            </section>
+
+            <section class="chart-settings-panel" data-chart-settings-panel="display" hidden>
+              <section class="chart-display-section chart-curve-only" id="chart_curve_display_options">
+                <h3>Curve history</h3>
+                <label class="chart-slider-field" for="chart_max_snapshots">
+                  <span>Maximum snapshots to show</span>
+                  <div>
+                    <input class="chart-setting-input" id="chart_max_snapshots" type="range" min="0" max="1" step="1" value="0">
+                    <output id="chart_max_snapshots_value">All</output>
+                  </div>
+                </label>
+                <label class="chart-toggle-row" for="chart_exclude_outliers">
+                  <span><strong>Outliers</strong><small>Exclude extreme values when automatically scaling Y.</small></span>
+                  <input class="chart-setting-input" id="chart_exclude_outliers" type="checkbox">
+                </label>
+                <label class="chart-slider-field" for="chart_smoothing">
+                  <span>Smoothing</span>
+                  <div>
+                    <input class="chart-setting-input" id="chart_smoothing" type="range" min="0" max="0.95" step="0.05" value="0">
+                    <output id="chart_smoothing_value">Off</output>
+                  </div>
+                </label>
+                <label class="chart-slider-field" for="chart_line_width">
+                  <span>Line width</span>
+                  <div>
+                    <input class="chart-setting-input" id="chart_line_width" type="range" min="0.5" max="3" step="0.25" value="1">
+                    <output id="chart_line_width_value">1.00×</output>
+                  </div>
+                </label>
+                <fieldset class="chart-type-field">
+                  <legend>Chart type</legend>
+                  <label><input class="chart-setting-input" type="radio" name="chart_type" value="lines" checked><span title="Lines" aria-label="Lines">⌁</span></label>
+                  <label><input class="chart-setting-input" type="radio" name="chart_type" value="lines_markers"><span title="Lines and points" aria-label="Lines and points">⌁·</span></label>
+                  <label><input class="chart-setting-input" type="radio" name="chart_type" value="markers"><span title="Points" aria-label="Points">···</span></label>
+                </fieldset>
+                <p class="chart-fidelity-note"><strong>Point aggregation:</strong> Full fidelity. instra does not discard trajectory points.</p>
+              </section>
+
+              <section class="chart-display-section chart-heatmap-only" id="chart_heatmap_display_options" hidden>
+                <h3>Heatmap display</h3>
+                <label class="chart-slider-field" for="chart_heatmap_row_height">
+                  <span>Vertical pixels per optimizer step</span>
+                  <div>
+                    <input class="chart-setting-input" id="chart_heatmap_row_height" type="range" min="1" max="24" step="1" value="12">
+                    <output id="chart_heatmap_row_height_value">12 px</output>
+                  </div>
+                </label>
+                <p class="chart-fidelity-note">Candidate-layer columns remain fitted to the viewport; vertical scaling is independent.</p>
+              </section>
+
+              <section class="chart-display-section">
+                <h3>Plot area</h3>
+                <label class="chart-toggle-row" for="chart_show_grid">
+                  <span><strong>Gridlines</strong><small>Show the major X and Y grid.</small></span>
+                  <input class="chart-setting-input" id="chart_show_grid" type="checkbox" checked>
+                </label>
+              </section>
+            </section>
+
+            <p class="chart-settings-error" id="chart_settings_error" hidden></p>
+          </div>
         </section>
-        <p class="chart-settings-error" id="chart_settings_error" hidden></p>
       </div>
       <footer>
-        <button class="reset-axis-button" id="reset_chart_settings" type="button">Reset to automatic</button>
+        <button class="reset-axis-button" id="reset_chart_settings" type="button">Reset all</button>
         <button id="cancel_chart_settings" type="button">Cancel</button>
         <button id="save_chart_settings" class="primary-button" type="button">Apply</button>
       </footer>

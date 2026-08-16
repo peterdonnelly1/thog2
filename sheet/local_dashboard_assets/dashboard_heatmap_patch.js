@@ -50,6 +50,17 @@ function heatmap_abs_limit(default_limit) {
 }
 
 function heatmap_probe_row_height_px() {
+  const preview = Number(
+    app.chart_settings_render_override?.chart_name === "heatmap"
+      ? app.chart_settings_render_override.settings?.heatmap_row_height
+      : NaN,
+  );
+  if (Number.isFinite(preview)) {
+    return Math.min(
+      heatmap_maximum_probe_row_height_px,
+      Math.max(heatmap_minimum_probe_row_height_px, preview),
+    );
+  }
   const override = Number(heatmap_settings_for_current_run().probe_row_height_px);
   if (Number.isFinite(override)) {
     return Math.min(
@@ -1023,10 +1034,14 @@ window.addEventListener("load", () => {
   const heatmap_viewer_signature = () => JSON.stringify({
     colour: colour_for_run(app.current_run_id),
     settings: heatmap_settings_for_current_run(),
+    chart: stored_chart_settings("heatmap"),
   });
   const depth_viewer_signature = () => JSON.stringify({
     colour: colour_for_run(app.current_run_id),
     scales: load_json(trajectory_scale_settings_key_fast, {}),
+    charts: Object.fromEntries(
+      trajectory_chart_names_fast.map(chart_name => [chart_name, stored_chart_settings(chart_name)]),
+    ),
   });
 
   render_figures = async function() {

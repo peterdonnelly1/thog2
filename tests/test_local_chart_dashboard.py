@@ -312,6 +312,16 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="chart_x_max"' in html
     assert 'id="chart_y_min"' in html
     assert 'id="chart_y_max"' in html
+    assert 'id="chart_settings_preview"' in html
+    assert 'id="chart_title_value"' in html
+    assert 'id="chart_x_label"' in html
+    assert 'id="chart_y_label"' in html
+    assert 'id="chart_max_snapshots"' in html
+    assert 'id="chart_exclude_outliers"' in html
+    assert 'id="chart_smoothing"' in html
+    assert 'id="chart_line_width"' in html
+    assert 'id="chart_heatmap_row_height"' in html
+    assert 'id="chart_show_grid"' in html
     assert 'id="depth_chart_group"' in html
     assert 'id="depth_group_toggle"' in html
     assert "instra · THOG2 instrumentation" in html
@@ -343,6 +353,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "apply_chart_axis_settings" in javascript
     assert "save_chart_settings" in javascript
     assert "reset_chart_settings" in javascript
+    assert "render_chart_settings_preview" in javascript
+    assert "apply_chart_display_settings" in javascript
+    assert "limit_curve_snapshots" in javascript
+    assert "apply_outlier_resistant_y_range" in javascript
+    assert "smoothed_values" in javascript
+    assert 'button.textContent = "⚙"' in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
     assert "set_workspace_view" not in javascript
@@ -352,6 +368,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'if (tab_name === "files") refresh_files();' in heatmap_patch
     assert "actions.insertBefore(control, maximize);" in heatmap_patch
     assert "header.insertBefore(control, maximize);" not in heatmap_patch
+    assert 'chart: stored_chart_settings("heatmap")' in heatmap_patch
+    assert "trajectory_chart_names_fast.map(chart_name => [chart_name, stored_chart_settings(chart_name)])" in heatmap_patch
     assert 'name_button.addEventListener("click", () => set_file_path(entry.path));' in javascript
     assert 'window.open(local_file_url(entry.path), "_blank", "noopener")' in javascript
     assert '"/api/local-files"' in javascript
@@ -367,4 +385,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert ".file-source-tabs { display: flex;" in stylesheet
     assert ".file-list-panel { flex: 1 1 auto; min-height: 0;" in stylesheet
     assert ".files-table-wrap { flex: 1 1 auto; position: relative; min-height: 0;" in stylesheet
+    assert ".chart-settings-workspace { min-height: 0; display: grid;" in stylesheet
+    assert ".chart-settings-preview-pane { min-width: 0; min-height: 0;" in stylesheet
+    assert ".chart-settings-controls { min-width: 0; min-height: 0;" in stylesheet
 # ^^^ THOG
