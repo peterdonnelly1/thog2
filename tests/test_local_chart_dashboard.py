@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import run_thog2_local_dashboard as dashboard
 from sheet.local_chart_store import (
     LocalChartStore,
@@ -188,6 +190,106 @@ def test_delete_run_removes_only_local_chart_database_files(
     assert catalog.runs()["runs"] == []
 
 
+def test_instra_files_browse_only_the_selected_local_run(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    telemetry = _telemetry(artifact="files_artifact", run_id="files_run")
+    store = ensure_local_chart_store(telemetry)
+    local_root = store.path.parent
+    notes = local_root / "notes"
+    notes.mkdir()
+    local_file = notes / "summary.txt"
+    local_file.write_text("instra file browser", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("must remain private", encoding="utf-8")
+    blocked_link = local_root / "outside-link"
+    blocked_link.symlink_to(outside)
+
+    catalog = dashboard.DashboardCatalog(root=tmp_path)
+    root_listing = catalog.local_files("files_run")
+    nested_listing = catalog.local_files("files_run", "notes")
+
+    assert root_listing["source"] == "instra"
+    assert root_listing["current_path"] == ""
+    assert {entry["name"]: entry["kind"] for entry in root_listing["entries"]}[
+        "notes"
+    ] == "folder"
+    assert {entry["name"]: entry["kind"] for entry in root_listing["entries"]}[
+        "outside-link"
+    ] == "symlink"
+    assert nested_listing["parent_path"] == ""
+    assert nested_listing["entries"][0]["path"] == "notes/summary.txt"
+    assert catalog.local_file("files_run", "notes/summary.txt") == local_file
+    with pytest.raises(ValueError):
+        catalog.local_file("files_run", "../outside.txt")
+    with pytest.raises(PermissionError):
+        catalog.local_file("files_run", "outside-link")
+    close_local_chart_store(telemetry)
+
+
+def test_wandb_files_are_exposed_as_a_folder_manifest(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    telemetry = _telemetry(
+        artifact="wandb_files_artifact",
+        run_id="wandb_files_run",
+        url="https://wandb.ai/example/project/runs/wandb_files_run",
+    )
+    ensure_local_chart_store(telemetry)
+    requested_references = []
+    remote_files = (
+        SimpleNamespace(
+            name="config.yaml",
+            size=120,
+            mimetype="application/yaml",
+            md5="config-digest",
+            updated_at="2026-08-16T10:30:00Z",
+            direct_url="https://storage.wandb.ai/files/config.yaml",
+            url="https://api.wandb.ai/files/config.yaml",
+        ),
+        SimpleNamespace(
+            name="media/table/data.json",
+            size=640,
+            mimetype="application/json",
+            md5="data-digest",
+            updated_at="2026-08-16T10:31:00Z",
+            direct_url="https://storage.wandb.ai/files/data.json",
+            url="https://api.wandb.ai/files/data.json",
+        ),
+    )
+
+    class FakeApi:
+        def run(self, reference):
+            requested_references.append(reference)
+            return SimpleNamespace(files=lambda: remote_files)
+
+    catalog = dashboard.DashboardCatalog(
+        root=tmp_path,
+        wandb_api_factory=FakeApi,
+    )
+    root_listing = catalog.wandb_files("wandb_files_run")
+    media_listing = catalog.wandb_files("wandb_files_run", "media")
+
+    assert requested_references == ["example/project/wandb_files_run"]
+    assert root_listing["available"] is True
+    assert root_listing["manifest_count"] == 2
+    assert [(entry["name"], entry["kind"]) for entry in root_listing["entries"]] == [
+        ("media", "folder"),
+        ("config.yaml", "file"),
+    ]
+    assert media_listing["entries"][0]["path"] == "media/table"
+    assert root_listing["entries"][1]["download_url"].endswith("/config.yaml")
+    assert root_listing["entries"][1]["modified_at"] == "2026-08-16T10:30:00Z"
+    assert root_listing["wandb_files_url"].endswith("/wandb_files_run/files")
+    with pytest.raises(ValueError):
+        catalog.wandb_files("wandb_files_run", "../outside")
+    close_local_chart_store(telemetry)
+
+
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
@@ -202,8 +304,23 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="page_size"' in html
     assert 'id="sort_direction"' in html
     assert 'id="run_menu"' in html
+    assert 'id="chart_settings_overlay"' in html
+    assert 'id="chart_x_min"' in html
+    assert 'id="chart_x_max"' in html
+    assert 'id="chart_y_min"' in html
+    assert 'id="chart_y_max"' in html
     assert 'id="depth_chart_group"' in html
     assert 'id="depth_group_toggle"' in html
+    assert "instra · THOG2 instrumentation" in html
+    assert 'id="files_tab"' in html
+    assert 'id="files_workspace"' in html
+    assert 'id="instra_files_tab"' in html
+    assert 'id="wandb_files_tab"' in html
+    assert 'id="file_breadcrumbs"' in html
+    assert 'id="files_body"' in html
+    assert "<th>File name</th>" in html
+    assert ">Last modified</th>" in html
+    assert ">Download</th>" in html
     assert ">Probes</th>" in html
     assert ">Curves</th>" in html
     assert ">Logged</th>" in html
@@ -219,10 +336,25 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "crashed:" in javascript
     assert "toggle_maximized_chart" in javascript
     assert "position_restore_button" in javascript
+    assert "chart_axis_settings" in javascript
+    assert "apply_chart_axis_settings" in javascript
+    assert "save_chart_settings" in javascript
+    assert "reset_chart_settings" in javascript
     assert "start_chart_resize" in javascript
     assert "should_follow_recommendation" in javascript
+    assert "set_workspace_view" in javascript
+    assert "set_file_source" in javascript
+    assert '"/api/local-files"' in javascript
+    assert '"/api/wandb-files"' in javascript
     assert '.chart-card[data-chart="heatmap"] { flex: 1 1 100%; }' in stylesheet
-    assert '.chart-card:not([data-chart="heatmap"]) { flex: 1 1 calc(33.333% - 10px); }' in stylesheet
+    assert '.chart-card:not([data-chart="heatmap"]) { min-width: 180px; flex: 1 1 calc(33.333% - 10px); }' in stylesheet
     assert ".plot-shell { position: absolute; inset: 52px 0 0 0; overflow: auto;" in stylesheet
-    assert ".chart-card.maximized .maximize-button { position: fixed;" in stylesheet
+    assert '.chart-card:not([data-chart="heatmap"]) { min-width: 180px;' in stylesheet
+    assert ".plot-mount { position: relative; z-index: 2; width: 100%; min-width: 0;" in stylesheet
+    assert '.chart-card[data-chart="heatmap"] .plot-mount { width: max(100%, 720px);' in stylesheet
+    assert ".chart-card.maximized .maximize-button, .chart-card.maximized .chart-settings-button { position: fixed;" in stylesheet
+    assert ".files-workspace { flex: 1 1 auto; min-height: 0;" in stylesheet
+    assert ".file-source-tabs { display: flex;" in stylesheet
+    assert ".file-list-panel { flex: 1 1 auto; min-height: 0;" in stylesheet
+    assert ".files-table-wrap { flex: 1 1 auto; position: relative; min-height: 0;" in stylesheet
 # ^^^ THOG

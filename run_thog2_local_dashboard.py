@@ -1,5 +1,5 @@
 # vvv THOG
-"""Serve live THOG chart runs and interactive figures from compact local data."""
+"""Serve instra run charts, local files and W&B file manifests."""
 
 from __future__ import annotations
 
@@ -7,13 +7,15 @@ import argparse
 import json
 import mimetypes
 import sqlite3
+import stat
 import threading
+import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path, PurePosixPath
+from typing import Any, Callable, Dict, Optional, Tuple
+from urllib.parse import parse_qs, quote, urlparse
 
 from plotly.offline import get_plotlyjs
 from plotly.utils import PlotlyJSONEncoder
@@ -32,6 +34,8 @@ _ASSET_ROOT = Path(__file__).resolve().parent / "sheet" / "local_dashboard_asset
 # _ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js", "dashboard_heatmap_patch.js"))
 _ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js", "dashboard_heatmap_patch.js", "dashboard_ui_patch.css"))
 # ^^^ THOG
+_WANDB_FILE_CACHE_SECONDS = 30.0
+_WANDB_FILE_LIMIT = 5000
 
 
 def _modified_time(path: Path) -> float:
@@ -46,6 +50,33 @@ def _timestamp_from_epoch(value: float) -> str:
     if value <= 0.0:
         return ""
     return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+
+
+def _normalise_relative_path(value: str) -> PurePosixPath:
+    if "\\" in value:
+        raise ValueError("backslashes are not permitted in file paths")
+    path = PurePosixPath(value or ".")
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("file path must remain inside the selected run")
+    return PurePosixPath(*(part for part in path.parts if part not in {"", "."}))
+
+
+def _relative_path_text(path: PurePosixPath) -> str:
+    return "" if str(path) == "." else path.as_posix()
+
+
+def _wandb_run_reference(wandb_url: str, wandb_run_id: str) -> str:
+    parts = tuple(part for part in urlparse(wandb_url).path.split("/") if part)
+    try:
+        runs_index = parts.index("runs")
+    except ValueError as error:
+        raise ValueError("W&B run URL does not contain a runs path") from error
+    if runs_index < 2:
+        raise ValueError("W&B run URL does not identify an entity and project")
+    run_id = wandb_run_id or (parts[runs_index + 1] if len(parts) > runs_index + 1 else "")
+    if not run_id:
+        raise ValueError("W&B run ID is unavailable")
+    return f"{parts[runs_index - 2]}/{parts[runs_index - 1]}/{run_id}"
 
 
 class RunDashboardState:
@@ -172,11 +203,19 @@ class RunDashboardState:
 
 
 class DashboardCatalog:
-    def __init__(self, *, root: Path, requested_run: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        *,
+        root: Path,
+        requested_run: Optional[str] = None,
+        wandb_api_factory: Optional[Callable[[], Any]] = None,
+    ) -> None:
         self.root = Path(root)
         self.requested_run = requested_run
+        self.wandb_api_factory = wandb_api_factory
         self.lock = threading.Lock()
         self.states: Dict[Path, RunDashboardState] = {}
+        self.wandb_file_cache: Dict[str, Tuple[float, Tuple[Dict[str, Any], ...]]] = {}
 
     def _candidate_paths(self) -> Tuple[Path, ...]:
         if not self.root.is_dir():
@@ -364,6 +403,255 @@ class DashboardCatalog:
             "removed_directory": removed_directory,
         }
 
+    def _resolved_local_path(
+        self,
+        run_name: str,
+        relative_path: str,
+    ) -> Tuple[RunDashboardState, Path, PurePosixPath]:
+        state = self.state_for_run(run_name)
+        root = state.database_path.parent.resolve()
+        relative = _normalise_relative_path(relative_path)
+        candidate = root
+        for part in relative.parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                raise PermissionError("symbolic links are not accessible through instra")
+        resolved = candidate.resolve(strict=True)
+        try:
+            resolved.relative_to(root)
+        except ValueError as error:
+            raise PermissionError(
+                "refusing to access a path outside the selected instra run"
+            ) from error
+        return state, resolved, relative
+
+    def local_files(self, run_name: str, relative_path: str = "") -> Dict[str, Any]:
+        state, directory, relative = self._resolved_local_path(run_name, relative_path)
+        if not directory.is_dir():
+            raise NotADirectoryError(relative_path)
+        entries = []
+        for child in directory.iterdir():
+            child_stat = child.lstat()
+            child_relative = relative / child.name
+            if stat.S_ISLNK(child_stat.st_mode):
+                kind = "symlink"
+                size = None
+            elif stat.S_ISDIR(child_stat.st_mode):
+                kind = "folder"
+                size = None
+            elif stat.S_ISREG(child_stat.st_mode):
+                kind = "file"
+                size = int(child_stat.st_size)
+            else:
+                kind = "other"
+                size = None
+            entry = {
+                "name": child.name,
+                "path": _relative_path_text(child_relative),
+                "kind": kind,
+                "size": size,
+                "modified_at": _timestamp_from_epoch(child_stat.st_mtime),
+                "mime_type": mimetypes.guess_type(child.name)[0] or "",
+            }
+            if kind == "folder":
+                folder_count = 0
+                file_count = 0
+                try:
+                    for descendant in child.iterdir():
+                        descendant_stat = descendant.lstat()
+                        if stat.S_ISLNK(descendant_stat.st_mode):
+                            continue
+                        if stat.S_ISDIR(descendant_stat.st_mode):
+                            folder_count += 1
+                        elif stat.S_ISREG(descendant_stat.st_mode):
+                            file_count += 1
+                except OSError:
+                    pass
+                entry["folder_count"] = folder_count
+                entry["file_count"] = file_count
+            entries.append(entry)
+        entries.sort(
+            key=lambda entry: (
+                entry["kind"] != "folder",
+                str(entry["name"]).casefold(),
+            )
+        )
+        status = state.status()
+        parent = relative.parent
+        return {
+            "source": "instra",
+            "available": True,
+            "root_path": str(state.database_path.parent.resolve()),
+            "current_path": _relative_path_text(relative),
+            "parent_path": None if str(relative) == "." else _relative_path_text(parent),
+            "entries": entries,
+            "entry_count": len(entries),
+            "run_id": status["dashboard_run_id"],
+        }
+
+    def local_file(self, run_name: str, relative_path: str) -> Path:
+        _state, path, _relative = self._resolved_local_path(run_name, relative_path)
+        if not path.is_file():
+            raise FileNotFoundError(relative_path)
+        return path
+
+    def _wandb_file_manifest(
+        self,
+        status: Dict[str, Any],
+        *,
+        refresh: bool,
+    ) -> Tuple[Dict[str, Any], ...]:
+        reference = _wandb_run_reference(
+            str(status["wandb_url"]),
+            str(status["wandb_run_id"]),
+        )
+        cached = self.wandb_file_cache.get(reference)
+        if cached and not refresh and time.monotonic() - cached[0] < _WANDB_FILE_CACHE_SECONDS:
+            return cached[1]
+        if self.wandb_api_factory is None:
+            import wandb
+
+            api = wandb.Api(timeout=10)
+        else:
+            api = self.wandb_api_factory()
+        run = api.run(reference)
+        manifest = []
+        for index, remote_file in enumerate(run.files()):
+            if index >= _WANDB_FILE_LIMIT:
+                break
+            name = str(remote_file.name)
+            relative = _normalise_relative_path(name)
+            if str(relative) == ".":
+                continue
+            try:
+                size = int(remote_file.size)
+            except (AttributeError, TypeError, ValueError):
+                size = None
+            try:
+                mime_type = str(remote_file.mimetype or "")
+            except AttributeError:
+                mime_type = mimetypes.guess_type(name)[0] or ""
+            try:
+                digest = str(remote_file.md5 or "")
+            except AttributeError:
+                digest = ""
+            try:
+                modified_at = str(remote_file.updated_at or "")
+            except AttributeError:
+                modified_at = ""
+            try:
+                download_url = str(remote_file.direct_url or "")
+            except AttributeError:
+                download_url = ""
+            if not download_url:
+                try:
+                    download_url = str(remote_file.url or "")
+                except AttributeError:
+                    download_url = ""
+            if urlparse(download_url).scheme not in {"http", "https"}:
+                download_url = ""
+            manifest.append(
+                {
+                    "name": relative.name,
+                    "path": _relative_path_text(relative),
+                    "kind": "file",
+                    "size": size,
+                    "modified_at": modified_at,
+                    "mime_type": mime_type,
+                    "digest": digest,
+                    "download_url": download_url,
+                }
+            )
+        resolved = tuple(manifest)
+        self.wandb_file_cache[reference] = (time.monotonic(), resolved)
+        return resolved
+
+    def wandb_files(
+        self,
+        run_name: str,
+        relative_path: str = "",
+        *,
+        refresh: bool = False,
+    ) -> Dict[str, Any]:
+        state = self.state_for_run(run_name)
+        status = state.status()
+        wandb_url = str(status["wandb_url"])
+        if not wandb_url or not status["wandb_run_id"]:
+            return {
+                "source": "wandb",
+                "available": False,
+                "error": "This local run is not linked to a W&B run.",
+                "entries": [],
+                "current_path": "",
+                "parent_path": None,
+                "wandb_files_url": "",
+            }
+        relative = _normalise_relative_path(relative_path)
+        try:
+            manifest = self._wandb_file_manifest(status, refresh=refresh)
+        except Exception as error:
+            return {
+                "source": "wandb",
+                "available": False,
+                "error": f"W&B files could not be loaded: {error}",
+                "entries": [],
+                "current_path": "",
+                "parent_path": None,
+                "wandb_files_url": f"{wandb_url.rstrip('/')}/files",
+            }
+        prefix_parts = () if str(relative) == "." else relative.parts
+        folders: Dict[str, Dict[str, Any]] = {}
+        folder_descendants: Dict[str, set[str]] = {}
+        files = []
+        for item in manifest:
+            item_path = PurePosixPath(str(item["path"]))
+            if item_path.parts[: len(prefix_parts)] != prefix_parts:
+                continue
+            remainder = item_path.parts[len(prefix_parts) :]
+            if not remainder:
+                continue
+            if len(remainder) > 1:
+                folder_name = remainder[0]
+                folder_path = relative / folder_name
+                folder = folders.setdefault(
+                    folder_name,
+                    {
+                        "name": folder_name,
+                        "path": _relative_path_text(folder_path),
+                        "kind": "folder",
+                        "size": 0,
+                        "modified_at": "",
+                        "mime_type": "",
+                        "child_count": 0,
+                        "file_count": 0,
+                        "folder_count": 0,
+                    },
+                )
+                folder["child_count"] += 1
+                folder["file_count"] += 1
+                descendants = folder_descendants.setdefault(folder_name, set())
+                for depth in range(1, len(remainder) - 1):
+                    descendants.add("/".join(remainder[1 : depth + 1]))
+                if item["size"] is not None:
+                    folder["size"] += int(item["size"])
+                continue
+            files.append(dict(item))
+        for folder_name, descendants in folder_descendants.items():
+            folders[folder_name]["folder_count"] = len(descendants)
+        entries = sorted(folders.values(), key=lambda item: str(item["name"]).casefold())
+        entries.extend(sorted(files, key=lambda item: str(item["name"]).casefold()))
+        return {
+            "source": "wandb",
+            "available": True,
+            "current_path": _relative_path_text(relative),
+            "parent_path": None if str(relative) == "." else _relative_path_text(relative.parent),
+            "entries": entries,
+            "entry_count": len(entries),
+            "manifest_count": len(manifest),
+            "wandb_files_url": f"{wandb_url.rstrip('/')}/files",
+            "run_id": status["dashboard_run_id"],
+        }
+
 
 def _handler_for(catalog: DashboardCatalog):
     plotly_javascript = get_plotlyjs().encode("utf-8")
@@ -409,6 +697,23 @@ def _handler_for(catalog: DashboardCatalog):
                 status=status,
             )
 
+        def _send_file(self, path: Path, *, download: bool) -> None:
+            file_size = path.stat().st_size
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            disposition = "attachment" if download else "inline"
+            encoded_name = quote(path.name, safe="")
+            self.send_response(int(HTTPStatus.OK))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(file_size))
+            self.send_header("Content-Disposition", f"{disposition}; filename*=UTF-8''{encoded_name}")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Security-Policy", "sandbox; default-src 'none'")
+            self.end_headers()
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    self.wfile.write(chunk)
+
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             path = parsed.path
@@ -438,6 +743,41 @@ def _handler_for(catalog: DashboardCatalog):
                 if path == "/api/runs":
                     self._send_json(catalog.runs())
                     return
+                if path in {"/api/local-files", "/api/wandb-files"}:
+                    run_name = query.get("run", [""])[0]
+                    if not run_name:
+                        self._send_json(
+                            {"error": "run query parameter is required"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    relative_path = query.get("path", [""])[0]
+                    if path == "/api/local-files":
+                        value = catalog.local_files(run_name, relative_path)
+                    else:
+                        refresh = query.get("refresh", ["0"])[0] == "1"
+                        value = catalog.wandb_files(
+                            run_name,
+                            relative_path,
+                            refresh=refresh,
+                        )
+                    self._send_json(value)
+                    return
+                if path == "/api/local-file":
+                    run_name = query.get("run", [""])[0]
+                    relative_path = query.get("path", [""])[0]
+                    if not run_name or not relative_path:
+                        self._send_json(
+                            {"error": "run and path query parameters are required"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    local_file = catalog.local_file(run_name, relative_path)
+                    self._send_file(
+                        local_file,
+                        download=query.get("download", ["0"])[0] == "1",
+                    )
+                    return
                 if path in {"/api/status", "/api/figures"}:
                     run_name = query.get("run", [""])[0]
                     if not run_name:
@@ -455,8 +795,12 @@ def _handler_for(catalog: DashboardCatalog):
                     content_type="text/plain; charset=utf-8",
                     status=HTTPStatus.NOT_FOUND,
                 )
-            except (FileNotFoundError, KeyError) as error:
+            except (FileNotFoundError, KeyError, NotADirectoryError) as error:
                 self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            except PermissionError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.FORBIDDEN)
+            except ValueError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
             except Exception as error:
                 self._send_json(
                     {"error": str(error)},
@@ -502,7 +846,7 @@ def _handler_for(catalog: DashboardCatalog):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Serve live THOG2 charts from compact local run data"
+        description="Serve instra charts and files from compact local run data"
     )
     parser.add_argument(
         "--run",
@@ -522,7 +866,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         _handler_for(catalog),
     )
     url = f"http://{arguments.host}:{arguments.port}/"
-    print(f"THOG2 local instrumentation: {url}", flush=True)
+    print(f"instra: {url}", flush=True)
     if arguments.run:
         print(f"waiting for local chart run: {arguments.run}", flush=True)
     else:

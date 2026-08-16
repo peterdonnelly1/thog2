@@ -46,6 +46,13 @@ const app = {
   colours: load_json("thog2_local_run_colours", {}),
   visibility: load_json("thog2_local_run_visibility", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
+  axis_ranges: load_json("thog2_local_chart_axis_ranges", {}),
+  workspace_view: "charts",
+  file_source: localStorage.getItem("instra_file_source") === "wandb" ? "wandb" : "instra",
+  file_path: "",
+  file_payload: null,
+  file_loading: false,
+  file_request_serial: 0,
   page_size: load_number("thog2_local_page_size", 50),
   current_page: 1,
   sort_descending: localStorage.getItem("thog2_local_sort_descending") !== "0",
@@ -58,7 +65,9 @@ const app = {
   picker_hue: 250,
   picker_saturation: 56,
   picker_value: 84,
+  axis_chart_name: null,
 };
+if (!app.axis_ranges || typeof app.axis_ranges !== "object" || Array.isArray(app.axis_ranges)) app.axis_ranges = {};
 
 function by_id(id) { return document.getElementById(id); }
 
@@ -273,7 +282,7 @@ function append_run_row(body, run) {
   state_icon.appendChild(icon_svg(state_icon_name));
   badge.append(state_icon, document.createTextNode(shown_state));
   if (shown_state === "crashed") {
-    badge.title = `No local chart data for more than ${app.crash_timeout_minutes} minutes`;
+    badge.title = `No instra chart data for more than ${app.crash_timeout_minutes} minutes`;
   }
   state_cell.appendChild(badge);
   row.appendChild(state_cell);
@@ -325,7 +334,7 @@ function render_runs() {
     by_id("empty_runs_title").textContent = app.runs.length ? "No matching runs" : "Waiting for a local run";
     by_id("empty_runs_detail").textContent = app.runs.length
       ? "Change the search or filter to see runs."
-      : "The viewer is ready. Start training and the W&B-linked run will appear here automatically.";
+      : "instra is ready. Start training and the W&B-linked run will appear here automatically.";
     return;
   }
   let previous_group = null;
@@ -374,8 +383,12 @@ async function refresh_catalog() {
     by_id("topbar_state").textContent = watch_text;
 
     if (app.current_run_id && !app.runs.some(run => run_identifier(run) === app.current_run_id)) {
+      app.file_request_serial += 1;
       app.current_run_id = null;
       app.manual_selection = false;
+      app.file_path = "";
+      app.file_payload = null;
+      app.file_loading = false;
       reset_run_charts();
     }
 
@@ -505,10 +518,102 @@ function transpose_heatmap(prepared) {
   }
 }
 
+function chart_axis_settings(chart_name) {
+  const stored = app.axis_ranges && typeof app.axis_ranges === "object"
+    ? app.axis_ranges[chart_name]
+    : null;
+  const normalized = {};
+  for (const field of ["x_min", "x_max", "y_min", "y_max"]) {
+    const value = Number(stored?.[field]);
+    if (stored?.[field] !== null && stored?.[field] !== "" && Number.isFinite(value)) normalized[field] = value;
+  }
+  return normalized;
+}
+
+function has_chart_axis_settings(chart_name) {
+  return Object.keys(chart_axis_settings(chart_name)).length > 0;
+}
+
+function numeric_trace_bounds(prepared, axis_name) {
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const trace of prepared.data || []) {
+    for (const raw_value of trace[axis_name] || []) {
+      const value = Number(raw_value);
+      if (!Number.isFinite(value)) continue;
+      minimum = Math.min(minimum, value);
+      maximum = Math.max(maximum, value);
+    }
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return [0, 1];
+  if (minimum !== maximum) return [minimum, maximum];
+  const padding = Math.max(1, Math.abs(minimum) * 0.05);
+  return [minimum - padding, maximum + padding];
+}
+
+function automatic_axis_bounds(prepared, axis_name) {
+  const axis = prepared.layout[`${axis_name}axis`] || {};
+  const range = axis.range || [];
+  const range_minimum = Number(range[0]);
+  const range_maximum = Number(range[1]);
+  if (Number.isFinite(range_minimum) && Number.isFinite(range_maximum) && range_minimum < range_maximum) {
+    return [range_minimum, range_maximum];
+  }
+  return numeric_trace_bounds(prepared, axis_name);
+}
+
+function heatmap_step_coordinate(prepared, requested_step, boundary) {
+  const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+  const coordinates = heatmap_trace?.y || [];
+  const steps = (heatmap_trace?.customdata || []).map((row, index) => {
+    const value = Array.isArray(row) && row.length ? Number(row[0]) : Number(coordinates[index]);
+    return Number.isFinite(value) ? value : Number(coordinates[index]);
+  });
+  if (!coordinates.length || coordinates.length !== steps.length) return requested_step;
+  if (boundary === "minimum") {
+    const index = steps.findIndex(step => step >= requested_step);
+    return Number(coordinates[index < 0 ? coordinates.length - 1 : index]) - 0.5;
+  }
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (steps[index] <= requested_step) return Number(coordinates[index]) + 0.5;
+  }
+  return Number(coordinates[0]) + 0.5;
+}
+
+function apply_chart_axis_settings(prepared, chart_name, settings) {
+  for (const axis_name of ["x", "y"]) {
+    const minimum_field = `${axis_name}_min`;
+    const maximum_field = `${axis_name}_max`;
+    const has_minimum = Number.isFinite(settings[minimum_field]);
+    const has_maximum = Number.isFinite(settings[maximum_field]);
+    if (!has_minimum && !has_maximum) continue;
+    const automatic = automatic_axis_bounds(prepared, axis_name);
+    let minimum = has_minimum ? settings[minimum_field] : automatic[0];
+    let maximum = has_maximum ? settings[maximum_field] : automatic[1];
+    if (chart_name === "heatmap" && axis_name === "y") {
+      if (has_minimum) minimum = heatmap_step_coordinate(prepared, minimum, "minimum");
+      if (has_maximum) maximum = heatmap_step_coordinate(prepared, maximum, "maximum");
+    } else if (chart_name === "heatmap" && axis_name === "x") {
+      if (has_minimum) minimum -= 0.5;
+      if (has_maximum) maximum += 0.5;
+    }
+    if (!(minimum < maximum)) {
+      const padding = Math.max(1, Math.abs(has_minimum ? minimum : maximum) * 0.05);
+      if (has_minimum && !has_maximum) maximum = minimum + padding;
+      else if (!has_minimum && has_maximum) minimum = maximum - padding;
+    }
+    const axis = prepared.layout[`${axis_name}axis`] || {};
+    axis.autorange = false;
+    axis.range = [minimum, maximum];
+    prepared.layout[`${axis_name}axis`] = axis;
+  }
+}
+
 function prepare_figure(figure, chart_name) {
   const prepared = clone_figure(figure);
+  const axis_settings = chart_axis_settings(chart_name);
   prepared.layout = prepared.layout || {};
-  prepared.layout.uirevision = `${app.current_run_id}-${chart_name}`;
+  prepared.layout.uirevision = `${app.current_run_id}-${chart_name}-${JSON.stringify(axis_settings)}`;
   prepared.layout.autosize = true;
   prepared.layout.paper_bgcolor = "white";
   prepared.layout.plot_bgcolor = "white";
@@ -534,6 +639,7 @@ function prepare_figure(figure, chart_name) {
       }
     }
   }
+  apply_chart_axis_settings(prepared, chart_name, axis_settings);
   return prepared;
 }
 
@@ -558,6 +664,18 @@ function add_panel_resizers(article) {
   }
 }
 
+function chart_settings_button(chart_name, title) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "chart-settings-button";
+  button.dataset.chartSettings = chart_name;
+  button.textContent = "⚙";
+  button.title = "Chart settings";
+  button.setAttribute("aria-label", `Settings for ${title}`);
+  button.classList.toggle("active", has_chart_axis_settings(chart_name));
+  return button;
+}
+
 function depth_card(chart_name) {
   const article = document.createElement("article");
   article.className = "chart-card";
@@ -572,14 +690,17 @@ function depth_card(chart_name) {
   detail.id = `${chart_name}_detail`;
   detail.textContent = "Waiting for the first DEPTH weight snapshot.";
   copy.append(title, detail);
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "maximize-button";
-  button.dataset.maximize = chart_name;
-  button.textContent = "⛶";
-  button.title = "Maximize chart";
-  button.setAttribute("aria-label", `Maximize ${title.textContent}`);
-  header.append(copy, button);
+  const actions = document.createElement("div");
+  actions.className = "chart-card-actions";
+  const maximize_button = document.createElement("button");
+  maximize_button.type = "button";
+  maximize_button.className = "maximize-button";
+  maximize_button.dataset.maximize = chart_name;
+  maximize_button.textContent = "⛶";
+  maximize_button.title = "Maximize chart";
+  maximize_button.setAttribute("aria-label", `Maximize ${title.textContent}`);
+  actions.append(chart_settings_button(chart_name, title.textContent), maximize_button);
+  header.append(copy, actions);
   const shell = document.createElement("div");
   shell.className = "plot-shell";
   const placeholder = document.createElement("div");
@@ -675,13 +796,262 @@ function render_run_heading() {
 
 function render_empty_state() {
   const has_run = Boolean(app.current_run_id);
-  by_id("charts_empty").hidden = has_run;
-  by_id("charts_scroll").hidden = !has_run;
+  const charts_visible = app.workspace_view === "charts";
+  by_id("charts_empty").hidden = !charts_visible || has_run;
+  by_id("charts_scroll").hidden = !charts_visible || !has_run;
+  by_id("files_workspace").hidden = app.workspace_view !== "files";
   if (!has_run) {
     by_id("charts_empty_title").textContent = app.runs.length ? "Select a run" : "Waiting for a local run";
     by_id("charts_empty_detail").textContent = app.runs.length
       ? "Choose a run from the persistent panel on the left."
       : "This page can stay open before training starts; the active W&B-linked run will appear automatically.";
+  }
+  render_files();
+}
+
+function update_workspace_tabs() {
+  document.querySelectorAll(".run-tab").forEach(button => {
+    const selected = button.dataset.workspaceView === app.workspace_view;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+  document.querySelectorAll(".file-source-tab").forEach(button => {
+    const selected = button.dataset.fileSource === app.file_source;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+}
+
+function set_workspace_view(view) {
+  if (!["charts", "files"].includes(view) || app.workspace_view === view) return;
+  if (view === "files") restore_maximized_chart();
+  app.workspace_view = view;
+  update_workspace_tabs();
+  render_empty_state();
+  if (view === "files") refresh_files();
+  else requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
+}
+
+function set_file_source(source) {
+  if (!["instra", "wandb"].includes(source)) return;
+  app.file_source = source;
+  app.file_path = "";
+  app.file_payload = null;
+  localStorage.setItem("instra_file_source", source);
+  update_workspace_tabs();
+  render_files();
+  refresh_files();
+}
+
+function set_file_path(path) {
+  app.file_path = path || "";
+  app.file_payload = null;
+  render_files();
+  refresh_files();
+}
+
+function file_modified_text(value) {
+  if (!value) return "—";
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return "—";
+  const delta_seconds = Math.max(0, Math.round((Date.now() - timestamp.getTime()) / 1000));
+  if (delta_seconds < 60) return "just now";
+  if (delta_seconds < 3600) return `${Math.floor(delta_seconds / 60)}m ago`;
+  if (delta_seconds < 86400) return `${Math.floor(delta_seconds / 3600)}h ago`;
+  if (delta_seconds < 86400 * 30) return `${Math.floor(delta_seconds / 86400)}d ago`;
+  return timestamp.toLocaleDateString();
+}
+
+function folder_summary(entry) {
+  const folder_count = Number(entry.folder_count);
+  const file_count = Number(entry.file_count ?? entry.child_count);
+  if (!Number.isFinite(folder_count) && !Number.isFinite(file_count)) return "Folder";
+  const parts = [];
+  if (Number.isFinite(folder_count)) {
+    parts.push(`${format_integer(folder_count)} subfolder${folder_count === 1 ? "" : "s"}`);
+  }
+  if (Number.isFinite(file_count)) {
+    parts.push(`${format_integer(file_count)} file${file_count === 1 ? "" : "s"}`);
+  }
+  return parts.join(", ");
+}
+
+function file_breadcrumbs(payload) {
+  const container = by_id("file_breadcrumbs");
+  container.replaceChildren();
+  const root_button = document.createElement("button");
+  root_button.type = "button";
+  root_button.dataset.filePath = "";
+  root_button.textContent = "root";
+  root_button.title = payload?.root_path || payload?.wandb_files_url || "File root";
+  container.appendChild(root_button);
+  const parts = String(payload?.current_path || "").split("/").filter(Boolean);
+  let assembled = "";
+  for (const part of parts) {
+    const separator = document.createElement("span");
+    separator.textContent = "›";
+    separator.setAttribute("aria-hidden", "true");
+    assembled = assembled ? `${assembled}/${part}` : part;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.filePath = assembled;
+    button.textContent = part;
+    button.title = assembled;
+    container.append(separator, button);
+  }
+}
+
+function local_file_url(path, download = false) {
+  const query = new URLSearchParams({run: app.current_run_id, path});
+  if (download) query.set("download", "1");
+  return `/api/local-file?${query}`;
+}
+
+function append_file_row(body, entry) {
+  const row = document.createElement("tr");
+  row.className = `file-row file-${entry.kind}`;
+  const name_cell = document.createElement("td");
+  const name_button = document.createElement("button");
+  name_button.type = "button";
+  name_button.className = "file-name-button";
+  const glyph = document.createElement("span");
+  glyph.className = `file-glyph ${entry.kind}`;
+  glyph.setAttribute("aria-hidden", "true");
+  const name = document.createElement("strong");
+  name.textContent = entry.kind === "folder" ? `${entry.name} /` : entry.name;
+  name.title = entry.path;
+  name_button.append(glyph, name);
+  if (entry.kind === "folder") {
+    name_button.addEventListener("click", () => set_file_path(entry.path));
+  } else if (entry.kind === "file" && app.file_source === "instra") {
+    name_button.addEventListener("click", () => window.open(local_file_url(entry.path), "_blank", "noopener"));
+  } else if (entry.kind === "file" && entry.download_url) {
+    name_button.addEventListener("click", () => window.open(entry.download_url, "_blank", "noopener"));
+  } else {
+    name_button.disabled = true;
+  }
+  name_cell.appendChild(name_button);
+  row.appendChild(name_cell);
+  row.appendChild(text_cell(entry.kind === "folder" ? folder_summary(entry) : file_modified_text(entry.modified_at), "file-modified-column"));
+  row.appendChild(text_cell(entry.kind === "folder" ? "0 B" : (entry.size === null || entry.size === undefined ? "—" : format_bytes(entry.size)), "file-size-column"));
+  const actions = document.createElement("td");
+  actions.className = "file-actions-column";
+  if (entry.kind === "file" && app.file_source === "instra") {
+    const download = document.createElement("a");
+    download.className = "file-row-action";
+    download.href = local_file_url(entry.path, true);
+    download.textContent = "⇩";
+    download.title = "Download file";
+    download.setAttribute("aria-label", `Download ${entry.name}`);
+    actions.appendChild(download);
+  } else if (entry.kind === "file" && entry.download_url) {
+    const download = document.createElement("a");
+    download.className = "file-row-action";
+    download.href = entry.download_url;
+    download.target = "_blank";
+    download.rel = "noopener noreferrer";
+    download.textContent = "⇩";
+    download.title = "Download from W&B";
+    download.setAttribute("aria-label", `Download ${entry.name} from W&B`);
+    actions.appendChild(download);
+  }
+  row.appendChild(actions);
+  body.appendChild(row);
+}
+
+function render_files() {
+  update_workspace_tabs();
+  const body = by_id("files_body");
+  body.replaceChildren();
+  const empty = by_id("files_empty");
+  const payload = app.file_payload;
+  const run = current_run();
+  const wandb_link = by_id("file_wandb_link");
+  const fallback_wandb_url = run?.wandb_url ? `${String(run.wandb_url).replace(/\/$/, "")}/files` : "";
+  const wandb_files_url = payload?.wandb_files_url || fallback_wandb_url;
+  wandb_link.hidden = app.file_source !== "wandb" || !wandb_files_url;
+  if (wandb_files_url) wandb_link.href = wandb_files_url;
+  const source_label = app.file_source === "instra" ? "Local run directory" : "W&B-managed files";
+  const refresh_button = by_id("refresh_files");
+  refresh_button.disabled = app.file_loading;
+  refresh_button.classList.toggle("loading", app.file_loading);
+  file_breadcrumbs(payload);
+  const query = by_id("file_search").value.trim().toLowerCase();
+  const all_entries = payload?.entries || [];
+  const entries = all_entries.filter(entry => !query || `${entry.name} ${entry.path} ${entry.mime_type || ""}`.toLowerCase().includes(query));
+  const item_count = query
+    ? `${format_integer(entries.length)} of ${format_integer(all_entries.length)} items`
+    : `${format_integer(all_entries.length)} item${all_entries.length === 1 ? "" : "s"}`;
+  by_id("file_source_status").textContent = app.file_loading ? `Loading · ${source_label}` : `${item_count} · ${source_label}`;
+  if (!app.current_run_id) {
+    empty.hidden = false;
+    by_id("files_empty_title").textContent = "Select a run";
+    by_id("files_empty_detail").textContent = "Choose a run from the left to inspect its files.";
+    return;
+  }
+  if (app.file_loading) {
+    empty.hidden = false;
+    by_id("files_empty_title").textContent = app.file_source === "instra" ? "Reading local folder" : "Loading W&B files";
+    by_id("files_empty_detail").textContent = "The selected run remains available while the manifest is loaded.";
+    return;
+  }
+  if (payload && payload.available === false) {
+    empty.hidden = false;
+    by_id("files_empty_title").textContent = app.file_source === "wandb" ? "W&B files unavailable" : "Folder unavailable";
+    by_id("files_empty_detail").textContent = payload.error || "This file source is unavailable for the selected run.";
+    return;
+  }
+  if (!payload) {
+    empty.hidden = false;
+    by_id("files_empty_title").textContent = "Ready to browse";
+    by_id("files_empty_detail").textContent = "Refresh to load this file source.";
+    return;
+  }
+  empty.hidden = entries.length > 0;
+  if (!entries.length) {
+    by_id("files_empty_title").textContent = query ? "No matching files" : "This folder is empty";
+    by_id("files_empty_detail").textContent = query ? "Clear the folder filter to see all items." : "There are no files at this path.";
+    return;
+  }
+  for (const entry of entries) append_file_row(body, entry);
+}
+
+async function refresh_files(force = false) {
+  if (app.workspace_view !== "files" || !app.current_run_id) {
+    render_files();
+    return;
+  }
+  const request_serial = ++app.file_request_serial;
+  const requested_run_id = app.current_run_id;
+  const requested_source = app.file_source;
+  app.file_loading = true;
+  render_files();
+  const endpoint = requested_source === "instra" ? "/api/local-files" : "/api/wandb-files";
+  const query = new URLSearchParams({run: requested_run_id, path: app.file_path});
+  if (force && requested_source === "wandb") query.set("refresh", "1");
+  try {
+    const payload = await fetch_json(`${endpoint}?${query}`);
+    if (
+      request_serial !== app.file_request_serial
+      || requested_run_id !== app.current_run_id
+      || requested_source !== app.file_source
+    ) return;
+    app.file_payload = payload;
+    app.file_path = payload.current_path || "";
+  } catch (error) {
+    if (request_serial !== app.file_request_serial) return;
+    app.file_payload = {
+      source: requested_source,
+      available: false,
+      error: error.message,
+      entries: [],
+      current_path: app.file_path,
+    };
+  } finally {
+    if (request_serial === app.file_request_serial) {
+      app.file_loading = false;
+      render_files();
+    }
   }
 }
 
@@ -714,10 +1084,15 @@ function select_run(run_id, options = {}) {
   app.manual_selection = manual;
   if (app.current_run_id !== run_id) {
     restore_maximized_chart();
+    app.file_request_serial += 1;
     app.current_run_id = run_id;
     app.current_status = app.runs.find(run => run_identifier(run) === run_id) || null;
     app.figures = null;
     app.figure_revision = null;
+    app.file_path = "";
+    app.file_payload = null;
+    app.file_loading = false;
+    by_id("file_search").value = "";
     reset_run_charts();
   }
   const route = `/runs/${encodeURIComponent(run_id)}`;
@@ -729,6 +1104,7 @@ function select_run(run_id, options = {}) {
   render_run_heading();
   render_empty_state();
   refresh_current_run();
+  if (app.workspace_view === "files") refresh_files();
 }
 
 function resize_plot_in_card(card) {
@@ -785,7 +1161,8 @@ function start_chart_resize(event, handle) {
   const move = pointer_event => {
     const pane_width = Math.max(260, by_id("charts_scroll").clientWidth - 20);
     const pane_height = Math.max(260, by_id("charts_scroll").clientHeight - 20);
-    const width = Math.max(Math.min(300, pane_width), Math.min(pane_width, start_rect.width + pointer_event.clientX - start_x));
+    const minimum_width = card.dataset.chart === "heatmap" ? 300 : 180;
+    const width = Math.max(Math.min(minimum_width, pane_width), Math.min(pane_width, start_rect.width + pointer_event.clientX - start_x));
     const height = Math.max(270, Math.min(Math.max(900, pane_height), start_rect.height + pointer_event.clientY - start_y));
     if (direction === "east" || direction === "both") card.style.flex = `0 0 ${Math.round(width)}px`;
     if (direction === "south" || direction === "both") card.style.height = `${Math.round(height)}px`;
@@ -835,6 +1212,7 @@ function toggle_maximized_chart(chart_name) {
 function position_restore_button() {
   const card = document.querySelector(".chart-card.maximized");
   const button = card?.querySelector(".maximize-button");
+  const settings_button = card?.querySelector(".chart-settings-button");
   const header = card?.querySelector(".chart-card-header");
   const pane = by_id("charts_pane");
   if (!button || !header || !pane) return;
@@ -843,6 +1221,10 @@ function position_restore_button() {
   if (header_rect.width <= 0 || header_rect.height <= 0 || pane_rect.width <= 0) return;
   button.style.top = `${Math.round(header_rect.top + Math.max(6, (header_rect.height - button.offsetHeight) / 2))}px`;
   button.style.right = `${Math.round(Math.max(12, window.innerWidth - pane_rect.right + 12))}px`;
+  if (settings_button) {
+    settings_button.style.top = button.style.top;
+    settings_button.style.right = `${Math.round(Math.max(49, window.innerWidth - pane_rect.right + 49))}px`;
+  }
 }
 
 function restore_maximized_chart() {
@@ -859,6 +1241,9 @@ function restore_maximized_chart() {
     button.setAttribute("aria-label", `Maximize ${chart_titles[card.dataset.chart]}`);
     button.style.removeProperty("top");
     button.style.removeProperty("right");
+    const settings_button = card.querySelector(".chart-settings-button");
+    settings_button?.style.removeProperty("top");
+    settings_button?.style.removeProperty("right");
   });
   requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
 }
@@ -975,7 +1360,7 @@ async function delete_menu_run() {
     ? "\n\nThis run still appears to be running. Its training process may recreate or continue writing the database."
     : "";
   const confirmed = window.confirm(
-    `Delete local chart data for:\n\n${run.artifact_name}\n\nPath: ${run.run_directory}${active_warning}\n\nThis does not delete checkpoints, other logs, or the W&B run.`
+    `Delete instra chart data for:\n\n${run.artifact_name}\n\nPath: ${run.run_directory}${active_warning}\n\nThis does not delete checkpoints, other logs, or the W&B run.`
   );
   if (!confirmed) return;
   close_run_menu();
@@ -995,16 +1380,99 @@ async function delete_menu_run() {
       reset_run_charts();
       history.replaceState({}, "", "/runs");
     }
-    show_toast("Local chart run deleted.");
+    show_toast("instra chart data deleted.");
     await refresh_catalog();
   } catch (error) {
     show_toast(`Delete failed: ${error.message}`);
   }
 }
 
+function update_chart_settings_buttons() {
+  document.querySelectorAll(".chart-settings-button").forEach(button => {
+    button.classList.toggle("active", has_chart_axis_settings(button.dataset.chartSettings));
+  });
+}
+
+function axis_input_value(field_name) {
+  const raw_value = by_id(`chart_${field_name}`).value.trim();
+  if (!raw_value) return null;
+  const value = Number(raw_value);
+  return Number.isFinite(value) ? value : NaN;
+}
+
+function open_chart_settings(chart_name) {
+  if (!chart_titles[chart_name]) return;
+  close_run_menu();
+  close_colour_picker();
+  close_settings();
+  app.axis_chart_name = chart_name;
+  const settings = chart_axis_settings(chart_name);
+  by_id("chart_settings_title").textContent = chart_titles[chart_name];
+  by_id("chart_settings_axes").textContent = chart_name === "heatmap"
+    ? "X is absolute candidate layer count; Y is optimizer step. Square heatmap cells remain enforced."
+    : "X and Y limits apply only to this curve panel. Horizontal panel resizing may distort the chart freely.";
+  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
+    by_id(`chart_${field_name}`).value = Number.isFinite(settings[field_name]) ? String(settings[field_name]) : "";
+  }
+  by_id("chart_settings_error").hidden = true;
+  by_id("chart_settings_overlay").hidden = false;
+  by_id("chart_x_min").focus();
+}
+
+function close_chart_settings() {
+  by_id("chart_settings_overlay").hidden = true;
+  app.axis_chart_name = null;
+}
+
+function render_axis_settings_change() {
+  update_chart_settings_buttons();
+  if (!app.figures) return;
+  render_figures().catch(error => show_toast(`Chart settings failed: ${error.message}`));
+}
+
+function save_chart_settings() {
+  const chart_name = app.axis_chart_name;
+  if (!chart_name) return;
+  const settings = {};
+  for (const field_name of ["x_min", "x_max", "y_min", "y_max"]) {
+    const value = axis_input_value(field_name);
+    if (Number.isNaN(value)) {
+      by_id("chart_settings_error").textContent = "Axis limits must be finite numbers or blank for automatic.";
+      by_id("chart_settings_error").hidden = false;
+      return;
+    }
+    if (value !== null) settings[field_name] = value;
+  }
+  if (Number.isFinite(settings.x_min) && Number.isFinite(settings.x_max) && settings.x_min >= settings.x_max) {
+    by_id("chart_settings_error").textContent = "X minimum must be less than X maximum.";
+    by_id("chart_settings_error").hidden = false;
+    return;
+  }
+  if (Number.isFinite(settings.y_min) && Number.isFinite(settings.y_max) && settings.y_min >= settings.y_max) {
+    by_id("chart_settings_error").textContent = "Y minimum must be less than Y maximum.";
+    by_id("chart_settings_error").hidden = false;
+    return;
+  }
+  if (Object.keys(settings).length) app.axis_ranges[chart_name] = settings;
+  else delete app.axis_ranges[chart_name];
+  save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
+  close_chart_settings();
+  render_axis_settings_change();
+}
+
+function reset_chart_settings() {
+  const chart_name = app.axis_chart_name;
+  if (!chart_name) return;
+  delete app.axis_ranges[chart_name];
+  save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
+  close_chart_settings();
+  render_axis_settings_change();
+}
+
 function open_settings() {
   close_run_menu();
   close_colour_picker();
+  close_chart_settings();
   by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
   by_id("settings_overlay").hidden = false;
   by_id("settings_nav").classList.add("selected");
@@ -1169,10 +1637,27 @@ function show_toast(message) {
 }
 
 function bind_events() {
+  document.querySelectorAll(".run-tab").forEach(button => {
+    button.addEventListener("click", () => set_workspace_view(button.dataset.workspaceView));
+  });
+  document.querySelectorAll(".file-source-tab").forEach(button => {
+    button.addEventListener("click", () => set_file_source(button.dataset.fileSource));
+  });
+  by_id("file_breadcrumbs").addEventListener("click", event => {
+    const button = event.target.closest("[data-file-path]");
+    if (button) set_file_path(button.dataset.filePath);
+  });
+  by_id("file_search").addEventListener("input", render_files);
+  by_id("refresh_files").addEventListener("click", () => refresh_files(true));
   by_id("charts_scroll").addEventListener("click", event => {
     const group_button = event.target.closest(".chart-group-toggle");
     if (group_button) {
       toggle_chart_group(group_button);
+      return;
+    }
+    const chart_settings = event.target.closest(".chart-settings-button");
+    if (chart_settings) {
+      open_chart_settings(chart_settings.dataset.chartSettings);
       return;
     }
     const maximize_button = event.target.closest(".maximize-button");
@@ -1233,6 +1718,13 @@ function bind_events() {
   by_id("save_settings").addEventListener("click", save_settings);
   by_id("settings_overlay").addEventListener("pointerdown", event => {
     if (event.target === by_id("settings_overlay")) close_settings();
+  });
+  by_id("close_chart_settings").addEventListener("click", close_chart_settings);
+  by_id("cancel_chart_settings").addEventListener("click", close_chart_settings);
+  by_id("save_chart_settings").addEventListener("click", save_chart_settings);
+  by_id("reset_chart_settings").addEventListener("click", reset_chart_settings);
+  by_id("chart_settings_overlay").addEventListener("pointerdown", event => {
+    if (event.target === by_id("chart_settings_overlay")) close_chart_settings();
   });
   by_id("copy_run_name").addEventListener("click", () => {
     const run = run_for_id(app.menu_run_id);
@@ -1302,7 +1794,8 @@ function bind_events() {
       return;
     }
     if (event.key === "Escape") {
-      if (!by_id("settings_overlay").hidden) close_settings();
+      if (!by_id("chart_settings_overlay").hidden) close_chart_settings();
+      else if (!by_id("settings_overlay").hidden) close_settings();
       else if (!by_id("run_menu").hidden) close_run_menu();
       else if (app.maximized_chart) restore_maximized_chart();
       else close_colour_picker();
@@ -1321,11 +1814,13 @@ function bind_events() {
 async function start() {
   migrate_panel_layout();
   ensure_depth_cards();
+  update_chart_settings_buttons();
   build_swatches();
   bind_events();
   by_id("page_size").value = String(app.page_size);
   by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
   update_sort_direction_ui();
+  update_workspace_tabs();
   const saved_width = Number(localStorage.getItem("thog2_local_runs_width"));
   if (Number.isFinite(saved_width) && saved_width > 0) set_runs_pane_width(saved_width);
   if (localStorage.getItem("thog2_local_runs_collapsed") === "1") toggle_runs_pane();
