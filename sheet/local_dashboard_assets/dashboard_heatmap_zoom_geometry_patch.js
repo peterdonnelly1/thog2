@@ -1,9 +1,9 @@
 // vvv THOG
 "use strict";
 
-// Make heatmap wheel zoom a centred, geometry-aware viewport operation. Plotly
-// normally preserves shapes/annotations in data units, which makes the centre L
-// band balloon during x zoom and leaves centre text at its pre-zoom density.
+// Make heatmap wheel zoom a centred, geometry-aware viewport operation. Reflow
+// the centre L text at the current zoom density without recreating the obsolete
+// opaque background band.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const state_by_mount = new WeakMap();
@@ -349,10 +349,14 @@ window.addEventListener("load", () => {
       const geometry = visible_row_geometry(mount);
       if (!target_x || !geometry) return;
 
+      const half_band = dynamic_centre_band(mount, target_x, geometry);
       const existing_annotations = Array.isArray(mount.layout?.annotations)
         ? mount.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !centre_datum_annotation(annotation));
+      // Rebuild the L-column text at the current zoom scale, but never restore
+      // the former centre background band.
+      annotations.push(...dynamic_centre_annotations(mount, half_band, geometry));
 
       const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : [])
         .filter(shape => shape?.name !== "thog2-centre-datum-background");

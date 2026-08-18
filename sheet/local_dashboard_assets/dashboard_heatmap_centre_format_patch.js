@@ -2,8 +2,8 @@
 "use strict";
 
 // Final presentation correction for newest-step emphasis and a colour key that
-// remains outside the heatmap body at very small row counts. The obsolete
-// centre/L overlay is stripped rather than allowed to obscure the real bricks.
+// remains outside the heatmap body at very small row counts. Retain the useful
+// centre/L text while stripping its obsolete opaque background band.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const strict_finite_number = value => {
@@ -117,28 +117,6 @@ window.addEventListener("load", () => {
       return annotations;
     };
 
-    const centre_background_shape = prepared => {
-      const range = Array.isArray(prepared.layout?.yaxis?.range)
-        ? prepared.layout.yaxis.range.map(Number)
-        : [0.5, 1.5];
-      const finite = range.filter(Number.isFinite);
-      const y0 = finite.length ? Math.min(...finite) : 0.5;
-      const y1 = finite.length ? Math.max(...finite) : 1.5;
-      return {
-        type: "rect",
-        xref: "x",
-        yref: "y",
-        x0: -0.5,
-        x1: 0.5,
-        y0,
-        y1,
-        line: {width: 0},
-        fillcolor: "#000000",
-        layer: "above",
-        name: "thog2-centre-datum-background",
-      };
-    };
-
     const emphasize_latest_step = (prepared, heatmap_trace, annotations) => {
       const coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
       const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
@@ -241,10 +219,16 @@ window.addEventListener("load", () => {
         r: Math.max(150, Number(prepared.layout?.margin?.r || 0)),
       };
 
+      const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
+        ? prepared.layout.meta.thog2_current_losses
+        : [];
       const existing_annotations = Array.isArray(prepared.layout.annotations)
         ? prepared.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !is_old_centre_annotation(annotation));
+      // Retain the useful L-column loss/delta text. Only its obsolete opaque
+      // background band is removed below.
+      annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));
       emphasize_latest_step(prepared, heatmap_trace, annotations);
       prepared.layout.annotations = annotations;
 

@@ -7,7 +7,10 @@
 // otherwise correctly-sized trajectory cards.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 152;
+    // The two 76 px axis margins preserve the mirrored x axes. An additional
+    // 12 px at the top gives the title/ticks deliberate breathing room without
+    // changing the literal heatmap row pitch.
+    const heatmap_chrome_height_px = 164;
     const ordinary_plot_minimum_width_px = 360;
     const ordinary_plot_minimum_height_px = 240;
 
@@ -101,6 +104,18 @@ window.addEventListener("load", () => {
       return Number.isFinite(numeric) ? numeric : null;
     };
 
+    const heatmap_x_axis_typeface = prepared => {
+      const body_typeface = document.body
+        ? window.getComputedStyle(document.body).fontFamily
+        : "";
+      return String(
+        prepared.layout?.xaxis?.tickfont?.family
+        || prepared.layout?.font?.family
+        || body_typeface
+        || "Inter, ui-sans-serif, system-ui, sans-serif"
+      );
+    };
+
     const best_better_loss_annotations = (prepared, heatmap_trace) => {
       const x_coordinates = Array.isArray(heatmap_trace.x) ? heatmap_trace.x : [];
       const y_coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
@@ -108,18 +123,12 @@ window.addEventListener("load", () => {
       const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
         ? prepared.layout.meta.thog2_current_losses
         : [];
-      const shell = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-shell');
-      const shell_width = Math.max(1, Number(shell?.clientWidth || prepared.layout?.width || 1));
-      const margin = prepared.layout?.margin || {};
-      const plot_width = Math.max(
-        1,
-        shell_width - Number(margin.l || 0) - Number(margin.r || 0),
-      );
-      const cell_width = plot_width / Math.max(1, x_coordinates.length);
       const row_height = Math.max(1, Number(heatmap_probe_row_height_px()));
-      const row_limited_font = Math.max(5, Math.min(13, Math.floor(row_height * 0.82)));
-      const width_limited_font = Math.max(5, Math.floor((cell_width - 2) / (8 * 0.61)));
-      const font_size = Math.min(row_limited_font, width_limited_font);
+      // The winning value is intentionally allowed to use the full brick
+      // height. Do not shrink it to fit narrow columns: that made the important
+      // label illegibly small on wide probe ranges.
+      const font_size = Math.max(9, Math.min(18, Math.round(row_height * 1.15)));
+      const axis_typeface = heatmap_x_axis_typeface(prepared);
       const annotations = [];
 
       for (let row_index = 0; row_index < customdata.length; row_index += 1) {
@@ -151,7 +160,7 @@ window.addEventListener("load", () => {
           xanchor: "center",
           yanchor: "middle",
           font: {
-            family: "DejaVu Sans, sans-serif",
+            family: axis_typeface,
             size: font_size,
             color: "#000000",
           },
@@ -168,10 +177,15 @@ window.addEventListener("load", () => {
       if (!prepared?.layout?.xaxis) return;
 
       orient_heatmap_newest_at_top(prepared);
+      const axis_typeface = heatmap_x_axis_typeface(prepared);
       prepared.layout.xaxis = {
         ...prepared.layout.xaxis,
         side: "top",
         anchor: "y",
+        tickfont: {
+          ...(prepared.layout.xaxis.tickfont || {}),
+          family: axis_typeface,
+        },
       };
       prepared.layout.xaxis2 = {
         ...prepared.layout.xaxis,
@@ -196,7 +210,7 @@ window.addEventListener("load", () => {
       }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: 76,
+        t: 88,
         b: 76,
       };
     };

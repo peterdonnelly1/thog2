@@ -7,7 +7,7 @@
 // panel separators, and reserve sufficient axis room for coefficient charts.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 152;
+    const heatmap_chrome_height_px = 164;
     const colour_key_floor_px = 64;
     const colour_key_normal_cap_px = 220;
     const overview_default_storage_key = "thog2_local_overview_default_font_size";
@@ -62,9 +62,9 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace || !prepared.layout?.yaxis) return;
 
-      // Both native x axes receive their own fixed margin. This avoids the old
-      // paper annotation, whose large y-shift created blank space and clipped the
-      // title against the chart viewport in short heatmaps.
+      // Both native x axes receive their own fixed margin. The top gets a modest
+      // extra 12 px of whitespace so its title/ticks breathe without recreating
+      // the old oversized paper annotation or clipping short heatmaps.
       for (const axis_name of ["xaxis", "xaxis2"]) {
         const axis = prepared.layout?.[axis_name];
         if (!axis) continue;
@@ -84,7 +84,7 @@ window.addEventListener("load", () => {
       }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: 76,
+        t: 88,
         b: 76,
       };
       prepared.layout.annotations = (prepared.layout.annotations || []).filter(

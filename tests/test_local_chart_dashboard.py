@@ -409,22 +409,29 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "actions.insertBefore(button, vertical_control || maximize);" in heatmap_loss_patch
     assert "heatmap_header.insertBefore(button" not in heatmap_loss_patch
     assert "...centre_annotations(prepared, heatmap_trace, current_losses)" not in heatmap_loss_patch
-    assert "annotations.push(...centre_annotations" not in heatmap_centre_format_patch
+    assert "annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));" in heatmap_centre_format_patch
+    assert "centre_background_shape" not in heatmap_centre_format_patch
     assert "prepared.layout.shapes = existing_shapes;" in heatmap_centre_format_patch
-    assert "annotations.push(...dynamic_centre_annotations" not in heatmap_zoom_geometry_patch
+    assert "annotations.push(...dynamic_centre_annotations(mount, half_band, geometry));" in heatmap_zoom_geometry_patch
     assert '.filter(shape => shape?.name !== "thog2-centre-datum-background")' in heatmap_zoom_geometry_patch
-    assert "const heatmap_chrome_height_px = 152;" in heatmap_top_anchor_patch
+    assert "const heatmap_chrome_height_px = 164;" in heatmap_top_anchor_patch
     assert "best_better_loss_annotations" in heatmap_top_anchor_patch
     assert "candidate_loss = current_loss + candidate_delta" in heatmap_top_anchor_patch
     assert 'name: "thog2-best-better-loss"' in heatmap_top_anchor_patch
+    assert "Math.round(row_height * 1.15)" in heatmap_top_anchor_patch
+    assert "prepared.layout?.xaxis?.tickfont?.family" in heatmap_top_anchor_patch
+    assert "family: axis_typeface" in heatmap_top_anchor_patch
+    assert "width_limited_font" not in heatmap_top_anchor_patch
+    assert 'text: `<b>${best.loss.toFixed(4)}</b>`' in heatmap_top_anchor_patch
     assert 'color: "#000000"' in heatmap_top_anchor_patch
     assert "prepared.layout.xaxis2 =" in heatmap_top_anchor_patch
     assert 'overlaying: "x"' in heatmap_top_anchor_patch
     assert 'matches: "x"' in heatmap_top_anchor_patch
+    assert "t: 88" in heatmap_top_anchor_patch
     assert "b: 76" in heatmap_top_anchor_patch
-    assert "const heatmap_chrome_height_px = 152;" in heatmap_final_presentation_patch
+    assert "const heatmap_chrome_height_px = 164;" in heatmap_final_presentation_patch
     assert 'for (const axis_name of ["xaxis", "xaxis2"])' in heatmap_final_presentation_patch
-    assert "t: 76" in heatmap_final_presentation_patch
+    assert "t: 88" in heatmap_final_presentation_patch
     assert "b: 76" in heatmap_final_presentation_patch
     assert "yshift: 50" not in heatmap_final_presentation_patch
     assert "heatmap_x_title_node" not in heatmap_dom_alignment_patch
