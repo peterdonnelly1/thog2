@@ -7,7 +7,7 @@
 // panel separators, and reserve sufficient axis room for coefficient charts.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 138;
+    const heatmap_chrome_height_px = 152;
     const colour_key_floor_px = 64;
     const colour_key_normal_cap_px = 220;
     const overview_default_storage_key = "thog2_local_overview_default_font_size";
@@ -62,43 +62,34 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace || !prepared.layout?.yaxis) return;
 
-      // Plotly's top-axis title standoff remains coupled to its tick-label layout in
-      // this compressed heatmap geometry. Remove the native title entirely and draw
-      // our own paper annotation well above the top tick row instead.
-      const native_x_title = prepared.layout?.xaxis?.title;
-      const x_title_text = typeof native_x_title === "string"
-        ? native_x_title
-        : String(native_x_title?.text || "candidate layer-count offset from active layer count");
-      prepared.layout.xaxis = {
-        ...(prepared.layout.xaxis || {}),
-        title: {text: ""},
-      };
+      // Both native x axes receive their own fixed margin. This avoids the old
+      // paper annotation, whose large y-shift created blank space and clipped the
+      // title against the chart viewport in short heatmaps.
+      for (const axis_name of ["xaxis", "xaxis2"]) {
+        const axis = prepared.layout?.[axis_name];
+        if (!axis) continue;
+        const title = axis.title;
+        const title_text = typeof title === "string"
+          ? title
+          : String(title?.text || "candidate layer-count offset from active layer count");
+        prepared.layout[axis_name] = {
+          ...axis,
+          title: {
+            ...(typeof title === "object" && title !== null ? title : {}),
+            text: title_text,
+            standoff: 8,
+          },
+          automargin: false,
+        };
+      }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: Math.max(120, Number(prepared.layout?.margin?.t || 0)),
-        b: Math.max(18, Number(prepared.layout?.margin?.b || 0)),
+        t: 76,
+        b: 76,
       };
       prepared.layout.annotations = (prepared.layout.annotations || []).filter(
         annotation => annotation?.name !== "thog2-heatmap-x-title"
       );
-      prepared.layout.annotations.push({
-        name: "thog2-heatmap-x-title",
-        x: 0.5,
-        y: 1,
-        xref: "paper",
-        yref: "paper",
-        text: x_title_text,
-        showarrow: false,
-        xanchor: "center",
-        yanchor: "bottom",
-        yshift: 50,
-        font: {
-          family: "Inter, ui-sans-serif, system-ui, sans-serif",
-          size: 11,
-          color: "#30343b",
-        },
-        captureevents: false,
-      });
 
       const mount = by_id("heatmap_plot");
       const probe_count = Math.max(1, Array.isArray(heatmap_trace.y) ? heatmap_trace.y.length : 1);

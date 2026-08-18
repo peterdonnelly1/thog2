@@ -349,23 +349,13 @@ window.addEventListener("load", () => {
       const geometry = visible_row_geometry(mount);
       if (!target_x || !geometry) return;
 
-      const half_band = dynamic_centre_band(mount, target_x, geometry);
       const existing_annotations = Array.isArray(mount.layout?.annotations)
         ? mount.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !centre_datum_annotation(annotation));
-      annotations.push(...dynamic_centre_annotations(mount, half_band, geometry));
 
-      const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : []).map(shape => {
-        if (shape?.name !== "thog2-centre-datum-background") return shape;
-        return {
-          ...shape,
-          x0: -half_band,
-          x1: half_band,
-          fillcolor: "#000000",
-          line: {width: 0},
-        };
-      });
+      const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : [])
+        .filter(shape => shape?.name !== "thog2-centre-datum-background");
 
       const update = {
         annotations,
@@ -382,11 +372,6 @@ window.addEventListener("load", () => {
         update["yaxis.tickvals"] = y_ticks.tickvals;
         update["yaxis.ticktext"] = y_ticks.ticktext;
       }
-
-      if (state.base_top_margin === null) {
-        state.base_top_margin = Math.max(0, finite_number(mount.layout?.margin?.t) ?? 0);
-      }
-      update["margin.t"] = state.base_top_margin + top_whitespace_px(geometry);
 
       state.applying = true;
       try {

@@ -6,8 +6,6 @@
 // axis flags which hide log tick labels, so resolve both from rendered/data state.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const x_title_text = "candidate layer-count offset from active layer count";
-    const x_title_gap_px = 8;
     const newest_y_left_shift_px = -7;
     const trajectory_scale_settings_key = "thog2_local_trajectory_scale_modes";
     const trajectory_chart_names = new Set([
@@ -24,13 +22,6 @@ window.addEventListener("load", () => {
       || mount?.querySelector("g.hm image")
       || null
     );
-
-    const heatmap_x_title_node = mount => {
-      if (!mount) return null;
-      return [...mount.querySelectorAll("svg text")].find(
-        node => String(node.textContent || "").trim() === x_title_text
-      ) || null;
-    };
 
     const align_heatmap_dom_labels = () => {
       const mount = by_id("heatmap_plot");
@@ -63,24 +54,6 @@ window.addEventListener("load", () => {
         );
       }
 
-      const title = heatmap_x_title_node(mount);
-      const x_ticks = [...mount.querySelectorAll(".xtick text")];
-      if (title && x_ticks.length) {
-        // Measure from a neutral transform so repeated renders/resize events do
-        // not accumulate translation. Enforce a real white-space gap.
-        title.style.setProperty("transform", "none", "important");
-        title.style.setProperty("transform-box", "fill-box", "important");
-        title.style.setProperty("transform-origin", "center", "important");
-        const tick_top = Math.min(...x_ticks.map(node => node.getBoundingClientRect().top));
-        const title_rect = title.getBoundingClientRect();
-        const desired_bottom = tick_top - x_title_gap_px;
-        const delta_y = Math.min(0, desired_bottom - title_rect.bottom);
-        title.style.setProperty(
-          "transform",
-          `translateY(${delta_y.toFixed(2)}px)`,
-          "important",
-        );
-      }
     };
 
     const trajectory_mode = chart_name => (

@@ -1,8 +1,9 @@
 // vvv THOG
 "use strict";
 
-// Final presentation correction for the centre/L datum, newest-step emphasis,
-// and a colour key that remains outside the heatmap body at very small row counts.
+// Final presentation correction for newest-step emphasis and a colour key that
+// remains outside the heatmap body at very small row counts. The obsolete
+// centre/L overlay is stripped rather than allowed to obscure the real bricks.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const strict_finite_number = value => {
@@ -240,21 +241,17 @@ window.addEventListener("load", () => {
         r: Math.max(150, Number(prepared.layout?.margin?.r || 0)),
       };
 
-      const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
-        ? prepared.layout.meta.thog2_current_losses
-        : [];
       const existing_annotations = Array.isArray(prepared.layout.annotations)
         ? prepared.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !is_old_centre_annotation(annotation));
-      annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));
       emphasize_latest_step(prepared, heatmap_trace, annotations);
       prepared.layout.annotations = annotations;
 
       const existing_shapes = Array.isArray(prepared.layout.shapes)
         ? prepared.layout.shapes.filter(shape => shape?.name !== "thog2-centre-datum-background")
         : [];
-      prepared.layout.shapes = [...existing_shapes, centre_background_shape(prepared)];
+      prepared.layout.shapes = existing_shapes;
       compact_colourbar(prepared, heatmap_trace);
     };
 

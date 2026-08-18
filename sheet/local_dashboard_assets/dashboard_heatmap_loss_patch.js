@@ -239,10 +239,6 @@ window.addEventListener("load", () => {
         title: percent_mode ? "Δloss (%) bands" : "Δloss bands",
       };
 
-      prepared.layout.annotations = [
-        ...(Array.isArray(prepared.layout.annotations) ? prepared.layout.annotations : []),
-        ...centre_annotations(prepared, heatmap_trace, current_losses),
-      ];
       queueMicrotask(sync_heatmap_loss_mode_button);
     };
 

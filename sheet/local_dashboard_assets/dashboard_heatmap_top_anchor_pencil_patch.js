@@ -7,7 +7,7 @@
 // otherwise correctly-sized trajectory cards.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 94;
+    const heatmap_chrome_height_px = 152;
     const ordinary_plot_minimum_width_px = 360;
     const ordinary_plot_minimum_height_px = 240;
 
@@ -95,6 +95,73 @@ window.addEventListener("load", () => {
       prepared.layout.yaxis.autorange = false;
     };
 
+    const finite_number = value => {
+      if (value === null || value === undefined || value === "") return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const best_better_loss_annotations = (prepared, heatmap_trace) => {
+      const x_coordinates = Array.isArray(heatmap_trace.x) ? heatmap_trace.x : [];
+      const y_coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
+      const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+      const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
+        ? prepared.layout.meta.thog2_current_losses
+        : [];
+      const shell = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-shell');
+      const shell_width = Math.max(1, Number(shell?.clientWidth || prepared.layout?.width || 1));
+      const margin = prepared.layout?.margin || {};
+      const plot_width = Math.max(
+        1,
+        shell_width - Number(margin.l || 0) - Number(margin.r || 0),
+      );
+      const cell_width = plot_width / Math.max(1, x_coordinates.length);
+      const row_height = Math.max(1, Number(heatmap_probe_row_height_px()));
+      const row_limited_font = Math.max(5, Math.min(13, Math.floor(row_height * 0.82)));
+      const width_limited_font = Math.max(5, Math.floor((cell_width - 2) / (8 * 0.61)));
+      const font_size = Math.min(row_limited_font, width_limited_font);
+      const annotations = [];
+
+      for (let row_index = 0; row_index < customdata.length; row_index += 1) {
+        const current_loss = finite_number(current_losses[row_index]);
+        const y_coordinate = finite_number(y_coordinates[row_index]);
+        const row = customdata[row_index];
+        if (current_loss === null || y_coordinate === null || !Array.isArray(row)) continue;
+
+        let best = null;
+        for (let column_index = 0; column_index < row.length; column_index += 1) {
+          const cell = row[column_index];
+          const candidate_delta = Array.isArray(cell) ? finite_number(cell[3]) : null;
+          if (candidate_delta === null || !(candidate_delta < 0)) continue;
+          const candidate_loss = current_loss + candidate_delta;
+          if (best === null || candidate_loss < best.loss) {
+            best = {column_index, loss: candidate_loss};
+          }
+        }
+        if (best === null || best.column_index >= x_coordinates.length) continue;
+
+        annotations.push({
+          name: "thog2-best-better-loss",
+          x: x_coordinates[best.column_index],
+          y: y_coordinate,
+          xref: "x",
+          yref: "y",
+          text: `<b>${best.loss.toFixed(4)}</b>`,
+          showarrow: false,
+          xanchor: "center",
+          yanchor: "middle",
+          font: {
+            family: "DejaVu Sans, sans-serif",
+            size: font_size,
+            color: "#000000",
+          },
+          align: "center",
+          captureevents: false,
+        });
+      }
+      return annotations;
+    };
+
     const base_transpose_heatmap_final = transpose_heatmap;
     transpose_heatmap = function(prepared) {
       base_transpose_heatmap_final(prepared);
@@ -106,10 +173,31 @@ window.addEventListener("load", () => {
         side: "top",
         anchor: "y",
       };
+      prepared.layout.xaxis2 = {
+        ...prepared.layout.xaxis,
+        side: "bottom",
+        anchor: "y",
+        overlaying: "x",
+        matches: "x",
+        showgrid: false,
+        zeroline: false,
+      };
+      const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
+      if (heatmap_trace) {
+        const existing_annotations = Array.isArray(prepared.layout.annotations)
+          ? prepared.layout.annotations.filter(
+              annotation => annotation?.name !== "thog2-best-better-loss"
+            )
+          : [];
+        prepared.layout.annotations = [
+          ...existing_annotations,
+          ...best_better_loss_annotations(prepared, heatmap_trace),
+        ];
+      }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
         t: 76,
-        b: 18,
+        b: 76,
       };
     };
 

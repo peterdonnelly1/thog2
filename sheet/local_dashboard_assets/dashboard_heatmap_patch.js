@@ -207,6 +207,7 @@ function transpose_heatmap_relative(prepared) {
         step_values[probe_index],
         candidate_layers_at_probe,
         signed_layer_offset(offset),
+        Number(cell),
       ];
     }
   }

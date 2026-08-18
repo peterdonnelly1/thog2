@@ -299,6 +299,21 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_loss_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_loss_patch.js"
     ).read_text(encoding="utf-8")
+    heatmap_centre_format_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_centre_format_patch.js"
+    ).read_text(encoding="utf-8")
+    heatmap_zoom_geometry_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_zoom_geometry_patch.js"
+    ).read_text(encoding="utf-8")
+    heatmap_top_anchor_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_top_anchor_pencil_patch.js"
+    ).read_text(encoding="utf-8")
+    heatmap_final_presentation_patch = (
+        dashboard._ASSET_ROOT / "dashboard_final_presentation_settings_patch.js"
+    ).read_text(encoding="utf-8")
+    heatmap_dom_alignment_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_dom_alignment_patch.js"
+    ).read_text(encoding="utf-8")
     wandb_groups_patch = (
         dashboard._ASSET_ROOT / "dashboard_wandb_groups_patch.js"
     ).read_text(encoding="utf-8")
@@ -350,6 +365,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
     assert "transpose_heatmap" in javascript
+    assert "signed_layer_offset(offset),\n        Number(cell)," in heatmap_patch
     assert 'scaleanchor = "x"' in javascript
     assert 'constraintoward = "bottom"' in javascript
     assert 'color: "white"' in javascript
@@ -392,6 +408,27 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'const actions = maximize?.parentElement;' in heatmap_loss_patch
     assert "actions.insertBefore(button, vertical_control || maximize);" in heatmap_loss_patch
     assert "heatmap_header.insertBefore(button" not in heatmap_loss_patch
+    assert "...centre_annotations(prepared, heatmap_trace, current_losses)" not in heatmap_loss_patch
+    assert "annotations.push(...centre_annotations" not in heatmap_centre_format_patch
+    assert "prepared.layout.shapes = existing_shapes;" in heatmap_centre_format_patch
+    assert "annotations.push(...dynamic_centre_annotations" not in heatmap_zoom_geometry_patch
+    assert '.filter(shape => shape?.name !== "thog2-centre-datum-background")' in heatmap_zoom_geometry_patch
+    assert "const heatmap_chrome_height_px = 152;" in heatmap_top_anchor_patch
+    assert "best_better_loss_annotations" in heatmap_top_anchor_patch
+    assert "candidate_loss = current_loss + candidate_delta" in heatmap_top_anchor_patch
+    assert 'name: "thog2-best-better-loss"' in heatmap_top_anchor_patch
+    assert 'color: "#000000"' in heatmap_top_anchor_patch
+    assert "prepared.layout.xaxis2 =" in heatmap_top_anchor_patch
+    assert 'overlaying: "x"' in heatmap_top_anchor_patch
+    assert 'matches: "x"' in heatmap_top_anchor_patch
+    assert "b: 76" in heatmap_top_anchor_patch
+    assert "const heatmap_chrome_height_px = 152;" in heatmap_final_presentation_patch
+    assert 'for (const axis_name of ["xaxis", "xaxis2"])' in heatmap_final_presentation_patch
+    assert "t: 76" in heatmap_final_presentation_patch
+    assert "b: 76" in heatmap_final_presentation_patch
+    assert "yshift: 50" not in heatmap_final_presentation_patch
+    assert "heatmap_x_title_node" not in heatmap_dom_alignment_patch
+    assert 'update["margin.t"]' not in heatmap_zoom_geometry_patch
     assert 'chart: stored_chart_settings("heatmap")' in heatmap_patch
     assert "app.dynamic_chart_figures?.[chart_name]" in heatmap_patch
     assert "trajectory_chart_names_fast.map(chart_name => [chart_name, stored_chart_settings(chart_name)])" in heatmap_patch
