@@ -449,7 +449,14 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "100 * (current_loss - candidate_loss) / Math.abs(current_loss)" in heatmap_top_anchor_patch
     assert "best.improvement_percent.toFixed(2)" in heatmap_top_anchor_patch
     assert 'name: "thog2-best-better-loss"' in heatmap_top_anchor_patch
-    assert "Math.round(row_height * 1.15)" in heatmap_top_anchor_patch
+    assert "const centre_stat_font = prepared =>" in heatmap_top_anchor_patch
+    assert "const resolved_centre_font = centre_stat_font(prepared);" in heatmap_top_anchor_patch
+    assert "family: resolved_centre_font.family" in heatmap_top_anchor_patch
+    assert "size: resolved_centre_font.size" in heatmap_top_anchor_patch
+    assert "Math.round(row_height * 1.15)" not in heatmap_top_anchor_patch
+    assert 'annotation?.name !== "thog2-best-better-loss"' in heatmap_zoom_geometry_patch
+    assert "family: resolved_centre_font.family" in heatmap_zoom_geometry_patch
+    assert "size: resolved_centre_font.size" in heatmap_zoom_geometry_patch
     assert "prepared.layout?.xaxis?.tickfont?.family" in heatmap_top_anchor_patch
     assert "family: axis_typeface" in heatmap_top_anchor_patch
     assert "width_limited_font" not in heatmap_top_anchor_patch

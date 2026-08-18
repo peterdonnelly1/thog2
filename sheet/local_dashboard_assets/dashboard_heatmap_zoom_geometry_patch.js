@@ -371,7 +371,19 @@ window.addEventListener("load", () => {
         ? mount.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !centre_datum_annotation(annotation));
-      annotations.push(...dynamic_centre_annotations(mount, centre_geometry));
+      const centre_annotations = dynamic_centre_annotations(mount, centre_geometry);
+      annotations.push(...centre_annotations);
+      const resolved_centre_font = centre_annotations[0]?.font;
+      if (resolved_centre_font) {
+        for (const annotation of annotations) {
+          if (annotation?.name !== "thog2-best-better-loss") continue;
+          annotation.font = {
+            ...(annotation.font || {}),
+            family: resolved_centre_font.family,
+            size: resolved_centre_font.size,
+          };
+        }
+      }
 
       const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : [])
         .filter(shape => shape?.name !== "thog2-centre-datum-background");

@@ -115,6 +115,21 @@ window.addEventListener("load", () => {
       );
     };
 
+    const centre_stat_font = prepared => {
+      const centre_stat = (prepared.layout?.annotations || []).find(annotation => (
+        annotation?.xref === "x"
+        && annotation?.yref === "y"
+        && annotation?.showarrow === false
+        && typeof annotation?.hovertext === "string"
+        && annotation.hovertext.startsWith("step=")
+        && String(annotation?.font?.family || "").includes("Mono")
+      ));
+      return {
+        family: String(centre_stat?.font?.family || "DejaVu Sans Mono, monospace"),
+        size: Math.max(1, Number(centre_stat?.font?.size || 10)),
+      };
+    };
+
     const best_better_loss_annotations = (prepared, heatmap_trace) => {
       const x_coordinates = Array.isArray(heatmap_trace.x) ? heatmap_trace.x : [];
       const y_coordinates = Array.isArray(heatmap_trace.y) ? heatmap_trace.y : [];
@@ -122,12 +137,7 @@ window.addEventListener("load", () => {
       const current_losses = Array.isArray(prepared.layout?.meta?.thog2_current_losses)
         ? prepared.layout.meta.thog2_current_losses
         : [];
-      const row_height = Math.max(1, Number(heatmap_probe_row_height_px()));
-      // The winning value is intentionally allowed to use the full brick
-      // height. Do not shrink it to fit narrow columns: that made the important
-      // label illegibly small on wide probe ranges.
-      const font_size = Math.max(9, Math.min(18, Math.round(row_height * 1.15)));
-      const axis_typeface = heatmap_x_axis_typeface(prepared);
+      const resolved_centre_font = centre_stat_font(prepared);
       const annotations = [];
 
       for (let row_index = 0; row_index < customdata.length; row_index += 1) {
@@ -165,8 +175,8 @@ window.addEventListener("load", () => {
           xanchor: "center",
           yanchor: "middle",
           font: {
-            family: axis_typeface,
-            size: font_size,
+            family: resolved_centre_font.family,
+            size: resolved_centre_font.size,
             color: "#000000",
           },
           align: "center",
