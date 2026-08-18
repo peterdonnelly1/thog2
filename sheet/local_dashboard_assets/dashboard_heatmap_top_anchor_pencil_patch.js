@@ -7,10 +7,9 @@
 // otherwise correctly-sized trajectory cards.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    // The two 76 px axis margins preserve the mirrored x axes. An additional
-    // 12 px at the top gives the title/ticks deliberate breathing room without
-    // changing the literal heatmap row pitch.
-    const heatmap_chrome_height_px = 164;
+    // The mirrored x axes use 104 px above and 76 px below the body. The larger
+    // top allocation keeps the title on its own line above the ordinates.
+    const heatmap_chrome_height_px = 180;
     const ordinary_plot_minimum_width_px = 360;
     const ordinary_plot_minimum_height_px = 240;
 
@@ -210,7 +209,7 @@ window.addEventListener("load", () => {
       }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: 88,
+        t: 104,
         b: 76,
       };
     };

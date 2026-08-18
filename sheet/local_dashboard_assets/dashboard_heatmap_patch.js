@@ -264,7 +264,7 @@ function transpose_heatmap_relative(prepared) {
     tickvals: offsets,
     ticktext: offsets.map(offset => (
       offset === 0 && Number.isFinite(latest_active_layer_count)
-        ? `0<br><b>L=${latest_active_layer_count}</b>`
+        ? `<b>L=${latest_active_layer_count}</b>`
         : signed_layer_offset(offset)
     )),
     anchor: "y",
@@ -974,7 +974,9 @@ window.addEventListener("load", () => {
     prepared.layout.width = Math.round(dimensions.width);
     prepared.layout.height = Math.round(dimensions.height);
     if (chart_name === "heatmap") {
-      prepared.layout.margin = {...(prepared.layout.margin || {}), t: 18, b: 76};
+      // Keep enough real top margin for the mirrored axis title and its tick row.
+      // This is the last layout write before Plotly receives the figure.
+      prepared.layout.margin = {...(prepared.layout.margin || {}), t: 104, b: 76};
       prepared.layout.yaxis = {...(prepared.layout.yaxis || {}), domain: [0, 1], automargin: false};
     }
     if (mount.dataset.plotReady === "true") {

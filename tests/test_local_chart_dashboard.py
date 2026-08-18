@@ -314,6 +314,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_dom_alignment_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_dom_alignment_patch.js"
     ).read_text(encoding="utf-8")
+    maximize_lband_patch = (
+        dashboard._ASSET_ROOT / "dashboard_maximize_lband_patch.js"
+    ).read_text(encoding="utf-8")
     wandb_groups_patch = (
         dashboard._ASSET_ROOT / "dashboard_wandb_groups_patch.js"
     ).read_text(encoding="utf-8")
@@ -365,7 +368,11 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
     assert "transpose_heatmap" in javascript
+    assert 'x_label: "candidate layer-count offset from L"' in javascript
+    assert "obsolete_heatmap_x_label" in javascript
     assert "signed_layer_offset(offset),\n        Number(cell)," in heatmap_patch
+    assert '? `<b>L=${latest_active_layer_count}</b>`' in heatmap_patch
+    assert "0<br><b>L=" not in heatmap_patch
     assert 'scaleanchor = "x"' in javascript
     assert 'constraintoward = "bottom"' in javascript
     assert 'color: "white"' in javascript
@@ -410,11 +417,18 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "heatmap_header.insertBefore(button" not in heatmap_loss_patch
     assert "...centre_annotations(prepared, heatmap_trace, current_losses)" not in heatmap_loss_patch
     assert "annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));" in heatmap_centre_format_patch
-    assert "centre_background_shape" not in heatmap_centre_format_patch
-    assert "prepared.layout.shapes = existing_shapes;" in heatmap_centre_format_patch
-    assert "annotations.push(...dynamic_centre_annotations(mount, half_band, geometry));" in heatmap_zoom_geometry_patch
-    assert '.filter(shape => shape?.name !== "thog2-centre-datum-background")' in heatmap_zoom_geometry_patch
-    assert "const heatmap_chrome_height_px = 164;" in heatmap_top_anchor_patch
+    assert "centre_background_shape" in heatmap_centre_format_patch
+    assert "x0: -0.5" in heatmap_centre_format_patch
+    assert "x1: 0.5" in heatmap_centre_format_patch
+    assert 'fillcolor: "#000000"' in heatmap_centre_format_patch
+    assert "prepared.layout.shapes = [...existing_shapes, centre_background_shape(prepared)];" in heatmap_centre_format_patch
+    assert "dynamic_centre_band" not in heatmap_zoom_geometry_patch
+    assert "dynamic_centre_annotations(mount, 0.5, centre_geometry)" in heatmap_zoom_geometry_patch
+    assert "shapes.push(centre_background_shape(current_y));" in heatmap_zoom_geometry_patch
+    assert "widen_centre_datum_band" not in maximize_lband_patch
+    assert "thog2_centre_band_half_width" not in maximize_lband_patch
+    assert "const heatmap_chrome_height_px = 180;" in heatmap_top_anchor_patch
+    assert 'prepared.layout.margin = {...(prepared.layout.margin || {}), t: 104, b: 76};' in heatmap_patch
     assert "best_better_loss_annotations" in heatmap_top_anchor_patch
     assert "candidate_loss = current_loss + candidate_delta" in heatmap_top_anchor_patch
     assert 'name: "thog2-best-better-loss"' in heatmap_top_anchor_patch
@@ -427,11 +441,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "prepared.layout.xaxis2 =" in heatmap_top_anchor_patch
     assert 'overlaying: "x"' in heatmap_top_anchor_patch
     assert 'matches: "x"' in heatmap_top_anchor_patch
-    assert "t: 88" in heatmap_top_anchor_patch
+    assert "t: 104" in heatmap_top_anchor_patch
     assert "b: 76" in heatmap_top_anchor_patch
-    assert "const heatmap_chrome_height_px = 164;" in heatmap_final_presentation_patch
+    assert "const heatmap_chrome_height_px = 180;" in heatmap_final_presentation_patch
     assert 'for (const axis_name of ["xaxis", "xaxis2"])' in heatmap_final_presentation_patch
-    assert "t: 88" in heatmap_final_presentation_patch
+    assert 'standoff: axis_name === "xaxis" ? 28 : 12' in heatmap_final_presentation_patch
+    assert "t: 104" in heatmap_final_presentation_patch
     assert "b: 76" in heatmap_final_presentation_patch
     assert "yshift: 50" not in heatmap_final_presentation_patch
     assert "heatmap_x_title_node" not in heatmap_dom_alignment_patch

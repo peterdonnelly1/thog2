@@ -7,7 +7,7 @@
 // panel separators, and reserve sufficient axis room for coefficient charts.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const heatmap_chrome_height_px = 164;
+    const heatmap_chrome_height_px = 180;
     const colour_key_floor_px = 64;
     const colour_key_normal_cap_px = 220;
     const overview_default_storage_key = "thog2_local_overview_default_font_size";
@@ -62,9 +62,8 @@ window.addEventListener("load", () => {
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (!heatmap_trace || !prepared.layout?.yaxis) return;
 
-      // Both native x axes receive their own fixed margin. The top gets a modest
-      // extra 12 px of whitespace so its title/ticks breathe without recreating
-      // the old oversized paper annotation or clipping short heatmaps.
+      // Both native x axes receive their own fixed margin and title standoff.
+      // The top title sits on a separate line above the ordinates.
       for (const axis_name of ["xaxis", "xaxis2"]) {
         const axis = prepared.layout?.[axis_name];
         if (!axis) continue;
@@ -77,14 +76,14 @@ window.addEventListener("load", () => {
           title: {
             ...(typeof title === "object" && title !== null ? title : {}),
             text: title_text,
-            standoff: 8,
+            standoff: axis_name === "xaxis" ? 28 : 12,
           },
           automargin: false,
         };
       }
       prepared.layout.margin = {
         ...(prepared.layout.margin || {}),
-        t: 88,
+        t: 104,
         b: 76,
       };
       prepared.layout.annotations = (prepared.layout.annotations || []).filter(
@@ -150,6 +149,28 @@ window.addEventListener("load", () => {
     const base_prepare_figure_presentation = prepare_figure;
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_figure_presentation(figure, chart_name);
+      if (chart_name === "heatmap") {
+        const top_title = prepared.layout?.xaxis?.title;
+        const title_object = typeof top_title === "object" && top_title !== null
+          ? top_title
+          : {text: String(top_title || "candidate layer-count offset from L")};
+        prepared.layout.xaxis = {
+          ...(prepared.layout.xaxis || {}),
+          title: {...title_object, standoff: 28},
+          automargin: false,
+        };
+        prepared.layout.xaxis2 = {
+          ...(prepared.layout.xaxis2 || {}),
+          title: {...title_object, standoff: 12},
+          automargin: false,
+        };
+        prepared.layout.margin = {
+          ...(prepared.layout.margin || {}),
+          t: 104,
+          b: 76,
+        };
+        return prepared;
+      }
       if (!trajectory_chart_names.has(chart_name)) return prepared;
 
       const log_mode = trajectory_mode(chart_name) === "log";

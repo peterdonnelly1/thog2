@@ -1,10 +1,9 @@
 // vvv THOG
 "use strict";
 
-// Define chart maximise as occupying the complete Charts-tab content area, while
-// retaining the run list/top run chrome. Also widen the heatmap's centre/L datum
-// band when dense x geometry would otherwise force its CLI-style text unreadably
-// small.
+// Define chart maximise as occupying the complete Charts-tab content area while
+// retaining the run list/top run chrome. Heatmap datum geometry is deliberately
+// left unchanged: the centre/L background must remain exactly one cell wide.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const sync_tab_maximize_surface = () => {
@@ -43,92 +42,6 @@ window.addEventListener("load", () => {
       }
       requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
       return result;
-    };
-
-    const finite_number = value => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : null;
-    };
-
-    const centre_datum_annotation = annotation => (
-      annotation
-      && annotation.xref === "x"
-      && annotation.yref === "y"
-      && annotation.showarrow === false
-      && typeof annotation.hovertext === "string"
-      && annotation.hovertext.startsWith("step=")
-      && String(annotation.font?.family || "").includes("Mono")
-    );
-
-    const widen_centre_datum_band = (prepared, heatmap_trace) => {
-      const shape = (prepared.layout?.shapes || []).find(
-        candidate => candidate?.name === "thog2-centre-datum-background"
-      );
-      if (!shape) return;
-
-      const shell = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-shell');
-      const shell_width = Math.max(1, Number(shell?.clientWidth || prepared.layout?.width || 1));
-      const margin = prepared.layout?.margin || {};
-      const plot_width = Math.max(
-        1,
-        shell_width - Number(margin.l || 0) - Number(margin.r || 0),
-      );
-      const column_count = Math.max(
-        1,
-        Array.isArray(heatmap_trace.x) ? heatmap_trace.x.length : 1,
-      );
-      const cell_width = Math.max(1, plot_width / column_count);
-      const row_height = Math.max(1, Number(heatmap_probe_row_height_px()));
-
-      // Above 10 px/step every probe row may carry text, so respect row pitch.
-      // Below that the established renderer already samples annotations to y ticks,
-      // which lets those retained rows use a useful 10 px font despite tiny cells.
-      const target_font_size = row_height >= 10
-        ? Math.max(8, Math.min(13, Math.floor(row_height * 0.78)))
-        : 10;
-      const required_text_width = 17 * target_font_size * 0.61 + 6;
-      const band_width_in_cells = Math.max(
-        1,
-        Math.min(7, required_text_width / cell_width),
-      );
-      const half_band = Math.max(0.5, band_width_in_cells / 2);
-      const available_band_width = Math.max(cell_width, band_width_in_cells * cell_width);
-      const width_limited_font = Math.max(
-        7,
-        Math.floor((available_band_width - 4) / (17 * 0.61)),
-      );
-      const font_size = Math.min(target_font_size, width_limited_font);
-
-      shape.x0 = -half_band;
-      shape.x1 = half_band;
-      shape.fillcolor = "#000000";
-      shape.line = {width: 0};
-
-      for (const annotation of prepared.layout?.annotations || []) {
-        if (!centre_datum_annotation(annotation)) continue;
-        annotation.x = -half_band;
-        annotation.xanchor = "left";
-        annotation.xshift = 2;
-        annotation.align = "left";
-        annotation.font = {
-          ...(annotation.font || {}),
-          size: font_size,
-        };
-      }
-
-      prepared.layout.meta = {
-        ...(prepared.layout.meta || {}),
-        thog2_centre_band_half_width: half_band,
-        thog2_centre_band_font_size: font_size,
-      };
-    };
-
-    const base_transpose_heatmap_lband = transpose_heatmap;
-    transpose_heatmap = function(prepared) {
-      base_transpose_heatmap_lband(prepared);
-      const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
-      if (!heatmap_trace) return;
-      widen_centre_datum_band(prepared, heatmap_trace);
     };
 
     const style = document.createElement("style");

@@ -554,7 +554,7 @@ function chart_default_labels(chart_name, supplied_mode = null) {
     };
   }
   return chart_name === "heatmap"
-    ? {x_source: "Candidate layer count", x_label: "absolute candidate layer count", y_source: "Optimizer step", y_label: "optimizer step"}
+    ? {x_source: "Candidate layer-count offset", x_label: "candidate layer-count offset from L", y_source: "Optimizer step", y_label: "optimizer step"}
     : {x_source: "Layer sample number", x_label: "layer sample number", y_source: "Generated weight value", y_label: "weight value"};
 }
 
@@ -569,9 +569,14 @@ function normalize_chart_settings(chart_name, supplied = null) {
   const stored = supplied || stored_chart_settings(chart_name);
   const x_axis_mode = chart_x_axis_mode(chart_name, stored.x_axis_mode);
   const labels = chart_default_labels(chart_name, x_axis_mode);
+  const stored_x_label = typeof stored.x_label === "string" ? stored.x_label.trim() : "";
+  const obsolete_heatmap_x_label = (
+    chart_name === "heatmap"
+    && stored_x_label === "absolute candidate layer count"
+  );
   const normalized = {
     title: typeof stored.title === "string" && stored.title.trim() ? stored.title.trim() : chart_titles[chart_name],
-    x_label: typeof stored.x_label === "string" && stored.x_label.trim() ? stored.x_label.trim() : labels.x_label,
+    x_label: stored_x_label && !obsolete_heatmap_x_label ? stored_x_label : labels.x_label,
     y_label: typeof stored.y_label === "string" && stored.y_label.trim() ? stored.y_label.trim() : labels.y_label,
     max_snapshots: 0,
     exclude_outliers: stored.exclude_outliers === true,

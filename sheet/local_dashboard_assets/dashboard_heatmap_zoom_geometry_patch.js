@@ -2,8 +2,8 @@
 "use strict";
 
 // Make heatmap wheel zoom a centred, geometry-aware viewport operation. Reflow
-// the centre L text at the current zoom density without recreating the obsolete
-// opaque background band.
+// the centre L text at the current zoom density while keeping its pure-black
+// background exactly one heatmap cell wide.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const state_by_mount = new WeakMap();
@@ -11,7 +11,6 @@ window.addEventListener("load", () => {
     const maximum_font_px = 16;
     const centre_text_glyph_count = 17;
     const centre_text_width_factor = 0.61;
-    const centre_band_padding_px = 10;
     const minimum_top_whitespace_px = 7;
     const maximum_top_whitespace_px = 24;
     const target_y_tick_count = 10;
@@ -194,18 +193,36 @@ window.addEventListener("load", () => {
       });
     };
 
-    const dynamic_centre_band = (mount, x_range, geometry) => {
+    const centre_text_geometry = (mount, x_range, geometry) => {
       const size = geometry?.size || plot_size(mount);
       const x_span = Math.max(1e-6, Math.abs(x_range[1] - x_range[0]));
       const pixels_per_x_unit = size.width / x_span;
-      const desired_text_width_px = (
-        centre_text_glyph_count
-        * geometry.font_size
-        * centre_text_width_factor
-        + centre_band_padding_px
+      const width_limited_font = Math.max(
+        3,
+        Math.floor(
+          (pixels_per_x_unit - 3)
+          / (centre_text_glyph_count * centre_text_width_factor)
+        ),
       );
-      return Math.max(0.08, desired_text_width_px / (2 * Math.max(1e-6, pixels_per_x_unit)));
+      return {
+        ...geometry,
+        font_size: Math.min(geometry.font_size, width_limited_font),
+      };
     };
+
+    const centre_background_shape = y_range => ({
+      type: "rect",
+      xref: "x",
+      yref: "y",
+      x0: -0.5,
+      x1: 0.5,
+      y0: Math.min(...y_range),
+      y1: Math.max(...y_range),
+      line: {width: 0},
+      fillcolor: "#000000",
+      layer: "above",
+      name: "thog2-centre-datum-background",
+    });
 
     const nice_tick_interval = span => {
       if (!(span > 0)) return 1;
@@ -349,17 +366,16 @@ window.addEventListener("load", () => {
       const geometry = visible_row_geometry(mount);
       if (!target_x || !geometry) return;
 
-      const half_band = dynamic_centre_band(mount, target_x, geometry);
+      const centre_geometry = centre_text_geometry(mount, target_x, geometry);
       const existing_annotations = Array.isArray(mount.layout?.annotations)
         ? mount.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !centre_datum_annotation(annotation));
-      // Rebuild the L-column text at the current zoom scale, but never restore
-      // the former centre background band.
-      annotations.push(...dynamic_centre_annotations(mount, half_band, geometry));
+      annotations.push(...dynamic_centre_annotations(mount, 0.5, centre_geometry));
 
       const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : [])
         .filter(shape => shape?.name !== "thog2-centre-datum-background");
+      shapes.push(centre_background_shape(current_y));
 
       const update = {
         annotations,
