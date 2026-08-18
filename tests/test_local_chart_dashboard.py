@@ -296,6 +296,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_patch.js"
     ).read_text(encoding="utf-8")
+    heatmap_loss_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_loss_patch.js"
+    ).read_text(encoding="utf-8")
     wandb_groups_patch = (
         dashboard._ASSET_ROOT / "dashboard_wandb_groups_patch.js"
     ).read_text(encoding="utf-8")
@@ -386,6 +389,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'if (tab_name === "files") refresh_files();' in heatmap_patch
     assert "actions.insertBefore(control, maximize);" in heatmap_patch
     assert "header.insertBefore(control, maximize);" not in heatmap_patch
+    assert 'const actions = maximize?.parentElement;' in heatmap_loss_patch
+    assert "actions.insertBefore(button, vertical_control || maximize);" in heatmap_loss_patch
+    assert "heatmap_header.insertBefore(button" not in heatmap_loss_patch
     assert 'chart: stored_chart_settings("heatmap")' in heatmap_patch
     assert "app.dynamic_chart_figures?.[chart_name]" in heatmap_patch
     assert "trajectory_chart_names_fast.map(chart_name => [chart_name, stored_chart_settings(chart_name)])" in heatmap_patch

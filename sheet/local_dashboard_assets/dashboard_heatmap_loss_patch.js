@@ -263,7 +263,8 @@ window.addEventListener("load", () => {
     const heatmap_header = document.querySelector('.chart-card[data-chart="heatmap"] .chart-card-header');
     const vertical_control = by_id("heatmap_vertical_scale")?.closest(".heatmap-vertical-scale-control");
     const maximize = heatmap_header?.querySelector(".maximize-button");
-    if (heatmap_header && !by_id("heatmap_delta_loss_mode")) {
+    const actions = maximize?.parentElement;
+    if (heatmap_header && actions && !by_id("heatmap_delta_loss_mode")) {
       const button = document.createElement("button");
       button.id = "heatmap_delta_loss_mode";
       button.type = "button";
@@ -276,7 +277,7 @@ window.addEventListener("load", () => {
         sync_heatmap_loss_mode_button();
         if (app.figures && app.current_run_id) await render_figures();
       });
-      heatmap_header.insertBefore(button, vertical_control || maximize || null);
+      actions.insertBefore(button, vertical_control || maximize);
     }
     sync_heatmap_loss_mode_button();
 
