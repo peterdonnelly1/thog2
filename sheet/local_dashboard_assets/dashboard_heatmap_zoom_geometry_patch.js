@@ -166,27 +166,27 @@ window.addEventListener("load", () => {
       return retained;
     };
 
-    const dynamic_centre_annotations = (mount, half_band, geometry) => {
+    const dynamic_centre_annotations = (mount, geometry) => {
       const rows = retained_visible_rows(geometry);
       return rows.map(row => {
         const loss_text = row.loss.toFixed(3).padStart(6, " ").replace(/^ /, "&nbsp;");
         const delta_text = row.delta === null ? "Δ=      —" : `Δ= ${signed_fixed_3(row.delta)}`;
         return {
-          x: -half_band,
+          x: 0,
           y: row.coordinate,
           xref: "x",
           yref: "y",
           text: `${loss_text}&nbsp;&nbsp;<span style="color:${delta_colour(row.delta)};font-weight:700">${delta_text}</span>`,
           showarrow: false,
-          xanchor: "left",
+          xanchor: "center",
           yanchor: "middle",
-          xshift: 2,
+          xshift: 0,
           font: {
             family: "DejaVu Sans Mono, monospace",
             size: geometry.font_size,
             color: "#ffffff",
           },
-          align: "left",
+          align: "center",
           captureevents: false,
           hovertext: row.step === null ? "step=—" : `step=${row.step}`,
         };
@@ -371,7 +371,7 @@ window.addEventListener("load", () => {
         ? mount.layout.annotations
         : [];
       const annotations = existing_annotations.filter(annotation => !centre_datum_annotation(annotation));
-      annotations.push(...dynamic_centre_annotations(mount, 0.5, centre_geometry));
+      annotations.push(...dynamic_centre_annotations(mount, centre_geometry));
 
       const shapes = (Array.isArray(mount.layout?.shapes) ? mount.layout.shapes : [])
         .filter(shape => shape?.name !== "thog2-centre-datum-background");

@@ -105,10 +105,10 @@ window.addEventListener("load", () => {
       const font_size = Math.min(row_limited, width_limited);
       for (const annotation of prepared.layout.annotations || []) {
         if (!centre_annotation(annotation)) continue;
-        annotation.x = -0.5;
-        annotation.xanchor = "left";
-        annotation.xshift = 1;
-        annotation.align = "left";
+        annotation.x = 0;
+        annotation.xanchor = "center";
+        annotation.xshift = 0;
+        annotation.align = "center";
         annotation.font = {
           ...(annotation.font || {}),
           size: font_size,

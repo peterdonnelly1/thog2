@@ -57,6 +57,8 @@ window.addEventListener("load", () => {
     const install_heatmap_mode_buttons = () => {
       const old_button = by_id("heatmap_delta_loss_mode");
       if (!old_button || by_id("heatmap_delta_loss_modes")) return;
+      const heatmap_header = old_button.closest(".chart-card-header");
+      if (!heatmap_header) return;
       old_button.hidden = true;
       const group = document.createElement("div");
       group.id = "heatmap_delta_loss_modes";
@@ -80,7 +82,7 @@ window.addEventListener("load", () => {
         event.preventDefault(); event.stopPropagation(); choose("percent");
       });
       group.append(absolute, percent);
-      old_button.insertAdjacentElement("beforebegin", group);
+      heatmap_header.appendChild(group);
     };
 
     const install_trajectory_mode_buttons = () => {
@@ -408,6 +410,16 @@ window.addEventListener("load", () => {
         border-radius: 5px;
         overflow: hidden;
         background: #f6f7f8;
+      }
+      .chart-card[data-chart="heatmap"] .chart-card-header {
+        position: relative;
+      }
+      .chart-card[data-chart="heatmap"] .heatmap-mode-group {
+        position: absolute;
+        z-index: 3;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
       }
       .explicit-mode-button {
         min-width: 38px;

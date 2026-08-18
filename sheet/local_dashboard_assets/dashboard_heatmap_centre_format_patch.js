@@ -95,21 +95,21 @@ window.addEventListener("load", () => {
         const loss_text = loss.toFixed(3).padStart(6, " ").replace(/^ /, "&nbsp;");
         const delta_text = delta === null ? "Δ=      —" : `Δ= ${signed_fixed_3(delta)}`;
         annotations.push({
-          x: -0.5,
+          x: 0,
           y: coordinates[index],
           xref: "x",
           yref: "y",
           text: `${loss_text}&nbsp;&nbsp;<span style="color:${delta_colour(delta)};font-weight:700">${delta_text}</span>`,
           showarrow: false,
-          xanchor: "left",
+          xanchor: "center",
           yanchor: "middle",
-          xshift: 1,
+          xshift: 0,
           font: {
             family: "DejaVu Sans Mono, monospace",
             size: font_size,
             color: "#ffffff",
           },
-          align: "left",
+          align: "center",
           captureevents: false,
           hovertext: step === undefined ? undefined : `step=${step}`,
         });

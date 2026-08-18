@@ -142,11 +142,17 @@ window.addEventListener("load", () => {
           const candidate_delta = Array.isArray(cell) ? finite_number(cell[3]) : null;
           if (candidate_delta === null || !(candidate_delta < 0)) continue;
           const candidate_loss = current_loss + candidate_delta;
+          const improvement_percent = current_loss === 0
+            ? null
+            : 100 * (current_loss - candidate_loss) / Math.abs(current_loss);
           if (best === null || candidate_loss < best.loss) {
-            best = {column_index, loss: candidate_loss};
+            best = {column_index, loss: candidate_loss, improvement_percent};
           }
         }
         if (best === null || best.column_index >= x_coordinates.length) continue;
+        const percent_suffix = Number.isFinite(best.improvement_percent)
+          ? ` (${best.improvement_percent.toFixed(2)}%)`
+          : "";
 
         annotations.push({
           name: "thog2-best-better-loss",
@@ -154,7 +160,7 @@ window.addEventListener("load", () => {
           y: y_coordinate,
           xref: "x",
           yref: "y",
-          text: `<b>${best.loss.toFixed(4)}</b>`,
+          text: `<b>${best.loss.toFixed(4)}${percent_suffix}</b>`,
           showarrow: false,
           xanchor: "center",
           yanchor: "middle",

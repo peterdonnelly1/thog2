@@ -305,6 +305,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_zoom_geometry_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_zoom_geometry_patch.js"
     ).read_text(encoding="utf-8")
+    heatmap_geometry_final_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_geometry_final_patch.js"
+    ).read_text(encoding="utf-8")
     heatmap_top_anchor_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_top_anchor_pencil_patch.js"
     ).read_text(encoding="utf-8")
@@ -313,6 +316,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     ).read_text(encoding="utf-8")
     heatmap_dom_alignment_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_dom_alignment_patch.js"
+    ).read_text(encoding="utf-8")
+    logs_modes_patch = (
+        dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
     maximize_lband_patch = (
         dashboard._ASSET_ROOT / "dashboard_maximize_lband_patch.js"
@@ -415,6 +421,10 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'const actions = maximize?.parentElement;' in heatmap_loss_patch
     assert "actions.insertBefore(button, vertical_control || maximize);" in heatmap_loss_patch
     assert "heatmap_header.insertBefore(button" not in heatmap_loss_patch
+    assert "heatmap_header.appendChild(group);" in logs_modes_patch
+    assert '.heatmap-mode-group {' in logs_modes_patch
+    assert 'left: 50%;' in logs_modes_patch
+    assert 'transform: translate(-50%, -50%);' in logs_modes_patch
     assert "...centre_annotations(prepared, heatmap_trace, current_losses)" not in heatmap_loss_patch
     assert "annotations.push(...centre_annotations(prepared, heatmap_trace, current_losses));" in heatmap_centre_format_patch
     assert "centre_background_shape" in heatmap_centre_format_patch
@@ -423,20 +433,27 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'fillcolor: "#000000"' in heatmap_centre_format_patch
     assert "prepared.layout.shapes = [...existing_shapes, centre_background_shape(prepared)];" in heatmap_centre_format_patch
     assert "dynamic_centre_band" not in heatmap_zoom_geometry_patch
-    assert "dynamic_centre_annotations(mount, 0.5, centre_geometry)" in heatmap_zoom_geometry_patch
+    assert "dynamic_centre_annotations(mount, centre_geometry)" in heatmap_zoom_geometry_patch
     assert "shapes.push(centre_background_shape(current_y));" in heatmap_zoom_geometry_patch
+    for centre_patch in (heatmap_centre_format_patch, heatmap_zoom_geometry_patch):
+        assert 'xanchor: "center"' in centre_patch
+        assert 'align: "center"' in centre_patch
+    assert 'annotation.xanchor = "center";' in heatmap_geometry_final_patch
+    assert 'annotation.align = "center";' in heatmap_geometry_final_patch
     assert "widen_centre_datum_band" not in maximize_lband_patch
     assert "thog2_centre_band_half_width" not in maximize_lband_patch
     assert "const heatmap_chrome_height_px = 180;" in heatmap_top_anchor_patch
     assert 'prepared.layout.margin = {...(prepared.layout.margin || {}), t: 104, b: 76};' in heatmap_patch
     assert "best_better_loss_annotations" in heatmap_top_anchor_patch
     assert "candidate_loss = current_loss + candidate_delta" in heatmap_top_anchor_patch
+    assert "100 * (current_loss - candidate_loss) / Math.abs(current_loss)" in heatmap_top_anchor_patch
+    assert "best.improvement_percent.toFixed(2)" in heatmap_top_anchor_patch
     assert 'name: "thog2-best-better-loss"' in heatmap_top_anchor_patch
     assert "Math.round(row_height * 1.15)" in heatmap_top_anchor_patch
     assert "prepared.layout?.xaxis?.tickfont?.family" in heatmap_top_anchor_patch
     assert "family: axis_typeface" in heatmap_top_anchor_patch
     assert "width_limited_font" not in heatmap_top_anchor_patch
-    assert 'text: `<b>${best.loss.toFixed(4)}</b>`' in heatmap_top_anchor_patch
+    assert 'text: `<b>${best.loss.toFixed(4)}${percent_suffix}</b>`' in heatmap_top_anchor_patch
     assert 'color: "#000000"' in heatmap_top_anchor_patch
     assert "prepared.layout.xaxis2 =" in heatmap_top_anchor_patch
     assert 'overlaying: "x"' in heatmap_top_anchor_patch
