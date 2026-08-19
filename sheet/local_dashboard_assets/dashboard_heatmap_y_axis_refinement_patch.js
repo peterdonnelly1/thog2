@@ -8,8 +8,8 @@ window.addEventListener("load", () => {
   setTimeout(() => {
     const state_by_mount = new WeakMap();
     const maximum_tick_count = 14;
-    const minimum_tick_font_px = 10;
-    const maximum_tick_font_px = 15;
+    const minimum_tick_font_px = 12;
+    const maximum_tick_font_px = 17;
 
     const finite_number = value => {
       if (value === null || value === undefined || value === "") return null;
@@ -140,7 +140,7 @@ window.addEventListener("load", () => {
       const spacing = plot_height / Math.max(1, Number(tick_count) - 1);
       return Math.max(
         minimum_tick_font_px,
-        Math.min(maximum_tick_font_px, Math.round(spacing * 0.28)),
+        Math.min(maximum_tick_font_px, Math.round(spacing * 0.30)),
       );
     };
 

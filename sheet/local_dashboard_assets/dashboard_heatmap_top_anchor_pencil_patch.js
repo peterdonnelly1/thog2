@@ -10,6 +10,8 @@ window.addEventListener("load", () => {
     // The mirrored x axes use 104 px above and 76 px below the body. The larger
     // top allocation keeps the title on its own line above the ordinates.
     const heatmap_chrome_height_px = 180;
+    const heatmap_axis_tick_font_px = 12;
+    const heatmap_axis_title_font_px = 12;
     const ordinary_plot_minimum_width_px = 360;
     const ordinary_plot_minimum_height_px = 240;
 
@@ -115,6 +117,22 @@ window.addEventListener("load", () => {
       );
     };
 
+    const at_least_font_size = (value, minimum) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.max(minimum, numeric) : minimum;
+    };
+
+    const enlarged_axis_title = title => {
+      const resolved = typeof title === "string" ? {text: title} : {...(title || {})};
+      return {
+        ...resolved,
+        font: {
+          ...(resolved.font || {}),
+          size: at_least_font_size(resolved.font?.size, heatmap_axis_title_font_px),
+        },
+      };
+    };
+
     const centre_stat_font = prepared => {
       const centre_stat = (prepared.layout?.annotations || []).find(annotation => (
         annotation?.xref === "x"
@@ -197,9 +215,14 @@ window.addEventListener("load", () => {
         ...prepared.layout.xaxis,
         side: "top",
         anchor: "y",
+        title: enlarged_axis_title(prepared.layout.xaxis.title),
         tickfont: {
           ...(prepared.layout.xaxis.tickfont || {}),
           family: axis_typeface,
+          size: at_least_font_size(
+            prepared.layout.xaxis.tickfont?.size,
+            heatmap_axis_tick_font_px,
+          ),
         },
       };
       prepared.layout.xaxis2 = {
@@ -210,6 +233,17 @@ window.addEventListener("load", () => {
         matches: "x",
         showgrid: false,
         zeroline: false,
+      };
+      prepared.layout.yaxis = {
+        ...(prepared.layout.yaxis || {}),
+        title: enlarged_axis_title(prepared.layout?.yaxis?.title),
+        tickfont: {
+          ...(prepared.layout?.yaxis?.tickfont || {}),
+          size: at_least_font_size(
+            prepared.layout?.yaxis?.tickfont?.size,
+            heatmap_axis_tick_font_px,
+          ),
+        },
       };
       const heatmap_trace = (prepared.data || []).find(trace => trace.type === "heatmap");
       if (heatmap_trace) {
@@ -283,6 +317,13 @@ window.addEventListener("load", () => {
         border: 0 !important;
         border-radius: 0 !important;
         box-shadow: none !important;
+      }
+      /* A saved heatmap width may be narrower than a subsequently enlarged
+         Charts pane. The heatmap owns its row, so it must always consume it. */
+      .chart-card[data-chart="heatmap"] {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        max-width: none !important;
       }
       .chart-card-header {
         border-bottom: 1px solid #dfe2e6 !important;

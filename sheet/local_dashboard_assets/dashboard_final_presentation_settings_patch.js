@@ -350,7 +350,7 @@ window.addEventListener("load", () => {
 
       /* The newest/top step should be visually centred on the first heatmap row. */
       .chart-card[data-chart="heatmap"] .ytick text.thog2-newest-y-tick {
-        font-size: 15px !important;
+        font-size: 17px !important;
         font-weight: 800 !important;
         fill: #171a1f !important;
         transform: translate(-7px, 10px) !important;

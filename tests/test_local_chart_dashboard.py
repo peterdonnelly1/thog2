@@ -317,6 +317,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_dom_alignment_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_dom_alignment_patch.js"
     ).read_text(encoding="utf-8")
+    heatmap_y_axis_refinement_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_y_axis_refinement_patch.js"
+    ).read_text(encoding="utf-8")
     logs_modes_patch = (
         dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
@@ -459,6 +462,16 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "size: resolved_centre_font.size" in heatmap_zoom_geometry_patch
     assert "prepared.layout?.xaxis?.tickfont?.family" in heatmap_top_anchor_patch
     assert "family: axis_typeface" in heatmap_top_anchor_patch
+    assert "const heatmap_axis_tick_font_px = 12;" in heatmap_top_anchor_patch
+    assert "const heatmap_axis_title_font_px = 12;" in heatmap_top_anchor_patch
+    assert "title: enlarged_axis_title(prepared.layout.xaxis.title)" in heatmap_top_anchor_patch
+    assert "title: enlarged_axis_title(prepared.layout?.yaxis?.title)" in heatmap_top_anchor_patch
+    assert 'flex: 1 1 100% !important;' in heatmap_top_anchor_patch
+    assert 'width: 100% !important;' in heatmap_top_anchor_patch
+    assert "const minimum_tick_font_px = 12;" in heatmap_y_axis_refinement_patch
+    assert "const maximum_tick_font_px = 17;" in heatmap_y_axis_refinement_patch
+    assert "Math.round(spacing * 0.30)" in heatmap_y_axis_refinement_patch
+    assert "font-size: 17px !important;" in heatmap_final_presentation_patch
     assert "width_limited_font" not in heatmap_top_anchor_patch
     assert 'text: `<b>${best.loss.toFixed(4)}${percent_suffix}</b>`' in heatmap_top_anchor_patch
     assert 'color: "#000000"' in heatmap_top_anchor_patch
