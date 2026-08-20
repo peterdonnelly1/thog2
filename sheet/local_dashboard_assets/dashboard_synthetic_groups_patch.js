@@ -49,7 +49,7 @@
   coefficients_toggle.innerHTML = (
     '<span class="group-grip" aria-hidden="true">⠿</span>'
     + '<span class="group-caret" aria-hidden="true">⌄</span>'
-    + '<strong>coefficients</strong>'
+    + '<strong>weights</strong>'
     + `<span class="group-count">${coefficient_chart_names.length}</span>`
   );
   coefficients_header.appendChild(coefficients_toggle);

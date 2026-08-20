@@ -28,6 +28,11 @@ window.addEventListener("load", () => {
       return Boolean(group && !group.classList.contains("collapsed"));
     };
 
+    const workspace_api = () => {
+      const candidate = window.__instra_workspace;
+      return candidate?.active?.() === true ? candidate : null;
+    };
+
     const reset_performance_state_for_run = run_id => {
       if (performance_state.run_id === run_id) return;
       performance_state.run_id = run_id;
@@ -63,6 +68,7 @@ window.addEventListener("load", () => {
     const depth_signature = status => JSON.stringify([
       status?.depth_snapshot_count ?? null,
       status?.depth_maximum_update ?? null,
+      workspace_api()?.selection_key?.() || null,
     ]);
 
     const family_stale = family => {
@@ -108,7 +114,8 @@ window.addEventListener("load", () => {
         !app.figures?.depth
         || performance_state.depth_signature !== next_depth_signature
       );
-      const fetch_heatmap = need_heatmap && synthetic_group_open("heatmap");
+      const workspace = workspace_api();
+      const fetch_heatmap = need_heatmap && !workspace && synthetic_group_open("heatmap");
       const fetch_depth = need_depth && synthetic_group_open("coefficients");
 
       if (need_heatmap && !fetch_heatmap) performance_state.deferred_heatmap = true;
@@ -132,7 +139,11 @@ window.addEventListener("load", () => {
               })()
             : Promise.resolve(null),
           fetch_depth
-            ? base_fetch_json_performance(`/api/figure-family?run=${encoded_run}&family=depth`)
+            ? (
+                workspace
+                  ? workspace.fetch_depth_payload(base_fetch_json_performance)
+                  : base_fetch_json_performance(`/api/figure-family?run=${encoded_run}&family=depth`)
+              )
             : Promise.resolve(null),
         ]);
         if (run_id !== app.current_run_id) return empty_figures();
@@ -188,7 +199,7 @@ window.addEventListener("load", () => {
       const explicit_pending = performance_state.pending_render;
       performance_state.pending_render = null;
       const pending = explicit_pending || {
-        heatmap: synthetic_group_open("heatmap") && Boolean(app.figures.heatmap),
+        heatmap: !workspace_api() && synthetic_group_open("heatmap") && Boolean(app.figures.heatmap),
         depth: synthetic_group_open("coefficients") && Boolean(app.figures.depth),
       };
 

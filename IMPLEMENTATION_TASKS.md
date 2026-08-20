@@ -49,3 +49,21 @@
 - [x] Run static/syntax/browser-asset checks.
 - [x] Review diff for unrelated changes and configuration compatibility.
 - [x] Commit and publish the completed branch.
+
+## F. Instra regression repair and multi-run Workspace
+
+- [x] Restore per-weight-chart linear/signed-log controls and lighten DENSE cross strokes.
+- [x] Rename the synthetic `coefficients` group to `weights` without changing stored chart-family names.
+- [x] Restore the weight-chart top axis/title and make DENSE train/val group eligibility data-driven.
+- [x] Suppress the heatmap group for DENSE runs.
+- [x] Make all heatmap brick labels use one font family, size, mode and percentage format.
+- [x] Rename the heatmap to `Heatmap - True Loss vs Counterfactual Layer Count Loss`.
+- [x] Add a true top absolute-layer axis while retaining the relative-offset axis.
+- [x] Remove blank heatmap protrusions and raise the colour-key title.
+- [x] Render chaos-bump and update-brake state reliably from persisted per-row metadata.
+- [x] Persist probe/step row mode on Apply and apply it to the main chart.
+- [x] Use the CLI salmon colour for `update brake on`.
+- [x] Add a left-rail Workspace view that overlays corresponding charts for visible runs.
+- [x] Exclude heatmaps from Workspace and preserve single-run navigation.
+- [x] Add source, server, persistence and multi-run figure regression tests.
+- [ ] Run focused and broad regression suites, publish, and verify CI.

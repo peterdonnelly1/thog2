@@ -35,3 +35,14 @@
 - Updated `sitecustomize.py` to preserve all exact public double-underscore namespaces while retaining ordinary underscore aliases, added a direct regression, and made the W&B visibility test select its intended destination explicitly.
 - The corrected focused CI suite passed. The exhaustive 211-module head-vs-base comparison then identified exactly three stale v0.55/v0.56 ownership/help assertions; all implementation tests passed and the other 23 non-passing modules reproduced equivalently on the base.
 - Updated those legacy integration assertions to recognise v0.57 as the final selector owner and to validate the expanded six-algorithm/help surface, including the bulldozer objective override.
+
+## 2026-08-20 — Instra regression repair and Workspace
+
+- Began a fresh acceptance pass against the reported live UI rather than relying on the earlier checked implementation list.
+- Preserved the user's unrelated `sheet/trainer_schedule.py` working-tree change and excluded it from this task.
+- Identified the dashboard's composed patch/load order as the first dependency to resolve: several v0.57 behaviours exist in source files but are not all part of the served asset graph, while later geometry overrides can replace axis semantics.
+- Established repair order: asset/data eligibility and setting persistence; one authoritative heatmap renderer; weight-chart presentation; multi-run Workspace; focused and broad regression verification.
+- Added one final v0.58 browser owner after v0.57, repaired the invalid weight-scale DOM insertion, and retained internal `coefficients` identifiers while displaying the group as `weights`.
+- Added multi-run Workspace aggregation across visible runs for both stored weight figures and locally scanned W&B metric groups. Heatmaps are excluded and DENSE heatmap groups are hidden.
+- Rebuilt final heatmap axes and overlays from persisted row metadata: latest-L absolute top axis, uniform deduplicated labels, permanent white decision bricks, black L band, brake/chaos headers, protrusion removal, and Apply-time persistence.
+- Added a Node semantic smoke test covering Workspace aggregation, DENSE eligibility, settings persistence, weight preparation, heatmap axes, decision labels, and brake/chaos state. JavaScript syntax, inline scripts, Python compilation, and scoped whitespace checks pass locally; dependency-complete Python and broad comparison suites remain delegated to branch CI.

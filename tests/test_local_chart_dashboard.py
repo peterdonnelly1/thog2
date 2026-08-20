@@ -291,6 +291,9 @@ def test_wandb_files_are_exposed_as_a_folder_manifest(
 
 
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
+    launcher = (Path(dashboard.__file__).with_name("run_thog2_dashboard.py")).read_text(
+        encoding="utf-8"
+    )
     html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
     heatmap_patch = (
@@ -323,6 +326,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_v057_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_v057_patch.js"
     ).read_text(encoding="utf-8")
+    v058_repair_patch = (
+        dashboard._ASSET_ROOT / "dashboard_v058_repair_workspace_patch.js"
+    ).read_text(encoding="utf-8")
     logs_modes_patch = (
         dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
@@ -339,6 +345,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="runs_pane"' in html
     assert 'id="workspace_divider"' in html
     assert 'class="icon-rail"' in html
+    assert 'id="workspace_nav"' in html
+    assert '"dashboard_v058_repair_workspace_patch.js",' in launcher
     assert 'id="settings_nav"' in html
     assert 'id="page_size"' in html
     assert 'id="sort_direction"' in html
@@ -517,7 +525,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "app.dynamic_chart_figures[key] = figure;" in wandb_groups_patch
     assert "thog2_x_variants: series.x_variants || {}" in wandb_groups_patch
     assert "await render_plot(mount, figure, key);" in wandb_groups_patch
-    assert "Heatmap - Loss vs Counterfactual Layer Count" in html
+    assert "Heatmap - True Loss vs Counterfactual Layer Count Loss" in html
     assert 'probe_count: 100' in heatmap_v057_patch
     assert 'window_mode: "rolling"' in heatmap_v057_patch
     assert 'y_display_mode: "probes"' in heatmap_v057_patch
@@ -530,6 +538,30 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'color: "#96dcff"' in heatmap_v057_patch
     assert 'side: "top", anchor: "y", overlaying: "x", matches: "x"' in heatmap_v057_patch
     assert 'axis_tick_font_px = 14' in heatmap_v057_patch
+    assert 'const heatmap_title = "Heatmap - True Loss vs Counterfactual Layer Count Loss";' in v058_repair_patch
+    assert 'const weight_scale_key = "thog2_local_trajectory_scale_modes";' in v058_repair_patch
+    assert 'marker.line = {...(trace.marker.line || {}), width: 0.55};' in v058_repair_patch
+    assert 'textContent = "weights"' in v058_repair_patch
+    assert 'app.workspace_mode = false;' in v058_repair_patch
+    assert "fetch_depth_payload" in v058_repair_patch
+    assert "fetch_metric_groups" in v058_repair_patch
+    assert "fetch_metric_group" in v058_repair_patch
+    assert 'group.hidden = hide;' in v058_repair_patch
+    assert 'dense_run(current_run())' in v058_repair_patch
+    assert 'fillcolor: "#ffffff"' in v058_repair_patch
+    assert 'font: {...font, color: "#000000"}' in v058_repair_patch
+    assert 'size: Math.max(1, Number(centre?.font?.size || 10))' in v058_repair_patch
+    assert 'heatmap_cell_label(best.loss, centre_loss)' in v058_repair_patch
+    assert 'improvement.toFixed(2)' in v058_repair_patch
+    assert 'side: "top", anchor: "y", overlaying: "x", matches: "x"' in v058_repair_patch
+    assert 'absolute candidate layer count · latest L=' in v058_repair_patch
+    assert 'color: salmon' in v058_repair_patch
+    assert 'const salmon = "#ff9696";' in v058_repair_patch
+    assert "sampling chaos bump made - magnitude" in v058_repair_patch
+    assert "reverted to pre-chaos bump sampling" in v058_repair_patch
+    assert 'prepared.data = (prepared.data || []).filter(trace => trace === heatmap || trace.type === "heatmap");' in v058_repair_patch
+    assert 'pending_heatmap_settings = collect_heatmap_settings();' in v058_repair_patch
+    assert 'save_heatmap_viewer_setting(name, value);' in v058_repair_patch
 
 
 def test_dashboard_html_is_read_for_each_page_request() -> None:

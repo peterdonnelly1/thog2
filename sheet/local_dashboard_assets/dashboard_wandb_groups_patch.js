@@ -13,6 +13,12 @@ window.addEventListener("load", () => {
     let poll_in_flight = false;
     let last_run_id = null;
 
+    const workspace_api = () => {
+      const candidate = window.__instra_workspace;
+      return candidate?.active?.() === true ? candidate : null;
+    };
+    const current_view_key = () => workspace_api()?.selection_key?.() || app.current_run_id;
+
     const metric_group_sections = () => [...document.querySelectorAll(".local-metric-group")];
     const group_section = name => metric_group_sections().find(section => section.dataset.metricGroup === name) || null;
     const group_collapsed_settings = () => load_json(group_state_key, {});
@@ -189,7 +195,7 @@ window.addEventListener("load", () => {
         hovertemplate: "%{y:.6g}<extra>%{fullData.name}</extra>",
         line: {
           width: 1.35,
-          color: default_palette[index % default_palette.length],
+          color: series.color || default_palette[index % default_palette.length],
         },
       }));
       const multi_series = traces.length > 1;
@@ -287,10 +293,16 @@ window.addEventListener("load", () => {
       if (!section || section.classList.contains("collapsed")) return;
       const revision = Number(group_revisions.get(group_name) || 0);
       if (!force && rendered_revisions.get(group_name) === revision) return;
+      const requested_view = current_view_key();
       try {
-        const encoded_run = encodeURIComponent(app.current_run_id);
-        const encoded_group = encodeURIComponent(group_name);
-        const payload = await fetch_json(`/api/chart-group?run=${encoded_run}&group=${encoded_group}`);
+        const workspace = workspace_api();
+        const payload = workspace
+          ? await workspace.fetch_metric_group(group_name)
+          : await fetch_json(
+              `/api/chart-group?run=${encodeURIComponent(app.current_run_id)}`
+              + `&group=${encodeURIComponent(group_name)}`
+            );
+        if (requested_view !== current_view_key()) return;
         if (payload.available === false) return;
         await render_group_payload(payload);
       } catch (error) {
@@ -302,14 +314,17 @@ window.addEventListener("load", () => {
       if (!app.current_run_id || poll_in_flight) return;
       if (by_id("charts_scroll")?.hidden) return;
       poll_in_flight = true;
-      const requested_run = app.current_run_id;
+      const requested_run = current_view_key();
       try {
         if (last_run_id !== requested_run) {
           clear_metric_groups();
           last_run_id = requested_run;
         }
-        const payload = await fetch_json(`/api/chart-groups?run=${encodeURIComponent(requested_run)}`);
-        if (requested_run !== app.current_run_id) return;
+        const workspace = workspace_api();
+        const payload = workspace
+          ? await workspace.fetch_metric_groups()
+          : await fetch_json(`/api/chart-groups?run=${encodeURIComponent(app.current_run_id)}`);
+        if (requested_run !== current_view_key()) return;
         if (!payload.available) {
           clear_metric_groups();
           return;
@@ -370,6 +385,12 @@ window.addEventListener("load", () => {
       }
     `;
     document.head.appendChild(style);
+
+    window.__thog2_metric_groups = {
+      clear: clear_metric_groups,
+      refresh: refresh_metric_groups,
+      refresh_group: refresh_group_data,
+    };
 
     setInterval(refresh_metric_groups, 2500);
     setTimeout(refresh_metric_groups, 50);

@@ -102,6 +102,7 @@ def test_dense_figure_uses_unconnected_crosses(monkeypatch) -> None:
     assert len(figure.data) == 2
     assert all(trace.mode == "markers" for trace in figure.data)
     assert all(trace.marker.symbol == "x" for trace in figure.data)
+    assert all(trace.marker.line.width == pytest.approx(0.55) for trace in figure.data)
     assert all(trace.line.width is None for trace in figure.data)
     assert tuple(figure.layout.xaxis.range) == (0.5, 3.5)
     assert "DENSE learned scalar weights" in figure.layout.title.text

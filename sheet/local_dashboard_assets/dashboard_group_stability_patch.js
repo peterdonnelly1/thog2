@@ -3,7 +3,9 @@
 
 // Keep W&B-like group navigation structurally stable while a mature run's local
 // .wandb file is still catching up. Train is always present first, but remains
-// collapsed so startup does not imply chart materialisation/render work.
+// collapsed so startup does not imply chart materialisation/render work. The
+// placeholder remains expandable: it must never look like a broken train group
+// while the local W&B scanner is still catching up.
 window.addEventListener("load", () => {
   const placeholder_id = "thog2_pending_train_group";
 
@@ -36,7 +38,6 @@ window.addEventListener("load", () => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "chart-group-toggle";
-      button.disabled = true;
       button.setAttribute("aria-expanded", "false");
       button.innerHTML = (
         '<span class="group-grip" aria-hidden="true">⠿</span>'
@@ -45,7 +46,14 @@ window.addEventListener("load", () => {
         + '<span class="group-count">…</span>'
       );
       header.appendChild(button);
-      section.appendChild(header);
+      const grid = document.createElement("div");
+      grid.className = "chart-grid thog2-pending-train-grid";
+      grid.hidden = true;
+      const message = document.createElement("p");
+      message.className = "thog2-pending-train-message";
+      message.textContent = "Scanning local W&B history for train charts…";
+      grid.appendChild(message);
+      section.append(header, grid);
     }
 
     const first_metric_group = charts_scroll.querySelector(":scope > .local-metric-group");
@@ -59,11 +67,7 @@ window.addEventListener("load", () => {
   const style = document.createElement("style");
   style.textContent = `
     .thog2-pending-train-group { min-height: 35px; background: #fff; }
-    .thog2-pending-train-group .chart-group-toggle:disabled {
-      opacity: 1;
-      color: #49515b;
-      cursor: default;
-    }
+    .thog2-pending-train-message { margin: 14px 18px; color: #68717c; font-size: 12px; }
   `;
   document.head.appendChild(style);
 

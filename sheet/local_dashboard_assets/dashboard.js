@@ -2,7 +2,7 @@
 "use strict";
 
 const chart_titles = {
-  heatmap: "Heatmap - Loss vs Counterfactual Layer Count",
+  heatmap: "Heatmap - True Loss vs Counterfactual Layer Count Loss",
   attn_q_head_N: "Attention query scalar trajectories",
   attn_k_head_N: "Attention key scalar trajectories",
   attn_v_head_N: "Attention value scalar trajectories",

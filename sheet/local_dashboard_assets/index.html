@@ -25,6 +25,10 @@
   </header>
 
   <nav class="icon-rail" aria-label="Instrumentation sections">
+    <button class="rail-item" id="workspace_nav" type="button" title="Workspace">
+      <span class="workspace-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Workspace</span>
+    </button>
     <button class="rail-item selected" id="runs_nav" type="button" title="Runs">
       <span class="runs-icon" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>Runs</span>
@@ -147,7 +151,7 @@
           <div class="chart-grid" id="chart_grid">
             <article class="chart-card" data-chart="heatmap">
               <header class="chart-card-header">
-                <div class="chart-heading-copy"><h2>Heatmap - Loss vs Counterfactual Layer Count</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
+                <div class="chart-heading-copy"><h2>Heatmap - True Loss vs Counterfactual Layer Count Loss</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
                 <div class="chart-card-actions">
                   <button class="chart-settings-button" data-chart-settings="heatmap" type="button" aria-label="Settings for heatmap" title="Chart settings">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -821,7 +825,8 @@
           const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
           const header = card?.querySelector(".chart-card-header");
           const maximize = header?.querySelector(".maximize-button");
-          if (!header || !maximize || header.querySelector(".trajectory-scale-toggle")) continue;
+          const actions = maximize?.parentElement;
+          if (!header || !actions || !maximize || header.querySelector(".trajectory-scale-toggle")) continue;
           const button = document.createElement("button");
           button.type = "button";
           button.className = "trajectory-scale-toggle";
@@ -840,7 +845,7 @@
             sync_trajectory_scale_button(chart_name);
             await rerender_trajectory(chart_name);
           });
-          header.insertBefore(button, maximize);
+          actions.insertBefore(button, maximize);
           sync_trajectory_scale_button(chart_name);
         }
       };

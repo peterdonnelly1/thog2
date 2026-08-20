@@ -1,0 +1,230 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const visible = new Set(["run-a", "run-b"]);
+const colours = {"run-a": "#ef4444", "run-b": "#2563eb"};
+const saved_heatmap_settings = {};
+const save_button_listeners = [];
+const elements = {
+  heatmap_chart_group: {hidden: false, setAttribute() {}},
+  save_chart_settings: {
+    addEventListener: (_name, callback, options) => save_button_listeners.push({callback, capture: options === true}),
+  },
+  chart_settings_overlay: {hidden: false},
+  chart_heatmap_probe_count: {value: "37"},
+  chart_heatmap_window_mode: {value: "rolling"},
+  chart_heatmap_y_display_mode: {value: "steps"},
+  chart_heatmap_delta_mode: {value: "percent"},
+  chart_heatmap_auto_colour: {checked: true},
+  chart_heatmap_abs_limit: {value: "0.05"},
+  chart_heatmap_green_limit: {value: "0.05"},
+  chart_heatmap_blue_limit: {value: "1"},
+  chart_heatmap_yellow_limit: {value: "2"},
+  chart_heatmap_red_limit: {value: "0.05"},
+};
+const context = {
+  console,
+  JSON,
+  Math,
+  Number,
+  Object,
+  Array,
+  Set,
+  Map,
+  Promise,
+  String,
+  Boolean,
+  app: {
+    runs: [
+      {local_run_id: "run-a", artifact_name: "alpha", model_type: "sheet", depth_snapshot_count: 2},
+      {local_run_id: "run-b", artifact_name: "beta", model_type: "dense", depth_snapshot_count: 2},
+      {local_run_id: "run-c", artifact_name: "hidden", model_type: "sheet", depth_snapshot_count: 2},
+    ],
+    current_run_id: "run-a",
+    current_status: null,
+    axis_ranges: {},
+    figures: null,
+    maximized_chart: null,
+  },
+  chart_titles: {
+    heatmap: "Heatmap - Loss vs Counterfactual Layer Count",
+    attn_q_head_N: "Q weights",
+    attn_k_head_N: "K weights",
+    attn_v_head_N: "V weights",
+    attn_out_head_N: "Output weights",
+    mlp_up: "MLP up weights",
+    mlp_down: "MLP down weights",
+  },
+  window: {addEventListener: (_name, callback) => callback()},
+  document: {
+    body: {classList: {add() {}, remove() {}}},
+    head: {appendChild() {}},
+    createElement: () => ({classList: {add() {}, toggle() {}}, dataset: {}, style: {}, append() {}, addEventListener() {}, setAttribute() {}}),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  },
+  setTimeout: callback => { callback(); return 1; },
+  setInterval: () => 1,
+  clearTimeout() {},
+  queueMicrotask: callback => callback(),
+  fetch: async url => {
+    const run = new URL(`http://instra.local${url}`).searchParams.get("run");
+    if (url.startsWith("/api/chart-groups")) {
+      return {ok: true, json: async () => ({available: true, groups: [{name: "train", chart_count: 1, revision: run === "run-a" ? 2 : 3}]})};
+    }
+    if (url.startsWith("/api/chart-group")) {
+      return {ok: true, json: async () => ({
+        available: true,
+        group: {
+          name: "train",
+          revision: run === "run-a" ? 2 : 3,
+          charts: [{
+            id: "loss",
+            title: "loss",
+            x_title: "step",
+            default_x_axis_mode: "step",
+            available_x_axis_modes: ["step", "relative_wall"],
+            series: [{name: "loss", x: [1], y: [run === "run-a" ? 8 : 7]}],
+          }],
+        },
+      })};
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  },
+  URL,
+  by_id: id => elements[id] || null,
+  run_identifier: run => run.local_run_id,
+  is_visible: run_id => visible.has(run_id),
+  colour_for_run: run_id => colours[run_id],
+  current_run() { return context.app.runs.find(run => run.local_run_id === context.app.current_run_id); },
+  select_run() {},
+  render_run_heading() {},
+  render_runs() {},
+  render_figures: async () => {},
+  reset_run_charts() {},
+  refresh_current_run() {},
+  restore_maximized_chart() {},
+  local_set_detail_tab() {},
+  load_json: () => ({}),
+  save_json() {},
+  render_plot: async () => {},
+  heatmap_settings_for_current_run: () => ({}),
+  save_heatmap_viewer_setting(name, value) { saved_heatmap_settings[name] = value; },
+  prepare_figure: figure => JSON.parse(JSON.stringify(figure)),
+  transpose_heatmap() {},
+};
+
+vm.createContext(context);
+const source = fs.readFileSync(
+  "sheet/local_dashboard_assets/dashboard_v058_repair_workspace_patch.js",
+  "utf8",
+);
+vm.runInContext(source, context, {filename: "dashboard_v058_repair_workspace_patch.js"});
+
+async function main() {
+  context.app.axis_chart_name = "heatmap";
+  save_button_listeners.find(listener => listener.capture).callback();
+  // The dashboard's original save handler runs between capture and bubble. It
+  // closes the valid dialog, which is the signal used by the repair layer.
+  elements.chart_settings_overlay.hidden = true;
+  save_button_listeners.find(listener => !listener.capture).callback();
+  assert.equal(saved_heatmap_settings.probe_count, 37);
+  assert.equal(saved_heatmap_settings.y_display_mode, "steps");
+
+  context.app.current_run_id = "run-b";
+  context.render_run_heading();
+  assert.equal(elements.heatmap_chart_group.hidden, true);
+  context.app.current_run_id = "run-a";
+  context.render_run_heading();
+  assert.equal(elements.heatmap_chart_group.hidden, false);
+
+  const workspace = context.window.__instra_workspace;
+  assert.equal(workspace.active(), false);
+  assert.deepEqual(Array.from(workspace.visible_runs(), run => run.local_run_id), ["run-a", "run-b"]);
+
+  const groups = await workspace.fetch_metric_groups();
+  assert.deepEqual(Array.from(groups.groups, group => group.name), ["train"]);
+
+  const train = await workspace.fetch_metric_group("train");
+  assert.equal(train.group.charts.length, 1);
+  assert.deepEqual(Array.from(train.group.charts[0].series, series => series.name), ["alpha", "beta"]);
+  assert.deepEqual(Array.from(train.group.charts[0].series, series => series.color), ["#ef4444", "#2563eb"]);
+
+  const depth = await workspace.fetch_depth_payload(async url => {
+    const run = new URL(`http://instra.local${url}`).searchParams.get("run");
+    return {
+      depth: {
+        mlp_down: {
+          data: [{name: "snapshot", x: [1], y: [run === "run-a" ? 1 : 2], marker: {symbol: "x", line: {width: 4}}}],
+          layout: {title: {text: "DENSE learned scalar weights"}, xaxis: {title: {text: "layer index"}}},
+        },
+      },
+    };
+  });
+  assert.equal(depth.depth.mlp_down.data.length, 2);
+  assert.deepEqual(Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_run_id), ["run-a", "run-b"]);
+
+  const prepared_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
+  assert.equal(prepared_weight.layout.title.text, "DENSE learned scalar weights");
+  assert.equal(prepared_weight.layout.xaxis.side, "bottom");
+  assert.equal(prepared_weight.layout.xaxis2.side, "top");
+  assert.equal(prepared_weight.data[0].marker.line.width, 0.55);
+  assert.equal(prepared_weight.data[0].marker.color, "#ef4444");
+
+  const prepared_heatmap = {
+    data: [
+      {type: "scatter", name: "obsolete active-layer line", x: [-1, 1], y: [10, 11]},
+      {
+        type: "heatmap",
+        x: [-1, 0, 1],
+        y: [10, 11],
+        z: [[0, 0, -0.2], [0, 0, -0.1]],
+        customdata: [
+          [[10, 3, -1, 0.1], [10, 4, 0, 0], [10, 5, 1, -0.2]],
+          [[11, 4, -1, 0.1], [11, 5, 0, 0], [11, 6, 1, -0.1]],
+        ],
+        colorbar: {title: {text: "Δloss (%) bands"}},
+      },
+    ],
+    layout: {
+      xaxis: {tickfont: {size: 8}},
+      yaxis: {tickfont: {size: 8}},
+      annotations: [{
+        xref: "x", yref: "y", x: 0, y: 10,
+        hovertext: "step=10", text: "L", font: {family: "DejaVu Sans Mono, monospace", size: 9},
+      }],
+      meta: {
+        thog2_optimizer_updates: [10, 11],
+        thog2_active_layers: [4, 5],
+        thog2_selected_layers: [5, 5],
+        thog2_current_losses: [10, 9],
+        thog2_brake_active: [false, true],
+        thog2_decision_committed: [true, false],
+        thog2_chaos_bump: [null, {state: "active", magnitude_percent: 5, step: 1, duration: 12}],
+      },
+    },
+  };
+  context.transpose_heatmap(prepared_heatmap);
+  assert.equal(prepared_heatmap.data.length, 1);
+  assert.equal(prepared_heatmap.data[0].type, "heatmap");
+  assert.equal(prepared_heatmap.layout.xaxis2.side, "top");
+  assert.deepEqual(Array.from(prepared_heatmap.layout.xaxis2.ticktext), ["4", "5", "6"]);
+  assert.equal(prepared_heatmap.layout.xaxis.tickfont.size, 14);
+  assert.equal(prepared_heatmap.layout.yaxis.tickfont.size, 14);
+  assert.ok(prepared_heatmap.layout.shapes.some(shape => shape.name === "thog2-centre-datum-background" && shape.fillcolor === "#000000"));
+  assert.ok(prepared_heatmap.layout.shapes.some(shape => shape.name === "thog2-committed-decision-brick" && shape.fillcolor === "#ffffff"));
+  const winner = prepared_heatmap.layout.annotations.find(annotation => annotation.name === "thog2-best-better-loss");
+  assert.equal(winner.text, "<b>9.800 (2.00%)</b>");
+  assert.equal(winner.font.size, 9);
+  assert.equal(prepared_heatmap.layout.annotations.filter(annotation => annotation.name === "thog2-committed-decision-text").length, 0);
+  assert.ok(prepared_heatmap.layout.annotations.some(annotation => annotation.name === "thog2-update-brake" && annotation.font.color === "#ff9696"));
+  assert.ok(prepared_heatmap.layout.annotations.some(annotation => annotation.name === "thog2-chaos-bump" && annotation.text.includes("Step 1/12")));
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -246,7 +246,7 @@ def _build_dense_plotly_figure(
                         "color": colour,
                         "size": marker_size,
                         "symbol": "x",
-                        "line": {"width": 1.4, "color": colour},
+                        "line": {"width": 0.55, "color": colour},
                     },
                     opacity=opacity,
                     hovertemplate=(
