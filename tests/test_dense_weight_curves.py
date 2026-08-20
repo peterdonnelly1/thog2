@@ -102,12 +102,34 @@ def test_dense_figure_uses_crosses_with_per_step_connectors(monkeypatch) -> None
     assert len(figure.data) == 2
     assert all(trace.mode == "lines+markers" for trace in figure.data)
     assert all(trace.marker.symbol == "x" for trace in figure.data)
-    assert all(trace.marker.line.width == pytest.approx(0.55) for trace in figure.data)
+    assert all(trace.marker.line.width == pytest.approx(0.35) for trace in figure.data)
+    assert all(trace.marker.size <= 6 for trace in figure.data)
     assert all(trace.line.width == pytest.approx(0.45) for trace in figure.data)
     assert all(trace.line.shape == "linear" for trace in figure.data)
+    assert figure.data[0].marker.color != figure.data[1].marker.color
+    assert tuple(trace.name for trace in figure.data) == ("step 10", "step 11")
+    assert all(trace.showlegend for trace in figure.data)
+    assert all(trace.meta["instra_dense_weight"] is True for trace in figure.data)
+    assert "oldest" not in figure.layout.title.text.lower()
+    assert "newest" not in figure.layout.title.text.lower()
     assert tuple(figure.layout.xaxis.range) == (0.5, 3.5)
     assert "DENSE learned scalar weights" in figure.layout.title.text
     assert "faint lines group one step" in figure.layout.title.text
+
+
+def test_dense_scalar_coordinates_share_one_step_colour_and_legend_row(monkeypatch) -> None:
+    monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "2")
+    snapshot = dense_curves._dense_weight_snapshot(
+        _trainer(_model()),
+        _telemetry(),
+        optimizer_update=17,
+    )
+    figure = depth_curves_v2._build_depth_plotly_figure((snapshot,), "mlp_down")
+
+    assert len(figure.data) == 2
+    assert len({trace.marker.color for trace in figure.data}) == 1
+    assert sum(bool(trace.showlegend) for trace in figure.data) == 1
+    assert all(trace.name == "step 17" for trace in figure.data)
 
 
 def test_dense_and_depth_selection_lock_is_run_identity_independent(monkeypatch) -> None:

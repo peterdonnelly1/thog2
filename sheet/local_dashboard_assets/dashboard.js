@@ -15,6 +15,16 @@ const chart_groups = {
   depth: Object.keys(chart_titles),
 };
 
+const depth_weight_chart_names = Object.freeze([
+  "attn_q_head_N",
+  "attn_k_head_N",
+  "attn_v_head_N",
+  "attn_out_head_N",
+  "mlp_up",
+  "mlp_down",
+]);
+const depth_weight_chart_set = new Set(depth_weight_chart_names);
+
 const default_palette = [
   "#865ed6", "#e76f38", "#f4ab83", "#ffb73d", "#91bf57", "#4d9d71",
   "#218d80", "#78c2b6", "#48b4cf", "#578adb", "#7a59d1", "#df79d9",
@@ -579,6 +589,7 @@ function normalize_chart_settings(chart_name, supplied = null) {
     x_label: stored_x_label && !obsolete_heatmap_x_label ? stored_x_label : labels.x_label,
     y_label: typeof stored.y_label === "string" && stored.y_label.trim() ? stored.y_label.trim() : labels.y_label,
     max_snapshots: 0,
+    snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling",
     exclude_outliers: stored.exclude_outliers === true,
     smoothing: 0,
     line_width: 1,
@@ -690,7 +701,11 @@ function apply_chart_axis_settings(prepared, chart_name, settings) {
 }
 
 function trace_optimizer_update(trace) {
+  const dense_update = Number(trace?.meta?.instra_dense_optimizer_update);
+  if (Number.isFinite(dense_update)) return dense_update;
   const description = `${trace?.name || ""} ${trace?.hovertemplate || ""}`;
+  const dense_match = description.match(/(?:^|[^A-Za-z0-9])step\s+(\d+)(?:\D|$)/i);
+  if (dense_match) return Number(dense_match[1]);
   const match = description.match(/(?:^|[^A-Za-z0-9])U(\d+)(?:\D|$)/);
   return match ? Number(match[1]) : null;
 }
@@ -704,14 +719,17 @@ function available_snapshot_updates(figure) {
     seen.add(update);
     updates.push(update);
   }
-  return updates;
+  return updates.sort((left, right) => left - right);
 }
 
-function limit_curve_snapshots(prepared, maximum) {
+function limit_curve_snapshots(prepared, maximum, window_mode = "rolling") {
   if (!Number.isInteger(maximum) || maximum < 1) return;
   const updates = available_snapshot_updates(prepared);
   if (updates.length <= maximum) return;
-  const retained = new Set(updates.slice(-maximum));
+  const retained_updates = window_mode === "from_zero"
+    ? updates.slice(0, maximum)
+    : updates.slice(-maximum);
+  const retained = new Set(retained_updates);
   prepared.data = (prepared.data || []).filter(trace => {
     const update = trace_optimizer_update(trace);
     return !Number.isFinite(update) || retained.has(update);
@@ -807,7 +825,7 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
   prepared.layout.xaxis.gridcolor = "#e7e9ed";
   prepared.layout.yaxis.gridcolor = "#e7e9ed";
   if (chart_name === "heatmap") return;
-  limit_curve_snapshots(prepared, settings.max_snapshots);
+  limit_curve_snapshots(prepared, settings.max_snapshots, settings.snapshot_window_mode);
   for (const trace of prepared.data || []) {
     if (!trace || !["scatter", "scattergl", undefined].includes(trace.type)) continue;
     const original_mode = String(trace.mode || "lines");
@@ -1682,6 +1700,9 @@ function chart_settings_form_state() {
     x_label: by_id("chart_x_label").value.trim() || labels.x_label,
     y_label: by_id("chart_y_label").value.trim() || labels.y_label,
     max_snapshots: chart_name === "heatmap" ? 0 : Number(by_id("chart_max_snapshots").value),
+    snapshot_window_mode: chart_name !== "heatmap" && by_id("chart_snapshot_window_mode").value === "from_zero"
+      ? "from_zero"
+      : "rolling",
     exclude_outliers: chart_name !== "heatmap" && by_id("chart_exclude_outliers").checked,
     smoothing: chart_name === "heatmap" ? 0 : Number(by_id("chart_smoothing").value),
     line_width: chart_name === "heatmap" ? 1 : Number(by_id("chart_line_width").value),
@@ -1727,6 +1748,7 @@ function compact_chart_settings(chart_name, settings) {
   }
   if (chart_name !== "heatmap") {
     if (settings.max_snapshots > 0) compact.max_snapshots = settings.max_snapshots;
+    if (settings.snapshot_window_mode === "from_zero") compact.snapshot_window_mode = "from_zero";
     if (settings.exclude_outliers) compact.exclude_outliers = true;
     if (settings.smoothing > 0) compact.smoothing = settings.smoothing;
     if (settings.line_width !== 1) compact.line_width = settings.line_width;
@@ -1750,9 +1772,13 @@ function set_chart_settings_tab(tab_name) {
 
 function sync_chart_setting_outputs() {
   const chart_name = app.axis_chart_name;
+  const is_weight_chart = depth_weight_chart_set.has(chart_name);
   const maximum = Number(by_id("chart_max_snapshots").max);
   const snapshots = Number(by_id("chart_max_snapshots").value);
   by_id("chart_max_snapshots_value").textContent = snapshots > 0 ? String(snapshots) : `All${maximum > 0 ? ` ${maximum}` : ""}`;
+  by_id("chart_curve_history_title").textContent = is_weight_chart ? "Weight step history" : "Curve history";
+  by_id("chart_max_snapshots_label").textContent = is_weight_chart ? "Step count" : "Maximum snapshots to show";
+  by_id("chart_snapshot_window_field").hidden = !is_weight_chart;
   const smoothing = Number(by_id("chart_smoothing").value);
   by_id("chart_smoothing_value").textContent = smoothing > 0 ? smoothing.toFixed(2) : "Off";
   by_id("chart_line_width_value").textContent = `${Number(by_id("chart_line_width").value).toFixed(2)}×`;
@@ -1808,6 +1834,7 @@ function populate_chart_settings_form(chart_name, supplied = null) {
   const snapshot_count = chart_name === "heatmap" ? 0 : available_snapshot_updates(figure_for_chart(chart_name)).length;
   by_id("chart_max_snapshots").max = String(Math.max(1, snapshot_count));
   by_id("chart_max_snapshots").value = String(settings.max_snapshots > 0 ? Math.min(settings.max_snapshots, Math.max(1, snapshot_count)) : 0);
+  by_id("chart_snapshot_window_mode").value = settings.snapshot_window_mode;
   by_id("chart_exclude_outliers").checked = settings.exclude_outliers;
   by_id("chart_smoothing").value = String(settings.smoothing);
   by_id("chart_line_width").value = String(settings.line_width);
@@ -1875,7 +1902,9 @@ function open_chart_settings(chart_name) {
   by_id("chart_settings_title").textContent = `${normalize_chart_settings(chart_name).title} settings`;
   by_id("chart_settings_axes").textContent = chart_name === "heatmap"
     ? "Candidate-layer and optimizer-step controls apply only to this heatmap."
-    : "Curve history, axes and display changes apply only to this panel.";
+    : depth_weight_chart_set.has(chart_name)
+      ? "Recorded optimizer-step history, axes and display changes apply only to this weights panel."
+      : "Curve history, axes and display changes apply only to this panel.";
   populate_chart_settings_form(chart_name);
   set_chart_settings_tab("data");
   by_id("chart_settings_error").hidden = true;

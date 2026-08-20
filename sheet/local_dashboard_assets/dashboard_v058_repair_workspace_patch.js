@@ -64,10 +64,20 @@ window.addEventListener("load", () => {
       return `${id}:${JSON.stringify(run.revision || [])}:${colour_for_run(id)}`;
     }).join("|");
 
+    const dense_step_colour = optimizer_update => {
+      const update = Math.max(0, Math.trunc(Number(optimizer_update) || 0));
+      const seed = Math.imul(update, 0x9e3779b1) >>> 0;
+      const hue = seed % 360;
+      const saturation = 62 + ((seed >>> 8) % 17);
+      const lightness = 43 + ((seed >>> 16) % 12);
+      return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    };
+
     const merge_depth_payloads = entries => {
       const depth = {};
       for (const chart_name of weight_chart_names) {
         let merged = null;
+        let contains_dense = false;
         for (const entry of entries) {
           const source = entry?.payload?.depth?.[chart_name];
           if (!source) continue;
@@ -84,15 +94,24 @@ window.addEventListener("load", () => {
             const prior_meta = trace.meta && typeof trace.meta === "object" && !Array.isArray(trace.meta)
               ? trace.meta
               : {};
+            const dense_trace = prior_meta.instra_dense_weight === true;
+            const dense_update = Number(prior_meta.instra_dense_optimizer_update);
+            contains_dense ||= dense_trace;
             trace.meta = {
               ...prior_meta,
               instra_workspace_run_id: id,
               instra_workspace_colour: colour,
             };
-            trace.name = `${run_name(entry.run)} · ${String(trace.name || chart_titles[chart_name])}`;
-            trace.legendgroup = `instra-workspace-${id}`;
-            trace.showlegend = !legend_added;
-            legend_added = true;
+            if (dense_trace) {
+              trace.name = `${run_name(entry.run)} · step ${dense_update}`;
+              trace.legendgroup = `instra-workspace-${id}-step-${dense_update}`;
+              trace.showlegend = prior_meta.instra_dense_step_legend === true;
+            } else {
+              trace.name = `${run_name(entry.run)} · ${String(trace.name || chart_titles[chart_name])}`;
+              trace.legendgroup = `instra-workspace-${id}`;
+              trace.showlegend = !legend_added;
+              legend_added = true;
+            }
             merged.data.push(trace);
           }
         }
@@ -101,7 +120,7 @@ window.addEventListener("load", () => {
           merged.layout.showlegend = true;
           merged.layout.legend = {
             ...(merged.layout.legend || {}),
-            title: {text: "visible runs"},
+            title: {text: contains_dense ? "" : "visible runs"},
           };
           depth[chart_name] = merged;
         }
@@ -492,14 +511,24 @@ window.addEventListener("load", () => {
             ? trace.meta
             : {};
           const run_id = meta.instra_workspace_run_id;
-          const colour = run_id ? colour_for_run(run_id) : meta.instra_workspace_colour;
+          const dense_trace = meta.instra_dense_weight === true;
+          const colour = dense_trace
+            ? dense_step_colour(meta.instra_dense_optimizer_update)
+            : run_id
+            ? colour_for_run(run_id)
+            : meta.instra_workspace_colour;
           if (colour) {
             trace.line = {...(trace.line || {}), color: colour};
             trace.marker = {...(trace.marker || {}), color: colour};
             trace.marker.line = {...(trace.marker.line || {}), color: colour};
           }
-          if (trace.marker?.symbol === "x") {
-            trace.marker.line = {...(trace.marker.line || {}), width: 0.55};
+          if (dense_trace && trace.marker?.symbol === "x") {
+            const marker_size = finite_number(trace.marker?.size);
+            trace.marker = {
+              ...(trace.marker || {}),
+              size: marker_size === null ? 5 : Math.min(6, marker_size),
+              line: {...(trace.marker.line || {}), width: 0.35, color: colour},
+            };
             trace.mode = "lines+markers";
             trace.line = {
               ...(trace.line || {}),

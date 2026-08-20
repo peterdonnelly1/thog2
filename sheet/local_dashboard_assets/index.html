@@ -329,13 +329,20 @@
 
             <section class="chart-settings-panel" data-chart-settings-panel="display" hidden>
               <section class="chart-display-section chart-curve-only" id="chart_curve_display_options">
-                <h3>Curve history</h3>
+                <h3 id="chart_curve_history_title">Curve history</h3>
                 <label class="chart-slider-field" for="chart_max_snapshots">
-                  <span>Maximum snapshots to show</span>
+                  <span id="chart_max_snapshots_label">Maximum snapshots to show</span>
                   <div>
                     <input class="chart-setting-input" id="chart_max_snapshots" type="range" min="0" max="1" step="1" value="0">
                     <output id="chart_max_snapshots_value">All</output>
                   </div>
+                </label>
+                <label class="chart-editor-field chart-editor-field-wide" id="chart_snapshot_window_field" for="chart_snapshot_window_mode" hidden>
+                  <span>Step window</span>
+                  <select class="chart-setting-input" id="chart_snapshot_window_mode">
+                    <option value="rolling">Rolling</option>
+                    <option value="from_zero">From zero</option>
+                  </select>
                 </label>
                 <label class="chart-toggle-row" for="chart_exclude_outliers">
                   <span><strong>Outliers</strong><small>Exclude extreme values when automatically scaling Y.</small></span>

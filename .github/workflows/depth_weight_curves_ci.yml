@@ -36,6 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m compileall -q sheet run_thog2_owt.py run_thog2_owt_core.py run_thog2_lifecycle.py tests
+          node --check sheet/local_dashboard_assets/dashboard.js
           node --check sheet/local_dashboard_assets/dashboard_v058_repair_workspace_patch.js
           node tests/dashboard_v058_smoke.js
 

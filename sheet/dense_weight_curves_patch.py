@@ -203,6 +203,16 @@ def _snapshots_are_dense(snapshots: Sequence[Mapping[str, Any]]) -> bool:
     )
 
 
+def _dense_step_colour(optimizer_update: int) -> str:
+    """Return a stable, random-looking colour for one optimizer update."""
+
+    seed = (int(optimizer_update) * 0x9E3779B1) & 0xFFFFFFFF
+    hue = seed % 360
+    saturation = 62 + ((seed >> 8) % 17)
+    lightness = 43 + ((seed >> 16) % 12)
+    return f"hsl({hue}, {saturation}%, {lightness}%)"
+
+
 def _build_dense_plotly_figure(
     snapshots: Sequence[Mapping[str, Any]],
     chart_name: str,
@@ -222,26 +232,18 @@ def _build_dense_plotly_figure(
         x_values = tuple(float(value) for value in family["executed_layer_coordinates"])
         age_fraction = 1.0 if history_count == 1 else history_index / float(history_count - 1)
         opacity = 0.22 + 0.78 * age_fraction
-        marker_size = 6.0 + 3.0 * age_fraction
-        is_oldest = history_index == 0
-        is_newest = history_index == history_count - 1
-        age_label = (
-            "newest"
-            if is_newest
-            else "oldest"
-            if is_oldest
-            else f"history {history_index + 1}/{history_count}"
-        )
+        marker_size = 4.0 + 2.0 * age_fraction
+        colour = _dense_step_colour(update)
         for scalar_index, curve in enumerate(family["curves"]):
             scalar_id = str(curve["scalar_id"])
-            colour = _v2._SCALAR_COLOURS[scalar_index % len(_v2._SCALAR_COLOURS)]
             figure.add_trace(
                 go.Scatter(
                     x=x_values,
                     y=tuple(float(value) for value in curve["values"]),
                     mode="lines+markers",
-                    name=f"{scalar_id} · {age_label} U{update}",
-                    showlegend=is_oldest or is_newest,
+                    name=f"step {update}",
+                    legendgroup=f"dense-step-{update}",
+                    showlegend=scalar_index == 0,
                     line={
                         "color": colour,
                         "width": 0.45,
@@ -251,20 +253,26 @@ def _build_dense_plotly_figure(
                         "color": colour,
                         "size": marker_size,
                         "symbol": "x",
-                        "line": {"width": 0.55, "color": colour},
+                        "line": {"width": 0.35, "color": colour},
+                    },
+                    meta={
+                        "instra_dense_weight": True,
+                        "instra_dense_optimizer_update": update,
+                        "instra_dense_step_legend": scalar_index == 0,
+                        "instra_dense_scalar_id": scalar_id,
                     },
                     opacity=opacity,
                     hovertemplate=(
-                        f"{scalar_id}<br>U{update} · {age_label}"
+                        f"{scalar_id}<br>step {update}"
                         "<br>layer=%{x:.0f}<br>weight=%{y:.7g}<extra></extra>"
                     ),
                 )
             )
     title_name = _v2._chart_title(chart_name, retained[-1])
-    age_title = (
-        f"U{oldest_update} oldest → U{newest_update} newest"
+    step_title = (
+        f"steps {oldest_update} → {newest_update}"
         if history_count > 1
-        else f"U{newest_update} newest"
+        else f"step {newest_update}"
     )
     layer_count = len(
         retained[-1]["families"][chart_name]["executed_layer_coordinates"]
@@ -272,12 +280,12 @@ def _build_dense_plotly_figure(
     figure.update_layout(
         title=(
             f"DENSE learned scalar weights — {title_name}"
-            f"<br><sup>{age_title}; × = discrete materialised layer weight; faint lines group one step</sup>"
+            f"<br><sup>{step_title}; × = discrete materialised layer weight; faint lines group one step</sup>"
         ),
         xaxis_title="layer index",
         yaxis_title="weight value",
         hovermode="closest",
-        legend={"title": {"text": "oldest / newest"}},
+        legend={"title": {"text": ""}},
         template="plotly_white",
     )
     if layer_count >= 1:

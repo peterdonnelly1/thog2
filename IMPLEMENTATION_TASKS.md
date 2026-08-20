@@ -14,7 +14,7 @@
 
 - [x] Reuse the six existing THOG depth-wise weight chart families for DENSE.
 - [x] Plot corresponding materialised DENSE weights at integer layer sample numbers.
-- [x] Use unconnected cross markers.
+- [x] Use cross markers with faint straight segments connecting each DENSE optimizer step.
 - [x] Preserve coordinate selection, history colouring, hover metadata, destinations, and row limits.
 - [x] Add local and W&B regression tests.
 
@@ -70,4 +70,15 @@
 - [x] Materialise top Plotly axes with invisible `x2` anchors and restore the final absolute heatmap title.
 - [x] Keep the Workspace title in the card header rather than the Plotly chart body.
 - [x] Join each DENSE step's crosses with faint straight segments without linking different steps or runs.
-- [ ] Commit and publish the top-axis repair, then verify dependency-backed CI.
+- [x] Commit and publish the top-axis repair, then verify dependency-backed CI.
+
+## G. DENSE optimizer-step history refinement
+
+- [x] Give every DENSE optimizer step a stable, random-looking colour shared by its sampled scalars.
+- [x] Reduce DENSE cross size and stroke weight while retaining faint per-step connectors.
+- [x] Replace scalar-coordinate legend entries with one optimizer-step entry per recorded step.
+- [x] Remove `oldest` / `newest` language from DENSE weight titles and legends.
+- [x] Add per-weight-chart `Step count` and `Step window` (`Rolling` / `From zero`) display preferences.
+- [x] Base all DENSE history filtering on recorded optimizer steps, never probe number.
+- [x] Add semantic coverage for step colours, legend ownership, marker styling and both history-window modes.
+- [x] Commit and publish this DENSE refinement when requested.

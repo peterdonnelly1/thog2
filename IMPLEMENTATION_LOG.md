@@ -52,3 +52,8 @@
 - Removed the redundant Plotly-internal weight title in Workspace only; the card header remains the sole Workspace title owner, while single-run figures retain their detailed source title.
 - Changed each DENSE optimizer-step/scalar trace from crosses alone to crosses joined by 0.45 px straight segments. Connectors never cross step, scalar, or run boundaries and THOG curve traces are unchanged.
 - Extended source and browser-semantic tests for Workspace title ownership, single-run title retention, cross-marker preservation, straight connector width and run-colour propagation.
+- Published the top-axis/Workspace-title/DENSE-connector tree; the remote branch records that exact tree as `b2d2691`.
+- Refined DENSE history presentation so each recorded optimizer step owns one stable random-looking HSL colour and one legend row, while all selected scalar coordinates within that step share the colour and retain their scalar identity in hover metadata.
+- Reduced DENSE crosses to a 4–6 px range with a 0.35 px cross stroke; retained 0.45 px straight connectors within each scalar/step only. Removed all `oldest` / `newest` title and legend language.
+- Added per-weight-chart Instra display settings for `Step count` and `Step window` (`Rolling` or `From zero`). Windowing reads explicit DENSE optimizer-update metadata first, retains the existing THOG `U…` fallback, and sorts updates numerically; it never uses PLASTIC probe indices.
+- Added semantic Node coverage for DENSE Workspace colour/legend behavior, marker styling, and earliest/latest optimizer-step windows. Dashboard JavaScript syntax, semantic smoke, Python compilation and scoped whitespace checks pass locally. The dependency-complete chart suites remain covered by the branch workflow.

@@ -365,6 +365,10 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert '>Wall Time</option>' in html
     assert 'id="chart_y_label"' in html
     assert 'id="chart_max_snapshots"' in html
+    assert 'id="chart_snapshot_window_mode"' in html
+    assert ">Step window</span>" in html
+    assert '<option value="rolling">Rolling</option>' in html
+    assert '<option value="from_zero">From zero</option>' in html
     assert 'id="chart_exclude_outliers"' in html
     assert 'id="chart_smoothing"' in html
     assert 'id="chart_line_width"' in html
@@ -414,6 +418,11 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "dynamic_chart_figures" in javascript
     assert "dynamic_chart_metadata" in javascript
     assert "limit_curve_snapshots" in javascript
+    assert 'snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling"' in javascript
+    assert 'window_mode === "from_zero"' in javascript
+    assert 'trace?.meta?.instra_dense_optimizer_update' in javascript
+    assert 'is_weight_chart ? "Step count"' in javascript
+    assert '"Recorded optimizer-step history, axes and display changes apply only to this weights panel."' in javascript
     assert "apply_outlier_resistant_y_range" in javascript
     assert "smoothed_values" in javascript
     assert "function chart_settings_icon()" in javascript
@@ -540,9 +549,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'axis_tick_font_px = 14' in heatmap_v057_patch
     assert 'const heatmap_title = "Heatmap - True Loss vs Counterfactual Layer Count Loss";' in v058_repair_patch
     assert 'const weight_scale_key = "thog2_local_trajectory_scale_modes";' in v058_repair_patch
-    assert 'marker.line = {...(trace.marker.line || {}), width: 0.55};' in v058_repair_patch
+    assert 'const dense_step_colour = optimizer_update =>' in v058_repair_patch
+    assert 'prior_meta.instra_dense_step_legend === true' in v058_repair_patch
+    assert 'title: {text: contains_dense ? "" : "visible runs"}' in v058_repair_patch
     assert 'if (app.workspace_mode) delete prepared.layout.title;' in v058_repair_patch
     assert 'trace.mode = "lines+markers";' in v058_repair_patch
+    assert 'width: 0.35, color: colour' in v058_repair_patch
     assert 'width: 0.45' in v058_repair_patch
     assert 'textContent = "weights"' in v058_repair_patch
     assert 'app.workspace_mode = false;' in v058_repair_patch

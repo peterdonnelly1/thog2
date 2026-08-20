@@ -158,33 +158,51 @@ async function main() {
     return {
       depth: {
         mlp_down: {
-          data: [{
-            name: "snapshot",
+          data: [10, 20].map((step, index) => ({
+            name: `step ${step}`,
             mode: "lines+markers",
             x: [1, 2],
-            y: run === "run-a" ? [1, 1.5] : [2, 2.5],
+            y: run === "run-a" ? [1 + index, 1.5 + index] : [2 + index, 2.5 + index],
             line: {width: 0.45, shape: "linear"},
-            marker: {symbol: "x", line: {width: 4}},
-          }],
+            marker: {symbol: "x", size: 9, line: {width: 4}},
+            meta: {
+              instra_dense_weight: true,
+              instra_dense_optimizer_update: step,
+              instra_dense_step_legend: true,
+              instra_dense_scalar_id: "r1_c2",
+            },
+          })),
           layout: {title: {text: "DENSE learned scalar weights"}, xaxis: {title: {text: "layer index"}}},
         },
       },
     };
   });
-  assert.equal(depth.depth.mlp_down.data.length, 2);
-  assert.deepEqual(Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_run_id), ["run-a", "run-b"]);
+  assert.equal(depth.depth.mlp_down.data.length, 4);
+  assert.deepEqual(
+    Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_run_id),
+    ["run-a", "run-a", "run-b", "run-b"],
+  );
+  assert.deepEqual(
+    Array.from(depth.depth.mlp_down.data, trace => trace.name),
+    ["alpha · step 10", "alpha · step 20", "beta · step 10", "beta · step 20"],
+  );
+  assert.equal(depth.depth.mlp_down.layout.legend.title.text, "");
 
   context.app.workspace_mode = true;
   const prepared_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
   assert.equal(prepared_weight.layout.title, undefined);
   assert.equal(prepared_weight.layout.xaxis.side, "bottom");
   assert.equal(prepared_weight.layout.xaxis2.side, "top");
-  assert.equal(prepared_weight.data[0].marker.line.width, 0.55);
-  assert.equal(prepared_weight.data[0].marker.color, "#ef4444");
+  assert.equal(prepared_weight.data[0].marker.line.width, 0.35);
+  assert.equal(prepared_weight.data[0].marker.size, 6);
+  assert.match(prepared_weight.data[0].marker.color, /^hsl\(/);
+  assert.equal(prepared_weight.data[0].marker.color, prepared_weight.data[2].marker.color);
+  assert.notEqual(prepared_weight.data[0].marker.color, prepared_weight.data[1].marker.color);
   assert.equal(prepared_weight.data[0].mode, "lines+markers");
   assert.equal(prepared_weight.data[0].line.width, 0.45);
   assert.equal(prepared_weight.data[0].line.shape, "linear");
-  assert.equal(prepared_weight.data[0].line.color, "#ef4444");
+  assert.equal(prepared_weight.data[0].line.color, prepared_weight.data[0].marker.color);
+  assert.ok(prepared_weight.data.slice(0, 4).every(trace => !/oldest|newest/i.test(trace.name)));
   const weight_top_axis_anchor = prepared_weight.data.find(trace => trace.meta?.instra_top_axis_anchor);
   assert.equal(weight_top_axis_anchor.xaxis, "x2");
   assert.equal(weight_top_axis_anchor.opacity, 0);
@@ -192,6 +210,52 @@ async function main() {
   context.app.workspace_mode = false;
   const prepared_single_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
   assert.equal(prepared_single_weight.layout.title.text, "DENSE learned scalar weights");
+
+  // The weight-history display window counts recorded optimizer steps. It
+  // deliberately has no relationship to PLASTIC probe rows.
+  const dashboard_source = fs.readFileSync("sheet/local_dashboard_assets/dashboard.js", "utf8");
+  const function_source = name => {
+    const start = dashboard_source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `missing ${name}`);
+    const body_start = dashboard_source.indexOf("{", start);
+    let depth = 0;
+    for (let index = body_start; index < dashboard_source.length; index += 1) {
+      if (dashboard_source[index] === "{") depth += 1;
+      else if (dashboard_source[index] === "}") {
+        depth -= 1;
+        if (depth === 0) return dashboard_source.slice(start, index + 1);
+      }
+    }
+    throw new Error(`unterminated ${name}`);
+  };
+  const step_window_context = {Number, Set};
+  vm.createContext(step_window_context);
+  vm.runInContext(
+    ["trace_optimizer_update", "available_snapshot_updates", "limit_curve_snapshots"]
+      .map(function_source)
+      .join("\n"),
+    step_window_context,
+  );
+  const step_figure = {
+    data: [1, 3, 5].map(step => ({
+      name: `step ${step}`,
+      meta: {instra_dense_optimizer_update: step},
+    })).concat([{name: "top-axis anchor", meta: {instra_top_axis_anchor: true}}]),
+  };
+  const from_zero = JSON.parse(JSON.stringify(step_figure));
+  step_window_context.limit_curve_snapshots(from_zero, 2, "from_zero");
+  assert.deepEqual(
+    Array.from(from_zero.data, trace => trace.meta?.instra_dense_optimizer_update ?? null),
+    [1, 3, null],
+  );
+  const rolling = JSON.parse(JSON.stringify(step_figure));
+  step_window_context.limit_curve_snapshots(rolling, 2, "rolling");
+  assert.deepEqual(
+    Array.from(rolling.data, trace => trace.meta?.instra_dense_optimizer_update ?? null),
+    [3, 5, null],
+  );
+  assert.equal(step_window_context.trace_optimizer_update({name: "step 9"}), 9);
+  assert.equal(step_window_context.trace_optimizer_update({name: "curve U12"}), 12);
 
   const prepared_heatmap = {
     data: [
