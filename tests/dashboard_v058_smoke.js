@@ -158,7 +158,14 @@ async function main() {
     return {
       depth: {
         mlp_down: {
-          data: [{name: "snapshot", x: [1], y: [run === "run-a" ? 1 : 2], marker: {symbol: "x", line: {width: 4}}}],
+          data: [{
+            name: "snapshot",
+            mode: "lines+markers",
+            x: [1, 2],
+            y: run === "run-a" ? [1, 1.5] : [2, 2.5],
+            line: {width: 0.45, shape: "linear"},
+            marker: {symbol: "x", line: {width: 4}},
+          }],
           layout: {title: {text: "DENSE learned scalar weights"}, xaxis: {title: {text: "layer index"}}},
         },
       },
@@ -167,12 +174,24 @@ async function main() {
   assert.equal(depth.depth.mlp_down.data.length, 2);
   assert.deepEqual(Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_run_id), ["run-a", "run-b"]);
 
+  context.app.workspace_mode = true;
   const prepared_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
-  assert.equal(prepared_weight.layout.title.text, "DENSE learned scalar weights");
+  assert.equal(prepared_weight.layout.title, undefined);
   assert.equal(prepared_weight.layout.xaxis.side, "bottom");
   assert.equal(prepared_weight.layout.xaxis2.side, "top");
   assert.equal(prepared_weight.data[0].marker.line.width, 0.55);
   assert.equal(prepared_weight.data[0].marker.color, "#ef4444");
+  assert.equal(prepared_weight.data[0].mode, "lines+markers");
+  assert.equal(prepared_weight.data[0].line.width, 0.45);
+  assert.equal(prepared_weight.data[0].line.shape, "linear");
+  assert.equal(prepared_weight.data[0].line.color, "#ef4444");
+  const weight_top_axis_anchor = prepared_weight.data.find(trace => trace.meta?.instra_top_axis_anchor);
+  assert.equal(weight_top_axis_anchor.xaxis, "x2");
+  assert.equal(weight_top_axis_anchor.opacity, 0);
+  assert.equal(weight_top_axis_anchor.showlegend, false);
+  context.app.workspace_mode = false;
+  const prepared_single_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
+  assert.equal(prepared_single_weight.layout.title.text, "DENSE learned scalar weights");
 
   const prepared_heatmap = {
     data: [
@@ -208,8 +227,12 @@ async function main() {
     },
   };
   context.transpose_heatmap(prepared_heatmap);
-  assert.equal(prepared_heatmap.data.length, 1);
+  assert.equal(prepared_heatmap.data.length, 2);
   assert.equal(prepared_heatmap.data[0].type, "heatmap");
+  const heatmap_top_axis_anchor = prepared_heatmap.data.find(trace => trace.meta?.instra_top_axis_anchor);
+  assert.equal(heatmap_top_axis_anchor.xaxis, "x2");
+  assert.deepEqual(Array.from(heatmap_top_axis_anchor.x), [-1, 1]);
+  assert.equal(heatmap_top_axis_anchor.opacity, 0);
   assert.equal(prepared_heatmap.layout.xaxis2.side, "top");
   assert.deepEqual(Array.from(prepared_heatmap.layout.xaxis2.ticktext), ["4", "5", "6"]);
   assert.equal(prepared_heatmap.layout.xaxis.tickfont.size, 14);
@@ -222,6 +245,16 @@ async function main() {
   assert.equal(prepared_heatmap.layout.annotations.filter(annotation => annotation.name === "thog2-committed-decision-text").length, 0);
   assert.ok(prepared_heatmap.layout.annotations.some(annotation => annotation.name === "thog2-update-brake" && annotation.font.color === "#ff9696"));
   assert.ok(prepared_heatmap.layout.annotations.some(annotation => annotation.name === "thog2-chaos-bump" && annotation.text.includes("Step 1/12")));
+
+  // prepare_figure is the final owner after older presentation wrappers have
+  // run; it must restore the absolute top title as well as retain the anchor.
+  prepared_heatmap.layout.xaxis2.title = {text: "candidate layer-count offset from L"};
+  const finally_prepared_heatmap = context.prepare_figure(prepared_heatmap, "heatmap");
+  assert.equal(finally_prepared_heatmap.layout.xaxis2.title.text, "absolute candidate layer count · latest L=5");
+  assert.equal(
+    finally_prepared_heatmap.data.filter(trace => trace.meta?.instra_top_axis_anchor).length,
+    1,
+  );
 }
 
 main().catch(error => {

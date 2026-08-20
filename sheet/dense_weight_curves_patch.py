@@ -239,9 +239,14 @@ def _build_dense_plotly_figure(
                 go.Scatter(
                     x=x_values,
                     y=tuple(float(value) for value in curve["values"]),
-                    mode="markers",
+                    mode="lines+markers",
                     name=f"{scalar_id} · {age_label} U{update}",
                     showlegend=is_oldest or is_newest,
+                    line={
+                        "color": colour,
+                        "width": 0.45,
+                        "shape": "linear",
+                    },
                     marker={
                         "color": colour,
                         "size": marker_size,
@@ -267,7 +272,7 @@ def _build_dense_plotly_figure(
     figure.update_layout(
         title=(
             f"DENSE learned scalar weights — {title_name}"
-            f"<br><sup>{age_title}; × = discrete materialised layer weight</sup>"
+            f"<br><sup>{age_title}; × = discrete materialised layer weight; faint lines group one step</sup>"
         ),
         xaxis_title="layer index",
         yaxis_title="weight value",

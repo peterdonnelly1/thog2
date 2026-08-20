@@ -66,4 +66,8 @@
 - [x] Add a left-rail Workspace view that overlays corresponding charts for visible runs.
 - [x] Exclude heatmaps from Workspace and preserve single-run navigation.
 - [x] Add source, server, persistence and multi-run figure regression tests.
-- [ ] Run focused and broad regression suites, publish, and verify CI.
+- [x] Verify the reported update-brake sequence without changing valid transition logic.
+- [x] Materialise top Plotly axes with invisible `x2` anchors and restore the final absolute heatmap title.
+- [x] Keep the Workspace title in the card header rather than the Plotly chart body.
+- [x] Join each DENSE step's crosses with faint straight segments without linking different steps or runs.
+- [ ] Commit and publish the top-axis repair, then verify dependency-backed CI.

@@ -88,7 +88,7 @@ def test_dense_qkv_rows_read_the_correct_combined_projection_slice(monkeypatch) 
         assert snapshot["families"][chart_name]["curves"][0]["values"] == expected
 
 
-def test_dense_figure_uses_unconnected_crosses(monkeypatch) -> None:
+def test_dense_figure_uses_crosses_with_per_step_connectors(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
     model = _model()
     trainer = _trainer(model)
@@ -100,13 +100,14 @@ def test_dense_figure_uses_unconnected_crosses(monkeypatch) -> None:
     figure = depth_curves_v2._build_depth_plotly_figure(snapshots, "mlp_down")
 
     assert len(figure.data) == 2
-    assert all(trace.mode == "markers" for trace in figure.data)
+    assert all(trace.mode == "lines+markers" for trace in figure.data)
     assert all(trace.marker.symbol == "x" for trace in figure.data)
     assert all(trace.marker.line.width == pytest.approx(0.55) for trace in figure.data)
-    assert all(trace.line.width is None for trace in figure.data)
+    assert all(trace.line.width == pytest.approx(0.45) for trace in figure.data)
+    assert all(trace.line.shape == "linear" for trace in figure.data)
     assert tuple(figure.layout.xaxis.range) == (0.5, 3.5)
     assert "DENSE learned scalar weights" in figure.layout.title.text
-    assert "× = discrete materialised layer weight" in figure.layout.title.text
+    assert "faint lines group one step" in figure.layout.title.text
 
 
 def test_dense_and_depth_selection_lock_is_run_identity_independent(monkeypatch) -> None:

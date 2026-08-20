@@ -541,6 +541,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'const heatmap_title = "Heatmap - True Loss vs Counterfactual Layer Count Loss";' in v058_repair_patch
     assert 'const weight_scale_key = "thog2_local_trajectory_scale_modes";' in v058_repair_patch
     assert 'marker.line = {...(trace.marker.line || {}), width: 0.55};' in v058_repair_patch
+    assert 'if (app.workspace_mode) delete prepared.layout.title;' in v058_repair_patch
+    assert 'trace.mode = "lines+markers";' in v058_repair_patch
+    assert 'width: 0.45' in v058_repair_patch
     assert 'textContent = "weights"' in v058_repair_patch
     assert 'app.workspace_mode = false;' in v058_repair_patch
     assert "fetch_depth_payload" in v058_repair_patch
@@ -555,6 +558,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'improvement.toFixed(2)' in v058_repair_patch
     assert 'side: "top", anchor: "y", overlaying: "x", matches: "x"' in v058_repair_patch
     assert 'absolute candidate layer count · latest L=' in v058_repair_patch
+    assert 'meta: {instra_top_axis_anchor: true}' in v058_repair_patch
+    assert 'xaxis: "x2"' in v058_repair_patch
     assert 'color: salmon' in v058_repair_patch
     assert 'const salmon = "#ff9696";' in v058_repair_patch
     assert "sampling chaos bump made - magnitude" in v058_repair_patch

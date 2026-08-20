@@ -424,12 +424,42 @@ window.addEventListener("load", () => {
       return {...(value || {}), text: String(value?.text || fallback)};
     };
 
+    // Plotly does not reliably materialise an overlaid axis unless at least one
+    // trace explicitly refers to it.  Keep a transparent, non-interactive trace
+    // on x2 so the mirrored ordinates and their title survive Plotly.react(),
+    // settings previews, maximisation, and scroll-canvas rerenders.
+    const top_axis_anchor = (prepared, x_values, y_values) => {
+      prepared.data = (prepared.data || []).filter(
+        trace => trace?.meta?.instra_top_axis_anchor !== true
+      );
+      const xs = (x_values || []).filter(value => value !== null && value !== undefined);
+      const ys = (y_values || []).filter(value => value !== null && value !== undefined);
+      if (!xs.length || !ys.length) return;
+      const anchor_x = xs.length === 1 ? [xs[0]] : [xs[0], xs[xs.length - 1]];
+      const anchor_y = anchor_x.map(() => ys[0]);
+      prepared.data.push({
+        type: "scatter",
+        mode: "markers",
+        x: anchor_x,
+        y: anchor_y,
+        xaxis: "x2",
+        yaxis: "y",
+        marker: {size: 0.1, opacity: 0},
+        opacity: 0,
+        showlegend: false,
+        hoverinfo: "skip",
+        hovertemplate: null,
+        meta: {instra_top_axis_anchor: true},
+      });
+    };
+
     const base_prepare_figure_v058 = prepare_figure;
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_figure_v058(figure, chart_name);
       if (weight_chart_set.has(chart_name)) {
         const source_title = figure?.layout?.title;
-        if (source_title) prepared.layout.title = clone(source_title);
+        if (app.workspace_mode) delete prepared.layout.title;
+        else if (source_title) prepared.layout.title = clone(source_title);
         const bottom_axis = prepared.layout.xaxis || {};
         const title = axis_title(bottom_axis.title, "layer index");
         prepared.layout.xaxis = {
@@ -470,8 +500,45 @@ window.addEventListener("load", () => {
           }
           if (trace.marker?.symbol === "x") {
             trace.marker.line = {...(trace.marker.line || {}), width: 0.55};
+            trace.mode = "lines+markers";
+            trace.line = {
+              ...(trace.line || {}),
+              color: colour || trace.line?.color || trace.marker?.color,
+              width: 0.45,
+              shape: "linear",
+            };
           }
         }
+        const source_trace = (prepared.data || []).find(trace => (
+          Array.isArray(trace?.x) && trace.x.length && Array.isArray(trace?.y) && trace.y.length
+        ));
+        top_axis_anchor(prepared, source_trace?.x, source_trace?.y);
+      } else if (chart_name === "heatmap") {
+        const heatmap = (prepared.data || []).find(trace => trace?.type === "heatmap");
+        const meta = prepared.layout?.meta || {};
+        const latest_index = latest_meta_index(meta);
+        const latest_l = finite_number(meta.thog2_active_layers?.[latest_index]);
+        prepared.layout.xaxis2 = {
+          ...(prepared.layout.xaxis2 || {}),
+          side: "top",
+          anchor: "y",
+          overlaying: "x",
+          matches: "x",
+          visible: true,
+          showticklabels: true,
+          showline: true,
+          ticks: "outside",
+          showgrid: false,
+          zeroline: false,
+          title: {
+            text: latest_l === null
+              ? "absolute candidate layer count"
+              : `absolute candidate layer count · latest L=${latest_l}`,
+            standoff: 12,
+            font: {size: 14},
+          },
+        };
+        top_axis_anchor(prepared, heatmap?.x, heatmap?.y);
       }
       return prepared;
     };
@@ -701,6 +768,7 @@ window.addEventListener("load", () => {
       // a blank protrusion outside the first heatmap row. Metadata now owns L.
       prepared.data = (prepared.data || []).filter(trace => trace === heatmap || trace.type === "heatmap");
       repair_heatmap_overlays(prepared, heatmap);
+      top_axis_anchor(prepared, heatmap.x, heatmap.y);
       const colourbar = heatmap.colorbar || {};
       const title = typeof colourbar.title === "string"
         ? {text: colourbar.title}
