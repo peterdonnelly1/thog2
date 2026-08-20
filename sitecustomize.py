@@ -24,6 +24,20 @@ def _normalise_long_option(argument: str) -> str:
     if argument == "--" or not argument.startswith("--"):
         return argument
     option, separator, value = argument.partition("=")
+    # These public namespaces deliberately use double underscores.  The shell
+    # wrapper validates their exact spelling and preserves it, so the Python
+    # compatibility normaliser must not turn ``__`` into ``--`` before the
+    # canonical argparse actions and late option overlays see the argument.
+    if option.startswith(
+        (
+            "--plastic__",
+            "--no-plastic__",
+            "--chaos_bump__",
+            "--no-chaos_bump__",
+            "--instrumentation__",
+        )
+    ):
+        return option + (separator + value if separator else "")
     return option.replace("_", "-") + (separator + value if separator else "")
 
 

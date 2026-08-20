@@ -170,6 +170,19 @@ def test_threshold_parser_and_persistence_are_algorithm_specific(monkeypatch) ->
     assert v057.JUMP_THRESHOLD_KEY not in values
 
 
+def test_sitecustomize_preserves_exact_public_double_underscore_names() -> None:
+    import sitecustomize
+
+    assert sitecustomize._normalise_long_option("--plastic__enabled") == "--plastic__enabled"
+    assert (
+        sitecustomize._normalise_long_option(
+            "--instrumentation__delta_loss_v_layer_heatmap__destination=local"
+        )
+        == "--instrumentation__delta_loss_v_layer_heatmap__destination=local"
+    )
+    assert sitecustomize._normalise_long_option("--select_depth") == "--select-depth"
+
+
 def test_jump_validation_allows_nonunit_max_step(monkeypatch) -> None:
     monkeypatch.setenv(tsk._ALGORITHM_ENV, v057.JUMP_TO_LOWEST_LOSS_ALGORITHM)
     v057._validate_v057_config(

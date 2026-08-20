@@ -178,6 +178,7 @@ def test_observational_probe_token_capacity_is_validated_when_plastic_disabled(k
 def test_depth_weight_charts_are_visible_iff_debug_exceeds_two(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")
     monkeypatch.setenv(depth_curves._environment_name("DEPTH_EVALUATION_POINTS"), "8")
+    monkeypatch.setenv(depth_curves._environment_name("DESTINATION"), "wandb")
     trajectory = _trajectory()
     trainer = _chart_trainer(trajectory)
 
