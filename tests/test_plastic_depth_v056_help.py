@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from sheet import help_registry_descriptor_patch as registry
+from sheet import plastic_depth_decision_algorithms_v057_patch as v057
 from sheet import plastic_depth_v056_help_patch as help_patch
 from sheet import plastic_depth_v056_objective_decision_patch as v056
 
@@ -13,7 +14,10 @@ def test_help_registry_contains_v056_decision_section() -> None:
         if name == help_patch._SECTION
     )
     text = "\n".join(" | ".join(row) for row in section)
-    assert "all 4 objectives are permitted with all 3 decision algorithms" in text
+    assert (
+        "all 4 objectives are permitted with directional_coherence, both combined modes, sen and kendall"
+        in text
+    )
     assert "directional_coherence" in text
     assert v056.LRA_ALGORITHM in text
     assert v056.STRATIFIED_ALGORITHM in text
@@ -27,9 +31,17 @@ def test_help_registry_contains_v056_decision_section() -> None:
     assert "fixed |tau| >= 0.5" in text
     assert "undiscounted objective-score delta adj < 0" in text
     assert "change_z/score_z" in text
+    assert v057.SEN_ALGORITHM in text
+    assert v057.KENDALL_ALGORITHM in text
+    assert v057.JUMP_TO_LOWEST_LOSS_ALGORITHM in text
+    assert "configured goals are ignored" in text
+    assert v057._SEN_THRESHOLD_OPTION in text
+    assert v057._KENDALL_THRESHOLD_OPTION in text
+    assert v057._JUMP_THRESHOLD_OPTION in text
     selector_index = next(index for index, row in enumerate(section) if row[0] == "LDA")
-    assert section[selector_index + 1] == ("", "    For Sen slope:", "")
-    assert section[selector_index + 5] == ("", "    For Kendall tau:", "")
+    sen_index = next(index for index, row in enumerate(section) if row[1] == "    For Sen slope:")
+    kendall_index = next(index for index, row in enumerate(section) if row[1] == "    For Kendall tau:")
+    assert selector_index < sen_index < kendall_index
 
 
 def test_growth_discount_registry_entry_is_unique_and_objective_neutral() -> None:

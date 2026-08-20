@@ -6,6 +6,7 @@ import os
 import pytest
 
 from sheet import plastic_depth_sen_kendall_v055_patch as v055
+from sheet import plastic_depth_decision_algorithms_v057_patch as v057
 from sheet import plastic_depth_theil_sen_kendall_patch as tsk
 from sheet import trainer_step
 
@@ -49,8 +50,8 @@ def test_v056_retargets_v054_compatibility_constant_to_objective_neutral_lra():
     assert tsk._runtime_minimum_absolute_kendall_tau() == pytest.approx(0.5)
 
 
-def test_runtime_selector_surface_is_owned_by_v055_not_bootstrap_fallback():
-    assert trainer_step.choose_plastic_depth_count_with_mad is v055._choose_count_v055
+def test_runtime_selector_surface_is_owned_by_v057_not_bootstrap_fallback():
+    assert trainer_step.choose_plastic_depth_count_with_mad is v057._choose_count_v057
 
 
 def test_v055_lra_classifier_is_deterministic_for_identical_ddp_inputs():

@@ -9,6 +9,7 @@ import pytest
 import constants
 
 from sheet import plastic_depth_sen_kendall_v055_patch as v055
+from sheet import plastic_depth_decision_algorithms_v057_patch as v057
 from sheet import plastic_depth_theil_sen_kendall_patch as tsk
 from sheet import plastic_depth_wall_time_equivalent_time_gain_patch as wall_time
 from sheet import trainer_step
@@ -167,8 +168,8 @@ def test_bootstrap_rows_never_drive_either_v055_algorithm():
         assert decision.selected_count == 10
 
 
-def test_runtime_selector_is_v055_not_bootstrap_fallback():
-    assert trainer_step.choose_plastic_depth_count_with_mad is v055._choose_count_v055
+def test_runtime_selector_is_v057_not_bootstrap_fallback():
+    assert trainer_step.choose_plastic_depth_count_with_mad is v057._choose_count_v057
 
 
 def test_provisional_timing_fit_uses_one_count_without_decision_fallback(monkeypatch):

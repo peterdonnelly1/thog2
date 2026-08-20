@@ -33,3 +33,5 @@
 - Published the exact tested tree through the connected GitHub integration. The first dependency-backed focused run reported 5 failures among 143 focused tests (138 passed).
 - Root-caused four failures to the process-level underscore alias normaliser rewriting the deliberately exact PLASTIC/chaos/instrumentation namespaces after the new late parser layer, and one to a chart test relying on the former W&B destination default.
 - Updated `sitecustomize.py` to preserve all exact public double-underscore namespaces while retaining ordinary underscore aliases, added a direct regression, and made the W&B visibility test select its intended destination explicitly.
+- The corrected focused CI suite passed. The exhaustive 211-module head-vs-base comparison then identified exactly three stale v0.55/v0.56 ownership/help assertions; all implementation tests passed and the other 23 non-passing modules reproduced equivalently on the base.
+- Updated those legacy integration assertions to recognise v0.57 as the final selector owner and to validate the expanded six-algorithm/help surface, including the bulldozer objective override.
