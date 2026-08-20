@@ -23,7 +23,9 @@ def test_help_registry_contains_v056_decision_section() -> None:
     assert v056.STRATIFIED_ALGORITHM in text
     assert "For Sen slope:" in text
     assert "sen < 0" in text
-    assert "Adding layers tends to improve the wall-time-equivalent economic score" in text
+    assert "selected objective score tends to decrease as layer count increases" in text
+    sen_negative = next(row for row in section if row[1] == "        sen < 0")
+    assert "wall-time-equivalent economic score" not in sen_negative[2]
     assert "tau ≈ -0.5" in text
     assert "minimum accepted indication toward adding layer" in text
     assert "tau ≈ +0.5" in text
@@ -55,6 +57,7 @@ def test_growth_discount_registry_entry_is_unique_and_objective_neutral() -> Non
     section, row = matches[0]
     assert section == help_patch._SECTION
     assert "growth-side objective evidence" in row[2]
+    assert "Sen/Kendall modes only" in row[2]
     assert "economic evidence" not in row[2]
 
 

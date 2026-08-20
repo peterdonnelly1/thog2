@@ -21,17 +21,17 @@ _ROWS = (
     (
         "",
         "        sen < 0",
-        "y tends to decrease as x increases. Adding layers tends to improve the wall-time-equivalent economic score",
+        "selected objective score tends to decrease as layer count increases; evidence favours adding layers",
     ),
     (
         "",
         "        sen = 0",
-        "no overall trend. Little directional economic preference",
+        "no overall slope in the selected objective score; no reliable directional preference",
     ),
     (
         "",
         "        sen > 0",
-        "y tends to increase as x increases. Removing layers tends to improve the wall-time-equivalent economic score",
+        "selected objective score tends to increase as layer count increases; evidence favours removing layers",
     ),
     ("", "    For Kendall tau:", ""),
     (
@@ -110,7 +110,7 @@ _ROWS = (
     (
         "—",
         _GROWTH_DISCOUNT_OPTION,
-        "TSK only: credit [0,1] of beneficial growth-side objective evidence before Sen/Kendall; adverse growth evidence and the exact adjacent check remain undiscounted",
+        "Sen/Kendall modes only: credit [0,1] of beneficial growth-side objective evidence; adverse growth evidence and adjacent checks remain undiscounted",
     ),
 )
 

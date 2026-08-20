@@ -97,6 +97,49 @@ def test_descriptor_registry_uses_actual_keys_and_explicit_missing_marker() -> N
     assert "—" in registry and "--plastic__layer_count__cuda_allocator_reserve_gib VALUE" in registry
 
 
+def test_descriptor_registry_covers_current_observability_and_plastic_controls() -> None:
+    registry = descriptor_help.format_descriptor_registry()
+    expected = (
+        "--instrumentation__depth_weight_curves__scalar_weights_per_matrix N",
+        "--instrumentation__depth_weight_curves__depth_evaluation_points N",
+        "--instrumentation__depth_weight_curves__time_mode latest|accumulate",
+        "--instrumentation__depth_weight_curves__history_length N",
+        "--instrumentation__depth_weight_curves__log_every_n_steps N",
+        "--instrumentation__depth_weight_curves__same_coordinates_all_runs",
+        "--no-instrumentation__depth_weight_curves__same_coordinates_all_runs",
+        "--instrumentation__depth_weight_curves__destination wandb|local|none",
+        "--plastic__layer_count__same_batch_all_probes",
+        "--no-plastic__layer_count__same_batch_all_probes",
+        "--plastic__wall_time_equivalent_time_gain_discount VALUE",
+        "--plastic__wall_time_equivalent_time_gain_loss_rate_window N",
+        "--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations N",
+        "--chaos_bump__sampling__enabled",
+        "--no-chaos_bump__sampling__enabled",
+        "--chaos_bump__sampling__initial_lockout__steps N",
+        "--chaos_bump__sampling__maximum_bumps N",
+        "--chaos_bump__sampling__interlude__min_steps N",
+        "--chaos_bump__sampling__interlude__max_steps N",
+        "--chaos_bump__sampling__duration__min_steps N",
+        "--chaos_bump__sampling__duration__max_steps N",
+        "--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps VALUE",
+        "--chaos_bump__sampling__max_movement_fraction_of_local_gap VALUE",
+        "--help",
+    )
+    for option in expected:
+        assert option in registry
+    assert "six THOG curves or DENSE cross-marker charts" in registry
+
+
+def test_descriptor_registry_documents_decision_specific_legacy_controls() -> None:
+    registry = descriptor_help.format_descriptor_registry()
+    assert (
+        "directional_coherence robust significance threshold; "
+        "ignored by Sen/Kendall and jump modes"
+    ) in registry
+    assert "PLASTIC DEPTH relative-wall-time objective" in registry
+    assert "Sampling-only chaos bump" in registry
+
+
 def test_registered_parser_help_appends_descriptor_registry_once() -> None:
     rendered = core.build_parser().format_help()
     assert rendered.count("getopt / artifact descriptor registry") == 1
