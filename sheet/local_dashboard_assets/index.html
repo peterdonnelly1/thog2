@@ -147,7 +147,7 @@
           <div class="chart-grid" id="chart_grid">
             <article class="chart-card" data-chart="heatmap">
               <header class="chart-card-header">
-                <div class="chart-heading-copy"><h2>Layer-count Δloss heatmap</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
+                <div class="chart-heading-copy"><h2>Heatmap - Loss vs Counterfactual Layer Count</h2><p id="heatmap_card_detail">Waiting for the first layer-count probe.</p></div>
                 <div class="chart-card-actions">
                   <button class="chart-settings-button" data-chart-settings="heatmap" type="button" aria-label="Settings for heatmap" title="Chart settings">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1017,7 +1017,7 @@
         settings_note.textContent = (
           "Colour-band saturation limits and vertical pixels/step are live viewer overrides. "
           + "Yellow is Δloss ≤ −1.0; blue is −1.0 < Δloss ≤ −0.1; green is −0.1 < Δloss < 0; red is Δloss > 0. "
-          + "Mode, destination and linear max-step remain capture/routing controls."
+          + "Mode and destination remain capture/routing controls."
         );
       }
 

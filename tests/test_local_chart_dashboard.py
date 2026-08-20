@@ -320,6 +320,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     heatmap_y_axis_refinement_patch = (
         dashboard._ASSET_ROOT / "dashboard_heatmap_y_axis_refinement_patch.js"
     ).read_text(encoding="utf-8")
+    heatmap_v057_patch = (
+        dashboard._ASSET_ROOT / "dashboard_heatmap_v057_patch.js"
+    ).read_text(encoding="utf-8")
     logs_modes_patch = (
         dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
@@ -473,7 +476,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "Math.round(spacing * 0.30)" in heatmap_y_axis_refinement_patch
     assert "font-size: 17px !important;" in heatmap_final_presentation_patch
     assert "width_limited_font" not in heatmap_top_anchor_patch
-    assert 'text: `<b>${best.loss.toFixed(4)}${percent_suffix}</b>`' in heatmap_top_anchor_patch
+    assert 'text: `<b>${best.loss.toFixed(3)}${percent_suffix}</b>`' in heatmap_top_anchor_patch
     assert 'color: "#000000"' in heatmap_top_anchor_patch
     assert "prepared.layout.xaxis2 =" in heatmap_top_anchor_patch
     assert 'overlaying: "x"' in heatmap_top_anchor_patch
@@ -514,6 +517,19 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "app.dynamic_chart_figures[key] = figure;" in wandb_groups_patch
     assert "thog2_x_variants: series.x_variants || {}" in wandb_groups_patch
     assert "await render_plot(mount, figure, key);" in wandb_groups_patch
+    assert "Heatmap - Loss vs Counterfactual Layer Count" in html
+    assert 'probe_count: 100' in heatmap_v057_patch
+    assert 'window_mode: "rolling"' in heatmap_v057_patch
+    assert 'y_display_mode: "probes"' in heatmap_v057_patch
+    assert 'delta_loss_display_mode: "percent"' in heatmap_v057_patch
+    assert 'make_mode_button("|abs|", "absolute"' in logs_modes_patch
+    assert 'name: "thog2-committed-decision-brick"' in heatmap_v057_patch
+    assert 'fillcolor: "#ffffff"' in heatmap_v057_patch
+    assert 'text: "<b>update brake on</b>"' in heatmap_v057_patch
+    assert "reverted to pre-chaos bump sampling" in heatmap_v057_patch
+    assert 'color: "#96dcff"' in heatmap_v057_patch
+    assert 'side: "top", anchor: "y", overlaying: "x", matches: "x"' in heatmap_v057_patch
+    assert 'axis_tick_font_px = 14' in heatmap_v057_patch
 
 
 def test_dashboard_html_is_read_for_each_page_request() -> None:

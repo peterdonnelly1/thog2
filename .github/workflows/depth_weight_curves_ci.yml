@@ -43,10 +43,15 @@ jobs:
         run: |
           set -euo pipefail
           pytest -q \
+            tests/test_dense_weight_curves.py \
             tests/test_depth_weight_curves_and_observational_probes.py \
             tests/test_depth_weight_curves_v2.py \
             tests/test_depth_observational_probe_runtime.py \
             tests/test_depth_observational_probe_console.py \
+            tests/test_delta_loss_v_layer_heatmap.py \
+            tests/test_local_chart_dashboard.py \
+            tests/test_plastic_depth_decision_algorithms_v057.py \
+            tests/test_plastic_depth_wrapper_options.py \
             tests/test_plastic_depth_wandb_probe_curves.py \
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_stage3_semantic_materialization.py \

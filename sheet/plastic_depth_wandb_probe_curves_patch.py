@@ -108,6 +108,8 @@ def _probe_record_from_event(event: Any) -> Optional[Dict[str, Any]]:
         "optimizer_update": update,
         "active_layers": current,
         "selected_layers": selected,
+        "brake_active": bool(payload.get("brake_active", False)),
+        "decision_committed": selected != current,
         "shrink": tuple(shrink),
         "growth": tuple(growth),
     }
@@ -479,13 +481,62 @@ def _consume_new_delta_loss_heatmap_records(
     _ensure_delta_loss_heatmap_state(telemetry)
     events = tuple(getattr(trainer, "events", ()))
     start = int(getattr(telemetry, "_delta_loss_heatmap_last_event_index", -1)) + 1
-    records = tuple(
-        record
-        for event in events[start:]
-        if (record := _probe_record_from_event(event)) is not None
+    chaos_state = dict(
+        getattr(telemetry, "_delta_loss_heatmap_chaos_state", {}) or {}
     )
+    records: List[Dict[str, Any]] = []
+    for event in events[start:]:
+        name = getattr(event, "name", None)
+        payload = getattr(event, "payload", None)
+        if name == "chaos_bump_sampling_started" and isinstance(payload, Mapping):
+            fractions = tuple(
+                abs(float(value))
+                for value in payload.get("movement_fractions", ())
+                if math.isfinite(float(value))
+            )
+            chaos_state = {
+                "active": True,
+                "reverted": False,
+                "start_update": int(payload.get("start_update", 0)),
+                "end_update": int(payload.get("end_update", 0)),
+                "duration_steps": int(payload.get("duration_steps", 0)),
+                "magnitude_percent": 100.0 * float(
+                    payload.get(
+                        "maximum_movement_fraction_of_local_gap",
+                        max(fractions, default=0.0),
+                    )
+                ),
+            }
+            continue
+        if name == "chaos_bump_sampling_ended" and isinstance(payload, Mapping):
+            chaos_state = {
+                **chaos_state,
+                "active": False,
+                "reverted": True,
+                "reverted_update": int(payload.get("completed_update", 0)),
+            }
+            continue
+        record = _probe_record_from_event(event)
+        if record is None:
+            continue
+        update = int(record["optimizer_update"])
+        marker: Optional[Dict[str, Any]] = None
+        if bool(chaos_state.get("active", False)):
+            start_update = int(chaos_state.get("start_update", update))
+            duration = max(1, int(chaos_state.get("duration_steps", 1)))
+            marker = {
+                "state": "active",
+                "magnitude_percent": float(chaos_state.get("magnitude_percent", 0.0)),
+                "step": max(1, min(duration, update - start_update + 1)),
+                "duration": duration,
+            }
+        elif bool(chaos_state.get("reverted", False)):
+            marker = {"state": "reverted"}
+            chaos_state["reverted"] = False
+        records.append({**record, "chaos_bump": marker})
+    setattr(telemetry, "_delta_loss_heatmap_chaos_state", chaos_state)
     telemetry._delta_loss_heatmap_last_event_index = len(events) - 1
-    return records
+    return tuple(records)
 
 
 def _maximum_candidate_layer(
@@ -518,6 +569,10 @@ def _delta_loss_heatmap_record(
         "probe_id": str(record["probe_id"]),
         "optimizer_update": int(record["optimizer_update"]),
         "active_layers": int(record["active_layers"]),
+        "selected_layers": int(record.get("selected_layers", record["active_layers"])),
+        "brake_active": bool(record.get("brake_active", False)),
+        "decision_committed": bool(record.get("decision_committed", False)),
+        "chaos_bump": record.get("chaos_bump"),
         "values": values,
     }
 
@@ -589,6 +644,15 @@ def _delta_loss_heatmap_render_data(
         "z": z_by_layer,
         "probe_labels": probe_labels,
         "active_layers": tuple(int(record["active_layers"]) for record in selected),
+        "selected_layers": tuple(
+            int(record.get("selected_layers", record["active_layers"]))
+            for record in selected
+        ),
+        "brake_active": tuple(bool(record.get("brake_active", False)) for record in selected),
+        "decision_committed": tuple(
+            bool(record.get("decision_committed", False)) for record in selected
+        ),
+        "chaos_bump": tuple(record.get("chaos_bump") for record in selected),
         "optimizer_updates": tuple(int(record["optimizer_update"]) for record in selected),
         "source_rows": len(history),
         "rendered_rows": len(selected),
@@ -700,12 +764,6 @@ def _should_refresh_delta_loss_heatmap(
     config = getattr(telemetry, "config", {})
     mode = config.get("instrumentation__delta_loss_v_layer_heatmap")
     if mode == "linear":
-        maximum_step = config.get(
-            "instrumentation__delta_loss_v_layer_heatmap_linear"
-        )
-        latest_probe_step = int(history[-1]["optimizer_update"])
-        if maximum_step is not None and latest_probe_step > int(maximum_step):
-            return False
         return True
     if force or total in _DELTA_LOSS_HEATMAP_EARLY_REFRESH_PROBES:
         return True

@@ -88,15 +88,41 @@ def install(dashboard: Any) -> None:
             status.get("depth_maximum_update"),
         )
 
-    def heatmap_payload(self: Any, status: dict[str, Any]) -> dict[str, Any]:
-        revision = heatmap_revision(status)
+    def heatmap_payload(
+        self: Any,
+        status: dict[str, Any],
+        *,
+        probe_count: int = 100,
+        window_mode: str = "rolling",
+    ) -> dict[str, Any]:
+        resolved_count = max(1, min(512, int(probe_count)))
+        resolved_window = str(window_mode).strip().lower()
+        if resolved_window not in {"from_zero", "rolling"}:
+            raise ValueError("heatmap window_mode must be from_zero or rolling")
+        revision = (*heatmap_revision(status), resolved_count, resolved_window)
         with self.lock:
-            if getattr(self, "_thog2_heatmap_revision", None) != revision:
-                history = self.reader.heatmap_history()
+            cache = getattr(self, "_thog2_heatmap_payloads", None)
+            if not isinstance(cache, dict):
+                cache = {}
+                self._thog2_heatmap_payloads = cache
+            if revision not in cache:
+                window_reader = getattr(self.reader, "heatmap_history_window", None)
+                if callable(window_reader):
+                    selected_history = window_reader(
+                        probe_count=resolved_count,
+                        window_mode=resolved_window,
+                    )
+                else:
+                    history = self.reader.heatmap_history()
+                    selected_history = (
+                        history[:resolved_count]
+                        if resolved_window == "from_zero"
+                        else history[-resolved_count:]
+                    )
                 figure = None
                 maximum_layers = 0
-                if history:
-                    maximum_layers = max(len(record["values"]) for record in history)
+                if selected_history:
+                    maximum_layers = max(len(record["values"]) for record in selected_history)
                     metadata = self.reader.metadata()
                     configuration = json.loads(metadata.get("config_json", "{}"))
                     abs_limit = float(
@@ -106,19 +132,22 @@ def install(dashboard: Any) -> None:
                         )
                     )
                     figure = dashboard.probe_curves._delta_loss_heatmap_figure(
-                        history,
+                        selected_history,
                         maximum_layers=maximum_layers,
                         abs_limit=abs_limit,
                     ).to_plotly_json()
-                self._thog2_heatmap_revision = revision
-                self._thog2_heatmap_payload = {
+                cache.clear()
+                cache[revision] = {
                     "heatmap": figure,
                     "heatmap_dimensions": {
                         "layers": maximum_layers,
-                        "probes": min(len(history), 512),
+                        "probes": len(selected_history),
+                        "source_probes": int(status.get("heatmap_count") or 0),
+                        "probe_count": resolved_count,
+                        "window_mode": resolved_window,
                     },
                 }
-            return self._thog2_heatmap_payload
+            return cache[revision]
 
     def depth_payload(self: Any, status: dict[str, Any]) -> dict[str, Any]:
         revision = depth_revision(status)
@@ -139,10 +168,21 @@ def install(dashboard: Any) -> None:
                 self._thog2_depth_payload = {"depth": figures}
             return self._thog2_depth_payload
 
-    def figure_family(self: Any, family: str) -> dict[str, Any]:
+    def figure_family(
+        self: Any,
+        family: str,
+        *,
+        probe_count: int = 100,
+        window_mode: str = "rolling",
+    ) -> dict[str, Any]:
         status = self.status()
         if family == "heatmap":
-            return heatmap_payload(self, status)
+            return heatmap_payload(
+                self,
+                status,
+                probe_count=probe_count,
+                window_mode=window_mode,
+            )
         if family == "depth":
             return depth_payload(self, status)
         raise ValueError(f"unknown figure family: {family}")
@@ -186,7 +226,15 @@ def install(dashboard: Any) -> None:
                     return
                 try:
                     state = catalog.state_for_run(run_name)
-                    self._send_json(state.figure_family(family))
+                    probe_count = int(query.get("probe_count", ["100"])[0])
+                    window_mode = query.get("window_mode", ["rolling"])[0]
+                    self._send_json(
+                        state.figure_family(
+                            family,
+                            probe_count=probe_count,
+                            window_mode=window_mode,
+                        )
+                    )
                 except (FileNotFoundError, KeyError) as error:
                     self._send_json({"error": str(error)}, status=dashboard.HTTPStatus.NOT_FOUND)
                 except ValueError as error:

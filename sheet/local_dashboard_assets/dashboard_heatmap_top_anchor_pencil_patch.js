@@ -188,7 +188,7 @@ window.addEventListener("load", () => {
           y: y_coordinate,
           xref: "x",
           yref: "y",
-          text: `<b>${best.loss.toFixed(4)}${percent_suffix}</b>`,
+          text: `<b>${best.loss.toFixed(3)}${percent_suffix}</b>`,
           showarrow: false,
           xanchor: "center",
           yanchor: "middle",

@@ -7,9 +7,9 @@ window.addEventListener("load", () => {
   setTimeout(() => {
     const display_mode_setting = "delta_loss_display_mode";
     const current_display_mode = () => (
-      heatmap_settings_for_current_run()[display_mode_setting] === "percent"
-        ? "percent"
-        : "absolute"
+      heatmap_settings_for_current_run()[display_mode_setting] === "absolute"
+        ? "absolute"
+        : "percent"
     );
     const clamp_01 = value => Math.max(0, Math.min(1, Number(value)));
     const finite_number = value => {
@@ -246,7 +246,7 @@ window.addEventListener("load", () => {
       const button = by_id("heatmap_delta_loss_mode");
       if (!button) return;
       const percent_mode = current_display_mode() === "percent";
-      button.textContent = percent_mode ? "%" : "Abs";
+      button.textContent = percent_mode ? "%" : "|abs|";
       button.dataset.mode = percent_mode ? "percent" : "absolute";
       button.title = percent_mode
         ? "Heatmap colours use percentage Δloss relative to the centre L loss; click for absolute Δloss"

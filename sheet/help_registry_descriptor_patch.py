@@ -57,7 +57,6 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--instrumentation__depth_weight_curves__destination wandb|local|none", "six DEPTH weight-curve destination; default local"),
             ("—", "--instrumentation__delta_loss_v_layer_heatmap log|linear", "absolute-layer observational Δloss heatmap; absent means disabled"),
             ("—", "--instrumentation__delta_loss_v_layer_heatmap__destination wandb|local|none", "heatmap destination; default local"),
-            ("—", "--instrumentation__delta_loss_v_layer_heatmap_linear MAX_STEP", "optional final optimizer step for linear per-probe publication"),
             ("—", "--instrumentation__delta_loss_v_layer_heatmap_abs_limit VALUE", "fixed symmetric colour limit; default 0.05"),
             ("—", "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes N", "W&B-only sparse upload cadence; default 250 probes"),
             ("—", "--max-nonfinite-update-skips N", "maximum tolerated skipped non-finite updates"),

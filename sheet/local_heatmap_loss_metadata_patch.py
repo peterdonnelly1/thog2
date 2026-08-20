@@ -65,6 +65,9 @@ def _append_heatmap_records_with_current_loss(
                 for candidate in sorted(point_by_candidate)
             ],
             "current_loss": resolved_current_loss,
+            "brake_active": bool(record.get("brake_active", False)),
+            "decision_committed": bool(record.get("decision_committed", False)),
+            "chaos_bump": record.get("chaos_bump"),
         }
         rows.append(
             (
@@ -94,18 +97,8 @@ def _append_heatmap_records_with_current_loss(
     return len(rows)
 
 
-def _heatmap_history_with_current_loss(self: Any) -> Tuple[Dict[str, Any], ...]:
-    connection = self._connection()
-    try:
-        rows = connection.execute(
-            """
-            SELECT optimizer_update, probe_id, active_layers, selected_layers, payload
-            FROM heatmap_records
-            ORDER BY optimizer_update
-            """
-        ).fetchall()
-    finally:
-        connection.close()
+def _decode_heatmap_rows(rows: Iterable[Any]) -> Tuple[Dict[str, Any], ...]:
+    rows = tuple(rows)
     decoded = []
     maximum_layers = 1
     payloads = []
@@ -127,6 +120,14 @@ def _heatmap_history_with_current_loss(self: Any) -> Tuple[Dict[str, Any], ...]:
                 "optimizer_update": int(row["optimizer_update"]),
                 "active_layers": int(row["active_layers"]),
                 "selected_layers": int(row["selected_layers"]),
+                "brake_active": bool(payload.get("brake_active", False)),
+                "decision_committed": bool(
+                    payload.get(
+                        "decision_committed",
+                        int(row["selected_layers"]) != int(row["active_layers"]),
+                    )
+                ),
+                "chaos_bump": payload.get("chaos_bump"),
                 "current_loss": (
                     None if current_loss is None else float(current_loss)
                 ),
@@ -134,6 +135,50 @@ def _heatmap_history_with_current_loss(self: Any) -> Tuple[Dict[str, Any], ...]:
             }
         )
     return tuple(decoded)
+
+
+def _heatmap_history_with_current_loss(self: Any) -> Tuple[Dict[str, Any], ...]:
+    connection = self._connection()
+    try:
+        rows = connection.execute(
+            """
+            SELECT optimizer_update, probe_id, active_layers, selected_layers, payload
+            FROM heatmap_records
+            ORDER BY optimizer_update
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    return _decode_heatmap_rows(rows)
+
+
+def _heatmap_history_window_with_current_loss(
+    self: Any,
+    *,
+    probe_count: int,
+    window_mode: str,
+) -> Tuple[Dict[str, Any], ...]:
+    count = max(1, min(512, int(probe_count)))
+    mode = str(window_mode).strip().lower()
+    if mode not in {"from_zero", "rolling"}:
+        raise ValueError("heatmap window_mode must be from_zero or rolling")
+    order = "ASC" if mode == "from_zero" else "DESC"
+    connection = self._connection()
+    try:
+        rows = connection.execute(
+            f"""
+            SELECT optimizer_update, probe_id, active_layers, selected_layers, payload
+            FROM heatmap_records
+            ORDER BY optimizer_update {order}
+            LIMIT ?
+            """,
+            (count,),
+        ).fetchall()
+    finally:
+        connection.close()
+    if mode == "rolling":
+        rows = tuple(reversed(rows))
+    return _decode_heatmap_rows(rows)
 
 
 def _heatmap_render_data_with_current_loss(*args: Any, **kwargs: Any) -> Dict[str, Any]:
@@ -155,6 +200,20 @@ def _heatmap_render_data_with_current_loss(*args: Any, **kwargs: Any) -> Dict[st
         else float(history[index]["current_loss"])
         for index in indices
     )
+    for field, default in (
+        ("selected_layers", None),
+        ("brake_active", False),
+        ("decision_committed", False),
+        ("chaos_bump", None),
+    ):
+        rendered[field] = tuple(
+            (
+                int(history[index].get(field, history[index]["active_layers"]))
+                if field == "selected_layers"
+                else history[index].get(field, default)
+            )
+            for index in indices
+        )
     return rendered
 
 
@@ -179,6 +238,12 @@ def _heatmap_figure_with_current_loss(
         meta={
             **(dict(figure.layout.meta) if isinstance(figure.layout.meta, Mapping) else {}),
             "thog2_current_losses": list(rendered["current_losses"]),
+            "thog2_active_layers": list(rendered["active_layers"]),
+            "thog2_selected_layers": list(rendered["selected_layers"]),
+            "thog2_brake_active": list(rendered["brake_active"]),
+            "thog2_decision_committed": list(rendered["decision_committed"]),
+            "thog2_chaos_bump": list(rendered["chaos_bump"]),
+            "thog2_optimizer_updates": list(rendered["optimizer_updates"]),
         }
     )
     return figure
@@ -187,6 +252,7 @@ def _heatmap_figure_with_current_loss(
 _probe_curves._probe_record_from_event = _probe_record_from_event_with_current_loss
 _local_store.LocalChartStore.append_heatmap_records = _append_heatmap_records_with_current_loss
 _local_store.LocalChartReader.heatmap_history = _heatmap_history_with_current_loss
+_local_store.LocalChartReader.heatmap_history_window = _heatmap_history_window_with_current_loss
 _probe_curves._delta_loss_heatmap_render_data = _heatmap_render_data_with_current_loss
 _probe_curves._delta_loss_heatmap_figure = _heatmap_figure_with_current_loss
 # ^^^ THOG

@@ -55,6 +55,7 @@ import run_thog2_owt_core as _core                                              
 import sheet.geometry_registry as _geometry_registry                                                                                                        # <<< THOG align geometry report value columns with the shared console label width
 import sheet.plastic_depth_console_postfix_patch as _plastic_depth_console_postfix                                                                          # <<< THOG let the outer public formatter restore PLASTIC annotations to the physical row end
 import sheet.plastic_depth_v056_objective_decision_patch as _plastic_depth_v056                                                                              # <<< THOG enforce final decision-algorithm ownership after the public runner's legacy compatibility wrapper
+import sheet.plastic_depth_decision_algorithms_v057_patch as _plastic_depth_v057                                                                             # <<< THOG retain standalone Sen/Kendall and direct-loss selector ownership in the public runner
 import sheet.stage6_trainer as _stage6                                                                                                                      # <<< THOG public console policy adjusts terminal colour semantics without altering the preserved trainer source
 from sheet.depth_trajectory import DepthTrajectory                                                                                                          # <<< THOG identify geometries that actually retain DEPTH matrix materialisation
 from sheet.interactive_interrupt import (                                                                                                                   # <<< THOG Ctrl-G requests one safe-boundary checkpoint and exit
@@ -455,7 +456,7 @@ _ORIGINAL_PREPARE_CONSOLE_PROGRESS_PAYLOAD = _stage6.Stage6Trainer._prepare_cons
 
 
 def _plastic_change_z_is_retired() -> bool:
-    return _plastic_depth_v056._runtime_algorithm() in _plastic_depth_v056.SEN_KENDALL_ALGORITHMS
+    return _plastic_depth_v057._runtime_algorithm() in _plastic_depth_v057.OWNED_ALGORITHMS
 
 
 def _latest_plastic_change_z(trainer: Any) -> Optional[tuple[Optional[float], Optional[float]]]:

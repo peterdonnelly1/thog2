@@ -451,7 +451,6 @@ function sync_heatmap_settings_panel() {
   const settings = heatmap_run_settings();
   mode.value = settings.mode ?? "—";
   by_id("heatmap_setting_destination").value = settings.destination ?? "—";
-  by_id("heatmap_setting_linear").value = settings.linear_max_step ?? "—";
   const run_limit = Number(settings.abs_limit);
   by_id("heatmap_setting_abs_limit").value = String(
     heatmap_abs_limit(Number.isFinite(run_limit) ? run_limit : 0.05)
@@ -477,13 +476,12 @@ function install_heatmap_settings_panel() {
   section.id = "heatmap_settings_section";
   section.className = "heatmap-settings-section";
   const heading = document.createElement("h3");
-  heading.textContent = "Layer-count Δloss heatmap";
+  heading.textContent = "Heatmap - Loss vs Counterfactual Layer Count";
   const grid = document.createElement("div");
   grid.className = "heatmap-settings-grid";
 
   make_heatmap_settings_row(grid, "instrumentation__delta_loss_v_layer_heatmap", "heatmap_setting_mode", {readonly: true});
   make_heatmap_settings_row(grid, "instrumentation__delta_loss_v_layer_heatmap__destination", "heatmap_setting_destination", {readonly: true});
-  make_heatmap_settings_row(grid, "instrumentation__delta_loss_v_layer_heatmap_linear", "heatmap_setting_linear", {readonly: true});
   const abs_limit = make_heatmap_settings_row(
     grid,
     "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
@@ -505,7 +503,7 @@ function install_heatmap_settings_panel() {
   const note = document.createElement("p");
   note.className = "heatmap-settings-note";
   note.textContent = (
-    "abs_limit and vertical pixels/step are live viewer overrides. Mode, destination and linear max-step are capture/routing controls from the selected run; the viewer cannot recreate probes that were not recorded."
+    "abs_limit and vertical pixels/step are live viewer overrides. Mode and destination are capture/routing controls from the selected run."
   );
 
   const actions = document.createElement("div");
@@ -1086,7 +1084,7 @@ window.addEventListener("load", () => {
       rendered_heatmap_viewer_signature = heatmap_signature;
     }
     by_id("heatmap_card_detail").textContent = status
-      ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)} · discrete cells`
+      ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)}`
       : "Layer-count probes";
 
     if (depth_changed) {

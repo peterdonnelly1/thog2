@@ -1,0 +1,32 @@
+# Implementation Log
+
+## 2026-08-20
+
+- Started from local `depth_weight_curves_and_observational_probes` at `aacfb2a`, one local commit ahead of the configured remote-tracking reference.
+- Confirmed the working tree was clean before creating these tracking files.
+- Established staged implementation order: algorithms, DENSE charts, heatmap settings/data, visuals/events, comprehensive regression testing.
+- Added PLASTIC v0.57 decision ownership with standalone `sen`, standalone `kendall`, and `jump_to_lowest_loss`.
+- Added independent Sen-slope, Kendall-tau, and raw-loss improvement thresholds with CLI routing, help, persistence, identity, resume-mismatch checks, startup rows and audit replay.
+- Standalone statistical modes retain full-radius stratified evidence, growth-side discount, raw-adjacent improvement veto, configured window, update brake and unit-step commits.
+- Bulldozer mode ranks finite raw validation losses independently of the configured objective, ignores the statistical window and max-step, and retains update/warmup/CUDA safety gates. Same-batch mode is reduced to one-probe windows only for this algorithm.
+- Added focused selector, threshold, brake, tie, direct-jump, validation, parser/persistence and wrapper regression tests. Python syntax, shell syntax and wrapper routing checks pass; the torch-dependent suite remains scheduled for the comprehensive test phase.
+- Added DENSE snapshot capture for the same Q/K/V/attention-output/MLP-up/MLP-down chart families as THOG.
+- DENSE snapshots read actual learned block weights at integer layer indices. Q/K/V correctly address the three row slices of nanoGPT's combined attention input projection.
+- DENSE figures use unconnected cross markers, preserve deterministic scalar/head selection, accumulated-history age styling, hover metadata, local SQLite storage and W&B destinations, while THOG's continuous curves and executed-layer circles remain unchanged.
+- Added DENSE family, projection-slice, marker, coordinate-lock and local-history regression tests; syntax and diff checks pass pending the dependency-backed suite.
+- Removed the public heatmap linear-max-step argument and all capture-time truncation. Local heatmap storage now retains complete probe history; linear W&B publication and promoted probe progress are no longer capped by the retired field.
+- Added server-side, cached heatmap windows with a validated 1–512 viewer probe count (default 100) and rolling/from-zero selection.
+- Moved capture metadata, probe window, row mode, Δloss mode and colour-band controls into the heatmap gear. The old workspace-level heatmap settings section is retained only as hidden compatibility DOM for earlier composed patches.
+- Added exact every-optimizer-step expansion with blank non-probe rows, while y-axis labels remain optimizer-step values in both row modes.
+- Persisted committed decisions, update-brake state, selected counts and sampling-chaos-bump state alongside each local heatmap record, including backward-compatible defaults for existing SQLite rows.
+- Added permanent white/black committed-decision cells, transition-blue L labelling, brake and chaos headers, a latest-L absolute top axis, larger axes, three-decimal cell loss labels, percent-default mode, `|abs|`, revised title/subtitle, adjusted key title and header control placement.
+- Python and JavaScript syntax checks plus `git diff --check` pass after the heatmap data/UI stage; focused and broad behavioral suites remain in progress.
+- Removed the retired heatmap capture-limit option from the remaining shell and lifecycle routes. Existing checkpoint-schema storage remains readable, but the field is ignored and is no longer accepted by either public CLI.
+- Corrected final UI composition so the visible `|abs|`/`%` control is centred and percentage mode is the actual default; the hidden legacy button is no longer the positioning target.
+- Added indexed 1–512-record SQLite window reads so a rolling live view does not decode the complete run on every probe refresh.
+- Reviewed decision dispatch and fixed the v0.56-retired/unknown-name error path to avoid recursive delegation after runtime ownership is patched.
+- Static verification passes: Python compileall, all dashboard JavaScript `node --check`, Bash syntax, and `git diff --check`.
+- Focused wrapper routing suite passes (10/10). Pure direct-loss selector, DENSE chart source-contract, and Instra heatmap source-contract smoke checks pass.
+- A 32-test cross-cutting shell regression selection has the same 12 failures and 5 dependency/baseline errors as the exact pre-change commit's 31-test selection. The failures are pre-existing missing Torch/runtime assets and legacy absent-wrapper expectations, not new differences.
+- The local environment has no Torch, Plotly, pytest, or browser binary, so dependency-backed chart/controller tests cannot execute here. Added all new tests plus affected heatmap/dashboard suites to the branch's GitHub CPU workflow, which installs the required dependencies and runs on publish.
+- Final staged diff is scoped to the three requested feature areas, their configuration/help surfaces, Instra presentation/data paths, tests, CI coverage and these handoff records. Prepared for commit and branch publication.

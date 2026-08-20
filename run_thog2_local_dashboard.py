@@ -141,11 +141,10 @@ class RunDashboardState:
             "updated_at": metadata.get("updated_at", modified_at),
             "host_label": str(configuration.get("host_label", "")),
             "model_type": str(configuration.get("model_type", "")),
-            # vvv THOG surface the selected run's heatmap capture controls so the viewer settings dialog can distinguish live display controls from trainer-side capture/routing controls
+            # vvv THOG surface only capture/routing controls; history length is now a reversible per-chart Instra setting
             "heatmap_settings": {
                 "mode": configuration.get("instrumentation__delta_loss_v_layer_heatmap"),
                 "destination": configuration.get("instrumentation__delta_loss_v_layer_heatmap__destination", "local"),
-                "linear_max_step": configuration.get("instrumentation__delta_loss_v_layer_heatmap_linear"),
                 "abs_limit": configuration.get("instrumentation__delta_loss_v_layer_heatmap_abs_limit", 0.05),
             },
             # ^^^ THOG

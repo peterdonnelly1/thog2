@@ -333,6 +333,10 @@ def _start_bump(trainer: Any, state: Dict[str, Any]) -> None:
         base_coordinates=base_values,
         rattled_coordinates=rattled_values,
         signed_movements=actual_movements,
+        movement_fractions=state["movement_fractions"],
+        maximum_movement_fraction_of_local_gap=float(
+            config.max_movement_fraction_of_local_gap
+        ),
         visit_order=state["visit_order"],
     )
 

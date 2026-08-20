@@ -29,9 +29,9 @@ window.addEventListener("load", () => {
       save_json(trajectory_scale_settings_key, settings);
     };
     const heatmap_mode = () => (
-      heatmap_settings_for_current_run()[heatmap_display_mode_setting] === "percent"
-        ? "percent"
-        : "absolute"
+      heatmap_settings_for_current_run()[heatmap_display_mode_setting] === "absolute"
+        ? "absolute"
+        : "percent"
     );
 
     const make_mode_button = (label, mode, title, glyph_kind = null) => {
@@ -65,7 +65,7 @@ window.addEventListener("load", () => {
       group.className = "explicit-mode-group heatmap-mode-group";
       group.setAttribute("role", "group");
       group.setAttribute("aria-label", "Heatmap delta-loss display mode");
-      const absolute = make_mode_button("Abs", "absolute", "Colour heatmap by absolute Δloss");
+      const absolute = make_mode_button("|abs|", "absolute", "Colour heatmap by absolute Δloss");
       const percent = make_mode_button("%", "percent", "Colour heatmap by percentage Δloss relative to the centre L loss");
       const choose = async mode => {
         if (!app.current_run_id || heatmap_mode() === mode) return;

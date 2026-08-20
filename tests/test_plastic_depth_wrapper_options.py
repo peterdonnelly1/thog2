@@ -98,6 +98,27 @@ printf '%s\\n' "$@"
             ],
         )
 
+    def test_v057_decision_thresholds_are_routed_after_separator(self) -> None:
+        command = """
+set -- -g RUN --plastic__layer_count_decision_algorithm jump_to_lowest_loss --plastic__layer_count_decision_algorithm__jump_to_lowest_loss__minimum_improvement_percent 1.25
+source ./plastic_depth_lookahead_wrapper_options.sh
+printf '%s\n' "$@"
+"""
+        result = self._run_bash("-c", command)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "-g",
+                "RUN",
+                "--",
+                "--plastic__layer_count_decision_algorithm",
+                "jump_to_lowest_loss",
+                "--plastic__layer_count_decision_algorithm__jump_to_lowest_loss__minimum_improvement_percent",
+                "1.25",
+            ],
+        )
+
     def test_retired_kendall_tau_control_is_rejected(self) -> None:
         command = """
 set -- --plastic__layer_count_gradient__minimum_absolute_kendall_tau 0.7

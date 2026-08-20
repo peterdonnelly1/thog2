@@ -371,13 +371,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="local",
     )
     parser.add_argument(
-        "--instrumentation__delta_loss_v_layer_heatmap_linear",
-        dest="instrumentation__delta_loss_v_layer_heatmap_linear",
-        type=int,
-        default=None,
-        metavar="MAX_STEP",
-    )
-    parser.add_argument(
         "--instrumentation__delta_loss_v_layer_heatmap_abs_limit",
         dest="instrumentation__delta_loss_v_layer_heatmap_abs_limit",
         type=float,
@@ -617,7 +610,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         wandb_mode=arguments.wandb_mode,
         instrumentation__delta_loss_v_layer_heatmap=arguments.instrumentation__delta_loss_v_layer_heatmap,
         instrumentation__delta_loss_v_layer_heatmap__destination=arguments.instrumentation__delta_loss_v_layer_heatmap__destination,
-        instrumentation__delta_loss_v_layer_heatmap_linear=arguments.instrumentation__delta_loss_v_layer_heatmap_linear,
+        # Heatmap history length is an Instra viewer choice, not a capture limit.
+        instrumentation__delta_loss_v_layer_heatmap_linear=None,
         instrumentation__delta_loss_v_layer_heatmap_abs_limit=arguments.instrumentation__delta_loss_v_layer_heatmap_abs_limit,
         instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes=arguments.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes,
         artifact_suffix=arguments.artifact_suffix,

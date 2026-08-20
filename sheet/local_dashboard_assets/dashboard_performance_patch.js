@@ -38,11 +38,27 @@ window.addEventListener("load", () => {
       performance_state.deferred_coefficients = false;
     };
 
-    const heatmap_signature = status => JSON.stringify([
+    const heatmap_window_settings = () => {
+      const settings = typeof heatmap_settings_for_current_run === "function"
+        ? heatmap_settings_for_current_run()
+        : {};
+      const count = Number(settings.probe_count);
+      return {
+        probe_count: Number.isInteger(count) && count > 0 ? Math.min(512, count) : 100,
+        window_mode: settings.window_mode === "from_zero" ? "from_zero" : "rolling",
+      };
+    };
+
+    const heatmap_signature = status => {
+      const viewer = heatmap_window_settings();
+      return JSON.stringify([
       status?.heatmap_count ?? null,
       status?.heatmap_maximum_update ?? null,
       status?.heatmap_settings?.abs_limit ?? null,
-    ]);
+        viewer.probe_count,
+        viewer.window_mode,
+      ]);
+    };
 
     const depth_signature = status => JSON.stringify([
       status?.depth_snapshot_count ?? null,
@@ -107,7 +123,13 @@ window.addEventListener("load", () => {
       try {
         const [heatmap_payload, depth_payload] = await Promise.all([
           fetch_heatmap
-            ? base_fetch_json_performance(`/api/figure-family?run=${encoded_run}&family=heatmap`)
+            ? (() => {
+                const viewer = heatmap_window_settings();
+                return base_fetch_json_performance(
+                  `/api/figure-family?run=${encoded_run}&family=heatmap`
+                  + `&probe_count=${viewer.probe_count}&window_mode=${encodeURIComponent(viewer.window_mode)}`
+                );
+              })()
             : Promise.resolve(null),
           fetch_depth
             ? base_fetch_json_performance(`/api/figure-family?run=${encoded_run}&family=depth`)
@@ -174,7 +196,7 @@ window.addEventListener("load", () => {
       const heatmap_detail = by_id("heatmap_card_detail");
       if (heatmap_detail) {
         heatmap_detail.textContent = status
-          ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)} · discrete cells`
+          ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)}`
           : "Layer-count probes";
       }
 

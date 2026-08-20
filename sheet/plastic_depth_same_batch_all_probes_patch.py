@@ -618,9 +618,18 @@ def _begin_plastic_depth_inline_update_same_batch(self: Any) -> Optional[Dict[st
 
     current_count = int(context["current_count"])
     active = _ensure_active_window(self, current_count=current_count)
-    window_size = int(
-        self.config.plastic__layer_count_probe__window_size_as_number_of_probes
+    # vvv THOG jump_to_lowest_loss is deliberately a current-probe bulldozer. Treat each
+    # probe as a complete one-probe window so same-batch mode cannot delay or veto it.
+    decision_algorithm = os.environ.get(
+        "THOG2_PLASTIC_LAYER_COUNT_DECISION_ALGORITHM",
+        "directional_coherence",
+    ).strip()
+    window_size = (
+        1
+        if decision_algorithm == "jump_to_lowest_loss"
+        else int(self.config.plastic__layer_count_probe__window_size_as_number_of_probes)
     )
+    # ^^^ THOG
     if window_size < 1:
         raise RuntimeError("PLASTIC same-batch window size must be positive")
     pending_ordinal = int(active["probe_count"]) + 1

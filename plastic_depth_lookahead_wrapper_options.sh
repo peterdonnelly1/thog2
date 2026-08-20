@@ -2,7 +2,7 @@
 
 # vvv THOG
 # Observe core-owned PLASTIC controls for legacy environment consumers and route the
-# v0.541 Python-native wall-time controls plus v0.53 same-batch and v0.56 decision controls through the established -- extra-args channel.
+# v0.541 Python-native wall-time controls plus v0.53 same-batch and v0.57 decision controls through the established -- extra-args channel.
 THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS="${THOG2_PLASTIC_LAYER_COUNT_PROBE_RADIUS:-1}"
 THOG2_PLASTIC_LAYER_COUNT_MAX_STEP="${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP:-1}"
 THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES="${THOG2_PLASTIC_LAYER_COUNT__SAME_BATCH_ALL_PROBES:-false}"
@@ -56,6 +56,23 @@ while (( THOG2_PLASTIC_LOOKAHEAD_INDEX < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARG
       continue
       ;;
     --plastic__layer_count_decision_algorithm__growth_side_discount=*)
+      THOG2_PLASTIC_DECISION_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
+      continue
+      ;;
+    --plastic__layer_count_decision_algorithm__sen__minimum_absolute_slope|--plastic__layer_count_decision_algorithm__kendall__minimum_absolute_tau|--plastic__layer_count_decision_algorithm__jump_to_lowest_loss__minimum_improvement_percent)
+      (( THOG2_PLASTIC_LOOKAHEAD_INDEX + 1 < ${#THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[@]} )) || {
+        echo "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT requires a value" >&2
+        exit 2
+      }
+      THOG2_PLASTIC_DECISION_EXTRA_ARGS+=(
+        "$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT"
+        "${THOG2_PLASTIC_LOOKAHEAD_ORIGINAL_ARGS[$((THOG2_PLASTIC_LOOKAHEAD_INDEX + 1))]}"
+      )
+      ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 2))
+      continue
+      ;;
+    --plastic__layer_count_decision_algorithm__sen__minimum_absolute_slope=*|--plastic__layer_count_decision_algorithm__kendall__minimum_absolute_tau=*|--plastic__layer_count_decision_algorithm__jump_to_lowest_loss__minimum_improvement_percent=*)
       THOG2_PLASTIC_DECISION_EXTRA_ARGS+=("$THOG2_PLASTIC_LOOKAHEAD_ARGUMENT")
       ((THOG2_PLASTIC_LOOKAHEAD_INDEX += 1))
       continue
@@ -205,11 +222,11 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     "  --plastic__layer_count__max_allowable_layer_change N=${THOG2_PLASTIC_LAYER_COUNT_MAX_STEP}          maximum committed FINE movement" \
     '  --plastic__layer_count__same_batch_all_probes             one fixed probe batch per strict non-overlapping evidence window' \
     '  --no-plastic__layer_count__same_batch_all_probes          established rolling/multi-batch probe path; default' \
-    '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), theil_sen_kendall_LRA, or sen_kendall__tau__stratified; objective selected separately' \
+    '  --plastic__layer_count_decision_algorithm ALGORITHM       directional_coherence (default), theil_sen_kendall_LRA, sen_kendall__tau__stratified, sen, kendall, or jump_to_lowest_loss; objective selected separately except bulldozer mode' \
     '      For Sen slope:' \
-    '        sen < 0    y tends to decrease as x increases. Adding layers tends to improve the wall-time-equivalent economic score' \
+    '        sen < 0    y tends to decrease as x increases. Adding layers tends to improve the selected objective score' \
     '        sen = 0    no overall trend. Little directional economic preference' \
-    '        sen > 0    y tends to increase as x increases. Removing layers tends to improve the wall-time-equivalent economic score' \
+    '        sen > 0    y tends to increase as x increases. Removing layers tends to improve the selected objective score' \
     '      For Kendall tau:' \
     '        tau = -1    perfectly decreasing ordering. Extremely strong/near-perfect indication toward adding layers' \
     '        tau ≈ -0.8  strongly decreasing. Strong indication toward adding layers' \
@@ -219,6 +236,9 @@ if [[ "$THOG2_PLASTIC_LOOKAHEAD_HELP" == true ]]; then
     '        tau ≈ +0.8  strongly increasing. Strong indication toward removing layers' \
     '        tau = +1    perfectly increasing ordering. Extremely strong/near-perfect indication toward removing layers' \
     '  --plastic__layer_count_decision_algorithm__growth_side_discount X       Sen/Kendall only; credit fraction [0,1] of beneficial growth-side objective evidence; default 1.0' \
+    '  --plastic__layer_count_decision_algorithm__sen__minimum_absolute_slope X       standalone Sen minimum |objective-score slope/layer|; default 0' \
+    '  --plastic__layer_count_decision_algorithm__kendall__minimum_absolute_tau X       standalone Kendall minimum |tau-b| in [0,1]; default 0.5' \
+    '  --plastic__layer_count_decision_algorithm__jump_to_lowest_loss__minimum_improvement_percent PERCENT       direct raw-loss jump threshold; default 0' \
     '  --plastic__wall_time_equivalent_time_gain_discount X       credited fraction of positive equivalent-time gain; default 0.9' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_window N       rolling ordinary-training loss-rate window; default 64' \
     '  --plastic__wall_time_equivalent_time_gain_loss_rate_min_observations N       minimum observations before loss-rate fit is usable; default 16' \

@@ -2,7 +2,7 @@
 "use strict";
 
 const chart_titles = {
-  heatmap: "Layer-count Δloss heatmap",
+  heatmap: "Heatmap - Loss vs Counterfactual Layer Count",
   attn_q_head_N: "Attention query scalar trajectories",
   attn_k_head_N: "Attention key scalar trajectories",
   attn_v_head_N: "Attention value scalar trajectories",
@@ -960,7 +960,7 @@ function depth_card(chart_name) {
   title.textContent = normalize_chart_settings(chart_name).title;
   const detail = document.createElement("p");
   detail.id = `${chart_name}_detail`;
-  detail.textContent = "Waiting for the first DEPTH weight snapshot.";
+  detail.textContent = "Waiting for the first weight snapshot.";
   copy.append(title, detail);
   const actions = document.createElement("div");
   actions.className = "chart-card-actions";
@@ -978,7 +978,7 @@ function depth_card(chart_name) {
   const placeholder = document.createElement("div");
   placeholder.className = "plot-placeholder";
   placeholder.id = `${chart_name}_placeholder`;
-  placeholder.textContent = "Waiting for the first DEPTH weight snapshot.";
+  placeholder.textContent = "Waiting for the first weight snapshot.";
   const mount = document.createElement("div");
   mount.className = "plot-mount";
   mount.id = `${chart_name}_plot`;
@@ -1007,7 +1007,7 @@ function reset_run_charts() {
   by_id("heatmap_card_detail").textContent = "Waiting for the first layer-count probe.";
   for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
     const detail = by_id(`${chart_name}_detail`);
-    if (detail) detail.textContent = "Waiting for the first DEPTH weight snapshot.";
+    if (detail) detail.textContent = "Waiting for the first weight snapshot.";
   }
 }
 
@@ -1019,7 +1019,7 @@ async function render_figures() {
   }
   const status = current_run();
   by_id("heatmap_card_detail").textContent = status
-    ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)} · discrete cells`
+    ? `${format_integer(status.heatmap_count)} probes · latest step ${format_integer(status.heatmap_maximum_update)}`
     : "Layer-count probes";
   for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
     const figure = app.figures.depth[chart_name];

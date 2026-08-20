@@ -95,18 +95,8 @@ def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: A
         )
         if heatmap_records and heatmap_destination == "local":
             try:
-                maximum_step = (
-                    telemetry.config.get(
-                        "instrumentation__delta_loss_v_layer_heatmap_linear"
-                    )
-                    if telemetry.config.get(
-                        "instrumentation__delta_loss_v_layer_heatmap"
-                    ) == "linear"
-                    else None
-                )
                 ensure_local_chart_store(telemetry).append_heatmap_records(
                     heatmap_records,
-                    maximum_step=maximum_step,
                 )
             except Exception as error:
                 telemetry._delta_loss_heatmap_disabled = True

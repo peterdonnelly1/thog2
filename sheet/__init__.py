@@ -212,3 +212,11 @@ from . import plastic_depth_cuda_headroom_guard_patch as _plastic_depth_cuda_hea
 # vvv THOG v1.3 install sampling-only chaos bumps last so count freeze, console and checkpoint semantics are authoritative
 from . import chaos_bump_sampling_patch as _chaos_bump_sampling_patch
 # ^^^ THOG
+
+# vvv THOG add standalone Sen/Kendall thresholds and direct raw-loss jumping after every retained selector, audit and safety overlay
+from . import plastic_depth_decision_algorithms_v057_patch as _plastic_depth_decision_algorithms_v057_patch
+# ^^^ THOG
+
+# vvv THOG reuse the six depth-weight chart families for conventional DENSE blocks as discrete cross-marker series
+from . import dense_weight_curves_patch as _dense_weight_curves_patch
+# ^^^ THOG

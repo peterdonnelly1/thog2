@@ -147,7 +147,7 @@ def _optimizer_progress_due(
 # ^^^ THOG
 
 
-# vvv THOG linear heatmap mode promotes only completed probe updates to progress events, using the inclusive optimizer-step cap when supplied
+# vvv THOG linear heatmap mode promotes every completed probe update; Instra owns the reversible viewer window
 def _linear_heatmap_probe_progress_due(
     *,
     config: Any,
@@ -167,12 +167,7 @@ def _linear_heatmap_probe_progress_due(
         return False
     if probe_update is None or int(probe_update) != int(completed_updates):
         return False
-    maximum_step = getattr(
-        config,
-        "instrumentation__delta_loss_v_layer_heatmap_linear",
-        None,
-    )
-    return maximum_step is None or int(completed_updates) <= int(maximum_step)
+    return True
 # ^^^ THOG
 
 

@@ -15,7 +15,7 @@ import run_thog2_owt_core as runner
 from sheet import depth_weight_curves_and_observational_probes_patch as depth_probes
 from sheet import depth_observational_probe_wandb_patch as observational_wandb
 from sheet import plastic_depth_wandb_probe_curves_patch as curves
-from sheet.local_chart_store import LocalChartReader, close_local_chart_store
+from sheet.local_chart_store import LocalChartReader, LocalChartStore, close_local_chart_store
 from sheet.run_config import OwtRunConfig
 from sheet.stage6_trainer import _linear_heatmap_probe_progress_due
 from sheet.trainer_state import TrainerEvent
@@ -31,6 +31,8 @@ def _event(
     current: int = 4,
     radius: int = 1,
     observational_only: bool = False,
+    selected: int | None = None,
+    brake_active: bool = False,
 ) -> TrainerEvent:
     candidates = tuple(
         {
@@ -44,7 +46,8 @@ def _event(
         completed_updates,
         {
             "previous_active_layers": current,
-            "selected_active_layers": current,
+            "selected_active_layers": current if selected is None else selected,
+            "brake_active": brake_active,
             "probe_sequence": probe_sequence,
             "probe_update": completed_updates + 1,
             "observational_only": observational_only,
@@ -70,15 +73,13 @@ def _heatmap_config(*, plastic_enabled: bool, do_learn_layer_count: bool) -> Owt
     return OwtRunConfig(**values)
 
 
-def test_cli_uses_log_or_linear_modes_and_conservative_defaults() -> None:
+def test_cli_uses_log_or_linear_modes_and_viewer_owns_history_window() -> None:
     arguments = runner.build_parser().parse_args(
         [
             "--instrumentation__delta_loss_v_layer_heatmap",
             "linear",
             "--instrumentation__delta_loss_v_layer_heatmap__destination",
             "wandb",
-            "--instrumentation__delta_loss_v_layer_heatmap_linear",
-            "500",
             "--instrumentation__delta_loss_v_layer_heatmap_abs_limit",
             "0.125",
             "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
@@ -87,20 +88,24 @@ def test_cli_uses_log_or_linear_modes_and_conservative_defaults() -> None:
     )
     assert arguments.instrumentation__delta_loss_v_layer_heatmap == "linear"
     assert arguments.instrumentation__delta_loss_v_layer_heatmap__destination == "wandb"
-    assert arguments.instrumentation__delta_loss_v_layer_heatmap_linear == 500
+    assert not hasattr(arguments, "instrumentation__delta_loss_v_layer_heatmap_linear")
     assert arguments.instrumentation__delta_loss_v_layer_heatmap_abs_limit == pytest.approx(0.125)
     assert arguments.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes == 400
 
     defaults = runner.build_parser().parse_args([])
     assert defaults.instrumentation__delta_loss_v_layer_heatmap is None
     assert defaults.instrumentation__delta_loss_v_layer_heatmap__destination == "local"
-    assert defaults.instrumentation__delta_loss_v_layer_heatmap_linear is None
+    assert not hasattr(defaults, "instrumentation__delta_loss_v_layer_heatmap_linear")
     assert defaults.instrumentation__delta_loss_v_layer_heatmap_abs_limit == pytest.approx(0.05)
     assert defaults.instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes == 250
 
     with pytest.raises(SystemExit):
         runner.build_parser().parse_args(
             ["--instrumentation__delta_loss_v_layer_heatmap", "true"]
+        )
+    with pytest.raises(SystemExit):
+        runner.build_parser().parse_args(
+            ["--instrumentation__delta_loss_v_layer_heatmap_linear", "500"]
         )
 
 
@@ -111,8 +116,6 @@ def test_heatmap_controls_are_operational_across_resume_and_fork() -> None:
             "linear",
             "--instrumentation__delta_loss_v_layer_heatmap__destination",
             "local",
-            "--instrumentation__delta_loss_v_layer_heatmap_linear",
-            "800",
             "--instrumentation__delta_loss_v_layer_heatmap_abs_limit",
             "0.075",
             "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
@@ -121,11 +124,9 @@ def test_heatmap_controls_are_operational_across_resume_and_fork() -> None:
     )
     assert arguments.instrumentation__delta_loss_v_layer_heatmap == "linear"
     assert arguments.instrumentation__delta_loss_v_layer_heatmap__destination == "local"
-    assert arguments.instrumentation__delta_loss_v_layer_heatmap_linear == 800
     for destination in (
         "instrumentation__delta_loss_v_layer_heatmap",
         "instrumentation__delta_loss_v_layer_heatmap__destination",
-        "instrumentation__delta_loss_v_layer_heatmap_linear",
         "instrumentation__delta_loss_v_layer_heatmap_abs_limit",
         "instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
     ):
@@ -216,6 +217,48 @@ def test_heatmap_uses_absolute_layers_and_expands_to_observed_growth_candidates(
     assert rendered["z"][59][1] == pytest.approx(0.12)
 
 
+def test_heatmap_records_decision_brake_and_chaos_runtime_metadata() -> None:
+    telemetry = SimpleNamespace()
+    trainer = SimpleNamespace(events=[
+        TrainerEvent(
+            "chaos_bump_sampling_started",
+            9,
+            {
+                "start_update": 10,
+                "end_update": 11,
+                "duration_steps": 2,
+                "movement_fractions": (0.01, 0.05, 0.03),
+            },
+        ),
+        _event(
+            completed_updates=9,
+            probe_sequence=1,
+            current=4,
+            selected=5,
+            brake_active=True,
+        ),
+        TrainerEvent(
+            "chaos_bump_sampling_ended",
+            10,
+            {"completed_update": 10},
+        ),
+        _event(completed_updates=10, probe_sequence=2, current=5),
+    ])
+
+    records = curves._consume_new_delta_loss_heatmap_records(trainer, telemetry)
+
+    assert len(records) == 2
+    assert records[0]["decision_committed"] is True
+    assert records[0]["brake_active"] is True
+    assert records[0]["chaos_bump"] == {
+        "state": "active",
+        "magnitude_percent": pytest.approx(5.0),
+        "step": 1,
+        "duration": 2,
+    }
+    assert records[1]["chaos_bump"] == {"state": "reverted"}
+
+
 def test_heatmap_progressively_decimates_to_512_exact_rows_and_keeps_endpoints() -> None:
     source = []
     for probe_sequence in range(1, 701):
@@ -297,7 +340,7 @@ def test_heatmap_upload_cadence_is_early_then_every_250_probes() -> None:
     assert curves._should_refresh_delta_loss_heatmap(telemetry, force=True)
 
 
-def test_linear_heatmap_uploads_every_probe_until_optional_optimizer_step() -> None:
+def test_linear_heatmap_uploads_every_probe_without_a_capture_cap() -> None:
     telemetry = SimpleNamespace(
         config={
             "instrumentation__delta_loss_v_layer_heatmap": "linear",
@@ -314,14 +357,14 @@ def test_linear_heatmap_uploads_every_probe_until_optional_optimizer_step() -> N
 
     telemetry._delta_loss_heatmap_last_logged_total = 2
     history.append({"probe_id": "P3", "optimizer_update": 30})
-    assert not curves._should_refresh_delta_loss_heatmap(telemetry)
-    assert not curves._should_refresh_delta_loss_heatmap(telemetry, force=True)
+    assert curves._should_refresh_delta_loss_heatmap(telemetry)
+    assert curves._should_refresh_delta_loss_heatmap(telemetry, force=True)
 
     telemetry.config["instrumentation__delta_loss_v_layer_heatmap_linear"] = None
     assert curves._should_refresh_delta_loss_heatmap(telemetry)
 
 
-def test_linear_heatmap_promotes_only_probe_steps_through_inclusive_cap() -> None:
+def test_linear_heatmap_promotes_every_probe_step_without_a_capture_cap() -> None:
     config = SimpleNamespace(
         instrumentation__delta_loss_v_layer_heatmap="linear",
         instrumentation__delta_loss_v_layer_heatmap_linear=20,
@@ -331,7 +374,7 @@ def test_linear_heatmap_promotes_only_probe_steps_through_inclusive_cap() -> Non
         completed_updates=20,
         probe_update=20,
     )
-    assert not _linear_heatmap_probe_progress_due(
+    assert _linear_heatmap_probe_progress_due(
         config=config,
         completed_updates=21,
         probe_update=21,
@@ -544,6 +587,34 @@ def test_attachment_writes_local_heatmap_without_wandb(
     close_local_chart_store(telemetry)
 
 
+def test_local_heatmap_reader_selects_earliest_or_latest_probe_window(tmp_path: Path) -> None:
+    store = LocalChartStore(
+        tmp_path / "charts.sqlite3",
+        run_name="window-test",
+        config={},
+    )
+    store.append_heatmap_records(
+        {
+            "probe_id": f"P{step}",
+            "optimizer_update": step * 3,
+            "active_layers": 4,
+            "selected_layers": 4,
+            "current_loss": 5.0,
+            "shrink": ((0, 0.0, 4, 0),),
+            "growth": ((0, 0.0, 4, 0), (1, -0.01, 5, 1)),
+        }
+        for step in range(1, 6)
+    )
+    reader = LocalChartReader(store.path)
+
+    earliest = reader.heatmap_history_window(probe_count=2, window_mode="from_zero")
+    latest = reader.heatmap_history_window(probe_count=2, window_mode="rolling")
+
+    assert tuple(row["optimizer_update"] for row in earliest) == (3, 6)
+    assert tuple(row["optimizer_update"] for row in latest) == (12, 15)
+    store.close()
+
+
 def test_wrapper_accepts_dormant_plastic_controls_and_forwards_both_instrumentation_surfaces() -> None:
     environment = dict(os.environ)
     environment["THOG2_PYTHON"] = sys.executable
@@ -608,8 +679,6 @@ def test_wrapper_accepts_dormant_plastic_controls_and_forwards_both_instrumentat
             "linear",
             "--instrumentation__delta_loss_v_layer_heatmap__destination",
             "local",
-            "--instrumentation__delta_loss_v_layer_heatmap_linear",
-            "1000",
             "--instrumentation__delta_loss_v_layer_heatmap_abs_limit",
             "0.05",
             "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes",
@@ -635,7 +704,6 @@ def test_wrapper_accepts_dormant_plastic_controls_and_forwards_both_instrumentat
         "--instrumentation__depth_weight_curves__destination local",
         "--instrumentation__delta_loss_v_layer_heatmap linear",
         "--instrumentation__delta_loss_v_layer_heatmap__destination local",
-        "--instrumentation__delta_loss_v_layer_heatmap_linear 1000",
     ):
         assert expected in dry_run
 # ^^^ THOG
