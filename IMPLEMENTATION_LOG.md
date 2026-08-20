@@ -67,3 +67,12 @@
 - Implemented Workspace current-only filtering per visible run, so runs at different optimizer steps each retain their own newest snapshot rather than being compared against one global maximum step.
 - Verified both DENSE and THOG update identification, multiple scalars at one DENSE step, per-run Workspace maxima, run/Workspace setting isolation, absent Workspace legends, JavaScript syntax across every dashboard asset, Python source compilation, scoped whitespace and the v0.58 semantic smoke test.
 - Full dependency-backed Python tests cannot run in this sandbox because Plotly and pytest are not installed; the affected source-contract and chart suites remain in the branch CI workflow.
+
+## 2026-08-21 — THOG integer-layer comparison view
+
+- Confirmed that one DENSE run had reached step 336, while the Workspace preview could contain the newest snapshot from every visible run. The prior tooltip suppressed trace identity, so a displayed step 1 could not be attributed safely. Workspace hovers now begin with the owning run name.
+- Hardened current-only filtering at the same time: the merge resolves and preserves each source trace's optimizer update before rewriting its name, including compatibility parsing for older figures without explicit step metadata. Filtering groups by `instra_workspace_run_id` and retains exactly the maximum recorded optimizer update per visible run; focused coverage uses a step-1/step-336 pair from one run and retains only step 336.
+- Chose an Instra display preference rather than a training hyperparameter because the request changes presentation, not learned weights or instrumentation capture cadence.
+- Added exact integer-coordinate/value metadata to every THOG history trace. This avoids visually resampling or interpolating the 256-point curve and leaves default local and W&B plots unchanged.
+- Added independently scoped `Join with line segments` settings for ordinary run charts and Workspace charts. When enabled, THOG uses open circles at exact integer layers connected by straight segments; DENSE retains its cross markers and existing connectors.
+- Verified the step-336 per-run maximum, older metadata compatibility, unknown-step handling, run/Workspace preference isolation, exact THOG coordinates, DENSE non-interference, every dashboard JavaScript file, Python source compilation, and scoped whitespace with the v0.58 semantic smoke test. Dependency-backed Python tests remain unavailable locally because pytest is not installed.

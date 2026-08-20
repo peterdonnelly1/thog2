@@ -34,6 +34,27 @@ window.addEventListener("load", () => {
     };
     const clone = value => JSON.parse(JSON.stringify(value));
     const run_name = run => String(run?.artifact_name || run?.run_name || run_identifier(run));
+    const escaped_html = value => String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+    const source_optimizer_update = trace => {
+      for (const value of [
+        trace?.meta?.instra_workspace_optimizer_update,
+        trace?.meta?.instra_dense_optimizer_update,
+        trace?.meta?.instra_thog_optimizer_update,
+      ]) {
+        const numeric = finite_number(value);
+        if (numeric !== null) return numeric;
+      }
+      const description = `${trace?.name || ""} ${trace?.hovertemplate || ""}`;
+      const step_match = description.match(/(?:^|[^A-Za-z0-9])step\s+(\d+)(?:\D|$)/i);
+      if (step_match) return Number(step_match[1]);
+      const update_match = description.match(/(?:^|[^A-Za-z0-9])U(\d+)(?:\D|$)/);
+      return update_match ? Number(update_match[1]) : null;
+    };
     const visible_runs = () => app.runs.filter(run => is_visible(run_identifier(run)));
     const dense_run = run => String(run?.model_type || "").trim().toLowerCase() === "dense";
     const direct_json = async url => {
@@ -93,18 +114,22 @@ window.addEventListener("load", () => {
               ? trace.meta
               : {};
             const dense_trace = prior_meta.instra_dense_weight === true;
-            const dense_update = Number(prior_meta.instra_dense_optimizer_update);
+            const optimizer_update = source_optimizer_update(trace);
+            const dense_update = optimizer_update === null ? "—" : optimizer_update;
+            const owner_name = run_name(entry.run);
             trace.meta = {
               ...prior_meta,
               instra_workspace_run_id: id,
               instra_workspace_colour: colour,
+              instra_workspace_optimizer_update: optimizer_update,
             };
+            trace.hovertemplate = `<b>${escaped_html(owner_name)}</b><br>${String(trace.hovertemplate || "")}`;
             if (dense_trace) {
-              trace.name = `${run_name(entry.run)} · step ${dense_update}`;
+              trace.name = `${owner_name} · step ${dense_update}`;
               trace.legendgroup = `instra-workspace-${id}-step-${dense_update}`;
               trace.showlegend = false;
             } else {
-              trace.name = `${run_name(entry.run)} · ${String(trace.name || chart_titles[chart_name])}`;
+              trace.name = `${owner_name} · ${String(trace.name || chart_titles[chart_name])}`;
               trace.legendgroup = `instra-workspace-${id}`;
               trace.showlegend = false;
             }

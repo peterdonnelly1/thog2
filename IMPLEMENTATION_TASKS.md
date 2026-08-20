@@ -91,3 +91,13 @@
 - [x] In Workspace, retain the newest recorded optimizer step independently for every visible run.
 - [x] Run focused browser semantics, source-contract, syntax and regression tests.
 - [x] Review and commit the completed tree; publish it when requested.
+
+## I. THOG integer-layer line-segment view
+
+- [x] Verify current-only Workspace filtering cannot retain two optimizer steps from one run.
+- [x] Expose exact THOG integer-layer weights in figure metadata without changing training or default charts.
+- [x] Add per-weight-chart `Join with line segments` to Display Preferences.
+- [x] Render THOG integer weights as open circles joined by straight segments while preserving DENSE crosses.
+- [x] Scope the setting independently to each run/chart and each Workspace chart.
+- [x] Add focused core, browser-semantic, source-contract and regression coverage.
+- [x] Review and commit the completed tree; publish it when requested.

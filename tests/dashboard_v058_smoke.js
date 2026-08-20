@@ -167,7 +167,7 @@ async function main() {
             marker: {symbol: "x", size: 9, line: {width: 4}},
             meta: {
               instra_dense_weight: true,
-              instra_dense_optimizer_update: step,
+              ...(index === 0 ? {instra_dense_optimizer_update: step} : {}),
               instra_dense_step_legend: true,
               instra_dense_scalar_id: "r1_c2",
             },
@@ -189,6 +189,12 @@ async function main() {
   assert.equal(depth.depth.mlp_down.layout.showlegend, false);
   assert.equal(depth.depth.mlp_down.layout.legend, undefined);
   assert.ok(depth.depth.mlp_down.data.every(trace => trace.showlegend === false));
+  assert.deepEqual(
+    Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_optimizer_update),
+    [10, 20, 10, 20],
+  );
+  assert.ok(depth.depth.mlp_down.data[0].hovertemplate.startsWith("<b>alpha</b><br>"));
+  assert.ok(depth.depth.mlp_down.data[2].hovertemplate.startsWith("<b>beta</b><br>"));
 
   context.app.workspace_mode = true;
   const prepared_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
@@ -233,7 +239,7 @@ async function main() {
   const step_window_context = {Number, Set};
   vm.createContext(step_window_context);
   vm.runInContext(
-    ["trace_optimizer_update", "available_snapshot_updates", "limit_curve_snapshots", "retain_latest_weight_snapshots"]
+    ["trace_optimizer_update", "available_snapshot_updates", "limit_curve_snapshots", "retain_latest_weight_snapshots", "apply_thog_line_segments"]
       .map(function_source)
       .join("\n"),
     step_window_context,
@@ -258,12 +264,15 @@ async function main() {
   );
   assert.equal(step_window_context.trace_optimizer_update({name: "step 9"}), 9);
   assert.equal(step_window_context.trace_optimizer_update({name: "curve U12"}), 12);
+  assert.equal(step_window_context.trace_optimizer_update({meta: {instra_thog_optimizer_update: 13}}), 13);
+  assert.equal(step_window_context.trace_optimizer_update({meta: {instra_workspace_optimizer_update: 14}}), 14);
+  assert.equal(step_window_context.trace_optimizer_update({meta: {instra_workspace_optimizer_update: null}, name: "owner step 336"}), null);
 
   const workspace_current = {
     data: [
-      {name: "step 2", meta: {instra_dense_optimizer_update: 2, instra_workspace_run_id: "run-a"}},
-      {name: "step 5 scalar 1", meta: {instra_dense_optimizer_update: 5, instra_workspace_run_id: "run-a"}},
-      {name: "step 5 scalar 2", meta: {instra_dense_optimizer_update: 5, instra_workspace_run_id: "run-a"}},
+      {name: "step 1", meta: {instra_dense_optimizer_update: 1, instra_workspace_run_id: "run-a"}},
+      {name: "step 336 scalar 1", meta: {instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
+      {name: "step 336 scalar 2", meta: {instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
       {name: "curve U3", meta: {instra_workspace_run_id: "run-b"}},
       {name: "curve U4", meta: {instra_workspace_run_id: "run-b"}},
       {name: "top-axis anchor", meta: {instra_top_axis_anchor: true}},
@@ -275,8 +284,51 @@ async function main() {
       trace.meta?.instra_workspace_run_id || null,
       step_window_context.trace_optimizer_update(trace),
     ]),
-    [["run-a", 5], ["run-a", 5], ["run-b", 4], [null, null]],
+    [["run-a", 336], ["run-a", 336], ["run-b", 4], [null, null]],
   );
+
+  const joined_thog = {
+    data: [
+      {
+        name: "r1_c2 · U8",
+        mode: "lines",
+        x: [1, 1.5, 2],
+        y: [0.1, 0.2, 0.3],
+        line: {color: "#158f80", width: 2},
+        hovertemplate: "r1_c2<br>U8<br>layer=%{x:.3f}<br>weight=%{y:.7g}<extra></extra>",
+        meta: {
+          instra_thog_weight: true,
+          instra_thog_optimizer_update: 8,
+          instra_thog_integer_x: [1, 2],
+          instra_thog_integer_y: [0.1, 0.3],
+        },
+      },
+      {
+        name: "r1_c2 · executed layers",
+        mode: "markers",
+        x: [1, 2],
+        y: [0.1, 0.3],
+        meta: {instra_thog_weight: true, instra_thog_executed_overlay: true},
+      },
+      {
+        name: "step 8",
+        mode: "lines+markers",
+        x: [1, 2],
+        y: [1, 2],
+        meta: {instra_dense_weight: true, instra_dense_optimizer_update: 8},
+      },
+    ],
+  };
+  step_window_context.apply_thog_line_segments(joined_thog);
+  assert.equal(joined_thog.data.length, 2);
+  assert.deepEqual(Array.from(joined_thog.data[0].x), [1, 2]);
+  assert.deepEqual(Array.from(joined_thog.data[0].y), [0.1, 0.3]);
+  assert.equal(joined_thog.data[0].mode, "lines+markers");
+  assert.equal(joined_thog.data[0].line.shape, "linear");
+  assert.equal(joined_thog.data[0].marker.symbol, "circle-open");
+  assert.equal(joined_thog.data[0].marker.line.width, 1.2);
+  assert.ok(joined_thog.data[0].hovertemplate.includes("layer=%{x:.0f}"));
+  assert.equal(joined_thog.data[1].meta.instra_dense_weight, true);
 
   const weight_preference_store = {};
   const weight_preference_context = {
@@ -286,15 +338,23 @@ async function main() {
       workspace_mode: false,
       current_run_id: "run-a",
       weight_current_only: {},
+      weight_join_with_line_segments: {},
     },
     depth_weight_chart_set: new Set(["mlp_down"]),
     weight_current_only_storage_key: "weight-preferences",
+    weight_join_with_line_segments_storage_key: "join-preferences",
     save_json(key, value) { weight_preference_store[key] = JSON.parse(JSON.stringify(value)); },
     String,
   };
   vm.createContext(weight_preference_context);
   vm.runInContext(
-    ["weight_current_only_scope", "stored_weight_current_only", "save_weight_current_only"]
+    [
+      "weight_current_only_scope",
+      "stored_weight_current_only",
+      "save_weight_current_only",
+      "stored_weight_join_with_line_segments",
+      "save_weight_join_with_line_segments",
+    ]
       .map(function_source)
       .join("\n"),
     weight_preference_context,
@@ -305,12 +365,18 @@ async function main() {
   assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), false);
   weight_preference_context.app.workspace_mode = true;
   weight_preference_context.save_weight_current_only("mlp_down", true);
+  weight_preference_context.save_weight_join_with_line_segments("mlp_down", true);
   assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), true);
+  assert.equal(weight_preference_context.stored_weight_join_with_line_segments("mlp_down"), true);
   weight_preference_context.app.workspace_mode = false;
   weight_preference_context.app.current_run_id = "run-a";
   assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), true);
+  assert.equal(weight_preference_context.stored_weight_join_with_line_segments("mlp_down"), false);
   assert.deepEqual(weight_preference_store["weight-preferences"], {
     "run:run-a:mlp_down": true,
+    "workspace:mlp_down": true,
+  });
+  assert.deepEqual(weight_preference_store["join-preferences"], {
     "workspace:mlp_down": true,
   });
 

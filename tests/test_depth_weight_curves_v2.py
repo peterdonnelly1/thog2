@@ -131,7 +131,13 @@ def test_plotly_history_emphasises_newest_and_oldest(monkeypatch) -> None:
     assert float(line_traces[0].opacity) < float(line_traces[1].opacity)
     assert float(line_traces[0].line.width) < float(line_traces[1].line.width)
     assert line_traces[0].line.color == line_traces[1].line.color
+    assert line_traces[0].meta["instra_thog_weight"] is True
+    assert line_traces[0].meta["instra_thog_optimizer_update"] == 10
+    assert tuple(line_traces[0].meta["instra_thog_integer_x"]) == (1.0, 2.0, 3.0, 4.0)
+    assert tuple(line_traces[0].meta["instra_thog_integer_y"]) == snapshots[0]["families"]["attn_q_head_N"]["curves"][0]["executed_values"]
     assert tuple(marker_traces[0].x) == (1.0, 2.0, 3.0, 4.0)
+    assert marker_traces[0].meta["instra_thog_executed_overlay"] is True
+    assert marker_traces[0].meta["instra_thog_optimizer_update"] == 11
     assert figure.layout.hovermode == "closest"
     assert figure.layout.xaxis.dtick == 1
     assert figure.layout.xaxis.tickangle == 0

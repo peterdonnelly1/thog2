@@ -357,6 +357,18 @@ def _build_depth_plotly_figure(
                     showlegend=is_oldest or is_newest,
                     line={"color": colour, "width": width},
                     opacity=opacity,
+                    meta={
+                        "instra_thog_weight": True,
+                        "instra_thog_optimizer_update": update,
+                        "instra_thog_scalar_id": scalar_id,
+                        "instra_thog_integer_x": tuple(
+                            float(value)
+                            for value in family["executed_layer_coordinates"]
+                        ),
+                        "instra_thog_integer_y": tuple(
+                            float(value) for value in curve["executed_values"]
+                        ),
+                    },
                     hovertemplate=(
                         f"{scalar_id}<br>U{update} · {age_label}"
                         "<br>layer=%{x:.3f}<br>weight=%{y:.7g}<extra></extra>"
@@ -371,6 +383,12 @@ def _build_depth_plotly_figure(
                         mode="markers",
                         name=f"{scalar_id} · executed layers",
                         showlegend=False,
+                        meta={
+                            "instra_thog_weight": True,
+                            "instra_thog_executed_overlay": True,
+                            "instra_thog_optimizer_update": update,
+                            "instra_thog_scalar_id": scalar_id,
+                        },
                         marker={
                             "color": colour,
                             "size": 7,

@@ -48,6 +48,7 @@ const chart_x_axis_modes = Object.freeze({
 
 const panel_layout_version = "heatmap-row-and-three-by-two-curves-v1";
 const weight_current_only_storage_key = "thog2_local_weight_current_only";
+const weight_join_with_line_segments_storage_key = "thog2_local_weight_join_with_line_segments";
 
 const app = {
   runs: [],
@@ -66,6 +67,7 @@ const app = {
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
   axis_ranges: load_json("thog2_local_chart_axis_ranges", {}),
   weight_current_only: load_json(weight_current_only_storage_key, {}),
+  weight_join_with_line_segments: load_json(weight_join_with_line_segments_storage_key, {}),
   file_source: localStorage.getItem("instra_file_source") === "wandb" ? "wandb" : "instra",
   file_path: "",
   file_payload: null,
@@ -94,6 +96,7 @@ const app = {
 };
 if (!app.axis_ranges || typeof app.axis_ranges !== "object" || Array.isArray(app.axis_ranges)) app.axis_ranges = {};
 if (!app.weight_current_only || typeof app.weight_current_only !== "object" || Array.isArray(app.weight_current_only)) app.weight_current_only = {};
+if (!app.weight_join_with_line_segments || typeof app.weight_join_with_line_segments !== "object" || Array.isArray(app.weight_join_with_line_segments)) app.weight_join_with_line_segments = {};
 
 function by_id(id) { return document.getElementById(id); }
 
@@ -602,6 +605,18 @@ function save_weight_current_only(chart_name, enabled) {
   save_json(weight_current_only_storage_key, app.weight_current_only);
 }
 
+function stored_weight_join_with_line_segments(chart_name) {
+  return depth_weight_chart_set.has(chart_name)
+    && app.weight_join_with_line_segments[weight_current_only_scope(chart_name)] === true;
+}
+
+function save_weight_join_with_line_segments(chart_name, enabled) {
+  const key = weight_current_only_scope(chart_name);
+  if (enabled) app.weight_join_with_line_segments[key] = true;
+  else delete app.weight_join_with_line_segments[key];
+  save_json(weight_join_with_line_segments_storage_key, app.weight_join_with_line_segments);
+}
+
 function normalize_chart_settings(chart_name, supplied = null) {
   const supplied_settings = supplied !== null;
   const stored = supplied_settings ? supplied : stored_chart_settings(chart_name);
@@ -619,6 +634,11 @@ function normalize_chart_settings(chart_name, supplied = null) {
     max_snapshots: 0,
     current_weights_only: depth_weight_chart_set.has(chart_name) && (
       supplied_settings ? stored.current_weights_only === true : stored_weight_current_only(chart_name)
+    ),
+    join_with_line_segments: depth_weight_chart_set.has(chart_name) && (
+      supplied_settings
+        ? stored.join_with_line_segments === true
+        : stored_weight_join_with_line_segments(chart_name)
     ),
     snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling",
     exclude_outliers: stored.exclude_outliers === true,
@@ -653,7 +673,11 @@ function chart_axis_settings(chart_name, supplied = null) {
 }
 
 function has_chart_axis_settings(chart_name) {
-  return Object.keys(stored_chart_settings(chart_name)).length > 0 || stored_weight_current_only(chart_name);
+  return (
+    Object.keys(stored_chart_settings(chart_name)).length > 0
+    || stored_weight_current_only(chart_name)
+    || stored_weight_join_with_line_segments(chart_name)
+  );
 }
 
 function numeric_trace_bounds(prepared, axis_name) {
@@ -732,8 +756,19 @@ function apply_chart_axis_settings(prepared, chart_name, settings) {
 }
 
 function trace_optimizer_update(trace) {
-  const dense_update = Number(trace?.meta?.instra_dense_optimizer_update);
-  if (Number.isFinite(dense_update)) return dense_update;
+  const meta = trace?.meta;
+  if (meta && typeof meta === "object" && !Array.isArray(meta)
+      && Object.prototype.hasOwnProperty.call(meta, "instra_workspace_optimizer_update")) {
+    const raw_workspace_update = meta.instra_workspace_optimizer_update;
+    if (raw_workspace_update === null || raw_workspace_update === undefined || raw_workspace_update === "") return null;
+    const workspace_update = Number(raw_workspace_update);
+    return Number.isFinite(workspace_update) ? workspace_update : null;
+  }
+  for (const raw_update of [meta?.instra_dense_optimizer_update, meta?.instra_thog_optimizer_update]) {
+    if (raw_update === null || raw_update === undefined || raw_update === "") continue;
+    const update = Number(raw_update);
+    if (Number.isFinite(update)) return update;
+  }
   const description = `${trace?.name || ""} ${trace?.hovertemplate || ""}`;
   const dense_match = description.match(/(?:^|[^A-Za-z0-9])step\s+(\d+)(?:\D|$)/i);
   if (dense_match) return Number(dense_match[1]);
@@ -782,6 +817,48 @@ function retain_latest_weight_snapshots(prepared) {
     const run_id = String(trace?.meta?.instra_workspace_run_id || single_run);
     return update === latest_by_run.get(run_id);
   });
+}
+
+function apply_thog_line_segments(prepared) {
+  const transformed = [];
+  for (const trace of prepared.data || []) {
+    const meta = trace?.meta;
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+      transformed.push(trace);
+      continue;
+    }
+    if (meta.instra_thog_executed_overlay === true) continue;
+    if (meta.instra_thog_weight !== true) {
+      transformed.push(trace);
+      continue;
+    }
+    const x_values = Array.isArray(meta.instra_thog_integer_x)
+      ? meta.instra_thog_integer_x.map(Number)
+      : [];
+    const y_values = Array.isArray(meta.instra_thog_integer_y)
+      ? meta.instra_thog_integer_y.map(Number)
+      : [];
+    if (!x_values.length || x_values.length !== y_values.length) {
+      transformed.push(trace);
+      continue;
+    }
+    const colour = trace.line?.color || trace.marker?.color;
+    trace.x = x_values;
+    trace.y = y_values;
+    trace.mode = "lines+markers";
+    trace.line = {...(trace.line || {}), shape: "linear"};
+    trace.marker = {
+      ...(trace.marker || {}),
+      symbol: "circle-open",
+      size: 6,
+      color: colour,
+      line: {...(trace.marker?.line || {}), width: 1.2, color: colour},
+    };
+    trace.hovertemplate = String(trace.hovertemplate || "")
+      .replace("layer=%{x:.3f}", "layer=%{x:.0f}");
+    transformed.push(trace);
+  }
+  prepared.data = transformed;
 }
 
 function smoothed_values(values, smoothing) {
@@ -888,6 +965,9 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
     if (settings.chart_type !== "lines") {
       trace.marker = {...(trace.marker || {}), size: Math.max(3, Number(trace.marker?.size || 4))};
     }
+  }
+  if (depth_weight_chart_set.has(chart_name) && settings.join_with_line_segments) {
+    apply_thog_line_segments(prepared);
   }
   if (settings.exclude_outliers && !Number.isFinite(settings.y_min) && !Number.isFinite(settings.y_max)) {
     apply_outlier_resistant_y_range(prepared);
@@ -1753,6 +1833,7 @@ function chart_settings_form_state() {
     y_label: by_id("chart_y_label").value.trim() || labels.y_label,
     max_snapshots: chart_name === "heatmap" ? 0 : Number(by_id("chart_max_snapshots").value),
     current_weights_only: depth_weight_chart_set.has(chart_name) && by_id("chart_current_weights_only").checked,
+    join_with_line_segments: depth_weight_chart_set.has(chart_name) && by_id("chart_join_with_line_segments").checked,
     snapshot_window_mode: chart_name !== "heatmap" && by_id("chart_snapshot_window_mode").value === "from_zero"
       ? "from_zero"
       : "rolling",
@@ -1834,6 +1915,7 @@ function sync_chart_setting_outputs() {
   by_id("chart_max_snapshots_label").textContent = is_weight_chart ? "Step count" : "Maximum snapshots to show";
   by_id("chart_snapshot_window_field").hidden = !is_weight_chart;
   by_id("chart_current_weights_only_field").hidden = !is_weight_chart;
+  by_id("chart_join_with_line_segments_field").hidden = !is_weight_chart;
   by_id("chart_max_snapshots").disabled = current_weights_only;
   by_id("chart_snapshot_window_mode").disabled = current_weights_only;
   const smoothing = Number(by_id("chart_smoothing").value);
@@ -1892,6 +1974,7 @@ function populate_chart_settings_form(chart_name, supplied = null) {
   by_id("chart_max_snapshots").max = String(Math.max(1, snapshot_count));
   by_id("chart_max_snapshots").value = String(settings.max_snapshots > 0 ? Math.min(settings.max_snapshots, Math.max(1, snapshot_count)) : 0);
   by_id("chart_current_weights_only").checked = settings.current_weights_only;
+  by_id("chart_join_with_line_segments").checked = settings.join_with_line_segments;
   by_id("chart_snapshot_window_mode").value = settings.snapshot_window_mode;
   by_id("chart_exclude_outliers").checked = settings.exclude_outliers;
   by_id("chart_smoothing").value = String(settings.smoothing);
@@ -2015,6 +2098,7 @@ function save_chart_settings() {
   save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
   if (depth_weight_chart_set.has(chart_name)) {
     save_weight_current_only(chart_name, state.settings.current_weights_only);
+    save_weight_join_with_line_segments(chart_name, state.settings.join_with_line_segments);
   }
   if (chart_name === "heatmap" && typeof save_heatmap_viewer_setting === "function") {
     save_heatmap_viewer_setting("probe_row_height_px", state.settings.heatmap_row_height);

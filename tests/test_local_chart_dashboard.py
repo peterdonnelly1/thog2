@@ -368,6 +368,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="chart_snapshot_window_mode"' in html
     assert 'id="chart_current_weights_only"' in html
     assert ">Current weights only</strong>" in html
+    assert 'id="chart_join_with_line_segments"' in html
+    assert ">Join with line segments</strong>" in html
     assert ">Step window</span>" in html
     assert '<option value="rolling">Rolling</option>' in html
     assert '<option value="from_zero">From zero</option>' in html
@@ -423,6 +425,11 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "retain_latest_weight_snapshots" in javascript
     assert "stored_weight_current_only" in javascript
     assert "save_weight_current_only" in javascript
+    assert "stored_weight_join_with_line_segments" in javascript
+    assert "save_weight_join_with_line_segments" in javascript
+    assert "apply_thog_line_segments" in javascript
+    assert "instra_thog_integer_x" in javascript
+    assert "instra_thog_integer_y" in javascript
     assert 'return `workspace:${chart_name}`;' in javascript
     assert 'return `run:${String(app.current_run_id || "unselected")}:${chart_name}`;' in javascript
     assert "settings.current_weights_only" in javascript
@@ -561,6 +568,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'trace.showlegend = false;' in v058_repair_patch
     assert 'merged.layout.showlegend = false;' in v058_repair_patch
     assert "delete merged.layout.legend;" in v058_repair_patch
+    assert "instra_workspace_optimizer_update: optimizer_update" in v058_repair_patch
+    assert "source_optimizer_update" in v058_repair_patch
+    assert "escaped_html(owner_name)" in v058_repair_patch
     assert 'if (app.workspace_mode) delete prepared.layout.title;' in v058_repair_patch
     assert 'trace.mode = "lines+markers";' in v058_repair_patch
     assert 'width: 0.35, color: colour' in v058_repair_patch
