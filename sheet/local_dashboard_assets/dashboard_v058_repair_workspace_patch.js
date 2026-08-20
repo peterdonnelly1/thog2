@@ -77,7 +77,6 @@ window.addEventListener("load", () => {
       const depth = {};
       for (const chart_name of weight_chart_names) {
         let merged = null;
-        let contains_dense = false;
         for (const entry of entries) {
           const source = entry?.payload?.depth?.[chart_name];
           if (!source) continue;
@@ -88,7 +87,6 @@ window.addEventListener("load", () => {
           }
           const id = run_identifier(entry.run);
           const colour = colour_for_run(id);
-          let legend_added = false;
           for (const source_trace of source.data || []) {
             const trace = clone(source_trace);
             const prior_meta = trace.meta && typeof trace.meta === "object" && !Array.isArray(trace.meta)
@@ -96,7 +94,6 @@ window.addEventListener("load", () => {
               : {};
             const dense_trace = prior_meta.instra_dense_weight === true;
             const dense_update = Number(prior_meta.instra_dense_optimizer_update);
-            contains_dense ||= dense_trace;
             trace.meta = {
               ...prior_meta,
               instra_workspace_run_id: id,
@@ -105,23 +102,19 @@ window.addEventListener("load", () => {
             if (dense_trace) {
               trace.name = `${run_name(entry.run)} · step ${dense_update}`;
               trace.legendgroup = `instra-workspace-${id}-step-${dense_update}`;
-              trace.showlegend = prior_meta.instra_dense_step_legend === true;
+              trace.showlegend = false;
             } else {
               trace.name = `${run_name(entry.run)} · ${String(trace.name || chart_titles[chart_name])}`;
               trace.legendgroup = `instra-workspace-${id}`;
-              trace.showlegend = !legend_added;
-              legend_added = true;
+              trace.showlegend = false;
             }
             merged.data.push(trace);
           }
         }
         if (merged) {
           merged.layout = merged.layout || {};
-          merged.layout.showlegend = true;
-          merged.layout.legend = {
-            ...(merged.layout.legend || {}),
-            title: {text: contains_dense ? "" : "visible runs"},
-          };
+          merged.layout.showlegend = false;
+          delete merged.layout.legend;
           depth[chart_name] = merged;
         }
       }

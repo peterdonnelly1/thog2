@@ -82,3 +82,12 @@
 - [x] Base all DENSE history filtering on recorded optimizer steps, never probe number.
 - [x] Add semantic coverage for step colours, legend ownership, marker styling and both history-window modes.
 - [x] Commit and publish this DENSE refinement when requested.
+
+## H. Workspace legend and current-weight display preference
+
+- [x] Remove weight-chart legends from Workspace without changing single-run legends or hover identity.
+- [x] Add `Current weights only` to every weight chart's Display Preferences.
+- [x] Persist the toggle independently for each run/chart and each Workspace chart.
+- [x] In Workspace, retain the newest recorded optimizer step independently for every visible run.
+- [x] Run focused browser semantics, source-contract, syntax and regression tests.
+- [x] Review and commit the completed tree; publish it when requested.

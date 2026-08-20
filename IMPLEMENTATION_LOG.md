@@ -57,3 +57,13 @@
 - Reduced DENSE crosses to a 4–6 px range with a 0.35 px cross stroke; retained 0.45 px straight connectors within each scalar/step only. Removed all `oldest` / `newest` title and legend language.
 - Added per-weight-chart Instra display settings for `Step count` and `Step window` (`Rolling` or `From zero`). Windowing reads explicit DENSE optimizer-update metadata first, retains the existing THOG `U…` fallback, and sorts updates numerically; it never uses PLASTIC probe indices.
 - Added semantic Node coverage for DENSE Workspace colour/legend behavior, marker styling, and earliest/latest optimizer-step windows. Dashboard JavaScript syntax, semantic smoke, Python compilation and scoped whitespace checks pass locally. The dependency-complete chart suites remain covered by the branch workflow.
+
+## 2026-08-21 — Workspace weight-history controls
+
+- Reconstructed the requested continuation from the active repository because the prior-chat lookup returned no usable turn state; no partial implementation was present.
+- Preserved the unrelated user modification in `sheet/trainer_schedule.py` and excluded it from all task edits.
+- Removed all Workspace weight legends while retaining full trace names for hover identity and leaving ordinary single-run legends unchanged.
+- Added a `Current weights only` Display Preferences toggle for all six weight charts. Its state is scoped independently to each run/chart and to each Workspace chart.
+- Implemented Workspace current-only filtering per visible run, so runs at different optimizer steps each retain their own newest snapshot rather than being compared against one global maximum step.
+- Verified both DENSE and THOG update identification, multiple scalars at one DENSE step, per-run Workspace maxima, run/Workspace setting isolation, absent Workspace legends, JavaScript syntax across every dashboard asset, Python source compilation, scoped whitespace and the v0.58 semantic smoke test.
+- Full dependency-backed Python tests cannot run in this sandbox because Plotly and pytest are not installed; the affected source-contract and chart suites remain in the branch CI workflow.

@@ -47,6 +47,7 @@ const chart_x_axis_modes = Object.freeze({
 });
 
 const panel_layout_version = "heatmap-row-and-three-by-two-curves-v1";
+const weight_current_only_storage_key = "thog2_local_weight_current_only";
 
 const app = {
   runs: [],
@@ -64,6 +65,7 @@ const app = {
   visibility: load_json("thog2_local_run_visibility", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
   axis_ranges: load_json("thog2_local_chart_axis_ranges", {}),
+  weight_current_only: load_json(weight_current_only_storage_key, {}),
   file_source: localStorage.getItem("instra_file_source") === "wandb" ? "wandb" : "instra",
   file_path: "",
   file_payload: null,
@@ -82,6 +84,7 @@ const app = {
   picker_saturation: 56,
   picker_value: 84,
   axis_chart_name: null,
+  axis_chart_workspace_mode: null,
   chart_settings_render_override: null,
   chart_settings_preview_serial: 0,
   chart_settings_preview_timer: null,
@@ -90,6 +93,7 @@ const app = {
   dynamic_chart_metadata: {},
 };
 if (!app.axis_ranges || typeof app.axis_ranges !== "object" || Array.isArray(app.axis_ranges)) app.axis_ranges = {};
+if (!app.weight_current_only || typeof app.weight_current_only !== "object" || Array.isArray(app.weight_current_only)) app.weight_current_only = {};
 
 function by_id(id) { return document.getElementById(id); }
 
@@ -575,8 +579,32 @@ function stored_chart_settings(chart_name) {
   return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
 }
 
+function weight_current_only_scope(chart_name) {
+  const workspace_mode = (
+    app.axis_chart_name === chart_name
+    && typeof app.axis_chart_workspace_mode === "boolean"
+  )
+    ? app.axis_chart_workspace_mode
+    : app.workspace_mode === true;
+  if (workspace_mode) return `workspace:${chart_name}`;
+  return `run:${String(app.current_run_id || "unselected")}:${chart_name}`;
+}
+
+function stored_weight_current_only(chart_name) {
+  return depth_weight_chart_set.has(chart_name)
+    && app.weight_current_only[weight_current_only_scope(chart_name)] === true;
+}
+
+function save_weight_current_only(chart_name, enabled) {
+  const key = weight_current_only_scope(chart_name);
+  if (enabled) app.weight_current_only[key] = true;
+  else delete app.weight_current_only[key];
+  save_json(weight_current_only_storage_key, app.weight_current_only);
+}
+
 function normalize_chart_settings(chart_name, supplied = null) {
-  const stored = supplied || stored_chart_settings(chart_name);
+  const supplied_settings = supplied !== null;
+  const stored = supplied_settings ? supplied : stored_chart_settings(chart_name);
   const x_axis_mode = chart_x_axis_mode(chart_name, stored.x_axis_mode);
   const labels = chart_default_labels(chart_name, x_axis_mode);
   const stored_x_label = typeof stored.x_label === "string" ? stored.x_label.trim() : "";
@@ -589,6 +617,9 @@ function normalize_chart_settings(chart_name, supplied = null) {
     x_label: stored_x_label && !obsolete_heatmap_x_label ? stored_x_label : labels.x_label,
     y_label: typeof stored.y_label === "string" && stored.y_label.trim() ? stored.y_label.trim() : labels.y_label,
     max_snapshots: 0,
+    current_weights_only: depth_weight_chart_set.has(chart_name) && (
+      supplied_settings ? stored.current_weights_only === true : stored_weight_current_only(chart_name)
+    ),
     snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling",
     exclude_outliers: stored.exclude_outliers === true,
     smoothing: 0,
@@ -622,7 +653,7 @@ function chart_axis_settings(chart_name, supplied = null) {
 }
 
 function has_chart_axis_settings(chart_name) {
-  return Object.keys(stored_chart_settings(chart_name)).length > 0;
+  return Object.keys(stored_chart_settings(chart_name)).length > 0 || stored_weight_current_only(chart_name);
 }
 
 function numeric_trace_bounds(prepared, axis_name) {
@@ -736,6 +767,23 @@ function limit_curve_snapshots(prepared, maximum, window_mode = "rolling") {
   });
 }
 
+function retain_latest_weight_snapshots(prepared) {
+  const single_run = "__instra_single_run__";
+  const latest_by_run = new Map();
+  for (const trace of prepared.data || []) {
+    const update = trace_optimizer_update(trace);
+    if (!Number.isFinite(update)) continue;
+    const run_id = String(trace?.meta?.instra_workspace_run_id || single_run);
+    latest_by_run.set(run_id, Math.max(update, latest_by_run.get(run_id) ?? -Infinity));
+  }
+  prepared.data = (prepared.data || []).filter(trace => {
+    const update = trace_optimizer_update(trace);
+    if (!Number.isFinite(update)) return true;
+    const run_id = String(trace?.meta?.instra_workspace_run_id || single_run);
+    return update === latest_by_run.get(run_id);
+  });
+}
+
 function smoothed_values(values, smoothing) {
   if (!(smoothing > 0)) return values;
   const output = [];
@@ -825,7 +873,11 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
   prepared.layout.xaxis.gridcolor = "#e7e9ed";
   prepared.layout.yaxis.gridcolor = "#e7e9ed";
   if (chart_name === "heatmap") return;
-  limit_curve_snapshots(prepared, settings.max_snapshots, settings.snapshot_window_mode);
+  if (depth_weight_chart_set.has(chart_name) && settings.current_weights_only) {
+    retain_latest_weight_snapshots(prepared);
+  } else {
+    limit_curve_snapshots(prepared, settings.max_snapshots, settings.snapshot_window_mode);
+  }
   for (const trace of prepared.data || []) {
     if (!trace || !["scatter", "scattergl", undefined].includes(trace.type)) continue;
     const original_mode = String(trace.mode || "lines");
@@ -1700,6 +1752,7 @@ function chart_settings_form_state() {
     x_label: by_id("chart_x_label").value.trim() || labels.x_label,
     y_label: by_id("chart_y_label").value.trim() || labels.y_label,
     max_snapshots: chart_name === "heatmap" ? 0 : Number(by_id("chart_max_snapshots").value),
+    current_weights_only: depth_weight_chart_set.has(chart_name) && by_id("chart_current_weights_only").checked,
     snapshot_window_mode: chart_name !== "heatmap" && by_id("chart_snapshot_window_mode").value === "from_zero"
       ? "from_zero"
       : "rolling",
@@ -1773,12 +1826,16 @@ function set_chart_settings_tab(tab_name) {
 function sync_chart_setting_outputs() {
   const chart_name = app.axis_chart_name;
   const is_weight_chart = depth_weight_chart_set.has(chart_name);
+  const current_weights_only = is_weight_chart && by_id("chart_current_weights_only").checked;
   const maximum = Number(by_id("chart_max_snapshots").max);
   const snapshots = Number(by_id("chart_max_snapshots").value);
   by_id("chart_max_snapshots_value").textContent = snapshots > 0 ? String(snapshots) : `All${maximum > 0 ? ` ${maximum}` : ""}`;
   by_id("chart_curve_history_title").textContent = is_weight_chart ? "Weight step history" : "Curve history";
   by_id("chart_max_snapshots_label").textContent = is_weight_chart ? "Step count" : "Maximum snapshots to show";
   by_id("chart_snapshot_window_field").hidden = !is_weight_chart;
+  by_id("chart_current_weights_only_field").hidden = !is_weight_chart;
+  by_id("chart_max_snapshots").disabled = current_weights_only;
+  by_id("chart_snapshot_window_mode").disabled = current_weights_only;
   const smoothing = Number(by_id("chart_smoothing").value);
   by_id("chart_smoothing_value").textContent = smoothing > 0 ? smoothing.toFixed(2) : "Off";
   by_id("chart_line_width_value").textContent = `${Number(by_id("chart_line_width").value).toFixed(2)}×`;
@@ -1834,6 +1891,7 @@ function populate_chart_settings_form(chart_name, supplied = null) {
   const snapshot_count = chart_name === "heatmap" ? 0 : available_snapshot_updates(figure_for_chart(chart_name)).length;
   by_id("chart_max_snapshots").max = String(Math.max(1, snapshot_count));
   by_id("chart_max_snapshots").value = String(settings.max_snapshots > 0 ? Math.min(settings.max_snapshots, Math.max(1, snapshot_count)) : 0);
+  by_id("chart_current_weights_only").checked = settings.current_weights_only;
   by_id("chart_snapshot_window_mode").value = settings.snapshot_window_mode;
   by_id("chart_exclude_outliers").checked = settings.exclude_outliers;
   by_id("chart_smoothing").value = String(settings.smoothing);
@@ -1898,6 +1956,7 @@ function open_chart_settings(chart_name) {
   close_run_menu();
   close_colour_picker();
   close_settings();
+  app.axis_chart_workspace_mode = app.workspace_mode === true;
   app.axis_chart_name = chart_name;
   by_id("chart_settings_title").textContent = `${normalize_chart_settings(chart_name).title} settings`;
   by_id("chart_settings_axes").textContent = chart_name === "heatmap"
@@ -1925,6 +1984,7 @@ function close_chart_settings() {
   by_id("chart_settings_overlay").hidden = true;
   reset_chart_settings_preview_mount();
   app.axis_chart_name = null;
+  app.axis_chart_workspace_mode = null;
   if (was_open) render_axis_settings_change(chart_name);
 }
 
@@ -1953,6 +2013,9 @@ function save_chart_settings() {
   if (Object.keys(compact).length) app.axis_ranges[chart_name] = compact;
   else delete app.axis_ranges[chart_name];
   save_json("thog2_local_chart_axis_ranges", app.axis_ranges);
+  if (depth_weight_chart_set.has(chart_name)) {
+    save_weight_current_only(chart_name, state.settings.current_weights_only);
+  }
   if (chart_name === "heatmap" && typeof save_heatmap_viewer_setting === "function") {
     save_heatmap_viewer_setting("probe_row_height_px", state.settings.heatmap_row_height);
   }

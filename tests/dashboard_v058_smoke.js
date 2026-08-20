@@ -186,7 +186,9 @@ async function main() {
     Array.from(depth.depth.mlp_down.data, trace => trace.name),
     ["alpha · step 10", "alpha · step 20", "beta · step 10", "beta · step 20"],
   );
-  assert.equal(depth.depth.mlp_down.layout.legend.title.text, "");
+  assert.equal(depth.depth.mlp_down.layout.showlegend, false);
+  assert.equal(depth.depth.mlp_down.layout.legend, undefined);
+  assert.ok(depth.depth.mlp_down.data.every(trace => trace.showlegend === false));
 
   context.app.workspace_mode = true;
   const prepared_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
@@ -231,7 +233,7 @@ async function main() {
   const step_window_context = {Number, Set};
   vm.createContext(step_window_context);
   vm.runInContext(
-    ["trace_optimizer_update", "available_snapshot_updates", "limit_curve_snapshots"]
+    ["trace_optimizer_update", "available_snapshot_updates", "limit_curve_snapshots", "retain_latest_weight_snapshots"]
       .map(function_source)
       .join("\n"),
     step_window_context,
@@ -256,6 +258,61 @@ async function main() {
   );
   assert.equal(step_window_context.trace_optimizer_update({name: "step 9"}), 9);
   assert.equal(step_window_context.trace_optimizer_update({name: "curve U12"}), 12);
+
+  const workspace_current = {
+    data: [
+      {name: "step 2", meta: {instra_dense_optimizer_update: 2, instra_workspace_run_id: "run-a"}},
+      {name: "step 5 scalar 1", meta: {instra_dense_optimizer_update: 5, instra_workspace_run_id: "run-a"}},
+      {name: "step 5 scalar 2", meta: {instra_dense_optimizer_update: 5, instra_workspace_run_id: "run-a"}},
+      {name: "curve U3", meta: {instra_workspace_run_id: "run-b"}},
+      {name: "curve U4", meta: {instra_workspace_run_id: "run-b"}},
+      {name: "top-axis anchor", meta: {instra_top_axis_anchor: true}},
+    ],
+  };
+  step_window_context.retain_latest_weight_snapshots(workspace_current);
+  assert.deepEqual(
+    Array.from(workspace_current.data, trace => [
+      trace.meta?.instra_workspace_run_id || null,
+      step_window_context.trace_optimizer_update(trace),
+    ]),
+    [["run-a", 5], ["run-a", 5], ["run-b", 4], [null, null]],
+  );
+
+  const weight_preference_store = {};
+  const weight_preference_context = {
+    app: {
+      axis_chart_name: null,
+      axis_chart_workspace_mode: null,
+      workspace_mode: false,
+      current_run_id: "run-a",
+      weight_current_only: {},
+    },
+    depth_weight_chart_set: new Set(["mlp_down"]),
+    weight_current_only_storage_key: "weight-preferences",
+    save_json(key, value) { weight_preference_store[key] = JSON.parse(JSON.stringify(value)); },
+    String,
+  };
+  vm.createContext(weight_preference_context);
+  vm.runInContext(
+    ["weight_current_only_scope", "stored_weight_current_only", "save_weight_current_only"]
+      .map(function_source)
+      .join("\n"),
+    weight_preference_context,
+  );
+  weight_preference_context.save_weight_current_only("mlp_down", true);
+  assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), true);
+  weight_preference_context.app.current_run_id = "run-b";
+  assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), false);
+  weight_preference_context.app.workspace_mode = true;
+  weight_preference_context.save_weight_current_only("mlp_down", true);
+  assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), true);
+  weight_preference_context.app.workspace_mode = false;
+  weight_preference_context.app.current_run_id = "run-a";
+  assert.equal(weight_preference_context.stored_weight_current_only("mlp_down"), true);
+  assert.deepEqual(weight_preference_store["weight-preferences"], {
+    "run:run-a:mlp_down": true,
+    "workspace:mlp_down": true,
+  });
 
   const prepared_heatmap = {
     data: [

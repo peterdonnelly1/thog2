@@ -366,6 +366,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="chart_y_label"' in html
     assert 'id="chart_max_snapshots"' in html
     assert 'id="chart_snapshot_window_mode"' in html
+    assert 'id="chart_current_weights_only"' in html
+    assert ">Current weights only</strong>" in html
     assert ">Step window</span>" in html
     assert '<option value="rolling">Rolling</option>' in html
     assert '<option value="from_zero">From zero</option>' in html
@@ -418,6 +420,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "dynamic_chart_figures" in javascript
     assert "dynamic_chart_metadata" in javascript
     assert "limit_curve_snapshots" in javascript
+    assert "retain_latest_weight_snapshots" in javascript
+    assert "stored_weight_current_only" in javascript
+    assert "save_weight_current_only" in javascript
+    assert 'return `workspace:${chart_name}`;' in javascript
+    assert 'return `run:${String(app.current_run_id || "unselected")}:${chart_name}`;' in javascript
+    assert "settings.current_weights_only" in javascript
     assert 'snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling"' in javascript
     assert 'window_mode === "from_zero"' in javascript
     assert 'trace?.meta?.instra_dense_optimizer_update' in javascript
@@ -550,8 +558,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'const heatmap_title = "Heatmap - True Loss vs Counterfactual Layer Count Loss";' in v058_repair_patch
     assert 'const weight_scale_key = "thog2_local_trajectory_scale_modes";' in v058_repair_patch
     assert 'const dense_step_colour = optimizer_update =>' in v058_repair_patch
-    assert 'prior_meta.instra_dense_step_legend === true' in v058_repair_patch
-    assert 'title: {text: contains_dense ? "" : "visible runs"}' in v058_repair_patch
+    assert 'trace.showlegend = false;' in v058_repair_patch
+    assert 'merged.layout.showlegend = false;' in v058_repair_patch
+    assert "delete merged.layout.legend;" in v058_repair_patch
     assert 'if (app.workspace_mode) delete prepared.layout.title;' in v058_repair_patch
     assert 'trace.mode = "lines+markers";' in v058_repair_patch
     assert 'width: 0.35, color: colour' in v058_repair_patch
