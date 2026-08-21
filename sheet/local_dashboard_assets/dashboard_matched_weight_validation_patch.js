@@ -18,8 +18,14 @@ window.addEventListener("load", () => {
     const values = inputs.map(input => Number(input?.value));
     const maximum = Math.min(
       ...inputs.map(input => {
-        const value = Number(input?.max);
+        // const value = Number(input?.max);
+        // return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+        // vvv THOG an absent HTML max is "", and Number("") is 0; keep an unknown bound genuinely unbounded instead
+        const raw_maximum = String(input?.getAttribute("max") ?? "").trim();
+        if (!raw_maximum) return Number.POSITIVE_INFINITY;
+        const value = Number(raw_maximum);
         return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+        // ^^^ THOG
       }),
     );
     const invalid = values.some(value => (
