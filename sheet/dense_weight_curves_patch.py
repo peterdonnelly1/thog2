@@ -371,3 +371,7 @@ __all__ = [
     "_weight_snapshot_with_dense",
 ]
 # ^^^ THOG
+
+# vvv THOG install matched logical weight selection after DENSE has installed its final snapshot and figure dispatch
+from . import matched_weight_selection_patch as _matched_weight_selection_patch
+# ^^^ THOG
