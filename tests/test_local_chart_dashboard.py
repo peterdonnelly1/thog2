@@ -329,6 +329,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     v058_repair_patch = (
         dashboard._ASSET_ROOT / "dashboard_v058_repair_workspace_patch.js"
     ).read_text(encoding="utf-8")
+    weights_group_settings_patch = (
+        dashboard._ASSET_ROOT / "dashboard_weights_group_settings_patch.js"
+    ).read_text(encoding="utf-8")
     logs_modes_patch = (
         dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
@@ -347,6 +350,10 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'class="icon-rail"' in html
     assert 'id="workspace_nav"' in html
     assert '"dashboard_v058_repair_workspace_patch.js",' in launcher
+    assert '"dashboard_weights_group_settings_patch.js",' in launcher
+    assert launcher.index('"dashboard_v058_repair_workspace_patch.js",') < launcher.index(
+        '"dashboard_weights_group_settings_patch.js",'
+    )
     assert 'id="settings_nav"' in html
     assert 'id="page_size"' in html
     assert 'id="sort_direction"' in html
@@ -423,6 +430,13 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "dynamic_chart_metadata" in javascript
     assert "limit_curve_snapshots" in javascript
     assert "retain_latest_weight_snapshots" in javascript
+    assert "instra_enforce_workspace_latest_weights" in weights_group_settings_patch
+    assert "instra_apply_weight_group_defaults" in weights_group_settings_patch
+    assert 'id = "weights_group_settings_button"' in weights_group_settings_patch
+    assert 'id = "chart_inherit_weights_group_field"' in weights_group_settings_patch
+    assert '"thog2_local_weight_group_settings_v1"' in weights_group_settings_patch
+    assert '"thog2_local_weight_chart_overrides_v1"' in weights_group_settings_patch
+    assert "Individual chart overrides take precedence." in weights_group_settings_patch
     assert "stored_weight_current_only" in javascript
     assert "save_weight_current_only" in javascript
     assert "stored_weight_join_with_line_segments" in javascript

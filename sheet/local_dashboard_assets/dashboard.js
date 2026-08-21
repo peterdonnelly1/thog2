@@ -760,9 +760,10 @@ function trace_optimizer_update(trace) {
   if (meta && typeof meta === "object" && !Array.isArray(meta)
       && Object.prototype.hasOwnProperty.call(meta, "instra_workspace_optimizer_update")) {
     const raw_workspace_update = meta.instra_workspace_optimizer_update;
-    if (raw_workspace_update === null || raw_workspace_update === undefined || raw_workspace_update === "") return null;
-    const workspace_update = Number(raw_workspace_update);
-    return Number.isFinite(workspace_update) ? workspace_update : null;
+    if (raw_workspace_update !== null && raw_workspace_update !== undefined && raw_workspace_update !== "") {
+      const workspace_update = Number(raw_workspace_update);
+      if (Number.isFinite(workspace_update)) return workspace_update;
+    }
   }
   for (const raw_update of [meta?.instra_dense_optimizer_update, meta?.instra_thog_optimizer_update]) {
     if (raw_update === null || raw_update === undefined || raw_update === "") continue;
@@ -813,8 +814,12 @@ function retain_latest_weight_snapshots(prepared) {
   }
   prepared.data = (prepared.data || []).filter(trace => {
     const update = trace_optimizer_update(trace);
-    if (!Number.isFinite(update)) return true;
-    const run_id = String(trace?.meta?.instra_workspace_run_id || single_run);
+    const workspace_run_id = trace?.meta?.instra_workspace_run_id;
+    if (!Number.isFinite(update)) {
+      if (!workspace_run_id) return true;
+      return !latest_by_run.has(String(workspace_run_id));
+    }
+    const run_id = String(workspace_run_id || single_run);
     return update === latest_by_run.get(run_id);
   });
 }

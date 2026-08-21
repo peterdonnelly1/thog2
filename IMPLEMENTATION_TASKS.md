@@ -101,3 +101,13 @@
 - [x] Scope the setting independently to each run/chart and each Workspace chart.
 - [x] Add focused core, browser-semantic, source-contract and regression coverage.
 - [x] Review and commit the completed tree; publish it when requested.
+
+## J. Workspace latest-weight enforcement and Weights group settings
+
+- [x] Reproduce the missing final-render coverage in the Workspace current-only path.
+- [x] Enforce newest-recorded-step filtering after the complete Workspace presentation chain.
+- [x] Add Run-scoped and Workspace-scoped Weights group settings.
+- [x] Make individual weight-chart settings override inherited group settings.
+- [x] Add focused browser-semantic, source-contract, syntax and regression coverage.
+- [x] Review and commit the completed tree.
+- [ ] Publish it when requested.

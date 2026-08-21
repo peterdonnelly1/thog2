@@ -222,20 +222,21 @@ async function main() {
   // The weight-history display window counts recorded optimizer steps. It
   // deliberately has no relationship to PLASTIC probe rows.
   const dashboard_source = fs.readFileSync("sheet/local_dashboard_assets/dashboard.js", "utf8");
-  const function_source = name => {
-    const start = dashboard_source.indexOf(`function ${name}(`);
+  const function_source_from = (source_text, name) => {
+    const start = source_text.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, `missing ${name}`);
-    const body_start = dashboard_source.indexOf("{", start);
+    const body_start = source_text.indexOf("{", start);
     let depth = 0;
-    for (let index = body_start; index < dashboard_source.length; index += 1) {
-      if (dashboard_source[index] === "{") depth += 1;
-      else if (dashboard_source[index] === "}") {
+    for (let index = body_start; index < source_text.length; index += 1) {
+      if (source_text[index] === "{") depth += 1;
+      else if (source_text[index] === "}") {
         depth -= 1;
-        if (depth === 0) return dashboard_source.slice(start, index + 1);
+        if (depth === 0) return source_text.slice(start, index + 1);
       }
     }
     throw new Error(`unterminated ${name}`);
   };
+  const function_source = name => function_source_from(dashboard_source, name);
   const step_window_context = {Number, Set};
   vm.createContext(step_window_context);
   vm.runInContext(
@@ -266,13 +267,14 @@ async function main() {
   assert.equal(step_window_context.trace_optimizer_update({name: "curve U12"}), 12);
   assert.equal(step_window_context.trace_optimizer_update({meta: {instra_thog_optimizer_update: 13}}), 13);
   assert.equal(step_window_context.trace_optimizer_update({meta: {instra_workspace_optimizer_update: 14}}), 14);
-  assert.equal(step_window_context.trace_optimizer_update({meta: {instra_workspace_optimizer_update: null}, name: "owner step 336"}), null);
+  assert.equal(step_window_context.trace_optimizer_update({meta: {instra_workspace_optimizer_update: null}, name: "owner step 336"}), 336);
 
   const workspace_current = {
     data: [
       {name: "step 1", meta: {instra_dense_optimizer_update: 1, instra_workspace_run_id: "run-a"}},
       {name: "step 336 scalar 1", meta: {instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
       {name: "step 336 scalar 2", meta: {instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
+      {name: "historical owner trace", meta: {instra_workspace_optimizer_update: null, instra_workspace_run_id: "run-a"}},
       {name: "curve U3", meta: {instra_workspace_run_id: "run-b"}},
       {name: "curve U4", meta: {instra_workspace_run_id: "run-b"}},
       {name: "top-axis anchor", meta: {instra_top_axis_anchor: true}},
@@ -285,6 +287,55 @@ async function main() {
       step_window_context.trace_optimizer_update(trace),
     ]),
     [["run-a", 336], ["run-a", 336], ["run-b", 4], [null, null]],
+  );
+
+  // The final loaded asset repeats the invariant after every legacy render
+  // wrapper. This is the path used by Workspace after its traces are merged.
+  const group_patch_source = fs.readFileSync(
+    "sheet/local_dashboard_assets/dashboard_weights_group_settings_patch.js",
+    "utf8",
+  );
+  const group_patch_context = {Number, Map, Math, Object, String};
+  vm.createContext(group_patch_context);
+  vm.runInContext(
+    [
+      "instra_weight_trace_update",
+      "instra_enforce_workspace_latest_weights",
+      "instra_apply_weight_group_defaults",
+    ]
+      .map(name => function_source_from(group_patch_source, name))
+      .join("\n"),
+    group_patch_context,
+  );
+  const final_workspace_current = {
+    data: [
+      {name: "step 1", meta: {instra_workspace_optimizer_update: null, instra_dense_optimizer_update: 1, instra_workspace_run_id: "run-a"}},
+      {name: "step 336 scalar 1", meta: {instra_workspace_optimizer_update: null, instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
+      {name: "step 336 scalar 2", meta: {instra_workspace_optimizer_update: 336, instra_dense_optimizer_update: 336, instra_workspace_run_id: "run-a"}},
+      {name: "curve U7", meta: {instra_workspace_run_id: "run-b"}},
+      {name: "curve U9", meta: {instra_workspace_run_id: "run-b"}},
+      {name: "owner without update", meta: {instra_workspace_run_id: "run-b"}},
+      {name: "top-axis anchor", meta: {instra_top_axis_anchor: true}},
+    ],
+  };
+  group_patch_context.instra_enforce_workspace_latest_weights(final_workspace_current);
+  assert.deepEqual(
+    Array.from(final_workspace_current.data, trace => [
+      trace.meta?.instra_workspace_run_id || null,
+      group_patch_context.instra_weight_trace_update(trace),
+    ]),
+    [["run-a", 336], ["run-a", 336], ["run-b", 9], [null, null]],
+  );
+  const inherited = {title: "individual title", current_weights_only: false, line_width: 1};
+  group_patch_context.instra_apply_weight_group_defaults(
+    inherited,
+    {current_weights_only: true, line_width: 2},
+    {line_width: 0.75},
+    ["current_weights_only", "line_width"],
+  );
+  assert.deepEqual(
+    {...inherited},
+    {title: "individual title", current_weights_only: true, line_width: 0.75},
   );
 
   const joined_thog = {
