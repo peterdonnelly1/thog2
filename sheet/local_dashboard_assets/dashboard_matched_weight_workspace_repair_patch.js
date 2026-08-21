@@ -6,7 +6,8 @@
 // user-selected coordinate is active they are treated as incompatible rather
 // than disabling matched selection for every newer run. Workspace line widths
 // are also normalised so THOG age styling and DENSE source styling do not imply
-// a false difference between runs.
+// a false difference between runs. Workspace colours are always the owning run
+// colour, including DENSE traces and THOG executed-layer marker overlays.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const protocol = "matched_six_v1";
@@ -87,9 +88,17 @@ window.addEventListener("load", () => {
       for (const trace of prepared.data || []) {
         const meta = trace?.meta;
         if (!meta || typeof meta !== "object" || Array.isArray(meta)) continue;
-        if (!meta.instra_workspace_run_id || meta.instra_top_axis_anchor === true) continue;
-        if (!String(trace.mode || "").includes("lines")) continue;
-        trace.line = {...(trace.line || {}), width: line_width};
+        const run_id = meta.instra_workspace_run_id;
+        if (!run_id || meta.instra_top_axis_anchor === true) continue;
+        const run_colour = colour_for_run(String(run_id));
+        const mode = String(trace.mode || "");
+        if (mode.includes("lines")) {
+          trace.line = {...(trace.line || {}), color: run_colour, width: line_width};
+        }
+        if (mode.includes("markers") || trace.marker) {
+          trace.marker = {...(trace.marker || {}), color: run_colour};
+          trace.marker.line = {...(trace.marker.line || {}), color: run_colour};
+        }
       }
       return prepared;
     };
