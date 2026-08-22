@@ -60,6 +60,66 @@ async function request_routing_regression() {
   assert.equal(parsed.searchParams.has("step_min"), false);
 }
 
+function workspace_range_intersection_regression() {
+  const source = load_source("dashboard_weight_step_controls_patch.js");
+  const start = source.indexOf("    const visible_workspace_runs = () => (");
+  const end = source.indexOf("    const invalidate_depth_view = () => {");
+  assert.ok(start >= 0 && end > start, "could not isolate retained-step range logic");
+
+  let visible_runs = [
+    {dashboard_run_id: "A", depth_snapshot_count: 100, depth_minimum_update: 100, depth_maximum_update: 300},
+    {dashboard_run_id: "B", depth_snapshot_count: 100, depth_minimum_update: 150, depth_maximum_update: 250},
+    {dashboard_run_id: "C", depth_snapshot_count: 100, depth_minimum_update: 120, depth_maximum_update: 220},
+  ];
+  let selected_run = visible_runs[0];
+  const context = {
+    app: {workspace_mode: true},
+    window: {__instra_workspace: {visible_runs: () => visible_runs}},
+    finite_integer: value => {
+      if (value === null || value === undefined || value === "") return null;
+      const numeric = Number(value);
+      return Number.isInteger(numeric) ? numeric : null;
+    },
+    current_run: () => selected_run,
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${source.slice(start, end)}\nthis.available_step_range_test = available_step_range;`,
+    context,
+  );
+
+  let range = context.available_step_range_test();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(range)),
+    {available: true, minimum: 150, maximum: 220},
+    "Workspace range is not the intersection of all eye-d runs",
+  );
+
+  visible_runs[1] = {...visible_runs[1], depth_minimum_update: 400, depth_maximum_update: 500};
+  range = context.available_step_range_test();
+  assert.equal(range.available, false);
+  assert.equal(range.reason, "no overlapping steps");
+
+  // Simulate eye-ablation of the incompatible run. The intersection must recover
+  // immediately from the same live visible_runs() source used by the Workspace.
+  visible_runs = [visible_runs[0], visible_runs[2]];
+  range = context.available_step_range_test();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(range)),
+    {available: true, minimum: 120, maximum: 220},
+    "eye-ablation did not recompute the Workspace step intersection",
+  );
+
+  context.app.workspace_mode = false;
+  selected_run = {depth_snapshot_count: 7, depth_minimum_update: 910, depth_maximum_update: 916};
+  range = context.available_step_range_test();
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(range)),
+    {available: true, minimum: 910, maximum: 916},
+    "Runs view did not use the selected run's own retained range",
+  );
+}
+
 function signed_log_regression() {
   const style_nodes = [];
   const base_prepare = figure => JSON.parse(JSON.stringify(figure));
@@ -168,6 +228,7 @@ function structural_control_regression() {
 
 (async () => {
   await request_routing_regression();
+  workspace_range_intersection_regression();
   signed_log_regression();
   structural_control_regression();
   console.log("instra weight step/filter regression: PASS");
