@@ -54,6 +54,8 @@ async function request_routing_regression() {
 function global_flags_and_round_trip_regression() {
   const storage = new Map();
   const tabs = [{hidden: true}, {hidden: false}];
+  const click_handlers = [];
+  let workspace_runs = [];
   const elements = new Map([
     ["chart_current_weights_only", {checked: false, disabled: false}],
     ["chart_join_with_line_segments", {checked: false, disabled: false}],
@@ -101,8 +103,12 @@ function global_flags_and_round_trip_regression() {
     },
     window: {
       location: {origin: "http://127.0.0.1:6007"},
-      addEventListener(event, callback) { if (event === "load") callback(); },
-      __instra_workspace: {visible_runs: () => []},
+      addEventListener(event, callback) {
+        if (event === "load") callback();
+        else if (event === "click") click_handlers.push(callback);
+      },
+      removeEventListener() {},
+      __instra_workspace: {visible_runs: () => workspace_runs},
       __instra_workspace_depth_cache: {clear() {}},
       __thog2_dashboard_performance: {state: {depth_signature: "old", pending_render: {}, deferred_coefficients: false}},
       __instra_matched_weight_selection: null,
@@ -160,10 +166,27 @@ function global_flags_and_round_trip_regression() {
     assert.equal(settings.join_with_line_segments, false);
   }
 
+  // The real UI save path is captured on window before the older group handler can
+  // stopImmediatePropagation at the save button.
+  elements.get("chart_settings_overlay").hidden = false;
+  elements.get("chart_settings_title").textContent = "Run Weights settings";
+  elements.get("chart_current_weights_only").checked = true;
+  elements.get("chart_join_with_line_segments").checked = true;
+  const save_event = {target: {closest: selector => selector === "#save_chart_settings" ? {} : null}};
+  for (const handler of click_handlers) handler(save_event);
+  assert.equal(api.global_flags().current_weights_only, true);
+  assert.equal(api.global_flags().join_with_line_segments, true);
+  elements.get("chart_settings_overlay").hidden = true;
+  elements.get("chart_settings_title").textContent = "Attention - Q settings";
+
   const initial_refreshes = refreshes;
+  api.set_global_flags({current_weights_only: false, join_with_line_segments: false});
+  assert.ok(refreshes > initial_refreshes, "disabling current-only did not refetch depth data");
+  assert.equal(context.app.figures.depth, null, "stale current-only payload survived history transition");
+
+  const before_current_enable = refreshes;
   api.set_global_flags({current_weights_only: true, join_with_line_segments: true});
-  assert.ok(refreshes > initial_refreshes, "enabling current-only did not refetch depth data");
-  assert.equal(context.app.figures.depth, null, "stale history payload survived current-only transition");
+  assert.ok(refreshes > before_current_enable, "enabling current-only did not refetch depth data");
   for (const chart_name of weight_names) {
     const settings = context.normalize_chart_settings(chart_name);
     assert.equal(settings.current_weights_only, true);
@@ -177,6 +200,7 @@ function global_flags_and_round_trip_regression() {
   assert.equal(current_figure.data[0].line.color, "#123456", "current-only Runs curve did not use run colour");
   assert.equal(current_figure.data[0].marker.color, "#123456");
 
+  // current-only -> history must invalidate again; this is the three-screenshot regression.
   context.app.figures = {heatmap: null, depth: {q: {data: [{name: "one current trace"}]}}};
   const before_history_restore = refreshes;
   api.set_global_flags({current_weights_only: false, join_with_line_segments: false});
@@ -195,6 +219,38 @@ function global_flags_and_round_trip_regression() {
   api.clear_step_range();
   context.retain_latest_weight_snapshots({data: []});
   assert.equal(retain_calls, 1, "default history path did not resume after clearing explicit window");
+
+  // Workspace availability is the intersection of eye-d runs and must change as
+  // runs are ablated. Capacity is likewise the common (minimum) capture history.
+  context.app.workspace_mode = true;
+  workspace_runs = [
+    {
+      dashboard_run_id: "A", maximum_update: 200, depth_snapshot_count: 100,
+      depth_minimum_update: 101, depth_maximum_update: 200,
+      configuration: {instrumentation__depth_weight_curves__history_length: 100},
+    },
+    {
+      dashboard_run_id: "B", maximum_update: 180, depth_snapshot_count: 60,
+      depth_minimum_update: 121, depth_maximum_update: 180,
+      configuration: {instrumentation__depth_weight_curves__history_length: 80},
+    },
+  ];
+  assert.deepEqual(api.available_step_range(), {available: true, minimum: 121, maximum: 180});
+  assert.deepEqual(api.current_step_bounds(), {minimum: 180, maximum: 200});
+  assert.equal(api.common_history_capacity(), 80);
+
+  workspace_runs = [workspace_runs[0]];
+  assert.deepEqual(api.available_step_range(), {available: true, minimum: 101, maximum: 200});
+  assert.equal(api.common_history_capacity(), 100);
+
+  workspace_runs.push({
+    dashboard_run_id: "C", maximum_update: 300, depth_snapshot_count: 51,
+    depth_minimum_update: 250, depth_maximum_update: 300,
+    configuration: {instrumentation__depth_weight_curves__history_length: 100},
+  });
+  assert.deepEqual(api.available_step_range(), {available: false, reason: "no overlapping steps"});
+  context.app.workspace_mode = false;
+  workspace_runs = [];
 
   tabs[0].hidden = true;
   tabs[1].hidden = false;
