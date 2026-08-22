@@ -120,13 +120,26 @@ window.addEventListener("load", () => {
       }, 0);
     }, true);
 
-    const charts_observer = new MutationObserver(queue_enforcement);
-    charts_observer.observe(charts_scroll, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "hidden", "aria-expanded"],
+    // Plotly rewrites large descendants of charts_scroll during every react().
+    // Train groups themselves are direct children of charts_scroll, so observing
+    // the full subtree made unrelated plot DOM churn wake this compatibility rule.
+    // Watch only direct group insertion/removal and ignore all Plotly descendants.
+    const touches_train_group = node => (
+      node instanceof Element
+      && (
+        node.dataset?.metricGroup === "train"
+        || node.dataset?.chartGroup === "train"
+      )
+    );
+    const charts_observer = new MutationObserver(records => {
+      for (const record of records) {
+        if ([...record.addedNodes, ...record.removedNodes].some(touches_train_group)) {
+          queue_enforcement();
+          return;
+        }
+      }
     });
+    charts_observer.observe(charts_scroll, {childList: true});
 
     const workspace_observer = new MutationObserver(queue_enforcement);
     workspace_observer.observe(document.body, {
