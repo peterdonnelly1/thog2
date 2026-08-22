@@ -12,6 +12,8 @@ window.addEventListener("load", () => {
     const pending_by_chart = new Map();
     const stats = {skipped: 0, flushed: 0, rendered: 0};
     const base_render_plot_visibility = render_plot;
+    let flush_in_flight = null;
+    let flush_requested = false;
 
     const maximized_weight_chart = () => (
       weight_chart_set.has(app.maximized_chart) ? app.maximized_chart : null
@@ -24,7 +26,15 @@ window.addEventListener("load", () => {
     };
 
     const render_pending_job = async (chart_name, job) => {
-      if (!job || job.run_id !== app.current_run_id) return false;
+      const latest = pending_by_chart.get(chart_name);
+      if (!latest) return false;
+      // A newer hidden refresh may arrive while another chart is being rendered.
+      // Always consume the newest pending job rather than a stale loop snapshot.
+      job = latest;
+      if (job.run_id !== app.current_run_id) {
+        pending_by_chart.delete(chart_name);
+        return false;
+      }
       const maximized = maximized_weight_chart();
       if (maximized && maximized !== chart_name) return false;
       if (!card_is_visible(job.mount)) return false;
@@ -34,14 +44,28 @@ window.addEventListener("load", () => {
       return true;
     };
 
-    const flush_visible_pending = async () => {
-      for (const [chart_name, job] of [...pending_by_chart.entries()]) {
-        try {
-          await render_pending_job(chart_name, job);
-        } catch (error) {
-          show_toast(`Deferred weight chart refresh failed: ${error.message}`);
-        }
+    const flush_visible_pending = () => {
+      if (flush_in_flight) {
+        flush_requested = true;
+        return flush_in_flight;
       }
+      flush_in_flight = (async () => {
+        try {
+          do {
+            flush_requested = false;
+            for (const chart_name of [...pending_by_chart.keys()]) {
+              try {
+                await render_pending_job(chart_name, pending_by_chart.get(chart_name));
+              } catch (error) {
+                show_toast(`Deferred weight chart refresh failed: ${error.message}`);
+              }
+            }
+          } while (flush_requested);
+        } finally {
+          flush_in_flight = null;
+        }
+      })();
+      return flush_in_flight;
     };
 
     render_plot = function(mount, figure, chart_name) {
@@ -93,7 +117,10 @@ window.addEventListener("load", () => {
 
     const base_select_run_visibility = select_run;
     select_run = function(run_id, options = {}) {
-      if (run_id !== app.current_run_id) pending_by_chart.clear();
+      if (run_id !== app.current_run_id) {
+        pending_by_chart.clear();
+        flush_requested = false;
+      }
       return base_select_run_visibility(run_id, options);
     };
 
