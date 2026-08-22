@@ -167,6 +167,18 @@ window.addEventListener("load", () => {
       return result;
     };
 
+    const base_show_toast_coupling = show_toast;
+    show_toast = function(message) {
+      let text = String(message || "");
+      const saved = /^Weight indices set to residual (\d+), branch (\d+);(.*)$/.exec(text);
+      if (saved) {
+        text = `Weight matrix feature coupling set to input ${saved[1]} → output ${saved[2]};${saved[3]}`;
+      } else if (text.startsWith("Weight indices must both be between ")) {
+        text = text.replace("Weight indices", "Input and output features");
+      }
+      return base_show_toast_coupling(text);
+    };
+
     const actual_coupling = (trace, chart_name) => {
       const model_feature = finite_integer(trace?.meta?.instra_weight_model_feature);
       const intermediate_feature = finite_integer(trace?.meta?.instra_weight_intermediate_feature);
