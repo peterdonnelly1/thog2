@@ -42,6 +42,7 @@ jobs:
           node tests/instra_workspace_weight_overlay_regression.js
           node tests/instra_dashboard_performance_regression.js
           node tests/instra_weight_step_filter_regression.js
+          node tests/instra_heatmap_performance_regression.js
 
       - name: Run focused feature and affected regressions
         env:
