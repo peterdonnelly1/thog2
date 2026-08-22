@@ -41,6 +41,7 @@ jobs:
           node tests/instra_weight_coupling_regression.js
           node tests/instra_workspace_weight_overlay_regression.js
           node tests/instra_dashboard_performance_regression.js
+          node tests/instra_weight_step_filter_regression.js
 
       - name: Run focused feature and affected regressions
         env:
@@ -56,6 +57,7 @@ jobs:
             tests/test_delta_loss_v_layer_heatmap.py \
             tests/test_console_and_descriptor_help.py \
             tests/test_local_chart_dashboard.py \
+            tests/test_instra_weight_step_range.py \
             tests/test_plastic_depth_decision_algorithms_v057.py \
             tests/test_plastic_depth_v056_help.py \
             tests/test_plastic_depth_wrapper_options.py \
