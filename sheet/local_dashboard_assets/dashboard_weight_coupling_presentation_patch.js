@@ -2,9 +2,9 @@
 "use strict";
 
 // Final Weights presentation pass: use ML-facing feature-coupling terminology,
-// keep the four group index controls compact, put the two MLP charts in the
-// right column, simplify attention labels, separate Plotly title/subtitle text,
-// and slightly reduce trajectory line weight without changing chart settings.
+// keep the group index controls compact, put the two MLP charts in the right
+// column, simplify attention labels, separate Plotly title/subtitle text, and
+// slightly reduce trajectory line weight without changing chart settings.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const weight_chart_names = new Set([
@@ -102,7 +102,12 @@ window.addEventListener("load", () => {
         button.setAttribute("aria-label", title);
       }
       const random_button = by_id("weight_random_jump");
-      if (random_button) random_button.hidden = true;
+      if (random_button) {
+        if (random_button.hidden) random_button.hidden = false;
+        if (random_button.textContent !== "random") random_button.textContent = "random";
+        random_button.title = "Let INSTRA choose a new random feature coupling";
+        random_button.setAttribute("aria-label", random_button.title);
+      }
       controls.setAttribute(
         "aria-label",
         "Weight matrix feature coupling. Input and output feature index controls."
@@ -164,6 +169,7 @@ window.addEventListener("load", () => {
       const result = base_ensure_depth_cards_coupling();
       reorder_weight_cards();
       apply_attention_headings();
+      apply_weight_control_labels();
       return result;
     };
 
@@ -270,21 +276,37 @@ window.addEventListener("load", () => {
       apply_attention_headings();
     };
 
+    // Plotly mutates the chart subtree heavily during redraws. A broad
+    // MutationObserver here amplifies every redraw and, when another patch toggles
+    // a control attribute, can become a self-sustaining browser loop. Use bounded
+    // startup passes plus the card-construction wrapper instead.
     enforce_static_presentation();
-    const group = by_id("coefficients_chart_group");
-    if (group) {
-      const observer = new MutationObserver(enforce_static_presentation);
-      observer.observe(group, {childList: true, subtree: true, characterData: true});
-    }
+    let startup_passes = 0;
+    const startup_timer = setInterval(() => {
+      startup_passes += 1;
+      enforce_static_presentation();
+      if (startup_passes >= 20 || (
+        by_id("weight_index_group_controls")
+        && desired_weight_order.every(chart_name => document.querySelector(`.chart-card[data-chart="${chart_name}"]`))
+      )) {
+        clearInterval(startup_timer);
+      }
+    }, 100);
 
     const style = document.createElement("style");
     style.textContent = `
-      #weight_random_jump { display: none !important; }
       #weight_index_group_controls .weight-index-step-button {
         min-width: 27px !important;
         width: 27px !important;
         padding-left: 3px !important;
         padding-right: 3px !important;
+      }
+      #weight_random_jump {
+        display: inline-flex !important;
+        width: auto !important;
+        min-width: 48px !important;
+        padding-left: 6px !important;
+        padding-right: 6px !important;
       }
       #weight_index_group_summary { margin-right: 7px; }
       .chart-card[data-chart="attn_q_head_N"] .chart-heading-copy h2 strong,
