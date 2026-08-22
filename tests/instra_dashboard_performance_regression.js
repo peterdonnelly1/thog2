@@ -34,6 +34,7 @@ async function workspace_depth_cache_regression() {
 
   const context = {
     console,
+    URL,
     depth_weight_chart_names: ["q", "k", "v", "o", "up", "down"],
     normalize_chart_settings: () => ({current_weights_only: current_only}),
     run_identifier: run => run.dashboard_run_id,
@@ -91,8 +92,18 @@ async function workspace_depth_cache_regression() {
   );
   assert.equal(requests.at(-1), "B");
 
+  const before_stress = requests.length;
+  for (let iteration = 0; iteration < 10000; iteration += 1) {
+    await workspace.fetch_depth_payload(request);
+  }
+  assert.equal(
+    requests.length,
+    before_stress,
+    "unchanged Workspace stress refreshes leaked network requests",
+  );
+
   const stats = context.window.__instra_workspace_depth_cache.stats();
-  assert.ok(stats.hits >= 5, "Workspace depth cache recorded too few hits");
+  assert.ok(stats.hits >= 20005, "Workspace depth cache recorded too few stress-test hits");
   assert.ok(stats.misses >= 8, "Workspace depth cache recorded too few misses");
   assert.equal(stats.entries, 2);
 }
@@ -131,37 +142,54 @@ async function render_visibility_regression() {
   vm.runInContext(load_source("dashboard_render_visibility_performance_patch.js"), context);
 
   await context.render_plot(mounts.q, {version: 1}, "q");
-  await context.render_plot(mounts.k, {version: 1}, "k");
-  await context.render_plot(mounts.k, {version: 2}, "k");
-  await context.render_plot(mounts.v, {version: 1}, "v");
+  for (const chart_name of chart_names.slice(1)) {
+    await context.render_plot(mounts[chart_name], {version: 1}, chart_name);
+  }
   assert.deepEqual(rendered.map(item => item.chart_name), ["q"], "hidden weight charts were still Plotly-rendered");
-  assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 2);
+  assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 5);
+
+  for (let version = 2; version <= 1000; version += 1) {
+    for (const chart_name of chart_names.slice(1)) {
+      await context.render_plot(mounts[chart_name], {version}, chart_name);
+    }
+  }
+  assert.equal(rendered.length, 1, "hidden fullscreen stress updates reached Plotly");
+  assert.equal(
+    context.window.__instra_render_visibility_performance.pending_count(),
+    5,
+    "hidden fullscreen stress updates accumulated instead of coalescing",
+  );
 
   context.toggle_maximized_chart("k");
-  await Promise.resolve();
-  assert.equal(rendered.filter(item => item.chart_name === "k").length, 1, "newly visible maximized chart was not flushed once");
+  await context.window.__instra_render_visibility_performance.flush();
+  const k_renders = rendered.filter(item => item.chart_name === "k");
+  assert.equal(k_renders.length, 1, "newly visible maximized chart was not flushed once");
   assert.equal(
-    rendered.find(item => item.chart_name === "k").figure.version,
-    2,
+    k_renders[0].figure.version,
+    1000,
     "deferred chart did not keep only the newest hidden update",
   );
 
-  await context.render_plot(mounts.q, {version: 3}, "q");
+  await context.render_plot(mounts.q, {version: 1001}, "q");
   assert.equal(rendered.filter(item => item.chart_name === "q").length, 1, "newly hidden prior chart was rendered");
 
   context.restore_maximized_chart();
-  await Promise.resolve();
+  await context.window.__instra_render_visibility_performance.flush();
   assert.equal(rendered.filter(item => item.chart_name === "q").length, 2, "restore did not flush hidden Q");
-  assert.equal(rendered.filter(item => item.chart_name === "v").length, 1, "restore did not flush hidden V");
+  for (const chart_name of ["v", "o", "up", "down"]) {
+    const chart_renders = rendered.filter(item => item.chart_name === chart_name);
+    assert.equal(chart_renders.length, 1, `restore did not flush hidden ${chart_name}`);
+    assert.equal(chart_renders[0].figure.version, 1000, `${chart_name} did not flush its newest hidden update`);
+  }
   assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 0);
 
   context.app.maximized_chart = "q";
-  await context.render_plot(mounts.k, {version: 4}, "k");
+  await context.render_plot(mounts.k, {version: 2000}, "k");
   assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 1);
   context.select_run("R2");
   assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 0, "run switch retained stale deferred figures");
   context.restore_maximized_chart();
-  await Promise.resolve();
+  await context.window.__instra_render_visibility_performance.flush();
   assert.ok(rendered.every(item => item.run_id === "R1"), "stale deferred figure leaked into the new run");
 }
 
