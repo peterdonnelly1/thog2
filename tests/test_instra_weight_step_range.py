@@ -108,7 +108,7 @@ def test_retained_weight_step_range_reads_only_requested_snapshots(tmp_path: Pat
     store.close()
 
 
-def test_range_payload_cache_and_http_route(tmp_path: Path) -> None:
+def test_range_payload_cache_http_route_and_future_fill(tmp_path: Path) -> None:
     store = LocalChartStore(
         tmp_path / "charts.sqlite3",
         run_name="route_test",
@@ -162,6 +162,18 @@ def test_range_payload_cache_and_http_route(tmp_path: Path) -> None:
     bad.do_GET()
     assert bad.sent[0] == HTTPStatus.BAD_REQUEST
 
+    # A future display window is initially empty. When the trainer later records a
+    # snapshot inside it, the same range key must invalidate on depth revision and
+    # immediately start returning data rather than reusing the cached empty payload.
+    future = step_range._ranged_depth_payload(
+        dashboard,
+        state,
+        minimum_update=60,
+        maximum_update=70,
+    )
+    assert future["weight_step_range"]["snapshot_count"] == 0
+    assert future["depth"] == {}
+
     store.append_depth_weight_snapshot(_snapshot(50), history_length=4)
     assert state.status()["depth_minimum_update"] == 20
     refreshed = step_range._ranged_depth_payload(
@@ -172,5 +184,16 @@ def test_range_payload_cache_and_http_route(tmp_path: Path) -> None:
     )
     assert refreshed["depth"]["chart"]["updates"] == [20, 30, 40, 50]
     assert builder_calls[-1] == (20, 30, 40, 50)
+
+    store.append_depth_weight_snapshot(_snapshot(60), history_length=4)
+    future_filled = step_range._ranged_depth_payload(
+        dashboard,
+        state,
+        minimum_update=60,
+        maximum_update=70,
+    )
+    assert future_filled["weight_step_range"]["snapshot_count"] == 1
+    assert future_filled["depth"]["chart"]["updates"] == [60]
+    assert builder_calls[-1] == (60,)
     store.close()
 # ^^^ THOG
