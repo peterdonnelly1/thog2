@@ -35,6 +35,10 @@ async function workspace_depth_cache_regression() {
   const context = {
     console,
     URL,
+    app: {
+      current_run_id: "A",
+      current_status: {depth_snapshot_count: 100, depth_maximum_update: 1000},
+    },
     depth_weight_chart_names: ["q", "k", "v", "o", "up", "down"],
     normalize_chart_settings: () => ({current_weights_only: current_only}),
     run_identifier: run => run.dashboard_run_id,
@@ -65,10 +69,16 @@ async function workspace_depth_cache_regression() {
   assert.equal(requests.length, 3, "unchanged visible runs were fetched again");
   assert.deepEqual(payload.entries.map(item => item.run_id), ["A", "B", "C"]);
 
+  // /api/status is polled more frequently than /api/runs. A fresh selected-run
+  // revision must invalidate the cache even while the catalog row is still stale.
+  context.app.current_status.depth_maximum_update = 1001;
+  await workspace.fetch_depth_payload(request);
+  assert.equal(requests.length, 4, "fresh current-run status did not invalidate its cached depth payload");
+  assert.equal(requests.at(-1), "A");
+
   visible_runs[0].depth_maximum_update = 1001;
   await workspace.fetch_depth_payload(request);
-  assert.equal(requests.length, 4, "one advancing run should cause exactly one depth request");
-  assert.equal(requests.at(-1), "A");
+  assert.equal(requests.length, 4, "catalog catch-up refetched an already-current run");
 
   current_only = false;
   await workspace.fetch_depth_payload(request);
