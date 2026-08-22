@@ -57,6 +57,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_matched_weight_workspace_repair_patch.js",
     "dashboard_workspace_stability_performance_patch.js",
     "dashboard_weight_controls_run_table_patch.js",
+    "dashboard_run_table_s_checkpoint_patch.js",
 )
 
 
