@@ -317,16 +317,6 @@ window.addEventListener("load", () => {
       }
     `;
     document.head.appendChild(style);
-
-    requestAnimationFrame(() => requestAnimationFrame(async () => {
-      for (const chart_name of weight_chart_names) {
-        const mount = by_id(`${chart_name}_plot`);
-        let figure = null;
-        try { figure = figure_for_chart(chart_name); }
-        catch (_error) { figure = null; }
-        if (mount && figure) await render_plot(mount, figure, chart_name);
-      }
-    }));
   }, 320);
 });
 // ^^^ THOG
