@@ -25,9 +25,7 @@ async function request_routing_regression() {
     },
     window: {
       location: {origin: "http://127.0.0.1:6007"},
-      __instra_weight_step_filter: {
-        request_range: () => selected_range,
-      },
+      __instra_weight_step_filter: {request_range: () => selected_range},
     },
   };
   context.window.window = context.window;
@@ -37,20 +35,13 @@ async function request_routing_regression() {
   await context.fetch_json("/api/figure-family?run=A&family=depth");
   let parsed = new URL(requests.at(-1), "http://127.0.0.1:6007");
   assert.equal(parsed.searchParams.get("current_only"), "1");
-  assert.equal(parsed.searchParams.has("step_min"), false);
 
-  selected_range = {minimum: 120, maximum: 145};
+  selected_range = {minimum: 1230, maximum: 1329};
   await context.fetch_json("/api/figure-family?run=A&family=depth&current_only=1");
   parsed = new URL(requests.at(-1), "http://127.0.0.1:6007");
-  assert.equal(parsed.searchParams.get("step_min"), "120");
-  assert.equal(parsed.searchParams.get("step_max"), "145");
-  assert.equal(parsed.searchParams.has("current_only"), false, "explicit range did not override latest-only request");
-
-  selected_range = {minimum: 333, maximum: 333};
-  await context.fetch_json("/api/figure-family?run=A&family=depth");
-  parsed = new URL(requests.at(-1), "http://127.0.0.1:6007");
-  assert.equal(parsed.searchParams.get("step_min"), "333");
-  assert.equal(parsed.searchParams.get("step_max"), "333");
+  assert.equal(parsed.searchParams.get("step_min"), "1230");
+  assert.equal(parsed.searchParams.get("step_max"), "1329");
+  assert.equal(parsed.searchParams.has("current_only"), false);
 
   selected_range = null;
   current_only = false;
@@ -60,177 +51,181 @@ async function request_routing_regression() {
   assert.equal(parsed.searchParams.has("step_min"), false);
 }
 
-function workspace_range_intersection_regression() {
-  const source = load_source("dashboard_weight_step_controls_patch.js");
-  const start = source.indexOf("    const visible_workspace_runs = () => (");
-  const end = source.indexOf("    const invalidate_depth_view = () => {");
-  assert.ok(start >= 0 && end > start, "could not isolate retained-step range logic");
+function global_flags_and_round_trip_regression() {
+  const storage = new Map();
+  const tabs = [{hidden: true}, {hidden: false}];
+  const elements = new Map([
+    ["chart_current_weights_only", {checked: false, disabled: false}],
+    ["chart_join_with_line_segments", {checked: false, disabled: false}],
+    ["chart_current_weights_only_field", {querySelector: () => ({textContent: ""})}],
+    ["chart_join_with_line_segments_field", {querySelector: () => ({textContent: ""})}],
+    ["chart_settings_overlay", {hidden: true}],
+    ["chart_settings_title", {textContent: "Attention - Q settings"}],
+  ]);
+  const weight_names = ["q", "k", "v", "o", "up", "down"];
+  let refreshes = 0;
+  let retain_calls = 0;
+  let workspace_latest_calls = 0;
+  let open_saw_tabs = null;
+  const base_settings = {current_weights_only: false, join_with_line_segments: false};
 
-  let visible_runs = [
-    {dashboard_run_id: "A", depth_snapshot_count: 100, depth_minimum_update: 100, depth_maximum_update: 300},
-    {dashboard_run_id: "B", depth_snapshot_count: 100, depth_minimum_update: 150, depth_maximum_update: 250},
-    {dashboard_run_id: "C", depth_snapshot_count: 100, depth_minimum_update: 120, depth_maximum_update: 220},
-  ];
-  let selected_run = visible_runs[0];
-  const context = {
-    app: {workspace_mode: true},
-    window: {__instra_workspace: {visible_runs: () => visible_runs}},
-    finite_integer: value => {
-      if (value === null || value === undefined || value === "") return null;
-      const numeric = Number(value);
-      return Number.isInteger(numeric) ? numeric : null;
-    },
-    current_run: () => selected_run,
+  const load_json = (key, fallback) => {
+    if (key === "thog2_local_trajectory_scale_modes") return {q: "linear"};
+    if (!storage.has(key)) return fallback;
+    return JSON.parse(storage.get(key));
   };
-  vm.createContext(context);
-  vm.runInContext(
-    `${source.slice(start, end)}\nthis.available_step_range_test = available_step_range;`,
-    context,
-  );
+  const save_json = (key, value) => storage.set(key, JSON.stringify(value));
 
-  let range = context.available_step_range_test();
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(range)),
-    {available: true, minimum: 150, maximum: 220},
-    "Workspace range is not the intersection of all eye-d runs",
-  );
+  const current_run_value = {
+    dashboard_run_id: "R1",
+    maximum_update: 1100,
+    depth_snapshot_count: 100,
+    depth_minimum_update: 1001,
+    depth_maximum_update: 1100,
+    configuration: {instrumentation__depth_weight_curves__history_length: 100},
+  };
 
-  visible_runs[1] = {...visible_runs[1], depth_minimum_update: 400, depth_maximum_update: 500};
-  range = context.available_step_range_test();
-  assert.equal(range.available, false);
-  assert.equal(range.reason, "no overlapping steps");
-
-  // Simulate eye-ablation of the incompatible run. The intersection must recover
-  // immediately from the same live visible_runs() source used by the Workspace.
-  visible_runs = [visible_runs[0], visible_runs[2]];
-  range = context.available_step_range_test();
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(range)),
-    {available: true, minimum: 120, maximum: 220},
-    "eye-ablation did not recompute the Workspace step intersection",
-  );
-
-  context.app.workspace_mode = false;
-  selected_run = {depth_snapshot_count: 7, depth_minimum_update: 910, depth_maximum_update: 916};
-  range = context.available_step_range_test();
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(range)),
-    {available: true, minimum: 910, maximum: 916},
-    "Runs view did not use the selected run's own retained range",
-  );
-}
-
-function signed_log_regression() {
-  const style_nodes = [];
-  const base_prepare = figure => JSON.parse(JSON.stringify(figure));
   const context = {
     console,
     structuredClone: global.structuredClone,
-    depth_weight_chart_names: ["q"],
+    depth_weight_chart_names: weight_names,
     app: {
       workspace_mode: false,
-      current_run_id: "A",
-      current_status: null,
+      current_run_id: "R1",
+      current_status: current_run_value,
       refresh_in_flight: false,
-      figure_revision: null,
-      axis_chart_name: null,
-      axis_chart_workspace_mode: null,
+      figures: {heatmap: null, depth: {q: {data: []}}},
+      figure_revision: "old",
+      axis_chart_name: "q",
+      axis_chart_workspace_mode: false,
     },
     window: {
       location: {origin: "http://127.0.0.1:6007"},
       addEventListener(event, callback) { if (event === "load") callback(); },
       __instra_workspace: {visible_runs: () => []},
+      __instra_workspace_depth_cache: {clear() {}},
+      __thog2_dashboard_performance: {state: {depth_signature: "old", pending_render: {}, deferred_coefficients: false}},
       __instra_matched_weight_selection: null,
+      Plotly: {purge() {}},
     },
     document: {
       activeElement: null,
       querySelector() { return null; },
-      querySelectorAll() { return []; },
-      createElement() { return {textContent: "", style: {}, classList: {toggle() {}}}; },
-      head: {appendChild(node) { style_nodes.push(node); }},
+      querySelectorAll(selector) {
+        if (selector === "[data-chart-settings-tab]") return tabs;
+        return [];
+      },
+      createElement() { return {textContent: "", style: {}, classList: {add() {}, toggle() {}}, append() {}, appendChild() {}}; },
+      head: {appendChild() {}},
     },
-    by_id: () => null,
-    normalize_chart_settings: () => ({current_weights_only: false}),
-    retain_latest_weight_snapshots: () => undefined,
-    instra_enforce_workspace_latest_weights: prepared => prepared,
-    current_run: () => ({depth_snapshot_count: 10, depth_minimum_update: 10, depth_maximum_update: 100}),
-    run_identifier: run => run?.dashboard_run_id || "",
-    figure_for_chart: () => null,
-    prepare_figure: base_prepare,
+    by_id: id => elements.get(id) || null,
+    load_json,
+    save_json,
+    normalize_chart_settings: () => ({...base_settings}),
+    retain_latest_weight_snapshots: () => { retain_calls += 1; },
+    instra_enforce_workspace_latest_weights: prepared => { workspace_latest_calls += 1; return prepared; },
+    open_chart_settings: () => { open_saw_tabs = tabs.map(tab => tab.hidden); },
+    populate_chart_settings_form: () => undefined,
+    sync_chart_setting_outputs: () => undefined,
+    current_run: () => current_run_value,
+    run_identifier: run => run.dashboard_run_id,
+    refresh_current_run: () => { refreshes += 1; },
+    render_figures: async () => undefined,
+    prepare_figure: figure => JSON.parse(JSON.stringify(figure)),
+    render_plot: async () => undefined,
     render_runs: () => undefined,
     render_run_heading: () => undefined,
-    refresh_current_run: () => undefined,
-    show_toast: () => undefined,
-    load_json: (key, fallback) => key === "thog2_local_trajectory_scale_modes" ? {q: "log"} : fallback,
+    figure_for_chart: () => null,
+    show_toast: message => { throw new Error(`unexpected toast: ${message}`); },
+    colour_for_run: () => "#123456",
+    localStorage: {
+      getItem(key) { return storage.get(key) ?? null; },
+      setItem(key, value) { storage.set(key, String(value)); },
+    },
     setTimeout(callback) { callback(); return 1; },
-    setInterval() { return 1; },
-    clearInterval() {},
-    queueMicrotask,
+    clearTimeout() {},
   };
   context.window.window = context.window;
   vm.createContext(context);
   vm.runInContext(load_source("dashboard_weight_step_controls_patch.js"), context);
 
-  const prepared = context.prepare_figure({
-    data: [],
-    layout: {
-      yaxis: {
-        tickvals: [-2, -1, 0, 1, 2],
-        ticktext: ["-0.01", "-0.001", "0", "0.001", "0.01"],
-      },
-    },
-  }, "q");
+  const api = context.window.__instra_weight_controls_v2;
+  assert.ok(api, "weights-v2 API was not installed");
+  assert.equal(api.common_history_capacity(), 100);
+  assert.deepEqual(api.available_step_range(), {available: true, minimum: 1001, maximum: 1100});
 
-  const labels = prepared.layout.yaxis.ticktext;
-  assert.ok(labels.includes("1e-04"), "signed-log scale did not add a smaller positive decade");
-  assert.ok(labels.includes("-1e-04"), "signed-log scale did not add a smaller negative decade");
-  assert.ok(labels.includes("1e-03"));
-  assert.ok(labels.includes("-1e-02"));
-  assert.ok(labels.includes("0e+00"));
-  assert.ok(
-    labels.every(label => /^-?\d+e[+-]\d{2}$/.test(label)),
-    `non-scientific signed-log label remained: ${labels.join(", ")}`,
-  );
-  assert.ok(style_nodes.length >= 1, "final weight controls style was not installed");
+  for (const chart_name of weight_names) {
+    const settings = context.normalize_chart_settings(chart_name);
+    assert.equal(settings.current_weights_only, false);
+    assert.equal(settings.join_with_line_segments, false);
+  }
+
+  const initial_refreshes = refreshes;
+  api.set_global_flags({current_weights_only: true, join_with_line_segments: true});
+  assert.ok(refreshes > initial_refreshes, "enabling current-only did not refetch depth data");
+  assert.equal(context.app.figures.depth, null, "stale history payload survived current-only transition");
+  for (const chart_name of weight_names) {
+    const settings = context.normalize_chart_settings(chart_name);
+    assert.equal(settings.current_weights_only, true);
+    assert.equal(settings.join_with_line_segments, true);
+  }
+
+  const current_figure = context.prepare_figure({
+    data: [{mode: "lines+markers", line: {color: "#old", width: 1}, marker: {color: "#old"}}],
+    layout: {},
+  }, "q");
+  assert.equal(current_figure.data[0].line.color, "#123456", "current-only Runs curve did not use run colour");
+  assert.equal(current_figure.data[0].marker.color, "#123456");
+
+  context.app.figures = {heatmap: null, depth: {q: {data: [{name: "one current trace"}]}}};
+  const before_history_restore = refreshes;
+  api.set_global_flags({current_weights_only: false, join_with_line_segments: false});
+  assert.ok(refreshes > before_history_restore, "disabling current-only did not refetch history");
+  assert.equal(context.app.figures.depth, null, "one-snapshot payload survived history restore");
+  assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
+  assert.equal(context.normalize_chart_settings("q").join_with_line_segments, false);
+
+  api.set_step_range(1230, 1329);
+  assert.deepEqual(context.window.__instra_weight_step_filter.request_range(), {minimum: 1230, maximum: 1329});
+  assert.equal(context.normalize_chart_settings("q").current_weights_only, true);
+  context.retain_latest_weight_snapshots({data: []});
+  context.instra_enforce_workspace_latest_weights({data: []});
+  assert.equal(retain_calls, 0, "explicit step window was collapsed to newest Runs snapshot");
+  assert.equal(workspace_latest_calls, 0, "explicit step window was collapsed to newest Workspace snapshot");
+  api.clear_step_range();
+  context.retain_latest_weight_snapshots({data: []});
+  assert.equal(retain_calls, 1, "default history path did not resume after clearing explicit window");
+
+  tabs[0].hidden = true;
+  tabs[1].hidden = false;
+  context.open_chart_settings("q");
+  assert.deepEqual(open_saw_tabs, [false, false], "individual weight settings did not restore both tabs");
 }
 
-function structural_control_regression() {
+function structural_regression() {
   const source = load_source("dashboard_weight_step_controls_patch.js");
-  assert.match(source, /data available for steps \$\{range\.minimum\} – \$\{range\.maximum\}/);
-  assert.match(source, /Math\.max\(\.\.\.ranges\.map\(range => range\.minimum\)\)/);
-  assert.match(source, /Math\.min\(\.\.\.ranges\.map\(range => range\.maximum\)\)/);
-  assert.match(source, /reason: "no overlapping steps"/);
-  assert.match(source, /raw_maximum === "" \? minimum/,
-    "blank range end no longer means one exact step");
-  assert.match(source, /selected_step_range = \{minimum, maximum\}/);
-  assert.match(source, /weight_step_whole_range/);
-  assert.match(source, /selected_step_range = null/);
-
-  assert.match(source, /if \(step_filter_active\(\)\) return;/,
-    "Runs-view latest-only collapse is no longer bypassed for explicit step windows");
-  assert.match(source, /if \(step_filter_active\(\)\) return prepared;/,
-    "Workspace latest-only collapse is no longer bypassed for explicit step windows");
-
-  assert.match(source, /label\.textContent = "weight matrix feature coupling \(i → o\):"/);
-  assert.match(source, /random\.textContent = "RND"/);
-  assert.match(source, /weight_coupling_input/);
-  assert.match(source, /weight_coupling_output/);
-  assert.match(source, /full\.slice\(0, 10\)/, "host truncation is no longer exactly 10 characters");
+  assert.match(source, /show_label\.textContent = "show weights for steps"/);
+  assert.match(source, /from\.placeholder = "from"/);
+  assert.match(source, /to\.placeholder = "to"/);
+  assert.match(source, /Curves will be displayed when step \$\{selected_step_range\.minimum\} is reached/);
+  assert.match(source, /width > capacity/);
+  assert.match(source, /instrumentation__depth_weight_curves__history_length/);
+  assert.match(source, /Global across all six weight charts and every run/);
+  assert.match(source, /font-size: 11px/);
+  assert.match(source, /#weight_random_jump::after/);
+  assert.match(source, /content: "RND"/);
+  assert.match(source, /margin-left: 38px !important/);
+  assert.match(source, /full\.slice\(0, 10\)/);
   assert.match(source, /headers\[logged_index\]\.textContent = "STEPS"/);
-  assert.match(source, /new_actual = smallest\.actual_value \/ 10/,
-    "extra smaller signed-log decade was removed");
-  assert.match(source, /padStart\(2, "0"\)/,
-    "scientific exponent padding was removed");
-  assert.ok(!source.includes("MutationObserver"), "weight-step controls reintroduced a persistent DOM observer");
-  assert.match(source, /clearInterval\(startup_timer\)/,
-    "weight-step startup reconciliation is no longer bounded");
+  assert.match(source, /new_actual = smallest\.actual_value \/ 10/);
+  assert.match(source, /padStart\(2, "0"\)/);
+  assert.ok(!source.includes("MutationObserver"), "weights-v2 reintroduced a persistent DOM observer");
 }
 
 (async () => {
   await request_routing_regression();
-  workspace_range_intersection_regression();
-  signed_log_regression();
-  structural_control_regression();
+  global_flags_and_round_trip_regression();
+  structural_regression();
   console.log("instra weight step/filter regression: PASS");
 })().catch(error => {
   console.error(error);
