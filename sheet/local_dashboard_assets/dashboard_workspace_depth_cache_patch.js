@@ -25,7 +25,23 @@ window.addEventListener("load", () => {
 
     const visible_runs_by_id = () => new Map(
       (typeof workspace.visible_runs === "function" ? workspace.visible_runs() : [])
-        .map(run => [String(run_identifier(run)), run])
+        .map(run => {
+          const run_id = String(run_identifier(run));
+          // /api/status for the selected run is polled slightly more frequently
+          // than /api/runs. Use that fresher revision so caching never delays a
+          // newly-arrived current-run weight snapshot until the next catalog poll.
+          const current_status = (
+            run_id === String(app.current_run_id || "")
+            && app.current_status
+            && typeof app.current_status === "object"
+          ) ? app.current_status : null;
+          if (!current_status) return [run_id, run];
+          return [run_id, {
+            ...run,
+            depth_snapshot_count: current_status.depth_snapshot_count,
+            depth_maximum_update: current_status.depth_maximum_update,
+          }];
+        })
     );
 
     const depth_revision = (run, variant) => JSON.stringify([
