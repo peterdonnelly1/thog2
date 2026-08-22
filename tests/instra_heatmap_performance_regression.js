@@ -78,6 +78,7 @@ async function heatmap_family_demand_regression() {
     resize_visible_plots: () => undefined,
     select_run: run_id => { app.current_run_id = run_id; },
     current_run: () => app.current_status,
+    refresh_current_run: () => { refresh_calls += 1; },
     format_integer: value => String(value),
     show_toast: message => { throw new Error(`unexpected toast: ${message}`); },
     requestAnimationFrame(callback) { callback(); return 1; },
@@ -120,8 +121,6 @@ async function heatmap_family_demand_regression() {
   context.window.__thog2_dashboard_performance.refresh_family_if_stale("heatmap");
   assert.equal(refresh_calls, 1, "reopening a stale heatmap did not wake the run refresh path");
 
-  // Simulate what refresh_current_run does after the wake: the family request must
-  // now be issued because the open group is stale.
   payload = await context.fetch_json("/api/figures?run=R1");
   assert.equal(requests.length, 3, "woken heatmap did not fetch the new revision");
   parsed = new URL(requests.at(-1), "http://127.0.0.1:6007");
@@ -132,10 +131,7 @@ async function heatmap_family_demand_regression() {
 }
 
 (async () => {
-  // refresh_current_run must be installed after context creation so it can count
-  // wakeups made by refresh_family_if_stale.
-  const original_run = heatmap_family_demand_regression;
-  await original_run();
+  await heatmap_family_demand_regression();
   console.log("instra heatmap performance regression: PASS");
 })().catch(error => {
   console.error(error);
