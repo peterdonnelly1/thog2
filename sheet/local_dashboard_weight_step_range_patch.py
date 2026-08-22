@@ -43,6 +43,50 @@ def _depth_snapshots_in_range(
     return tuple(_store._decode_payload(row["payload"]) for row in rows)
 
 
+def _ranged_depth_payload(
+    dashboard: Any,
+    state: Any,
+    *,
+    minimum_update: int,
+    maximum_update: int,
+) -> dict[str, Any]:
+    status = state.status()
+    revision = (
+        tuple(status.get("revision", ())),
+        status.get("depth_snapshot_count"),
+        status.get("depth_maximum_update"),
+        int(minimum_update),
+        int(maximum_update),
+    )
+    with state.lock:
+        if getattr(state, "_thog2_ranged_depth_revision", None) != revision:
+            snapshots = _depth_snapshots_in_range(
+                state.reader,
+                minimum_update=minimum_update,
+                maximum_update=maximum_update,
+            )
+            figures: dict[str, Any] = {}
+            if snapshots:
+                available = snapshots[-1].get("families", {})
+                for chart_name in dashboard.depth_curves._CHART_FAMILIES:
+                    if chart_name not in available:
+                        continue
+                    figures[chart_name] = dashboard.depth_curves._build_depth_plotly_figure(
+                        snapshots,
+                        chart_name,
+                    ).to_plotly_json()
+            state._thog2_ranged_depth_revision = revision
+            state._thog2_ranged_depth_payload = {
+                "depth": figures,
+                "weight_step_range": {
+                    "minimum": int(minimum_update),
+                    "maximum": int(maximum_update),
+                    "snapshot_count": len(snapshots),
+                },
+            }
+        return state._thog2_ranged_depth_payload
+
+
 def install(dashboard: Any) -> None:
     if getattr(dashboard, "_thog2_weight_step_range_patch_installed", False):
         return
@@ -71,47 +115,6 @@ def install(dashboard: Any) -> None:
         }
 
     dashboard.RunDashboardState.status = status_with_depth_minimum
-
-    def ranged_depth_payload(
-        state: Any,
-        *,
-        minimum_update: int,
-        maximum_update: int,
-    ) -> dict[str, Any]:
-        status = state.status()
-        revision = (
-            status.get("depth_snapshot_count"),
-            status.get("depth_maximum_update"),
-            int(minimum_update),
-            int(maximum_update),
-        )
-        with state.lock:
-            if getattr(state, "_thog2_ranged_depth_revision", None) != revision:
-                snapshots = _depth_snapshots_in_range(
-                    state.reader,
-                    minimum_update=minimum_update,
-                    maximum_update=maximum_update,
-                )
-                figures: dict[str, Any] = {}
-                if snapshots:
-                    available = snapshots[-1].get("families", {})
-                    for chart_name in dashboard.depth_curves._CHART_FAMILIES:
-                        if chart_name not in available:
-                            continue
-                        figures[chart_name] = dashboard.depth_curves._build_depth_plotly_figure(
-                            snapshots,
-                            chart_name,
-                        ).to_plotly_json()
-                state._thog2_ranged_depth_revision = revision
-                state._thog2_ranged_depth_payload = {
-                    "depth": figures,
-                    "weight_step_range": {
-                        "minimum": int(minimum_update),
-                        "maximum": int(maximum_update),
-                        "snapshot_count": len(snapshots),
-                    },
-                }
-            return state._thog2_ranged_depth_payload
 
     original_handler_for = dashboard._handler_for
 
@@ -143,7 +146,8 @@ def install(dashboard: Any) -> None:
                         raise ValueError("weight step maximum must be >= minimum")
                     state = catalog.state_for_run(run_name)
                     self._send_json(
-                        ranged_depth_payload(
+                        _ranged_depth_payload(
+                            dashboard,
                             state,
                             minimum_update=minimum_update,
                             maximum_update=maximum_update,
