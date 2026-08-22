@@ -449,7 +449,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "settings.current_weights_only" in javascript
     assert 'snapshot_window_mode: stored.snapshot_window_mode === "from_zero" ? "from_zero" : "rolling"' in javascript
     assert 'window_mode === "from_zero"' in javascript
-    assert 'trace?.meta?.instra_dense_optimizer_update' in javascript
+    assert 'trace?.meta?.instra_dense_optimizer_update' in v058_repair_patch
     assert 'is_weight_chart ? "Step count"' in javascript
     assert '"Recorded optimizer-step history, axes and display changes apply only to this weights panel."' in javascript
     assert "apply_outlier_resistant_y_range" in javascript
