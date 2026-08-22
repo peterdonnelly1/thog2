@@ -2,10 +2,9 @@
 "use strict";
 
 // Keep current-weight charts useful when a finished/older run never recorded the
-// presently requested user coupling.  In that case, Runs view falls back to the
-// single random coupling that was actually recorded in the latest snapshot.  This
-// pass also owns the final six-chart order and keeps the explicit random control
-// visible after the earlier compatibility layers have installed their controls.
+// presently requested user coupling. In that case, Runs view falls back to the
+// random coupling that was actually recorded in the latest snapshot. This pass
+// also owns the final six-chart order and keeps the explicit random control visible.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const weight_chart_names = new Set([
@@ -152,7 +151,7 @@ window.addEventListener("load", () => {
       }
 
       // A user-selected coupling is only present in snapshots recorded after that
-      // selection was made.  Finished/older runs must not turn into six empty axes:
+      // selection was made. Finished/older runs must not turn into six empty axes:
       // use their recorded random pair when the requested pair is absent.
       if (
         app.workspace_mode !== true
@@ -169,37 +168,56 @@ window.addEventListener("load", () => {
       const cards = desired_weight_order.map(chart_name =>
         document.querySelector(`.chart-card[data-chart="${chart_name}"]`)
       );
-      if (cards.some(card => !card)) return;
+      if (cards.some(card => !card)) return false;
       const parent = cards[0].parentElement;
-      if (!parent || cards.some(card => card.parentElement !== parent)) return;
+      if (!parent || cards.some(card => card.parentElement !== parent)) return false;
       const current = [...parent.children]
         .filter(card => card.matches?.(".chart-card") && weight_chart_names.has(card.dataset.chart))
         .map(card => card.dataset.chart);
-      if (current.join("|") === desired_weight_order.join("|")) return;
-      for (const card of cards) parent.appendChild(card);
+      if (current.join("|") !== desired_weight_order.join("|")) {
+        for (const card of cards) parent.appendChild(card);
+      }
+      return true;
     };
 
     const show_random_control = () => {
       const button = by_id("weight_random_jump");
-      if (!button) return;
-      button.hidden = false;
-      button.removeAttribute("hidden");
-      button.textContent = "random";
-      button.title = "Let INSTRA choose a new random feature coupling";
-      button.setAttribute("aria-label", button.title);
+      if (!button) return false;
+      if (button.hidden) button.hidden = false;
+      if (button.hasAttribute("hidden")) button.removeAttribute("hidden");
+      if (button.textContent !== "random") button.textContent = "random";
+      const title = "Let INSTRA choose a new random feature coupling";
+      if (button.title !== title) button.title = title;
+      if (button.getAttribute("aria-label") !== title) button.setAttribute("aria-label", title);
+      return true;
     };
 
-    const enforce_static_state = () => {
-      reorder_weight_cards();
-      show_random_control();
+    const enforce_static_state = () => ({
+      cards_ready: reorder_weight_cards(),
+      random_ready: show_random_control(),
+    });
+
+    // Never observe the Plotly/chart subtree continuously. A previous version had
+    // two observers disagreeing over the random button's hidden state; one observer
+    // also rewrote textContent, generating another child-list mutation. That formed
+    // an unbounded callback loop and pegged Firefox. Bounded startup retries plus
+    // the card-construction wrapper are sufficient and cannot self-trigger forever.
+    const base_ensure_depth_cards_weight_reliability = ensure_depth_cards;
+    ensure_depth_cards = function() {
+      const result = base_ensure_depth_cards_weight_reliability();
+      enforce_static_state();
+      return result;
     };
 
     enforce_static_state();
-    const weight_group = by_id("coefficients_chart_group") || by_id("depth_chart_group");
-    if (weight_group) {
-      const observer = new MutationObserver(enforce_static_state);
-      observer.observe(weight_group, {childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"]});
-    }
+    let startup_passes = 0;
+    const startup_timer = setInterval(() => {
+      startup_passes += 1;
+      const ready = enforce_static_state();
+      if ((ready.cards_ready && ready.random_ready) || startup_passes >= 30) {
+        clearInterval(startup_timer);
+      }
+    }, 100);
 
     const style = document.createElement("style");
     style.textContent = `
