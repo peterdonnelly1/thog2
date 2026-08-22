@@ -15,6 +15,7 @@ from sheet import local_dashboard_wandb_charts_patch as _local_dashboard_wandb_c
 from sheet import local_dashboard_wandb_catchup_patch as _local_dashboard_wandb_catchup_patch
 from sheet import local_dashboard_performance_patch as _local_dashboard_performance_patch
 from sheet import local_dashboard_current_weights_performance_patch as _local_dashboard_current_weights_performance_patch
+from sheet import local_dashboard_weight_step_range_patch as _local_dashboard_weight_step_range_patch
 from sheet import matched_weight_selection_patch as _matched_weight_selection_patch
 import run_thog2_local_dashboard as _dashboard
 
@@ -25,6 +26,7 @@ _local_dashboard_wandb_catchup_patch.install(_local_dashboard_wandb_charts_patch
 _local_dashboard_performance_patch.install(_dashboard)
 _matched_weight_selection_patch.install_dashboard(_dashboard)
 _local_dashboard_current_weights_performance_patch.install(_dashboard)
+_local_dashboard_weight_step_range_patch.install(_dashboard)
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
@@ -62,6 +64,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_coupling_reliability_patch.js",
     "dashboard_workspace_depth_cache_patch.js",
     "dashboard_render_visibility_performance_patch.js",
+    "dashboard_weight_step_controls_patch.js",
 )
 
 
