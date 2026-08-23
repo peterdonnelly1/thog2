@@ -102,8 +102,6 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             "run_thog2_dashboard.py",
             "--root",
             str(tmp_path),
-            "--run",
-            "workspace_a",
             "--host",
             "127.0.0.1",
             "--port",
