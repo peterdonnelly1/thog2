@@ -131,7 +131,13 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
         )
         _wait(
             driver,
-            lambda: bool(driver.execute_script("return window.app?.workspace_mode === true;")),
+            lambda: bool(driver.execute_script(
+                """
+                const nav = document.getElementById('workspace_nav');
+                return document.body.classList.contains('instra-workspace-mode')
+                  && !!nav?.classList.contains('selected');
+                """
+            )),
             message="Workspace mode did not activate",
         )
         _open_group(driver, "coefficients_chart_group", "coefficients_group_toggle")
