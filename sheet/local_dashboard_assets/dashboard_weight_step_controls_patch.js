@@ -182,7 +182,7 @@ window.addEventListener("load", () => {
         performance.deferred_coefficients = true;
       }
       if (app.figures && typeof app.figures === "object") {
-        app.figures = {...app.figures, depth: null};
+        app.figures = {...app.figures, depth: {}};
       }
       app.figure_revision = null;
       apply_selected_range_placeholders();
@@ -251,9 +251,9 @@ window.addEventListener("load", () => {
       if (join_small) join_small.textContent = "Global across all six weight charts and every run.";
     };
 
-    const chart_settings_is_weights_group = () => (
+    const chart_settings_is_weight_editor = () => (
       !by_id("chart_settings_overlay")?.hidden
-      && /weights settings/i.test(String(by_id("chart_settings_title")?.textContent || ""))
+      && weight_chart_set.has(app.axis_chart_name)
     );
 
     const base_open_chart_settings_weight_v2 = open_chart_settings;
@@ -277,11 +277,10 @@ window.addEventListener("load", () => {
       const result = base_sync_chart_setting_outputs_weight_v2();
       if (!weight_chart_set.has(app.axis_chart_name)) return result;
       sync_global_weight_fields();
-      const group_editor = chart_settings_is_weights_group();
       const current = by_id("chart_current_weights_only");
       const join = by_id("chart_join_with_line_segments");
-      if (current) current.disabled = !group_editor;
-      if (join) join.disabled = !group_editor;
+      if (current) current.disabled = false;
+      if (join) join.disabled = false;
       return result;
     };
 
@@ -290,7 +289,7 @@ window.addEventListener("load", () => {
     // saves are ignored because their settings overlay is not open.
     window.addEventListener("click", event => {
       const button = event.target.closest?.("#save_chart_settings");
-      if (!button || !chart_settings_is_weights_group()) return;
+      if (!button || !chart_settings_is_weight_editor()) return;
       set_global_flags({
         current_weights_only: by_id("chart_current_weights_only")?.checked === true,
         join_with_line_segments: by_id("chart_join_with_line_segments")?.checked === true,
@@ -989,6 +988,6 @@ window.addEventListener("load", () => {
     sync_step_controls();
     sync_coupling_editor();
     sync_global_weight_fields();
-  }, 1900);
+  }, 0);
 });
 // ^^^ THOG
