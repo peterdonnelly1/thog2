@@ -182,7 +182,7 @@ function global_flags_and_round_trip_regression() {
   const initial_refreshes = refreshes;
   api.set_global_flags({current_weights_only: false, join_with_line_segments: false});
   assert.ok(refreshes > initial_refreshes, "disabling current-only did not refetch depth data");
-  assert.equal(context.app.figures.depth, null, "stale current-only payload survived history transition");
+  assert.deepEqual(context.app.figures.depth, {}, "stale current-only payload survived history transition");
 
   const before_current_enable = refreshes;
   api.set_global_flags({current_weights_only: true, join_with_line_segments: true});
@@ -205,7 +205,7 @@ function global_flags_and_round_trip_regression() {
   const before_history_restore = refreshes;
   api.set_global_flags({current_weights_only: false, join_with_line_segments: false});
   assert.ok(refreshes > before_history_restore, "disabling current-only did not refetch history");
-  assert.equal(context.app.figures.depth, null, "one-snapshot payload survived history restore");
+  assert.deepEqual(context.app.figures.depth, {}, "one-snapshot payload survived history restore");
   assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
   assert.equal(context.normalize_chart_settings("q").join_with_line_segments, false);
 
