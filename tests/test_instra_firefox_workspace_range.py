@@ -44,9 +44,13 @@ def _make_weight_store(
 def _eye_click(driver, run_id: str) -> None:
     driver.execute_script(
         """
-        const row = document.querySelector(`tr[data-run-id="${arguments[0]}"]`);
+        const wanted = String(arguments[0]);
+        const row = [...document.querySelectorAll('tr[data-run-id]')].find(candidate => {
+          const value = String(candidate.dataset.runId || '');
+          return value === wanted || value === `legacy:${wanted}`;
+        });
         const eye = row?.querySelector('.eye-button');
-        if (!eye) throw new Error(`missing eye for ${arguments[0]}`);
+        if (!eye) throw new Error(`missing eye for ${wanted}`);
         eye.click();
         """,
         run_id,
