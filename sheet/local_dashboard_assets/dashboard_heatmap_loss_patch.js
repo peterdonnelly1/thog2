@@ -6,6 +6,7 @@
 window.addEventListener("load", () => {
   setTimeout(() => {
     const display_mode_setting = "delta_loss_display_mode";
+    let legacy_absolute_fallback_active = false;
     const current_display_mode = () => (
       heatmap_settings_for_current_run()[display_mode_setting] === "absolute"
         ? "absolute"
@@ -13,6 +14,7 @@ window.addEventListener("load", () => {
     );
     const clamp_01 = value => Math.max(0, Math.min(1, Number(value)));
     const finite_number = value => {
+      if (value === null || value === undefined || value === "") return null;
       const numeric = Number(value);
       return Number.isFinite(numeric) ? numeric : null;
     };
@@ -31,9 +33,8 @@ window.addEventListener("load", () => {
     };
     const auto_enabled = () => heatmap_settings_for_current_run().auto_colour_saturation === true;
 
-    const display_delta = (raw_delta, current_loss) => {
-      if (current_display_mode() !== "percent") return raw_delta;
-      if (!(Number.isFinite(current_loss) && current_loss !== 0)) return null;
+    const display_delta = (raw_delta, current_loss, percent_mode) => {
+      if (!percent_mode) return raw_delta;
       return 100.0 * raw_delta / current_loss;
     };
 
@@ -168,6 +169,31 @@ window.addEventListener("load", () => {
         ? prepared.layout.meta.thog2_current_losses.map(finite_number)
         : [];
       const customdata = Array.isArray(heatmap_trace.customdata) ? heatmap_trace.customdata : [];
+      const requested_percent = current_display_mode() === "percent";
+      let saw_delta = false;
+      let percent_metadata_complete = true;
+      for (let row_index = 0; row_index < customdata.length; row_index += 1) {
+        const row = customdata[row_index];
+        if (!Array.isArray(row)) continue;
+        const row_has_delta = row.some(cell => (
+          Array.isArray(cell) && finite_number(cell[3]) !== null
+        ));
+        if (!row_has_delta) continue;
+        saw_delta = true;
+        const current_loss = current_losses[row_index] ?? null;
+        if (!(Number.isFinite(current_loss) && current_loss !== 0)) {
+          percent_metadata_complete = false;
+          break;
+        }
+      }
+      legacy_absolute_fallback_active = requested_percent && saw_delta && !percent_metadata_complete;
+      const percent_mode = requested_percent && !legacy_absolute_fallback_active;
+      prepared.layout = prepared.layout || {};
+      prepared.layout.meta = {
+        ...(prepared.layout.meta || {}),
+        thog2_legacy_absolute_fallback: legacy_absolute_fallback_active,
+      };
+
       const display_values = [];
       for (let row_index = 0; row_index < customdata.length; row_index += 1) {
         const current_loss = current_losses[row_index] ?? null;
@@ -178,7 +204,7 @@ window.addEventListener("load", () => {
           if (!Array.isArray(cell)) continue;
           const raw_delta = finite_number(cell[3]);
           if (raw_delta === null) continue;
-          const shown_delta = display_delta(raw_delta, current_loss);
+          const shown_delta = display_delta(raw_delta, current_loss, percent_mode);
           cell[4] = current_loss;
           cell[5] = shown_delta;
           if (shown_delta !== null) display_values.push(shown_delta);
@@ -208,7 +234,6 @@ window.addEventListener("load", () => {
         [0.505, "rgb(112,76,76)"],
         [1.000, "rgb(255,0,0)"],
       ];
-      const percent_mode = current_display_mode() === "percent";
       heatmap_trace.hovertemplate = percent_mode
         ? (
             "step=%{customdata[0]}<br>"
@@ -236,7 +261,9 @@ window.addEventListener("load", () => {
           "0",
           `${auto_enabled() ? "auto " : ""}red ${format_limit(limits.red, "+", percent_mode)}`,
         ],
-        title: percent_mode ? "Δloss (%) bands" : "Δloss bands",
+        title: legacy_absolute_fallback_active
+          ? "Δloss bands (legacy absolute fallback)"
+          : (percent_mode ? "Δloss (%) bands" : "Δloss bands"),
       };
 
       queueMicrotask(sync_heatmap_loss_mode_button);
@@ -245,7 +272,17 @@ window.addEventListener("load", () => {
     function sync_heatmap_loss_mode_button() {
       const button = by_id("heatmap_delta_loss_mode");
       if (!button) return;
-      const percent_mode = current_display_mode() === "percent";
+      const requested_percent = current_display_mode() === "percent";
+      const percent_mode = requested_percent && !legacy_absolute_fallback_active;
+      if (legacy_absolute_fallback_active) {
+        button.textContent = "|abs|";
+        button.dataset.mode = "absolute-legacy";
+        button.title = "Percentage Δloss is unavailable for this legacy run because centre-loss metadata was not recorded; showing absolute Δloss.";
+        button.setAttribute("aria-label", button.title);
+        button.setAttribute("aria-pressed", "false");
+        button.disabled = true;
+        return;
+      }
       button.textContent = percent_mode ? "%" : "|abs|";
       button.dataset.mode = percent_mode ? "percent" : "absolute";
       button.title = percent_mode
@@ -268,6 +305,7 @@ window.addEventListener("load", () => {
       button.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
+        if (legacy_absolute_fallback_active) return;
         const next = current_display_mode() === "absolute" ? "percent" : "absolute";
         save_heatmap_viewer_setting(display_mode_setting, next);
         sync_heatmap_loss_mode_button();
@@ -328,6 +366,7 @@ window.addEventListener("load", () => {
       app.figures = null;
       app.figure_revision = null;
       app.manual_selection = false;
+      legacy_absolute_fallback_active = false;
       by_id("heatmap_plot")?.replaceChildren();
       if (by_id("heatmap_plot")) by_id("heatmap_plot").dataset.plotReady = "false";
       history.replaceState({}, "", "/runs");
@@ -425,6 +464,7 @@ window.addEventListener("load", () => {
     // require switching away and back to repair it.
     const base_select_run_loss_patch = select_run;
     select_run = async function(...args) {
+      legacy_absolute_fallback_active = false;
       const result = await base_select_run_loss_patch(...args);
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const card = document.querySelector('.chart-card[data-chart="heatmap"]');
@@ -434,6 +474,6 @@ window.addEventListener("load", () => {
     };
 
     if (app.figures && app.current_run_id) render_figures();
-  }, 1);
+  }, 0);
 });
 // ^^^ THOG
