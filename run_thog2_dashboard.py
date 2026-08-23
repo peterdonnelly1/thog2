@@ -71,6 +71,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_regression_repair_patch.js",
     "dashboard_weight_step_placeholder_cleanup_patch.js",
     "dashboard_weight_semantics_repair_patch.js",                                                                                                          # <<< THOG restore group/chart ownership and make current-only mean the latest optimizer step even with an explicit step window
+    "dashboard_weight_style_semantics_repair_patch.js",                                                                                                    # <<< THOG align Runs-view trace colours with the repaired per-chart current-only semantics instead of the obsolete global flag
 )
 
 
