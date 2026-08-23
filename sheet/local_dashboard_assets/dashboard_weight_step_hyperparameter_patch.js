@@ -132,7 +132,17 @@ window.addEventListener("load", () => {
     };
 
     const style = document.createElement("style");
-    style.textContent = ".weight-step-current { font-weight: 400 !important; }";
+    style.textContent = `
+      .weight-step-current { font-weight: 400 !important; }
+      #heatmap_chart_group:not(.collapsed):not(.maximized),
+      #coefficients_chart_group:not(.collapsed):not(.maximized) {
+        min-height: 0 !important;
+      }
+      #heatmap_chart_group:not(.collapsed):not(.maximized) > .chart-grid,
+      #coefficients_chart_group:not(.collapsed):not(.maximized) > .chart-grid {
+        min-height: 0 !important;
+      }
+    `;
     document.head.appendChild(style);
 
     const observer = new MutationObserver(() => {
