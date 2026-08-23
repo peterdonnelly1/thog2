@@ -26,6 +26,7 @@ function make_context() {
       setAttribute(name, value) { this[name] = String(value); },
     }],
   ]);
+  let context = null;
   const weight_api = {
     global_flags: () => ({...flags}),
     set_global_flags(next) {
@@ -33,13 +34,14 @@ function make_context() {
         current_weights_only: next.current_weights_only === true,
         join_with_line_segments: next.join_with_line_segments === true,
       };
+      if (context?.app?.figures) context.app.figures.depth = null;
       return true;
     },
   };
-  const context = {
+  context = {
     console,
     depth_weight_chart_names: ["q", "k", "v", "o", "up", "down"],
-    app: {axis_chart_name: "q"},
+    app: {axis_chart_name: "q", figures: {heatmap: {}, depth: {q: {}}}},
     window: {
       __instra_weight_controls_v2: weight_api,
       __instra_weight_step_filter: {active: () => explicit_range},
@@ -110,6 +112,7 @@ function global_weight_control_regression() {
     {current_weights_only: true, join_with_line_segments: true},
     "individual Weight editor did not write the global flags",
   );
+  assert.deepEqual(context.app.figures.depth, {}, "weight-mode invalidation exposed a null depth payload to renderers");
 
   title.textContent = "Completely renamed group editor";
   current.disabled = true;
