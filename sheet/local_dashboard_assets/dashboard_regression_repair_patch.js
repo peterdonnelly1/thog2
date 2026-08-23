@@ -45,7 +45,7 @@ window.addEventListener("load", () => {
       api.__instra_safe_flag_writer = true;
     };
 
-    const sync_global_weight_controls = () => {
+    const sync_global_weight_controls = ({load_values = true} = {}) => {
       install_safe_global_flag_writer();
       if (!weight_editor_open()) return;
       const api = weight_api();
@@ -53,14 +53,14 @@ window.addEventListener("load", () => {
       const current = by_id("chart_current_weights_only");
       const join = by_id("chart_join_with_line_segments");
       if (current) {
-        if (flags) current.checked = flags.current_weights_only === true;
+        if (load_values && flags) current.checked = flags.current_weights_only === true;
         current.disabled = step_range_active();
         current.title = current.disabled
           ? "Current weights only is overridden while an explicit weight-step range is active."
           : "Global across all six weight charts and every run.";
       }
       if (join) {
-        if (flags) join.checked = flags.join_with_line_segments === true;
+        if (load_values && flags) join.checked = flags.join_with_line_segments === true;
         join.disabled = false;
         join.title = "Global across all six weight charts and every run.";
       }
@@ -68,22 +68,31 @@ window.addEventListener("load", () => {
 
     const base_sync_chart_setting_outputs_regression = sync_chart_setting_outputs;
     sync_chart_setting_outputs = function() {
+      const editing = weight_editor_open();
+      const current = by_id("chart_current_weights_only");
+      const join = by_id("chart_join_with_line_segments");
+      const current_checked = editing && current ? current.checked : null;
+      const join_checked = editing && join ? join.checked : null;
       const result = base_sync_chart_setting_outputs_regression();
-      sync_global_weight_controls();
+      if (editing) {
+        if (current && current_checked !== null) current.checked = current_checked;
+        if (join && join_checked !== null) join.checked = join_checked;
+      }
+      sync_global_weight_controls({load_values: false});
       return result;
     };
 
     const base_populate_chart_settings_form_regression = populate_chart_settings_form;
     populate_chart_settings_form = function(chart_name, supplied = null) {
       const result = base_populate_chart_settings_form_regression(chart_name, supplied);
-      if (weight_chart_set.has(chart_name)) sync_global_weight_controls();
+      if (weight_chart_set.has(chart_name)) sync_global_weight_controls({load_values: true});
       return result;
     };
 
     const base_open_chart_settings_regression = open_chart_settings;
     open_chart_settings = function(chart_name) {
       const result = base_open_chart_settings_regression(chart_name);
-      if (weight_chart_set.has(chart_name)) queueMicrotask(sync_global_weight_controls);
+      if (weight_chart_set.has(chart_name)) queueMicrotask(() => sync_global_weight_controls({load_values: true}));
       return result;
     };
 
@@ -288,7 +297,7 @@ window.addEventListener("load", () => {
     });
 
     install_safe_global_flag_writer();
-    sync_global_weight_controls();
-  }, 2200);
+    sync_global_weight_controls({load_values: true});
+  }, 1);
 });
 // ^^^ THOG
