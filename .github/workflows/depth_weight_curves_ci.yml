@@ -66,6 +66,7 @@ jobs:
             tests/test_instra_firefox_acceptance.py \
             tests/test_instra_firefox_weight_controls.py \
             tests/test_instra_firefox_heatmap_diagnostics.py \
+            tests/test_instra_firefox_workspace_range.py \
             tests/test_plastic_depth_decision_algorithms_v057.py \
             tests/test_plastic_depth_v056_help.py \
             tests/test_plastic_depth_wrapper_options.py \
