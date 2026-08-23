@@ -46,7 +46,7 @@ def _heatmap_history_window(
     finally:
         connection.close()
 
-    decoded_payloads: list[tuple[Any, tuple[int, ...], tuple[float, ...]]] = []
+    decoded_payloads: list[tuple[Any, dict[str, Any], tuple[int, ...], tuple[float, ...]]] = []
     maximum_layers = 1
     for row in rows:
         payload = _store._decode_payload(row["payload"])
@@ -54,19 +54,31 @@ def _heatmap_history_window(
         deltas = tuple(float(value) for value in payload["delta_losses"])
         if candidates:
             maximum_layers = max(maximum_layers, max(candidates))
-        decoded_payloads.append((row, candidates, deltas))
+        decoded_payloads.append((row, payload, candidates, deltas))
 
     decoded: list[dict[str, Any]] = []
-    for row, candidates, deltas in decoded_payloads:
+    for row, payload, candidates, deltas in decoded_payloads:
         values = [math.nan] * maximum_layers
         for candidate, delta in zip(candidates, deltas):
             values[candidate - 1] = delta
+        current_loss = payload.get("current_loss")
         decoded.append(
             {
                 "probe_id": str(row["probe_id"]),
                 "optimizer_update": int(row["optimizer_update"]),
                 "active_layers": int(row["active_layers"]),
                 "selected_layers": int(row["selected_layers"]),
+                "brake_active": bool(payload.get("brake_active", False)),
+                "decision_committed": bool(
+                    payload.get(
+                        "decision_committed",
+                        int(row["selected_layers"]) != int(row["active_layers"]),
+                    )
+                ),
+                "chaos_bump": payload.get("chaos_bump"),
+                "current_loss": (
+                    None if current_loss is None else float(current_loss)
+                ),
                 "values": values,
             }
         )
