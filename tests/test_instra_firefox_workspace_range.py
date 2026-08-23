@@ -1,0 +1,237 @@
+# vvv THOG
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+from sheet.local_chart_store import LocalChartStore
+from tests.test_instra_firefox_acceptance import (
+    _firefox_driver,
+    _free_port,
+    _open_group,
+    _wait,
+    _wait_for_server,
+    _weight_snapshot,
+)
+
+
+def _make_weight_store(
+    root: Path,
+    *,
+    artifact_name: str,
+    run_id: str,
+    first_step: int,
+    last_step: int,
+) -> None:
+    path = root / artifact_name / run_id / "charts.sqlite3"
+    store = LocalChartStore(
+        path,
+        run_name=artifact_name,
+        run_id=run_id,
+        config={
+            "host_label": "scruffy",
+            "model_type": "sheet",
+            "instrumentation__depth_weight_curves__history_length": 100,
+        },
+    )
+    for step in range(first_step, last_step + 1):
+        store.append_depth_weight_snapshot(_weight_snapshot(step), history_length=100)
+    store.close()
+
+
+def _eye_click(driver, run_id: str) -> None:
+    driver.execute_script(
+        """
+        const row = document.querySelector(`tr[data-run-id="${arguments[0]}"]`);
+        const eye = row?.querySelector('.eye-button');
+        if (!eye) throw new Error(`missing eye for ${arguments[0]}`);
+        eye.click();
+        """,
+        run_id,
+    )
+
+
+def _set_step_window(driver, minimum: int, maximum: int) -> None:
+    driver.execute_script(
+        """
+        const from = document.getElementById('weight_step_from');
+        const to = document.getElementById('weight_step_to');
+        const apply = document.getElementById('weight_step_apply');
+        if (!from || !to || !apply) throw new Error('weight step controls missing');
+        from.value = String(arguments[0]);
+        to.value = String(arguments[1]);
+        apply.click();
+        """,
+        minimum,
+        maximum,
+    )
+
+
+def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) -> None:
+    _make_weight_store(
+        tmp_path,
+        artifact_name="workspace_a",
+        run_id="workspace_a",
+        first_step=1000,
+        last_step=1004,
+    )
+    _make_weight_store(
+        tmp_path,
+        artifact_name="workspace_b",
+        run_id="workspace_b",
+        first_step=1002,
+        last_step=1006,
+    )
+    _make_weight_store(
+        tmp_path,
+        artifact_name="workspace_c",
+        run_id="workspace_c",
+        first_step=1010,
+        last_step=1014,
+    )
+
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    environment = dict(os.environ)
+    environment["PYTHONUNBUFFERED"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "run_thog2_dashboard.py",
+            "--root",
+            str(tmp_path),
+            "--run",
+            "workspace_a",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    driver = None
+    try:
+        _wait_for_server(base_url, process)
+        driver = _firefox_driver()
+        driver.set_page_load_timeout(30)
+        driver.get(f"{base_url}/runs/workspace_a")
+        _wait(
+            driver,
+            lambda: int(driver.execute_script("return document.querySelectorAll('tr[data-run-id]').length;")) >= 3,
+            timeout=20,
+            message="three Workspace fixture runs did not appear",
+        )
+
+        driver.execute_script(
+            "const el=document.getElementById('workspace_nav'); if(!el) throw new Error('workspace_nav'); el.click();"
+        )
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script("return window.app?.workspace_mode === true;")),
+            message="Workspace mode did not activate",
+        )
+        _open_group(driver, "coefficients_chart_group", "coefficients_group_toggle")
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script("return document.getElementById('weight_step_availability') !== null;")),
+            message="Workspace weight-step controls did not appear",
+        )
+
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                "return document.getElementById('weight_step_availability')?.textContent || '';"
+            ) == "data available: no overlapping steps",
+            message="three-run Workspace did not report no overlapping steps",
+        )
+
+        _eye_click(driver, "workspace_c")
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                "return document.getElementById('weight_step_availability')?.textContent || '';"
+            ) == "data available 1002–1004",
+            message="eye-ablation did not restore the A/B retained-step intersection",
+        )
+
+        _set_step_window(driver, 1002, 1003)
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const range = window.__instra_weight_step_filter?.request_range?.();
+                return range?.minimum === 1002 && range?.maximum === 1003;
+                """
+            ) is True,
+            message="explicit Workspace step window did not become active",
+        )
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "const el=document.getElementById('attn_q_head_N_plot'); return !!el && el.dataset.plotReady === 'true';"
+            )),
+            timeout=20,
+            message="Workspace Q chart did not render selected step window",
+        )
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const mount = document.getElementById('attn_q_head_N_plot');
+                const steps = (mount?.data || [])
+                  .map(trace => Number(trace?.meta?.instra_workspace_optimizer_update))
+                  .filter(Number.isFinite);
+                return steps.length > 0 && steps.every(step => step >= 1002 && step <= 1003);
+                """
+            ) is True,
+            message="Workspace rendered traces outside explicit 1002–1003 window",
+        )
+
+        _set_step_window(driver, 1010, 1011)
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const placeholder = document.getElementById('attn_q_head_N_placeholder');
+                return !!placeholder && !placeholder.hidden
+                  && placeholder.textContent.includes('Curves will be displayed when step 1010 is reached');
+                """
+            ) is True,
+            message="future Workspace window did not show the step-1010 placeholder",
+        )
+
+        driver.execute_script("document.getElementById('weight_step_whole_range').click();")
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                "return window.__instra_weight_step_filter?.active?.() === false;"
+            ) is True,
+            message="whole range did not clear explicit Workspace window",
+        )
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const placeholder = document.getElementById('attn_q_head_N_placeholder');
+                return !!placeholder && placeholder.hidden;
+                """
+            ) is True,
+            timeout=20,
+            message="Q chart did not leave future-window placeholder after whole range",
+        )
+    finally:
+        if driver is not None:
+            driver.quit()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+# ^^^ THOG
