@@ -17,6 +17,7 @@ _END_OPTION = f"--{_END_DESTINATION}"
 _START_ENVIRONMENT = "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_START_STEP"
 _END_ENVIRONMENT = "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_END_STEP"
 _CLI_INSTALLED_ATTRIBUTE = "_thog_depth_weight_step_range_arguments_installed"
+_EXPLICIT_STEP_RANGE: dict[str, int] = {}
 
 
 def _nonnegative_integer(value: str) -> int:
@@ -40,15 +41,18 @@ def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _publish_step_range_environment(namespace: argparse.Namespace) -> None:
+    # vvv THOG argparse is layered repeatedly in this runner; a later parser seeing its default None must never erase an explicit range captured by an earlier pass
     for destination, environment in (
         (_START_DESTINATION, _START_ENVIRONMENT),
         (_END_DESTINATION, _END_ENVIRONMENT),
     ):
         value = getattr(namespace, destination, None)
         if value is None:
-            os.environ.pop(environment, None)
-        else:
-            os.environ[environment] = str(int(value))
+            continue
+        resolved = int(value)
+        _EXPLICIT_STEP_RANGE[destination] = resolved
+        os.environ[environment] = str(resolved)
+    # ^^^ THOG
 
 
 _ORIGINAL_PARSE_KNOWN_ARGS = argparse.ArgumentParser.parse_known_args
@@ -86,7 +90,10 @@ def _local_chart_store_init_with_weight_step_range(
         (_START_DESTINATION, _START_ENVIRONMENT),
         (_END_DESTINATION, _END_ENVIRONMENT),
     ):
-        value = os.environ.get(environment)
+        value = _EXPLICIT_STEP_RANGE.get(destination)
+        if value is None:
+            environment_value = os.environ.get(environment)
+            value = None if environment_value is None else int(environment_value)
         if value is not None:
             enriched_config[destination] = int(value)
     _ORIGINAL_LOCAL_CHART_STORE_INIT(
