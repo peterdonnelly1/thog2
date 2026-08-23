@@ -28,7 +28,25 @@ window.addEventListener("load", () => {
 
     const weight_api = () => window.__instra_weight_controls_v2 || window.__instra_weight_step_controls || null;
 
+    const repair_depth_payload_shape = () => {
+      if (!app.figures || typeof app.figures !== "object" || app.figures.depth !== null) return;
+      app.figures = {...app.figures, depth: {}};
+    };
+
+    const install_safe_global_flag_writer = () => {
+      const api = window.__instra_weight_controls_v2;
+      if (!api || typeof api.set_global_flags !== "function" || api.__instra_safe_flag_writer === true) return;
+      const base_set_global_flags = api.set_global_flags.bind(api);
+      api.set_global_flags = function(...args) {
+        const result = base_set_global_flags(...args);
+        repair_depth_payload_shape();
+        return result;
+      };
+      api.__instra_safe_flag_writer = true;
+    };
+
     const sync_global_weight_controls = () => {
+      install_safe_global_flag_writer();
       if (!weight_editor_open()) return;
       const api = weight_api();
       const flags = typeof api?.global_flags === "function" ? api.global_flags() : null;
@@ -75,6 +93,7 @@ window.addEventListener("load", () => {
     window.addEventListener("click", event => {
       const button = event.target.closest?.("#save_chart_settings");
       if (!button || !weight_editor_open()) return;
+      install_safe_global_flag_writer();
       const api = weight_api();
       if (typeof api?.set_global_flags !== "function") return;
       const current = by_id("chart_current_weights_only");
@@ -85,10 +104,10 @@ window.addEventListener("load", () => {
         join_with_line_segments: join?.checked === true,
       };
       if (
-        before.current_weights_only === next.current_weights_only
-        && before.join_with_line_segments === next.join_with_line_segments
-      ) return;
-      api.set_global_flags(next);
+        before.current_weights_only !== next.current_weights_only
+        || before.join_with_line_segments !== next.join_with_line_segments
+      ) api.set_global_flags(next);
+      repair_depth_payload_shape();
     }, true);
 
     const clamp_01 = value => Math.max(0, Math.min(1, Number(value)));
@@ -263,10 +282,12 @@ window.addEventListener("load", () => {
     window.__instra_regression_repair = Object.freeze({
       weight_editor_open,
       sync_global_weight_controls,
+      repair_depth_payload_shape,
       heatmap_needs_absolute_fallback,
       apply_legacy_absolute_heatmap,
     });
 
+    install_safe_global_flag_writer();
     sync_global_weight_controls();
   }, 2200);
 });
