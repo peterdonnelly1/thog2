@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet --upgrade pip
-          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly
+          python -m pip install --quiet numpy pytest psutil tensorboard tiktoken wandb matplotlib plotly selenium
           python -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Compile Python surface
@@ -63,6 +63,7 @@ jobs:
             tests/test_local_chart_dashboard.py \
             tests/test_instra_heatmap_window.py \
             tests/test_instra_weight_step_range.py \
+            tests/test_instra_firefox_acceptance.py \
             tests/test_plastic_depth_decision_algorithms_v057.py \
             tests/test_plastic_depth_v056_help.py \
             tests/test_plastic_depth_wrapper_options.py \
