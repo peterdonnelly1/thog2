@@ -45,6 +45,7 @@ jobs:
           node tests/instra_weight_step_filter_regression.js
           node tests/instra_heatmap_performance_regression.js
           node tests/instra_weight_persistence_log_regression.js
+          node tests/instra_regression_repair.js
 
       - name: Run focused feature and affected regressions
         env:
