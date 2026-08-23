@@ -95,7 +95,7 @@ const traces_for = (data, run) => data.filter(
   trace => trace.meta?.instra_workspace_run_id === run
 );
 
-// Reproduce the two-eyed-run screenshot across every one of the six weight charts.
+// A selected Workspace view must never substitute a differently indexed trace.
 for (const chart_name of chart_names) {
   const figure = {
     data: [
@@ -109,8 +109,8 @@ for (const chart_name of chart_names) {
   const prepared = context.prepare_figure(figure, chart_name);
   assert.deepEqual(
     run_ids(prepared.data).sort(),
-    ["A", "B"],
-    `${chart_name}: 2-run Workspace lost an eyed run`,
+    ["A"],
+    `${chart_name}: a run without the selected coupling remained visible`,
   );
   assert.equal(
     traces_for(prepared.data, "A").length,
@@ -121,23 +121,8 @@ for (const chart_name of chart_names) {
     traces_for(prepared.data, "A")[0].meta.instra_weight_selection_fallback,
     undefined,
   );
-  assert.equal(
-    traces_for(prepared.data, "B").length,
-    2,
-    `${chart_name}: fallback did not retain line+marker companions`,
-  );
-  assert.ok(traces_for(prepared.data, "B").every(
-    trace => trace.meta.instra_weight_selection_fallback === true
-  ));
-  assert.ok(traces_for(prepared.data, "B").every(
-    trace => trace.line?.color === "#b" || trace.marker?.color === "#b"
-  ));
-  const b_line = traces_for(prepared.data, "B").find(trace => trace.mode.includes("lines"));
-  assert.equal(
-    b_line.line.width,
-    1.25,
-    `${chart_name}: Workspace fallback bypassed normalized line width`,
-  );
+  assert.equal(traces_for(prepared.data, "B").length, 0);
+  assert.ok(prepared.data.every(trace => trace.meta.instra_weight_selection_fallback !== true));
 }
 
 // Reproduce the four-eyed-run/maximized screenshot, including one legacy run.
@@ -158,27 +143,14 @@ for (const chart_name of chart_names) {
   const prepared = context.prepare_figure(figure, chart_name);
   assert.deepEqual(
     run_ids(prepared.data).sort(),
-    ["A", "B", "C", "D"],
-    `${chart_name}: 4-run/maximized Workspace lost an eyed run`,
+    ["A", "D"],
+    `${chart_name}: the selected view substituted an incompatible coupling`,
   );
   assert.equal(traces_for(prepared.data, "A").length, 1);
   assert.equal(traces_for(prepared.data, "D").length, 1);
-  assert.equal(traces_for(prepared.data, "B").length, 1);
-  assert.equal(traces_for(prepared.data, "B")[0].meta.instra_weight_selection_fallback, true);
-  assert.equal(
-    traces_for(prepared.data, "C").length,
-    2,
-    `${chart_name}: legacy fallback companions were not retained`,
-  );
-  assert.ok(traces_for(prepared.data, "C").every(
-    trace => trace.meta.instra_weight_selection_kind === "incompatible"
-  ));
-  assert.ok(traces_for(prepared.data, "C").every(
-    trace => trace.meta.instra_weight_selection_fallback === true
-  ));
-  assert.ok(traces_for(prepared.data, "C").every(
-    trace => trace.line?.color === "#c" || trace.marker?.color === "#c"
-  ));
+  assert.equal(traces_for(prepared.data, "B").length, 0);
+  assert.equal(traces_for(prepared.data, "C").length, 0);
+  assert.ok(prepared.data.every(trace => trace.meta.instra_weight_selection_fallback !== true));
 }
 
 // Current-only off: ordinary/random history passes through and gets no fallback tag.

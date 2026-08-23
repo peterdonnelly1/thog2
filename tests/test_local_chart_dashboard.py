@@ -585,7 +585,10 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "instra_workspace_optimizer_update: optimizer_update" in v058_repair_patch
     assert "source_optimizer_update" in v058_repair_patch
     assert "escaped_html(owner_name)" in v058_repair_patch
-    assert 'if (app.workspace_mode) delete prepared.layout.title;' in v058_repair_patch
+    assert "delete prepared.layout.title;" in v058_repair_patch
+    assert "prepared.layout.showlegend = false;" in v058_repair_patch
+    assert "delete prepared.layout.legend;" in v058_repair_patch
+    assert "delete prepared.layout.xaxis2.title;" in v058_repair_patch
     assert 'trace.mode = "lines+markers";' in v058_repair_patch
     assert 'width: 0.35, color: colour' in v058_repair_patch
     assert 'width: 0.45' in v058_repair_patch
@@ -595,7 +598,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "fetch_metric_groups" in v058_repair_patch
     assert "fetch_metric_group" in v058_repair_patch
     assert 'group.hidden = hide;' in v058_repair_patch
-    assert 'dense_run(current_run())' in v058_repair_patch
+    assert "const heatmap_available = run =>" in v058_repair_patch
+    assert "Number(run?.heatmap_count || 0) > 0" in v058_repair_patch
+    assert "(dense_run(run) && !heatmap_available(run))" in v058_repair_patch
     assert 'fillcolor: "#ffffff"' in v058_repair_patch
     assert 'font: {...font, color: "#000000"}' in v058_repair_patch
     assert 'size: Math.max(1, Number(centre?.font?.size || 10))' in v058_repair_patch

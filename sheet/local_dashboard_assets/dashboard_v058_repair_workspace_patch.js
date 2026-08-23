@@ -65,6 +65,16 @@ window.addEventListener("load", () => {
     };
     const visible_runs = () => app.runs.filter(run => is_visible(run_identifier(run)));
     const dense_run = run => String(run?.model_type || "").trim().toLowerCase() === "dense";
+    const heatmap_available = run => {
+      const configuration = run?.configuration && typeof run.configuration === "object"
+        ? run.configuration
+        : {};
+      return (
+        Number(run?.heatmap_count || 0) > 0
+        || run?.heatmap_settings?.mode === true
+        || configuration.instrumentation__delta_loss_v_layer_heatmap === true
+      );
+    };
     const direct_json = async url => {
       const response = await fetch(url, {cache: "no-store"});
       const value = await response.json();
@@ -274,7 +284,8 @@ window.addEventListener("load", () => {
     const set_heatmap_group_visibility = () => {
       const group = by_id("heatmap_chart_group");
       if (!group) return;
-      const hide = app.workspace_mode || dense_run(current_run());
+      const run = current_run();
+      const hide = app.workspace_mode || (dense_run(run) && !heatmap_available(run));
       group.hidden = hide;
       group.setAttribute("aria-hidden", String(hide));
       if (hide && app.maximized_chart === "heatmap") restore_maximized_chart();
@@ -508,9 +519,7 @@ window.addEventListener("load", () => {
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_figure_v058(figure, chart_name);
       if (weight_chart_set.has(chart_name)) {
-        const source_title = figure?.layout?.title;
-        if (app.workspace_mode) delete prepared.layout.title;
-        else if (source_title) prepared.layout.title = clone(source_title);
+        delete prepared.layout.title;
         const bottom_axis = prepared.layout.xaxis || {};
         const title = axis_title(bottom_axis.title, "layer index");
         prepared.layout.xaxis = {
@@ -530,12 +539,12 @@ window.addEventListener("load", () => {
           ticks: "outside",
           showgrid: false,
           zeroline: false,
-          title: {...title, standoff: 10},
           automargin: true,
         };
+        delete prepared.layout.xaxis2.title;
         prepared.layout.margin = {
           ...(prepared.layout.margin || {}),
-          t: Math.max(84, Number(prepared.layout?.margin?.t || 0)),
+          t: Math.max(42, Number(prepared.layout?.margin?.t || 0)),
           b: Math.max(64, Number(prepared.layout?.margin?.b || 0)),
         };
         for (const trace of prepared.data || []) {
@@ -574,6 +583,14 @@ window.addEventListener("load", () => {
           Array.isArray(trace?.x) && trace.x.length && Array.isArray(trace?.y) && trace.y.length
         ));
         top_axis_anchor(prepared, source_trace?.x, source_trace?.y);
+        const presentation = window.__instra_weight_presentation;
+        if (typeof presentation?.apply_plot_chrome === "function") {
+          presentation.apply_plot_chrome(prepared, chart_name);
+        } else {
+          prepared.layout.showlegend = false;
+          delete prepared.layout.legend;
+          for (const trace of prepared.data || []) trace.showlegend = false;
+        }
       } else if (chart_name === "heatmap") {
         const heatmap = (prepared.data || []).find(trace => trace?.type === "heatmap");
         const meta = prepared.layout?.meta || {};

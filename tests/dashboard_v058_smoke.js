@@ -137,6 +137,12 @@ async function main() {
   context.app.current_run_id = "run-b";
   context.render_run_heading();
   assert.equal(elements.heatmap_chart_group.hidden, true);
+  context.app.runs[1].heatmap_count = 1;
+  context.app.runs[1].heatmap_settings = {mode: true};
+  context.render_run_heading();
+  assert.equal(elements.heatmap_chart_group.hidden, false, "available heatmap data was hidden by model type");
+  context.app.runs[1].heatmap_count = 0;
+  context.app.runs[1].heatmap_settings = {mode: false};
   context.app.current_run_id = "run-a";
   context.render_run_heading();
   assert.equal(elements.heatmap_chart_group.hidden, false);
@@ -217,7 +223,11 @@ async function main() {
   assert.equal(weight_top_axis_anchor.showlegend, false);
   context.app.workspace_mode = false;
   const prepared_single_weight = context.prepare_figure(depth.depth.mlp_down, "mlp_down");
-  assert.equal(prepared_single_weight.layout.title.text, "DENSE learned scalar weights");
+  assert.equal(prepared_single_weight.layout.title, undefined);
+  assert.equal(prepared_single_weight.layout.showlegend, false);
+  assert.equal(prepared_single_weight.layout.legend, undefined);
+  assert.equal(prepared_single_weight.layout.xaxis2.title, undefined);
+  assert.ok(prepared_single_weight.data.every(trace => trace.showlegend === false));
 
   // The weight-history display window counts recorded optimizer steps. It
   // deliberately has no relationship to PLASTIC probe rows.

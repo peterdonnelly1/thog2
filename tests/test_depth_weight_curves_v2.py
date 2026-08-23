@@ -250,3 +250,61 @@ def test_local_depth_curve_sink_uses_no_wandb_and_bounds_history(
     assert set(snapshots[-1]["families"]) == set(depth_curves_v2._CHART_FAMILIES)
     close_local_chart_store(telemetry)
 # ^^^ THOG
+
+
+# vvv THOG repeated scalar ids must retain the coupling recorded at their own optimizer update, not inherit the newest snapshot's indices
+def test_matched_weight_metadata_is_keyed_by_update_and_scalar(monkeypatch) -> None:
+    from sheet import matched_weight_selection_patch as matched_weights
+
+    def trace(update: int):
+        return SimpleNamespace(
+            name="r0_c0",
+            hovertemplate="r0_c0",
+            meta={
+                "instra_thog_scalar_id": "r0_c0",
+                "instra_thog_optimizer_update": update,
+            },
+        )
+
+    figure = SimpleNamespace(
+        data=[trace(10), trace(20)],
+        layout=SimpleNamespace(title=SimpleNamespace(text="DEPTH — attention query")),
+    )
+    monkeypatch.setattr(
+        matched_weights,
+        "_ORIGINAL_FIGURE_BUILDER",
+        lambda _snapshots, _chart_name: figure,
+    )
+    snapshots = tuple(
+        {
+            "optimizer_update": update,
+            "weight_selection": {"feature_count": 32},
+            "families": {
+                "attn_q_head_N": {
+                    "curves": ({
+                        "scalar_id": "r0_c0",
+                        "model_feature": model_feature,
+                        "intermediate_feature": intermediate_feature,
+                        "selection_kind": kind,
+                    },),
+                },
+            },
+        }
+        for update, model_feature, intermediate_feature, kind in (
+            (10, 1, 2, "random"),
+            (20, 8, 9, "user"),
+        )
+    )
+
+    prepared = matched_weights._build_figure_with_matched_selection(
+        snapshots,
+        "attn_q_head_N",
+    )
+
+    assert prepared.data[0].meta["instra_weight_model_feature"] == 1
+    assert prepared.data[0].meta["instra_weight_intermediate_feature"] == 2
+    assert prepared.data[0].meta["instra_weight_selection_kind"] == "random"
+    assert prepared.data[1].meta["instra_weight_model_feature"] == 8
+    assert prepared.data[1].meta["instra_weight_intermediate_feature"] == 9
+    assert prepared.data[1].meta["instra_weight_selection_kind"] == "user"
+# ^^^ THOG

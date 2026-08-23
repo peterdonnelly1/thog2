@@ -170,10 +170,18 @@ const context = {
   normalize_chart_settings: (chart_name, supplied = null) => ({
     title: supplied?.title || chart_titles[chart_name] || chart_name,
     current_weights_only: true,
+    join_with_line_segments: true,
     ...(supplied || {}),
   }),
   prepare_figure: figure => {
     const prepared = deep_clone(figure);
+    for (const trace of prepared.data || []) {
+      if (trace?.meta?.instra_thog_weight !== true) continue;
+      trace.x = [...trace.meta.instra_thog_integer_x];
+      trace.y = [...trace.meta.instra_thog_integer_y];
+      trace.mode = "lines+markers";
+      trace.line = {...(trace.line || {}), shape: "linear"};
+    }
     if (figure.__simulate_matched_filter) prepared.data = prepared.data.filter(matches_selected);
     return prepared;
   },
@@ -238,10 +246,16 @@ for (const [chart_name, letter] of Object.entries({
 
 const random_trace = (model_feature, intermediate_feature, width = 3.6) => ({
   mode: "lines",
+  x: [1, 1.5, 2],
+  y: [0.1, 0.3, 0.2],
+  showlegend: true,
   name: `residual feature ${model_feature} · branch feature ${intermediate_feature}`,
   hovertemplate: `residual feature ${model_feature} · branch feature ${intermediate_feature}`,
-  line: {width},
+  line: {width, shape: "spline"},
   meta: {
+    instra_thog_weight: true,
+    instra_thog_integer_x: [1, 2],
+    instra_thog_integer_y: [0.1, 0.2],
     instra_weight_selection_protocol: "matched_six_v1",
     instra_weight_selection_kind: "random",
     instra_weight_model_feature: model_feature,
@@ -250,10 +264,16 @@ const random_trace = (model_feature, intermediate_feature, width = 3.6) => ({
 });
 const selected_trace = () => ({
   mode: "lines",
+  x: [1, 1.5, 2],
+  y: [0.4, 0.7, 0.5],
+  showlegend: true,
   name: "residual feature 123 · branch feature 145",
   hovertemplate: "residual feature 123 · branch feature 145",
-  line: {width: 3.6},
+  line: {width: 3.6, shape: "spline"},
   meta: {
+    instra_thog_weight: true,
+    instra_thog_integer_x: [1, 2],
+    instra_thog_integer_y: [0.4, 0.5],
     instra_weight_selection_protocol: "matched_six_v1",
     instra_weight_selection_kind: "user",
     instra_weight_model_feature: 123,
@@ -269,12 +289,14 @@ let figure = {
   },
 };
 let prepared = context.prepare_figure(figure, "attn_q_head_N");
-assert.equal(prepared.data.length, 1, "older run stayed blank instead of using its recorded random coupling");
-assert.equal(prepared.data[0].meta.instra_weight_selection_fallback, true);
-assert.match(prepared.data[0].name, /input feature 2 → output feature 3/);
-assert.ok(Math.abs(prepared.data[0].line.width - 2.88) < 1e-12);
-assert.match(prepared.layout.title.text, /Attention - <b>Q<\/b>/);
-assert.ok(!prepared.layout.title.text.includes("<sup>"));
+assert.equal(prepared.data.length, 0, "a differently indexed random coupling leaked into the selected view");
+assert.equal(prepared.layout.title, undefined, "the redundant Plotly title was retained");
+assert.equal(prepared.layout.showlegend, false, "the redundant right-hand legend was retained");
+assert.equal(prepared.layout.legend, undefined);
+assert.match(
+  prepared.layout.annotations?.[0]?.text || "",
+  /selected coupling 123 → 145 was not recorded/i,
+);
 
 figure = {
   __simulate_matched_filter: true,
@@ -282,8 +304,8 @@ figure = {
   layout: {title: {text: "DEPTH generated scalar trajectories — MLP contraction<br><sup>subtitle</sup>"}},
 };
 prepared = context.prepare_figure(figure, "mlp_down");
-assert.equal(prepared.data.length, 1);
-assert.match(prepared.data[0].name, /input feature 3 → output feature 2/);
+assert.equal(prepared.data.length, 0);
+assert.match(prepared.layout.annotations?.[0]?.text || "", /123 → 145/);
 
 figure = {
   __simulate_matched_filter: true,
@@ -295,6 +317,13 @@ assert.equal(prepared.data.length, 1, "selected coupling should remain singular"
 assert.notEqual(prepared.data[0].meta.instra_weight_selection_fallback, true);
 assert.ok(Math.abs(prepared.data[0].line.width - 2.88) < 1e-12);
 assert.match(prepared.data[0].name, /input feature 123 → output feature 145/);
+assert.deepEqual(prepared.data[0].x, [1, 2]);
+assert.deepEqual(prepared.data[0].y, [0.4, 0.5]);
+assert.equal(prepared.data[0].line.shape, "linear");
+assert.equal(prepared.data[0].showlegend, false);
+assert.equal(prepared.layout.title, undefined);
+assert.equal(prepared.layout.showlegend, false);
+assert.ok(!(prepared.layout.annotations || []).some(annotation => /not recorded/i.test(annotation.text || "")));
 
 context.app.workspace_mode = true;
 figure = {
@@ -304,6 +333,7 @@ figure = {
 };
 prepared = context.prepare_figure(figure, "attn_k_head_N");
 assert.equal(prepared.data.length, 0, "Runs-only fallback leaked into Workspace");
+assert.match(prepared.layout.annotations?.[0]?.text || "", /123 → 145/);
 
 console.log("instra weight coupling regression: PASS");
 // ^^^ THOG

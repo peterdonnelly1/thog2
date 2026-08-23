@@ -101,6 +101,93 @@ def _make_legacy_store(root: Path) -> tuple[Path, str]:
     return path, run_id
 
 
+def _make_selected_thog_store(root: Path) -> tuple[Path, str]:
+    run_id = "firefox_selected_thog"
+    path = root / "firefox_selected_thog_artifact" / run_id / "charts.sqlite3"
+    store = LocalChartStore(
+        path,
+        run_name="firefox_selected_thog_artifact",
+        run_id=run_id,
+        config={
+            "host_label": "scruffy",
+            "model_type": "sheet",
+            "instrumentation__depth_weight_curves__history_length": 100,
+            "instrumentation__delta_loss_v_layer_heatmap": True,
+            "instrumentation__delta_loss_v_layer_heatmap__destination": "local",
+            "instrumentation__delta_loss_v_layer_heatmap_abs_limit": 0.05,
+        },
+    )
+    store.append_heatmap_records(_legacy_probe(step) for step in range(120, 128))
+    families: dict[str, object] = {}
+    for chart_index, chart_name in enumerate(_WEIGHT_CHARTS):
+        coordinates = tuple(float(layer) for layer in range(1, 17))
+        reverse = chart_name in {"attn_out_head_N", "mlp_down"}
+        random_model, random_intermediate = 2, 3
+        selected_model, selected_intermediate = 12, 14
+        random_row, random_column = (
+            (random_model, random_intermediate)
+            if reverse
+            else (random_intermediate, random_model)
+        )
+        selected_row, selected_column = (
+            (selected_model, selected_intermediate)
+            if reverse
+            else (selected_intermediate, selected_model)
+        )
+        curves = []
+        for curve_index, (row, column, model_feature, intermediate_feature, kind) in enumerate((
+            (random_row, random_column, random_model, random_intermediate, "random"),
+            (selected_row, selected_column, selected_model, selected_intermediate, "user"),
+        )):
+            values = tuple(
+                0.01 * (chart_index + 1) + 0.002 * layer + 0.0004 * curve_index
+                for layer in range(1, 17)
+            )
+            curves.append({
+                "scalar_id": f"r{row}_c{column}",
+                "output_row": row,
+                "row_index": column,
+                "values": values,
+                "executed_values": values,
+                "model_feature": model_feature,
+                "intermediate_feature": intermediate_feature,
+                "selection_kind": kind,
+            })
+        families[chart_name] = {
+            "semantic_family": chart_name,
+            "depth_coordinates": coordinates,
+            "executed_layer_coordinates": coordinates,
+            "curves": tuple(curves),
+        }
+    store.append_depth_weight_snapshot(
+        {
+            "optimizer_update": 127,
+            "attention_head": 0,
+            "families": families,
+            "weight_selection": {
+                "protocol": "matched_six_v1",
+                "user_selected": True,
+                "model_feature": 12,
+                "intermediate_feature": 14,
+                "feature_count": 16,
+                "applied": True,
+            },
+        },
+        history_length=100,
+    )
+    store.close()
+    (root / ".instra_weight_selection.json").write_text(
+        json.dumps({
+            "protocol": "matched_six_v1",
+            "user_selected": True,
+            "model_feature": 12,
+            "intermediate_feature": 14,
+        }),
+        encoding="utf-8",
+    )
+    return path, run_id
+
+
 def _wait_for_server(url: str, process: subprocess.Popen[str], timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -313,6 +400,154 @@ def test_real_firefox_heatmap_and_global_weight_controls(tmp_path: Path) -> None
         _open_settings_and_wait(driver, "#weights_group_settings_button")
         assert _checkbox_enabled(driver, "chart_current_weights_only")
         assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+    finally:
+        if driver is not None:
+            driver.quit()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+# ^^^ THOG
+
+
+# vvv THOG the modern THOG path keeps heatmaps discoverable and renders only the group-selected integer-segment coupling without duplicate Plotly chrome
+def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
+    _database, run_id = _make_selected_thog_store(tmp_path)
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    environment = dict(os.environ)
+    environment["PYTHONUNBUFFERED"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "run_thog2_dashboard.py",
+            "--root",
+            str(tmp_path),
+            "--run",
+            run_id,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    driver = None
+    try:
+        _wait_for_server(base_url, process)
+        driver = _firefox_driver()
+        driver.set_page_load_timeout(30)
+        driver.get(f"{base_url}/runs/{run_id}")
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "return document.querySelector('tr.current-run') !== null;"
+            )),
+            timeout=20,
+            message="selected THOG fixture run was not selected",
+        )
+
+        assert driver.execute_script(
+            "return document.getElementById('heatmap_chart_group')?.hidden === false;"
+        ), "THOG heatmap group was hidden"
+        _open_group(driver, "heatmap_chart_group", "heatmap_group_toggle")
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "return document.getElementById('heatmap_plot')?.dataset.plotReady === 'true';"
+            )),
+            timeout=20,
+            message="THOG heatmap did not render",
+        )
+
+        _open_group(driver, "coefficients_chart_group", "coefficients_group_toggle")
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "return document.getElementById('weights_group_settings_button') !== null;"
+            )),
+            message="Weights group settings button did not appear",
+        )
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "return /12\\s*→\\s*14/.test(document.getElementById('weight_index_group_summary')?.textContent || '');"
+            )),
+            message="group-level selected coupling did not load",
+        )
+
+        _open_settings_and_wait(driver, "#weights_group_settings_button")
+        for element_id in ("chart_current_weights_only", "chart_join_with_line_segments"):
+            if not _checkbox_checked(driver, element_id):
+                driver.execute_script(
+                    "document.getElementById(arguments[0]).click();",
+                    element_id,
+                )
+        _save_settings_and_wait(driver)
+
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                """
+                const mount = document.getElementById('attn_q_head_N_plot');
+                return (mount?.data || []).some(trace => (
+                  trace?.meta?.instra_weight_model_feature === 12
+                  && trace?.meta?.instra_weight_intermediate_feature === 14
+                  && trace?.meta?.instra_thog_weight === true
+                  && String(trace?.mode || '').includes('lines')
+                ));
+                """
+            )),
+            timeout=20,
+            message="selected THOG coupling did not render",
+        )
+        diagnostic = driver.execute_script(
+            """
+            const mount = document.getElementById('attn_q_head_N_plot');
+            const traces = (mount?.data || []).filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
+            const selected = traces.find(trace => (
+              trace?.meta?.instra_weight_model_feature === 12
+              && trace?.meta?.instra_weight_intermediate_feature === 14
+              && String(trace?.mode || '').includes('lines')
+            ));
+            return {
+              trace_count: traces.length,
+              selected_x: selected?.x || [],
+              selected_shape: selected?.line?.shape || null,
+              selected_mode: selected?.mode || null,
+              wrong_coupling_count: traces.filter(trace => (
+                trace?.meta?.instra_weight_selection_protocol === 'matched_six_v1'
+                && (
+                  trace?.meta?.instra_weight_model_feature !== 12
+                  || trace?.meta?.instra_weight_intermediate_feature !== 14
+                )
+              )).length,
+              executed_overlay_count: traces.filter(
+                trace => trace?.meta?.instra_thog_executed_overlay === true
+              ).length,
+              title: mount?.layout?.title?.text ?? mount?.layout?.title ?? null,
+              showlegend: mount?.layout?.showlegend ?? null,
+              legend: mount?.layout?.legend ?? null,
+              top_title: mount?.layout?.xaxis2?.title?.text ?? mount?.layout?.xaxis2?.title ?? null,
+            };
+            """
+        )
+        assert diagnostic["trace_count"] == 1, diagnostic
+        assert diagnostic["selected_x"] == list(range(1, 17)), diagnostic
+        assert diagnostic["selected_shape"] == "linear", diagnostic
+        assert "lines" in diagnostic["selected_mode"], diagnostic
+        assert diagnostic["wrong_coupling_count"] == 0, diagnostic
+        assert diagnostic["executed_overlay_count"] == 0, diagnostic
+        assert diagnostic["title"] is None, diagnostic
+        assert diagnostic["showlegend"] is False, diagnostic
+        assert diagnostic["legend"] is None, diagnostic
+        assert diagnostic["top_title"] is None, diagnostic
     finally:
         if driver is not None:
             driver.quit()

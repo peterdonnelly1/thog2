@@ -111,3 +111,14 @@
 - [x] Add focused browser-semantic, source-contract, syntax and regression coverage.
 - [x] Review and commit the completed tree.
 - [ ] Publish it when requested.
+
+## K. INSTRA regression repair — selected coupling, segments, chrome and heatmap
+
+- [x] Reproduce the stale THOG fallback after matched-coupling filtering.
+- [x] Prevent Runs and Workspace from substituting a different recorded coupling.
+- [x] Keep exact THOG integer-segment conversion on the selected trace path.
+- [x] Remove redundant Plotly weight titles, right legends and duplicate top-axis titles.
+- [x] Key historical coupling metadata by optimizer update and scalar id.
+- [x] Keep heatmaps visible whenever capture is enabled or stored heatmap data exist.
+- [x] Add Node, Python and real-Firefox coverage for the repaired contract.
+- [ ] Publish and require both focused and broad CI success.

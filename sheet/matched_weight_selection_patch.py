@@ -299,6 +299,18 @@ def _trace_scalar_id(trace: Any) -> Optional[str]:
     return None
 
 
+def _trace_optimizer_update(trace: Any) -> Optional[int]:
+    meta = getattr(trace, "meta", None)
+    if not isinstance(meta, Mapping):
+        return None
+    for key in ("instra_thog_optimizer_update", "instra_dense_optimizer_update"):
+        try:
+            return int(meta[key])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
 def _build_figure_with_matched_selection(
     snapshots: Sequence[Mapping[str, Any]],
     chart_name: str,
@@ -311,14 +323,16 @@ def _build_figure_with_matched_selection(
     if not isinstance(selection, Mapping):
         return figure
 
-    curves: Dict[str, Mapping[str, Any]] = {}
+    curves: Dict[Tuple[int, str], Mapping[str, Any]] = {}
     for snapshot in retained:
+        optimizer_update = int(snapshot["optimizer_update"])
         for curve in snapshot.get("families", {}).get(chart_name, {}).get("curves", ()):
-            curves[str(curve.get("scalar_id", ""))] = curve
+            curves[(optimizer_update, str(curve.get("scalar_id", "")))] = curve
 
     for trace in figure.data:
         scalar_id = _trace_scalar_id(trace)
-        curve = curves.get(scalar_id or "")
+        optimizer_update = _trace_optimizer_update(trace)
+        curve = curves.get((optimizer_update, scalar_id or "")) if optimizer_update is not None else None
         if not isinstance(curve, Mapping):
             continue
         model_feature = int(curve["model_feature"])

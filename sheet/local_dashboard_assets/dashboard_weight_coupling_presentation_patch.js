@@ -3,8 +3,8 @@
 
 // Final Weights presentation pass: use ML-facing feature-coupling terminology,
 // keep the group index controls compact, put the two MLP charts in the right
-// column, simplify attention labels, separate Plotly title/subtitle text, and
-// slightly reduce trajectory line weight without changing chart settings.
+// column, simplify attention labels, and keep identity/chrome in the card/group
+// headers rather than repeating it inside every Plotly chart.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const weight_chart_names = new Set([
@@ -204,59 +204,78 @@ window.addEventListener("load", () => {
         .replace(/model \d+\s*[·•]\s*(?:attention|MLP) feature \d+/g, replacement);
     };
 
-    const attention_plot_title = (text, chart_name) => {
-      const letter = attention_letters[chart_name];
-      if (!letter || typeof text !== "string") return text;
-      const replacements = [
-        [/attention query/gi, "Attention - <b>Q</b>"],
-        [/attention key/gi, "Attention - <b>K</b>"],
-        [/attention value/gi, "Attention - <b>V</b>"],
-        [/attention output/gi, "Attention - <b>O</b>"],
-        [/attn_q_head_\d+/gi, "Attention - <b>Q</b>"],
-        [/attn_k_head_\d+/gi, "Attention - <b>K</b>"],
-        [/attn_v_head_\d+/gi, "Attention - <b>V</b>"],
-        [/attn_out_head_\d+/gi, "Attention - <b>O</b>"],
-      ];
-      let updated = text;
-      for (const [pattern, replacement] of replacements) updated = updated.replace(pattern, replacement);
-      return updated;
+    const current_only = chart_name => {
+      const override = app.chart_settings_render_override;
+      const settings = normalize_chart_settings(
+        chart_name,
+        override?.chart_name === chart_name ? override.settings : null,
+      );
+      return settings?.current_weights_only === true;
     };
 
-    const separate_plot_title_lines = prepared => {
-      const current = prepared.layout?.title;
-      if (!current) return;
-      const title = typeof current === "string" ? {text: current} : {...current};
-      let text = String(title.text || "");
-      text = text.replace(
-        /<br><sup>(.*?)<\/sup>/gi,
-        '<br><span style="font-size:10px">$1</span>',
+    const selected_coupling = () => {
+      const api = window.__instra_matched_weight_selection;
+      const selection = typeof api?.selection === "function" ? api.selection() : null;
+      if (!selection || selection.user_selected !== true) return null;
+      const model_feature = finite_integer(selection.model_feature);
+      const intermediate_feature = finite_integer(selection.intermediate_feature);
+      if (model_feature === null || intermediate_feature === null) return null;
+      return {model_feature, intermediate_feature};
+    };
+
+    const has_weight_trace = prepared => (prepared.data || []).some(trace => {
+      if (trace?.meta?.instra_top_axis_anchor === true) return false;
+      const meta = trace?.meta;
+      if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false;
+      if (meta.instra_weight_selection_protocol !== "matched_six_v1") return false;
+      const mode = String(trace?.mode || "");
+      return mode.includes("lines") || mode.includes("markers");
+    });
+
+    const apply_unavailable_annotation = (prepared, chart_name) => {
+      const annotation_name = "instra-selected-coupling-unavailable";
+      const annotations = (prepared.layout.annotations || []).filter(
+        annotation => annotation?.name !== annotation_name
       );
-      title.text = text;
-      title.pad = {...(title.pad || {}), b: Math.max(10, Number(title.pad?.b || 0))};
-      prepared.layout.title = title;
-      prepared.layout.margin = {
-        ...(prepared.layout.margin || {}),
-        t: Math.max(90, Number(prepared.layout.margin?.t || 0)),
-      };
+      const selection = selected_coupling();
+      if (selection && current_only(chart_name) && !has_weight_trace(prepared)) {
+        annotations.push({
+          name: annotation_name,
+          xref: "paper",
+          yref: "paper",
+          x: 0.5,
+          y: 0.5,
+          xanchor: "center",
+          yanchor: "middle",
+          align: "center",
+          showarrow: false,
+          font: {size: 12, color: "#667085"},
+          text: (
+            `Selected coupling ${selection.model_feature} → ${selection.intermediate_feature} `
+            + "was not recorded for this view."
+          ),
+        });
+      }
+      if (annotations.length) prepared.layout.annotations = annotations;
+      else delete prepared.layout.annotations;
+    };
+
+    const apply_weight_plot_chrome = (prepared, chart_name) => {
+      if (!weight_chart_names.has(chart_name)) return prepared;
+      prepared.layout = prepared.layout || {};
+      delete prepared.layout.title;
+      prepared.layout.showlegend = false;
+      delete prepared.layout.legend;
+      if (prepared.layout.xaxis2) delete prepared.layout.xaxis2.title;
+      for (const trace of prepared.data || []) trace.showlegend = false;
+      apply_unavailable_annotation(prepared, chart_name);
+      return prepared;
     };
 
     const base_prepare_figure_coupling = prepare_figure;
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_figure_coupling(figure, chart_name);
       if (!weight_chart_names.has(chart_name)) return prepared;
-
-      const title = prepared.layout?.title;
-      if (title) {
-        if (typeof title === "string") {
-          prepared.layout.title = attention_plot_title(title, chart_name);
-        } else {
-          prepared.layout.title = {
-            ...title,
-            text: attention_plot_title(String(title.text || ""), chart_name),
-          };
-        }
-      }
-      separate_plot_title_lines(prepared);
 
       for (const trace of prepared.data || []) {
         trace.name = replace_coupling_label(trace.name, trace, chart_name);
@@ -267,7 +286,11 @@ window.addEventListener("load", () => {
           trace.line = {...trace.line, width: width * line_width_scale};
         }
       }
-      return prepared;
+      return apply_weight_plot_chrome(prepared, chart_name);
+    };
+
+    window.__instra_weight_presentation = {
+      apply_plot_chrome: apply_weight_plot_chrome,
     };
 
     const enforce_static_presentation = () => {
