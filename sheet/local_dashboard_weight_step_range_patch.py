@@ -3,10 +3,18 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from . import local_chart_store as _store
+
+
+_WEIGHT_VIEW_CONFIGURATION_KEYS = (
+    "instrumentation__depth_weight_curves__history_length",
+    "instrumentation__depth_weight_curves__start_step",
+    "instrumentation__depth_weight_curves__end_step",
+)
 
 
 def _depth_minimum_update(reader: Any) -> int | None:
@@ -107,11 +115,24 @@ def install(dashboard: Any) -> None:
                 if int(status.get("depth_snapshot_count") or 0) > 0
                 else None
             )
-        if status.get("depth_minimum_update") == getattr(self, "_thog2_depth_minimum_update", None):
+        # vvv THOG expose only the Weights display configuration needed by the existing group controller; model/checkpoint configuration remains untouched
+        metadata = self.reader.metadata()
+        stored_configuration = json.loads(metadata.get("config_json", "{}"))
+        configuration = dict(status.get("configuration") or {})
+        for key in _WEIGHT_VIEW_CONFIGURATION_KEYS:
+            if key in stored_configuration:
+                configuration[key] = stored_configuration[key]
+        # ^^^ THOG
+        depth_minimum_update = getattr(self, "_thog2_depth_minimum_update", None)
+        if (
+            status.get("depth_minimum_update") == depth_minimum_update
+            and status.get("configuration") == configuration
+        ):
             return status
         return {
             **status,
-            "depth_minimum_update": getattr(self, "_thog2_depth_minimum_update", None),
+            "depth_minimum_update": depth_minimum_update,
+            "configuration": configuration,
         }
 
     dashboard.RunDashboardState.status = status_with_depth_minimum
