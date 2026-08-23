@@ -5,6 +5,14 @@
 // Earlier files remain compatibility layers for stored settings and old runs;
 // this layer deliberately resolves their conflicting late axis/annotation rules.
 window.addEventListener("load", () => {
+  let pending_workspace_enter = false;
+  const early_workspace_nav = by_id("workspace_nav");
+  const early_runs_nav = by_id("runs_nav");
+  const queue_workspace_enter = () => { pending_workspace_enter = true; };
+  const cancel_workspace_enter = () => { pending_workspace_enter = false; };
+  early_workspace_nav?.addEventListener("click", queue_workspace_enter);
+  early_runs_nav?.addEventListener("click", cancel_workspace_enter);
+
   setTimeout(() => {
     const weight_chart_names = Object.freeze([
       "attn_q_head_N",
@@ -345,8 +353,14 @@ window.addEventListener("load", () => {
       refresh_current_run();
     };
 
+    early_workspace_nav?.removeEventListener("click", queue_workspace_enter);
+    early_runs_nav?.removeEventListener("click", cancel_workspace_enter);
     by_id("workspace_nav")?.addEventListener("click", enter_workspace);
     by_id("runs_nav")?.addEventListener("click", leave_workspace);
+    if (pending_workspace_enter) {
+      pending_workspace_enter = false;
+      enter_workspace();
+    }
 
     const base_select_run_v058 = select_run;
     select_run = function(run_id, options = {}) {
