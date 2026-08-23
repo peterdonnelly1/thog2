@@ -123,7 +123,11 @@ def test_real_firefox_maximize_current_only_history_round_trip(tmp_path: Path) -
         current_count = _q_trace_count(driver)
 
         driver.execute_script(
-            "document.querySelector('.chart-card[data-chart=" + '"attn_q_head_N"' + "] .maximize-button').click();"
+            """
+            const button = document.querySelector('.chart-card[data-chart="attn_q_head_N"] .maximize-button');
+            if (!button) throw new Error('Q restore button missing');
+            button.click();
+            """
         )
         _wait(
             driver,
