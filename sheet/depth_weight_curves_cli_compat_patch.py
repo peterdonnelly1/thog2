@@ -55,16 +55,6 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
             "instrumentation__depth_weight_curves__history_length",
             {"type": int, "default": _depth._DEFAULT_HISTORY_LENGTH},
         ),
-        # vvv THOG seed INSTRA's inclusive Weights display window from run configuration while retaining the group-header controls as the live override
-        (
-            "instrumentation__depth_weight_curves__start_step",
-            {"type": int, "default": None},
-        ),
-        (
-            "instrumentation__depth_weight_curves__end_step",
-            {"type": int, "default": None},
-        ),
-        # ^^^ THOG
         (
             "instrumentation__depth_weight_curves__log_every_n_steps",
             {"type": int, "default": _depth._DEFAULT_LOG_EVERY_N_STEPS},
