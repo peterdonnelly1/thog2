@@ -70,6 +70,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_step_hyperparameter_patch.js",                                                                                                       # <<< THOG seed the existing Weights step-window controller from run hyperparameters without taking ownership away from the header controls
     "dashboard_regression_repair_patch.js",
     "dashboard_weight_step_placeholder_cleanup_patch.js",
+    "dashboard_weight_semantics_repair_patch.js",                                                                                                          # <<< THOG restore group/chart ownership and make current-only mean the latest optimizer step even with an explicit step window
 )
 
 
