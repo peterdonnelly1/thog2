@@ -81,11 +81,20 @@ window.addEventListener("load", () => {
       const prepared = base_prepare_figure_weight_reliability(figure, chart_name);
       if (!weight_chart_names.has(chart_name)) return prepared;
       const render_override = app.chart_settings_render_override;
-      const settings = normalize_chart_settings(
-        chart_name,
-        render_override?.chart_name === chart_name ? render_override.settings : null,
+      const editor_open = by_id("chart_settings_overlay")?.hidden === false;
+      const preview_settings = (
+        editor_open && render_override?.chart_name === chart_name
+          ? render_override.settings
+          : null
       );
-      if (settings?.join_with_line_segments !== true) return prepared;
+      const persisted = window.__instra_weight_stability_final?.effective?.(chart_name) || {};
+      const join_with_line_segments = (
+        preview_settings
+        && Object.prototype.hasOwnProperty.call(preview_settings, "join_with_line_segments")
+          ? preview_settings.join_with_line_segments === true
+          : persisted.join_with_line_segments === true
+      );
+      if (!join_with_line_segments) return prepared;
       prepared.data = (prepared.data || []).filter(
         trace => trace?.meta?.instra_thog_executed_overlay !== true
       );
