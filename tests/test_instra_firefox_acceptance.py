@@ -291,7 +291,7 @@ def _save_settings_and_wait(driver) -> None:
     )
 
 
-def test_real_firefox_heatmap_and_global_weight_controls(tmp_path: Path) -> None:
+def test_real_firefox_heatmap_and_weight_group_chart_overrides(tmp_path: Path) -> None:
     _database, run_id = _make_legacy_store(tmp_path)
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -379,7 +379,7 @@ def test_real_firefox_heatmap_and_global_weight_controls(tmp_path: Path) -> None
         before = _checkbox_checked(driver, "chart_current_weights_only")
         driver.execute_script("document.getElementById('chart_current_weights_only').click();")
         assert _checkbox_checked(driver, "chart_current_weights_only") is (not before)
-        expected = not before
+        group_expected = not before
         _save_settings_and_wait(driver)
 
         _open_settings_and_wait(
@@ -392,14 +392,25 @@ def test_real_firefox_heatmap_and_global_weight_controls(tmp_path: Path) -> None
         assert _checkbox_enabled(driver, "chart_join_with_line_segments"), (
             "individual-chart Join with line segments is disabled"
         )
-        assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is group_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is True
         driver.execute_script("document.getElementById('chart_current_weights_only').click();")
-        expected = not expected
+        chart_expected = not group_expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is chart_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is False
         _save_settings_and_wait(driver)
+
+        _open_settings_and_wait(
+            driver,
+            '.chart-card[data-chart="attn_q_head_N"] .chart-settings-button',
+        )
+        assert _checkbox_checked(driver, "chart_current_weights_only") is chart_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is False
+        driver.execute_script("document.getElementById('cancel_chart_settings').click();")
 
         _open_settings_and_wait(driver, "#weights_group_settings_button")
         assert _checkbox_enabled(driver, "chart_current_weights_only")
-        assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is group_expected
     finally:
         if driver is not None:
             driver.quit()
