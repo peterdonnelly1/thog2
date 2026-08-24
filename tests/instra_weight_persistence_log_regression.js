@@ -105,36 +105,16 @@ function load_context(storage, {scale_mode = "linear"} = {}) {
   return context;
 }
 
-function persistence_regression() {
-  const storage = new Map();
-  let context = load_context(storage);
-  context.window.__instra_weight_controls_v2.set_global_flags(
-    {current_weights_only: true, join_with_line_segments: true},
-    {refresh: false},
+function final_persistence_contract_regression() {
+  const final_source = fs.readFileSync(
+    path.join(repository_root, "sheet/local_dashboard_assets/dashboard_weight_stability_final_patch.js"),
+    "utf8",
   );
-  assert.ok(storage.has("thog2_local_weight_global_flags_v2"));
-
-  context = load_context(storage);
-  assert.deepEqual(
-    context.window.__instra_weight_controls_v2.global_flags(),
-    {current_weights_only: true, join_with_line_segments: true},
-    "global weight flags did not survive a fresh dashboard load",
-  );
-  for (const chart_name of weight_names) {
-    const settings = context.normalize_chart_settings(chart_name);
-    assert.equal(settings.current_weights_only, true, `${chart_name} lost current-only after reload`);
-    assert.equal(settings.join_with_line_segments, true, `${chart_name} lost line-segment mode after reload`);
-  }
-
-  context.window.__instra_weight_controls_v2.set_global_flags(
-    {current_weights_only: false, join_with_line_segments: false},
-    {refresh: false},
-  );
-  context = load_context(storage);
-  assert.deepEqual(
-    context.window.__instra_weight_controls_v2.global_flags(),
-    {current_weights_only: false, join_with_line_segments: false},
-    "cleared global weight flags did not survive a fresh dashboard load",
+  assert.match(final_source, /thog2_local_weight_group_settings_v1/);
+  assert.match(final_source, /thog2_local_weight_chart_overrides_v1/);
+  assert.ok(
+    !final_source.includes("thog2_local_weight_global_flags_v2"),
+    "final Weights owner regressed to obsolete cross-run global persistence",
   );
 }
 
@@ -160,7 +140,7 @@ function signed_log_runtime_regression() {
   assert.equal(prepared.layout.yaxis.tickvals.length, prepared.layout.yaxis.ticktext.length);
 }
 
-persistence_regression();
+final_persistence_contract_regression();
 signed_log_runtime_regression();
 console.log("instra weight persistence/log regression: PASS");
 // ^^^ THOG
