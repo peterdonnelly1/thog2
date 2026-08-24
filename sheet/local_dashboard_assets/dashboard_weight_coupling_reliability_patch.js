@@ -64,10 +64,30 @@ window.addEventListener("load", () => {
       "chart_current_weights_only",
       "chart_join_with_line_segments",
     ]);
+    let group_flag_draft = null;
+    const group_editor_open = () => (
+      by_id("chart_settings_overlay")?.hidden === false
+      && by_id("weights_group_scale_field")?.hidden === false
+    );
+    const remember_group_flag = control => {
+      if (!group_editor_open() || !control || !weight_flag_control_ids.has(control.id)) return;
+      if (!group_flag_draft) {
+        group_flag_draft = {
+          current_weights_only: by_id("chart_current_weights_only")?.checked === true,
+          join_with_line_segments: by_id("chart_join_with_line_segments")?.checked === true,
+        };
+      }
+      if (control.id === "chart_current_weights_only") {
+        group_flag_draft.current_weights_only = control.checked === true;
+      } else {
+        group_flag_draft.join_with_line_segments = control.checked === true;
+      }
+    };
     const preserve_weight_flag_draft = event => {
       const control = event.target;
       if (!control || !weight_flag_control_ids.has(control.id)) return;
       if (by_id("chart_settings_overlay")?.hidden) return;
+      remember_group_flag(control);
       const group_editor = by_id("weights_group_scale_field")?.hidden === false;
       const inherit = by_id("chart_inherit_weights_group");
       if (!group_editor && inherit?.checked === true) inherit.checked = false;
@@ -75,6 +95,19 @@ window.addEventListener("load", () => {
     };
     window.addEventListener("input", preserve_weight_flag_draft, true);
     window.addEventListener("change", preserve_weight_flag_draft, true);
+    window.addEventListener("click", event => {
+      const target = event.target;
+      if (target && weight_flag_control_ids.has(target.id)) {
+        remember_group_flag(target);
+        return;
+      }
+      if (!target?.closest?.("#save_chart_settings") || !group_editor_open() || !group_flag_draft) return;
+      const current = by_id("chart_current_weights_only");
+      const join = by_id("chart_join_with_line_segments");
+      if (current) current.checked = group_flag_draft.current_weights_only;
+      if (join) join.checked = group_flag_draft.join_with_line_segments;
+      queueMicrotask(() => { group_flag_draft = null; });
+    }, true);
 
     const base_prepare_figure_weight_reliability = prepare_figure;
     prepare_figure = function(figure, chart_name) {
