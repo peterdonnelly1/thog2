@@ -62,7 +62,6 @@ window.addEventListener("load", () => {
     ]);
     const preserve_weight_flag_draft = event => {
       const control = event.target;
-      if (!window.__instra_weight_stability_final) return;
       if (!control || !weight_flag_control_ids.has(control.id)) return;
       if (by_id("chart_settings_overlay")?.hidden) return;
       const group_editor = by_id("weights_group_scale_field")?.hidden === false;
@@ -136,6 +135,6 @@ window.addEventListener("load", () => {
       .chart-card[data-chart="mlp_down"] { order: 6 !important; }
     `;
     document.head.appendChild(style);
-  }, 420);
+  }, 0);
 });
 // ^^^ THOG
