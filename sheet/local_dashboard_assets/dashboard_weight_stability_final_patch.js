@@ -31,6 +31,7 @@ window.addEventListener("load", () => {
     const range_by_context = new Map();
     const loading_contexts = new Set();
     let refresh_suppression = 0;
+    let editor_draft = null;
 
     const own = (object, key) => (
       Boolean(object)
@@ -455,18 +456,43 @@ window.addEventListener("load", () => {
       }
     };
 
+    const editor_is_group = () => by_id("weights_group_scale_field")?.hidden === false;
+
+    const draft_matches_editor = () => Boolean(
+      editor_draft
+      && editor_draft.chart_name === app.axis_chart_name
+      && editor_draft.group_editor === editor_is_group()
+    );
+
+    const apply_editor_draft = () => {
+      if (!draft_matches_editor()) return;
+      const current = by_id("chart_current_weights_only");
+      const join = by_id("chart_join_with_line_segments");
+      if (editor_draft.current_weights_only !== null && current) {
+        current.checked = editor_draft.current_weights_only;
+      }
+      if (editor_draft.join_with_line_segments !== null && join) {
+        join.checked = editor_draft.join_with_line_segments;
+      }
+      if (editor_draft.force_override) {
+        const inherit = by_id("chart_inherit_weights_group");
+        if (inherit) inherit.checked = false;
+      }
+    };
+
     const sync_editor_controls = ({load_values = false} = {}) => {
       if (by_id("chart_settings_overlay")?.hidden) return;
       const chart_name = app.axis_chart_name;
       if (!weight_chart_set.has(chart_name)) return;
       const current = by_id("chart_current_weights_only");
       const join = by_id("chart_join_with_line_segments");
-      const group_editor = by_id("weights_group_scale_field")?.hidden === false;
+      const group_editor = editor_is_group();
       const inherit = !group_editor && by_id("chart_inherit_weights_group")?.checked === true;
-      if (load_values && !group_editor) {
+      if (load_values && !group_editor && !draft_matches_editor()) {
         if (current) current.checked = effective_flag(chart_name, "current_weights_only");
         if (join) join.checked = effective_flag(chart_name, "join_with_line_segments");
       }
+      apply_editor_draft();
       if (current) current.disabled = false;
       if (join) join.disabled = false;
       const current_note = by_id("chart_current_weights_only_field")?.querySelector?.("small");
@@ -586,17 +612,32 @@ window.addEventListener("load", () => {
       const target = event.target;
       if (!target?.matches?.("#chart_current_weights_only, #chart_join_with_line_segments")) return;
       if (by_id("chart_settings_overlay")?.hidden || !weight_chart_set.has(app.axis_chart_name)) return;
-      const desired = target.checked === true;
-      const group_editor = by_id("weights_group_scale_field")?.hidden === false;
-      if (!group_editor) {
-        const inherit = by_id("chart_inherit_weights_group");
-        if (inherit?.checked) inherit.checked = false;
+      const group_editor = editor_is_group();
+      if (!draft_matches_editor()) {
+        editor_draft = {
+          chart_name: app.axis_chart_name,
+          group_editor,
+          current_weights_only: null,
+          join_with_line_segments: null,
+          force_override: false,
+        };
       }
+      if (target.id === "chart_current_weights_only") {
+        editor_draft.current_weights_only = target.checked === true;
+      } else {
+        editor_draft.join_with_line_segments = target.checked === true;
+      }
+      if (!group_editor) editor_draft.force_override = true;
+      apply_editor_draft();
       queueMicrotask(() => {
-        target.checked = desired;
+        apply_editor_draft();
         sync_editor_controls({load_values: false});
         if (typeof schedule_chart_settings_preview === "function") schedule_chart_settings_preview();
       });
+      setTimeout(() => {
+        apply_editor_draft();
+        sync_editor_controls({load_values: false});
+      }, 0);
     }, true);
 
     const base_sync_chart_setting_outputs = sync_chart_setting_outputs;
@@ -624,6 +665,7 @@ window.addEventListener("load", () => {
 
     const base_open_chart_settings = open_chart_settings;
     open_chart_settings = function(chart_name) {
+      editor_draft = null;
       const result = base_open_chart_settings(chart_name);
       if (weight_chart_set.has(chart_name)) queueMicrotask(() => sync_editor_controls({load_values: true}));
       return result;
@@ -694,13 +736,15 @@ window.addEventListener("load", () => {
       return result;
     };
 
-    // A save may change current-only and therefore the optimal server request. The
-    // older global writers are ignored; after canonical group/override persistence
-    // has completed, invalidate exactly the depth family and refresh once.
+    // A save may change current-only and therefore the optimal server request. Make
+    // the editor draft authoritative at capture time, before the canonical group/
+    // override handler reads the form, then refresh once after persistence completes.
     window.addEventListener("click", event => {
       if (!event.target.closest?.("#save_chart_settings")) return;
       if (!weight_chart_set.has(app.axis_chart_name)) return;
+      apply_editor_draft();
       setTimeout(() => {
+        editor_draft = null;
         sync_editor_controls({load_values: true});
         invalidate_depth();
         refresh_current_run();
