@@ -40,7 +40,6 @@ window.addEventListener("load", () => {
     }
 
     const flags = current_only_flags();
-    const any_current_only = flags.some(Boolean);
     const all_current_only = flags.length > 0 && flags.every(Boolean);
     const range = selected_range();
 
@@ -48,15 +47,17 @@ window.addEventListener("load", () => {
     parsed.searchParams.delete("step_min");
     parsed.searchParams.delete("step_max");
 
-    if (all_current_only) {
-      parsed.searchParams.set("current_only", "1");
-    } else if (range && !any_current_only) {
+    // An explicit display range is authoritative even when Current weights only is
+    // enabled. The selected range needs every retained snapshot in [start,end]; only
+    // the no-range case may use the latest-only server optimisation.
+    if (range) {
       parsed.searchParams.set("step_min", String(range.minimum));
       parsed.searchParams.set("step_max", String(range.maximum));
+    } else if (all_current_only) {
+      parsed.searchParams.set("current_only", "1");
     }
-    // Mixed current/history mode intentionally fetches retained history once. The
-    // final Weights owner reduces current-only charts to latest and historical charts
-    // to the selected range client-side.
+    // Mixed no-range current/history mode intentionally fetches retained history once.
+    // The final Weights owner reduces current-only charts to latest client-side.
 
     return base_fetch_json(`${parsed.pathname}?${parsed.searchParams.toString()}`, options);
   };
