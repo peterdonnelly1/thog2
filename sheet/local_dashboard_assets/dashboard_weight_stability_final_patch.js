@@ -10,7 +10,6 @@ window.addEventListener("load", () => {
     if (!window.__instra_weight_controls_v2) return false;
     if (!window.__instra_weight_group_settings) return false;
     if (!window.__instra_matched_weight_selection) return false;
-    if (!window.__instra_weight_presentation) return false;
     if (!window.__thog2_dashboard_performance) return false;
     if (!window.__instra_legacy_heatmap_repair) return false;
     if (typeof normalize_chart_settings !== "function") return false;
@@ -464,7 +463,7 @@ window.addEventListener("load", () => {
       const join = by_id("chart_join_with_line_segments");
       const group_editor = by_id("weights_group_scale_field")?.hidden === false;
       const inherit = !group_editor && by_id("chart_inherit_weights_group")?.checked === true;
-      if (load_values) {
+      if (load_values && !group_editor) {
         if (current) current.checked = effective_flag(chart_name, "current_weights_only");
         if (join) join.checked = effective_flag(chart_name, "join_with_line_segments");
       }
@@ -748,9 +747,11 @@ window.addEventListener("load", () => {
 
   if (install()) return;
   let attempts = 0;
-  const timer = setInterval(() => {
+  const retry = () => {
     attempts += 1;
-    if (install() || attempts >= 240) clearInterval(timer);
-  }, 25);
+    if (install() || attempts >= 240) return;
+    setTimeout(retry, 25);
+  };
+  setTimeout(retry, 0);
 });
 // ^^^ THOG
