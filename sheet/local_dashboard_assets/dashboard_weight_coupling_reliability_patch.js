@@ -55,6 +55,47 @@ window.addEventListener("load", () => {
       random_ready: show_random_control(),
     });
 
+    // vvv THOG keep the consolidated group/override owner authoritative over the superseded global checkbox preview listeners
+    const weight_flag_control_ids = new Set([
+      "chart_current_weights_only",
+      "chart_join_with_line_segments",
+    ]);
+    const preserve_weight_flag_draft = event => {
+      const control = event.target;
+      if (!window.__instra_weight_stability_final) return;
+      if (!control || !weight_flag_control_ids.has(control.id)) return;
+      if (by_id("chart_settings_overlay")?.hidden) return;
+      const group_editor = by_id("weights_group_scale_field")?.hidden === false;
+      const inherit = by_id("chart_inherit_weights_group");
+      if (!group_editor && inherit?.checked === true) inherit.checked = false;
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener("input", preserve_weight_flag_draft, true);
+    window.addEventListener("change", preserve_weight_flag_draft, true);
+
+    const base_prepare_figure_weight_reliability = prepare_figure;
+    prepare_figure = function(figure, chart_name) {
+      const prepared = base_prepare_figure_weight_reliability(figure, chart_name);
+      if (!weight_chart_names.has(chart_name)) return prepared;
+      const render_override = app.chart_settings_render_override;
+      const settings = normalize_chart_settings(
+        chart_name,
+        render_override?.chart_name === chart_name ? render_override.settings : null,
+      );
+      if (settings?.join_with_line_segments !== true) return prepared;
+      prepared.data = (prepared.data || []).filter(
+        trace => trace?.meta?.instra_thog_executed_overlay !== true
+      );
+      for (const trace of prepared.data || []) {
+        if (trace?.meta?.instra_thog_weight !== true) continue;
+        const mode = String(trace.mode || "");
+        if (!mode.includes("lines")) continue;
+        trace.line = {...(trace.line || {}), shape: "linear"};
+      }
+      return prepared;
+    };
+    // ^^^ THOG
+
     // Never observe the Plotly/chart subtree continuously. A previous version had
     // two observers disagreeing over the random button's hidden state; one observer
     // also rewrote textContent, generating another child-list mutation. That formed
