@@ -64,7 +64,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_controls_run_table_patch.js",
     "dashboard_run_table_s_checkpoint_patch.js",
     "dashboard_weight_coupling_presentation_patch.js",
-    "dashboard_weight_coupling_reliability_patch.js",
+    # "dashboard_weight_coupling_reliability_patch.js",                                                                                                   # <<< THOG superseded position: reliability must install only after the consolidated final Weights owner
     "dashboard_workspace_depth_cache_patch.js",
     "dashboard_render_visibility_performance_patch.js",
     "dashboard_weight_step_controls_patch.js",
@@ -77,6 +77,7 @@ _EXTRA_ASSET_NAMES = (
     # "dashboard_weight_style_semantics_repair_patch.js",
     # ^^^ THOG
     "dashboard_weight_stability_final_patch.js",                                                                                                           # <<< THOG install one dependency-gated final owner for run-scoped ranges, chart/group settings, loading state, and time filtering
+    "dashboard_weight_coupling_reliability_patch.js",                                                                                                     # <<< THOG install deterministic final checkbox/render reliability only after the consolidated Weights owner
 )
 
 
