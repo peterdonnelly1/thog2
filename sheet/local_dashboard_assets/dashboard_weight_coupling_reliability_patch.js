@@ -140,6 +140,17 @@ window.addEventListener("load", () => {
           const chart_scope = `${group_scope}:${chart_name}`;
           const group = window.__instra_weight_group_settings?.group_settings_for_scope?.(group_scope) || null;
           const encode = value => value === true ? "1" : value === false ? "0" : "n";
+          // vvv THOG expose only storage scope names so we can distinguish a missing save from a save under the wrong run/workspace scope
+          let group_store_keys = [];
+          try {
+            const raw_group_store = JSON.parse(localStorage.getItem("thog2_local_weight_group_settings_v1") || "{}");
+            group_store_keys = raw_group_store && typeof raw_group_store === "object"
+              ? Object.keys(raw_group_store).sort()
+              : [];
+          } catch (_error) {
+            group_store_keys = ["parse_error"];
+          }
+          // ^^^ THOG
           prepared.layout = prepared.layout || {};
           prepared.layout.legend = {
             instra_join_diagnostic: (
@@ -148,6 +159,7 @@ window.addEventListener("load", () => {
               + `s${encode(persisted.join_with_line_segments)}`
               + `g${encode(group?.join_with_line_segments)}`
               + `l${encode(app.weight_join_with_line_segments?.[chart_scope])}`
+              + `k[${group_store_keys.join(",")}]`
             ),
           };
         }
