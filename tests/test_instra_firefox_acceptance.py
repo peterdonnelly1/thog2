@@ -500,6 +500,7 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
                     "document.getElementById(arguments[0]).click();",
                     element_id,
                 )
+        render_started = time.monotonic()
         _save_settings_and_wait(driver)
 
         _wait(
@@ -507,17 +508,29 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
             lambda: bool(driver.execute_script(
                 """
                 const mount = document.getElementById('attn_q_head_N_plot');
-                return (mount?.data || []).some(trace => (
+                const traces = (mount?.data || []).filter(
+                  trace => trace?.meta?.instra_top_axis_anchor !== true
+                );
+                const selected = traces.find(trace => (
                   trace?.meta?.instra_weight_model_feature === 12
                   && trace?.meta?.instra_weight_intermediate_feature === 14
                   && trace?.meta?.instra_thog_weight === true
                   && String(trace?.mode || '').includes('lines')
                 ));
+                return (
+                  traces.length === 1
+                  && !!selected
+                  && selected?.line?.shape === 'linear'
+                  && traces.every(trace => trace?.meta?.instra_thog_executed_overlay !== true)
+                );
                 """
             )),
             timeout=20,
-            message="selected THOG coupling did not render",
+            message="selected THOG coupling did not reach the post-save line-segment render contract",
         )
+        render_seconds = time.monotonic() - render_started
+        assert render_seconds < 10.0, f"post-save Weights render took {render_seconds:.2f}s"
+
         diagnostic = driver.execute_script(
             """
             const mount = document.getElementById('attn_q_head_N_plot');
