@@ -340,6 +340,6 @@ window.addEventListener("load", () => {
       }
     `;
     document.head.appendChild(style);
-  }, 320);
+  }, 0);
 });
 // ^^^ THOG
