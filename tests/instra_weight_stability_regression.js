@@ -132,6 +132,7 @@ const context = {
       selection: () => ({user_selected: selected_weight, model_feature: 3, intermediate_feature: 4}),
       capability: () => ({available: true, maximum: 15}),
     },
+    __instra_weight_presentation: {},
     __thog2_dashboard_performance: {state: {}},
     __instra_legacy_heatmap_repair: {},
     __instra_workspace_depth_cache: {clear() {}},
