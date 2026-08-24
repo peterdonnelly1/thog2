@@ -127,7 +127,29 @@ window.addEventListener("load", () => {
           ? preview_settings.join_with_line_segments === true
           : persisted.join_with_line_segments === true
       );
-      if (!join_with_line_segments) return prepared;
+      if (!join_with_line_segments) {
+        // vvv THOG hidden CI diagnostic: expose the exact final setting sources without changing visible Plotly chrome
+        const group_scope = app.workspace_mode === true
+          ? "workspace"
+          : `run:${String(app.current_run_id || "unselected")}`;
+        const chart_scope = `${group_scope}:${chart_name}`;
+        const groups = load_json("thog2_local_weight_group_settings_v1", {});
+        const overrides = load_json("thog2_local_weight_chart_overrides_v1", {});
+        prepared.layout = prepared.layout || {};
+        prepared.layout.legend = {
+          instra_join_diagnostic: true,
+          editor_open,
+          preview_join_with_line_segments: preview_settings?.join_with_line_segments ?? null,
+          persisted_join_with_line_segments: persisted.join_with_line_segments ?? null,
+          group_join_with_line_segments: groups?.[group_scope]?.join_with_line_segments ?? null,
+          override_join_with_line_segments: overrides?.[chart_scope]?.join_with_line_segments ?? null,
+          legacy_join_with_line_segments: app.weight_join_with_line_segments?.[chart_scope] ?? null,
+          group_scope,
+          chart_scope,
+        };
+        // ^^^ THOG
+        return prepared;
+      }
       prepared.data = (prepared.data || []).filter(
         trace => trace?.meta?.instra_thog_executed_overlay !== true
       );
