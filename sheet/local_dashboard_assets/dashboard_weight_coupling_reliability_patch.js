@@ -5,7 +5,11 @@
 // Missing selected couplings are deliberately not replaced here: the presentation
 // owner renders an honest unavailable state instead of a differently indexed line.
 window.addEventListener("load", () => {
-  setTimeout(() => {
+  // vvv THOG install only after the consolidated Weights stability owner is live so this layer is deterministically last
+  const install = () => {
+    if (window.__instra_weight_coupling_reliability_final) return true;
+    if (!window.__instra_weight_stability_final) return false;
+
     const weight_chart_names = new Set([
       "attn_q_head_N",
       "attn_k_head_N",
@@ -55,7 +59,6 @@ window.addEventListener("load", () => {
       random_ready: show_random_control(),
     });
 
-    // vvv THOG keep the consolidated group/override owner authoritative over the superseded global checkbox preview listeners
     const weight_flag_control_ids = new Set([
       "chart_current_weights_only",
       "chart_join_with_line_segments",
@@ -93,7 +96,6 @@ window.addEventListener("load", () => {
       }
       return prepared;
     };
-    // ^^^ THOG
 
     // Never observe the Plotly/chart subtree continuously. A previous version had
     // two observers disagreeing over the random button's hidden state; one observer
@@ -135,6 +137,19 @@ window.addEventListener("load", () => {
       .chart-card[data-chart="mlp_down"] { order: 6 !important; }
     `;
     document.head.appendChild(style);
-  }, 0);
+
+    window.__instra_weight_coupling_reliability_final = Object.freeze({
+      installed: true,
+    });
+    return true;
+  };
+
+  if (install()) return;
+  let attempts = 0;
+  const timer = setInterval(() => {
+    attempts += 1;
+    if (install() || attempts >= 240) clearInterval(timer);
+  }, 25);
+  // ^^^ THOG
 });
 // ^^^ THOG
