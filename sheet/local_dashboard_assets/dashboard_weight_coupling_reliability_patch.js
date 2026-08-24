@@ -133,16 +133,14 @@ window.addEventListener("load", () => {
           ? "workspace"
           : `run:${String(app.current_run_id || "unselected")}`;
         const chart_scope = `${group_scope}:${chart_name}`;
-        const groups = load_json("thog2_local_weight_group_settings_v1", {});
-        const overrides = load_json("thog2_local_weight_chart_overrides_v1", {});
+        const group = window.__instra_weight_group_settings?.group_settings_for_scope?.(group_scope) || null;
         prepared.layout = prepared.layout || {};
         prepared.layout.legend = {
           instra_join_diagnostic: true,
           editor_open,
           preview_join_with_line_segments: preview_settings?.join_with_line_segments ?? null,
           persisted_join_with_line_segments: persisted.join_with_line_segments ?? null,
-          group_join_with_line_segments: groups?.[group_scope]?.join_with_line_segments ?? null,
-          override_join_with_line_segments: overrides?.[chart_scope]?.join_with_line_segments ?? null,
+          group_join_with_line_segments: group?.join_with_line_segments ?? null,
           legacy_join_with_line_segments: app.weight_join_with_line_segments?.[chart_scope] ?? null,
           group_scope,
           chart_scope,
