@@ -128,7 +128,7 @@ window.addEventListener("load", () => {
           : persisted.join_with_line_segments === true
       );
       if (!join_with_line_segments) {
-        // vvv THOG hidden Firefox-only CI diagnostic: expose the exact final setting sources without changing visible Plotly chrome
+        // vvv THOG hidden Firefox-only CI diagnostic: compactly expose final setting sources without changing visible Plotly chrome
         const firefox_runtime = (
           typeof navigator !== "undefined"
           && /Firefox/i.test(String(navigator.userAgent || ""))
@@ -139,16 +139,16 @@ window.addEventListener("load", () => {
             : `run:${String(app.current_run_id || "unselected")}`;
           const chart_scope = `${group_scope}:${chart_name}`;
           const group = window.__instra_weight_group_settings?.group_settings_for_scope?.(group_scope) || null;
+          const encode = value => value === true ? "1" : value === false ? "0" : "n";
           prepared.layout = prepared.layout || {};
           prepared.layout.legend = {
-            instra_join_diagnostic: true,
-            editor_open,
-            preview_join_with_line_segments: preview_settings?.join_with_line_segments ?? null,
-            persisted_join_with_line_segments: persisted.join_with_line_segments ?? null,
-            group_join_with_line_segments: group?.join_with_line_segments ?? null,
-            legacy_join_with_line_segments: app.weight_join_with_line_segments?.[chart_scope] ?? null,
-            group_scope,
-            chart_scope,
+            instra_join_diagnostic: (
+              `e${encode(editor_open)}`
+              + `p${encode(preview_settings?.join_with_line_segments)}`
+              + `s${encode(persisted.join_with_line_segments)}`
+              + `g${encode(group?.join_with_line_segments)}`
+              + `l${encode(app.weight_join_with_line_segments?.[chart_scope])}`
+            ),
           };
         }
         // ^^^ THOG
