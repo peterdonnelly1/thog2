@@ -14,10 +14,13 @@ const index_of = name => source.indexOf(`"${name}"`);
 assert.equal(active_asset("dashboard_weight_request_router_patch.js"), true);
 assert.equal(active_asset("dashboard_legacy_heatmap_repair_patch.js"), true);
 assert.equal(active_asset("dashboard_weight_stability_final_patch.js"), true);
+assert.equal(active_asset("dashboard_weight_coupling_reliability_patch.js"), true);
 assert.ok(index_of("dashboard_weight_request_router_patch.js") < index_of("dashboard_performance_patch.js"));
 assert.ok(index_of("dashboard_weight_stability_final_patch.js") > index_of("dashboard_weight_step_controls_patch.js"));
+assert.ok(index_of("dashboard_weight_coupling_reliability_patch.js") > index_of("dashboard_weight_stability_final_patch.js"));
 
 for (const name of [
+  "dashboard_current_weights_request_patch.js",
   "dashboard_weight_step_hyperparameter_patch.js",
   "dashboard_regression_repair_patch.js",
   "dashboard_weight_step_placeholder_cleanup_patch.js",
