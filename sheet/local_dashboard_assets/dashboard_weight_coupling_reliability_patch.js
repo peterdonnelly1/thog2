@@ -203,10 +203,12 @@ window.addEventListener("load", () => {
 
   if (install()) return;
   let attempts = 0;
-  const timer = setInterval(() => {
+  const retry = () => {
     attempts += 1;
-    if (install() || attempts >= 240) clearInterval(timer);
-  }, 25);
+    if (install() || attempts >= 240) return;
+    setTimeout(retry, 0);
+  };
+  setTimeout(retry, 0);
   // ^^^ THOG
 });
 // ^^^ THOG
