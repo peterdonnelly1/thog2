@@ -65,7 +65,6 @@ window.addEventListener("load", () => {
       input.addEventListener("input", () => {
         state.context = current_step_context();
         state.dirty = true;
-        mark_step_context_user_owned();
       });
       protected_step_inputs.set(input, state);
     };
@@ -106,22 +105,32 @@ window.addEventListener("load", () => {
     };
     protect_step_inputs();
 
-    // Show/Enter commits the draft; Whole range explicitly clears it.  Pointerdown
-    // runs before the older capture-phase click owner calls sync_header().
-    window.addEventListener("pointerdown", event => {
-      const apply = event.target.closest?.("#weight_step_apply");
-      const whole = event.target.closest?.("#weight_step_whole_range");
-      if (!apply && !whole) return;
+    const prepare_step_button_command = target => {
+      const apply = target?.closest?.("#weight_step_apply");
+      const whole = target?.closest?.("#weight_step_whole_range");
+      if (!apply && !whole) return false;
       mark_step_context_user_owned();
       if (whole) {
         clear_step_input_drafts();
-        return;
+        return true;
       }
       const minimum = finite_integer(by_id("weight_step_from")?.value);
       const maximum = finite_integer(by_id("weight_step_to")?.value);
       if (minimum !== null && maximum !== null && minimum >= 0 && maximum >= minimum) {
         clear_step_input_drafts();
       }
+      return true;
+    };
+
+    // Show/Enter commits the draft; Whole range explicitly clears it. Pointerdown
+    // runs before the older capture-phase click owner calls sync_header(). Keyboard
+    // activation is handled separately because it does not produce pointerdown.
+    window.addEventListener("pointerdown", event => {
+      prepare_step_button_command(event.target);
+    }, true);
+    window.addEventListener("keydown", event => {
+      if (!["Enter", " ", "Spacebar"].includes(event.key)) return;
+      prepare_step_button_command(event.target);
     }, true);
     window.addEventListener("keyup", event => {
       if (event.key !== "Enter" || !event.target.matches?.("#weight_step_from, #weight_step_to")) return;
@@ -243,7 +252,7 @@ window.addEventListener("load", () => {
       return routed;
     };
 
-    // Render-only geometry repairs.  Stored axis settings remain unchanged.
+    // Render-only geometry repairs. Stored axis settings remain unchanged.
     const padded_figures = new WeakSet();
     const base_prepare_figure_regression = prepare_figure;
     prepare_figure = function(figure, chart_name) {
@@ -259,9 +268,18 @@ window.addEventListener("load", () => {
             ...(prepared.layout.margin || {}),
             r: Math.max(220, Number(prepared.layout?.margin?.r || 0)),
           };
+          const shell = document.querySelector('.chart-card[data-chart="heatmap"] .heatmap-shell');
+          const shell_width = Math.max(0, Number(shell?.clientWidth || 0));
+          const plot_width = Math.max(
+            1,
+            shell_width
+              - Number(prepared.layout.margin.l || 0)
+              - Number(prepared.layout.margin.r || 0),
+          );
+          const key_offset_px = 48;
           heatmap_trace.colorbar = {
             ...(heatmap_trace.colorbar || {}),
-            x: 1.14,
+            x: shell_width > 0 ? 1 + key_offset_px / plot_width : 1.08,
             xanchor: "left",
             xpad: 8,
           };
@@ -458,8 +476,8 @@ window.addEventListener("load", () => {
     };
 
     // The old single-group 100% minimum height is wrong for the stacked synthetic
-    // groups.  Expanded groups size to their contents; collapsed/maximized states
-    // retain their established rules.  In the run table NAME is deliberately the
+    // groups. Expanded groups size to their contents; collapsed/maximized states
+    // retain their established rules. In the run table NAME is deliberately the
     // only elastic descriptive column; bounded fields do not consume widened panes.
     const style = document.createElement("style");
     style.id = "thog2_weight_regression_final_style";
@@ -490,7 +508,7 @@ window.addEventListener("load", () => {
     document.head.appendChild(style);
     classify_run_table_headers();
 
-    // New installations/default-only profiles move from 11px to 12px.  Any
+    // New installations/default-only profiles move from 11px to 12px. Any
     // explicitly non-default current choice survives unchanged.
     const overview_default_key = "thog2_local_overview_default_font_size";
     const overview_current_key = "thog2_local_overview_font_size";
@@ -516,7 +534,7 @@ window.addEventListener("load", () => {
     observer.observe(document.body, {childList: true, subtree: true});
 
     // Configuration/status and the dependency-gated stable owner can arrive after
-    // this last-loaded asset.  Bounded lightweight reconciliation never touches
+    // this last-loaded asset. Bounded lightweight reconciliation never touches
     // Plotly unless an as-yet-unseeded configured range is actually discovered.
     let reconciliation_passes = 0;
     const reconciliation_timer = setInterval(() => {
