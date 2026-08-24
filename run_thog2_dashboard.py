@@ -49,6 +49,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_final_presentation_settings_patch.js",
     "dashboard_heatmap_dom_alignment_patch.js",
     "dashboard_current_weights_request_patch.js",
+    "dashboard_weight_request_router_patch.js",                                                                                                            # <<< THOG route Weights requests by final per-chart current/range semantics before the performance layer captures fetch_json
     "dashboard_performance_patch.js",
     "dashboard_heatmap_zoom_geometry_patch.js",
     "dashboard_heatmap_y_axis_refinement_patch.js",
@@ -67,11 +68,15 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_workspace_depth_cache_patch.js",
     "dashboard_render_visibility_performance_patch.js",
     "dashboard_weight_step_controls_patch.js",
-    "dashboard_weight_step_hyperparameter_patch.js",                                                                                                       # <<< THOG seed the existing Weights step-window controller from run hyperparameters without taking ownership away from the header controls
-    "dashboard_regression_repair_patch.js",
-    "dashboard_weight_step_placeholder_cleanup_patch.js",
-    "dashboard_weight_semantics_repair_patch.js",                                                                                                          # <<< THOG restore group/chart ownership and make current-only mean the latest optimizer step even with an explicit step window
-    "dashboard_weight_style_semantics_repair_patch.js",                                                                                                    # <<< THOG align Runs-view trace colours with the repaired per-chart current-only semantics instead of the obsolete global flag
+    "dashboard_legacy_heatmap_repair_patch.js",                                                                                                            # <<< THOG retain the legacy absolute-delta heatmap fallback without reintroducing global Weights state
+    # vvv THOG superseded overlapping Weights owners are retained in the repository for provenance but no longer executed
+    # "dashboard_weight_step_hyperparameter_patch.js",
+    # "dashboard_regression_repair_patch.js",
+    # "dashboard_weight_step_placeholder_cleanup_patch.js",
+    # "dashboard_weight_semantics_repair_patch.js",
+    # "dashboard_weight_style_semantics_repair_patch.js",
+    # ^^^ THOG
+    "dashboard_weight_stability_final_patch.js",                                                                                                           # <<< THOG install one dependency-gated final owner for run-scoped ranges, chart/group settings, loading state, and time filtering
 )
 
 
