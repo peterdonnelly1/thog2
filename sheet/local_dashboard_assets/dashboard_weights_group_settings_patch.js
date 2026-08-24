@@ -424,7 +424,28 @@ window.addEventListener("load", () => {
       // ^^^ THOG
     };
 
-    const apply_group_settings = () => {
+    // const apply_group_settings = () => {
+    //   const state = chart_settings_form_state();
+    //   if (state.error) {
+    //     by_id("chart_settings_error").textContent = state.error;
+    //     by_id("chart_settings_error").hidden = false;
+    //     return;
+    //   }
+    //   const group = common_settings_from_state(state.settings);
+    //   group.scale_mode = by_id("weights_group_scale_mode").value === "log" ? "log" : "linear";
+    //   weight_group_settings[group_editor_scope] = group;
+    //   save_group_store();
+    //   const scales = load_json(scale_storage_key, {});
+    //   for (const chart_name of weight_chart_names) scales[chart_name] = group.scale_mode;
+    //   save_json(scale_storage_key, scales);
+    //   cleanup_group_editor();
+    //   close_chart_settings();
+    //   update_group_button();
+    //   render_figures().catch(error => show_toast(`Weights settings failed: ${error.message}`));
+    //   show_toast("Weights group settings applied.");
+    // };
+    // vvv THOG make group Apply transactional with respect to its redraw: clear preview ownership, await one six-chart render, then close without launching the legacy duplicate redraw
+    const apply_group_settings = async () => {
       const state = chart_settings_form_state();
       if (state.error) {
         by_id("chart_settings_error").textContent = state.error;
@@ -438,12 +459,34 @@ window.addEventListener("load", () => {
       const scales = load_json(scale_storage_key, {});
       for (const chart_name of weight_chart_names) scales[chart_name] = group.scale_mode;
       save_json(scale_storage_key, scales);
+
+      const save_button = by_id("save_chart_settings");
+      if (save_button) save_button.disabled = true;
+      clearTimeout(app.chart_settings_preview_timer);
+      app.chart_settings_preview_serial += 1;
+      app.chart_settings_render_override = null;
+
+      try {
+        await render_figures();
+      } catch (error) {
+        show_toast(`Weights settings failed: ${error.message}`);
+        return;
+      } finally {
+        if (save_button) save_button.disabled = false;
+      }
+
       cleanup_group_editor();
-      close_chart_settings();
+      const saved_render_axis_settings_change = render_axis_settings_change;
+      render_axis_settings_change = () => undefined;
+      try {
+        close_chart_settings();
+      } finally {
+        render_axis_settings_change = saved_render_axis_settings_change;
+      }
       update_group_button();
-      render_figures().catch(error => show_toast(`Weights settings failed: ${error.message}`));
       show_toast("Weights group settings applied.");
     };
+    // ^^^ THOG
 
     const install_group_button = () => {
       const header = by_id("coefficients_chart_group")?.querySelector(".chart-group-header");
