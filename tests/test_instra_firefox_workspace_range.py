@@ -208,10 +208,10 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 """
                 const placeholder = document.getElementById('attn_q_head_N_placeholder');
                 return !!placeholder && !placeholder.hidden
-                  && placeholder.textContent.includes('Curves will be displayed when step 1010 is reached');
+                  && placeholder.textContent.includes('No recorded weight snapshots in steps 1010–1011');
                 """
             ) is True,
-            message="future Workspace window did not show the step-1010 placeholder",
+            message="historical Workspace incorrectly waited for future step 1010",
         )
 
         driver.execute_script("document.getElementById('weight_step_whole_range').click();")
@@ -231,7 +231,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 """
             ) is True,
             timeout=20,
-            message="Q chart did not leave future-window placeholder after whole range",
+            message="Q chart did not leave historical-range placeholder after whole range",
         )
     finally:
         if driver is not None:
