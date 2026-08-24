@@ -27,25 +27,6 @@ window.addEventListener("load", () => {
       "attn_out_head_N",
       "mlp_down",
     ]);
-    const firefox_runtime = () => (
-      typeof navigator !== "undefined"
-      && /Firefox/i.test(String(navigator.userAgent || ""))
-    );
-    const encode_boolean = value => value === true ? "1" : value === false ? "0" : "n";
-    const stored_group_state = group_scope => {
-      let store = {};
-      try {
-        const candidate = JSON.parse(localStorage.getItem("thog2_local_weight_group_settings_v1") || "{}");
-        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) store = candidate;
-      } catch (_error) {
-        return {group: null, keys: ["parse_error"]};
-      }
-      return {
-        group: store[group_scope] && typeof store[group_scope] === "object" ? store[group_scope] : null,
-        keys: Object.keys(store).sort(),
-      };
-    };
-
     const reorder_weight_cards = () => {
       const cards = desired_weight_order.map(chart_name =>
         document.querySelector(`.chart-card[data-chart="${chart_name}"]`)
@@ -120,33 +101,11 @@ window.addEventListener("load", () => {
         remember_group_flag(target);
         return;
       }
-      if (!target?.closest?.("#save_chart_settings") || !group_editor_open()) return;
-      const diagnostic_scope = app.workspace_mode === true
-        ? "workspace"
-        : `run:${String(app.current_run_id || "unselected")}`;
-      if (group_flag_draft) {
-        const current = by_id("chart_current_weights_only");
-        const join = by_id("chart_join_with_line_segments");
-        if (current) current.checked = group_flag_draft.current_weights_only;
-        if (join) join.checked = group_flag_draft.join_with_line_segments;
-      }
-      // vvv THOG hidden Firefox-only post-Apply diagnostic separates persistence from an asynchronous Plotly redraw race
-      setTimeout(() => {
-        if (!firefox_runtime()) return;
-        const stored = stored_group_state(diagnostic_scope);
-        const effective = window.__instra_weight_stability_final?.effective?.("attn_q_head_N") || {};
-        const mount = by_id("attn_q_head_N_plot");
-        if (!mount?.layout) return;
-        mount.layout.legend = {
-          instra_join_diagnostic: (
-            `save_s${encode_boolean(effective.join_with_line_segments)}`
-            + `g${encode_boolean(stored.group?.join_with_line_segments)}`
-            + `c${encode_boolean(stored.group?.current_weights_only)}`
-            + `k[${stored.keys.join(",")}]`
-          ),
-        };
-      }, 0);
-      // ^^^ THOG
+      if (!target?.closest?.("#save_chart_settings") || !group_editor_open() || !group_flag_draft) return;
+      const current = by_id("chart_current_weights_only");
+      const join = by_id("chart_join_with_line_segments");
+      if (current) current.checked = group_flag_draft.current_weights_only;
+      if (join) join.checked = group_flag_draft.join_with_line_segments;
       queueMicrotask(() => { group_flag_draft = null; });
     }, true);
 
@@ -168,30 +127,7 @@ window.addEventListener("load", () => {
           ? preview_settings.join_with_line_segments === true
           : persisted.join_with_line_segments === true
       );
-      if (!join_with_line_segments) {
-        // vvv THOG hidden Firefox-only CI diagnostic: compactly expose final setting sources without changing visible Plotly chrome
-        if (firefox_runtime()) {
-          const group_scope = app.workspace_mode === true
-            ? "workspace"
-            : `run:${String(app.current_run_id || "unselected")}`;
-          const chart_scope = `${group_scope}:${chart_name}`;
-          const group = window.__instra_weight_group_settings?.group_settings_for_scope?.(group_scope) || null;
-          const stored = stored_group_state(group_scope);
-          prepared.layout = prepared.layout || {};
-          prepared.layout.legend = {
-            instra_join_diagnostic: (
-              `e${encode_boolean(editor_open)}`
-              + `p${encode_boolean(preview_settings?.join_with_line_segments)}`
-              + `s${encode_boolean(persisted.join_with_line_segments)}`
-              + `g${encode_boolean(group?.join_with_line_segments)}`
-              + `l${encode_boolean(app.weight_join_with_line_segments?.[chart_scope])}`
-              + `k[${stored.keys.join(",")}]`
-            ),
-          };
-        }
-        // ^^^ THOG
-        return prepared;
-      }
+      if (!join_with_line_segments) return prepared;
       prepared.data = (prepared.data || []).filter(
         trace => trace?.meta?.instra_thog_executed_overlay !== true
       );
