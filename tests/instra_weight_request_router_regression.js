@@ -36,9 +36,11 @@ async function run_case(flags, range) {
 }
 
 (async () => {
+  // An explicit display window is authoritative regardless of the current-only flags.
   let request = await run_case([true, true, true, true, true, true], {minimum: 20, maximum: 30});
-  assert.equal(request.searchParams.get("current_only"), "1");
-  assert.equal(request.searchParams.has("step_min"), false);
+  assert.equal(request.searchParams.get("step_min"), "20");
+  assert.equal(request.searchParams.get("step_max"), "30");
+  assert.equal(request.searchParams.has("current_only"), false);
 
   request = await run_case([false, false, false, false, false, false], {minimum: 20, maximum: 30});
   assert.equal(request.searchParams.get("step_min"), "20");
@@ -46,7 +48,13 @@ async function run_case(flags, range) {
   assert.equal(request.searchParams.has("current_only"), false);
 
   request = await run_case([true, false, false, false, false, false], {minimum: 20, maximum: 30});
+  assert.equal(request.searchParams.get("step_min"), "20");
+  assert.equal(request.searchParams.get("step_max"), "30");
   assert.equal(request.searchParams.has("current_only"), false);
+
+  // Without an explicit range the all-current case still takes the efficient latest path.
+  request = await run_case([true, true, true, true, true, true], null);
+  assert.equal(request.searchParams.get("current_only"), "1");
   assert.equal(request.searchParams.has("step_min"), false);
   assert.equal(request.searchParams.has("step_max"), false);
 
