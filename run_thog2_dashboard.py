@@ -69,6 +69,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_legacy_heatmap_repair_patch.js",                                                                                                            # <<< THOG retain the legacy absolute-delta heatmap fallback without reintroducing global Weights state
     "dashboard_weight_stability_final_patch.js",                                                                                                           # <<< THOG install one dependency-gated final owner for run-scoped ranges, chart/group settings, loading state, and time filtering
     "dashboard_weight_coupling_reliability_patch.js",                                                                                                     # <<< THOG install deterministic final checkbox/render reliability only after the consolidated Weights owner
+    "dashboard_weight_regression_final_patch.js",                                                                                                          # <<< THOG guard editable ranges, stacked layout, y headroom, Overview density, and retained-data RND last
 )
 
 
