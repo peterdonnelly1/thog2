@@ -48,7 +48,6 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_maximize_lband_patch.js",
     "dashboard_final_presentation_settings_patch.js",
     "dashboard_heatmap_dom_alignment_patch.js",
-    "dashboard_current_weights_request_patch.js",
     "dashboard_weight_request_router_patch.js",                                                                                                            # <<< THOG route Weights requests by final per-chart current/range semantics before the performance layer captures fetch_json
     "dashboard_performance_patch.js",
     "dashboard_heatmap_zoom_geometry_patch.js",
@@ -64,18 +63,10 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_controls_run_table_patch.js",
     "dashboard_run_table_s_checkpoint_patch.js",
     "dashboard_weight_coupling_presentation_patch.js",
-    # "dashboard_weight_coupling_reliability_patch.js",                                                                                                   # <<< THOG superseded position: reliability must install only after the consolidated final Weights owner
     "dashboard_workspace_depth_cache_patch.js",
     "dashboard_render_visibility_performance_patch.js",
     "dashboard_weight_step_controls_patch.js",
     "dashboard_legacy_heatmap_repair_patch.js",                                                                                                            # <<< THOG retain the legacy absolute-delta heatmap fallback without reintroducing global Weights state
-    # vvv THOG superseded overlapping Weights owners are retained in the repository for provenance but no longer executed
-    # "dashboard_weight_step_hyperparameter_patch.js",
-    # "dashboard_regression_repair_patch.js",
-    # "dashboard_weight_step_placeholder_cleanup_patch.js",
-    # "dashboard_weight_semantics_repair_patch.js",
-    # "dashboard_weight_style_semantics_repair_patch.js",
-    # ^^^ THOG
     "dashboard_weight_stability_final_patch.js",                                                                                                           # <<< THOG install one dependency-gated final owner for run-scoped ranges, chart/group settings, loading state, and time filtering
     "dashboard_weight_coupling_reliability_patch.js",                                                                                                     # <<< THOG install deterministic final checkbox/render reliability only after the consolidated Weights owner
 )
