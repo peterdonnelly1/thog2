@@ -5,10 +5,11 @@
 // Missing selected couplings are deliberately not replaced here: the presentation
 // owner renders an honest unavailable state instead of a differently indexed line.
 window.addEventListener("load", () => {
-  // vvv THOG install only after the consolidated Weights stability owner is live so this layer is deterministically last
+  // vvv THOG install only after both consolidated Weights semantics and the delayed presentation owner are live
   const install = () => {
     if (window.__instra_weight_coupling_reliability_final) return true;
     if (!window.__instra_weight_stability_final) return false;
+    if (!window.__instra_weight_presentation) return false;
 
     const weight_chart_names = new Set([
       "attn_q_head_N",
@@ -141,6 +142,20 @@ window.addEventListener("load", () => {
     window.__instra_weight_coupling_reliability_final = Object.freeze({
       installed: true,
     });
+
+    // The presentation owner may have rendered once before this final wrapper was
+    // installed. Re-render exactly once so existing Plotly mounts immediately obey
+    // the no-executed-overlay / integer-line-segment contract.
+    if (app.current_run_id && typeof render_figures === "function") {
+      setTimeout(() => {
+        try {
+          const result = render_figures();
+          if (result && typeof result.catch === "function") result.catch(() => undefined);
+        } catch (_error) {
+          // A later normal refresh will retry; installation itself must stay stable.
+        }
+      }, 0);
+    }
     return true;
   };
 
