@@ -20,7 +20,7 @@ from tests.test_instra_firefox_acceptance import (
 )
 
 
-def test_real_firefox_global_weight_controls_are_clickable(tmp_path: Path) -> None:
+def test_real_firefox_weight_group_and_chart_overrides_are_clickable(tmp_path: Path) -> None:
     _database, run_id = _make_legacy_store(tmp_path)
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -73,7 +73,7 @@ def test_real_firefox_global_weight_controls_are_clickable(tmp_path: Path) -> No
               axis_chart_name: window.app?.axis_chart_name ?? null,
               overlay_hidden: document.getElementById('chart_settings_overlay')?.hidden,
               title: document.getElementById('chart_settings_title')?.textContent,
-              repair_loaded: !!window.__instra_regression_repair,
+              stability_loaded: !!window.__instra_weight_stability_final,
               step_filter_active: window.__instra_weight_step_filter?.active?.() ?? null,
             };
             """
@@ -82,8 +82,8 @@ def test_real_firefox_global_weight_controls_are_clickable(tmp_path: Path) -> No
         assert _checkbox_enabled(driver, "chart_join_with_line_segments"), f"group Join disabled: {diagnostic}"
         before = _checkbox_checked(driver, "chart_current_weights_only")
         driver.execute_script("document.getElementById('chart_current_weights_only').click();")
-        expected = not before
-        assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+        group_expected = not before
+        assert _checkbox_checked(driver, "chart_current_weights_only") is group_expected
         _save_settings_and_wait(driver)
 
         _open_settings_and_wait(driver, '.chart-card[data-chart="attn_q_head_N"] .chart-settings-button')
@@ -95,21 +95,29 @@ def test_real_firefox_global_weight_controls_are_clickable(tmp_path: Path) -> No
               axis_chart_name: window.app?.axis_chart_name ?? null,
               overlay_hidden: document.getElementById('chart_settings_overlay')?.hidden,
               title: document.getElementById('chart_settings_title')?.textContent,
-              repair_loaded: !!window.__instra_regression_repair,
+              stability_loaded: !!window.__instra_weight_stability_final,
               step_filter_active: window.__instra_weight_step_filter?.active?.() ?? null,
             };
             """
         )
         assert _checkbox_enabled(driver, "chart_current_weights_only"), f"individual Current-only disabled: {diagnostic}"
         assert _checkbox_enabled(driver, "chart_join_with_line_segments"), f"individual Join disabled: {diagnostic}"
-        assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is group_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is True
         driver.execute_script("document.getElementById('chart_current_weights_only').click();")
-        expected = not expected
+        chart_expected = not group_expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is chart_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is False
         _save_settings_and_wait(driver)
+
+        _open_settings_and_wait(driver, '.chart-card[data-chart="attn_q_head_N"] .chart-settings-button')
+        assert _checkbox_checked(driver, "chart_current_weights_only") is chart_expected
+        assert _checkbox_checked(driver, "chart_inherit_weights_group") is False
+        driver.execute_script("document.getElementById('cancel_chart_settings').click();")
 
         _open_settings_and_wait(driver, "#weights_group_settings_button")
         assert _checkbox_enabled(driver, "chart_current_weights_only")
-        assert _checkbox_checked(driver, "chart_current_weights_only") is expected
+        assert _checkbox_checked(driver, "chart_current_weights_only") is group_expected
     finally:
         if driver is not None:
             driver.quit()
