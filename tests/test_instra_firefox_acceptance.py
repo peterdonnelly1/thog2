@@ -527,10 +527,7 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
               && trace?.meta?.instra_weight_intermediate_feature === 14
               && String(trace?.mode || '').includes('lines')
             ));
-            const group_scope = app.workspace_mode === true
-              ? 'workspace'
-              : `run:${String(app.current_run_id || 'unselected')}`;
-            const chart_scope = `${group_scope}:attn_q_head_N`;
+            const group_scope = `run:${String(arguments[0])}`;
             let stored_groups = {};
             try {
               const candidate = JSON.parse(localStorage.getItem('thog2_local_weight_group_settings_v1') || '{}');
@@ -558,17 +555,16 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
               stored_group: stored_groups[group_scope] || null,
               stored_group_keys: Object.keys(stored_groups).sort(),
               group_scope,
-              legacy_join: app.weight_join_with_line_segments?.[chart_scope] ?? null,
               stability_installed: window.__instra_weight_stability_final?.installed === true,
               reliability_installed: window.__instra_weight_coupling_reliability_final?.installed === true,
               editor_open: document.getElementById('chart_settings_overlay')?.hidden === false,
-              render_override: app.chart_settings_render_override || null,
               title: mount?.layout?.title?.text ?? mount?.layout?.title ?? null,
               showlegend: mount?.layout?.showlegend ?? null,
               legend: mount?.layout?.legend ?? null,
               top_title: mount?.layout?.xaxis2?.title?.text ?? mount?.layout?.xaxis2?.title ?? null,
             };
-            """
+            """,
+            run_id,
         )
         print(f"INSTRA_JOIN_DIAGNOSTIC={diagnostic!r}", flush=True)
         assert diagnostic["trace_count"] == 1, diagnostic
