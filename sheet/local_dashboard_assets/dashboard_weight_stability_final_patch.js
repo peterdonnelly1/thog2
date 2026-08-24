@@ -10,6 +10,7 @@ window.addEventListener("load", () => {
     if (!window.__instra_weight_controls_v2) return false;
     if (!window.__instra_weight_group_settings) return false;
     if (!window.__instra_matched_weight_selection) return false;
+    if (!window.__instra_weight_presentation) return false;
     if (!window.__thog2_dashboard_performance) return false;
     if (!window.__instra_legacy_heatmap_repair) return false;
     if (typeof normalize_chart_settings !== "function") return false;
@@ -467,14 +468,14 @@ window.addEventListener("load", () => {
         if (current) current.checked = effective_flag(chart_name, "current_weights_only");
         if (join) join.checked = effective_flag(chart_name, "join_with_line_segments");
       }
-      if (current) current.disabled = inherit;
-      if (join) join.disabled = inherit;
+      if (current) current.disabled = false;
+      if (join) join.disabled = false;
       const current_note = by_id("chart_current_weights_only_field")?.querySelector?.("small");
       const join_note = by_id("chart_join_with_line_segments_field")?.querySelector?.("small");
       const note = group_editor
         ? "Applies to all six weight charts in this view unless a chart overrides it."
         : inherit
-          ? "Inherited from Weights group settings."
+          ? "Inherited from Weights group settings; changing this setting creates a chart override."
           : "Overrides Weights group settings for this chart.";
       if (current_note) current_note.textContent = note;
       if (join_note) join_note.textContent = note;
@@ -578,6 +579,26 @@ window.addEventListener("load", () => {
     };
     window.addEventListener("click", apply_range_from_header, true);
     window.addEventListener("keydown", apply_range_from_header, true);
+
+    // The two key Weights toggles are always directly editable. If an individual
+    // chart was inheriting its group defaults, the first edit explicitly turns
+    // inheritance off so the canonical group-settings owner persists an override.
+    window.addEventListener("click", event => {
+      const target = event.target;
+      if (!target?.matches?.("#chart_current_weights_only, #chart_join_with_line_segments")) return;
+      if (by_id("chart_settings_overlay")?.hidden || !weight_chart_set.has(app.axis_chart_name)) return;
+      const desired = target.checked === true;
+      const group_editor = by_id("weights_group_scale_field")?.hidden === false;
+      if (!group_editor) {
+        const inherit = by_id("chart_inherit_weights_group");
+        if (inherit?.checked) inherit.checked = false;
+      }
+      queueMicrotask(() => {
+        target.checked = desired;
+        sync_editor_controls({load_values: false});
+        if (typeof schedule_chart_settings_preview === "function") schedule_chart_settings_preview();
+      });
+    }, true);
 
     const base_sync_chart_setting_outputs = sync_chart_setting_outputs;
     sync_chart_setting_outputs = function() {
