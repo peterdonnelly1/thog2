@@ -297,6 +297,23 @@ window.addEventListener("load", () => {
 
     const inheritance_checkbox = () => by_id("chart_inherit_weights_group");
 
+    // vvv THOG canonical group/override owner captures these toggles before legacy preview listeners can rewrite them
+    const preserve_weight_toggle = event => {
+      if (!weight_chart_set.has(app.axis_chart_name)) return;
+      const target = event.currentTarget;
+      if (!target) return;
+      if (!group_editor_active && inheritance_checkbox()?.checked === true) {
+        inheritance_checkbox().checked = false;
+      }
+      event.stopImmediatePropagation();
+    };
+    for (const id of ["chart_current_weights_only", "chart_join_with_line_segments"]) {
+      const control = by_id(id);
+      control?.addEventListener("input", preserve_weight_toggle, true);
+      control?.addEventListener("change", preserve_weight_toggle, true);
+    }
+    // ^^^ THOG
+
     const base_sync_chart_setting_outputs = sync_chart_setting_outputs;
     sync_chart_setting_outputs = function() {
       base_sync_chart_setting_outputs();
@@ -321,8 +338,15 @@ window.addEventListener("load", () => {
       const group_scope = group_editor_active ? group_editor_scope : weight_group_scope(chart_name);
       const inherit = !group_editor_active && !chart_has_common_override(chart_name, group_scope);
       inheritance_checkbox().checked = inherit;
-      if (inherit) write_common_controls(group_settings_for_scope(group_scope) || default_common_settings());
+      if (group_editor_active) {
+        write_common_controls(group_settings_for_scope(group_scope) || default_common_settings());
+      } else if (inherit) {
+        write_common_controls(group_settings_for_scope(group_scope) || default_common_settings());
+      }
       sync_chart_setting_outputs();
+      if (group_editor_active) {
+        write_common_controls(group_settings_for_scope(group_scope) || default_common_settings());
+      }
     };
 
     const clear_legacy_common_settings = (chart_name, group_scope) => {
@@ -388,6 +412,16 @@ window.addEventListener("load", () => {
       if (data_tab) data_tab.hidden = true;
       set_chart_settings_tab("display");
       sync_chart_setting_outputs();
+      // vvv THOG reassert canonical group values after every legacy sync wrapper has run
+      write_common_controls(group);
+      by_id("weights_group_scale_mode").value = group.scale_mode;
+      queueMicrotask(() => {
+        if (!group_editor_active) return;
+        const current_group = group_settings_for_scope(group_editor_scope) || default_common_settings();
+        write_common_controls(current_group);
+        by_id("weights_group_scale_mode").value = current_group.scale_mode;
+      });
+      // ^^^ THOG
     };
 
     const apply_group_settings = () => {
