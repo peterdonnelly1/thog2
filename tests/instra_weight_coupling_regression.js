@@ -157,6 +157,7 @@ const context = {
   structuredClone: global.structuredClone,
   window: {
     addEventListener(event, callback) { if (event === "load") callback(); },
+    __instra_weight_stability_final: Object.freeze({installed: true}), // <<< THOG model the production loader contract: reliability installs only after final Weights stability
     __instra_matched_weight_selection: {
       selection: () => ({user_selected: true, model_feature: 123, intermediate_feature: 145}),
       capability: () => ({available: true, maximum: 767, reason: ""}),
