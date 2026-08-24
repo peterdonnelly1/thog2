@@ -531,7 +531,7 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
         render_seconds = time.monotonic() - render_started
         assert render_seconds < 10.0, f"post-save Weights render took {render_seconds:.2f}s"
 
-        diagnostic = driver.execute_script(
+        render_contract = driver.execute_script(
             """
             const mount = document.getElementById('attn_q_head_N_plot');
             const traces = (mount?.data || []).filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
@@ -540,15 +540,6 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
               && trace?.meta?.instra_weight_intermediate_feature === 14
               && String(trace?.mode || '').includes('lines')
             ));
-            const group_scope = `run:${String(arguments[0])}`;
-            let stored_groups = {};
-            try {
-              const candidate = JSON.parse(localStorage.getItem('thog2_local_weight_group_settings_v1') || '{}');
-              if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) stored_groups = candidate;
-            } catch (_error) {
-              stored_groups = {__parse_error__: true};
-            }
-            const effective = window.__instra_weight_stability_final?.effective?.('attn_q_head_N') || {};
             return {
               trace_count: traces.length,
               selected_x: selected?.x || [],
@@ -564,32 +555,23 @@ def test_real_firefox_selected_thog_render_contract(tmp_path: Path) -> None:
               executed_overlay_count: traces.filter(
                 trace => trace?.meta?.instra_thog_executed_overlay === true
               ).length,
-              effective,
-              stored_group: stored_groups[group_scope] || null,
-              stored_group_keys: Object.keys(stored_groups).sort(),
-              group_scope,
-              stability_installed: window.__instra_weight_stability_final?.installed === true,
-              reliability_installed: window.__instra_weight_coupling_reliability_final?.installed === true,
-              editor_open: document.getElementById('chart_settings_overlay')?.hidden === false,
               title: mount?.layout?.title?.text ?? mount?.layout?.title ?? null,
               showlegend: mount?.layout?.showlegend ?? null,
               legend: mount?.layout?.legend ?? null,
               top_title: mount?.layout?.xaxis2?.title?.text ?? mount?.layout?.xaxis2?.title ?? null,
             };
-            """,
-            run_id,
+            """
         )
-        print(f"INSTRA_JOIN_DIAGNOSTIC={diagnostic!r}", flush=True)
-        assert diagnostic["trace_count"] == 1, diagnostic
-        assert diagnostic["selected_x"] == list(range(1, 17)), diagnostic
-        assert diagnostic["selected_shape"] == "linear", diagnostic
-        assert "lines" in diagnostic["selected_mode"], diagnostic
-        assert diagnostic["wrong_coupling_count"] == 0, diagnostic
-        assert diagnostic["executed_overlay_count"] == 0, diagnostic
-        assert diagnostic["title"] is None, diagnostic
-        assert diagnostic["showlegend"] is False, diagnostic
-        assert diagnostic["legend"] is None, diagnostic
-        assert diagnostic["top_title"] is None, diagnostic
+        assert render_contract["trace_count"] == 1, render_contract
+        assert render_contract["selected_x"] == list(range(1, 17)), render_contract
+        assert render_contract["selected_shape"] == "linear", render_contract
+        assert "lines" in render_contract["selected_mode"], render_contract
+        assert render_contract["wrong_coupling_count"] == 0, render_contract
+        assert render_contract["executed_overlay_count"] == 0, render_contract
+        assert render_contract["title"] is None, render_contract
+        assert render_contract["showlegend"] is False, render_contract
+        assert render_contract["legend"] is None, render_contract
+        assert render_contract["top_title"] is None, render_contract
     finally:
         if driver is not None:
             driver.quit()
