@@ -92,6 +92,7 @@ window.addEventListener("load", () => {
     };
     const retained_weight_pairs = () => {
       const pairs = new Map();
+      const pairs_by_run = new Map();
       const figures = [];
       for (const chart_name of weight_chart_names) {
         try {
@@ -107,12 +108,25 @@ window.addEventListener("load", () => {
           const meta = trace?.meta;
           if (!meta || typeof meta !== "object" || Array.isArray(meta)) continue;
           if (meta.instra_weight_selection_protocol !== protocol) continue;
+          if (String(meta.instra_weight_selection_kind || "random") === "user") continue;
           const model_feature = finite_integer(meta.instra_weight_model_feature);
           const intermediate_feature = finite_integer(meta.instra_weight_intermediate_feature);
           if (model_feature === null || intermediate_feature === null) continue;
           if (model_feature < 0 || intermediate_feature < 0) continue;
-          pairs.set(`${model_feature}:${intermediate_feature}`, {model_feature, intermediate_feature});
+          const key = `${model_feature}:${intermediate_feature}`;
+          const pair = {model_feature, intermediate_feature};
+          pairs.set(key, pair);
+          const run_id = meta.instra_workspace_run_id ? String(meta.instra_workspace_run_id) : null;
+          if (run_id) {
+            if (!pairs_by_run.has(run_id)) pairs_by_run.set(run_id, new Set());
+            pairs_by_run.get(run_id).add(key);
+          }
         }
+      }
+      if (app.workspace_mode === true && pairs_by_run.size > 1) {
+        const run_sets = [...pairs_by_run.values()];
+        const common = [...run_sets[0]].filter(key => run_sets.every(run_pairs => run_pairs.has(key)));
+        return common.map(key => pairs.get(key)).filter(Boolean);
       }
       return [...pairs.values()];
     };
