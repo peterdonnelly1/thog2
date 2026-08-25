@@ -178,5 +178,6 @@ jobs:
 
       - name: Record GPU availability honestly
         if: always()
-        run: python -c "import torch; print({'cuda_available': torch.cuda.is_available(), 'cuda_device_count': torch.cuda.device_count()})"
+        run: |
+          python -c "import torch; print({'cuda_available': torch.cuda.is_available(), 'cuda_device_count': torch.cuda.device_count()})"
 # ^^^ THOG
