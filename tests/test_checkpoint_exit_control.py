@@ -91,11 +91,11 @@ class CheckpointExitControlTests(unittest.TestCase):
             self.assertEqual(trainer._timed(lambda: None), ("result", 0.25))
 
     def test_ctrl_g_forces_explicit_clean_telemetry_finish(self) -> None:
-        recorded_exit_codes = []
+        recorded_finishes = []
         run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = True
 
-        def record_finish(telemetry, *, exit_code=None) -> None:
-            recorded_exit_codes.append(exit_code)
+        def record_finish(telemetry, *, exit_code=None, final_state="finished") -> None:
+            recorded_finishes.append((exit_code, final_state))
 
         with mock.patch.object(
             run_thog2_owt,
@@ -107,7 +107,7 @@ class CheckpointExitControlTests(unittest.TestCase):
                 exit_code=None,
             )
 
-        self.assertEqual(recorded_exit_codes, [0])
+        self.assertEqual(recorded_finishes, [(0, "stopped")])
         self.assertFalse(run_thog2_owt._CHECKPOINT_EXIT_CLEAN_FINISH_PENDING)
 
     def test_public_main_maps_completed_checkpoint_exit_to_131(self) -> None:

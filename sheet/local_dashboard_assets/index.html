@@ -54,9 +54,13 @@
           <label class="toolbar-select"><span>Filter</span>
             <select id="state_filter" aria-label="Filter by state">
               <option value="all">All states</option>
-              <option value="running">Running</option>
+              <option value="preparing">Preparing</option>
+              <option value="recording">Recording</option>
+              <option value="monitoring">Monitoring</option>
               <option value="finished">Finished</option>
+              <option value="stopped">Stopped</option>
               <option value="crashed">Crashed</option>
+              <option value="data_lost">Data lost</option>
               <option value="unknown">Legacy / unknown</option>
             </select>
           </label>
@@ -422,12 +426,12 @@
         <button id="close_settings" type="button" aria-label="Close settings">×</button>
       </header>
       <div class="settings-content">
-        <label for="crash_timeout_minutes">Assume a run has crashed after no local chart data for</label>
+        <label for="crash_timeout_minutes">Assume a run has crashed after no model heartbeat for</label>
         <div class="timeout-control">
           <input id="crash_timeout_minutes" type="number" min="1" max="10080" step="1" value="15">
           <span>minutes</span>
         </div>
-        <p>This changes a stale <strong>running</strong> label to <strong>crashed</strong>. Finished runs remain finished.</p>
+        <p>This changes a stale active state to <strong>crashed</strong>. Terminal states remain unchanged.</p>
       </div>
       <footer>
         <button id="cancel_settings" type="button">Cancel</button>

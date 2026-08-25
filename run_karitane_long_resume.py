@@ -179,6 +179,7 @@ def main() -> int:
         },
     )
 
+    telemetry_final_state = "crashed"
     try:
         if trainer.distributed.is_primary:
             telemetry.start()
@@ -202,10 +203,16 @@ def main() -> int:
                 encoding="utf-8",
             )
             telemetry.add_final_result(result)
+        telemetry_final_state = "finished"
         return 0
+    except KeyboardInterrupt:
+        telemetry_final_state = "stopped"
+        if trainer.distributed.is_primary:
+            print("interrupted by Ctrl-C; finishing telemetry cleanly", flush=True)
+        return 130
     finally:
         if trainer.distributed.is_primary:
-            telemetry.finish()
+            telemetry.finish(final_state=telemetry_final_state)
         trainer.close()
 
 

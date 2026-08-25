@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sqlite3
+import time
 import uuid
 import zlib
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
 LOCAL_CHART_SCHEMA_VERSION = 2
+LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
+LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped", "crashed"))
 
 
 def _utc_timestamp() -> str:
@@ -136,6 +139,7 @@ class LocalChartStore:
             );
             """
         )
+        now = _utc_timestamp()
         metadata = {
             "schema_version": str(LOCAL_CHART_SCHEMA_VERSION),
             "run_name": str(run_name),
@@ -143,8 +147,11 @@ class LocalChartStore:
             "local_run_id": str(run_id or run_name),
             "wandb_run_id": str(wandb_run_id or ""),
             "wandb_url": str(wandb_url or ""),
-            "run_state": "running",
-            "updated_at": _utc_timestamp(),
+            "run_state": "preparing",
+            "current_update": "0",
+            "heartbeat_at": now,
+            "data_updated_at": now,
+            "updated_at": now,
             "config_json": json.dumps(
                 _json_compatible(config),
                 ensure_ascii=False,
@@ -161,15 +168,83 @@ class LocalChartStore:
             ("created_at", _utc_timestamp()),
         )
         self.connection.commit()
+        self._last_heartbeat_monotonic = 0.0
+        self._last_heartbeat_update = 0
+        self._last_heartbeat_state = "preparing"
+        self._has_heatmap_records = bool(
+            self.connection.execute("SELECT EXISTS(SELECT 1 FROM heatmap_records)").fetchone()[0]
+        )
+        self._has_depth_records = bool(
+            self.connection.execute("SELECT EXISTS(SELECT 1 FROM depth_weight_snapshots)").fetchone()[0]
+        )
+        self._has_recorded_data = self._has_heatmap_records or self._has_depth_records
 
     def _touch(self) -> None:
+        now = _utc_timestamp()
         self.connection.executemany(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
             (
-                ("run_state", "running"),
-                ("updated_at", _utc_timestamp()),
+                ("run_state", "recording"),
+                ("data_updated_at", now),
+                ("updated_at", now),
             ),
         )
+        self._last_heartbeat_state = "recording"
+        self._has_recorded_data = True
+
+    def configure_weight_capture(
+        self,
+        *,
+        start_step: Optional[int],
+        end_step: Optional[int],
+        cadence: int,
+        history_length: int,
+    ) -> None:
+        values = {
+            "weight_capture_expected": "true",
+            "weight_capture_start_step": "" if start_step is None else str(int(start_step)),
+            "weight_capture_end_step": "" if end_step is None else str(int(end_step)),
+            "weight_capture_cadence": str(int(cadence)),
+            "weight_capture_history_length": str(int(history_length)),
+        }
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            tuple(values.items()),
+        )
+        self.connection.commit()
+
+    def heartbeat(
+        self,
+        optimizer_update: int,
+        *,
+        run_state: str,
+        force: bool = False,
+    ) -> None:
+        state = str(run_state)
+        if state not in LOCAL_CHART_ACTIVE_STATES:
+            raise ValueError(f"invalid active local chart state: {state!r}")
+        update = max(0, int(optimizer_update))
+        monotonic_now = time.monotonic()
+        phase_changed = state != self._last_heartbeat_state
+        if (
+            not force
+            and not phase_changed
+            and monotonic_now - self._last_heartbeat_monotonic < 1.0
+        ):
+            return
+        now = _utc_timestamp()
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            (
+                ("run_state", state),
+                ("current_update", str(update)),
+                ("heartbeat_at", now),
+            ),
+        )
+        self.connection.commit()
+        self._last_heartbeat_monotonic = monotonic_now
+        self._last_heartbeat_update = update
+        self._last_heartbeat_state = state
 
     def append_heatmap_records(
         self,
@@ -217,6 +292,7 @@ class LocalChartStore:
             rows,
         )
         self._touch()
+        self._has_heatmap_records = True
         self.connection.commit()
         return len(rows)
 
@@ -247,16 +323,22 @@ class LocalChartStore:
             (max(1, int(history_length)),),
         )
         self._touch()
+        self._has_depth_records = True
         self.connection.commit()
 
-    def close(self) -> None:
+    def close(self, *, final_state: str = "finished") -> None:
         if self.connection is None:
             return
+        state = str(final_state)
+        if state not in LOCAL_CHART_TERMINAL_STATES:
+            raise ValueError(f"invalid terminal local chart state: {state!r}")
+        now = _utc_timestamp()
         self.connection.executemany(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
             (
-                ("run_state", "finished"),
-                ("updated_at", _utc_timestamp()),
+                ("run_state", state),
+                ("heartbeat_at", now),
+                ("updated_at", now),
             ),
         )
         self.connection.commit()
@@ -418,17 +500,23 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
     return store
 
 
-def close_local_chart_store(telemetry: Any) -> None:
+def close_local_chart_store(
+    telemetry: Any,
+    *,
+    final_state: str = "finished",
+) -> None:
     store = getattr(telemetry, "_thog_local_chart_store", None)
     if store is None:
         return
-    store.close()
+    store.close(final_state=final_state)
     setattr(telemetry, "_thog_local_chart_store", None)
 
 
 __all__ = [
     "CHART_DESTINATIONS",
+    "LOCAL_CHART_ACTIVE_STATES",
     "LOCAL_CHART_DATABASE_NAME",
+    "LOCAL_CHART_TERMINAL_STATES",
     "LocalChartReader",
     "LocalChartStore",
     "close_local_chart_store",

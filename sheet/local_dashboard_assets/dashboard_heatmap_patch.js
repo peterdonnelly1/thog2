@@ -622,7 +622,9 @@ function local_overview_timestamp(value) {
 
 function local_overview_duration(run) {
   const start = Date.parse(run?.created_at || "");
-  const end = display_run_state(run) === "running" ? Date.now() : Date.parse(run?.updated_at || "");
+  const end = is_active_run_state(run?.run_state) && display_run_state(run) !== "crashed"
+    ? Date.now()
+    : Date.parse(run?.updated_at || "");
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
   let seconds = Math.floor((end - start) / 1000);
   const days = Math.floor(seconds / 86400); seconds -= days * 86400;
@@ -650,8 +652,15 @@ function local_state_badge(run) {
   badge.className = `state-badge ${state}`;
   const icon = document.createElement("span");
   icon.className = "state-icon";
-  icon.appendChild(icon_svg(["running", "finished", "crashed"].includes(state) ? state : "unknown"));
-  badge.append(icon, document.createTextNode(state));
+  const icon_state = ["preparing", "recording", "monitoring"].includes(state)
+    ? "running"
+    : state === "stopped"
+      ? "finished"
+      : state === "data_lost"
+        ? "crashed"
+        : ["running", "finished", "crashed"].includes(state) ? state : "unknown";
+  icon.appendChild(icon_svg(icon_state));
+  badge.append(icon, document.createTextNode(format_run_state(state)));
   return badge;
 }
 

@@ -152,6 +152,25 @@ def test_snapshot_uses_executed_layer_index_ruler(monkeypatch) -> None:
 # ^^^ THOG
 
 
+def test_plastic_sampling_filters_curve_geometry_without_owning_capture_schedule() -> None:
+    active = torch.tensor([4.0, 19.0, 43.0, 88.0], dtype=torch.float32)
+    trajectory = SimpleNamespace(
+        plastic_enabled=True,
+        plastic_sampling=SimpleNamespace(
+            active_public_coordinates=lambda: active,
+        ),
+    )
+
+    coordinates = depth_curves_v2._executed_public_coordinates(
+        trajectory,
+        torch.zeros(1, dtype=torch.float32),
+    )
+
+    assert coordinates.dtype == torch.float64
+    assert coordinates.tolist() == pytest.approx(active.tolist())
+# ^^^ THOG
+
+
 # vvv THOG accumulated Plotly history makes age visually and interactively explicit while marking only the newest curve at executed layers
 def test_plotly_history_emphasises_newest_and_oldest(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "1")

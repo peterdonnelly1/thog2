@@ -735,6 +735,7 @@ def main() -> int:
     telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
     # vvv THOG preserve shell interrupt status while allowing W&B to record a clean intentional stop
     telemetry_exit_code: Optional[int] = None
+    telemetry_final_state = "crashed"
     # ^^^ THOG
     try:
         if trainer.distributed.is_primary:
@@ -754,16 +755,21 @@ def main() -> int:
             result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             telemetry.add_final_result(result)
             print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
+        telemetry_final_state = "finished"
         return 0
     # vvv THOG convert Ctrl-C into a clean telemetry finish while retaining conventional process status 130
     except KeyboardInterrupt:
         telemetry_exit_code = 0
+        telemetry_final_state = "stopped"
         if trainer.distributed.is_primary:
             print("interrupted by Ctrl-C; finishing telemetry cleanly", flush=True)
         return 130
     finally:
         if rank == 0:
-            telemetry.finish(exit_code=telemetry_exit_code)
+            telemetry.finish(
+                exit_code=telemetry_exit_code,
+                final_state=telemetry_final_state,
+            )
         trainer.close()
     # ^^^ THOG
 

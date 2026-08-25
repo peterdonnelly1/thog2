@@ -109,9 +109,9 @@ class InteractiveInterruptTests(unittest.TestCase):
                 self.assertIs(_trainer, trainer)
                 raise KeyboardInterrupt
 
-            def original_finish(_telemetry, *, exit_code=None):
+            def original_finish(_telemetry, *, exit_code=None, final_state="finished"):
                 self.assertIs(_telemetry, telemetry)
-                order.append(("finish", exit_code))
+                order.append(("finish", exit_code, final_state))
 
             with mock.patch.object(Stage6Trainer, "run_pilot", interrupted_run_pilot):
                 with mock.patch.object(WandbTelemetry, "finish", original_finish):
@@ -123,9 +123,16 @@ class InteractiveInterruptTests(unittest.TestCase):
                         with interactive_interrupt_checkpoint():
                             with self.assertRaises(KeyboardInterrupt):
                                 Stage6Trainer.run_pilot(trainer)
-                            WandbTelemetry.finish(telemetry, exit_code=0)
+                            WandbTelemetry.finish(
+                                telemetry,
+                                exit_code=0,
+                                final_state="stopped",
+                            )
 
-            self.assertEqual(order, [("checkpoint", trainer), ("finish", 0)])
+            self.assertEqual(
+                order,
+                [("checkpoint", trainer), ("finish", 0, "stopped")],
+            )
 
     def test_non_interrupt_finish_does_not_prompt(self) -> None:
         trainer = object()
@@ -137,9 +144,9 @@ class InteractiveInterruptTests(unittest.TestCase):
             self.assertIs(_trainer, trainer)
             return {"status": "completed"}
 
-        def original_finish(_telemetry, *, exit_code=None):
+        def original_finish(_telemetry, *, exit_code=None, final_state="finished"):
             self.assertIs(_telemetry, telemetry)
-            finish_calls.append(exit_code)
+            finish_calls.append((exit_code, final_state))
 
         with mock.patch.object(Stage6Trainer, "run_pilot", completed_run_pilot):
             with mock.patch.object(WandbTelemetry, "finish", original_finish):
@@ -149,7 +156,7 @@ class InteractiveInterruptTests(unittest.TestCase):
                         WandbTelemetry.finish(telemetry, exit_code=None)
 
         checkpoint.assert_not_called()
-        self.assertEqual(finish_calls, [None])
+        self.assertEqual(finish_calls, [(None, "finished")])
 
 
 if __name__ == "__main__":

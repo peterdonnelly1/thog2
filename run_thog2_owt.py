@@ -515,12 +515,18 @@ def _finish_telemetry_with_checkpoint_exit_policy(
     telemetry: Any,
     *,
     exit_code: Optional[int] = None,
+    final_state: str = "finished",
 ) -> None:
     global _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING
     clean_checkpoint_exit = _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING
     resolved_exit_code = 0 if clean_checkpoint_exit and exit_code is None else exit_code
+    resolved_final_state = "stopped" if clean_checkpoint_exit else final_state
     try:
-        _ORIGINAL_WANDB_TELEMETRY_FINISH(telemetry, exit_code=resolved_exit_code)
+        _ORIGINAL_WANDB_TELEMETRY_FINISH(
+            telemetry,
+            exit_code=resolved_exit_code,
+            final_state=resolved_final_state,
+        )
     finally:
         if clean_checkpoint_exit:
             _CHECKPOINT_EXIT_CLEAN_FINISH_PENDING = False

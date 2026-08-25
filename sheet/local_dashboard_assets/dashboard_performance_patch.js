@@ -244,6 +244,7 @@ window.addEventListener("load", () => {
         if (!synthetic_group_open("coefficients")) {
           performance_state.deferred_coefficients = true;
         } else {
+          const render_jobs = [];
           for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
             const figure = app.figures.depth?.[chart_name];
             if (!figure) continue;
@@ -254,8 +255,9 @@ window.addEventListener("load", () => {
             if (detail) {
               detail.textContent = `${format_integer(status?.depth_snapshot_count)} retained snapshots · latest step ${format_integer(status?.depth_maximum_update)}`;
             }
-            if (mount) await render_plot(mount, figure, chart_name);
+            if (mount) render_jobs.push(render_plot(mount, figure, chart_name));
           }
+          await Promise.all(render_jobs);
         }
       }
     };

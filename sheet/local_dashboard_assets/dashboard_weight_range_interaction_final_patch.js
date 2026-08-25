@@ -346,7 +346,7 @@ window.addEventListener("load", () => {
       let state = "";
       try { state = display_run_state(run); }
       catch (_error) { state = String(run?.run_state || ""); }
-      return state === "running" || state === "preparing";
+      return state === "preparing" || state === "recording" || state === "running";
     };
 
     const schedule_capture_pair = async candidate => {

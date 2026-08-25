@@ -144,13 +144,26 @@ function colour_for_run(run_id) {
 function is_visible(run_id) { return app.visibility[run_id] !== false; }
 function run_identifier(run) { return String(run.dashboard_run_id || run.local_run_id || run.wandb_run_id || run.run_name); }
 function current_run() { return app.runs.find(run => run_identifier(run) === app.current_run_id) || app.current_status; }
+function is_active_run_state(state) { return ["preparing", "recording", "monitoring", "running"].includes(String(state)); }
+function format_run_state(state) { return String(state || "unknown").replaceAll("_", " "); }
 
 function display_run_state(run) {
-  if (run.run_state !== "running") return run.run_state;
-  const last_write = Date.parse(run.updated_at || run.created_at || "");
-  if (!Number.isFinite(last_write)) return "running";
-  const timeout_ms = app.crash_timeout_minutes * 60 * 1000;
-  return Date.now() - last_write > timeout_ms ? "crashed" : "running";
+  const stored_state = String(run?.run_state || "unknown");
+  if (is_active_run_state(stored_state)) {
+    const heartbeat = Date.parse(run.heartbeat_at || run.updated_at || run.created_at || "");
+    if (Number.isFinite(heartbeat)) {
+      const timeout_ms = app.crash_timeout_minutes * 60 * 1000;
+      if (Date.now() - heartbeat > timeout_ms) return "crashed";
+    }
+  }
+  if (run?.data_lost === true) return "data_lost";
+  if (stored_state !== "running") return stored_state;
+  const chart_update = run?.chart_maximum_update;
+  return chart_update !== null
+    && chart_update !== undefined
+    && Number.isFinite(Number(chart_update))
+    ? "recording"
+    : "preparing";
 }
 
 function format_integer(value) {
@@ -307,11 +320,19 @@ function append_run_row(body, run) {
   badge.className = `state-badge ${shown_state}`;
   const state_icon = document.createElement("span");
   state_icon.className = "state-icon";
-  const state_icon_name = ["running", "finished", "crashed"].includes(shown_state) ? shown_state : "unknown";
+  const state_icon_name = ["preparing", "recording", "monitoring"].includes(shown_state)
+    ? "running"
+    : shown_state === "stopped"
+      ? "finished"
+      : shown_state === "data_lost"
+        ? "crashed"
+        : ["running", "finished", "crashed"].includes(shown_state) ? shown_state : "unknown";
   state_icon.appendChild(icon_svg(state_icon_name));
-  badge.append(state_icon, document.createTextNode(shown_state));
+  badge.append(state_icon, document.createTextNode(format_run_state(shown_state)));
   if (shown_state === "crashed") {
-    badge.title = `No instra chart data for more than ${app.crash_timeout_minutes} minutes`;
+    badge.title = `No model heartbeat for more than ${app.crash_timeout_minutes} minutes`;
+  } else if (shown_state === "data_lost") {
+    badge.title = "A configured weight snapshot was due, but no local weight data is available";
   }
   state_cell.appendChild(badge);
   row.appendChild(state_cell);
@@ -388,11 +409,11 @@ function should_follow_recommendation(recommended) {
   const selected = current_run();
   const candidate = app.runs.find(run => run_identifier(run) === recommended);
   if (!selected || !candidate) return true;
-  if (candidate.run_state === "running" && selected.run_state !== "running") return true;
+  if (is_active_run_state(candidate.run_state) && !is_active_run_state(selected.run_state)) return true;
   if (candidate.wandb_run_id && selected.is_legacy_layout) return true;
   if (
-    candidate.run_state === "running"
-    && selected.run_state === "running"
+    is_active_run_state(candidate.run_state)
+    && is_active_run_state(selected.run_state)
     && String(candidate.created_at) > String(selected.created_at)
   ) return true;
   return false;
@@ -1202,7 +1223,7 @@ function render_run_heading() {
   subtitle.replaceChildren();
   const values = [
     {text: run.wandb_run_id ? `W&B ID ${run.wandb_run_id}` : `Local ID ${run.local_run_id}`, class_name: "identity"},
-    {text: display_run_state(run)},
+    {text: format_run_state(display_run_state(run))},
     {text: run.host_label ? `host ${run.host_label}` : ""},
     {text: `${format_integer(run.heatmap_count)} probes`},
     {text: `${format_integer(run.depth_snapshot_count)} curves`},
@@ -1764,7 +1785,7 @@ async function delete_menu_run() {
   if (!run) return;
   const run_id = run_identifier(run);
   const state = display_run_state(run);
-  const active_warning = state === "running"
+  const active_warning = is_active_run_state(run.run_state) && state !== "crashed"
     ? "\n\nThis run still appears to be running. Its training process may recreate or continue writing the database."
     : "";
   const confirmed = window.confirm(

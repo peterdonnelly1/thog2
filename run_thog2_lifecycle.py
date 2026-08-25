@@ -1452,6 +1452,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     telemetry_exit_code: Optional[int] = None
+    telemetry_final_state = "crashed"
     session_result_path = current_session_result_path(lifecycle)
     try:
         if trainer.distributed.is_primary:
@@ -1542,15 +1543,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     sort_keys=True,
                 )
             )
+        telemetry_final_state = "finished"
         return 0
     except KeyboardInterrupt:
         telemetry_exit_code = 0
+        telemetry_final_state = "stopped"
         if trainer.distributed.is_primary:
             print("interrupted by Ctrl-C; finishing telemetry cleanly", flush=True)
         return 130
     finally:
         if rank == 0:
-            telemetry.finish(exit_code=telemetry_exit_code)
+            telemetry.finish(
+                exit_code=telemetry_exit_code,
+                final_state=telemetry_final_state,
+            )
         trainer.close()
         if fresh_state is not None:
             fresh_state.trainer = None

@@ -268,6 +268,7 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
         telemetry: WandbTelemetry,
         *,
         exit_code: Optional[int] = None,
+        final_state: str = "finished",
     ) -> None:
         global _INTERRUPTED_TRAINER
         trainer = _INTERRUPTED_TRAINER
@@ -276,7 +277,11 @@ def interactive_interrupt_checkpoint() -> Iterator[None]:
                 _checkpoint_after_interrupt(trainer)
             finally:
                 _INTERRUPTED_TRAINER = None
-        original_finish(telemetry, exit_code=exit_code)
+        original_finish(
+            telemetry,
+            exit_code=exit_code,
+            final_state=final_state,
+        )
 
     Stage6Trainer.run_pilot = run_pilot_with_interrupt_capture
     WandbTelemetry.finish = finish_with_interrupt_checkpoint

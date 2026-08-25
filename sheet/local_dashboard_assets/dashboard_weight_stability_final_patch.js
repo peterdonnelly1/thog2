@@ -220,6 +220,11 @@ window.addEventListener("load", () => {
         : effective_flag(chart_name, "join_with_line_segments");
       if (configured_capture_range()?.present === true) {
         normalized.current_weights_only = false;
+        // Instrumentation owns the recorded step window.  A persisted Instra
+        // history count/window may narrow runs without capture bounds, but it
+        // must never silently discard part of an explicit capture window.
+        normalized.max_snapshots = 0;
+        normalized.snapshot_window_mode = "rolling";
       }
       return normalized;
     };
@@ -387,7 +392,13 @@ window.addEventListener("load", () => {
       // collapse. The actual time/history filter is applied once, below.
       normalize_chart_settings = function(candidate, inner_supplied = null) {
         const normalized = saved_normalize(candidate, inner_supplied);
-        if (candidate === chart_name) normalized.current_weights_only = coordinate_selected;
+        if (candidate === chart_name) {
+          normalized.current_weights_only = coordinate_selected;
+          if (capture_limited) {
+            normalized.max_snapshots = 0;
+            normalized.snapshot_window_mode = "rolling";
+          }
+        }
         return normalized;
       };
       retain_latest_weight_snapshots = () => undefined;
@@ -559,7 +570,7 @@ window.addEventListener("load", () => {
       const runs = current_context_runs();
       const range = selected_range();
       const state = selected_run_state();
-      const running = state === "running" || state === "preparing";
+      const running = ["preparing", "recording", "monitoring"].includes(state);
       const configured = configured_capture_range();
 
       if (!range && configured?.present && running && configured.minimum !== null) {

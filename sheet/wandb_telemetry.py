@@ -576,8 +576,13 @@ class WandbTelemetry:
             self.writer.flush()
 
     # vvv THOG allow the runner to tell W&B that an intentional Ctrl-C finished cleanly
-    def finish(self, *, exit_code: Optional[int] = None) -> None:
-        close_local_chart_store(self)
+    def finish(
+        self,
+        *,
+        exit_code: Optional[int] = None,
+        final_state: str = "finished",
+    ) -> None:
+        close_local_chart_store(self, final_state=final_state)
         if self.run is not None:
             if exit_code is None:
                 self.run.finish()

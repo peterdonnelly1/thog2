@@ -220,3 +220,7 @@ from . import plastic_depth_decision_algorithms_v057_patch as _plastic_depth_dec
 # vvv THOG reuse the six depth-weight chart families for conventional DENSE blocks as discrete cross-marker series
 from . import dense_weight_curves_patch as _dense_weight_curves_patch
 # ^^^ THOG
+
+# vvv THOG register local runs before their first chart record and keep model liveness independent of finite instrumentation windows
+from . import local_chart_lifecycle_patch as _local_chart_lifecycle_patch
+# ^^^ THOG

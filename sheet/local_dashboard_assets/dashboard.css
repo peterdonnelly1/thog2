@@ -161,10 +161,17 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .state-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px 2px 5px; border-radius: 12px; color: #646c76; background: #eceef1; font-size: 10px; }
 .state-icon { width: 13px; height: 13px; display: inline-flex; }
 .state-icon svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
-.state-badge.running { color: #007e91; background: #dff5f8; }
-.state-badge.running .state-icon { animation: state-spin 1.5s linear infinite; }
+.state-badge.running,
+.state-badge.recording { color: #007e91; background: #dff5f8; }
+.state-badge.running .state-icon,
+.state-badge.recording .state-icon { animation: state-spin 1.5s linear infinite; }
+.state-badge.preparing { color: #275fae; background: #e2efff; }
+.state-badge.preparing .state-icon { animation: state-spin 1.5s linear infinite; }
+.state-badge.monitoring { color: #626a20; background: #f1f4d8; }
 .state-badge.finished { color: #48515d; background: #e8ebef; }
+.state-badge.stopped { color: #74531b; background: #f8edd5; }
 .state-badge.crashed { color: #a52b2b; background: #fbe4e4; }
+.state-badge.data_lost { color: #a52b2b; background: #ffe0cf; }
 @keyframes state-spin { to { transform: rotate(360deg); } }
 .legacy-tag { margin-left: 5px; color: #8a6a28; }
 .run-menu-button { width: 29px; height: 27px; padding: 0 0 5px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #59616d; font-size: 20px; line-height: 1; cursor: pointer; }

@@ -36,7 +36,7 @@ jobs:
       - name: Compile Python surface
         run: |
           set -euo pipefail
-          python -m compileall -q sheet run_thog2_dashboard.py run_thog2_local_dashboard.py run_thog2_owt.py run_thog2_owt_core.py run_thog2_lifecycle.py tests
+          python -m compileall -q sheet run_karitane_long_resume.py run_thog2_dashboard.py run_thog2_local_dashboard.py run_thog2_owt.py run_thog2_owt_core.py run_thog2_lifecycle.py tests
           for file in sheet/local_dashboard_assets/*.js; do node --check "$file"; done
           node tests/dashboard_v058_smoke.js
           node tests/instra_weight_coupling_regression.js
@@ -66,6 +66,9 @@ jobs:
             tests/test_delta_loss_v_layer_heatmap.py \
             tests/test_console_and_descriptor_help.py \
             tests/test_local_chart_dashboard.py \
+            tests/test_local_chart_lifecycle.py \
+            tests/test_checkpoint_exit_control.py \
+            tests/test_interactive_interrupt.py \
             tests/test_instra_heatmap_window.py \
             tests/test_instra_weight_step_range.py \
             tests/test_instra_firefox_acceptance.py \

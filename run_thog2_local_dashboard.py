@@ -38,6 +38,38 @@ _WANDB_FILE_CACHE_SECONDS = 30.0
 _WANDB_FILE_LIMIT = 5000
 
 
+def _active_run_state(value: Any) -> bool:
+    return str(value) in {"preparing", "recording", "monitoring", "running"}
+
+
+def _optional_metadata_integer(metadata: Dict[str, str], key: str) -> Optional[int]:
+    text = str(metadata.get(key, "")).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _weight_data_lost(
+    metadata: Dict[str, str],
+    *,
+    current_update: Optional[int],
+    snapshot_count: int,
+) -> bool:
+    if metadata.get("weight_capture_expected") != "true" or snapshot_count > 0:
+        return False
+    if current_update is None:
+        return False
+    start = _optional_metadata_integer(metadata, "weight_capture_start_step")
+    end = _optional_metadata_integer(metadata, "weight_capture_end_step")
+    first_due = max(1, start) if start is not None else 1
+    if end is not None and end < first_due:
+        return False
+    return int(current_update) >= first_due
+
+
 def _modified_time(path: Path) -> float:
     candidates = (path, Path(f"{path}-wal"), Path(f"{path}-shm"))
     return max(
@@ -94,21 +126,34 @@ class RunDashboardState:
     def status(self) -> Dict[str, Any]:
         status = self.reader.status()
         metadata = self.reader.metadata()
+        data_updated_at = metadata.get(
+            "data_updated_at",
+            metadata.get("updated_at"),
+        )
         revision = (
             status["heatmap_count"],
             status["heatmap_maximum_update"],
             status["depth_snapshot_count"],
             status["depth_maximum_update"],
-            metadata.get("updated_at"),
+            data_updated_at,
         )
         configuration = json.loads(metadata.get("config_json", "{}"))
-        maximum_update = max(
+        chart_maximum_update = max(
             (
                 value
                 for value in (
                     status["heatmap_maximum_update"],
                     status["depth_maximum_update"],
                 )
+                if value is not None
+            ),
+            default=None,
+        )
+        heartbeat_update = _optional_metadata_integer(metadata, "current_update")
+        maximum_update = max(
+            (
+                value
+                for value in (heartbeat_update, chart_maximum_update)
                 if value is not None
             ),
             default=None,
@@ -136,9 +181,22 @@ class RunDashboardState:
             "wandb_run_id": wandb_run_id,
             "wandb_url": metadata.get("wandb_url", ""),
             "run_state": metadata.get("run_state", "unknown"),
+            "data_lost": _weight_data_lost(
+                metadata,
+                current_update=maximum_update,
+                snapshot_count=int(status["depth_snapshot_count"]),
+            ),
             "is_legacy_layout": is_legacy_layout,
             "created_at": metadata.get("created_at", modified_at),
-            "updated_at": metadata.get("updated_at", modified_at),
+            "updated_at": metadata.get(
+                "heartbeat_at",
+                metadata.get("updated_at", modified_at),
+            ),
+            "heartbeat_at": metadata.get(
+                "heartbeat_at",
+                metadata.get("updated_at", modified_at),
+            ),
+            "data_updated_at": data_updated_at or modified_at,
             "host_label": str(configuration.get("host_label", "")),
             "model_type": str(configuration.get("model_type", "")),
             # vvv THOG surface only capture/routing controls; history length is now a reversible per-chart Instra setting
@@ -149,6 +207,7 @@ class RunDashboardState:
             },
             # ^^^ THOG
             "maximum_update": maximum_update,
+            "chart_maximum_update": chart_maximum_update,
             "database_bytes": int(self.database_path.stat().st_size),
             "run_directory": str(self.database_path.parent.resolve()),
             "revision": revision,
@@ -301,7 +360,7 @@ class DashboardCatalog:
         preferred = max(
             candidates,
             key=lambda run: (
-                str(run["run_state"]) == "running",
+                _active_run_state(run["run_state"]),
                 bool(run["wandb_run_id"]),
                 not bool(run["is_legacy_layout"]),
                 str(run["updated_at"]),
@@ -343,7 +402,7 @@ class DashboardCatalog:
                 return max(
                     exact_matches,
                     key=lambda item: (
-                        str(item[1]["run_state"]) == "running",
+                        _active_run_state(item[1]["run_state"]),
                         bool(item[1]["wandb_run_id"]),
                         not bool(item[1]["is_legacy_layout"]),
                         str(item[1]["updated_at"]),
@@ -353,7 +412,7 @@ class DashboardCatalog:
             return max(
                 artifact_matches,
                 key=lambda item: (
-                    str(item[1]["run_state"]) == "running",
+                    _active_run_state(item[1]["run_state"]),
                     bool(item[1]["wandb_run_id"]),
                     not bool(item[1]["is_legacy_layout"]),
                     str(item[1]["updated_at"]),

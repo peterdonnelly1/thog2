@@ -165,8 +165,10 @@ const context = {
   normalize_chart_settings: (chart_name, supplied = null) => ({
     current_weights_only: false,
     join_with_line_segments: false,
-    max_snapshots: 0,
-    snapshot_window_mode: "rolling",
+    // Model a persisted Instra preference which would otherwise hide all but
+    // one curve from an explicitly configured instrumentation window.
+    max_snapshots: 1,
+    snapshot_window_mode: "from_zero",
     ...(supplied || {}),
   }),
   trace_optimizer_update: trace => trace.meta.optimizer_update,
@@ -184,6 +186,15 @@ const context = {
       settings.current_weights_only ? trace.meta.kind === "user" : trace.meta.kind === "random"
     ));
     if (settings.current_weights_only) context.retain_latest_weight_snapshots(prepared);
+    else if (settings.max_snapshots > 0) {
+      const steps = [...new Set(prepared.data.map(trace => trace.meta.optimizer_update))].sort((a, b) => a - b);
+      const retained = new Set(
+        settings.snapshot_window_mode === "from_zero"
+          ? steps.slice(0, settings.max_snapshots)
+          : steps.slice(-settings.max_snapshots),
+      );
+      prepared.data = prepared.data.filter(trace => retained.has(trace.meta.optimizer_update));
+    }
     return prepared;
   },
   render_figures: async () => undefined,
@@ -226,6 +237,7 @@ assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 25});
 assert.equal(api.mode(), "whole");
 assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, true);
+assert.equal(context.normalize_chart_settings("q").max_snapshots, 0);
 
 context.app.current_run_id = "B";
 context.app.current_status = runs.A;
