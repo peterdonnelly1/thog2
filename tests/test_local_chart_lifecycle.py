@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import run_thog2_local_dashboard as dashboard
 from sheet import local_chart_lifecycle_patch as lifecycle
 from sheet import depth_weight_curves_and_observational_probes_patch as depth_curves
@@ -24,18 +22,35 @@ def test_finite_capture_count_includes_both_explicit_boundaries() -> None:
     ) == 3
 
 
-def test_capture_window_rejects_silent_history_truncation(monkeypatch) -> None:
+def test_capture_window_promotes_retention_instead_of_aborting(
+    monkeypatch,
+    capsys,
+) -> None:
     monkeypatch.setenv(depth_curves._environment_name("TIME_MODE"), "accumulate")
     monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "100")
     monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "1")
     monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "300")
     monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "400")
 
-    with pytest.raises(ValueError, match="requires at least 101, got 100"):
-        lifecycle._validate_capture_retention()
+    assert lifecycle._ensure_capture_retention() == 101
+    assert depth_curves._history_length() == 101
+    assert "from 100 to 101" in capsys.readouterr().out
 
     monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "101")
-    lifecycle._validate_capture_retention()
+    assert lifecycle._ensure_capture_retention() == 101
+    assert capsys.readouterr().out == ""
+
+
+def test_latest_mode_preserves_requested_retention(monkeypatch, capsys) -> None:
+    monkeypatch.setenv(depth_curves._environment_name("TIME_MODE"), "latest")
+    monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "100")
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "1")
+    monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "300")
+    monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "400")
+
+    assert lifecycle._ensure_capture_retention() == 100
+    assert depth_curves._history_length() == 100
+    assert capsys.readouterr().out == ""
 
 
 def test_weight_instrumentation_phase_is_independent_of_plastic_configuration() -> None:
@@ -79,9 +94,9 @@ def test_eager_attach_registers_run_before_first_weight_snapshot(monkeypatch) ->
     monkeypatch.setattr(lifecycle, "_weight_curves_supported", lambda _trainer: True)
     monkeypatch.setattr(lifecycle, "ensure_local_chart_store", lambda _telemetry: telemetry._thog_local_chart_store)
     monkeypatch.setattr(depth_curves, "_destination", lambda: "local")
-    monkeypatch.setattr(depth_curves, "_time_mode", lambda: "accumulate")
-    monkeypatch.setattr(depth_curves, "_history_length", lambda: 101)
-    monkeypatch.setattr(depth_curves, "_log_every_n_steps", lambda: 1)
+    monkeypatch.setenv(depth_curves._environment_name("TIME_MODE"), "accumulate")
+    monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "100")
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "1")
     monkeypatch.setattr(lifecycle, "_capture_bounds", lambda: (300, 400))
 
     lifecycle._attach_telemetry_with_local_lifecycle(trainer, telemetry)
@@ -98,6 +113,26 @@ def test_eager_attach_registers_run_before_first_weight_snapshot(monkeypatch) ->
         ),
         ("heartbeat", 11, "preparing", True),
     ]
+    assert depth_curves._history_length() == 101
+
+
+def test_disabled_weight_instrumentation_does_not_promote_retention(monkeypatch) -> None:
+    class FakeTrainer:
+        raw_model = object()
+
+    telemetry = SimpleNamespace(config={})
+    monkeypatch.setattr(lifecycle, "_ORIGINAL_ATTACH_TELEMETRY", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "_weight_curves_supported", lambda _trainer: True)
+    monkeypatch.setattr(depth_curves, "_destination", lambda: "none")
+    monkeypatch.setenv(depth_curves._environment_name("TIME_MODE"), "accumulate")
+    monkeypatch.setenv(depth_curves._environment_name("HISTORY_LENGTH"), "100")
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "1")
+    monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "300")
+    monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "400")
+
+    lifecycle._attach_telemetry_with_local_lifecycle(FakeTrainer(), telemetry)
+
+    assert depth_curves._history_length() == 100
 
 
 def test_status_uses_heartbeat_and_reports_evidence_based_data_loss(tmp_path: Path) -> None:

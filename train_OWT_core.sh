@@ -1249,10 +1249,10 @@ run_grid_point() {
   log_url="file://$(realpath -m "$log_path")"; viewer_url="file://$(realpath -m "$depth_curve_local_root/index.html")"; serve_url="http://localhost:${DEPTH_CURVE_HTTP_PORT}/"
   # vvv THOG inactive depth-curve diagnostics no longer advertise hypothetical renderer or viewer settings
   if [[ "$DEPTH_CURVE_PLOTS" == none ]]; then
-    depth_curve_console="  depth curves:       none"
+    depth_curve_console="  legacy depth plots: none"
     depth_curve_done=""
   else
-    depth_curve_console="  depth curves:       $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
+    depth_curve_console="  legacy depth plots: $DEPTH_CURVE_PLOTS  (sample elements: $DEPTH_CURVE_SAMPLE_ELEMENTS, renderer: $DEPTH_CURVE_RENDERER, local html: $DEPTH_CURVE_LOCAL_HTML)
   depth viewer:       $viewer_url
   serve viewer:       (cd $depth_curve_local_root && python -m http.server $DEPTH_CURVE_HTTP_PORT)
   served URL:         $serve_url"

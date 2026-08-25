@@ -95,7 +95,7 @@ def test_hyperblock_wrapper_dry_run_propagates_fixed_field_controls() -> None:
     assert "--hyperblock-depth-order 2" in result.stdout
     assert "--hyperblock-loop-count 3" in result.stdout
     assert "--hyperblock-loop-decay 0.8" in result.stdout
-    assert "depth curves:" in result.stdout and "none" in result.stdout
+    assert "legacy depth plots:" in result.stdout and "none" in result.stdout
     assert "depth viewer:" not in result.stdout
     assert "sample elements:" not in result.stdout
     assert "--geometry-preset" not in result.stdout.split("DRY RUN:", 1)[1]

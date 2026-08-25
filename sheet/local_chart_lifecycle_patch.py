@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Mapping, Optional
 
 import constants as _constants
@@ -53,22 +54,35 @@ def _finite_capture_count(
     return count
 
 
-def _validate_capture_retention() -> None:
+def _ensure_capture_retention() -> int:
+    requested = _depth._history_length()
     if _depth._time_mode() != "accumulate":
-        return
+        return requested
     start, end = _capture_bounds()
     required = _finite_capture_count(
         start_step=start,
         end_step=end,
         cadence=_depth._log_every_n_steps(),
     )
-    if required is None or required <= _depth._history_length():
-        return
-    raise ValueError(
-        "instrumentation__depth_weight_curves__history_length is too small for "
-        "the configured inclusive capture window and cadence: "
-        f"requires at least {required}, got {_depth._history_length()}"
+    if required is None or required <= requested:
+        return requested
+
+    effective = int(required)
+    os.environ[_depth._environment_name("HISTORY_LENGTH")] = str(effective)
+    print(
+        "THOG2 WARNING: increasing effective "
+        "instrumentation__depth_weight_curves__history_length "
+        f"from {requested} to {effective} so the configured inclusive capture "
+        "window remains authoritative.",
+        flush=True,
     )
+    return effective
+
+
+def _validate_capture_retention() -> None:
+    """Compatibility seam: validation now promotes retention instead of aborting."""
+
+    _ensure_capture_retention()
 
 
 def _weight_curves_supported(trainer: Any) -> bool:
@@ -163,12 +177,13 @@ _ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 
 
 def _attach_telemetry_with_local_lifecycle(trainer: Any, telemetry: Any) -> None:
-    _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
     weight_supported = _weight_curves_supported(trainer)
     weight_destination = _depth._destination() if weight_supported else "none"
     weight_enabled = weight_destination != "none"
+    effective_history_length = _depth._history_length()
     if weight_enabled:
-        _validate_capture_retention()
+        effective_history_length = _ensure_capture_retention()
+    _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
     weight_local = weight_destination == "local"
     heatmap_local = _heatmap_local(telemetry)
     if not weight_local and not heatmap_local:
@@ -181,7 +196,7 @@ def _attach_telemetry_with_local_lifecycle(trainer: Any, telemetry: Any) -> None
             start_step=start_step,
             end_step=end_step,
             cadence=_depth._log_every_n_steps(),
-            history_length=_depth._history_length(),
+            history_length=effective_history_length,
         )
 
     initial_update = int(trainer.state.completed_updates)
@@ -224,6 +239,7 @@ _wandb.attach_telemetry = _attach_telemetry_with_local_lifecycle
 __all__ = [
     "_active_phase",
     "_attach_telemetry_with_local_lifecycle",
+    "_ensure_capture_retention",
     "_finite_capture_count",
     "_validate_capture_retention",
     "_weight_phase",
