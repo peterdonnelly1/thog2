@@ -162,6 +162,17 @@ def test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_
             timeout=20,
             message="final weight-range owner did not install",
         )
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                """
+                return document.getElementById('weight_step_from')?.value === '999'
+                  && document.getElementById('weight_step_to')?.value === '1003';
+                """
+            )),
+            timeout=20,
+            message="initial retained range controls were not populated",
+        )
 
         initial = driver.execute_script(
             """
@@ -347,13 +358,14 @@ def test_real_firefox_weight_settings_previews_show_current_curves(tmp_path: Pat
             '.chart-card[data-chart="attn_q_head_N"] .chart-settings-button',
         ):
             _open_settings_and_wait(driver, selector)
+            initial_current_only = _checkbox_checked(driver, "chart_current_weights_only")
             _wait(
                 driver,
-                lambda: preview_step_count() == 2,
+                lambda: preview_step_count() == (1 if initial_current_only else 2),
                 timeout=20,
-                message=f"history preview was blank for {selector}",
+                message=f"initial preview did not match Current-only for {selector}",
             )
-            if _checkbox_checked(driver, "chart_current_weights_only"):
+            if initial_current_only:
                 driver.execute_script("document.getElementById('chart_current_weights_only').click();")
                 _wait(
                     driver,
