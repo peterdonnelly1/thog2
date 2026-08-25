@@ -11,6 +11,16 @@ const source = fs.readFileSync(
   path.join(repository_root, "sheet/local_dashboard_assets/dashboard_weight_range_interaction_final_patch.js"),
   "utf8",
 );
+const superseded_source = fs.readFileSync(
+  path.join(repository_root, "sheet/local_dashboard_assets/dashboard_weight_regression_final_patch.js"),
+  "utf8",
+);
+
+assert.match(
+  superseded_source,
+  /if \(window\.__instra_weight_range_interaction_final\) return;[\s\S]*?event\.preventDefault\(\);/,
+  "the superseded RND capture listener still blocks the run-aware final owner",
+);
 
 class FakeElement {
   constructor(id = "") {

@@ -358,6 +358,11 @@ window.addEventListener("load", () => {
     window.addEventListener("click", event => {
       const button = event.target.closest?.("#weight_random_jump");
       if (!button) return;
+      // The run-aware viewer installed by the range-interaction owner supersedes
+      // this retained-capture implementation.  Yield without stopping propagation
+      // so its later capture listener can choose from this run's matrix dimensions
+      // (or from recorded pairs for a completed historical run).
+      if (window.__instra_weight_range_interaction_final) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       const retained = retained_weight_pairs();
