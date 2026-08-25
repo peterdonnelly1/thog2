@@ -49,7 +49,8 @@ window.addEventListener("load", () => {
     };
 
     const matched_selection = () => {
-      const api = window.__instra_matched_weight_selection;
+      const api = window.__instra_weight_viewer_selection
+        || window.__instra_matched_weight_selection;
       const selection = typeof api?.selection === "function" ? api.selection() : null;
       return selection && typeof selection === "object" ? selection : null;
     };
@@ -214,7 +215,8 @@ window.addEventListener("load", () => {
     };
 
     const selected_coupling = () => {
-      const api = window.__instra_matched_weight_selection;
+      const api = window.__instra_weight_viewer_selection
+        || window.__instra_matched_weight_selection;
       const selection = typeof api?.selection === "function" ? api.selection() : null;
       if (!selection || selection.user_selected !== true) return null;
       const model_feature = finite_integer(selection.model_feature);

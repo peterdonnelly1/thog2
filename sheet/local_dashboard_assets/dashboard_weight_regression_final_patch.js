@@ -2,7 +2,7 @@
 "use strict";
 
 // Final narrow regression guard for the stacked Heatmap/Weights presentation,
-// editable step-window fields, configured display ranges, trajectory headroom,
+// editable step-window fields, retained display ranges, trajectory headroom,
 // run-table width allocation, and matched-coordinate RND history.
 window.addEventListener("load", () => {
   setTimeout(() => {
@@ -16,9 +16,6 @@ window.addEventListener("load", () => {
     ]);
     const weight_chart_set = new Set(weight_chart_names);
     const protocol = "matched_six_v1";
-    const start_key = "instrumentation__depth_weight_curves__start_step";
-    const end_key = "instrumentation__depth_weight_curves__end_step";
-    const configured_seed_contexts = new Set();
 
     const finite_integer = value => {
       if (value === null || value === undefined || value === "") return null;
@@ -34,11 +31,6 @@ window.addEventListener("load", () => {
       }
       if (app.workspace_mode === true) return "workspace:pending";
       return app.current_run_id ? `run:${String(app.current_run_id)}` : "";
-    };
-
-    const mark_step_context_user_owned = () => {
-      const key = current_step_context();
-      if (key) configured_seed_contexts.add(key);
     };
 
     // A step input owns its typed draft until it is explicitly committed/cleared or
@@ -108,9 +100,9 @@ window.addEventListener("load", () => {
     const prepare_step_button_command = target => {
       const apply = target?.closest?.("#weight_step_apply");
       const whole = target?.closest?.("#weight_step_whole_range");
-      if (!apply && !whole) return false;
-      mark_step_context_user_owned();
-      if (whole) {
+      const latest = target?.closest?.("#weight_step_latest");
+      if (!apply && !whole && !latest) return false;
+      if (whole || latest) {
         clear_step_input_drafts();
         return true;
       }
@@ -134,90 +126,8 @@ window.addEventListener("load", () => {
     }, true);
     window.addEventListener("keyup", event => {
       if (event.key !== "Enter" || !event.target.matches?.("#weight_step_from, #weight_step_to")) return;
-      mark_step_context_user_owned();
       reconcile_step_input_drafts();
     }, true);
-
-    const configuration_range = configuration => {
-      if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) return null;
-      if (!Object.prototype.hasOwnProperty.call(configuration, start_key)) return null;
-      if (!Object.prototype.hasOwnProperty.call(configuration, end_key)) return null;
-      const minimum = finite_integer(configuration[start_key]);
-      const maximum = finite_integer(configuration[end_key]);
-      if (minimum === null || maximum === null || minimum < 0 || maximum < minimum) return null;
-      return {minimum, maximum};
-    };
-    const run_identifiers = run => {
-      const values = new Set();
-      if (!run || typeof run !== "object") return values;
-      for (const raw of [
-        run.dashboard_run_id,
-        run.local_run_id,
-        run.wandb_run_id,
-        run.run_name,
-        run.artifact_name,
-      ]) {
-        if (raw !== null && raw !== undefined && String(raw)) values.add(String(raw));
-      }
-      try {
-        const value = run_identifier(run);
-        if (value !== null && value !== undefined && String(value)) values.add(String(value));
-      } catch (_error) {}
-      return values;
-    };
-    const same_run_identity = (left, right) => {
-      const left_ids = run_identifiers(left);
-      const right_ids = run_identifiers(right);
-      return [...left_ids].some(value => right_ids.has(value));
-    };
-    const merged_single_run_configuration = () => {
-      const catalog_run = typeof current_run === "function" ? current_run() : null;
-      const status_run = app.current_status && typeof app.current_status === "object" ? app.current_status : null;
-      const base = catalog_run?.configuration && typeof catalog_run.configuration === "object"
-        ? catalog_run.configuration
-        : {};
-      const status = (
-        status_run
-        && (!catalog_run || same_run_identity(catalog_run, status_run))
-        && status_run.configuration
-        && typeof status_run.configuration === "object"
-      ) ? status_run.configuration : {};
-      return {...base, ...status};
-    };
-    const configured_range_for_context = () => {
-      if (app.workspace_mode !== true) return configuration_range(merged_single_run_configuration());
-      const visible = typeof window.__instra_workspace?.visible_runs === "function"
-        ? window.__instra_workspace.visible_runs()
-        : [];
-      if (!visible.length) return null;
-      const ranges = visible.map(run => configuration_range(run?.configuration));
-      if (ranges.some(range => !range)) return null;
-      const first = ranges[0];
-      return ranges.every(range => (
-        range.minimum === first.minimum && range.maximum === first.maximum
-      )) ? first : null;
-    };
-    const seed_configured_step_range = () => {
-      const stability = window.__instra_weight_stability_final;
-      if (!stability) return false;
-      const key = current_step_context();
-      if (!key || configured_seed_contexts.has(key)) return false;
-      const existing = typeof stability.selected_range === "function" ? stability.selected_range() : null;
-      if (existing) {
-        configured_seed_contexts.add(key);
-        return true;
-      }
-      const configured = configured_range_for_context();
-      if (!configured || typeof stability.set_range !== "function") return false;
-      configured_seed_contexts.add(key);
-      try {
-        stability.set_range(configured.minimum, configured.maximum);
-        return true;
-      } catch (_error) {
-        configured_seed_contexts.delete(key);
-        return false;
-      }
-    };
 
     // Normalize only the render copy: selection_kind records how the coordinate was
     // obtained, not which historical snapshots belong to the selected coordinate.
@@ -225,7 +135,8 @@ window.addEventListener("load", () => {
     // owner independently applies current-only / explicit-range / history semantics.
     const route_selected_weight_coordinate = (figure, chart_name) => {
       if (!weight_chart_set.has(chart_name) || !figure || typeof figure !== "object") return figure;
-      const selection_api = window.__instra_matched_weight_selection;
+      const selection_api = window.__instra_weight_viewer_selection
+        || window.__instra_matched_weight_selection;
       const selection = typeof selection_api?.selection === "function" ? selection_api.selection() : null;
       if (!selection || selection.user_selected !== true) return figure;
       const model_feature = finite_integer(selection.model_feature);
@@ -533,19 +444,17 @@ window.addEventListener("load", () => {
     });
     observer.observe(document.body, {childList: true, subtree: true});
 
-    // Configuration/status and the dependency-gated stable owner can arrive after
-    // this last-loaded asset. Bounded lightweight reconciliation never touches
-    // Plotly unless an as-yet-unseeded configured range is actually discovered.
+    // Status and the dependency-gated stable owner can arrive after this last-loaded
+    // asset. Bounded lightweight reconciliation protects typed range drafts while
+    // the run list and controls settle.
     let reconciliation_passes = 0;
     const reconciliation_timer = setInterval(() => {
       reconciliation_passes += 1;
       protect_step_inputs();
       reconcile_step_input_drafts();
-      seed_configured_step_range();
       classify_run_table_headers();
       if (reconciliation_passes >= 240) clearInterval(reconciliation_timer);
     }, 250);
-    seed_configured_step_range();
   }, 360);
 });
 // ^^^ THOG

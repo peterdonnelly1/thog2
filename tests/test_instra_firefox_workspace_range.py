@@ -155,7 +155,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             driver,
             lambda: driver.execute_script(
                 "return document.getElementById('weight_step_availability')?.textContent || '';"
-            ) == "data available: no overlapping steps",
+            ) == "data available —",
             message="three-run Workspace did not report no overlapping steps",
         )
 
@@ -206,21 +206,29 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             driver,
             lambda: driver.execute_script(
                 """
-                const placeholder = document.getElementById('attn_q_head_N_placeholder');
-                return !!placeholder && !placeholder.hidden
-                  && placeholder.textContent.includes('No recorded weight snapshots in steps 1010–1011');
+                const error = document.getElementById('weight_step_range_error');
+                return document.getElementById('weight_step_from')?.value === '1004'
+                  && document.getElementById('weight_step_to')?.value === '1004'
+                  && !!error && !error.hidden
+                  && error.textContent.includes('cannot be greater than 1004');
                 """
             ) is True,
-            message="historical Workspace incorrectly waited for future step 1010",
+            message="invalid Workspace bounds were not corrected inline",
         )
 
         driver.execute_script("document.getElementById('weight_step_whole_range').click();")
         _wait(
             driver,
             lambda: driver.execute_script(
-                "return window.__instra_weight_step_filter?.active?.() === false;"
+                """
+                const range = window.__instra_weight_step_filter?.request_range?.();
+                return window.__instra_weight_step_filter?.active?.() === true
+                  && range?.minimum === 1002 && range?.maximum === 1004
+                  && document.getElementById('weight_step_from')?.value === '1002'
+                  && document.getElementById('weight_step_to')?.value === '1004';
+                """
             ) is True,
-            message="whole range did not clear explicit Workspace window",
+            message="whole range did not restore the full Workspace intersection",
         )
         _wait(
             driver,

@@ -16,6 +16,7 @@ async function heatmap_family_demand_regression() {
   let heatmap_open = true;
   let coefficients_open = false;
   let refresh_calls = 0;
+  let heatmap_renders = 0;
   const requests = [];
   const click_handlers = new Map();
   const groups = {
@@ -25,7 +26,7 @@ async function heatmap_family_demand_regression() {
     coefficients_group_toggle: {addEventListener: (_event, handler) => click_handlers.set("coefficients", handler)},
     heatmap_card_detail: {textContent: ""},
     heatmap_placeholder: {hidden: false},
-    heatmap_plot: {},
+    heatmap_plot: {id: "heatmap_plot", dataset: {}},
   };
 
   const app = {
@@ -73,7 +74,10 @@ async function heatmap_family_demand_regression() {
     by_id: id => groups[id] || null,
     fetch_json: base_fetch,
     render_figures: async () => undefined,
-    render_plot: async () => undefined,
+    render_plot: async mount => {
+      heatmap_renders += 1;
+      mount.dataset.plotReady = "true";
+    },
     resize_plot_in_card: () => undefined,
     resize_visible_plots: () => undefined,
     select_run: run_id => { app.current_run_id = run_id; },
@@ -98,6 +102,18 @@ async function heatmap_family_demand_regression() {
   assert.equal(parsed.searchParams.get("window_mode"), "rolling");
   assert.ok(payload.heatmap, "heatmap family response was not merged into figure payload");
   app.figures = payload;
+  await context.render_figures();
+  assert.equal(groups.heatmap_plot.dataset.instraRenderedRunId, "R1");
+
+  // A current cached payload with a blank/stale DOM mount must redraw locally. It
+  // must not wait for a new probe or issue a redundant network refresh.
+  groups.heatmap_plot.dataset.plotReady = "false";
+  delete groups.heatmap_plot.dataset.instraRenderedRunId;
+  const renders_before_mount_repair = heatmap_renders;
+  await context.window.__thog2_dashboard_performance.refresh_family_if_stale("heatmap");
+  assert.equal(refresh_calls, 0, "stale heatmap mount incorrectly refetched current payload");
+  assert.equal(heatmap_renders, renders_before_mount_repair + 1, "stale heatmap mount was not redrawn");
+  assert.equal(groups.heatmap_plot.dataset.instraRenderedRunId, "R1");
 
   payload = await context.fetch_json("/api/figures?run=R1");
   assert.equal(requests.length, 1, "unchanged heatmap revision refetched its family");

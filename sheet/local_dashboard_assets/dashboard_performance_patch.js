@@ -71,7 +71,7 @@ window.addEventListener("load", () => {
       workspace_api()?.selection_key?.() || null,
     ]);
 
-    const family_stale = family => {
+    const family_payload_stale = family => {
       const status = app.current_status || current_run();
       if (!status) return true;
       if (family === "heatmap") {
@@ -85,6 +85,20 @@ window.addEventListener("load", () => {
         || performance_state.depth_signature !== depth_signature(status)
       );
     };
+
+    const heatmap_mount_stale = () => {
+      const mount = by_id("heatmap_plot");
+      if (!mount) return true;
+      return (
+        mount.dataset?.plotReady !== "true"
+        || mount.dataset?.instraRenderedRunId !== String(app.current_run_id || "")
+      );
+    };
+
+    const family_stale = family => (
+      family_payload_stale(family)
+      || (family === "heatmap" && heatmap_mount_stale())
+    );
 
     const base_fetch_json_performance = fetch_json;
     fetch_json = async function(url, options = {}) {
@@ -221,6 +235,7 @@ window.addEventListener("load", () => {
             const placeholder = by_id("heatmap_placeholder");
             if (placeholder) placeholder.hidden = true;
             await render_plot(mount, figure, "heatmap");
+            mount.dataset.instraRenderedRunId = String(app.current_run_id || "");
           }
         }
       }
@@ -255,7 +270,7 @@ window.addEventListener("load", () => {
         state = {running: false, queued: false, latest: null, promise: Promise.resolve()};
         render_queues.set(chart_name, state);
       }
-      state.latest = {mount, figure, chart_name};
+      state.latest = {mount, figure, chart_name, run_id: String(app.current_run_id || "")};
       if (state.running) {
         state.queued = true;
         return state.promise;
@@ -268,6 +283,13 @@ window.addEventListener("load", () => {
             state.queued = false;
             const job = state.latest;
             await base_render_plot_performance(job.mount, job.figure, job.chart_name);
+            if (
+              job.chart_name === "heatmap"
+              && job.mount?.id === "heatmap_plot"
+              && job.run_id === String(app.current_run_id || "")
+            ) {
+              job.mount.dataset.instraRenderedRunId = job.run_id;
+            }
           } while (state.queued);
         } finally {
           state.running = false;
@@ -299,6 +321,18 @@ window.addEventListener("load", () => {
       if (!family_stale(family)) {
         requestAnimationFrame(resize_visible_plots);
         return;
+      }
+      if (
+        family === "heatmap"
+        && !family_payload_stale("heatmap")
+        && app.figures?.heatmap
+      ) {
+        performance_state.pending_render = {heatmap: true, depth: false};
+        const result = render_figures();
+        if (result && typeof result.catch === "function") {
+          result.catch(error => show_toast(`Heatmap redraw failed: ${error.message}`));
+        }
+        return result;
       }
       if (family === "heatmap") performance_state.deferred_heatmap = true;
       else performance_state.deferred_coefficients = true;

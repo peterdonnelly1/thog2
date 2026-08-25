@@ -34,6 +34,12 @@ class FakeElement {
   addEventListener(name, callback) { this.listeners.set(name, callback); }
   querySelector(selector) { return selector === "small" ? {textContent: ""} : null; }
   matches(selector) { return selector.includes(`#${this.id}`); }
+  closest(selector) { return this.matches(selector) ? this : null; }
+  setAttribute(name, value) { this[name] = String(value); }
+  insertAdjacentElement(_position, element) {
+    if (element?.id) elements.set(element.id, element);
+    return element;
+  }
 }
 
 const weight_names = ["q", "k", "v", "o", "up", "down"];
@@ -137,7 +143,11 @@ const context = {
     __instra_legacy_heatmap_repair: {},
     __instra_workspace_depth_cache: {clear() {}},
   },
-  document: {addEventListener() {}},
+  document: {
+    head: {appendChild() {}},
+    addEventListener() {},
+    createElement() { return new FakeElement(); },
+  },
   by_id: id => elements.get(id) || null,
   load_json,
   save_json,
@@ -207,33 +217,41 @@ vm.runInContext(source, context, {filename: "dashboard_weight_stability_final_pa
 const api = context.window.__instra_weight_stability_final;
 assert.ok(api, "final weight stability owner did not install");
 
-// Run-scoped configured ranges: A has 20-30, B has none, C has an expired 20-30.
-assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 30});
+// Every run begins with the range actually retained by that run; trainer capture
+// start/end hyperparameters never seed the viewer.
+assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
+assert.equal(api.mode(), "whole");
 assert.equal(context.normalize_chart_settings("q").current_weights_only, true);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, true);
 
 context.app.current_run_id = "B";
+context.app.current_status = runs.A;
+assert.deepEqual(
+  api.selected_range(),
+  {minimum: 401, maximum: 500},
+  "stale status from the previous run leaked into the selected run's retained bounds",
+);
 context.app.current_status = runs.B;
 context.app.figures = {depth: {}};
-assert.equal(api.selected_range(), null, "A's configured range leaked into historical run B");
+assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
 assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, false);
-assert.equal(api.placeholder_message("q"), "Weight curves unavailable.");
+assert.equal(api.placeholder_message("q"), "No recorded weight snapshots in steps 401–500.");
 
 context.app.current_run_id = "C";
 context.app.current_status = runs.C;
 context.app.figures = {depth: {}};
-assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 30});
+assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
 assert.equal(
   api.placeholder_message("q"),
-  "Selected steps 20–30 are no longer retained.",
-  "finished historical run was incorrectly told to wait for a future step",
+  "No recorded weight snapshots in steps 401–500.",
+  "historical run did not use its own retained range",
 );
 
 context.app.current_run_id = "A";
 context.app.current_status = runs.A;
 context.app.figures = {depth: {}};
-assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 30});
+assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
 
 // Current-only filters time only: random coordinate remains random and the latest
 // random curve is literally one of the history curves.
@@ -275,12 +293,14 @@ api.set_range(450, 460);
 assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 460});
 context.app.current_run_id = "A";
 context.app.current_status = runs.A;
-assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 30});
+assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
 context.app.current_run_id = "B";
 context.app.current_status = runs.B;
 assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 460});
 api.clear_range();
-assert.equal(api.selected_range(), null);
+assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
+api.show_latest();
+assert.deepEqual(api.selected_range(), {minimum: 500, maximum: 500});
 
 // A historical run switch starts with an honest loading state, never a future-step
 // message inherited from the live run.

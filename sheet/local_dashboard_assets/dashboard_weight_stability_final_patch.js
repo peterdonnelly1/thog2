@@ -21,8 +21,6 @@ window.addEventListener("load", () => {
     const weight_chart_set = new Set(weight_chart_names);
     const group_storage_key = "thog2_local_weight_group_settings_v1";
     const override_storage_key = "thog2_local_weight_chart_overrides_v1";
-    const start_key = "instrumentation__depth_weight_curves__start_step";
-    const end_key = "instrumentation__depth_weight_curves__end_step";
     const legacy_step_api = window.__instra_weight_controls_v2;
     const legacy_clear_step_range = typeof legacy_step_api.clear_step_range === "function"
       ? legacy_step_api.clear_step_range.bind(legacy_step_api)
@@ -75,64 +73,62 @@ window.addEventListener("load", () => {
 
     const current_context_runs = () => {
       if (app.workspace_mode === true) return visible_workspace_runs();
-      const run = typeof current_run === "function" ? current_run() : app.current_status;
-      return run ? [run] : [];
+      const run = typeof current_run === "function" ? current_run() : null;
+      const status = app.current_status && typeof app.current_status === "object"
+        ? app.current_status
+        : null;
+      const selected = String(app.current_run_id || "");
+      const status_matches = Boolean(status && selected && run_id(status) === selected);
+      if (!run) return status_matches ? [status] : [];
+      if (!status_matches || run_id(run) !== selected) return [run];
+      return [{...run, ...status, configuration: run.configuration || status.configuration || {}}];
     };
 
-    const merged_configuration = run => {
-      const base = run?.configuration && typeof run.configuration === "object"
-        ? run.configuration
-        : {};
-      const current = (
-        run_id(run)
-        && run_id(run) === String(app.current_run_id || "")
-        && app.current_status?.configuration
-        && typeof app.current_status.configuration === "object"
-      ) ? app.current_status.configuration : {};
-      return {...base, ...current};
-    };
-
-    const configured_range = () => {
+    const available_range = () => {
       const runs = current_context_runs();
       if (!runs.length) return null;
       const ranges = [];
       for (const run of runs) {
-        const configuration = merged_configuration(run);
-        if (!own(configuration, start_key) || !own(configuration, end_key)) return null;
-        const minimum = finite_step(configuration[start_key]);
-        const maximum = finite_step(configuration[end_key]);
+        const minimum = finite_step(run?.depth_minimum_update);
+        const maximum = finite_step(run?.depth_maximum_update);
         if (minimum === null || maximum === null || maximum < minimum) return null;
         ranges.push({minimum, maximum});
       }
-      const first = ranges[0];
-      return ranges.every(range => (
-        range.minimum === first.minimum && range.maximum === first.maximum
-      )) ? first : null;
+      const minimum = Math.max(...ranges.map(range => range.minimum));
+      const maximum = Math.min(...ranges.map(range => range.maximum));
+      return minimum <= maximum ? {minimum, maximum} : null;
     };
 
     const state_for_context = (key = context_key()) => {
       if (!key) return null;
       if (!range_by_context.has(key)) {
-        range_by_context.set(key, {range: null, user_overridden: false});
+        range_by_context.set(key, {mode: "whole", range: null});
       }
       return range_by_context.get(key);
     };
 
+    // Capture start/end hyperparameters describe what the trainer intended to log;
+    // they are not a viewer selection. A new run view always begins with the retained
+    // range that actually belongs to that run.
     const seed_configured_range = () => {
-      const state = state_for_context();
-      if (!state || state.user_overridden || state.range) return false;
-      const configured = configured_range();
-      if (!configured) return false;
-      state.range = configured;
-      return true;
+      state_for_context();
+      return false;
     };
 
     const selected_range = () => {
-      seed_configured_range();
-      const range = state_for_context()?.range;
-      if (!range) return null;
-      return {minimum: range.minimum, maximum: range.maximum};
+      const state = state_for_context();
+      const available = available_range();
+      if (!state || !available || state.mode === "settings") return null;
+      if (state.mode === "latest") {
+        return {minimum: available.maximum, maximum: available.maximum};
+      }
+      if (state.mode === "custom" && state.range) {
+        return {minimum: state.range.minimum, maximum: state.range.maximum};
+      }
+      return available;
     };
+
+    const selected_range_mode = () => state_for_context()?.mode || "whole";
 
     const group_scope = chart_name => {
       if (app.workspace_mode === true) return "workspace";
@@ -220,7 +216,8 @@ window.addEventListener("load", () => {
     }
 
     const selected_coordinate_enabled = chart_name => {
-      const selection = selection_api.selection?.() || {};
+      const viewer = window.__instra_weight_viewer_selection;
+      const selection = viewer?.selection?.() || selection_api.selection?.() || {};
       if (selection.user_selected !== true) return false;
       const capability = selection_api.capability?.(chart_name);
       return capability?.available !== false;
@@ -354,16 +351,66 @@ window.addEventListener("load", () => {
       app.figure_revision = null;
     };
 
+    const ensure_final_step_controls = () => {
+      const whole = by_id("weight_step_whole_range");
+      if (!whole) return false;
+      let latest = by_id("weight_step_latest");
+      if (!latest) {
+        latest = document.createElement("button");
+        latest.id = "weight_step_latest";
+        latest.type = "button";
+        latest.className = "weight-step-button";
+        latest.textContent = "latest step";
+        latest.title = "Show the latest retained weight snapshot";
+        whole.insertAdjacentElement("afterend", latest);
+      }
+      let error = by_id("weight_step_range_error");
+      if (!error) {
+        error = document.createElement("span");
+        error.id = "weight_step_range_error";
+        error.className = "weight-step-range-error";
+        error.setAttribute("role", "status");
+        error.hidden = true;
+        latest.insertAdjacentElement("afterend", error);
+      }
+      return true;
+    };
+
+    const show_range_error = message => {
+      ensure_final_step_controls();
+      const error = by_id("weight_step_range_error");
+      if (!error) return;
+      error.textContent = String(message || "");
+      error.hidden = !message;
+    };
+
+    const write_step_input = (input, value) => {
+      if (!input) return;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      if (descriptor?.set) descriptor.set.call(input, String(value));
+      else input.value = String(value);
+    };
+
     const sync_header = () => {
+      ensure_final_step_controls();
       const range = selected_range();
+      const available = available_range();
       const from = by_id("weight_step_from");
       const to = by_id("weight_step_to");
       const whole = by_id("weight_step_whole_range");
+      const latest = by_id("weight_step_latest");
       const current = by_id("weight_step_current");
       const availability = by_id("weight_step_availability");
+      const controls = by_id("weight_step_group_controls");
       if (from) from.value = range ? String(range.minimum) : "";
       if (to) to.value = range ? String(range.maximum) : "";
-      if (whole) whole.disabled = !range;
+      if (whole) whole.disabled = !available;
+      if (latest) latest.disabled = !available;
+      const mode = selected_range_mode();
+      whole?.setAttribute("aria-pressed", String(mode === "whole"));
+      latest?.setAttribute("aria-pressed", String(mode === "latest"));
+      controls?.classList?.toggle?.("active", range !== null);
+      if (whole) whole.title = "Show every retained weight snapshot in this view";
 
       const runs = current_context_runs();
       const current_steps = runs.map(run => (
@@ -378,22 +425,10 @@ window.addEventListener("load", () => {
         current.style.fontWeight = "400";
       }
 
-      const retained = runs.map(run => {
-        const minimum = finite_step(run?.depth_minimum_update);
-        const maximum = finite_step(run?.depth_maximum_update);
-        return minimum !== null && maximum !== null ? {minimum, maximum} : null;
-      }).filter(Boolean);
       if (availability) {
-        if (!retained.length) availability.textContent = "data available —";
-        else if (app.workspace_mode === true) {
-          const minimum = Math.max(...retained.map(value => value.minimum));
-          const maximum = Math.min(...retained.map(value => value.maximum));
-          availability.textContent = minimum <= maximum
-            ? `data available ${minimum}–${maximum}`
-            : "data available —";
-        } else {
-          availability.textContent = `data available ${retained[0].minimum}–${retained[0].maximum}`;
-        }
+        availability.textContent = available
+          ? `data available ${available.minimum}–${available.maximum}`
+          : "data available —";
       }
     };
 
@@ -524,7 +559,9 @@ window.addEventListener("load", () => {
       active: () => selected_range() !== null,
       signature: () => {
         const range = selected_range();
-        return range ? `${context_key()}:${range.minimum}:${range.maximum}` : `${context_key()}:default`;
+        return range
+          ? `${context_key()}:${selected_range_mode()}:${range.minimum}:${range.maximum}`
+          : `${context_key()}:settings`;
       },
       request_range: selected_range,
     };
@@ -538,11 +575,13 @@ window.addEventListener("load", () => {
       }
       const state = state_for_context();
       if (!state) return false;
-      const changed = !state.range
+      const changed = state.mode !== "custom"
+        || !state.range
         || state.range.minimum !== resolved_minimum
         || state.range.maximum !== resolved_maximum;
+      state.mode = "custom";
       state.range = {minimum: resolved_minimum, maximum: resolved_maximum};
-      if (user) state.user_overridden = true;
+      void user;
       sync_header();
       reconcile_placeholders();
       if (changed && refresh) {
@@ -552,12 +591,13 @@ window.addEventListener("load", () => {
       return changed;
     };
 
-    const clear_context_range = ({user = true, refresh = true} = {}) => {
+    const set_context_mode = (mode, {refresh = true} = {}) => {
       const state = state_for_context();
       if (!state) return false;
-      const changed = state.range !== null;
+      const normalized = ["whole", "latest", "settings"].includes(mode) ? mode : "whole";
+      const changed = state.mode !== normalized || state.range !== null;
+      state.mode = normalized;
       state.range = null;
-      if (user) state.user_overridden = true;
       sync_header();
       reconcile_placeholders();
       if (changed && refresh) {
@@ -566,17 +606,73 @@ window.addEventListener("load", () => {
       }
       return changed;
     };
+
+    const clear_context_range = ({refresh = true} = {}) => (
+      set_context_mode("whole", {refresh})
+    );
 
     legacy_step_api.selected_step_range = selected_range;
     legacy_step_api.set_step_range = (minimum, maximum) => (
       set_context_range(minimum, maximum, {user: true, refresh: true})
     );
-    legacy_step_api.clear_step_range = () => clear_context_range({user: true, refresh: true});
+    legacy_step_api.clear_step_range = () => clear_context_range({refresh: true});
     legacy_step_api.global_flags = () => ({
       current_weights_only: effective_flag(app.axis_chart_name || weight_chart_names[0], "current_weights_only"),
       join_with_line_segments: effective_flag(app.axis_chart_name || weight_chart_names[0], "join_with_line_segments"),
     });
     legacy_step_api.set_global_flags = () => false;
+
+    let last_edited_step_input = "";
+    window.addEventListener("input", event => {
+      if (!event.target?.matches?.("#weight_step_from, #weight_step_to")) return;
+      last_edited_step_input = event.target.id;
+      show_range_error("");
+    }, true);
+
+    const corrected_header_range = () => {
+      const available = available_range();
+      if (!available) return {error: "No retained weight steps are available."};
+      const from = by_id("weight_step_from");
+      const to = by_id("weight_step_to");
+      let minimum = finite_step(from?.value);
+      let maximum = finite_step(to?.value);
+      const errors = [];
+
+      if (minimum === null) {
+        minimum = available.minimum;
+        errors.push("'from' value must be a non-negative whole number");
+      } else if (minimum < available.minimum) {
+        minimum = available.minimum;
+        errors.push(`'from' value cannot be less than ${available.minimum}`);
+      } else if (minimum > available.maximum) {
+        minimum = available.maximum;
+        errors.push(`'from' value cannot be greater than ${available.maximum}`);
+      }
+
+      if (maximum === null) {
+        maximum = available.maximum;
+        errors.push("'to' value must be a non-negative whole number");
+      } else if (maximum > available.maximum) {
+        maximum = available.maximum;
+        errors.push(`'to' value cannot be greater than ${available.maximum}`);
+      } else if (maximum < available.minimum) {
+        maximum = available.minimum;
+        errors.push(`'to' value cannot be less than ${available.minimum}`);
+      }
+
+      if (minimum > maximum) {
+        if (last_edited_step_input === "weight_step_from") {
+          minimum = maximum;
+          errors.push("'from' value cannot be greater than 'to'");
+        } else {
+          maximum = minimum;
+          errors.push("'to' value cannot be less than 'from'");
+        }
+      }
+      write_step_input(from, minimum);
+      write_step_input(to, maximum);
+      return {minimum, maximum, error: errors.join("; ")};
+    };
 
     const apply_range_from_header = event => {
       const target = event.target;
@@ -587,20 +683,27 @@ window.addEventListener("load", () => {
         && target?.matches?.("#weight_step_from, #weight_step_to")
       );
       const whole = event.type === "click" && target?.closest?.("#weight_step_whole_range");
-      if (!apply && !enter && !whole) return;
+      const latest = event.type === "click" && target?.closest?.("#weight_step_latest");
+      if (!apply && !enter && !whole && !latest) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       if (whole) {
-        clear_context_range({user: true, refresh: true});
+        show_range_error("");
+        set_context_mode("whole", {refresh: true});
         return;
       }
-      const minimum = finite_step(by_id("weight_step_from")?.value);
-      const maximum = finite_step(by_id("weight_step_to")?.value);
-      if (minimum === null || maximum === null || maximum < minimum) {
-        show_toast("Enter a valid whole-number start and end step.");
+      if (latest) {
+        show_range_error("");
+        set_context_mode("latest", {refresh: true});
         return;
       }
-      set_context_range(minimum, maximum, {user: true, refresh: true});
+      const corrected = corrected_header_range();
+      if (corrected.error) {
+        show_range_error(corrected.error);
+        return;
+      }
+      show_range_error("");
+      set_context_range(corrected.minimum, corrected.maximum, {user: true, refresh: true});
     };
     window.addEventListener("click", apply_range_from_header, true);
     window.addEventListener("keydown", apply_range_from_header, true);
@@ -703,11 +806,7 @@ window.addEventListener("load", () => {
         return await base_refresh_current_run();
       } finally {
         if (key) loading_contexts.delete(key);
-        const seeded = seed_configured_range();
-        if (seeded) {
-          invalidate_depth();
-          if (!app.refresh_in_flight) queueMicrotask(() => refresh_current_run());
-        }
+        seed_configured_range();
         sync_header();
         reconcile_placeholders();
       }
@@ -727,7 +826,7 @@ window.addEventListener("load", () => {
       } finally {
         refresh_current_run = saved_refresh;
       }
-      seed_configured_range();
+      state_for_context();
       sync_header();
       const key = context_key();
       if (key) loading_contexts.add(key);
@@ -742,20 +841,52 @@ window.addEventListener("load", () => {
     window.addEventListener("click", event => {
       if (!event.target.closest?.("#save_chart_settings")) return;
       if (!weight_chart_set.has(app.axis_chart_name)) return;
+      if (by_id("chart_settings_overlay")?.hidden) return;
       apply_editor_draft();
+      const saved_current_only = by_id("chart_current_weights_only")?.checked === true;
       setTimeout(() => {
         editor_draft = null;
         sync_editor_controls({load_values: true});
+        if (saved_current_only) {
+          set_context_mode("settings", {refresh: false});
+        } else if (selected_range_mode() === "settings") {
+          set_context_mode("whole", {refresh: false});
+        }
         invalidate_depth();
         refresh_current_run();
       }, 0);
     }, true);
 
+    const style = document.createElement("style");
+    style.id = "thog2_weight_stability_final_style";
+    style.textContent = `
+      .weight-step-range-error {
+        color: #b42318;
+        font-size: 10px;
+        font-weight: 400;
+        line-height: 1.2;
+        margin-left: 2px;
+        white-space: nowrap;
+      }
+      .weight-step-button[aria-pressed="true"] {
+        border-color: #1590a8;
+        color: #0b6577;
+        background: #edfafd;
+      }
+    `;
+    document.head.appendChild(style);
+
     window.__instra_weight_stability_final = Object.freeze({
       context_key,
+      available_range,
       selected_range,
+      mode: selected_range_mode,
+      sync_header,
       set_range: (minimum, maximum) => set_context_range(minimum, maximum, {user: true, refresh: true}),
-      clear_range: () => clear_context_range({user: true, refresh: true}),
+      clear_range: () => clear_context_range({refresh: true}),
+      show_whole: () => set_context_mode("whole", {refresh: true}),
+      show_latest: () => set_context_mode("latest", {refresh: true}),
+      show_settings: () => set_context_mode("settings", {refresh: true}),
       effective: chart_name => ({
         current_weights_only: effective_flag(chart_name, "current_weights_only"),
         join_with_line_segments: effective_flag(chart_name, "join_with_line_segments"),

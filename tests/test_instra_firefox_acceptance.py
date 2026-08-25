@@ -118,63 +118,67 @@ def _make_selected_thog_store(root: Path) -> tuple[Path, str]:
         },
     )
     store.append_heatmap_records(_legacy_probe(step) for step in range(120, 128))
-    families: dict[str, object] = {}
-    for chart_index, chart_name in enumerate(_WEIGHT_CHARTS):
-        coordinates = tuple(float(layer) for layer in range(1, 17))
-        reverse = chart_name in {"attn_out_head_N", "mlp_down"}
-        random_model, random_intermediate = 2, 3
-        selected_model, selected_intermediate = 12, 14
-        random_row, random_column = (
-            (random_model, random_intermediate)
-            if reverse
-            else (random_intermediate, random_model)
-        )
-        selected_row, selected_column = (
-            (selected_model, selected_intermediate)
-            if reverse
-            else (selected_intermediate, selected_model)
-        )
-        curves = []
-        for curve_index, (row, column, model_feature, intermediate_feature, kind) in enumerate((
-            (random_row, random_column, random_model, random_intermediate, "random"),
-            (selected_row, selected_column, selected_model, selected_intermediate, "user"),
-        )):
-            values = tuple(
-                0.01 * (chart_index + 1) + 0.002 * layer + 0.0004 * curve_index
-                for layer in range(1, 17)
+    for step in (126, 127):
+        families: dict[str, object] = {}
+        for chart_index, chart_name in enumerate(_WEIGHT_CHARTS):
+            coordinates = tuple(float(layer) for layer in range(1, 17))
+            reverse = chart_name in {"attn_out_head_N", "mlp_down"}
+            random_model, random_intermediate = 2, 3
+            selected_model, selected_intermediate = 12, 14
+            random_row, random_column = (
+                (random_model, random_intermediate)
+                if reverse
+                else (random_intermediate, random_model)
             )
-            curves.append({
-                "scalar_id": f"r{row}_c{column}",
-                "output_row": row,
-                "row_index": column,
-                "values": values,
-                "executed_values": values,
-                "model_feature": model_feature,
-                "intermediate_feature": intermediate_feature,
-                "selection_kind": kind,
-            })
-        families[chart_name] = {
-            "semantic_family": chart_name,
-            "depth_coordinates": coordinates,
-            "executed_layer_coordinates": coordinates,
-            "curves": tuple(curves),
-        }
-    store.append_depth_weight_snapshot(
-        {
-            "optimizer_update": 127,
-            "attention_head": 0,
-            "families": families,
-            "weight_selection": {
-                "protocol": "matched_six_v1",
-                "user_selected": True,
-                "model_feature": 12,
-                "intermediate_feature": 14,
-                "feature_count": 16,
-                "applied": True,
+            selected_row, selected_column = (
+                (selected_model, selected_intermediate)
+                if reverse
+                else (selected_intermediate, selected_model)
+            )
+            curves = []
+            for curve_index, (row, column, model_feature, intermediate_feature, kind) in enumerate((
+                (random_row, random_column, random_model, random_intermediate, "random"),
+                (selected_row, selected_column, selected_model, selected_intermediate, "user"),
+            )):
+                values = tuple(
+                    0.01 * (chart_index + 1)
+                    + 0.002 * layer
+                    + 0.00004 * curve_index * layer * layer
+                    + step * 1e-7
+                    for layer in range(1, 17)
+                )
+                curves.append({
+                    "scalar_id": f"r{row}_c{column}",
+                    "output_row": row,
+                    "row_index": column,
+                    "values": values,
+                    "executed_values": values,
+                    "model_feature": model_feature,
+                    "intermediate_feature": intermediate_feature,
+                    "selection_kind": kind,
+                })
+            families[chart_name] = {
+                "semantic_family": chart_name,
+                "depth_coordinates": coordinates,
+                "executed_layer_coordinates": coordinates,
+                "curves": tuple(curves),
+            }
+        store.append_depth_weight_snapshot(
+            {
+                "optimizer_update": step,
+                "attention_head": 0,
+                "families": families,
+                "weight_selection": {
+                    "protocol": "matched_six_v1",
+                    "user_selected": True,
+                    "model_feature": 12,
+                    "intermediate_feature": 14,
+                    "feature_count": 16,
+                    "applied": True,
+                },
             },
-        },
-        history_length=100,
-    )
+            history_length=100,
+        )
     store.close()
     (root / ".instra_weight_selection.json").write_text(
         json.dumps({

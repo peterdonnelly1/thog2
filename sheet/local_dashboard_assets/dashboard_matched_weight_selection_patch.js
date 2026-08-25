@@ -319,7 +319,9 @@ window.addEventListener("load", () => {
       if (!weight_chart_set.has(chart_name)) return prepared;
       const current_only = resolved_current_only(chart_name);
       const capability = matched_weight_capability(chart_name);
-      const selected = saved_selection.user_selected === true;
+      const viewer_selection = window.__instra_weight_viewer_selection?.selection?.()
+        || saved_selection;
+      const selected = viewer_selection.user_selected === true;
 
       prepared.data = (prepared.data || []).filter(trace => {
         const kind = weight_trace_kind(trace);
@@ -329,8 +331,8 @@ window.addEventListener("load", () => {
         const meta = trace.meta || {};
         return (
           (kind === "user" || kind === "user_random")
-          && finite_integer(meta.instra_weight_model_feature) === saved_selection.model_feature
-          && finite_integer(meta.instra_weight_intermediate_feature) === saved_selection.intermediate_feature
+          && finite_integer(meta.instra_weight_model_feature) === finite_integer(viewer_selection.model_feature)
+          && finite_integer(meta.instra_weight_intermediate_feature) === finite_integer(viewer_selection.intermediate_feature)
         );
       });
       return prepared;
