@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import math
 import random
 from typing import Any, Dict, Mapping, Sequence, Tuple
 

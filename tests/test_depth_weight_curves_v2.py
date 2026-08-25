@@ -314,6 +314,50 @@ def test_local_depth_curve_sink_uses_no_wandb_and_bounds_history(
 # ^^^ THOG
 
 
+def test_local_depth_curve_failure_disables_capture_without_stopping_training(
+    monkeypatch,
+    capsys,
+) -> None:
+    calls = []
+
+    class FailingStore:
+        def append_depth_weight_snapshot(self, *_args, **_kwargs) -> None:
+            raise OSError("local disk unavailable")
+
+    monkeypatch.setattr(depth_curves._constants, "DEBUG", 3)
+    monkeypatch.setattr(depth_curves, "_destination", lambda: "local")
+    monkeypatch.setattr(
+        depth_curves,
+        "_depth_weight_snapshot",
+        lambda *_args, **_kwargs: calls.append("snapshot") or {
+            "optimizer_update": 10,
+            "families": {},
+        },
+    )
+    monkeypatch.setattr(
+        runtime_seam,
+        "ensure_local_chart_store",
+        lambda _telemetry: FailingStore(),
+    )
+    telemetry = SimpleNamespace(run=None, module=None)
+
+    runtime_seam._log_depth_weight_snapshot_with_patchable_snapshot(
+        object(),
+        telemetry,
+        optimizer_update=10,
+    )
+    runtime_seam._log_depth_weight_snapshot_with_patchable_snapshot(
+        object(),
+        telemetry,
+        optimizer_update=11,
+    )
+
+    assert calls == ["snapshot"]
+    assert telemetry._thog_local_depth_weight_capture_disabled is True
+    output = capsys.readouterr().out
+    assert output.count("local DEPTH weight logging failed") == 1
+
+
 # vvv THOG repeated scalar ids must retain the coupling recorded at their own optimizer update, not inherit the newest snapshot's indices
 def test_matched_weight_metadata_is_keyed_by_update_and_scalar(monkeypatch) -> None:
     from sheet import matched_weight_selection_patch as matched_weights

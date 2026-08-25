@@ -4,9 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import run_thog2_local_dashboard as dashboard
+from sheet import local_chart_store as local_store
+from sheet import wandb_telemetry
 from sheet import local_chart_lifecycle_patch as lifecycle
 from sheet import depth_weight_curves_and_observational_probes_patch as depth_curves
-from sheet.local_chart_store import LocalChartStore
+from sheet.local_chart_store import LocalChartStore, ensure_local_chart_store
 
 
 def test_finite_capture_count_includes_both_explicit_boundaries() -> None:
@@ -133,6 +135,113 @@ def test_disabled_weight_instrumentation_does_not_promote_retention(monkeypatch)
     lifecycle._attach_telemetry_with_local_lifecycle(FakeTrainer(), telemetry)
 
     assert depth_curves._history_length() == 100
+
+
+def test_heatmap_only_capture_enters_recording_phase(tmp_path: Path) -> None:
+    store = LocalChartStore(
+        tmp_path / "charts.sqlite3",
+        run_name="heatmap-only",
+        config={},
+    )
+    assert store._has_heatmap_records is False
+
+    store.append_heatmap_records((
+        {
+            "optimizer_update": 7,
+            "probe_id": "probe-7",
+            "active_layers": 8,
+            "selected_layers": 8,
+            "shrink": ((1, -0.01, 7, -1),),
+            "growth": ((1, 0.01, 9, 1),),
+        },
+    ))
+
+    assert store._has_heatmap_records is True
+    assert lifecycle._active_phase(
+        store,
+        7,
+        weight_local=False,
+        heatmap_local=True,
+        start_step=None,
+        end_step=None,
+    ) == "recording"
+    store.close()
+    assert local_store.LocalChartReader(store.path).metadata()["current_update"] == "7"
+
+
+def test_local_chart_announcement_uses_complete_dashboard_launcher(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    telemetry = SimpleNamespace(
+        name="launcher-test",
+        run=None,
+        config={},
+    )
+
+    ensure_local_chart_store(telemetry)
+
+    output = capsys.readouterr().out
+    assert "python -m run_thog2_dashboard --run " in output
+    assert "python -m run_thog2_local_dashboard --run " not in output
+    telemetry._thog_local_chart_store.close()
+
+
+def test_terminal_state_flushes_latest_throttled_model_update(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monotonic_values = iter((10.0, 10.1))
+    monkeypatch.setattr(local_store.time, "monotonic", lambda: next(monotonic_values))
+    path = tmp_path / "charts.sqlite3"
+    store = LocalChartStore(path, run_name="fast-run", config={})
+
+    store.heartbeat(1, run_state="recording", force=True)
+    store.heartbeat(2, run_state="recording")
+    assert local_store.LocalChartReader(path).metadata()["current_update"] == "1"
+
+    store.close(final_state="finished")
+
+    metadata = local_store.LocalChartReader(path).metadata()
+    assert metadata["current_update"] == "2"
+    assert metadata["run_state"] == "finished"
+
+
+def test_telemetry_finish_closes_remaining_sinks_after_local_store_failure(
+    monkeypatch,
+    capsys,
+) -> None:
+    calls = []
+
+    class FakeRun:
+        def finish(self, **_kwargs) -> None:
+            calls.append("wandb")
+
+    class FakeWriter:
+        def flush(self) -> None:
+            calls.append("flush")
+
+        def close(self) -> None:
+            calls.append("tensorboard")
+
+    telemetry = SimpleNamespace(
+        run=FakeRun(),
+        writer=FakeWriter(),
+    )
+    monkeypatch.setattr(
+        wandb_telemetry,
+        "close_local_chart_store",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk failure")),
+    )
+
+    wandb_telemetry.WandbTelemetry.finish(telemetry)
+
+    assert calls == ["wandb", "flush", "tensorboard"]
+    assert telemetry.run is None
+    assert telemetry.writer is None
+    assert "local chart store could not be closed" in capsys.readouterr().out
 
 
 def test_status_uses_heartbeat_and_reports_evidence_based_data_loss(tmp_path: Path) -> None:

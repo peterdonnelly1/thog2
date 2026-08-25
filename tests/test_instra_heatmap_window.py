@@ -1,10 +1,10 @@
 # vvv THOG
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from sheet import local_chart_store as store
-from sheet import local_heatmap_loss_metadata_patch as _heatmap_loss_metadata_patch
 from sheet import local_dashboard_heatmap_window_patch as heatmap_window_patch
 
 
@@ -103,6 +103,44 @@ def test_heatmap_history_window_accepts_legacy_rows_without_current_loss(tmp_pat
     assert record["chaos_bump"] is None
     assert record["values"][6] < 0
     assert record["values"][8] > 0
+
+
+def test_heatmap_decoders_retain_active_boundary_column(tmp_path: Path) -> None:
+    heatmap_window_patch.install()
+    database = tmp_path / "charts.sqlite3"
+    writer = store.LocalChartStore(
+        database,
+        run_name="heatmap-boundary-test",
+        run_id="heatmap-boundary-test",
+        config={},
+    )
+    writer.append_heatmap_records((
+        {
+            "optimizer_update": 41,
+            "probe_id": "maximum-layer-boundary",
+            "active_layers": 16,
+            "selected_layers": 16,
+            "current_loss": 2.5,
+            "shrink": (
+                (1, -0.01, 15, -1),
+                (2, -0.02, 14, -2),
+            ),
+            "growth": (),
+        },
+    ))
+    writer.close()
+    reader = store.LocalChartReader(database)
+
+    full_record = reader.heatmap_history()[0]
+    window_record = reader.heatmap_history_window(
+        probe_count=1,
+        window_mode="rolling",
+    )[0]
+
+    assert len(full_record["values"]) == 16
+    assert len(window_record["values"]) == 16
+    assert math.isnan(full_record["values"][15])
+    assert math.isnan(window_record["values"][15])
 
 
 def test_heatmap_history_window_validates_mode(tmp_path: Path) -> None:

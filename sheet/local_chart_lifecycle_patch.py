@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 import constants as _constants
 

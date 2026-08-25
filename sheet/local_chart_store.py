@@ -12,7 +12,7 @@ import uuid
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
@@ -78,6 +78,52 @@ def _decode_payload(value: bytes) -> Dict[str, Any]:
     if not isinstance(decoded, dict):
         raise ValueError("local chart payload must decode to an object")
     return decoded
+
+
+def _decode_heatmap_rows(rows: Iterable[Any]) -> Tuple[Dict[str, Any], ...]:
+    decoded_payloads = []
+    maximum_layers = 1
+    for row in rows:
+        payload = _decode_payload(row["payload"])
+        candidates = tuple(int(value) for value in payload["candidate_layers"])
+        deltas = tuple(float(value) for value in payload["delta_losses"])
+        observed_layers = (
+            int(row["active_layers"]),
+            int(row["selected_layers"]),
+            *candidates,
+        )
+        if any(layer < 1 for layer in observed_layers):
+            raise ValueError("local heatmap layer indices must be positive")
+        maximum_layers = max(maximum_layers, *observed_layers)
+        decoded_payloads.append((row, payload, candidates, deltas))
+
+    decoded = []
+    for row, payload, candidates, deltas in decoded_payloads:
+        values = [math.nan] * maximum_layers
+        for candidate, delta in zip(candidates, deltas, strict=True):
+            values[candidate - 1] = delta
+        current_loss = payload.get("current_loss")
+        decoded.append(
+            {
+                "probe_id": str(row["probe_id"]),
+                "optimizer_update": int(row["optimizer_update"]),
+                "active_layers": int(row["active_layers"]),
+                "selected_layers": int(row["selected_layers"]),
+                "brake_active": bool(payload.get("brake_active", False)),
+                "decision_committed": bool(
+                    payload.get(
+                        "decision_committed",
+                        int(row["selected_layers"]) != int(row["active_layers"]),
+                    )
+                ),
+                "chaos_bump": payload.get("chaos_bump"),
+                "current_loss": (
+                    None if current_loss is None else float(current_loss)
+                ),
+                "values": values,
+            }
+        )
+    return tuple(decoded)
 
 
 def _json_compatible(value: Any) -> Any:
@@ -169,7 +215,7 @@ class LocalChartStore:
         )
         self.connection.commit()
         self._last_heartbeat_monotonic = 0.0
-        self._last_heartbeat_update = 0
+        self._latest_observed_update = 0
         self._last_heartbeat_state = "preparing"
         self._has_heatmap_records = bool(
             self.connection.execute("SELECT EXISTS(SELECT 1 FROM heatmap_records)").fetchone()[0]
@@ -224,6 +270,7 @@ class LocalChartStore:
         if state not in LOCAL_CHART_ACTIVE_STATES:
             raise ValueError(f"invalid active local chart state: {state!r}")
         update = max(0, int(optimizer_update))
+        self._latest_observed_update = max(self._latest_observed_update, update)
         monotonic_now = time.monotonic()
         phase_changed = state != self._last_heartbeat_state
         if (
@@ -243,7 +290,6 @@ class LocalChartStore:
         )
         self.connection.commit()
         self._last_heartbeat_monotonic = monotonic_now
-        self._last_heartbeat_update = update
         self._last_heartbeat_state = state
 
     def append_heatmap_records(
@@ -267,6 +313,15 @@ class LocalChartStore:
                     point_by_candidate[candidate]
                     for candidate in sorted(point_by_candidate)
                 ],
+                "current_loss": (
+                    float(record["current_loss"])
+                    if record.get("current_loss") is not None
+                    and math.isfinite(float(record["current_loss"]))
+                    else None
+                ),
+                "brake_active": bool(record.get("brake_active", False)),
+                "decision_committed": bool(record.get("decision_committed", False)),
+                "chaos_bump": record.get("chaos_bump"),
             }
             rows.append(
                 (
@@ -279,6 +334,10 @@ class LocalChartStore:
             )
         if not rows:
             return 0
+        self._latest_observed_update = max(
+            self._latest_observed_update,
+            *(row[0] for row in rows),
+        )
         self.connection.executemany(
             """
             INSERT OR REPLACE INTO heatmap_records(
@@ -303,6 +362,10 @@ class LocalChartStore:
         history_length: int,
     ) -> None:
         optimizer_update = int(snapshot["optimizer_update"])
+        self._latest_observed_update = max(
+            self._latest_observed_update,
+            optimizer_update,
+        )
         self.connection.execute(
             """
             INSERT OR REPLACE INTO depth_weight_snapshots(optimizer_update, payload)
@@ -337,6 +400,7 @@ class LocalChartStore:
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
             (
                 ("run_state", state),
+                ("current_update", str(self._latest_observed_update)),
                 ("heartbeat_at", now),
                 ("updated_at", now),
             ),
@@ -417,34 +481,39 @@ class LocalChartReader:
             ).fetchall()
         finally:
             connection.close()
-        decoded = []
-        maximum_layers = 1
-        payloads = []
-        for row in rows:
-            payload = _decode_payload(row["payload"])
-            candidates = tuple(int(value) for value in payload["candidate_layers"])
-            deltas = tuple(float(value) for value in payload["delta_losses"])
-            if candidates:
-                maximum_layers = max(maximum_layers, max(candidates))
-            payloads.append((row, candidates, deltas))
-        for row, candidates, deltas in payloads:
-            values = [math.nan] * maximum_layers
-            for candidate, delta in zip(candidates, deltas):
-                values[candidate - 1] = delta
-            decoded.append(
-                {
-                    "probe_id": str(row["probe_id"]),
-                    "optimizer_update": int(row["optimizer_update"]),
-                    "active_layers": int(row["active_layers"]),
-                    "selected_layers": int(row["selected_layers"]),
-                    "values": values,
-                }
-            )
-        return tuple(decoded)
+        return _decode_heatmap_rows(rows)
 
     def maximum_heatmap_layer(self) -> int:
         history = self.heatmap_history()
         return max((len(record["values"]) for record in history), default=1)
+
+    def heatmap_history_window(
+        self,
+        *,
+        probe_count: int,
+        window_mode: str,
+    ) -> Tuple[Dict[str, Any], ...]:
+        count = max(1, min(512, int(probe_count)))
+        mode = str(window_mode).strip().lower()
+        if mode not in {"from_zero", "rolling"}:
+            raise ValueError("heatmap window_mode must be from_zero or rolling")
+        order = "ASC" if mode == "from_zero" else "DESC"
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT optimizer_update, probe_id, active_layers, selected_layers, payload
+                FROM heatmap_records
+                ORDER BY optimizer_update {order}
+                LIMIT ?
+                """,
+                (count,),
+            ).fetchall()
+        finally:
+            connection.close()
+        if mode == "rolling":
+            rows = tuple(reversed(rows))
+        return _decode_heatmap_rows(rows)
 
     def depth_weight_snapshots(self) -> Tuple[Dict[str, Any], ...]:
         connection = self._connection()
@@ -493,7 +562,7 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
         )
         print(
             "THOG2 local chart viewer: "
-            f"python -m run_thog2_local_dashboard --run {local_run_id}",
+            f"python -m run_thog2_dashboard --run {local_run_id}",
             flush=True,
         )
         setattr(telemetry, "_thog_local_chart_store_announced", True)
@@ -508,8 +577,10 @@ def close_local_chart_store(
     store = getattr(telemetry, "_thog_local_chart_store", None)
     if store is None:
         return
-    store.close(final_state=final_state)
-    setattr(telemetry, "_thog_local_chart_store", None)
+    try:
+        store.close(final_state=final_state)
+    finally:
+        setattr(telemetry, "_thog_local_chart_store", None)
 
 
 __all__ = [

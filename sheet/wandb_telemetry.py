@@ -582,7 +582,14 @@ class WandbTelemetry:
         exit_code: Optional[int] = None,
         final_state: str = "finished",
     ) -> None:
-        close_local_chart_store(self, final_state=final_state)
+        try:
+            close_local_chart_store(self, final_state=final_state)
+        except Exception as error:
+            print(
+                "THOG2 WARNING: local chart store could not be closed cleanly; "
+                f"continuing telemetry shutdown: {error}",
+                flush=True,
+            )
         if self.run is not None:
             if exit_code is None:
                 self.run.finish()

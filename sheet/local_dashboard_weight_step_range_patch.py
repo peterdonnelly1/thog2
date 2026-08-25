@@ -122,6 +122,11 @@ def install(dashboard: Any) -> None:
         for key in _WEIGHT_VIEW_CONFIGURATION_KEYS:
             if key in stored_configuration:
                 configuration[key] = stored_configuration[key]
+        effective_history_length = metadata.get("weight_capture_history_length")
+        if effective_history_length not in {None, ""}:
+            configuration[
+                "instrumentation__depth_weight_curves__history_length"
+            ] = int(effective_history_length)
         # ^^^ THOG
         depth_minimum_update = getattr(self, "_thog2_depth_minimum_update", None)
         if (

@@ -26,6 +26,10 @@ def _log_depth_weight_snapshot_with_patchable_snapshot(
     destination = _depth._destination()
     if destination == "none":
         return
+    if destination == "local" and bool(
+        getattr(telemetry, "_thog_local_depth_weight_capture_disabled", False)
+    ):
+        return
 
     snapshot = _depth._depth_weight_snapshot(
         trainer,
@@ -35,12 +39,20 @@ def _log_depth_weight_snapshot_with_patchable_snapshot(
     if not snapshot:
         return
     if destination == "local":
-        ensure_local_chart_store(telemetry).append_depth_weight_snapshot(
-            snapshot,
-            history_length=(
-                1 if _depth._time_mode() == "latest" else _depth._history_length()
-            ),
-        )
+        try:
+            ensure_local_chart_store(telemetry).append_depth_weight_snapshot(
+                snapshot,
+                history_length=(
+                    1 if _depth._time_mode() == "latest" else _depth._history_length()
+                ),
+            )
+        except Exception as error:
+            telemetry._thog_local_depth_weight_capture_disabled = True
+            print(
+                "THOG2 WARNING: local DEPTH weight logging failed; "
+                f"continuing training without further weight capture: {error}",
+                flush=True,
+            )
         return
     if telemetry.run is None:
         raise RuntimeError(

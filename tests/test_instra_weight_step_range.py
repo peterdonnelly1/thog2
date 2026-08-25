@@ -196,4 +196,28 @@ def test_range_payload_cache_http_route_and_future_fill(tmp_path: Path) -> None:
     assert future_filled["depth"]["chart"]["updates"] == [60]
     assert builder_calls[-1] == (60,)
     store.close()
+
+
+def test_status_reports_effective_promoted_history_capacity(tmp_path: Path) -> None:
+    store = LocalChartStore(
+        tmp_path / "charts.sqlite3",
+        run_name="promoted-retention",
+        run_id="promoted-retention",
+        config={"instrumentation__depth_weight_curves__history_length": 100},
+    )
+    store.configure_weight_capture(
+        start_step=300,
+        end_step=400,
+        cadence=1,
+        history_length=101,
+    )
+
+    dashboard = _fake_dashboard([])
+    step_range.install(dashboard)
+    state = dashboard.RunDashboardState(LocalChartReader(store.path))
+
+    assert state.status()["configuration"][
+        "instrumentation__depth_weight_curves__history_length"
+    ] == 101
+    store.close()
 # ^^^ THOG
