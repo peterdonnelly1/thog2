@@ -96,6 +96,55 @@ def _log_every_n_steps() -> int:
     return _positive_int_from_environment("LOG_EVERY_N_STEPS", _DEFAULT_LOG_EVERY_N_STEPS)
 
 
+def _optional_capture_step(suffix: str) -> Optional[int]:
+    label = _environment_name(suffix)
+    text = os.environ.get(label)
+    if text is None or not str(text).strip():
+        return None
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise ValueError(f"{label} must be a non-negative integer; got {text!r}") from error
+    if value < 0:
+        raise ValueError(f"{label} must be a non-negative integer; got {value!r}")
+    return value
+
+
+def _weight_snapshot_due(optimizer_update: int) -> bool:
+    """Return whether this successful update belongs to the capture window/cadence."""
+
+    update = int(optimizer_update)
+    if update < 1:
+        return False
+    start = _optional_capture_step("START_STEP")
+    end = _optional_capture_step("END_STEP")
+    if start is not None and end is not None and end < start:
+        raise ValueError(
+            f"{_environment_name('END_STEP')} must be greater than or equal to "
+            f"{_environment_name('START_STEP')}"
+        )
+    if start is not None and update < start:
+        return False
+    if end is not None and update > end:
+        return False
+
+    cadence = _log_every_n_steps()
+    if start is not None and start > 1:
+        return (
+            update == start
+            or (update > start and (update - start) % cadence == 0)
+            or (end is not None and update == end)
+        )
+
+    # Preserve the established unbounded cadence: update 1, then global cadence
+    # multiples. A finite end is an inclusive boundary even when not aligned.
+    return (
+        update == 1
+        or update % cadence == 0
+        or (end is not None and update == end)
+    )
+
+
 def _time_mode() -> str:
     value = os.environ.get(_environment_name("TIME_MODE"), _DEFAULT_TIME_MODE).strip().lower()
     if value not in {"latest", "accumulate"}:
@@ -533,7 +582,7 @@ def _attach_telemetry_with_depth_weight_curves(trainer: Any, telemetry: Any) -> 
         if bool(float(metrics.get("skipped_update", 0.0))):
             return metrics, elapsed
         update = int(trainer.state.completed_updates)
-        if update < 1 or (update != 1 and update % _log_every_n_steps() != 0):
+        if not _weight_snapshot_due(update):
             return metrics, elapsed
         try:
             _log_depth_weight_snapshot(

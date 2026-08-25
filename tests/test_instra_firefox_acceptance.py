@@ -180,7 +180,7 @@ def _make_selected_thog_store(root: Path) -> tuple[Path, str]:
             history_length=100,
         )
     store.close()
-    (root / ".instra_weight_selection.json").write_text(
+    (path.parent / ".instra_weight_selection.json").write_text(
         json.dumps({
             "protocol": "matched_six_v1",
             "user_selected": True,

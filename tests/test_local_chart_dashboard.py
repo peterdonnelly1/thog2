@@ -378,8 +378,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert 'id="chart_join_with_line_segments"' in html
     assert ">Join with line segments</strong>" in html
     assert ">Step window</span>" in html
-    assert '<option value="rolling">Rolling</option>' in html
-    assert '<option value="from_zero">From zero</option>' in html
+    assert '<option value="rolling">Latest retained steps</option>' in html
+    assert '<option value="from_zero">Earliest retained steps</option>' in html
     assert 'id="chart_exclude_outliers"' in html
     assert 'id="chart_smoothing"' in html
     assert 'id="chart_line_width"' in html

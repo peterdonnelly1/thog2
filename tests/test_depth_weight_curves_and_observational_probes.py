@@ -62,6 +62,8 @@ def _clear_depth_curve_environment(monkeypatch) -> None:
         "HISTORY_LENGTH",
         "LOG_EVERY_N_STEPS",
         "SAME_COORDINATES_ALL_RUNS",
+        "START_STEP",
+        "END_STEP",
     ):
         monkeypatch.delenv(depth_curves._environment_name(suffix), raising=False)
 
@@ -159,6 +161,46 @@ def test_depth_weight_curve_cli_controls_accept_parser_normalized_spellings(monk
 # ^^^ THOG
 
 
+def test_weight_snapshot_capture_window_is_inclusive_and_anchors_cadence(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "25")
+    monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "300")
+    monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "400")
+
+    captured = [step for step in range(1, 425) if depth_curves._weight_snapshot_due(step)]
+
+    assert captured == [300, 325, 350, 375, 400]
+
+
+def test_weight_snapshot_capture_window_forces_unaligned_end(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "40")
+    monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "300")
+    monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "405")
+
+    captured = [step for step in range(250, 450) if depth_curves._weight_snapshot_due(step)]
+
+    assert captured == [300, 340, 380, 405]
+
+
+def test_unbounded_weight_snapshot_cadence_is_unchanged(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
+    monkeypatch.setenv(depth_curves._environment_name("LOG_EVERY_N_STEPS"), "100")
+
+    captured = [step for step in range(1, 251) if depth_curves._weight_snapshot_due(step)]
+
+    assert captured == [1, 100, 200]
+
+
+def test_weight_snapshot_capture_window_rejects_reversed_bounds(monkeypatch) -> None:
+    _clear_depth_curve_environment(monkeypatch)
+    monkeypatch.setenv(depth_curves._environment_name("START_STEP"), "400")
+    monkeypatch.setenv(depth_curves._environment_name("END_STEP"), "300")
+
+    with pytest.raises(ValueError, match="END_STEP.*greater than or equal"):
+        depth_curves._weight_snapshot_due(350)
+
+
 # vvv THOG default selection is deterministic within one run but deliberately changes its seed with run identity
 def test_scalar_selection_is_fixed_per_run_and_run_specific(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SAME_COORDINATES_ALL_RUNS"), "false")
@@ -194,7 +236,10 @@ def test_scalar_selection_can_be_fixed_across_runs(monkeypatch) -> None:
     trainer = _trainer(trajectory)
     first = depth_curves._selected_scalar_coordinates(trainer, _telemetry("run-a"))
     second = depth_curves._selected_scalar_coordinates(trainer, _telemetry("run-b"))
-    assert first == second
+    assert {key: value for key, value in first.items() if key != "matched_selection_root"} == {
+        key: value for key, value in second.items() if key != "matched_selection_root"
+    }
+    assert first["matched_selection_root"] != second["matched_selection_root"]
 # ^^^ THOG
 
 

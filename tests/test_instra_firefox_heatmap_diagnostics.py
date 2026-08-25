@@ -39,6 +39,9 @@ def test_real_firefox_heatmap_pipeline_diagnostics(tmp_path: Path) -> None:
         _wait(driver, lambda: bool(driver.execute_script(
             "const el=document.getElementById('heatmap_plot'); return !!el && el.dataset.plotReady === 'true';")),
             timeout=15, message="heatmap never reached plotReady")
+        _wait(driver, lambda: bool(driver.execute_script(
+            "return !!window.__instra_dashboard_consistency_final;")),
+            timeout=15, message="final heatmap consistency guard did not install")
         diagnostic = driver.execute_script(
             """
             const mount = document.getElementById('heatmap_plot');
@@ -50,6 +53,7 @@ def test_real_firefox_heatmap_pipeline_diagnostics(tmp_path: Path) -> None:
             const customCells = Array.isArray(trace?.customdata) ? trace.customdata.flat().filter(Array.isArray) : [];
             return {
               repair_loaded: !!window.__instra_regression_repair,
+              consistency_loaded: !!window.__instra_dashboard_consistency_final,
               prepared_nonzero: preparedCells.filter(v => Number.isFinite(Number(v)) && Number(v) !== 0).length,
               prepared_null: preparedCells.filter(v => v === null || v === undefined).length,
               raw_nonzero: rawCells.filter(v => Number.isFinite(Number(v)) && Number(v) !== 0).length,
@@ -61,10 +65,17 @@ def test_real_firefox_heatmap_pipeline_diagnostics(tmp_path: Path) -> None:
               fallback_meta: mount?.layout?.meta?.thog2_legacy_absolute_fallback ?? null,
               mode_text: document.getElementById('heatmap_delta_loss_mode')?.textContent?.trim() ?? null,
               mode_disabled: document.getElementById('heatmap_delta_loss_mode')?.disabled ?? null,
+              colour_key_x: Number(trace?.colorbar?.x ?? 0),
+              colour_key_xpad: Number(trace?.colorbar?.xpad ?? 0),
+              right_margin: Number(mount?.layout?.margin?.r ?? 0),
             };
             """
         )
         assert diagnostic["prepared_nonzero"] > 0, f"heatmap pipeline diagnostic: {diagnostic}"
+        assert diagnostic["consistency_loaded"] is True, diagnostic
+        assert diagnostic["colour_key_x"] > 1.05, diagnostic
+        assert diagnostic["colour_key_xpad"] >= 12, diagnostic
+        assert diagnostic["right_margin"] >= 270, diagnostic
     finally:
         if driver is not None:
             driver.quit()

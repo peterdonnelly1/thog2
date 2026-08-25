@@ -138,7 +138,10 @@ def test_dense_and_depth_selection_lock_is_run_identity_independent(monkeypatch)
     model = _model()
     first = dense_curves._dense_selection(_trainer(model), _telemetry("run-a"))
     second = dense_curves._dense_selection(_trainer(model), _telemetry("run-b"))
-    assert first == second
+    assert {key: value for key, value in first.items() if key != "matched_selection_root"} == {
+        key: value for key, value in second.items() if key != "matched_selection_root"
+    }
+    assert first["matched_selection_root"] != second["matched_selection_root"]
 
 
 def test_dense_local_sink_uses_existing_snapshot_store(monkeypatch, tmp_path) -> None:

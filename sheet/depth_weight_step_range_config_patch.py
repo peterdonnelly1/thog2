@@ -1,5 +1,5 @@
 # vvv THOG
-"""Register, preserve and report display-only INSTRA weight instrumentation hyperparameters."""
+"""Register, preserve and report INSTRA weight capture-window hyperparameters."""
 
 from __future__ import annotations
 

@@ -81,7 +81,43 @@ window.addEventListener("load", () => {
       const status_matches = Boolean(status && selected && run_id(status) === selected);
       if (!run) return status_matches ? [status] : [];
       if (!status_matches || run_id(run) !== selected) return [run];
-      return [{...run, ...status, configuration: run.configuration || status.configuration || {}}];
+      return [{
+        ...run,
+        ...status,
+        configuration: {
+          ...(run.configuration || {}),
+          ...(status.configuration || {}),
+        },
+      }];
+    };
+
+    const capture_bounds_for_run = run => {
+      const configuration = run?.configuration || {};
+      const minimum = finite_step(
+        configuration.instrumentation__depth_weight_curves__start_step
+      );
+      const maximum = finite_step(
+        configuration.instrumentation__depth_weight_curves__end_step
+      );
+      return {
+        minimum,
+        maximum,
+        present: minimum !== null || maximum !== null,
+      };
+    };
+
+    const configured_capture_range = () => {
+      const runs = current_context_runs();
+      if (!runs.length) return null;
+      const bounds = runs.map(capture_bounds_for_run);
+      if (!bounds.some(value => value.present)) return null;
+      const minima = bounds.map(value => value.minimum).filter(value => value !== null);
+      const maxima = bounds.map(value => value.maximum).filter(value => value !== null);
+      return {
+        minimum: minima.length ? Math.max(...minima) : null,
+        maximum: maxima.length ? Math.min(...maxima) : null,
+        present: true,
+      };
     };
 
     const available_range = () => {
@@ -89,8 +125,15 @@ window.addEventListener("load", () => {
       if (!runs.length) return null;
       const ranges = [];
       for (const run of runs) {
-        const minimum = finite_step(run?.depth_minimum_update);
-        const maximum = finite_step(run?.depth_maximum_update);
+        const retained_minimum = finite_step(run?.depth_minimum_update);
+        const retained_maximum = finite_step(run?.depth_maximum_update);
+        const configured = capture_bounds_for_run(run);
+        const minimum = retained_minimum === null
+          ? null
+          : Math.max(retained_minimum, configured.minimum ?? retained_minimum);
+        const maximum = retained_maximum === null
+          ? null
+          : Math.min(retained_maximum, configured.maximum ?? retained_maximum);
         if (minimum === null || maximum === null || maximum < minimum) return null;
         ranges.push({minimum, maximum});
       }
@@ -102,17 +145,19 @@ window.addEventListener("load", () => {
     const state_for_context = (key = context_key()) => {
       if (!key) return null;
       if (!range_by_context.has(key)) {
-        range_by_context.set(key, {mode: "whole", range: null});
+        range_by_context.set(key, {mode: "settings", range: null, user_selected: false});
       }
       return range_by_context.get(key);
     };
 
-    // Capture start/end hyperparameters describe what the trainer intended to log;
-    // they are not a viewer selection. A new run view always begins with the retained
-    // range that actually belongs to that run.
     const seed_configured_range = () => {
-      state_for_context();
-      return false;
+      const state = state_for_context();
+      if (!state || state.user_selected) return false;
+      const mode = configured_capture_range()?.present ? "whole" : "settings";
+      const changed = state.mode !== mode || state.range !== null;
+      state.mode = mode;
+      state.range = null;
+      return changed;
     };
 
     const selected_range = () => {
@@ -173,9 +218,49 @@ window.addEventListener("load", () => {
       normalized.join_with_line_segments = join !== null
         ? join
         : effective_flag(chart_name, "join_with_line_segments");
+      if (configured_capture_range()?.present === true) {
+        normalized.current_weights_only = false;
+      }
       return normalized;
     };
     normalize_chart_settings = final_normalize_chart_settings;
+
+    // Settings mode is not an explicit request range, but the header should still
+    // describe the curves those settings display. Derive that descriptive range
+    // from actual retained trace updates so sparse capture cadences stay honest.
+    const settings_display_range = () => {
+      const available = available_range();
+      if (!available) return null;
+      const ranges = [];
+      for (const chart_name of weight_chart_names) {
+        let figure = null;
+        try { figure = figure_for_chart(chart_name); }
+        catch (_error) { figure = app.figures?.depth?.[chart_name] || null; }
+        const updates = [...new Set((figure?.data || []).map(trace => {
+          try { return finite_step(trace_optimizer_update(trace)); }
+          catch (_error) { return null; }
+        }).filter(value => value !== null))].sort((left, right) => left - right);
+        const settings = final_normalize_chart_settings(chart_name);
+        if (settings.current_weights_only === true) {
+          ranges.push({minimum: available.maximum, maximum: available.maximum});
+          continue;
+        }
+        const count = Math.max(0, finite_step(settings.max_snapshots) ?? 0);
+        if (!updates.length || count < 1 || count >= updates.length) {
+          ranges.push(available);
+          continue;
+        }
+        const selected = settings.snapshot_window_mode === "from_zero"
+          ? updates.slice(0, count)
+          : updates.slice(-count);
+        ranges.push({minimum: selected[0], maximum: selected[selected.length - 1]});
+      }
+      if (!ranges.length) return available;
+      return {
+        minimum: Math.min(...ranges.map(range => range.minimum)),
+        maximum: Math.max(...ranges.map(range => range.maximum)),
+      };
+    };
 
     const trace_update = trace => {
       try {
@@ -281,6 +366,7 @@ window.addEventListener("load", () => {
       const render_override = app.chart_settings_render_override;
       const supplied = render_override?.chart_name === chart_name ? render_override.settings : null;
       const settings = final_normalize_chart_settings(chart_name, supplied);
+      const capture_limited = configured_capture_range()?.present === true;
       const coordinate_selected = selected_coordinate_enabled(chart_name);
       const colours = app.workspace_mode === true ? null : original_colours(figure);
       const saved_normalize = normalize_chart_settings;
@@ -319,7 +405,7 @@ window.addEventListener("load", () => {
       }
 
       const range = selected_range();
-      if (settings.current_weights_only === true) {
+      if (!capture_limited && settings.current_weights_only === true) {
         retain_latest(prepared);
         apply_run_colour(prepared);
       } else if (range) {
@@ -394,6 +480,8 @@ window.addEventListener("load", () => {
     const sync_header = () => {
       ensure_final_step_controls();
       const range = selected_range();
+      const mode = selected_range_mode();
+      const displayed_range = range || (mode === "settings" ? settings_display_range() : null);
       const available = available_range();
       const from = by_id("weight_step_from");
       const to = by_id("weight_step_to");
@@ -402,11 +490,31 @@ window.addEventListener("load", () => {
       const current = by_id("weight_step_current");
       const availability = by_id("weight_step_availability");
       const controls = by_id("weight_step_group_controls");
-      if (from) from.value = range ? String(range.minimum) : "";
-      if (to) to.value = range ? String(range.maximum) : "";
+      const configured = configured_capture_range();
+      if (from) {
+        from.value = displayed_range
+          ? String(displayed_range.minimum)
+          : (configured?.minimum !== null && configured?.minimum !== undefined
+              ? String(configured.minimum)
+              : "");
+      }
+      if (to) {
+        to.value = displayed_range
+          ? String(displayed_range.maximum)
+          : (configured?.maximum !== null && configured?.maximum !== undefined
+              ? String(configured.maximum)
+              : "");
+      }
+      if (from && available) {
+        from.min = String(available.minimum);
+        from.max = String(available.maximum);
+      }
+      if (to && available) {
+        to.min = String(available.minimum);
+        to.max = String(available.maximum);
+      }
       if (whole) whole.disabled = !available;
       if (latest) latest.disabled = !available;
-      const mode = selected_range_mode();
       whole?.setAttribute("aria-pressed", String(mode === "whole"));
       latest?.setAttribute("aria-pressed", String(mode === "latest"));
       controls?.classList?.toggle?.("active", range !== null);
@@ -426,9 +534,13 @@ window.addEventListener("load", () => {
       }
 
       if (availability) {
-        availability.textContent = available
+        const configured_text = configured
+          ? `capture window ${configured.minimum ?? "first"}–${configured.maximum ?? "latest"}`
+          : "";
+        const available_text = available
           ? `data available ${available.minimum}–${available.maximum}`
           : "data available —";
+        availability.textContent = [configured_text, available_text].filter(Boolean).join(" · ");
       }
     };
 
@@ -448,6 +560,11 @@ window.addEventListener("load", () => {
       const range = selected_range();
       const state = selected_run_state();
       const running = state === "running" || state === "preparing";
+      const configured = configured_capture_range();
+
+      if (!range && configured?.present && running && configured.minimum !== null) {
+        return `Curves will be displayed when capture step ${configured.minimum} is reached.`;
+      }
 
       if (range && runs.length) {
         const current_steps = runs.map(run => (
@@ -523,16 +640,27 @@ window.addEventListener("load", () => {
       const join = by_id("chart_join_with_line_segments");
       const group_editor = editor_is_group();
       const inherit = !group_editor && by_id("chart_inherit_weights_group")?.checked === true;
+      const capture_limited = configured_capture_range()?.present === true;
       if (load_values && !group_editor && !draft_matches_editor()) {
         if (current) current.checked = effective_flag(chart_name, "current_weights_only");
         if (join) join.checked = effective_flag(chart_name, "join_with_line_segments");
       }
       apply_editor_draft();
-      if (current) current.disabled = false;
+      if (current && capture_limited) current.checked = false;
+      if (current) current.disabled = capture_limited;
       if (join) join.disabled = false;
+      const maximum = by_id("chart_max_snapshots");
+      const window_mode = by_id("chart_snapshot_window_mode");
+      if (maximum) maximum.disabled = capture_limited || current?.checked === true;
+      if (window_mode) {
+        const all_snapshots = Number(maximum?.value || 0) <= 0;
+        window_mode.disabled = capture_limited || current?.checked === true || all_snapshots;
+      }
       const current_note = by_id("chart_current_weights_only_field")?.querySelector?.("small");
       const join_note = by_id("chart_join_with_line_segments_field")?.querySelector?.("small");
-      const note = group_editor
+      const note = capture_limited
+        ? "The run's configured capture window is authoritative; use the header controls to narrow it."
+        : group_editor
         ? "Applies to all six weight charts in this view unless a chart overrides it."
         : inherit
           ? "Inherited from Weights group settings; changing this setting creates a chart override."
@@ -581,7 +709,7 @@ window.addEventListener("load", () => {
         || state.range.maximum !== resolved_maximum;
       state.mode = "custom";
       state.range = {minimum: resolved_minimum, maximum: resolved_maximum};
-      void user;
+      state.user_selected = user;
       sync_header();
       reconcile_placeholders();
       if (changed && refresh) {
@@ -591,7 +719,7 @@ window.addEventListener("load", () => {
       return changed;
     };
 
-    const set_context_mode = (mode, {refresh = true} = {}) => {
+    const set_context_mode = (mode, {refresh = true, user = true} = {}) => {
       const state = state_for_context();
       if (!state) return false;
       const normalized = ["whole", "latest", "settings"].includes(mode) ? mode : "whole";
@@ -599,6 +727,7 @@ window.addEventListener("load", () => {
       window.__instra_clear_weight_step_input_drafts?.();
       state.mode = normalized;
       state.range = null;
+      state.user_selected = user;
       sync_header();
       reconcile_placeholders();
       if (changed && refresh) {
@@ -609,7 +738,7 @@ window.addEventListener("load", () => {
     };
 
     const clear_context_range = ({refresh = true} = {}) => (
-      set_context_mode("whole", {refresh})
+      set_context_mode("whole", {refresh, user: true})
     );
 
     legacy_step_api.selected_step_range = selected_range;
@@ -814,6 +943,7 @@ window.addEventListener("load", () => {
     const base_refresh_current_run = refresh_current_run;
     refresh_current_run = async function() {
       if (refresh_suppression > 0) return;
+      if (seed_configured_range()) invalidate_depth();
       const key = context_key();
       const need_loading = !app.figures?.depth || Object.keys(app.figures.depth || {}).length === 0;
       if (key && need_loading && !app.refresh_in_flight) {
@@ -824,9 +954,13 @@ window.addEventListener("load", () => {
         return await base_refresh_current_run();
       } finally {
         if (key) loading_contexts.delete(key);
-        seed_configured_range();
+        const reseeded = seed_configured_range();
         sync_header();
         reconcile_placeholders();
+        if (reseeded) {
+          invalidate_depth();
+          queueMicrotask(() => refresh_current_run());
+        }
       }
     };
 
@@ -845,6 +979,7 @@ window.addEventListener("load", () => {
         refresh_current_run = saved_refresh;
       }
       state_for_context();
+      seed_configured_range();
       sync_header();
       const key = context_key();
       if (key) loading_contexts.add(key);
@@ -866,9 +1001,9 @@ window.addEventListener("load", () => {
         editor_draft = null;
         sync_editor_controls({load_values: true});
         if (saved_current_only) {
-          set_context_mode("settings", {refresh: false});
+          set_context_mode("settings", {refresh: false, user: false});
         } else if (selected_range_mode() === "settings") {
-          set_context_mode("whole", {refresh: false});
+          set_context_mode("whole", {refresh: false, user: false});
         }
         invalidate_depth();
         refresh_current_run();

@@ -6,14 +6,15 @@ from __future__ import annotations
 import json
 import os
 import random
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import dense_weight_curves_patch as _dense
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 from . import depth_weight_curves_v2_patch as _v2
-from .local_chart_store import local_chart_root
+from .local_chart_store import local_chart_database_path, local_chart_root
 
 
 WEIGHT_SELECTION_PROTOCOL = "matched_six_v1"
@@ -28,6 +29,17 @@ _DEFAULT_SELECTION = {
 
 def _selection_path(root: Optional[Path] = None) -> Path:
     return (local_chart_root() if root is None else Path(root)) / _SELECTION_FILE
+
+
+def _selection_root_for_telemetry(telemetry: Any) -> Path:
+    run = getattr(telemetry, "run", None)
+    run_id = str(getattr(run, "id", "") or "").strip()
+    if not run_id:
+        run_id = str(getattr(telemetry, "_thog_local_chart_run_id", "") or "").strip()
+    if not run_id:
+        run_id = f"local-{uuid.uuid4().hex[:8]}"
+        setattr(telemetry, "_thog_local_chart_run_id", run_id)
+    return local_chart_database_path(str(telemetry.name), run_id=run_id).parent
 
 
 def _normalise_selection(value: Any) -> Dict[str, Any]:
@@ -131,7 +143,8 @@ def _matched_selection(
         n_head=n_head,
         count=int(_depth._scalar_weights_per_matrix()),
     )
-    configured = read_weight_selection()
+    selection_root = _selection_root_for_telemetry(telemetry)
+    configured = read_weight_selection(selection_root)
     model_feature = int(configured["model_feature"])
     intermediate_feature = int(configured["intermediate_feature"])
     user_valid = (
@@ -149,6 +162,7 @@ def _matched_selection(
         "matched_feature_count": width,
         "matched_random_logical_coordinates": random_logical,
         "matched_user_selection": {**configured, "valid_for_run": user_valid},
+        "matched_selection_root": str(selection_root),
     }
     for chart_name in _v2._CHART_FAMILIES:
         selection[chart_name] = tuple(
@@ -158,12 +172,15 @@ def _matched_selection(
     return selection
 
 
-def _selection_is_current(cached: Any) -> bool:
+def _selection_is_current(cached: Any, telemetry: Any) -> bool:
     if not isinstance(cached, Mapping):
         return False
     if cached.get("matched_weight_protocol") != WEIGHT_SELECTION_PROTOCOL:
         return False
-    configured = read_weight_selection()
+    selection_root = _selection_root_for_telemetry(telemetry)
+    if str(cached.get("matched_selection_root", "")) != str(selection_root):
+        return False
+    configured = read_weight_selection(selection_root)
     user = cached.get("matched_user_selection")
     return (
         isinstance(user, Mapping)
@@ -175,7 +192,7 @@ def _selection_is_current(cached: Any) -> bool:
 
 def _selected_scalar_coordinates_matched(trainer: Any, telemetry: Any) -> Dict[str, Any]:
     cached = getattr(telemetry, "_thog_depth_weight_curve_selection", None)
-    if _selection_is_current(cached):
+    if _selection_is_current(cached, telemetry):
         return dict(cached)
     trajectory = _depth._depth_trajectory_from_model(trainer.raw_model)
     if trajectory is None:
@@ -192,7 +209,7 @@ def _selected_scalar_coordinates_matched(trainer: Any, telemetry: Any) -> Dict[s
 
 def _dense_selection_matched(trainer: Any, telemetry: Any) -> Dict[str, Any]:
     cached = getattr(telemetry, "_thog_depth_weight_curve_selection", None)
-    if _selection_is_current(cached):
+    if _selection_is_current(cached, telemetry):
         return dict(cached)
     model = trainer.raw_model
     if not _dense._dense_model(model):
@@ -386,12 +403,32 @@ def install_dashboard(dashboard: Any) -> None:
 
         class Handler(base_handler):
             def do_GET(self) -> None:
-                if urlparse(self.path).path != "/api/weight-selection":
+                parsed = urlparse(self.path)
+                if parsed.path != "/api/weight-selection":
                     return super().do_GET()
-                self._send_json(read_weight_selection(catalog.root))
+                try:
+                    query = parse_qs(parsed.query)
+                    run_name = query.get("run", [""])[0]
+                    root = (
+                        catalog.state_for_run(run_name).database_path.parent
+                        if run_name
+                        else catalog.root
+                    )
+                    self._send_json(read_weight_selection(root))
+                except (FileNotFoundError, KeyError) as error:
+                    self._send_json(
+                        {"error": str(error)},
+                        status=dashboard.HTTPStatus.NOT_FOUND,
+                    )
+                except Exception as error:
+                    self._send_json(
+                        {"error": str(error)},
+                        status=dashboard.HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
 
             def do_POST(self) -> None:
-                if urlparse(self.path).path != "/api/weight-selection":
+                parsed = urlparse(self.path)
+                if parsed.path != "/api/weight-selection":
                     self._send(
                         b"not found\n",
                         content_type="text/plain; charset=utf-8",
@@ -399,6 +436,13 @@ def install_dashboard(dashboard: Any) -> None:
                     )
                     return
                 try:
+                    query = parse_qs(parsed.query)
+                    run_name = query.get("run", [""])[0]
+                    root = (
+                        catalog.state_for_run(run_name).database_path.parent
+                        if run_name
+                        else catalog.root
+                    )
                     content_length = int(self.headers.get("Content-Length", "0"))
                     if content_length < 1 or content_length > 65536:
                         raise ValueError("weight-selection request body is missing or too large")
@@ -416,7 +460,7 @@ def install_dashboard(dashboard: Any) -> None:
                                 "model_feature": model_feature,
                                 "intermediate_feature": intermediate_feature,
                             },
-                            catalog.root,
+                            root,
                         )
                     )
                 except (TypeError, ValueError, json.JSONDecodeError) as error:

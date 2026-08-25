@@ -341,7 +341,7 @@ def _attach_telemetry_with_dense_weight_curves(trainer: Any, telemetry: Any) -> 
         if bool(float(metrics.get("skipped_update", 0.0))):
             return metrics, elapsed
         update = int(trainer.state.completed_updates)
-        if update < 1 or (update != 1 and update % _depth._log_every_n_steps() != 0):
+        if not _depth._weight_snapshot_due(update):
             return metrics, elapsed
         try:
             _depth._log_depth_weight_snapshot(

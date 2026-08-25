@@ -2,8 +2,8 @@
 "use strict";
 
 // Final owner for one logical weight coordinate shared by all six weight charts.
-// The persisted selection is global to this INSTRA root, while it affects plotted
-// data only when Current weights only is selected.
+// The capture selection is persisted per run so a coupling from one matrix shape
+// cannot leak into another run. It affects future snapshots after it is saved.
 window.addEventListener("load", () => {
   setTimeout(() => {
     const protocol = "matched_six_v1";
@@ -27,6 +27,8 @@ window.addEventListener("load", () => {
     let selection_loaded = false;
     let save_bypass = false;
     let save_in_flight = false;
+    let selection_request_serial = 0;
+    let loaded_run_id = "";
 
     const finite_integer = value => {
       if (value === null || value === undefined || value === "") return null;
@@ -119,6 +121,15 @@ window.addEventListener("load", () => {
       };
     };
 
+    const configured_feature_count = run => {
+      const configuration = run?.configuration || {};
+      for (const key of ["n_embd", "d_model", "model_width", "embedding_width"]) {
+        const value = finite_integer(configuration[key]);
+        if (value !== null && value > 0) return value;
+      }
+      return null;
+    };
+
     const matched_weight_capability = chart_name => {
       if (!weight_chart_set.has(chart_name)) {
         return {available: false, maximum: null, reason: "Not a weight chart."};
@@ -126,6 +137,13 @@ window.addEventListener("load", () => {
       const figure = raw_figure_for_chart(chart_name);
       const trace_info = (figure?.data || []).map(protocol_trace_info).filter(Boolean);
       if (!trace_info.length) {
+        if (app.workspace_mode !== true) {
+          const run = app.current_status || current_run();
+          const feature_count = configured_feature_count(run);
+          if (feature_count !== null) {
+            return {available: true, maximum: feature_count - 1, reason: ""};
+          }
+        }
         return {
           available: false,
           maximum: null,
@@ -275,32 +293,60 @@ window.addEventListener("load", () => {
     };
 
     const save_selection = async selection => {
-      const response = await fetch("/api/weight-selection", {
+      const run_id = String(app.current_run_id || "");
+      if (!run_id) throw new Error("Select a run before changing the weight coupling");
+      const response = await fetch(
+        `/api/weight-selection?run=${encodeURIComponent(run_id)}`,
+        {
         method: "POST",
         cache: "no-store",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify(selection),
-      });
+        },
+      );
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
+      if (run_id !== String(app.current_run_id || "")) {
+        throw new Error("The selected run changed while saving the weight coupling");
+      }
       saved_selection = normalise_selection(value);
       selection_loaded = true;
+      loaded_run_id = run_id;
       return saved_selection;
     };
 
     const load_selection = async () => {
+      const run_id = String(app.current_run_id || "");
+      const request_serial = ++selection_request_serial;
+      if (!run_id) {
+        saved_selection = {...default_selection};
+        selection_loaded = false;
+        loaded_run_id = "";
+        write_selection_controls();
+        return;
+      }
       try {
-        const response = await fetch("/api/weight-selection", {cache: "no-store"});
+        const response = await fetch(
+          `/api/weight-selection?run=${encodeURIComponent(run_id)}`,
+          {cache: "no-store"},
+        );
         const value = await response.json();
         if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
+        if (
+          request_serial !== selection_request_serial
+          || run_id !== String(app.current_run_id || "")
+        ) return;
         saved_selection = normalise_selection(value);
         selection_loaded = true;
+        loaded_run_id = run_id;
         write_selection_controls();
         if (app.figures) {
           render_figures().catch(error => show_toast(`Matched weight refresh failed: ${error.message}`));
         }
       } catch (error) {
+        if (request_serial !== selection_request_serial) return;
         selection_loaded = false;
+        loaded_run_id = "";
         update_matched_weight_controls();
         show_toast(`Matched weight settings unavailable: ${error.message}`);
       }
@@ -441,6 +487,27 @@ window.addEventListener("load", () => {
     window.__instra_matched_weight_selection = {
       capability: matched_weight_capability,
       selection: () => ({...saved_selection}),
+      save: (model_feature, intermediate_feature) => save_selection(normalise_selection({
+        user_selected: true,
+        model_feature,
+        intermediate_feature,
+      })),
+      reload: load_selection,
+      run_id: () => loaded_run_id,
+    };
+
+    const base_select_run_matched_selection = select_run;
+    select_run = function(run_id, options = {}) {
+      const changing = String(run_id || "") !== String(app.current_run_id || "");
+      const result = base_select_run_matched_selection(run_id, options);
+      if (changing || loaded_run_id !== String(app.current_run_id || "")) {
+        saved_selection = {...default_selection};
+        selection_loaded = false;
+        loaded_run_id = "";
+        write_selection_controls();
+        queueMicrotask(load_selection);
+      }
+      return result;
     };
 
     setInterval(() => {

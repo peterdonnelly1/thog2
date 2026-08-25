@@ -110,9 +110,11 @@ const capture_selection = {
   model_feature: 12,
   intermediate_feature: 14,
 };
+let capture_save_count = 0;
 const rendered = new Map();
 const app = {
   current_run_id: "R1",
+  current_status: {run_state: "finished"},
   workspace_mode: false,
   chart_settings_render_override: null,
 };
@@ -132,6 +134,14 @@ const context = {
     },
     __instra_matched_weight_selection: {
       selection: () => ({...capture_selection}),
+      capability: () => ({available: true, maximum: 15}),
+      async save(model_feature, intermediate_feature) {
+        capture_save_count += 1;
+        capture_selection.user_selected = true;
+        capture_selection.model_feature = model_feature;
+        capture_selection.intermediate_feature = intermediate_feature;
+        return {...capture_selection};
+      },
     },
     __instra_weight_coupling_reliability_final: {installed: true},
   },
@@ -153,6 +163,8 @@ const context = {
     ...(supplied || {}),
   }),
   colour_for_run: () => "#e8790c",
+  current_run: () => app.current_status,
+  display_run_state: run => String(run?.run_state || ""),
   prepare_figure(figure, chart_name) {
     const prepared = JSON.parse(JSON.stringify(figure));
     const viewer = context.window.__instra_weight_viewer_selection?.selection?.() || capture_selection;
@@ -197,6 +209,9 @@ context.window.window = context.window;
   assert.equal(elements.get("weight_coupling_output").value, "14");
 
   const before_values = rendered.get("attn_q_head_N").data.map(trace => trace.y[0]);
+  const random_values = [0.14, 0.21];
+  context.Math = Object.create(Math);
+  context.Math.random = () => random_values.shift();
   emit("click", elements.get("weight_random_jump"));
   await Promise.resolve();
   await Promise.resolve();
@@ -207,6 +222,7 @@ context.window.window = context.window;
     model_feature: 12,
     intermediate_feature: 14,
   }, "viewer RND mutated the trainer capture setting");
+  assert.equal(capture_save_count, 0, "recorded RND selection scheduled a redundant capture");
   const after_values = rendered.get("attn_q_head_N").data.map(trace => trace.y[0]);
   assert.notDeepEqual(after_values, before_values, "RND changed boxes without changing curve values");
 
@@ -220,10 +236,25 @@ context.window.window = context.window;
   elements.get("weight_coupling_input").value = "7";
   elements.get("weight_coupling_output").value = "8";
   emit("change", elements.get("weight_coupling_output"));
+  await Promise.resolve();
   assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
   assert.equal(elements.get("weight_coupling_input").value, "2");
   assert.equal(elements.get("weight_coupling_output").value, "3");
   assert.match(elements.get("weight_coupling_view_error").textContent, /was not recorded/);
+
+  app.current_status.run_state = "running";
+  elements.get("weight_coupling_input").value = "7";
+  elements.get("weight_coupling_output").value = "8";
+  emit("change", elements.get("weight_coupling_output"));
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(api.pair(), {model_feature: 7, intermediate_feature: 8});
+  assert.equal(capture_save_count, 1, "valid active-run coupling was not scheduled");
+  assert.match(elements.get("weight_coupling_view_error").textContent, /next recorded snapshot/);
+
+  api.select_pair(2, 3);
 
   elements.get("chart_settings_overlay").hidden = false;
   app.chart_settings_render_override = {

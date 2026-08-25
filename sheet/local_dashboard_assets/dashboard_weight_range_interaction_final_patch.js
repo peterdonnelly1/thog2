@@ -1,11 +1,10 @@
 // vvv THOG
 "use strict";
 
-// Final owner for retained-range rendering and the top-level coupling viewer. The
-// header coupling is deliberately display-only: historical snapshots contain a
-// bounded set of scalar trajectories, so the viewer may select only a logical pair
-// recorded for every chart/run/step currently on screen. Trainer capture remains in
-// the chart settings and applies to future snapshots.
+// Final owner for retained-range rendering and the top-level coupling viewer.
+// Recorded couplings redraw immediately. A different in-bounds coupling can also be
+// selected for a running run; it becomes available from the next retained snapshot
+// because historical scalar trajectories cannot be reconstructed retroactively.
 window.addEventListener("load", () => {
   const weight_chart_names = Object.freeze([
     "attn_q_head_N",
@@ -17,7 +16,7 @@ window.addEventListener("load", () => {
   ]);
   const weight_chart_set = new Set(weight_chart_names);
   const protocol = "matched_six_v1";
-  const viewer_storage_key = "thog2_local_weight_viewer_couplings_v1";
+  const viewer_storage_key = "thog2_local_weight_viewer_couplings_v2";
   let viewer_controller = null;
 
   const finite_integer = value => {
@@ -140,9 +139,13 @@ window.addEventListener("load", () => {
             || intermediate_feature < 0
             || optimizer_update === null
           ) continue;
-          const pair = {model_feature, intermediate_feature};
+          const selection_kind = String(meta.instra_weight_selection_kind || "random");
+          const pair = {model_feature, intermediate_feature, selection_kind};
           const key = pair_key(pair);
-          pairs.set(key, pair);
+          const prior = pairs.get(key);
+          if (!prior || (prior.selection_kind === "user" && selection_kind !== "user")) {
+            pairs.set(key, pair);
+          }
           const run_id = String(meta.instra_workspace_run_id || "__instra_single_run__");
           const unit_key = `${chart_name}:${run_id}:${optimizer_update}`;
           if (!units.has(unit_key)) units.set(unit_key, new Set());
@@ -166,16 +169,54 @@ window.addEventListener("load", () => {
       return value && typeof value === "object" ? value : {};
     };
 
+    const viewer_capability = () => {
+      for (const chart_name of weight_chart_names) {
+        try {
+          const capability = capture_api.capability?.(chart_name);
+          const maximum = finite_integer(capability?.maximum);
+          if (capability?.available === true && maximum !== null && maximum >= 0) {
+            return {available: true, maximum};
+          }
+        } catch (_error) {}
+      }
+      return {available: false, maximum: null};
+    };
+
+    const pair_in_bounds = pair => {
+      const capability = viewer_capability();
+      return Boolean(
+        capability.available
+        && pair
+        && finite_integer(pair.model_feature) !== null
+        && finite_integer(pair.intermediate_feature) !== null
+        && pair.model_feature >= 0
+        && pair.intermediate_feature >= 0
+        && pair.model_feature <= capability.maximum
+        && pair.intermediate_feature <= capability.maximum
+      );
+    };
+
     const viewer_pair = () => {
       const pairs = recorded_pairs();
-      if (!pairs.length) return null;
       const stored = stored_pair();
       const captured = capture_selection();
+      const captured_pair = captured.user_selected === true
+        ? {
+            model_feature: finite_integer(captured.model_feature),
+            intermediate_feature: finite_integer(captured.intermediate_feature),
+          }
+        : null;
       const resolved = pairs.find(pair => same_pair(pair, stored))
-        || pairs.find(pair => same_pair(pair, captured))
+        || (pair_in_bounds(stored) ? stored : null)
+        || (pair_in_bounds(captured_pair) ? captured_pair : null)
+        || pairs.find(pair => pair.selection_kind !== "user")
         || pairs[0];
+      if (!resolved) return null;
       if (!same_pair(resolved, stored)) persist_pair(resolved);
-      return {...resolved};
+      return {
+        model_feature: resolved.model_feature,
+        intermediate_feature: resolved.intermediate_feature,
+      };
     };
 
     const viewer_selection = () => {
@@ -188,7 +229,12 @@ window.addEventListener("load", () => {
           intermediate_feature: finite_integer(capture_selection().intermediate_feature) ?? 0,
         };
       }
-      return {protocol, user_selected: true, ...pair};
+      return {
+        protocol,
+        user_selected: true,
+        model_feature: pair.model_feature,
+        intermediate_feature: pair.intermediate_feature,
+      };
     };
 
     const ensure_error = () => {
@@ -223,6 +269,7 @@ window.addEventListener("load", () => {
     const sync_viewer_controls = () => {
       const pairs = recorded_pairs();
       const pair = viewer_pair();
+      const capability = viewer_capability();
       const input = by_id("weight_coupling_input");
       const output = by_id("weight_coupling_output");
       if (!input || !output) return;
@@ -230,7 +277,11 @@ window.addEventListener("load", () => {
         write_input(input, pair.model_feature);
         write_input(output, pair.intermediate_feature);
       }
-      const disabled = !pairs.length;
+      if (capability.maximum !== null) {
+        input.max = String(capability.maximum);
+        output.max = String(capability.maximum);
+      }
+      const disabled = !capability.available;
       input.disabled = disabled;
       output.disabled = disabled;
       for (const id of [
@@ -241,14 +292,14 @@ window.addEventListener("load", () => {
         "weight_random_jump",
       ]) {
         const button = by_id(id);
-        if (button) button.disabled = disabled || (id === "weight_random_jump" && pairs.length < 2);
+        if (button) button.disabled = disabled || capability.maximum < 1;
       }
       const button_titles = new Map([
-        ["weight_residual_minus", "Show the nearest recorded coupling with a lower input index"],
-        ["weight_residual_plus", "Show the nearest recorded coupling with a higher input index"],
-        ["weight_branch_minus", "Show the nearest recorded coupling with a lower output index"],
-        ["weight_branch_plus", "Show the nearest recorded coupling with a higher output index"],
-        ["weight_random_jump", "Show another coupling recorded for every displayed step"],
+        ["weight_residual_minus", "Select the preceding valid input feature"],
+        ["weight_residual_plus", "Select the next valid input feature"],
+        ["weight_branch_minus", "Select the preceding valid output feature"],
+        ["weight_branch_plus", "Select the next valid output feature"],
+        ["weight_random_jump", "Select a different random valid feature coupling"],
       ]);
       for (const [id, title] of button_titles) {
         const button = by_id(id);
@@ -260,9 +311,9 @@ window.addEventListener("load", () => {
       if (random) random.textContent = "RND";
       const editor = by_id("weight_coupling_editor");
       if (editor) {
-        editor.title = pairs.length
-          ? `${pairs.length} coupling${pairs.length === 1 ? "" : "s"} recorded for every displayed step`
-          : "No common recorded coupling is available for every displayed step";
+        editor.title = capability.available
+          ? `Valid feature indices: 0–${capability.maximum}; ${pairs.length} coupling${pairs.length === 1 ? "" : "s"} recorded across every displayed step`
+          : "Waiting for the run's matrix dimensions";
       }
       ensure_error();
     };
@@ -290,22 +341,39 @@ window.addEventListener("load", () => {
       return true;
     };
 
-    const commit_inputs = () => {
-      const model_feature = finite_integer(by_id("weight_coupling_input")?.value);
-      const intermediate_feature = finite_integer(by_id("weight_coupling_output")?.value);
-      const current = viewer_pair();
-      if (model_feature === null || intermediate_feature === null || model_feature < 0 || intermediate_feature < 0) {
-        show_error("Both coupling indices must be non-negative whole numbers.");
-        sync_viewer_controls();
+    const selected_run_is_active = () => {
+      const run = typeof current_run === "function" ? current_run() : app.current_status;
+      let state = "";
+      try { state = display_run_state(run); }
+      catch (_error) { state = String(run?.run_state || ""); }
+      return state === "running" || state === "preparing";
+    };
+
+    const schedule_capture_pair = async candidate => {
+      if (typeof capture_api.save !== "function") return false;
+      if (!selected_run_is_active()) return false;
+      await capture_api.save(candidate.model_feature, candidate.intermediate_feature);
+      persist_pair(candidate);
+      sync_viewer_controls();
+      request_render();
+      show_error(
+        `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} is valid and will appear from the next recorded snapshot; earlier snapshots cannot be reconstructed.`
+      );
+      return true;
+    };
+
+    const commit_pair = async candidate => {
+      if (select_pair(candidate)) return true;
+      try {
+        if (await schedule_capture_pair(candidate)) return true;
+      } catch (error) {
+        show_error(`Weight coupling save failed: ${error.message}`);
         return false;
       }
-      const candidate = {model_feature, intermediate_feature};
-      if (select_pair(candidate)) return true;
-      const range = stability.selected_range?.();
-      const suffix = range
-        ? ` in steps ${range.minimum}–${range.maximum}`
-        : " in this view";
-      show_error(`Coupling ${model_feature} → ${intermediate_feature} was not recorded for every displayed step${suffix}.`);
+      const current = viewer_pair();
+      show_error(
+        `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} was not recorded for this completed view.`
+      );
       if (current) {
         write_input(by_id("weight_coupling_input"), current.model_feature);
         write_input(by_id("weight_coupling_output"), current.intermediate_feature);
@@ -313,58 +381,76 @@ window.addEventListener("load", () => {
       return false;
     };
 
-    const directional_pair = (button_id, current, pairs) => {
-      const input_axis = button_id.startsWith("weight_residual_");
-      const increasing = button_id.endsWith("_plus");
-      const axis = input_axis ? "model_feature" : "intermediate_feature";
-      const other = input_axis ? "intermediate_feature" : "model_feature";
-      const candidates = pairs.filter(pair => (
-        increasing ? pair[axis] > current[axis] : pair[axis] < current[axis]
-      ));
-      candidates.sort((left, right) => (
-        Number(right[other] === current[other]) - Number(left[other] === current[other])
-        || Math.abs(left[axis] - current[axis]) - Math.abs(right[axis] - current[axis])
-        || Math.abs(left[other] - current[other]) - Math.abs(right[other] - current[other])
-      ));
-      return candidates[0] || null;
+    const commit_inputs = () => {
+      const model_feature = finite_integer(by_id("weight_coupling_input")?.value);
+      const intermediate_feature = finite_integer(by_id("weight_coupling_output")?.value);
+      const current = viewer_pair();
+      const capability = viewer_capability();
+      if (model_feature === null || intermediate_feature === null || model_feature < 0 || intermediate_feature < 0) {
+        show_error("Both coupling indices must be non-negative whole numbers.");
+        sync_viewer_controls();
+        return false;
+      }
+      if (
+        !capability.available
+        || model_feature > capability.maximum
+        || intermediate_feature > capability.maximum
+      ) {
+        show_error(
+          capability.available
+            ? `Both coupling indices must be between 0 and ${capability.maximum}.`
+            : "Waiting for this run's matrix dimensions."
+        );
+        if (current) {
+          write_input(by_id("weight_coupling_input"), current.model_feature);
+          write_input(by_id("weight_coupling_output"), current.intermediate_feature);
+        }
+        return false;
+      }
+      const candidate = {model_feature, intermediate_feature};
+      void commit_pair(candidate);
+      return true;
     };
 
     const handle_button = button_id => {
-      const pairs = recorded_pairs();
       const current = viewer_pair();
-      if (!pairs.length || !current) {
-        show_error("No common recorded coupling is available for these steps.");
+      const capability = viewer_capability();
+      if (!capability.available || !current) {
+        show_error("Waiting for this run's matrix dimensions and first coupling.");
         sync_viewer_controls();
         return;
       }
       if (button_id === "weight_random_jump") {
-        let alternatives = pairs.filter(pair => (
-          !same_pair(pair, current)
-          && pair.model_feature !== current.model_feature
-          && pair.intermediate_feature !== current.intermediate_feature
-        ));
-        if (!alternatives.length) alternatives = pairs.filter(pair => !same_pair(pair, current));
-        if (!alternatives.length) {
-          show_error("Only one coupling was recorded for every displayed step.");
-          sync_viewer_controls();
-          return;
-        }
-        select_pair(alternatives[Math.floor(Math.random() * alternatives.length)]);
+        const random_other = value => {
+          if (capability.maximum < 1) return value;
+          const draw = Math.floor(Math.random() * capability.maximum);
+          return draw >= value ? draw + 1 : draw;
+        };
+        void commit_pair({
+          model_feature: random_other(current.model_feature),
+          intermediate_feature: random_other(current.intermediate_feature),
+        });
         return;
       }
-      const next = directional_pair(button_id, current, pairs);
-      if (!next) {
-        show_error("No recorded coupling is available in that direction for these steps.");
-        sync_viewer_controls();
+      const next = {...current};
+      if (button_id === "weight_residual_minus") next.model_feature = Math.max(0, next.model_feature - 1);
+      if (button_id === "weight_residual_plus") next.model_feature = Math.min(capability.maximum, next.model_feature + 1);
+      if (button_id === "weight_branch_minus") next.intermediate_feature = Math.max(0, next.intermediate_feature - 1);
+      if (button_id === "weight_branch_plus") next.intermediate_feature = Math.min(capability.maximum, next.intermediate_feature + 1);
+      if (same_pair(next, current)) {
+        show_error(`Feature index is already at ${button_id.endsWith("minus") ? 0 : capability.maximum}.`);
         return;
       }
-      select_pair(next);
+      void commit_pair(next);
     };
 
     const viewer_api = {
       selection: viewer_selection,
       pair: viewer_pair,
-      recorded_pairs: () => recorded_pairs().map(pair => ({...pair})),
+      recorded_pairs: () => recorded_pairs().map(pair => ({
+        model_feature: pair.model_feature,
+        intermediate_feature: pair.intermediate_feature,
+      })),
       select_pair: (model_feature, intermediate_feature) => select_pair({
         model_feature: finite_integer(model_feature),
         intermediate_feature: finite_integer(intermediate_feature),
@@ -455,6 +541,18 @@ window.addEventListener("load", () => {
         prepared = base_prepare_figure_weight_range_final(figure, chart_name);
       } finally {
         app.chart_settings_render_override = saved_override;
+      }
+      const selected_pair = viewer_pair();
+      if (selected_pair) {
+        prepared.data = (prepared.data || []).filter(trace => {
+          const meta = trace?.meta;
+          if (!meta || typeof meta !== "object" || Array.isArray(meta)) return true;
+          if (meta.instra_weight_selection_protocol !== protocol) return true;
+          return (
+            finite_integer(meta.instra_weight_model_feature) === selected_pair.model_feature
+            && finite_integer(meta.instra_weight_intermediate_feature) === selected_pair.intermediate_feature
+          );
+        });
       }
       add_step_hover(prepared);
       colour_weight_steps(prepared);

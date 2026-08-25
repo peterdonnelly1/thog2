@@ -43,6 +43,46 @@ def _telemetry(name: str):
 # ^^^ THOG
 
 
+def test_matched_logical_coordinates_follow_matrix_orientation() -> None:
+    from sheet import matched_weight_selection_patch as matched_weights
+
+    forward = {"attn_q_head_N", "attn_k_head_N", "attn_v_head_N", "mlp_up"}
+    reverse = {"attn_out_head_N", "mlp_down"}
+
+    for chart_name in forward:
+        matrix_coordinate = matched_weights._logical_to_matrix(chart_name, 17, 29)
+        assert matrix_coordinate == (29, 17)
+        assert matched_weights._matrix_to_logical(chart_name, *matrix_coordinate) == (17, 29)
+
+    for chart_name in reverse:
+        matrix_coordinate = matched_weights._logical_to_matrix(chart_name, 17, 29)
+        assert matrix_coordinate == (17, 29)
+        assert matched_weights._matrix_to_logical(chart_name, *matrix_coordinate) == (17, 29)
+
+
+def test_matched_weight_selection_is_persisted_per_run(monkeypatch, tmp_path) -> None:
+    from sheet import matched_weight_selection_patch as matched_weights
+
+    monkeypatch.setenv("THOG2_INSTRUMENTATION_LOCAL_ROOT", str(tmp_path))
+    first = SimpleNamespace(name="same-name", run=SimpleNamespace(id="run-one"))
+    second = SimpleNamespace(name="same-name", run=SimpleNamespace(id="run-two"))
+    first_root = matched_weights._selection_root_for_telemetry(first)
+    second_root = matched_weights._selection_root_for_telemetry(second)
+
+    assert first_root != second_root
+    matched_weights.write_weight_selection(
+        {"user_selected": True, "model_feature": 1010, "intermediate_feature": 12},
+        first_root,
+    )
+    assert matched_weights.read_weight_selection(first_root)["model_feature"] == 1010
+    assert matched_weights.read_weight_selection(second_root) == {
+        "protocol": matched_weights.WEIGHT_SELECTION_PROTOCOL,
+        "user_selected": False,
+        "model_feature": 0,
+        "intermediate_feature": 0,
+    }
+
+
 # vvv THOG Q/K/V use the same selected head by output-row slice while attention output uses that same head by input-column slice
 def test_all_attention_charts_share_one_head(monkeypatch) -> None:
     monkeypatch.setenv(depth_curves._environment_name("SCALAR_WEIGHTS_PER_MATRIX"), "3")
@@ -76,7 +116,10 @@ def test_same_coordinates_all_runs_preserves_full_selection(monkeypatch) -> None
     trainer = _trainer(trajectory)
     first = depth_curves_v2._selected_scalar_coordinates_v2(trainer, _telemetry("run-a"))
     second = depth_curves_v2._selected_scalar_coordinates_v2(trainer, _telemetry("run-b"))
-    assert first == second
+    assert {key: value for key, value in first.items() if key != "matched_selection_root"} == {
+        key: value for key, value in second.items() if key != "matched_selection_root"
+    }
+    assert first["matched_selection_root"] != second["matched_selection_root"]
 # ^^^ THOG
 
 

@@ -48,6 +48,8 @@ jobs:
           node tests/instra_weight_stability_regression.js
           node tests/instra_weight_request_router_regression.js
           node tests/instra_weight_range_interaction_regression.js
+          node tests/instra_weight_runtime_loader_regression.js
+          node tests/instra_dashboard_consistency_final_regression.js
           node tests/instra_regression_repair.js
 
       - name: Run focused feature and affected regressions

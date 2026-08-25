@@ -219,44 +219,48 @@ vm.runInContext(source, context, {filename: "dashboard_weight_stability_final_pa
 const api = context.window.__instra_weight_stability_final;
 assert.ok(api, "final weight stability owner did not install");
 
-// Every run begins with the range actually retained by that run; trainer capture
-// start/end hyperparameters never seed the viewer.
-assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
+// Configured capture bounds are authoritative and clip the retained range. They
+// also suppress a persisted current-only setting so the whole captured window is
+// visible initially.
+assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 25});
 assert.equal(api.mode(), "whole");
-assert.equal(context.normalize_chart_settings("q").current_weights_only, true);
+assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, true);
 
 context.app.current_run_id = "B";
 context.app.current_status = runs.A;
 assert.deepEqual(
   api.selected_range(),
-  {minimum: 401, maximum: 500},
+  null,
   "stale status from the previous run leaked into the selected run's retained bounds",
 );
 context.app.current_status = runs.B;
 context.app.figures = {depth: {}};
-assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
+assert.equal(api.selected_range(), null);
+api.sync_header();
+assert.equal(elements.get("weight_step_from").value, "401");
+assert.equal(elements.get("weight_step_to").value, "500");
 assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, false);
-assert.equal(api.placeholder_message("q"), "No recorded weight snapshots in steps 401–500.");
+assert.equal(api.placeholder_message("q"), "Weight curves unavailable.");
 
 context.app.current_run_id = "C";
 context.app.current_status = runs.C;
 context.app.figures = {depth: {}};
-assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
+assert.equal(api.selected_range(), null);
 assert.equal(
   api.placeholder_message("q"),
-  "No recorded weight snapshots in steps 401–500.",
-  "historical run did not use its own retained range",
+  "Weight curves unavailable.",
+  "snapshots outside the configured capture window leaked into the view",
 );
 
 context.app.current_run_id = "A";
 context.app.current_status = runs.A;
 context.app.figures = {depth: {}};
-assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
+assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 25});
 
-// Current-only filters time only: random coordinate remains random and the latest
-// random curve is literally one of the history curves.
+// A configured capture window overrides current-only: random history remains
+// visible for the complete retained portion of the configured window.
 const figure = {
   data: [
     {name: "random-20", line: {color: "#1"}, meta: {optimizer_update: 20, kind: "random"}},
@@ -268,7 +272,7 @@ const figure = {
 };
 selected_weight = false;
 let prepared = context.prepare_figure(figure, "q");
-assert.deepEqual(prepared.data.map(trace => trace.name), ["random-25"]);
+assert.deepEqual(prepared.data.map(trace => trace.name), ["random-20", "random-25"]);
 
 // With an explicit selected coordinate, history and current-only use the same
 // coordinate family; current-only only reduces it to the newest snapshot.
@@ -285,7 +289,7 @@ save_json("thog2_local_weight_group_settings_v1", {
   "run:A": {current_weights_only: true, join_with_line_segments: true},
 });
 prepared = context.prepare_figure(figure, "q");
-assert.deepEqual(prepared.data.map(trace => trace.name), ["user-25"]);
+assert.deepEqual(prepared.data.map(trace => trace.name), ["user-20", "user-25"]);
 
 // Manual range belongs to B only and survives A/B/A switching without leakage.
 context.app.current_run_id = "B";
@@ -295,7 +299,7 @@ api.set_range(450, 460);
 assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 460});
 context.app.current_run_id = "A";
 context.app.current_status = runs.A;
-assert.deepEqual(api.selected_range(), {minimum: 1, maximum: 25});
+assert.deepEqual(api.selected_range(), {minimum: 20, maximum: 25});
 context.app.current_run_id = "B";
 context.app.current_status = runs.B;
 assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 460});

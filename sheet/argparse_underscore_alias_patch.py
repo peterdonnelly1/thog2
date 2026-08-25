@@ -46,7 +46,7 @@ def _add_argument_with_strict_plastic_names(
 if argparse.ArgumentParser.add_argument is not _add_argument_with_strict_plastic_names:
     argparse.ArgumentParser.add_argument = _add_argument_with_strict_plastic_names
 
-# vvv THOG install display-only Weights step-range hyperparameters on every normal runner path without adding them to model/checkpoint identity
+# vvv THOG install Weights capture-window hyperparameters on every normal runner path without adding them to model/checkpoint identity
 from . import depth_weight_step_range_config_patch as _depth_weight_step_range_config_patch
 # ^^^ THOG
 # ^^^ THOG

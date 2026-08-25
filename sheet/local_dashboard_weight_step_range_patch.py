@@ -115,7 +115,7 @@ def install(dashboard: Any) -> None:
                 if int(status.get("depth_snapshot_count") or 0) > 0
                 else None
             )
-        # vvv THOG expose only the Weights display configuration needed by the existing group controller; model/checkpoint configuration remains untouched
+        # vvv THOG expose only the Weights capture/display configuration needed by the existing group controller; model/checkpoint configuration remains untouched
         metadata = self.reader.metadata()
         stored_configuration = json.loads(metadata.get("config_json", "{}"))
         configuration = dict(status.get("configuration") or {})
