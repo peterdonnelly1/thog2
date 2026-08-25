@@ -362,14 +362,7 @@ window.addEventListener("load", () => {
       return true;
     };
 
-    const commit_pair = async candidate => {
-      if (select_pair(candidate)) return true;
-      try {
-        if (await schedule_capture_pair(candidate)) return true;
-      } catch (error) {
-        show_error(`Weight coupling save failed: ${error.message}`);
-        return false;
-      }
+    const reject_unrecorded_pair = candidate => {
       const current = viewer_pair();
       show_error(
         `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} was not recorded for this completed view.`
@@ -379,6 +372,22 @@ window.addEventListener("load", () => {
         write_input(by_id("weight_coupling_output"), current.intermediate_feature);
       }
       return false;
+    };
+
+    const commit_pair = candidate => {
+      if (select_pair(candidate)) return true;
+      // Historical rejection is deliberately synchronous: the values and red
+      // message must be corrected before the input event returns.
+      if (!selected_run_is_active()) return reject_unrecorded_pair(candidate);
+      return (async () => {
+        try {
+          if (await schedule_capture_pair(candidate)) return true;
+        } catch (error) {
+          show_error(`Weight coupling save failed: ${error.message}`);
+          return false;
+        }
+        return reject_unrecorded_pair(candidate);
+      })();
     };
 
     const commit_inputs = () => {

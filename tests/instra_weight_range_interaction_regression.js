@@ -246,11 +246,11 @@ context.window.window = context.window;
   elements.get("weight_coupling_input").value = "7";
   elements.get("weight_coupling_output").value = "8";
   emit("change", elements.get("weight_coupling_output"));
-  await Promise.resolve();
   assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
   assert.equal(elements.get("weight_coupling_input").value, "2");
   assert.equal(elements.get("weight_coupling_output").value, "3");
   assert.match(elements.get("weight_coupling_view_error").textContent, /was not recorded/);
+  await Promise.resolve();
 
   app.current_status.run_state = "running";
   elements.get("weight_coupling_input").value = "7";
