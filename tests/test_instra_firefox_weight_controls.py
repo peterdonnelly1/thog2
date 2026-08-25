@@ -273,7 +273,7 @@ def test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_
             """
             const trace = (document.getElementById('attn_q_head_N_plot')?.data || [])
               .find(value => value?.meta?.instra_top_axis_anchor !== true);
-            return {trace: trace?.line?.color || null, run: colour_for_run(app.current_run_id)};
+            return {trace: trace?.line?.color || null, run: colour_for_run(run_identifier(current_run()))};
             """
         )
         assert latest_colour["trace"] == latest_colour["run"], latest_colour
@@ -338,10 +338,15 @@ def test_real_firefox_weight_settings_previews_show_current_curves(tmp_path: Pat
         _wait(
             driver,
             lambda: bool(driver.execute_script(
-                "return !!window.__instra_weight_range_interaction_final && document.getElementById('weights_group_settings_button') !== null;"
+                """
+                return !!window.__instra_weight_range_interaction_final
+                  && document.getElementById('weights_group_settings_button') !== null
+                  && document.getElementById('attn_q_head_N_plot')?.dataset.plotReady === 'true'
+                  && window.__instra_weight_viewer_selection?.recorded_pairs?.().length >= 2;
+                """
             )),
             timeout=20,
-            message="weight preview controls did not become ready",
+            message="weight preview data and controls did not become ready",
         )
 
         def preview_step_count() -> int:
@@ -409,12 +414,15 @@ def test_real_firefox_rnd_changes_weight_coupling(tmp_path: Path) -> None:
             driver,
             lambda: bool(driver.execute_script(
                 """
-                const button = document.getElementById('weight_random_jump');
-                const input = document.getElementById('weight_coupling_input');
-                const output = document.getElementById('weight_coupling_output');
-                return !!window.__instra_weight_range_interaction_final && !!button && !button.disabled && !!input && !input.disabled && !!output && !output.disabled;
-                """
-            )),
+                    const button = document.getElementById('weight_random_jump');
+                    const input = document.getElementById('weight_coupling_input');
+                    const output = document.getElementById('weight_coupling_output');
+                    return !!window.__instra_weight_range_interaction_final
+                      && window.__instra_weight_viewer_selection?.recorded_pairs?.().length >= 2
+                      && document.getElementById('attn_q_head_N_plot')?.dataset.plotReady === 'true'
+                      && !!button && !button.disabled && !!input && !input.disabled && !!output && !output.disabled;
+                    """
+                )),
             timeout=20,
             message="RND controls did not become ready",
         )

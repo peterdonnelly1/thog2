@@ -175,6 +175,8 @@ const context = {
   render_run_heading() {},
   queueMicrotask(callback) { callback(); },
   setTimeout(callback) { callback(); return 1; },
+  setInterval(callback) { callback(); return 1; },
+  clearInterval() {},
 };
 context.window.window = context.window;
 

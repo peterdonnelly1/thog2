@@ -509,6 +509,16 @@ window.addEventListener("load", () => {
       viewer: viewer_api,
     });
     sync_viewer_controls();
+    // The oldest header owner installs at 1.55 s and can briefly restore capture-
+    // oriented values/enabled states. Reassert the viewer contract through that
+    // bounded startup window; normal render wrappers own synchronization afterward.
+    let startup_sync_passes = 0;
+    const startup_sync_timer = setInterval(() => {
+      startup_sync_passes += 1;
+      stability.sync_header?.();
+      sync_viewer_controls();
+      if (startup_sync_passes >= 24) clearInterval(startup_sync_timer);
+    }, 100);
     if (app.current_run_id) queueMicrotask(request_render);
     return true;
   };

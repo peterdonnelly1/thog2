@@ -66,6 +66,8 @@ def _set_step_window(driver, minimum: int, maximum: int) -> None:
         if (!from || !to || !apply) throw new Error('weight step controls missing');
         from.value = String(arguments[0]);
         to.value = String(arguments[1]);
+        from.dispatchEvent(new Event('input', {bubbles: true}));
+        to.dispatchEvent(new Event('input', {bubbles: true}));
         apply.click();
         """,
         minimum,
