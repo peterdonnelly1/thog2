@@ -273,7 +273,7 @@ def test_real_firefox_explicit_weight_range_overrides_current_only_and_has_step_
             """
             const trace = (document.getElementById('attn_q_head_N_plot')?.data || [])
               .find(value => value?.meta?.instra_top_axis_anchor !== true);
-            return {trace: trace?.line?.color || null, run: colour_for_run(window.app.current_run_id)};
+            return {trace: trace?.line?.color || null, run: colour_for_run(app.current_run_id)};
             """
         )
         assert latest_colour["trace"] == latest_colour["run"], latest_colour

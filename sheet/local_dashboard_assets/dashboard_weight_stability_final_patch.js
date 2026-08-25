@@ -743,6 +743,23 @@ window.addEventListener("load", () => {
       }, 0);
     }, true);
 
+    // The group editor repopulates its shared form after open_chart_settings has
+    // scheduled the base preview. Re-render once from the settled form so both the
+    // group and individual editors immediately show the selected retained coupling.
+    window.addEventListener("click", event => {
+      const opener = event.target?.closest?.(
+        "#weights_group_settings_button, .chart-card[data-chart] .chart-settings-button"
+      );
+      if (!opener) return;
+      setTimeout(() => {
+        if (by_id("chart_settings_overlay")?.hidden) return;
+        if (!weight_chart_set.has(app.axis_chart_name)) return;
+        if (typeof schedule_chart_settings_preview === "function") {
+          schedule_chart_settings_preview();
+        }
+      }, 0);
+    }, true);
+
     const base_sync_chart_setting_outputs = sync_chart_setting_outputs;
     sync_chart_setting_outputs = function() {
       const editing = !by_id("chart_settings_overlay")?.hidden && weight_chart_set.has(app.axis_chart_name);
