@@ -73,6 +73,7 @@ window.addEventListener("load", () => {
         state.dirty = false;
       }
     };
+    window.__instra_clear_weight_step_input_drafts = clear_step_input_drafts;
     const reconcile_step_input_drafts = () => {
       const stability = window.__instra_weight_stability_final;
       const range = typeof stability?.selected_range === "function" ? stability.selected_range() : null;

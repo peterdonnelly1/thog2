@@ -98,6 +98,7 @@ const runs = {
 let selected_weight = false;
 let refresh_resolver = null;
 let refresh_calls = 0;
+let cleared_step_drafts = 0;
 const click_listeners = [];
 const key_listeners = [];
 
@@ -142,6 +143,7 @@ const context = {
     __thog2_dashboard_performance: {state: {}},
     __instra_legacy_heatmap_repair: {},
     __instra_workspace_depth_cache: {clear() {}},
+    __instra_clear_weight_step_input_drafts: () => { cleared_step_drafts += 1; },
   },
   document: {
     head: {appendChild() {}},
@@ -301,6 +303,7 @@ api.clear_range();
 assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
 api.show_latest();
 assert.deepEqual(api.selected_range(), {minimum: 500, maximum: 500});
+assert.ok(cleared_step_drafts > 0, "Whole/Latest did not release protected input drafts");
 
 // A historical run switch starts with an honest loading state, never a future-step
 // message inherited from the live run.

@@ -596,6 +596,7 @@ window.addEventListener("load", () => {
       if (!state) return false;
       const normalized = ["whole", "latest", "settings"].includes(mode) ? mode : "whole";
       const changed = state.mode !== normalized || state.range !== null;
+      window.__instra_clear_weight_step_input_drafts?.();
       state.mode = normalized;
       state.range = null;
       sync_header();
