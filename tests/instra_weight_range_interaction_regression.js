@@ -265,6 +265,15 @@ context.window.window = context.window;
   assert.match(elements.get("weight_coupling_view_error").textContent, /next recorded snapshot/);
 
   api.select_pair(2, 3);
+  context.Math.random = () => 0.4;
+  emit("click", elements.get("weight_random_jump"));
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(api.pair(), {model_feature: 7, intermediate_feature: 7});
+  assert.equal(capture_save_count, 2, "active-run RND was restricted to recorded couplings");
+  api.select_pair(2, 3);
 
   elements.get("chart_settings_overlay").hidden = false;
   app.chart_settings_render_override = {

@@ -421,6 +421,25 @@ window.addEventListener("load", () => {
         return;
       }
       if (button_id === "weight_random_jump") {
+        // A completed run cannot reconstruct a coupling that was never retained,
+        // so RND must choose another recorded pair and redraw immediately. An
+        // active run can use the full matrix dimensions and schedule the newly
+        // selected pair for its next retained snapshot.
+        if (!selected_run_is_active()) {
+          const recorded = recorded_pairs();
+          const both_changed = recorded.filter(pair => (
+            pair.model_feature !== current.model_feature
+            && pair.intermediate_feature !== current.intermediate_feature
+          ));
+          const any_changed = recorded.filter(pair => !same_pair(pair, current));
+          const choices = both_changed.length ? both_changed : any_changed;
+          if (!choices.length) {
+            show_error("No other recorded coupling is available for this completed view.");
+            return;
+          }
+          void commit_pair(choices[Math.floor(Math.random() * choices.length)]);
+          return;
+        }
         const random_other = value => {
           if (capability.maximum < 1) return value;
           const draw = Math.floor(Math.random() * capability.maximum);
