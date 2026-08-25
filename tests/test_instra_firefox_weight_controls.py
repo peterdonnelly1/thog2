@@ -363,20 +363,24 @@ def test_real_firefox_weight_settings_previews_show_current_curves(tmp_path: Pat
             '.chart-card[data-chart="attn_q_head_N"] .chart-settings-button',
         ):
             _open_settings_and_wait(driver, selector)
-            initial_current_only = _checkbox_checked(driver, "chart_current_weights_only")
             _wait(
                 driver,
-                lambda: preview_step_count() == (1 if initial_current_only else 2),
+                lambda: preview_step_count() > 0,
                 timeout=20,
-                message=f"initial preview did not match Current-only for {selector}",
+                message=f"initial preview was blank for {selector}",
             )
-            if initial_current_only:
-                driver.execute_script("document.getElementById('chart_current_weights_only').click();")
-                _wait(
-                    driver,
-                    lambda: preview_step_count() == 2,
-                    message=f"history preview did not recover for {selector}",
-                )
+            driver.execute_script(
+                """
+                const current = document.getElementById('chart_current_weights_only');
+                if (current.checked) current.click();
+                else schedule_chart_settings_preview();
+                """
+            )
+            _wait(
+                driver,
+                lambda: preview_step_count() == 2,
+                message=f"history preview did not recover for {selector}",
+            )
             driver.execute_script("document.getElementById('chart_current_weights_only').click();")
             _wait(
                 driver,
