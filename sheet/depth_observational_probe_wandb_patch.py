@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from . import depth_weight_curves_and_observational_probes_patch as _depth
 from . import plastic_depth_wandb_probe_curves_patch as _probe_wandb
@@ -15,6 +15,27 @@ from .local_chart_store import ensure_local_chart_store
 
 
 _RUNTIME_GATE_ATTRIBUTE = "_thog_runtime_legacy_coefficient_debug_gate"
+
+
+def _bind_heatmap_runtime_config(trainer: Any, telemetry: Any) -> None:
+    """Expose operational heatmap controls to the trainer without checkpointing them."""
+    telemetry_config = getattr(telemetry, "config", {})
+    trainer_config = getattr(trainer, "config", None)
+    if not isinstance(telemetry_config, Mapping) or trainer_config is None:
+        return
+    setattr(
+        trainer_config,
+        "instrumentation__delta_loss_v_layer_heatmap",
+        telemetry_config.get("instrumentation__delta_loss_v_layer_heatmap"),
+    )
+    setattr(
+        trainer_config,
+        "instrumentation__delta_loss_v_layer_heatmap__destination",
+        telemetry_config.get(
+            "instrumentation__delta_loss_v_layer_heatmap__destination",
+            "local",
+        ),
+    )
 
 
 # vvv THOG keep private helper semantics intact for established tests while attached runs skip all old coefficient sampling/refresh work below DEBUG>9
@@ -65,6 +86,11 @@ _ORIGINAL_ATTACH_TELEMETRY = _wandb.attach_telemetry
 def _attach_telemetry_with_observational_probe_charts(trainer: Any, telemetry: Any) -> None:
     _ORIGINAL_ATTACH_TELEMETRY(trainer, telemetry)
     setattr(telemetry, _RUNTIME_GATE_ATTRIBUTE, True)
+    # vvv THOG these controls are deliberately absent from TrainingConfig's
+    # checkpoint identity, but the scheduler and progress loop still need the
+    # active run's operational values.
+    _bind_heatmap_runtime_config(trainer, telemetry)
+    # ^^^ THOG
     observational_enabled = _depth._observational_probe_enabled(trainer)
     heatmap_enabled = _probe_wandb._delta_loss_heatmap_enabled(telemetry)
     heatmap_destination = _probe_wandb._delta_loss_heatmap_destination(telemetry)

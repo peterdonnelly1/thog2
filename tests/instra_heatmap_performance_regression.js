@@ -17,6 +17,8 @@ async function heatmap_family_demand_regression() {
   let coefficients_open = false;
   let refresh_calls = 0;
   let heatmap_renders = 0;
+  let depth_renders = 0;
+  const depth_payloads = [];
   const requests = [];
   const click_handlers = new Map();
   const groups = {
@@ -27,6 +29,9 @@ async function heatmap_family_demand_regression() {
     heatmap_card_detail: {textContent: ""},
     heatmap_placeholder: {hidden: false},
     heatmap_plot: {id: "heatmap_plot", dataset: {}},
+    q_detail: {textContent: ""},
+    q_placeholder: {hidden: false},
+    q_plot: {id: "q_plot", dataset: {}},
   };
 
   const app = {
@@ -54,7 +59,7 @@ async function heatmap_family_demand_regression() {
       };
     }
     if (parsed.pathname === "/api/figure-family" && parsed.searchParams.get("family") === "depth") {
-      return {depth: {}};
+      return depth_payloads.shift() || {depth: {}};
     }
     throw new Error(`unexpected base fetch: ${text}`);
   };
@@ -72,10 +77,12 @@ async function heatmap_family_demand_regression() {
       __instra_workspace: null,
     },
     by_id: id => groups[id] || null,
+    chart_titles: {heatmap: "Heatmap", q: "Q"},
     fetch_json: base_fetch,
     render_figures: async () => undefined,
     render_plot: async mount => {
-      heatmap_renders += 1;
+      if (mount.id === "heatmap_plot") heatmap_renders += 1;
+      else depth_renders += 1;
       mount.dataset.plotReady = "true";
     },
     resize_plot_in_card: () => undefined,
@@ -134,14 +141,44 @@ async function heatmap_family_demand_regression() {
   assert.equal(context.window.__thog2_dashboard_performance.state.deferred_heatmap, true);
 
   heatmap_open = true;
-  context.window.__thog2_dashboard_performance.refresh_family_if_stale("heatmap");
-  assert.equal(refresh_calls, 1, "reopening a stale heatmap did not wake the run refresh path");
+  await context.window.__thog2_dashboard_performance.refresh_family_if_stale("heatmap");
+  assert.equal(refresh_calls, 0, "reopening a stale heatmap detoured through the whole-run refresh path");
+  assert.equal(requests.length, 3, "reopening a stale heatmap did not fetch its family directly");
 
   payload = await context.fetch_json("/api/figures?run=R1");
-  assert.equal(requests.length, 3, "woken heatmap did not fetch the new revision");
+  assert.equal(requests.length, 3, "current heatmap family was redundantly fetched again");
   parsed = new URL(requests.at(-1), "http://127.0.0.1:6007");
   assert.equal(parsed.searchParams.get("family"), "heatmap");
   assert.equal(context.window.__thog2_dashboard_performance.state.deferred_heatmap, false);
+
+  // A family response can race a live SQLite writer. If status already reports
+  // retained snapshots, an empty depth object is not a valid completed cache
+  // entry: the next family wake must retry it directly.
+  coefficients_open = true;
+  app.current_status.depth_snapshot_count = 101;
+  app.current_status.depth_maximum_update = 400;
+  app.figures.depth = {};
+  depth_payloads.push(
+    {depth: {}},
+    {depth: {q: {data: [{meta: {optimizer_update: 400}}], layout: {}}}},
+  );
+  payload = await context.fetch_json("/api/figures?run=R1");
+  app.figures = payload;
+  assert.equal(
+    context.window.__thog2_dashboard_performance.state.depth_signature,
+    null,
+    "known retained Weights were cached as a successful blank payload",
+  );
+  assert.equal(app.figure_revision, null, "blank Weights did not keep the live refresh path retryable");
+
+  await context.window.__thog2_dashboard_performance.refresh_family_if_stale("depth");
+  assert.ok(app.figures.depth.q, "direct Weights family retry did not recover retained curves");
+  assert.equal(depth_renders, 1, "recovered Weights family was not rendered exactly once");
+  assert.notEqual(
+    context.window.__thog2_dashboard_performance.state.depth_signature,
+    null,
+    "recovered Weights payload did not become current",
+  );
 
   assert.ok(click_handlers.has("heatmap"), "heatmap group toggle wake handler was not installed");
 }

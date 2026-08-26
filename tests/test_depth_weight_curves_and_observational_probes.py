@@ -38,6 +38,7 @@ def _trainer(
     cadence=5,
     learn=False,
     plastic=False,
+    heatmap_mode=None,
 ):
     return SimpleNamespace(
         raw_model=SimpleNamespace(trajectory=trajectory),
@@ -46,6 +47,7 @@ def _trainer(
             plastic__enabled=plastic,
             plastic__do_learn_layer_count=learn,
             plastic__layer_count_probe__probe_every_n_steps=cadence,
+            instrumentation__delta_loss_v_layer_heatmap=heatmap_mode,
         ),
     )
 
@@ -66,6 +68,21 @@ def _clear_depth_curve_environment(monkeypatch) -> None:
         "END_STEP",
     ):
         monkeypatch.delenv(depth_curves._environment_name(suffix), raising=False)
+
+
+def test_linear_heatmap_supplies_an_every_update_observational_cadence() -> None:
+    trainer = _trainer(_trajectory(), cadence=None, heatmap_mode="linear")
+
+    assert depth_curves._observational_probe_enabled(trainer) is True
+    assert depth_curves._observational_probe_due(trainer, 1) is True
+    assert depth_curves._observational_probe_due(trainer, 2) is True
+    assert depth_curves._observational_probe_due(trainer, 553) is True
+
+
+def test_sparse_heatmap_still_requires_an_explicit_probe_cadence() -> None:
+    trainer = _trainer(_trajectory(), cadence=None, heatmap_mode="log")
+
+    assert depth_curves._observational_probe_enabled(trainer) is False
 
 
 # vvv THOG canonical instrumentation CLI controls publish execution-only environment controls rather than model identity fields

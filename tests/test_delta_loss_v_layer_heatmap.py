@@ -587,6 +587,63 @@ def test_attachment_writes_local_heatmap_without_wandb(
     close_local_chart_store(telemetry)
 
 
+def test_attachment_binds_linear_heatmap_controls_before_scheduler_check(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        observational_wandb,
+        "_ORIGINAL_ATTACH_TELEMETRY",
+        lambda *_args: None,
+    )
+    observed = {}
+
+    def observational_enabled(trainer) -> bool:
+        observed["mode"] = getattr(
+            trainer.config,
+            "instrumentation__delta_loss_v_layer_heatmap",
+            None,
+        )
+        observed["destination"] = getattr(
+            trainer.config,
+            "instrumentation__delta_loss_v_layer_heatmap__destination",
+            None,
+        )
+        return False
+
+    monkeypatch.setattr(
+        observational_wandb._depth,
+        "_observational_probe_enabled",
+        observational_enabled,
+    )
+    trainer = SimpleNamespace(
+        config=SimpleNamespace(),
+        _print_progress=lambda *_args, **_kwargs: None,
+    )
+    telemetry = SimpleNamespace(
+        run=None,
+        module=None,
+        config={
+            "instrumentation__delta_loss_v_layer_heatmap": "linear",
+            "instrumentation__delta_loss_v_layer_heatmap__destination": "local",
+        },
+    )
+
+    observational_wandb._attach_telemetry_with_observational_probe_charts(
+        trainer,
+        telemetry,
+    )
+
+    assert observed == {"mode": "linear", "destination": "local"}
+    assert (
+        trainer.config.instrumentation__delta_loss_v_layer_heatmap
+        == "linear"
+    )
+    assert (
+        trainer.config.instrumentation__delta_loss_v_layer_heatmap__destination
+        == "local"
+    )
+
+
 def test_local_heatmap_reader_selects_earliest_or_latest_probe_window(tmp_path: Path) -> None:
     store = LocalChartStore(
         tmp_path / "charts.sqlite3",

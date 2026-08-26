@@ -732,11 +732,23 @@ def _observational_probe_enabled(trainer: Any) -> bool:
     if _depth_trajectory_from_model(getattr(trainer, "raw_model", None)) is None:
         return False
     interval = getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None)
-    return interval is not None and int(interval) >= 1
+    heatmap_mode = getattr(
+        config,
+        "instrumentation__delta_loss_v_layer_heatmap",
+        None,
+    )
+    return (
+        interval is not None and int(interval) >= 1
+    ) or heatmap_mode == "linear"
 
 
 def _observational_probe_due(trainer: Any, update: int) -> bool:
-    interval = int(trainer.config.plastic__layer_count_probe__probe_every_n_steps)
+    configured_interval = getattr(
+        trainer.config,
+        "plastic__layer_count_probe__probe_every_n_steps",
+        None,
+    )
+    interval = 1 if configured_interval is None else int(configured_interval)
     return int(update) == 1 or int(update) % interval == 0
 
 

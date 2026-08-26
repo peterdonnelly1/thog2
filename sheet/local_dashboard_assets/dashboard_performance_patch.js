@@ -71,6 +71,16 @@ window.addEventListener("load", () => {
       workspace_api()?.selection_key?.() || null,
     ]);
 
+    const depth_figures_present = figures => Boolean(
+      figures && Object.keys(figures).length > 0
+    );
+
+    const depth_payload_present = () => depth_figures_present(app.figures?.depth);
+
+    const depth_payload_expected = status => (
+      Number(status?.depth_snapshot_count || 0) > 0
+    );
+
     const family_payload_stale = family => {
       const status = app.current_status || current_run();
       if (!status) return true;
@@ -81,7 +91,7 @@ window.addEventListener("load", () => {
         );
       }
       return (
-        !app.figures?.depth
+        (depth_payload_expected(status) && !depth_payload_present())
         || performance_state.depth_signature !== depth_signature(status)
       );
     };
@@ -101,6 +111,24 @@ window.addEventListener("load", () => {
     );
 
     const base_fetch_json_performance = fetch_json;
+
+    const fetch_family_payload = (family, run_id) => {
+      const encoded_run = encodeURIComponent(run_id);
+      if (family === "heatmap") {
+        const viewer = heatmap_window_settings();
+        return base_fetch_json_performance(
+          `/api/figure-family?run=${encoded_run}&family=heatmap`
+          + `&probe_count=${viewer.probe_count}&window_mode=${encodeURIComponent(viewer.window_mode)}`
+        );
+      }
+      const workspace = workspace_api();
+      return workspace
+        ? workspace.fetch_depth_payload(base_fetch_json_performance)
+        : base_fetch_json_performance(
+            `/api/figure-family?run=${encoded_run}&family=depth`
+          );
+    };
+
     fetch_json = async function(url, options = {}) {
       let parsed = null;
       try {
@@ -125,7 +153,7 @@ window.addEventListener("load", () => {
         || performance_state.heatmap_signature !== next_heatmap_signature
       );
       const need_depth = (
-        !app.figures?.depth
+        (depth_payload_expected(app.current_status) && !depth_payload_present())
         || performance_state.depth_signature !== next_depth_signature
       );
       const workspace = workspace_api();
@@ -140,24 +168,13 @@ window.addEventListener("load", () => {
         return empty_figures();
       }
 
-      const encoded_run = encodeURIComponent(run_id);
       try {
         const [heatmap_payload, depth_payload] = await Promise.all([
           fetch_heatmap
-            ? (() => {
-                const viewer = heatmap_window_settings();
-                return base_fetch_json_performance(
-                  `/api/figure-family?run=${encoded_run}&family=heatmap`
-                  + `&probe_count=${viewer.probe_count}&window_mode=${encodeURIComponent(viewer.window_mode)}`
-                );
-              })()
+            ? fetch_family_payload("heatmap", run_id)
             : Promise.resolve(null),
           fetch_depth
-            ? (
-                workspace
-                  ? workspace.fetch_depth_payload(base_fetch_json_performance)
-                  : base_fetch_json_performance(`/api/figure-family?run=${encoded_run}&family=depth`)
-              )
+            ? fetch_family_payload("depth", run_id)
             : Promise.resolve(null),
         ]);
         if (run_id !== app.current_run_id) return empty_figures();
@@ -174,8 +191,17 @@ window.addEventListener("load", () => {
           performance_state.deferred_heatmap = false;
         }
         if (fetch_depth) {
-          performance_state.depth_signature = next_depth_signature;
-          performance_state.deferred_coefficients = false;
+          if (
+            depth_figures_present(combined.depth)
+            || !depth_payload_expected(app.current_status)
+          ) {
+            performance_state.depth_signature = next_depth_signature;
+            performance_state.deferred_coefficients = false;
+          } else {
+            performance_state.depth_signature = null;
+            performance_state.deferred_coefficients = true;
+            app.figure_revision = null;
+          }
         }
         performance_state.pending_render = {
           heatmap: fetch_heatmap,
@@ -191,8 +217,17 @@ window.addEventListener("load", () => {
           performance_state.deferred_heatmap = false;
         }
         if (synthetic_group_open("coefficients")) {
-          performance_state.depth_signature = next_depth_signature;
-          performance_state.deferred_coefficients = false;
+          if (
+            depth_figures_present(payload?.depth)
+            || !depth_payload_expected(app.current_status)
+          ) {
+            performance_state.depth_signature = next_depth_signature;
+            performance_state.deferred_coefficients = false;
+          } else {
+            performance_state.depth_signature = null;
+            performance_state.deferred_coefficients = true;
+            app.figure_revision = null;
+          }
         }
         performance_state.pending_render = {
           heatmap: synthetic_group_open("heatmap"),
@@ -317,6 +352,7 @@ window.addEventListener("load", () => {
       });
     };
 
+    const family_refreshes = new Map();
     const refresh_family_if_stale = family => {
       const group_name = family === "heatmap" ? "heatmap" : "coefficients";
       if (!synthetic_group_open(group_name) || !app.current_run_id) return;
@@ -336,19 +372,59 @@ window.addEventListener("load", () => {
         }
         return result;
       }
+      const existing = family_refreshes.get(family);
+      if (existing) return existing;
+
       if (family === "heatmap") performance_state.deferred_heatmap = true;
       else performance_state.deferred_coefficients = true;
-      app.figure_revision = null;
+      const run_id = String(app.current_run_id);
+      const refresh = (async () => {
+        try {
+          const payload = await fetch_family_payload(family, run_id);
+          if (
+            run_id !== String(app.current_run_id || "")
+            || !synthetic_group_open(group_name)
+          ) return;
 
-      const attempt = () => {
-        if (!app.current_run_id || !synthetic_group_open(group_name)) return;
-        if (app.refresh_in_flight) {
-          setTimeout(attempt, 75);
-          return;
+          app.figures = {
+            heatmap: family === "heatmap"
+              ? payload?.heatmap ?? null
+              : app.figures?.heatmap ?? null,
+            heatmap_dimensions: family === "heatmap"
+              ? payload?.heatmap_dimensions ?? {layers: 0, probes: 0}
+              : app.figures?.heatmap_dimensions ?? {layers: 0, probes: 0},
+            depth: family === "depth"
+              ? payload?.depth ?? {}
+              : app.figures?.depth ?? {},
+          };
+
+          const status = app.current_status || current_run();
+          if (family === "heatmap") {
+            performance_state.heatmap_signature = heatmap_signature(status);
+            performance_state.deferred_heatmap = false;
+          } else if (depth_payload_present() || !depth_payload_expected(status)) {
+            performance_state.depth_signature = depth_signature(status);
+            performance_state.deferred_coefficients = false;
+          } else {
+            // A known non-empty store must never become a cached successful blank.
+            // Leave it stale so the ordinary live refresh retries the family.
+            performance_state.depth_signature = null;
+            performance_state.deferred_coefficients = true;
+            app.figure_revision = null;
+          }
+          performance_state.pending_render = {
+            heatmap: family === "heatmap",
+            depth: family === "depth",
+          };
+          await render_figures();
+        } catch (error) {
+          show_toast(`${family === "heatmap" ? "Heatmap" : "Weights"} refresh failed: ${error.message}`);
+        } finally {
+          family_refreshes.delete(family);
         }
-        refresh_current_run();
-      };
-      attempt();
+      })();
+      family_refreshes.set(family, refresh);
+      return refresh;
     };
 
     const bind_synthetic_group = (button_id, family) => {

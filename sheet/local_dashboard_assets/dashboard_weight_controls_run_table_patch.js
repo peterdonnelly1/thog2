@@ -297,6 +297,10 @@ window.addEventListener("load", () => {
     };
 
     const run_shape_columns = Object.freeze([
+      {
+        key: "preset", label: "p", title: "preset", numeric: false,
+        value: run => run?.preset || configuration_value(run, "geometry_preset", "model_type"),
+      },
       {key: "layers", label: "L", title: "layers", value: run => configuration_value(run, "n_layer")},
       {
         key: "depth_order", label: "P", title: "depth order (not applicable to DENSE)",
@@ -326,7 +330,9 @@ window.addEventListener("load", () => {
       for (const definition of run_shape_columns) {
         const header = document.createElement("th");
         header.dataset.instraRunShapeHeader = definition.key;
-        header.className = "numeric-column run-shape-column";
+        header.className = definition.numeric === false
+          ? "run-shape-column run-preset-column"
+          : "numeric-column run-shape-column";
         header.textContent = definition.label;
         header.title = definition.title;
         marker.insertAdjacentElement("afterend", header);
@@ -345,12 +351,17 @@ window.addEventListener("load", () => {
       for (const definition of run_shape_columns) {
         const cell = document.createElement("td");
         cell.dataset.instraRunShapeCell = definition.key;
-        cell.className = "numeric-column run-shape-column";
+        cell.className = definition.numeric === false
+          ? "run-shape-column run-preset-column"
+          : "numeric-column run-shape-column";
         const raw = definition.value(run);
-        cell.textContent = definition.key === "activation_checkpointing"
+        const full_text = definition.key === "activation_checkpointing"
           ? raw
           : display_config_value(raw);
-        cell.title = `${definition.title}: ${cell.textContent}`;
+        cell.textContent = definition.key === "preset"
+          ? full_text.slice(0, 9)
+          : full_text;
+        cell.title = `${definition.title}: ${full_text}`;
         marker.insertAdjacentElement("afterend", cell);
         marker = cell;
       }
@@ -475,8 +486,9 @@ window.addEventListener("load", () => {
       .chart-card.maximized .explicit-trajectory-modes .explicit-mode-button {
         display: inline-flex !important; visibility: visible !important;
       }
-      .runs-table { min-width: 1480px; }
+      .runs-table { min-width: 1560px; }
       .run-shape-column { width: 52px !important; text-align: right !important; font-variant-numeric: tabular-nums; }
+      .run-preset-column { width: 76px !important; text-align: left !important; text-transform: none !important; }
       [data-instra-run-shape-header="grad_accum"], [data-instra-run-shape-cell="grad_accum"] { width: 64px !important; }
       .visibility-header-toggle { margin: 0 auto; }
     `;

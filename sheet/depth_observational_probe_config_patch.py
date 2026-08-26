@@ -22,7 +22,20 @@ def _observational_probe_requested(config: Any) -> bool:
             bool(getattr(config, "plastic__enabled", False))
             and bool(getattr(config, "plastic__do_learn_layer_count", False))
         )
-        and getattr(config, "plastic__layer_count_probe__probe_every_n_steps", None) is not None
+        and (
+            getattr(
+                config,
+                "plastic__layer_count_probe__probe_every_n_steps",
+                None,
+            )
+            is not None
+            or getattr(
+                config,
+                "instrumentation__delta_loss_v_layer_heatmap",
+                None,
+            )
+            == "linear"
+        )
     )
 
 

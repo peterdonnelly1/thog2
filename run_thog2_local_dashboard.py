@@ -42,6 +42,14 @@ def _active_run_state(value: Any) -> bool:
     return str(value) in {"preparing", "recording", "monitoring", "running"}
 
 
+def _preset_from_configuration(configuration: Dict[str, Any]) -> str:
+    model_type = str(configuration.get("model_type", "")).strip()
+    if model_type.lower() == "dense":
+        return "dense"
+    geometry_preset = str(configuration.get("geometry_preset", "")).strip()
+    return geometry_preset or model_type
+
+
 def _optional_metadata_integer(metadata: Dict[str, str], key: str) -> Optional[int]:
     text = str(metadata.get(key, "")).strip()
     if not text:
@@ -199,6 +207,7 @@ class RunDashboardState:
             "data_updated_at": data_updated_at or modified_at,
             "host_label": str(configuration.get("host_label", "")),
             "model_type": str(configuration.get("model_type", "")),
+            "preset": _preset_from_configuration(configuration),
             # vvv THOG surface only capture/routing controls; history length is now a reversible per-chart Instra setting
             "heatmap_settings": {
                 "mode": configuration.get("instrumentation__delta_loss_v_layer_heatmap"),

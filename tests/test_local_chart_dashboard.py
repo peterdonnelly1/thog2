@@ -34,6 +34,21 @@ def _heatmap_record(update: int) -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    ("configuration", "expected"),
+    (
+        ({"model_type": "dense", "geometry_preset": "depth"}, "dense"),
+        ({"model_type": "sheet", "geometry_preset": "depth"}, "depth"),
+        ({"model_type": "sheet", "geometry_preset": "jpeg_like_v1"}, "jpeg_like_v1"),
+    ),
+)
+def test_dashboard_reports_the_cli_preset(
+    configuration: dict[str, object],
+    expected: str,
+) -> None:
+    assert dashboard._preset_from_configuration(configuration) == expected
+
+
 def test_viewer_catalog_waits_when_started_before_training(tmp_path: Path) -> None:
     catalog = dashboard.DashboardCatalog(root=tmp_path)
 

@@ -192,6 +192,39 @@ def _make_selected_thog_store(root: Path) -> tuple[Path, str]:
     return path, run_id
 
 
+def _make_completed_capture_store(root: Path) -> tuple[Path, str]:
+    """Mirror a live run whose finite Weights capture ended before its heartbeat."""
+
+    run_id = "firefox_completed_capture"
+    path = root / "firefox_completed_capture_artifact" / run_id / "charts.sqlite3"
+    store = LocalChartStore(
+        path,
+        run_name="firefox_completed_capture_artifact",
+        run_id=run_id,
+        config={
+            "host_label": "scruffy",
+            "model_type": "sheet",
+            "geometry_preset": "jpeg_like_v1",
+            "instrumentation__depth_weight_curves__history_length": 101,
+            "instrumentation__depth_weight_curves__start_step": 300,
+            "instrumentation__depth_weight_curves__end_step": 400,
+            "instrumentation__delta_loss_v_layer_heatmap": "linear",
+            "instrumentation__delta_loss_v_layer_heatmap__destination": "local",
+        },
+    )
+    store.configure_weight_capture(
+        start_step=300,
+        end_step=400,
+        cadence=1,
+        history_length=101,
+    )
+    for step in range(300, 401):
+        store.append_depth_weight_snapshot(_weight_snapshot(step), history_length=101)
+    store.heartbeat(553, run_state="monitoring", force=True)
+    store.close()
+    return path, run_id
+
+
 def _wait_for_server(url: str, process: subprocess.Popen[str], timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -425,6 +458,99 @@ def test_real_firefox_heatmap_and_weight_group_chart_overrides(tmp_path: Path) -
             process.kill()
             process.wait(timeout=5)
 # ^^^ THOG
+
+
+def test_real_firefox_renders_a_completed_finite_weight_capture(tmp_path: Path) -> None:
+    _database, run_id = _make_completed_capture_store(tmp_path)
+    port = _free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    environment = dict(os.environ)
+    environment["PYTHONUNBUFFERED"] = "1"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "run_thog2_dashboard.py",
+            "--root",
+            str(tmp_path),
+            "--run",
+            run_id,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    driver = None
+    try:
+        _wait_for_server(base_url, process)
+        driver = _firefox_driver()
+        driver.set_page_load_timeout(30)
+        driver.get(f"{base_url}/runs/{run_id}")
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "return document.querySelector('tr.current-run') !== null;"
+            )),
+            timeout=20,
+            message="completed-capture fixture run was not selected",
+        )
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const cell = document.querySelector(
+                  'tr.current-run [data-instra-run-shape-cell="preset"]'
+                );
+                return cell?.textContent === 'jpeg_like'
+                  && cell?.title === 'preset: jpeg_like_v1'
+                  && cell?.previousElementSibling?.textContent.trim() === 'scruffy';
+                """
+            ) is True,
+            message="preset column was absent, misplaced, or not truncated to nine characters",
+        )
+
+        _open_group(driver, "coefficients_chart_group", "coefficients_group_toggle")
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                "return document.getElementById('weight_step_availability')?.textContent || '';"
+            ) == "data available 300–400",
+            message="completed capture did not expose its retained step range",
+        )
+        _wait(
+            driver,
+            lambda: bool(driver.execute_script(
+                "const el=document.getElementById('attn_q_head_N_plot'); return !!el && el.dataset.plotReady === 'true';"
+            )),
+            timeout=20,
+            message="completed finite capture remained blank after the live run advanced past its end",
+        )
+        assert driver.execute_script(
+            "return document.getElementById('attn_q_head_N_placeholder')?.hidden === true;"
+        )
+        assert driver.execute_script(
+            """
+            const range = window.__instra_weight_step_filter?.request_range?.();
+            const mount = document.getElementById('attn_q_head_N_plot');
+            return range?.minimum === 300
+              && range?.maximum === 400
+              && (mount?.data || []).length > 0;
+            """
+        )
+    finally:
+        if driver is not None:
+            driver.quit()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 # vvv THOG the modern THOG path keeps heatmaps discoverable and renders only the group-selected integer-segment coupling without duplicate Plotly chrome
