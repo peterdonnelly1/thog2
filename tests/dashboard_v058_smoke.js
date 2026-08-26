@@ -199,6 +199,14 @@ async function main() {
     Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_optimizer_update),
     [10, 20, 10, 20],
   );
+  assert.deepEqual(
+    Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_artifact_name),
+    ["alpha", "alpha", "beta", "beta"],
+  );
+  assert.deepEqual(
+    Array.from(depth.depth.mlp_down.data, trace => trace.meta.instra_workspace_run_datetime),
+    ["alpha", "alpha", "beta", "beta"],
+  );
   assert.ok(depth.depth.mlp_down.data[0].hovertemplate.startsWith("<b>alpha</b><br>"));
   assert.ok(depth.depth.mlp_down.data[2].hovertemplate.startsWith("<b>beta</b><br>"));
 

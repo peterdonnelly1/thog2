@@ -6,10 +6,11 @@
 // for expanded groups so a collapsed 20+ chart system group costs almost nothing.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const group_state_key = "thog2_local_metric_group_collapsed";
     const group_order = new Map([["train", 0], ["val", 1], ["system", 2]]);
     const group_revisions = new Map();
     const rendered_revisions = new Map();
+    let collapsed_group_context = "";
+    let collapsed_group_settings = new Map();
     let poll_in_flight = false;
     let last_run_id = null;
 
@@ -18,22 +19,35 @@ window.addEventListener("load", () => {
       return candidate?.active?.() === true ? candidate : null;
     };
     const current_view_key = () => workspace_api()?.selection_key?.() || app.current_run_id;
+    const group_context_key = () => {
+      const workspace = workspace_api();
+      if (workspace) {
+        const run_ids = (workspace.visible_runs?.() || [])
+          .map(run => String(run_identifier(run)))
+          .filter(Boolean)
+          .sort();
+        return `workspace:${run_ids.join("|")}`;
+      }
+      return `run:${String(app.current_run_id || "")}`;
+    };
 
     const metric_group_sections = () => [...document.querySelectorAll(".local-metric-group")];
     const group_section = name => metric_group_sections().find(section => section.dataset.metricGroup === name) || null;
-    const group_collapsed_settings = () => load_json(group_state_key, {});
+    const group_collapsed_settings = (key = group_context_key()) => {
+      if (key !== collapsed_group_context) {
+        collapsed_group_context = key;
+        collapsed_group_settings = new Map();
+      }
+      return collapsed_group_settings;
+    };
 
-    const default_collapsed = name => name !== "system";
     const group_is_collapsed = name => {
       const settings = group_collapsed_settings();
-      return Object.prototype.hasOwnProperty.call(settings, name)
-        ? Boolean(settings[name])
-        : default_collapsed(name);
+      return settings.has(name) ? settings.get(name) : true;
     };
     const save_group_collapsed = (name, collapsed) => {
       const settings = group_collapsed_settings();
-      settings[name] = Boolean(collapsed);
-      save_json(group_state_key, settings);
+      settings.set(name, Boolean(collapsed));
     };
 
     const chart_key = (group_name, chart_id) => `local_metric_${hash_text(`${group_name}\0${chart_id}`).toString(16)}`;
@@ -390,6 +404,9 @@ window.addEventListener("load", () => {
       clear: clear_metric_groups,
       refresh: refresh_metric_groups,
       refresh_group: refresh_group_data,
+      context_key: group_context_key,
+      group_is_collapsed,
+      set_group_collapsed: save_group_collapsed,
     };
 
     setInterval(refresh_metric_groups, 2500);

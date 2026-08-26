@@ -461,6 +461,16 @@ window.addEventListener("load", () => {
         latest.title = "Show the latest retained weight snapshot";
         whole.insertAdjacentElement("afterend", latest);
       }
+      let overlap = by_id("weight_step_overlapping_range");
+      if (!overlap) {
+        overlap = document.createElement("button");
+        overlap.id = "weight_step_overlapping_range";
+        overlap.type = "button";
+        overlap.className = "weight-step-button";
+        overlap.textContent = "show overlapping range";
+        overlap.title = "Show the optimizer-step range retained by every visible Workspace run";
+        latest.insertAdjacentElement("afterend", overlap);
+      }
       let error = by_id("weight_step_range_error");
       if (!error) {
         error = document.createElement("span");
@@ -468,7 +478,7 @@ window.addEventListener("load", () => {
         error.className = "weight-step-range-error";
         error.setAttribute("role", "status");
         error.hidden = true;
-        latest.insertAdjacentElement("afterend", error);
+        overlap.insertAdjacentElement("afterend", error);
       }
       return true;
     };
@@ -498,6 +508,7 @@ window.addEventListener("load", () => {
       const to = by_id("weight_step_to");
       const whole = by_id("weight_step_whole_range");
       const latest = by_id("weight_step_latest");
+      const overlap = by_id("weight_step_overlapping_range");
       const current = by_id("weight_step_current");
       const availability = by_id("weight_step_availability");
       const controls = by_id("weight_step_group_controls");
@@ -526,6 +537,10 @@ window.addEventListener("load", () => {
       }
       if (whole) whole.disabled = !available;
       if (latest) latest.disabled = !available;
+      if (overlap) {
+        overlap.hidden = app.workspace_mode !== true;
+        overlap.disabled = false;
+      }
       whole?.setAttribute("aria-pressed", String(mode === "whole"));
       latest?.setAttribute("aria-pressed", String(mode === "latest"));
       controls?.classList?.toggle?.("active", range !== null);
@@ -825,9 +840,20 @@ window.addEventListener("load", () => {
       );
       const whole = event.type === "click" && target?.closest?.("#weight_step_whole_range");
       const latest = event.type === "click" && target?.closest?.("#weight_step_latest");
-      if (!apply && !enter && !whole && !latest) return;
+      const overlap = event.type === "click" && target?.closest?.("#weight_step_overlapping_range");
+      if (!apply && !enter && !whole && !latest && !overlap) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (overlap) {
+        const available = available_range();
+        if (app.workspace_mode !== true || !available) {
+          show_range_error("No overlapping retained weight steps.");
+          return;
+        }
+        show_range_error("");
+        set_context_range(available.minimum, available.maximum, {user: true, refresh: true});
+        return;
+      }
       if (whole) {
         show_range_error("");
         set_context_mode("whole", {refresh: true});

@@ -82,6 +82,8 @@ const make_trace = (chart_name, step, model_feature, intermediate_feature, value
     instra_weight_model_feature: model_feature,
     instra_weight_intermediate_feature: intermediate_feature,
     instra_weight_feature_count: 16,
+    instra_workspace_artifact_name: "260824-0901_scruffy_THOG_ANALOG_DENSE",
+    instra_workspace_run_datetime: "260824-0901",
   },
 });
 
@@ -127,6 +129,7 @@ const app = {
   current_status: {run_state: "finished"},
   workspace_mode: false,
   chart_settings_render_override: null,
+  maximized_chart: null,
 };
 
 const context = {
@@ -242,6 +245,20 @@ context.window.window = context.window;
   assert.ok(prepared.data.every(trace => (
     trace.hovertemplate.includes(`step ${trace.meta.instra_thog_optimizer_update}`)
   )), "step number missing from hover");
+  assert.ok(prepared.data.every(trace => {
+    const rows = trace.hovertemplate.split("<extra", 1)[0].split("<br>");
+    return rows[0] === "<b>260824-0901</b>"
+      && rows[1] === `step ${trace.meta.instra_thog_optimizer_update}`;
+  }), "compact hover did not put run datetime first and step second");
+
+  app.maximized_chart = "attn_q_head_N";
+  const maximized = context.prepare_figure(figures.attn_q_head_N, "attn_q_head_N");
+  assert.ok(maximized.data.every(trace => {
+    const rows = trace.hovertemplate.split("<extra", 1)[0].split("<br>");
+    return rows[0] === "<b>260824-0901_scruffy_THOG_ANALOG_DENSE</b>"
+      && rows[1] === `step ${trace.meta.instra_thog_optimizer_update}`;
+  }), "maximized hover did not retain the full artifact with step second");
+  app.maximized_chart = null;
 
   elements.get("weight_coupling_input").value = "7";
   elements.get("weight_coupling_output").value = "8";

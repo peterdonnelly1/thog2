@@ -42,6 +42,11 @@ window.addEventListener("load", () => {
     };
     const clone = value => JSON.parse(JSON.stringify(value));
     const run_name = run => String(run?.artifact_name || run?.run_name || run_identifier(run));
+    const run_datetime = run => {
+      const artifact = run_name(run);
+      const match = artifact.match(/^(\d{6}-\d{4}|\d{2}-\d{3,4}-\d{4})(?:_|$)/);
+      return match ? match[1] : artifact;
+    };
     const escaped_html = value => String(value)
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -140,6 +145,8 @@ window.addEventListener("load", () => {
               instra_workspace_run_id: id,
               instra_workspace_colour: colour,
               instra_workspace_optimizer_update: optimizer_update,
+              instra_workspace_artifact_name: owner_name,
+              instra_workspace_run_datetime: run_datetime(entry.run),
             };
             trace.hovertemplate = `<b>${escaped_html(owner_name)}</b><br>${String(trace.hovertemplate || "")}`;
             if (dense_trace) {

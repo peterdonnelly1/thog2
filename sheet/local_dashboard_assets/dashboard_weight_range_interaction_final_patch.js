@@ -520,24 +520,57 @@ window.addEventListener("load", () => {
       prepared.layout = {...(prepared.layout || {}), colorway: steps.map(step => single_colour || step_colour(step))};
     };
 
-    const add_step_hover = prepared => {
+    const escaped_html = value => String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+
+    const selected_run_artifact = () => {
+      let run = null;
+      try { run = typeof current_run === "function" ? current_run() : null; }
+      catch (_error) { run = null; }
+      return String(run?.artifact_name || run?.run_name || app.current_status?.artifact_name || "");
+    };
+
+    const artifact_datetime = artifact => {
+      const value = String(artifact || "");
+      const match = value.match(/^(\d{6}-\d{4}|\d{2}-\d{3,4}-\d{4})(?:_|$)/);
+      return match ? match[1] : value;
+    };
+
+    const format_weight_hover = (prepared, chart_name) => {
       for (const trace of prepared?.data || []) {
         if (trace?.meta?.instra_top_axis_anchor === true) continue;
         let update = null;
         try { update = finite_integer(trace_optimizer_update(trace)); }
         catch (_error) { update = null; }
         if (update === null) continue;
-        const marker = `step ${update}`;
         const existing = typeof trace.hovertemplate === "string" ? trace.hovertemplate : "";
-        if (existing.includes(marker)) continue;
-        if (!existing) {
-          trace.hovertemplate = `${marker}<br>layer %{x}<br>weight %{y}<extra></extra>`;
-          continue;
-        }
         const extra_index = existing.indexOf("<extra");
-        trace.hovertemplate = extra_index >= 0
-          ? `${existing.slice(0, extra_index)}<br>${marker}${existing.slice(extra_index)}`
-          : `${existing}<br>${marker}`;
+        const body = extra_index >= 0 ? existing.slice(0, extra_index) : existing;
+        const extra = extra_index >= 0 ? existing.slice(extra_index) : "<extra></extra>";
+        let rows = body.split("<br>").filter(Boolean);
+        const meta = trace?.meta && typeof trace.meta === "object" && !Array.isArray(trace.meta)
+          ? trace.meta
+          : {};
+        const artifact = String(meta.instra_workspace_artifact_name || selected_run_artifact());
+        const compact_identity = String(meta.instra_workspace_run_datetime || artifact_datetime(artifact));
+        if (artifact && /^<b>[\s\S]*<\/b>$/.test(rows[0] || "")) rows = rows.slice(1);
+        rows = rows.filter(row => (
+          !new RegExp(`^step\\s+${update}\\s*$`, "i").test(row)
+          && !new RegExp(`^U${update}(?:\\s*[·•].*)?$`, "i").test(row)
+        ));
+        const identity = app.maximized_chart === chart_name ? artifact : compact_identity;
+        if (identity) {
+          rows = [`<b>${escaped_html(identity)}</b>`, `step ${update}`, ...rows];
+        } else if (rows.length) {
+          rows = [rows[0], `step ${update}`, ...rows.slice(1)];
+        } else {
+          rows = [`step ${update}`];
+        }
+        trace.hovertemplate = `${rows.join("<br>")}${extra}`;
       }
     };
 
@@ -582,10 +615,49 @@ window.addEventListener("load", () => {
           );
         });
       }
-      add_step_hover(prepared);
+      format_weight_hover(prepared, chart_name);
       colour_weight_steps(prepared);
       return prepared;
     };
+
+    let hover_mode_render_queued = false;
+    const queue_hover_mode_render = () => {
+      if (hover_mode_render_queued) return;
+      hover_mode_render_queued = true;
+      queueMicrotask(() => {
+        hover_mode_render_queued = false;
+        try {
+          const result = render_figures();
+          if (result && typeof result.catch === "function") {
+            result.catch(error => show_error(`Weight hover redraw failed: ${error.message}`));
+          }
+        } catch (error) {
+          show_error(`Weight hover redraw failed: ${error.message}`);
+        }
+      });
+    };
+
+    if (typeof restore_maximized_chart === "function") {
+      const base_restore_maximized_chart_weight_hover = restore_maximized_chart;
+      restore_maximized_chart = function() {
+        const prior = app.maximized_chart;
+        const result = base_restore_maximized_chart_weight_hover();
+        if (weight_chart_set.has(prior)) queue_hover_mode_render();
+        return result;
+      };
+    }
+
+    if (typeof toggle_maximized_chart === "function") {
+      const base_toggle_maximized_chart_weight_hover = toggle_maximized_chart;
+      toggle_maximized_chart = function(chart_name) {
+        const prior = app.maximized_chart;
+        const result = base_toggle_maximized_chart_weight_hover(chart_name);
+        if (weight_chart_set.has(chart_name) || weight_chart_set.has(prior)) {
+          queue_hover_mode_render();
+        }
+        return result;
+      };
+    }
 
     const base_render_figures_weight_range_final = render_figures;
     render_figures = async function() {

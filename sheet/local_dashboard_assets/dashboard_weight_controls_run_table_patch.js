@@ -358,9 +358,16 @@ window.addEventListener("load", () => {
         const full_text = definition.key === "activation_checkpointing"
           ? raw
           : display_config_value(raw);
-        cell.textContent = definition.key === "preset"
+        const visible_text = definition.key === "preset"
           ? full_text.slice(0, 9)
           : full_text;
+        if (definition.key === "preset" && full_text.toLowerCase() === "dense") {
+          const strong = document.createElement("strong");
+          strong.textContent = visible_text;
+          cell.appendChild(strong);
+        } else {
+          cell.textContent = visible_text;
+        }
         cell.title = `${definition.title}: ${full_text}`;
         marker.insertAdjacentElement("afterend", cell);
         marker = cell;

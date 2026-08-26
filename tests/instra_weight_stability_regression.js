@@ -101,6 +101,18 @@ let refresh_calls = 0;
 let cleared_step_drafts = 0;
 const click_listeners = [];
 const key_listeners = [];
+const emit_click = target => {
+  const event = {
+    type: "click",
+    target,
+    preventDefault() {},
+    stopImmediatePropagation() { this.stopped = true; },
+  };
+  for (const callback of click_listeners) {
+    callback(event);
+    if (event.stopped) break;
+  }
+};
 
 const context = {
   console,
@@ -320,6 +332,31 @@ assert.deepEqual(api.selected_range(), {minimum: 401, maximum: 500});
 api.show_latest();
 assert.deepEqual(api.selected_range(), {minimum: 500, maximum: 500});
 assert.ok(cleared_step_drafts > 0, "Whole/Latest did not release protected input drafts");
+
+// Workspace exposes the retained intersection as an explicit final control. It
+// remains clickable when no intersection exists so the established red inline
+// error can explain why no range was selected.
+context.app.workspace_mode = true;
+context.window.__instra_workspace = {visible_runs: () => [runs.A, runs.B]};
+api.sync_header();
+const overlap_button = elements.get("weight_step_overlapping_range");
+assert.ok(overlap_button, "Workspace overlap button was not installed");
+assert.equal(overlap_button.hidden, false);
+emit_click(overlap_button);
+assert.equal(elements.get("weight_step_range_error").hidden, false);
+assert.equal(elements.get("weight_step_range_error").textContent, "No overlapping retained weight steps.");
+
+context.window.__instra_workspace = {visible_runs: () => [
+  runs.B,
+  {...runs.B, dashboard_run_id: "D", depth_minimum_update: 450, depth_maximum_update: 550},
+]};
+api.sync_header();
+emit_click(overlap_button);
+assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 500});
+assert.equal(elements.get("weight_step_range_error").hidden, true);
+context.app.workspace_mode = false;
+api.sync_header();
+assert.equal(overlap_button.hidden, true, "overlap button leaked into a single-run view");
 
 // A historical run switch starts with an honest loading state, never a future-step
 // message inherited from the live run.
