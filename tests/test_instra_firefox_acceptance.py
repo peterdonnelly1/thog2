@@ -519,7 +519,7 @@ def test_real_firefox_renders_a_completed_finite_weight_capture(tmp_path: Path) 
             driver,
             lambda: driver.execute_script(
                 "return document.getElementById('weight_step_availability')?.textContent || '';"
-            ) == "data available 300–400",
+            ) == "capture window 300–400 · data available 300–400",
             message="completed capture did not expose its retained step range",
         )
         _wait(
