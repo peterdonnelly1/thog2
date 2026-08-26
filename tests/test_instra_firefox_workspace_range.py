@@ -134,22 +134,26 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             timeout=20,
             message="three Workspace fixture runs did not appear",
         )
-        preset_contract = driver.execute_script(
-            """
-            const row = wanted => [...document.querySelectorAll('tr[data-run-id]')].find(candidate => {
-              const value = String(candidate.dataset.runId || '');
-              return value === wanted || value === `legacy:${wanted}`;
-            });
-            const depth = row('workspace_a')?.querySelector('[data-instra-run-shape-cell="preset"]');
-            const dense = row('workspace_c')?.querySelector('[data-instra-run-shape-cell="preset"]');
-            return {
-              depth_text: depth?.textContent || '',
-              depth_bold: !!depth?.querySelector('strong'),
-              dense_text: dense?.textContent || '',
-              dense_bold: dense?.querySelector('strong')?.textContent || '',
-            };
-            """
+        preset_contract_script = """
+        const row = wanted => [...document.querySelectorAll('tr[data-run-id]')].find(candidate => {
+          const value = String(candidate.dataset.runId || '');
+          return value === wanted || value === `legacy:${wanted}`;
+        });
+        const depth = row('workspace_a')?.querySelector('[data-instra-run-shape-cell="preset"]');
+        const dense = row('workspace_c')?.querySelector('[data-instra-run-shape-cell="preset"]');
+        return {
+          depth_text: depth?.textContent || '',
+          depth_bold: !!depth?.querySelector('strong'),
+          dense_text: dense?.textContent || '',
+          dense_bold: dense?.querySelector('strong')?.textContent || '',
+        };
+        """
+        _wait(
+            driver,
+            lambda: driver.execute_script(preset_contract_script).get("dense_bold") == "dense",
+            message="delayed preset column did not render DENSE in bold",
         )
+        preset_contract = driver.execute_script(preset_contract_script)
         assert preset_contract == {
             "depth_text": "depth",
             "depth_bold": False,
