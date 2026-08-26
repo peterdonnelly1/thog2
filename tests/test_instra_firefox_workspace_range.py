@@ -285,7 +285,8 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 """
                 const traces = (document.getElementById('attn_q_head_N_plot')?.data || [])
                   .filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
-                return app.maximized_chart === 'attn_q_head_N' && traces.length > 0
+                const card = document.querySelector('.chart-card[data-chart="attn_q_head_N"]');
+                return !!card?.classList.contains('maximized') && traces.length > 0
                   && traces.every(trace => {
                     const rows = String(trace?.hovertemplate || '').split('<extra', 1)[0].split('<br>');
                     return rows[0] === `<b>${trace.meta.instra_workspace_artifact_name}</b>`
@@ -300,7 +301,9 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
         )
         _wait(
             driver,
-            lambda: driver.execute_script("return app.maximized_chart === null;") is True,
+            lambda: driver.execute_script(
+                "return !document.getElementById('charts_scroll')?.classList.contains('maximized-mode');"
+            ) is True,
             message="Workspace Q chart did not restore after hover test",
         )
 
