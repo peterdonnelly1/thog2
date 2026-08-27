@@ -245,6 +245,31 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             ) is True,
             message="Workspace overlap action did not select the retained intersection",
         )
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const traces = (document.getElementById('attn_q_head_N_plot')?.data || [])
+                  .filter(trace => (
+                    trace?.meta?.instra_top_axis_anchor !== true
+                    && trace?.meta?.instra_thog_executed_overlay !== true
+                  ));
+                const byRun = new Map();
+                for (const trace of traces) {
+                  const id = String(trace?.meta?.instra_workspace_run_id || '');
+                  const step = Number(trace?.meta?.instra_workspace_optimizer_update);
+                  if (!id || !Number.isFinite(step)) continue;
+                  if (!byRun.has(id)) byRun.set(id, new Set());
+                  byRun.get(id).add(step);
+                }
+                return byRun.size === 2 && [...byRun.values()].every(steps => (
+                  steps.size === 3 && [1002, 1003, 1004].every(step => steps.has(step))
+                ));
+                """
+            ) is True,
+            timeout=20,
+            message="Workspace overlap range did not finish redrawing both runs",
+        )
 
         driver.execute_script("document.getElementById('weight_step_gradient').click();")
         _wait(
@@ -263,16 +288,29 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                   const step = Number(trace?.meta?.instra_workspace_optimizer_update);
                   if (!id || !Number.isFinite(step)) continue;
                   if (!byRun.has(id)) byRun.set(id, []);
-                  byRun.get(id).push({step, colour: String(trace?.line?.color || '').toUpperCase()});
+                  byRun.get(id).push({step, colour: String(trace?.line?.color || '')});
                 }
-                const rgb = colour => [1, 3, 5].map(index => parseInt(colour.slice(index, index + 2), 16));
+                const rgb = colour => {
+                  const probe = document.createElement('span');
+                  probe.style.color = colour;
+                  probe.hidden = true;
+                  document.body.appendChild(probe);
+                  const values = (getComputedStyle(probe).color.match(/[0-9.]+/g) || [])
+                    .slice(0, 3).map(Number);
+                  probe.remove();
+                  return values;
+                };
+                const sameColour = (left, right) => {
+                  const a = rgb(left); const b = rgb(right);
+                  return a.length === 3 && b.length === 3 && a.every((value, index) => value === b[index]);
+                };
                 const lum = colour => { const [r,g,b] = rgb(colour); return .2126*r + .7152*g + .0722*b; };
                 return button?.getAttribute('aria-pressed') === 'true'
                   && [...byRun].every(([id, values]) => {
                     values.sort((a, b) => a.step - b.step);
                     if (values.length !== 3) return false;
-                    const base = String(colour_for_run(id)).toUpperCase();
-                    return values[1].colour === base
+                    const base = String(colour_for_run(id));
+                    return sameColour(values[1].colour, base)
                       && lum(values[0].colour) > lum(values[1].colour)
                       && lum(values[2].colour) < lum(values[1].colour);
                   });
