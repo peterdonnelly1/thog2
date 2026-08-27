@@ -602,6 +602,26 @@ window.addEventListener("load", () => {
       else input.value = String(value);
     };
 
+    const redraw_weight_figures = async () => {
+      await render_figures();
+      const rendered_context = context_key();
+      if (!rendered_context || typeof render_plot !== "function") return;
+      const fallback_jobs = [];
+      for (const chart_name of weight_chart_names) {
+        if (app.figures?.depth?.[chart_name]) continue;
+        const mount = by_id(`${chart_name}_plot`);
+        if (
+          mount?.dataset?.plotReady !== "true"
+          || mount.dataset.instraWeightContext !== rendered_context
+          || !mount.__instraWeightFigure
+        ) continue;
+        const placeholder = by_id(`${chart_name}_placeholder`);
+        if (placeholder) placeholder.hidden = true;
+        fallback_jobs.push(render_plot(mount, mount.__instraWeightFigure, chart_name));
+      }
+      await Promise.all(fallback_jobs);
+    };
+
     const sync_header = () => {
       ensure_final_step_controls();
       const next_context = context_key();
@@ -1004,7 +1024,7 @@ window.addEventListener("load", () => {
         gradient_enabled = !gradient_enabled;
         localStorage.setItem(gradient_storage_key, String(gradient_enabled));
         sync_header();
-        try { await render_figures(); }
+        try { await redraw_weight_figures(); }
         catch (error) { show_range_error(`Weight gradient redraw failed: ${error.message}`); }
         return;
       }
@@ -1145,6 +1165,7 @@ window.addEventListener("load", () => {
             && mount.data.length > 0
           ) {
             mount.dataset.instraWeightContext = rendered_context;
+            mount.__instraWeightFigure = app.figures.depth[chart_name];
           }
         }
       }

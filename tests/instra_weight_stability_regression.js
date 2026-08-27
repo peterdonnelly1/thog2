@@ -101,6 +101,7 @@ let selected_weight = false;
 let refresh_resolver = null;
 let refresh_calls = 0;
 let cleared_step_drafts = 0;
+let render_plot_calls = 0;
 const click_listeners = [];
 const key_listeners = [];
 const emit_click = async target => {
@@ -220,6 +221,11 @@ const context = {
     return prepared;
   },
   render_figures: async () => undefined,
+  render_plot: async (mount, figure) => {
+    render_plot_calls += 1;
+    mount.data = JSON.parse(JSON.stringify(figure.data || []));
+    mount.dataset.plotReady = "true";
+  },
   render_run_heading: () => undefined,
   populate_chart_settings_form: () => undefined,
   sync_chart_setting_outputs: () => undefined,
@@ -419,6 +425,14 @@ elements.get("q_plot").data = [{meta: {optimizer_update: 500}}];
 await context.render_figures();
 context.app.figures = {depth: {}};
 assert.equal(api.placeholder_message("q"), null, "current mounted curves were covered by loading copy");
+const gradient_button = elements.get("weight_step_gradient");
+const renders_before_gradient = render_plot_calls;
+await emit_click(gradient_button);
+assert.equal(
+  render_plot_calls,
+  renders_before_gradient + 1,
+  "gradient did not redraw the current mounted figure after its cache entry was cleared",
+);
 context.app.current_run_id = "A";
 context.app.current_status = runs.A;
 assert.equal(
