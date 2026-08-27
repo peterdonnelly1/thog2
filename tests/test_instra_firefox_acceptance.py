@@ -530,8 +530,13 @@ def test_real_firefox_renders_a_completed_finite_weight_capture(tmp_path: Path) 
             timeout=20,
             message="completed finite capture remained blank after the live run advanced past its end",
         )
-        assert driver.execute_script(
-            "return document.getElementById('attn_q_head_N_placeholder')?.hidden === true;"
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                "return document.getElementById('attn_q_head_N_placeholder')?.hidden === true;"
+            ) is True,
+            timeout=20,
+            message="completed finite capture remained in its transient loading state",
         )
         assert driver.execute_script(
             """

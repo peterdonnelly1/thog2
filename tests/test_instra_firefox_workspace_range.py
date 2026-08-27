@@ -253,7 +253,10 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 """
                 const button = document.getElementById('weight_step_gradient');
                 const traces = (document.getElementById('attn_q_head_N_plot')?.data || [])
-                  .filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
+                  .filter(trace => (
+                    trace?.meta?.instra_top_axis_anchor !== true
+                    && trace?.meta?.instra_thog_executed_overlay !== true
+                  ));
                 const byRun = new Map();
                 for (const trace of traces) {
                   const id = String(trace?.meta?.instra_workspace_run_id || '');
