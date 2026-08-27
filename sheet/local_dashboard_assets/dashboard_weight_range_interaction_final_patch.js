@@ -493,8 +493,74 @@ window.addEventListener("load", () => {
       return `hsl(${hue.toFixed(2)} 72% 46%)`;
     };
 
+    const blend_rgb = (left, right, amount) => left.map((value, index) => (
+      Math.round(value + (right[index] - value) * amount)
+    ));
+
+    const gradient_colour = (base_colour, update, minimum, maximum) => {
+      const base = typeof hex_to_rgb === "function" ? hex_to_rgb(base_colour) : null;
+      if (!base || maximum <= minimum) return base_colour;
+      const position = Math.max(0, Math.min(1, (update - minimum) / (maximum - minimum)));
+      if (position === 0.5) return base_colour;
+      if (position < 0.5) {
+        const lightest = blend_rgb(base, [255, 255, 255], 0.64);
+        return rgb_to_hex(blend_rgb(lightest, base, position / 0.5));
+      }
+      const darkest = blend_rgb(base, [0, 0, 0], 0.42);
+      return rgb_to_hex(blend_rgb(base, darkest, (position - 0.5) / 0.5));
+    };
+
+    const trace_run_id = trace => String(
+      trace?.meta?.instra_workspace_run_id || app.current_run_id || "__instra_single_run__"
+    );
+
     const colour_weight_steps = prepared => {
-      if (app.workspace_mode === true) return;
+      const use_gradient = stability.gradient_enabled?.() === true;
+      if (app.workspace_mode === true && !use_gradient) return;
+      if (use_gradient) {
+        const steps_by_run = new Map();
+        for (const trace of prepared?.data || []) {
+          if (trace?.meta?.instra_top_axis_anchor === true) continue;
+          let update = null;
+          try { update = finite_integer(trace_optimizer_update(trace)); }
+          catch (_error) { update = null; }
+          if (update === null) continue;
+          const identifier = trace_run_id(trace);
+          if (!steps_by_run.has(identifier)) steps_by_run.set(identifier, new Set());
+          steps_by_run.get(identifier).add(update);
+        }
+        const bounds_by_run = new Map([...steps_by_run].map(([identifier, values]) => {
+          const steps = [...values].sort((left, right) => left - right);
+          return [identifier, {
+            count: steps.length,
+            minimum: steps[0],
+            maximum: steps[steps.length - 1],
+          }];
+        }));
+        const colours = [];
+        for (const trace of prepared?.data || []) {
+          if (trace?.meta?.instra_top_axis_anchor === true) continue;
+          let update = null;
+          try { update = finite_integer(trace_optimizer_update(trace)); }
+          catch (_error) { update = null; }
+          if (update === null) continue;
+          const identifier = trace_run_id(trace);
+          const bounds = bounds_by_run.get(identifier);
+          const base_colour = colour_for_run(identifier);
+          const colour = !bounds || bounds.count <= 1
+            ? base_colour
+            : gradient_colour(base_colour, update, bounds.minimum, bounds.maximum);
+          colours.push(colour);
+          const mode = String(trace.mode || "");
+          if (mode.includes("lines") || trace.line) trace.line = {...(trace.line || {}), color: colour};
+          if (mode.includes("markers") || trace.marker) {
+            trace.marker = {...(trace.marker || {}), color: colour};
+            trace.marker.line = {...(trace.marker?.line || {}), color: colour};
+          }
+        }
+        prepared.layout = {...(prepared.layout || {}), colorway: colours};
+        return;
+      }
       const steps = [...new Set((prepared?.data || []).map(trace => {
         try { return finite_integer(trace_optimizer_update(trace)); }
         catch (_error) { return null; }

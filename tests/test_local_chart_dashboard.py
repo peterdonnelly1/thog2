@@ -412,8 +412,12 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "<th>File name</th>" in html
     assert ">Last modified</th>" in html
     assert ">Download</th>" in html
-    assert ">Probes</th>" in html
-    assert ">Curves</th>" in html
+    assert ">P_s</th>" in html
+    assert ">P_e</th>" in html
+    assert ">C_s</th>" in html
+    assert ">C_e</th>" in html
+    assert "run.heatmap_minimum_update" in javascript
+    assert "run.depth_minimum_update" in javascript
     assert ">Logged</th>" in html
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript

@@ -21,6 +21,7 @@ window.addEventListener("load", () => {
     const weight_chart_set = new Set(weight_chart_names);
     const group_storage_key = "thog2_local_weight_group_settings_v1";
     const override_storage_key = "thog2_local_weight_chart_overrides_v1";
+    const gradient_storage_key = "thog2_local_weight_gradient_v1";
     const legacy_step_api = window.__instra_weight_controls_v2;
     const legacy_clear_step_range = typeof legacy_step_api.clear_step_range === "function"
       ? legacy_step_api.clear_step_range.bind(legacy_step_api)
@@ -28,8 +29,10 @@ window.addEventListener("load", () => {
     const selection_api = window.__instra_matched_weight_selection;
     const range_by_context = new Map();
     const loading_contexts = new Set();
+    let gradient_enabled = localStorage.getItem(gradient_storage_key) === "true";
     let refresh_suppression = 0;
     let editor_draft = null;
+    let last_header_context = "";
 
     const own = (object, key) => (
       Boolean(object)
@@ -72,7 +75,25 @@ window.addEventListener("load", () => {
     };
 
     const current_context_runs = () => {
-      if (app.workspace_mode === true) return visible_workspace_runs();
+      if (app.workspace_mode === true) {
+        const status = app.current_status && typeof app.current_status === "object"
+          ? app.current_status
+          : null;
+        const selected = String(app.current_run_id || "");
+        return visible_workspace_runs().map(run => {
+          if (!status || !selected || run_id(run) !== selected || run_id(status) !== selected) {
+            return run;
+          }
+          return {
+            ...run,
+            ...status,
+            configuration: {
+              ...(run.configuration || {}),
+              ...(status.configuration || {}),
+            },
+          };
+        });
+      }
       const run = typeof current_run === "function" ? current_run() : null;
       const status = app.current_status && typeof app.current_status === "object"
         ? app.current_status
@@ -123,10 +144,50 @@ window.addEventListener("load", () => {
     const available_range = () => {
       const runs = current_context_runs();
       if (!runs.length) return null;
+      let rendered_ranges = null;
+      const rendered_range_for_run = identifier => {
+        if (rendered_ranges === null) {
+          rendered_ranges = new Map();
+          const single_identifier = runs.length === 1 ? run_id(runs[0]) : "";
+          for (const chart_name of weight_chart_names) {
+            let figure = null;
+            try { figure = figure_for_chart(chart_name); }
+            catch (_error) { figure = app.figures?.depth?.[chart_name] || null; }
+            for (const trace of figure?.data || []) {
+              const trace_identifier = String(
+                trace?.meta?.instra_workspace_run_id || single_identifier
+              );
+              if (!trace_identifier) continue;
+              let update = null;
+              try { update = finite_step(trace_optimizer_update(trace)); }
+              catch (_error) { update = null; }
+              if (update === null) continue;
+              const prior = rendered_ranges.get(trace_identifier);
+              rendered_ranges.set(trace_identifier, prior
+                ? {
+                    minimum: Math.min(prior.minimum, update),
+                    maximum: Math.max(prior.maximum, update),
+                  }
+                : {minimum: update, maximum: update});
+            }
+          }
+        }
+        return rendered_ranges.get(identifier) || null;
+      };
       const ranges = [];
       for (const run of runs) {
-        const retained_minimum = finite_step(run?.depth_minimum_update);
-        const retained_maximum = finite_step(run?.depth_maximum_update);
+        const identifier = run_id(run);
+        const stored_minimum = finite_step(run?.depth_minimum_update);
+        const stored_maximum = finite_step(run?.depth_maximum_update);
+        const rendered = stored_minimum === null || stored_maximum === null
+          ? rendered_range_for_run(identifier)
+          : null;
+        const retained_minimum = stored_minimum
+          ?? rendered?.minimum
+          ?? null;
+        const retained_maximum = stored_maximum
+          ?? rendered?.maximum
+          ?? null;
         const configured = capture_bounds_for_run(run);
         const minimum = retained_minimum === null
           ? null
@@ -199,6 +260,26 @@ window.addEventListener("load", () => {
       if (group && typeof group === "object" && own(group, field)) return group[field] === true;
       return false;
     };
+
+    const explicit_flag_for_scope = (scope, chart_name, field) => {
+      const overrides = json_store(override_storage_key);
+      const override_scope = `${scope}:${chart_name}`;
+      const override = overrides[override_scope];
+      if (override && typeof override === "object" && own(override, field)) {
+        return override[field] === true;
+      }
+      const legacy_store = field === "current_weights_only"
+        ? app.weight_current_only
+        : app.weight_join_with_line_segments;
+      if (own(legacy_store, override_scope)) return legacy_store[override_scope] === true;
+      const group = json_store(group_storage_key)[scope];
+      if (group && typeof group === "object" && own(group, field)) return group[field] === true;
+      return null;
+    };
+
+    const inherited_workspace_join = (chart_name, identifier) => (
+      explicit_flag_for_scope(`run:${identifier}`, chart_name, "join_with_line_segments") === true
+    );
 
     const supplied_flag = (supplied, field) => (
       supplied && typeof supplied === "object" && !Array.isArray(supplied) && own(supplied, field)
@@ -431,6 +512,19 @@ window.addEventListener("load", () => {
         }
         if (colours) restore_colours(prepared, colours);
       }
+      if (
+        app.workspace_mode === true
+        && explicit_flag_for_scope("workspace", chart_name, "join_with_line_segments") === null
+        && typeof apply_thog_line_segments === "function"
+      ) {
+        prepared.data = (prepared.data || []).flatMap(trace => {
+          const identifier = String(trace?.meta?.instra_workspace_run_id || "");
+          if (!identifier || !inherited_workspace_join(chart_name, identifier)) return [trace];
+          const one = {data: [trace]};
+          apply_thog_line_segments(one);
+          return one.data || [];
+        });
+      }
       return prepared;
     };
 
@@ -461,6 +555,16 @@ window.addEventListener("load", () => {
         latest.title = "Show the latest retained weight snapshot";
         whole.insertAdjacentElement("afterend", latest);
       }
+      let gradient = by_id("weight_step_gradient");
+      if (!gradient) {
+        gradient = document.createElement("button");
+        gradient.id = "weight_step_gradient";
+        gradient.type = "button";
+        gradient.className = "weight-step-button";
+        gradient.textContent = "gradient";
+        gradient.title = "Colour retained curves from lightest at the earliest step through the run colour to darkest at the latest step";
+        latest.insertAdjacentElement("afterend", gradient);
+      }
       let overlap = by_id("weight_step_overlapping_range");
       if (!overlap) {
         overlap = document.createElement("button");
@@ -469,7 +573,7 @@ window.addEventListener("load", () => {
         overlap.className = "weight-step-button";
         overlap.textContent = "show overlapping range";
         overlap.title = "Show the optimizer-step range retained by every visible Workspace run";
-        latest.insertAdjacentElement("afterend", overlap);
+        gradient.insertAdjacentElement("afterend", overlap);
       }
       let error = by_id("weight_step_range_error");
       if (!error) {
@@ -500,6 +604,11 @@ window.addEventListener("load", () => {
 
     const sync_header = () => {
       ensure_final_step_controls();
+      const next_context = context_key();
+      if (next_context !== last_header_context) {
+        last_header_context = next_context;
+        show_range_error("");
+      }
       const range = selected_range();
       const mode = selected_range_mode();
       const displayed_range = range || (mode === "settings" ? settings_display_range() : null);
@@ -508,6 +617,7 @@ window.addEventListener("load", () => {
       const to = by_id("weight_step_to");
       const whole = by_id("weight_step_whole_range");
       const latest = by_id("weight_step_latest");
+      const gradient = by_id("weight_step_gradient");
       const overlap = by_id("weight_step_overlapping_range");
       const current = by_id("weight_step_current");
       const availability = by_id("weight_step_availability");
@@ -543,6 +653,7 @@ window.addEventListener("load", () => {
       }
       whole?.setAttribute("aria-pressed", String(mode === "whole"));
       latest?.setAttribute("aria-pressed", String(mode === "latest"));
+      gradient?.setAttribute("aria-pressed", String(gradient_enabled));
       controls?.classList?.toggle?.("active", range !== null);
       if (whole) whole.title = "Show every retained weight snapshot in this view";
 
@@ -563,10 +674,7 @@ window.addEventListener("load", () => {
         const configured_text = configured
           ? `capture window ${configured.minimum ?? "first"}–${configured.maximum ?? "latest"}`
           : "";
-        const available_text = available
-          ? `data available ${available.minimum}–${available.maximum}`
-          : "data available —";
-        availability.textContent = [configured_text, available_text].filter(Boolean).join(" · ");
+        availability.textContent = configured_text;
       }
     };
 
@@ -614,8 +722,9 @@ window.addEventListener("load", () => {
       }
 
       const snapshot_count = Math.max(0, ...runs.map(run => Number(run?.depth_snapshot_count || 0)));
-      if (snapshot_count > 0) return "Weight curves unavailable.";
-      return running ? "Waiting for the first weight snapshot." : "No recorded weight snapshots.";
+      if (snapshot_count > 0) return "Loading weight curves…";
+      if (app.refresh_in_flight) return "Loading weight curves…";
+      return running ? "Loading weight curves…" : "No recorded weight snapshots.";
     };
 
     const reconcile_placeholders = () => {
@@ -785,6 +894,43 @@ window.addEventListener("load", () => {
       show_range_error("");
     }, true);
 
+    const refresh_workspace_statuses = async () => {
+      if (app.workspace_mode !== true) return;
+      const results = await Promise.all(visible_workspace_runs().map(async run => {
+        const identifier = run_id(run);
+        if (!identifier) return null;
+        try {
+          return {
+            identifier,
+            status: await fetch_json(`/api/status?run=${encodeURIComponent(identifier)}`),
+          };
+        } catch (_error) {
+          return null;
+        }
+      }));
+      for (const result of results.filter(Boolean)) {
+        const run = app.runs?.find(candidate => run_id(candidate) === result.identifier);
+        if (run) {
+          Object.assign(run, result.status, {
+            configuration: {
+              ...(run.configuration || {}),
+              ...(result.status.configuration || {}),
+            },
+          });
+        }
+        if (String(app.current_run_id || "") === result.identifier) {
+          app.current_status = {
+            ...(app.current_status || {}),
+            ...result.status,
+            configuration: {
+              ...(app.current_status?.configuration || {}),
+              ...(result.status.configuration || {}),
+            },
+          };
+        }
+      }
+    };
+
     const corrected_header_range = () => {
       const available = available_range();
       if (!available) return {error: "No retained weight steps are available."};
@@ -830,7 +976,7 @@ window.addEventListener("load", () => {
       return {minimum, maximum, error: errors.join("; ")};
     };
 
-    const apply_range_from_header = event => {
+    const apply_range_from_header = async event => {
       const target = event.target;
       const apply = event.type === "click" && target?.closest?.("#weight_step_apply");
       const enter = (
@@ -840,12 +986,26 @@ window.addEventListener("load", () => {
       );
       const whole = event.type === "click" && target?.closest?.("#weight_step_whole_range");
       const latest = event.type === "click" && target?.closest?.("#weight_step_latest");
+      const gradient = event.type === "click" && target?.closest?.("#weight_step_gradient");
       const overlap = event.type === "click" && target?.closest?.("#weight_step_overlapping_range");
-      if (!apply && !enter && !whole && !latest && !overlap) return;
+      if (!apply && !enter && !whole && !latest && !gradient && !overlap) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (gradient) {
+        gradient_enabled = !gradient_enabled;
+        localStorage.setItem(gradient_storage_key, String(gradient_enabled));
+        sync_header();
+        try { await render_figures(); }
+        catch (error) { show_range_error(`Weight gradient redraw failed: ${error.message}`); }
+        return;
+      }
       if (overlap) {
+        overlap.disabled = true;
+        overlap.setAttribute("aria-busy", "true");
+        await refresh_workspace_statuses();
         const available = available_range();
+        overlap.disabled = false;
+        overlap.removeAttribute("aria-busy");
         if (app.workspace_mode !== true || !available) {
           show_range_error("No overlapping retained weight steps.");
           return;
@@ -990,7 +1150,20 @@ window.addEventListener("load", () => {
       try {
         return await base_refresh_current_run();
       } finally {
-        if (key) loading_contexts.delete(key);
+        const has_depth = Boolean(
+          app.figures?.depth && Object.keys(app.figures.depth).length > 0
+        );
+        const known_snapshot_count = Math.max(
+          0,
+          ...current_context_runs().map(run => Number(run?.depth_snapshot_count || 0)),
+        );
+        const requested_snapshot_count = finite_step(
+          app.figures?.weight_step_range?.snapshot_count
+        );
+        if (
+          key
+          && (has_depth || known_snapshot_count === 0 || requested_snapshot_count === 0)
+        ) loading_contexts.delete(key);
         const reseeded = seed_configured_range();
         sync_header();
         reconcile_placeholders();
@@ -1058,6 +1231,11 @@ window.addEventListener("load", () => {
         margin-left: 2px;
         white-space: nowrap;
       }
+      #weight_step_gradient { margin-left: 6px; }
+      .weight-step-button[aria-busy="true"] {
+        opacity: .62;
+        cursor: progress;
+      }
       .weight-step-button[aria-pressed="true"] {
         border-color: #1590a8;
         color: #0b6577;
@@ -1081,6 +1259,10 @@ window.addEventListener("load", () => {
         current_weights_only: effective_flag(chart_name, "current_weights_only"),
         join_with_line_segments: effective_flag(chart_name, "join_with_line_segments"),
       }),
+      gradient_enabled: () => gradient_enabled,
+      workspace_join_explicit: chart_name => (
+        explicit_flag_for_scope("workspace", chart_name, "join_with_line_segments")
+      ),
       placeholder_message,
       reconcile_placeholders,
       seed_configured_range,

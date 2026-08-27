@@ -160,6 +160,26 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             "dense_text": "dense",
             "dense_bold": "dense",
         }
+        capture_columns = driver.execute_script(
+            """
+            const headers = [...document.querySelectorAll('.runs-table thead th')]
+              .map(cell => String(cell.textContent || '').trim());
+            const row = [...document.querySelectorAll('tr[data-run-id]')].find(candidate =>
+              ['workspace_a', 'legacy:workspace_a'].includes(String(candidate.dataset.runId || ''))
+            );
+            const value = label => row?.children[headers.indexOf(label)]?.textContent?.trim() || '';
+            return {
+              sequence: headers.filter(label => ['P_s', 'P_e', 'C_s', 'C_e'].includes(label)),
+              curve_start: value('C_s'),
+              curve_end: value('C_e'),
+            };
+            """
+        )
+        assert capture_columns == {
+            "sequence": ["P_s", "P_e", "C_s", "C_e"],
+            "curve_start": "1,000",
+            "curve_end": "1,004",
+        }
 
         driver.execute_script(
             "const el=document.getElementById('workspace_nav'); if(!el) throw new Error('workspace_nav'); el.click();"
@@ -182,13 +202,9 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             message="Workspace weight-step controls did not appear",
         )
 
-        _wait(
-            driver,
-            lambda: driver.execute_script(
-                "return document.getElementById('weight_step_availability')?.textContent || '';"
-            ) == "data available —",
-            message="three-run Workspace did not report no overlapping steps",
-        )
+        assert driver.execute_script(
+            "return document.getElementById('weight_step_availability')?.textContent || '';"
+        ) == ""
         driver.execute_script("document.getElementById('weight_step_overlapping_range').click();")
         _wait(
             driver,
@@ -207,8 +223,11 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
         _wait(
             driver,
             lambda: driver.execute_script(
-                "return document.getElementById('weight_step_availability')?.textContent || '';"
-            ) == "data available 1002–1004",
+                """
+                const range = window.__instra_weight_stability_final?.available_range?.();
+                return range?.minimum === 1002 && range?.maximum === 1004;
+                """
+            ) is True,
             message="eye-ablation did not restore the A/B retained-step intersection",
         )
         driver.execute_script("document.getElementById('weight_step_overlapping_range').click();")
@@ -225,6 +244,39 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 """
             ) is True,
             message="Workspace overlap action did not select the retained intersection",
+        )
+
+        driver.execute_script("document.getElementById('weight_step_gradient').click();")
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const button = document.getElementById('weight_step_gradient');
+                const traces = (document.getElementById('attn_q_head_N_plot')?.data || [])
+                  .filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
+                const byRun = new Map();
+                for (const trace of traces) {
+                  const id = String(trace?.meta?.instra_workspace_run_id || '');
+                  const step = Number(trace?.meta?.instra_workspace_optimizer_update);
+                  if (!id || !Number.isFinite(step)) continue;
+                  if (!byRun.has(id)) byRun.set(id, []);
+                  byRun.get(id).push({step, colour: String(trace?.line?.color || '').toUpperCase()});
+                }
+                const rgb = colour => [1, 3, 5].map(index => parseInt(colour.slice(index, index + 2), 16));
+                const lum = colour => { const [r,g,b] = rgb(colour); return .2126*r + .7152*g + .0722*b; };
+                return button?.getAttribute('aria-pressed') === 'true'
+                  && [...byRun].every(([id, values]) => {
+                    values.sort((a, b) => a.step - b.step);
+                    if (values.length !== 3) return false;
+                    const base = String(colour_for_run(id)).toUpperCase();
+                    return values[1].colour === base
+                      && lum(values[0].colour) > lum(values[1].colour)
+                      && lum(values[2].colour) < lum(values[1].colour);
+                  });
+                """
+            ) is True,
+            timeout=20,
+            message="Workspace gradient did not use light/run-colour/dark step ordering",
         )
 
         _set_step_window(driver, 1002, 1003)
@@ -286,7 +338,14 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                 const traces = (document.getElementById('attn_q_head_N_plot')?.data || [])
                   .filter(trace => trace?.meta?.instra_top_axis_anchor !== true);
                 const card = document.querySelector('.chart-card[data-chart="attn_q_head_N"]');
+                const actions = card?.querySelector('.chart-card-actions');
+                const groupHeader = document.querySelector('#coefficients_chart_group > .chart-group-header');
                 return !!card?.classList.contains('maximized') && traces.length > 0
+                  && getComputedStyle(groupHeader).display !== 'none'
+                  && !!actions?.classList.contains('thog2-maximized-weight-controls')
+                  && getComputedStyle(actions).visibility === 'visible'
+                  && !!actions.querySelector('.explicit-trajectory-modes')
+                  && !!actions.querySelector('.chart-settings-button')
                   && traces.every(trace => {
                     const rows = String(trace?.hovertemplate || '').split('<extra', 1)[0].split('<br>');
                     return rows[0] === `<b>${trace.meta.instra_workspace_artifact_name}</b>`
@@ -346,6 +405,18 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             ) is True,
             timeout=20,
             message="Q chart did not leave historical-range placeholder after whole range",
+        )
+        driver.execute_script("document.getElementById('runs_nav').click();")
+        _wait(
+            driver,
+            lambda: driver.execute_script(
+                """
+                const error = document.getElementById('weight_step_range_error');
+                return document.body.classList.contains('instra-workspace-mode') === false
+                  && (!error || error.hidden);
+                """
+            ) is True,
+            message="Workspace range error leaked back into Runs",
         )
     finally:
         if driver is not None:

@@ -36,6 +36,7 @@ class FakeElement {
   matches(selector) { return selector.includes(`#${this.id}`); }
   closest(selector) { return this.matches(selector) ? this : null; }
   setAttribute(name, value) { this[name] = String(value); }
+  removeAttribute(name) { delete this[name]; }
   insertAdjacentElement(_position, element) {
     if (element?.id) elements.set(element.id, element);
     return element;
@@ -94,6 +95,7 @@ const runs = {
     },
   },
 };
+const status_responses = {...runs};
 
 let selected_weight = false;
 let refresh_resolver = null;
@@ -101,7 +103,7 @@ let refresh_calls = 0;
 let cleared_step_drafts = 0;
 const click_listeners = [];
 const key_listeners = [];
-const emit_click = target => {
+const emit_click = async target => {
   const event = {
     type: "click",
     target,
@@ -109,7 +111,7 @@ const emit_click = target => {
     stopImmediatePropagation() { this.stopped = true; },
   };
   for (const callback of click_listeners) {
-    callback(event);
+    await callback(event);
     if (event.stopped) break;
   }
 };
@@ -173,6 +175,11 @@ const context = {
   run_identifier: run => run.dashboard_run_id,
   display_run_state: run => run.run_state,
   colour_for_run: () => "#008000",
+  fetch_json: async url => {
+    const identifier = new URL(url, "http://127.0.0.1").searchParams.get("run");
+    if (!status_responses[identifier]) throw new Error("not found");
+    return status_responses[identifier];
+  },
   show_toast: message => { throw new Error(`unexpected toast: ${message}`); },
   normalize_chart_settings: (chart_name, supplied = null) => ({
     current_weights_only: false,
@@ -190,6 +197,9 @@ const context = {
   },
   instra_enforce_workspace_latest_weights: prepared => prepared,
   limit_curve_snapshots() {},
+  apply_thog_line_segments(prepared) {
+    for (const trace of prepared.data || []) trace.instra_joined_for_test = true;
+  },
   prepare_figure(figure, chart_name) {
     const prepared = JSON.parse(JSON.stringify(figure));
     const settings = context.normalize_chart_settings(chart_name);
@@ -266,7 +276,7 @@ assert.equal(elements.get("weight_step_from").value, "401");
 assert.equal(elements.get("weight_step_to").value, "500");
 assert.equal(context.normalize_chart_settings("q").current_weights_only, false);
 assert.equal(context.normalize_chart_settings("q").join_with_line_segments, false);
-assert.equal(api.placeholder_message("q"), "Weight curves unavailable.");
+assert.equal(api.placeholder_message("q"), "Loading weight curves…");
 
 context.app.current_run_id = "C";
 context.app.current_status = runs.C;
@@ -274,7 +284,7 @@ context.app.figures = {depth: {}};
 assert.equal(api.selected_range(), null);
 assert.equal(
   api.placeholder_message("q"),
-  "Weight curves unavailable.",
+  "Loading weight curves…",
   "snapshots outside the configured capture window leaked into the view",
 );
 
@@ -336,27 +346,68 @@ assert.ok(cleared_step_drafts > 0, "Whole/Latest did not release protected input
 // Workspace exposes the retained intersection as an explicit final control. It
 // remains clickable when no intersection exists so the established red inline
 // error can explain why no range was selected.
+(async () => {
 context.app.workspace_mode = true;
 context.window.__instra_workspace = {visible_runs: () => [runs.A, runs.B]};
+selected_weight = false;
+const inherited_segments = context.prepare_figure({
+  data: [
+    {name: "A", meta: {optimizer_update: 20, kind: "random", instra_workspace_run_id: "A"}},
+    {name: "B", meta: {optimizer_update: 450, kind: "random", instra_workspace_run_id: "B"}},
+  ],
+  layout: {},
+}, "q");
+assert.equal(inherited_segments.data.find(trace => trace.name === "A").instra_joined_for_test, true);
+assert.equal(inherited_segments.data.find(trace => trace.name === "B").instra_joined_for_test, undefined);
+assert.equal(api.workspace_join_explicit("q"), null, "Workspace unexpectedly acquired an explicit segment preference");
+save_json("thog2_local_weight_group_settings_v1", {
+  ...load_json("thog2_local_weight_group_settings_v1", {}),
+  workspace: {current_weights_only: false, join_with_line_segments: false},
+});
+assert.equal(api.workspace_join_explicit("q"), false);
+const explicit_workspace_segments = context.prepare_figure({
+  data: [
+    {name: "A-explicit", meta: {optimizer_update: 20, kind: "random", instra_workspace_run_id: "A"}},
+  ],
+  layout: {},
+}, "q");
+assert.equal(explicit_workspace_segments.data[0].instra_joined_for_test, undefined);
+const settings_without_workspace = load_json("thog2_local_weight_group_settings_v1", {});
+delete settings_without_workspace.workspace;
+save_json("thog2_local_weight_group_settings_v1", settings_without_workspace);
+const trace_only_e = {
+  dashboard_run_id: "E", run_state: "finished", depth_snapshot_count: 2,
+  depth_minimum_update: null, depth_maximum_update: null, configuration: {},
+};
+context.window.__instra_workspace = {visible_runs: () => [trace_only_e]};
+context.app.figures = {depth: {q: {data: [
+  {meta: {optimizer_update: 70, instra_workspace_run_id: "E"}},
+  {meta: {optimizer_update: 80, instra_workspace_run_id: "E"}},
+]}}};
+assert.deepEqual(api.available_range(), {minimum: 70, maximum: 80}, "rendered range fallback failed");
+context.window.__instra_workspace = {visible_runs: () => [runs.A, runs.B]};
+context.app.figures = {depth: {}};
 api.sync_header();
 const overlap_button = elements.get("weight_step_overlapping_range");
 assert.ok(overlap_button, "Workspace overlap button was not installed");
 assert.equal(overlap_button.hidden, false);
-emit_click(overlap_button);
+await emit_click(overlap_button);
 assert.equal(elements.get("weight_step_range_error").hidden, false);
 assert.equal(elements.get("weight_step_range_error").textContent, "No overlapping retained weight steps.");
 
-context.window.__instra_workspace = {visible_runs: () => [
-  runs.B,
-  {...runs.B, dashboard_run_id: "D", depth_minimum_update: 450, depth_maximum_update: 550},
-]};
+const stale_d = {...runs.B, dashboard_run_id: "D", depth_minimum_update: null, depth_maximum_update: null};
+status_responses.D = {...stale_d, depth_minimum_update: 450, depth_maximum_update: 550};
+context.app.runs.push(stale_d);
+context.window.__instra_workspace = {visible_runs: () => [runs.B, stale_d]};
 api.sync_header();
-emit_click(overlap_button);
+await emit_click(overlap_button);
 assert.deepEqual(api.selected_range(), {minimum: 450, maximum: 500});
+assert.equal(stale_d.depth_minimum_update, 450, "overlap action did not refresh stale Workspace status");
 assert.equal(elements.get("weight_step_range_error").hidden, true);
 context.app.workspace_mode = false;
 api.sync_header();
 assert.equal(overlap_button.hidden, true, "overlap button leaked into a single-run view");
+assert.equal(elements.get("weight_step_range_error").hidden, true, "Workspace range error leaked into Runs");
 
 // A historical run switch starts with an honest loading state, never a future-step
 // message inherited from the live run.
@@ -370,4 +421,8 @@ assert.ok(refresh_calls > 0);
 context.__resolve_refresh();
 
 console.log("instra weight stability regression: PASS");
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
 // ^^^ THOG

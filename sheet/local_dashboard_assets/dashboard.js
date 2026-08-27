@@ -221,8 +221,8 @@ function filtered_runs() {
   runs.sort((left, right) => {
     let comparison = 0;
     if (sort === "name") comparison = String(left.artifact_name).localeCompare(String(right.artifact_name));
-    else if (sort === "heatmap") comparison = Number(left.heatmap_count) - Number(right.heatmap_count);
-    else if (sort === "depth") comparison = Number(left.depth_snapshot_count) - Number(right.depth_snapshot_count);
+    else if (sort === "heatmap") comparison = Number(left.heatmap_maximum_update) - Number(right.heatmap_maximum_update);
+    else if (sort === "depth") comparison = Number(left.depth_maximum_update) - Number(right.depth_maximum_update);
     else if (sort === "updated") comparison = String(left.updated_at).localeCompare(String(right.updated_at));
     else comparison = String(left.created_at).localeCompare(String(right.created_at));
     if (!comparison) comparison = run_identifier(left).localeCompare(run_identifier(right));
@@ -337,8 +337,10 @@ function append_run_row(body, run) {
   state_cell.appendChild(badge);
   row.appendChild(state_cell);
   row.appendChild(text_cell(run.host_label || "—"));
-  row.appendChild(text_cell(format_integer(run.heatmap_count), "numeric-column"));
-  row.appendChild(text_cell(format_integer(run.depth_snapshot_count), "numeric-column"));
+  row.appendChild(text_cell(format_integer(run.heatmap_minimum_update), "numeric-column"));
+  row.appendChild(text_cell(format_integer(run.heatmap_maximum_update), "numeric-column"));
+  row.appendChild(text_cell(format_integer(run.depth_minimum_update), "numeric-column"));
+  row.appendChild(text_cell(format_integer(run.depth_maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_time(run.updated_at)));
   const menu_cell = document.createElement("td");
@@ -1136,7 +1138,7 @@ function depth_card(chart_name) {
   title.textContent = normalize_chart_settings(chart_name).title;
   const detail = document.createElement("p");
   detail.id = `${chart_name}_detail`;
-  detail.textContent = "Waiting for the first weight snapshot.";
+  detail.textContent = "Loading weight curves…";
   copy.append(title, detail);
   const actions = document.createElement("div");
   actions.className = "chart-card-actions";
@@ -1154,7 +1156,7 @@ function depth_card(chart_name) {
   const placeholder = document.createElement("div");
   placeholder.className = "plot-placeholder";
   placeholder.id = `${chart_name}_placeholder`;
-  placeholder.textContent = "Waiting for the first weight snapshot.";
+  placeholder.textContent = "Loading weight curves…";
   const mount = document.createElement("div");
   mount.className = "plot-mount";
   mount.id = `${chart_name}_plot`;
@@ -1183,7 +1185,7 @@ function reset_run_charts() {
   by_id("heatmap_card_detail").textContent = "Waiting for the first layer-count probe.";
   for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
     const detail = by_id(`${chart_name}_detail`);
-    if (detail) detail.textContent = "Waiting for the first weight snapshot.";
+    if (detail) detail.textContent = "Loading weight curves…";
   }
 }
 

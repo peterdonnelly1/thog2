@@ -319,7 +319,7 @@ window.addEventListener("load", () => {
 
       const show_label = document.createElement("span");
       show_label.className = "weight-step-show-label";
-      show_label.textContent = "show weights for steps";
+      show_label.textContent = "steps";
 
       const from = document.createElement("input");
       from.id = "weight_step_from";
@@ -433,13 +433,10 @@ window.addEventListener("load", () => {
       else if (bounds.minimum === bounds.maximum) current.textContent = `current step ${bounds.maximum}`;
       else current.textContent = `current steps ${bounds.minimum}–${bounds.maximum}`;
 
-      if (retained.available) {
-        availability.textContent = `data available ${retained.minimum}–${retained.maximum}`;
-        availability.title = `Intersection of retained weight snapshots; maximum selectable window ${capacity} steps.`;
-      } else {
-        availability.textContent = `data available: ${retained.reason}`;
-        availability.title = `Maximum selectable window ${capacity} steps.`;
-      }
+      // The dependency-gated final owner writes the configured capture window.
+      // Keep this legacy pass neutral so it cannot flash stale retained ranges.
+      availability.textContent = "";
+      availability.title = "";
 
       if (step_filter_active()) {
         if (document.activeElement !== from) from.value = String(selected_step_range.minimum);
@@ -460,7 +457,7 @@ window.addEventListener("load", () => {
         return `Curves will be displayed when step ${selected_step_range.minimum} is reached`;
       }
       if (!selected_range_has_any_figure()) {
-        return `Waiting for a recorded weight snapshot in steps ${selected_step_range.minimum}–${selected_step_range.maximum}`;
+        return "Loading weight curves…";
       }
       return null;
     };

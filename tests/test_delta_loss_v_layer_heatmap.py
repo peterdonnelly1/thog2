@@ -580,6 +580,7 @@ def test_attachment_writes_local_heatmap_without_wandb(
     status = reader.status()
     history = reader.heatmap_history()
     assert status["heatmap_count"] == 1
+    assert status["heatmap_minimum_update"] == 10
     assert status["heatmap_maximum_update"] == 10
     assert len(history[0]["values"]) == 60
     assert history[0]["values"][47] == pytest.approx(0.0)

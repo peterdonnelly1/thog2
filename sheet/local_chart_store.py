@@ -433,13 +433,17 @@ class LocalChartReader:
         try:
             heatmap = connection.execute(
                 """
-                SELECT COUNT(*) AS count, MAX(optimizer_update) AS maximum_update
+                SELECT COUNT(*) AS count,
+                       MIN(optimizer_update) AS minimum_update,
+                       MAX(optimizer_update) AS maximum_update
                 FROM heatmap_records
                 """
             ).fetchone()
             depth = connection.execute(
                 """
-                SELECT COUNT(*) AS count, MAX(optimizer_update) AS maximum_update
+                SELECT COUNT(*) AS count,
+                       MIN(optimizer_update) AS minimum_update,
+                       MAX(optimizer_update) AS maximum_update
                 FROM depth_weight_snapshots
                 """
             ).fetchone()
@@ -457,10 +461,16 @@ class LocalChartReader:
             connection.close()
         return {
             "heatmap_count": int(heatmap["count"]),
+            "heatmap_minimum_update": (
+                None if heatmap["minimum_update"] is None else int(heatmap["minimum_update"])
+            ),
             "heatmap_maximum_update": (
                 None if heatmap["maximum_update"] is None else int(heatmap["maximum_update"])
             ),
             "depth_snapshot_count": int(depth["count"]),
+            "depth_minimum_update": (
+                None if depth["minimum_update"] is None else int(depth["minimum_update"])
+            ),
             "depth_maximum_update": (
                 None if depth["maximum_update"] is None else int(depth["maximum_update"])
             ),

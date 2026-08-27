@@ -71,8 +71,8 @@
               <option value="created">Created timestamp</option>
               <option value="updated">Recently updated</option>
               <option value="name">Name</option>
-              <option value="heatmap">Probes</option>
-              <option value="depth">Curves</option>
+              <option value="heatmap">Probe end step</option>
+              <option value="depth">Curve end step</option>
             </select>
           </label>
         </div>
@@ -88,8 +88,10 @@
               <th>W&amp;B ID</th>
               <th>State</th>
               <th>Host</th>
-              <th class="numeric-column heatmap-column" title="Number of retained layer-count heatmap probes">Probes</th>
-              <th class="numeric-column curve-column" title="Number of retained coefficient-curve time points">Curves</th>
+              <th class="numeric-column probe-start-column" title="First retained layer-count heatmap probe step">P_s</th>
+              <th class="numeric-column probe-end-column" title="Last retained layer-count heatmap probe step">P_e</th>
+              <th class="numeric-column curve-start-column" title="First retained weight-curve capture step">C_s</th>
+              <th class="numeric-column curve-end-column" title="Last retained weight-curve capture step">C_e</th>
               <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">Logged</th>
               <th>Updated</th>
               <th class="menu-column"><span class="visually-hidden">Run menu</span></th>

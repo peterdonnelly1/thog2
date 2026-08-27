@@ -57,7 +57,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--instrumentation__depth_weight_curves__scalar_weights_per_matrix N", "sampled scalar weights per matrix; default 3"),
             ("—", "--instrumentation__depth_weight_curves__depth_evaluation_points N", "continuous THOG curve resolution; DENSE remains discrete; default 256"),
             ("—", "--instrumentation__depth_weight_curves__time_mode latest|accumulate", "show the latest snapshot or accumulated history; default latest"),
-            ("—", "--instrumentation__depth_weight_curves__history_length N", "maximum accumulated snapshots; default 20"),
+            ("—", "--instrumentation__depth_weight_curves__history_length N", "open-ended accumulated-snapshot cap; finite capture windows auto-size; default 20"),
             ("—", "--instrumentation__depth_weight_curves__log_every_n_steps N", "successful updates between chart snapshots; default 100"),
             ("—", "--instrumentation__depth_weight_curves__same_coordinates_all_runs", "share deterministic scalar coordinates across runs"),
             ("—", "--no-instrumentation__depth_weight_curves__same_coordinates_all_runs", "select deterministic scalar coordinates per run; default"),

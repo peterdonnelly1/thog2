@@ -409,7 +409,10 @@ window.addEventListener("load", () => {
       set_group_collapsed: save_group_collapsed,
     };
 
-    setInterval(refresh_metric_groups, 2500);
+    // A newly-opened active run may acquire its first committed W&B history record
+    // between ordinary dashboard polls. One-second discovery keeps the pending
+    // train group responsive without loading any collapsed chart payloads.
+    setInterval(refresh_metric_groups, 1000);
     setTimeout(refresh_metric_groups, 50);
   }, 0);
 });

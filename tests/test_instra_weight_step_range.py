@@ -80,6 +80,9 @@ def test_retained_weight_step_range_reads_only_requested_snapshots(tmp_path: Pat
         store.append_depth_weight_snapshot(_snapshot(update), history_length=3)
 
     reader = LocalChartReader(store.path)
+    status = reader.status()
+    assert status["depth_minimum_update"] == 100
+    assert status["depth_maximum_update"] == 130
     assert step_range._depth_minimum_update(reader) == 100
     assert [
         item["optimizer_update"]
@@ -96,6 +99,7 @@ def test_retained_weight_step_range_reads_only_requested_snapshots(tmp_path: Pat
     ) == ()
 
     store.append_depth_weight_snapshot(_snapshot(140), history_length=3)
+    assert reader.status()["depth_minimum_update"] == 110
     assert step_range._depth_minimum_update(reader) == 110
     assert [
         item["optimizer_update"]

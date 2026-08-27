@@ -123,6 +123,7 @@ const capture_selection = {
   intermediate_feature: 14,
 };
 let capture_save_count = 0;
+let gradient_enabled = false;
 const rendered = new Map();
 const app = {
   current_run_id: "R1",
@@ -144,6 +145,7 @@ const context = {
     __instra_weight_stability_final: {
       context_key: () => "run:R1",
       selected_range: () => ({minimum: 10, maximum: 11}),
+      gradient_enabled: () => gradient_enabled,
     },
     __instra_matched_weight_selection: {
       selection: () => ({...capture_selection}),
@@ -175,7 +177,14 @@ const context = {
     current_weights_only: false,
     ...(supplied || {}),
   }),
-  colour_for_run: () => "#e8790c",
+  colour_for_run: run_id => run_id === "R2" ? "#2563EB" : "#E8790C",
+  hex_to_rgb(hex) {
+    const match = /^#?([0-9a-f]{6})$/i.exec(String(hex));
+    return match ? [0, 2, 4].map(index => parseInt(match[1].slice(index, index + 2), 16)) : null;
+  },
+  rgb_to_hex(rgb) {
+    return `#${rgb.map(value => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  },
   current_run: () => app.current_status,
   display_run_state: run => String(run?.run_state || ""),
   prepare_figure(figure, chart_name) {
@@ -259,6 +268,26 @@ context.window.window = context.window;
       && rows[1] === `step ${trace.meta.instra_thog_optimizer_update}`;
   }), "maximized hover did not retain the full artifact with step second");
   app.maximized_chart = null;
+
+  gradient_enabled = true;
+  const gradient_figure = {
+    data: [
+      make_trace("attn_q_head_N", 10, 2, 3, 10, "random"),
+      make_trace("attn_q_head_N", 15, 2, 3, 15, "random"),
+      make_trace("attn_q_head_N", 20, 2, 3, 20, "random"),
+    ],
+    layout: {},
+  };
+  const gradient = context.prepare_figure(gradient_figure, "attn_q_head_N");
+  const gradient_colours = gradient.data.map(trace => trace.line.color.toUpperCase());
+  const luminance = colour => {
+    const [red, green, blue] = context.hex_to_rgb(colour);
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  assert.equal(gradient_colours[1], "#E8790C", "gradient midpoint is not the exact run colour");
+  assert.ok(luminance(gradient_colours[0]) > luminance(gradient_colours[1]), "earliest gradient curve is not lighter");
+  assert.ok(luminance(gradient_colours[2]) < luminance(gradient_colours[1]), "latest gradient curve is not darker");
+  gradient_enabled = false;
 
   elements.get("weight_coupling_input").value = "7";
   elements.get("weight_coupling_output").value = "8";

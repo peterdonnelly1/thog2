@@ -18,6 +18,7 @@ _WEIGHT_VIEW_CONFIGURATION_KEYS = (
 
 
 def _depth_minimum_update(reader: Any) -> int | None:
+    """Compatibility fallback for stores/readers predating status minima."""
     connection = _store._open_database(reader.path, readonly=True)
     try:
         row = connection.execute(
@@ -108,7 +109,10 @@ def install(dashboard: Any) -> None:
             status.get("depth_snapshot_count"),
             status.get("depth_maximum_update"),
         )
-        if getattr(self, "_thog2_depth_minimum_revision", None) != revision:
+        if status.get("depth_minimum_update") is not None:
+            self._thog2_depth_minimum_revision = revision
+            self._thog2_depth_minimum_update = int(status["depth_minimum_update"])
+        elif getattr(self, "_thog2_depth_minimum_revision", None) != revision:
             self._thog2_depth_minimum_revision = revision
             self._thog2_depth_minimum_update = (
                 _depth_minimum_update(self.reader)

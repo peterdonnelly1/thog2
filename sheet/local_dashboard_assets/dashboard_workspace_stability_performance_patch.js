@@ -62,7 +62,7 @@ window.addEventListener("load", () => {
       .map(run => run_identifier(run))
       .join("|");
     const depth_key = () => visible_workspace_runs().map(run => (
-      `${run_identifier(run)}:${Number(run.depth_snapshot_count || 0)}:${String(run.depth_maximum_update ?? "")}`
+      `${run_identifier(run)}:${Number(run.depth_snapshot_count || 0)}:${String(run.depth_minimum_update ?? "")}:${String(run.depth_maximum_update ?? "")}`
     )).join("|");
 
     let last_composition_key = null;

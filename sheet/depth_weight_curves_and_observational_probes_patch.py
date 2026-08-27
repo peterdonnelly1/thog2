@@ -195,6 +195,10 @@ def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
         "--instrumentation__depth_weight_curves__history_length",
         type=int,
         default=_DEFAULT_HISTORY_LENGTH,
+        help=(
+            "retention cap for open-ended accumulated weight snapshots; "
+            "a finite start/end capture window automatically retains its full inclusive cadence"
+        ),
     )
     parser.add_argument(
         "--instrumentation__depth_weight_curves__log_every_n_steps",

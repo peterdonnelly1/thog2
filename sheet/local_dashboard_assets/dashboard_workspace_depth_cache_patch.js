@@ -39,13 +39,19 @@ window.addEventListener("load", () => {
           return [run_id, {
             ...run,
             depth_snapshot_count: current_status.depth_snapshot_count,
+            depth_minimum_update: current_status.depth_minimum_update,
             depth_maximum_update: current_status.depth_maximum_update,
+            configuration: {
+              ...(run.configuration || {}),
+              ...(current_status.configuration || {}),
+            },
           }];
         })
     );
 
     const depth_revision = (run, variant) => JSON.stringify([
       Number(run?.depth_snapshot_count || 0),
+      run?.depth_minimum_update ?? null,
       run?.depth_maximum_update ?? null,
       variant,
     ]);

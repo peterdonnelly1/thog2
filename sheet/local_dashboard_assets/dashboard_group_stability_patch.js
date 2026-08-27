@@ -45,6 +45,19 @@ window.addEventListener("load", () => {
         + '<strong>train</strong>'
         + '<span class="group-count">…</span>'
       );
+      button.addEventListener("click", () => {
+        // Opening the pending train group is an explicit user preference. Carry it
+        // into the real W&B-backed group when the first history record arrives.
+        queueMicrotask(() => {
+          window.__thog2_metric_groups?.set_group_collapsed?.(
+            "train",
+            section.classList.contains("collapsed"),
+          );
+          if (!section.classList.contains("collapsed")) {
+            window.__thog2_metric_groups?.refresh?.();
+          }
+        });
+      });
       header.appendChild(button);
       const grid = document.createElement("div");
       grid.className = "chart-grid thog2-pending-train-grid";
