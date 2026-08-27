@@ -687,9 +687,18 @@ window.addEventListener("load", () => {
 
     const placeholder_message = chart_name => {
       const key = context_key();
-      if (key && loading_contexts.has(key)) return "Loading weight curves…";
       const figure = app.figures?.depth?.[chart_name];
       if (figure) return null;
+      const mount = by_id(`${chart_name}_plot`);
+      const mounted_for_context = Boolean(
+        key
+        && mount?.dataset?.plotReady === "true"
+        && mount.dataset.instraWeightContext === key
+        && Array.isArray(mount.data)
+        && mount.data.length > 0
+      );
+      if (mounted_for_context) return null;
+      if (key && loading_contexts.has(key)) return "Loading weight curves…";
       const runs = current_context_runs();
       const range = selected_range();
       const state = selected_run_state();
@@ -1125,6 +1134,20 @@ window.addEventListener("load", () => {
     const base_render_figures = render_figures;
     render_figures = async function() {
       const result = await base_render_figures();
+      const rendered_context = context_key();
+      if (rendered_context) {
+        for (const chart_name of weight_chart_names) {
+          const mount = by_id(`${chart_name}_plot`);
+          if (
+            app.figures?.depth?.[chart_name]
+            && mount?.dataset?.plotReady === "true"
+            && Array.isArray(mount.data)
+            && mount.data.length > 0
+          ) {
+            mount.dataset.instraWeightContext = rendered_context;
+          }
+        }
+      }
       sync_header();
       reconcile_placeholders();
       return result;

@@ -409,6 +409,24 @@ api.sync_header();
 assert.equal(overlap_button.hidden, true, "overlap button leaked into a single-run view");
 assert.equal(elements.get("weight_step_range_error").hidden, true, "Workspace range error leaked into Runs");
 
+// A cache invalidation may clear app.figures after a valid Plotly render. Keep the
+// current context's mounted curves visible, but never trust a mount from another run.
+context.app.current_run_id = "B";
+context.app.current_status = runs.B;
+context.app.figures = {depth: {q: {data: [{meta: {optimizer_update: 500}}]}}};
+elements.get("q_plot").dataset.plotReady = "true";
+elements.get("q_plot").data = [{meta: {optimizer_update: 500}}];
+await context.render_figures();
+context.app.figures = {depth: {}};
+assert.equal(api.placeholder_message("q"), null, "current mounted curves were covered by loading copy");
+context.app.current_run_id = "A";
+context.app.current_status = runs.A;
+assert.equal(
+  api.placeholder_message("q"),
+  "Loading weight curves…",
+  "a mounted chart from another run suppressed the loading state",
+);
+
 // A historical run switch starts with an honest loading state, never a future-step
 // message inherited from the live run.
 refresh_resolver = resolve => { context.__resolve_refresh = resolve; };
