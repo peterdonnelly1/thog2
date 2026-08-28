@@ -24,9 +24,9 @@ Branch: `depth_weight_curves_and_observational_probes`
 - [x] JavaScript syntax and deterministic dashboard regressions.
 - [x] Python storage/server/lifecycle regressions.
 - [x] Live SQLite + HTTP acceptance for capture ranges and loading states.
-- [ ] Real Firefox Runs/Workspace/fullscreen acceptance.
-- [ ] Broad head-versus-base CPU comparison with zero new regressions.
-- [ ] Publish exact tested tree and provide download stanza.
+- [x] Real Firefox Runs/Workspace/fullscreen acceptance.
+- [x] Broad head-versus-base CPU comparison with zero new regressions.
+- [x] Publish exact tested implementation tree; provide the download stanza with the final handoff.
 
 ## Binding invariants
 
