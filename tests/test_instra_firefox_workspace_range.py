@@ -305,17 +305,29 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                   return a.length === 3 && b.length === 3 && a.every((value, index) => value === b[index]);
                 };
                 const lum = colour => { const [r,g,b] = rgb(colour); return .2126*r + .7152*g + .0722*b; };
-                return button?.getAttribute('aria-pressed') === 'true'
-                  && [...byRun].every(([id, values]) => {
-                    values.sort((a, b) => a.step - b.step);
-                    if (values.length !== 3) return false;
-                    const base = String(colour_for_run(id));
-                    return sameColour(values[1].colour, base)
-                      && lum(values[0].colour) > lum(values[1].colour)
-                      && lum(values[2].colour) < lum(values[1].colour);
-                  });
-                """
-            ) is True,
+                    const pressed = button?.getAttribute('aria-pressed') === 'true';
+                    const diagnostics = [...byRun].map(([id, values]) => {
+                        values.sort((a, b) => a.step - b.step);
+                        const base = String(colour_for_run(id));
+                        return {
+                          id,
+                          base,
+                          values: values.map(value => ({
+                            ...value,
+                            luminance: lum(value.colour),
+                          })),
+                          passed: values.length === 3
+                            && sameColour(values[1].colour, base)
+                            && lum(values[0].colour) > lum(values[1].colour)
+                            && lum(values[2].colour) < lum(values[1].colour),
+                        };
+                      });
+                    if (!pressed || !diagnostics.every(value => value.passed)) {
+                      throw new Error(JSON.stringify({pressed, diagnostics}));
+                    }
+                    return true;
+                    """
+                ) is True,
             timeout=20,
             message="Workspace gradient did not use light/run-colour/dark step ordering",
         )
