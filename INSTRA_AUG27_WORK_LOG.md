@@ -18,3 +18,11 @@
 - `history_length` is not globally redundant: it is the safety bound for open-ended accumulation. It is redundant for a finite start/end window because lifecycle code auto-sizes retention to the full inclusive cadence. CLI help now states that distinction.
 - Local verification: all dashboard JavaScript regressions pass; 198 non-browser focused Python tests plus 9 subtests pass; an additional 52 storage/dashboard/W&B tests pass; Python and JavaScript compilation pass.
 - Local Firefox reached driver startup but the workspace cancelled its driver/network approval. The real Firefox cases remain mandatory in hosted CI before release.
+
+## 2026-08-28 takeover
+
+- Resumed from the clean sandpit handoff. The six local unpublished commits were patch-equivalent to commits already published remotely; rebasing skipped those duplicates and aligned the sandpit to remote head `3d505e395fa149f077df033e9020ae76677d4dc1`.
+- The remote line included four post-handoff fixes for Firefox loading/gradient assertions, retained curves during cache refresh, Workspace redraw timing, and remounting weight controls.
+- Hosted run `33066483802` failed the focused job at `3d505e3`; broad CPU comparison was consequently skipped. Existing CI exposed only an exit-code annotation, so the focused pytest step now emits its failure tail as a GitHub check annotation for deterministic remote diagnosis.
+- Reverified the non-browser portion at `3d505e3`: 198 tests plus 9 subtests passed, all JavaScript dashboard regressions passed, and Python/JavaScript compilation passed.
+- Firefox 154.0.1 and geckodriver 0.37.1 were obtained in the sandbox, but the execution environment blocks even the local WebDriver TCP connection. Real Firefox acceptance therefore remains a hosted-CI gate.

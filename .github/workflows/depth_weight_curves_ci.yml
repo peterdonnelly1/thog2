@@ -58,6 +58,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -euo pipefail
+          set +e
           pytest -q \
             tests/test_dense_weight_curves.py \
             tests/test_depth_weight_curves_and_observational_probes.py \
@@ -84,7 +85,20 @@ jobs:
             tests/test_plastic_depth_probe_sampling_v0521.py \
             tests/test_stage3_semantic_materialization.py \
             tests/test_stage4_depth_materialization.py \
-            tests/test_depth_layer_norm_bias_modes.py
+            tests/test_depth_layer_norm_bias_modes.py \
+            2>&1 | tee /tmp/depth_weight_focused_pytest.log
+          pytest_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$pytest_status" -ne 0 ]; then
+            python - <<'PY'
+          from pathlib import Path
+
+          output = Path("/tmp/depth_weight_focused_pytest.log").read_text(encoding="utf-8", errors="replace")
+          failure_tail = output[-12000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Focused pytest failure::{failure_tail}")
+          PY
+          fi
+          exit "$pytest_status"
 
       - name: Publish focused regression status
         if: always()
