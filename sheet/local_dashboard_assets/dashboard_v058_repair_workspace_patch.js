@@ -554,6 +554,9 @@ window.addEventListener("load", () => {
           t: Math.max(42, Number(prepared.layout?.margin?.t || 0)),
           b: Math.max(64, Number(prepared.layout?.margin?.b || 0)),
         };
+        const gradient_enabled = (
+          window.__instra_weight_stability_final?.gradient_enabled?.() === true
+        );
         for (const trace of prepared.data || []) {
           const meta = trace.meta && typeof trace.meta === "object" && !Array.isArray(trace.meta)
             ? trace.meta
@@ -562,6 +565,8 @@ window.addEventListener("load", () => {
           const dense_trace = meta.instra_dense_weight === true;
           const colour = dense_trace
             ? dense_step_colour(meta.instra_dense_optimizer_update)
+            : gradient_enabled && run_id
+            ? null
             : run_id
             ? colour_for_run(run_id)
             : meta.instra_workspace_colour;

@@ -8,6 +8,7 @@ const visible = new Set(["run-a", "run-b"]);
 const colours = {"run-a": "#ef4444", "run-b": "#2563eb"};
 const saved_heatmap_settings = {};
 const save_button_listeners = [];
+let gradient_enabled = false;
 const elements = {
   heatmap_chart_group: {hidden: false, setAttribute() {}},
   save_chart_settings: {
@@ -58,7 +59,12 @@ const context = {
     mlp_up: "MLP up weights",
     mlp_down: "MLP down weights",
   },
-  window: {addEventListener: (_name, callback) => callback()},
+  window: {
+    addEventListener: (_name, callback) => callback(),
+    __instra_weight_stability_final: {
+      gradient_enabled: () => gradient_enabled,
+    },
+  },
   document: {
     body: {classList: {add() {}, remove() {}}},
     head: {appendChild() {}},
@@ -218,6 +224,36 @@ async function main() {
   assert.equal(prepared_weight.data[0].marker.line.width, 0.35);
   assert.equal(prepared_weight.data[0].marker.size, 6);
   assert.match(prepared_weight.data[0].marker.color, /^hsl\(/);
+
+  // The v0.58 compatibility layer installs after the final range owner in the
+  // browser. When gradient mode is active it must preserve the light/base/dark
+  // colours already assigned to ordinary Workspace curves.
+  gradient_enabled = true;
+  const gradient_colours = ["#f0d8d0", colours["run-a"], "#7d2424"];
+  const gradient_figure = {
+    data: [10, 20, 30].map((step, index) => ({
+      mode: "lines+markers",
+      line: {color: gradient_colours[index]},
+      marker: {color: gradient_colours[index], line: {color: gradient_colours[index]}},
+      meta: {
+        instra_workspace_run_id: "run-a",
+        instra_workspace_optimizer_update: step,
+      },
+    })),
+    layout: {},
+  };
+  const preserved_gradient = context.prepare_figure(gradient_figure, "mlp_down");
+  assert.deepEqual(
+    Array.from(preserved_gradient.data, trace => trace.line.color),
+    gradient_colours,
+    "late Workspace repair replaced the enabled step gradient",
+  );
+  assert.deepEqual(
+    Array.from(preserved_gradient.data, trace => trace.marker.line.color),
+    gradient_colours,
+    "late Workspace repair replaced gradient marker outlines",
+  );
+  gradient_enabled = false;
   assert.equal(prepared_weight.data[0].marker.color, prepared_weight.data[2].marker.color);
   assert.notEqual(prepared_weight.data[0].marker.color, prepared_weight.data[1].marker.color);
   assert.equal(prepared_weight.data[0].mode, "lines+markers");
