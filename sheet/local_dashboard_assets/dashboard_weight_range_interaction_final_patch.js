@@ -118,11 +118,13 @@ window.addEventListener("load", () => {
       catch (_error) { return null; }
     };
 
-    // Intersect logical pairs across every visible chart/run/optimizer-step unit.
-    // A chosen pair therefore cannot make part of a multi-step view disappear.
+    // A pair may begin part-way through a run after the user changes capture
+    // coordinates, so requiring it at every retained step makes real recorded data
+    // unreachable. In Workspace keep the honest cross-run intersection: never
+    // substitute a different matrix element merely to keep another run visible.
     const recorded_pairs = () => {
       const pairs = new Map();
-      const units = new Map();
+      const pairs_by_run = new Map();
       for (const chart_name of weight_chart_names) {
         const figure = raw_figure(chart_name);
         for (const trace of figure?.data || []) {
@@ -150,12 +152,11 @@ window.addEventListener("load", () => {
             pairs.set(key, pair);
           }
           const run_id = String(meta.instra_workspace_run_id || "__instra_single_run__");
-          const unit_key = `${chart_name}:${run_id}:${optimizer_update}`;
-          if (!units.has(unit_key)) units.set(unit_key, new Set());
-          units.get(unit_key).add(key);
+          if (!pairs_by_run.has(run_id)) pairs_by_run.set(run_id, new Set());
+          pairs_by_run.get(run_id).add(key);
         }
       }
-      const sets = [...units.values()];
+      const sets = [...pairs_by_run.values()];
       if (!sets.length) return [];
       return [...sets[0]]
         .filter(key => sets.every(unit => unit.has(key)))
@@ -265,10 +266,12 @@ window.addEventListener("load", () => {
       return error;
     };
 
-    const show_error = message => {
+    const show_error = (message, {title = "", tone = "error"} = {}) => {
       const error = ensure_error();
       if (!error) return;
       error.textContent = String(message || "");
+      error.title = message ? String(title || message) : "";
+      error.dataset.tone = message ? tone : "";
       error.hidden = !message;
     };
 
@@ -283,7 +286,13 @@ window.addEventListener("load", () => {
       document.activeElement?.matches?.("#weight_coupling_input, #weight_coupling_output") === true
     );
 
+    let last_viewer_context = null;
     const sync_viewer_controls = () => {
+      const next_context = context_key();
+      if (next_context !== last_viewer_context) {
+        last_viewer_context = next_context;
+        show_error("");
+      }
       const pairs = recorded_pairs();
       const pair = viewer_pair();
       const capability = viewer_capability();
@@ -329,7 +338,7 @@ window.addEventListener("load", () => {
       const editor = by_id("weight_coupling_editor");
       if (editor) {
         editor.title = capability.available
-          ? `Valid feature indices: 0–${capability.maximum}; ${pairs.length} coupling${pairs.length === 1 ? "" : "s"} recorded across every displayed step`
+          ? `Valid feature indices: 0–${capability.maximum}; ${pairs.length} coupling${pairs.length === 1 ? "" : "s"} available in this view`
           : "Waiting for the run's matrix dimensions";
       }
       ensure_error();
@@ -339,10 +348,10 @@ window.addEventListener("load", () => {
       try {
         const result = render_figures();
         if (result && typeof result.catch === "function") {
-          result.catch(error => show_error(`Weight coupling redraw failed: ${error.message}`));
+          result.catch(error => show_error("Redraw failed.", {title: error.message}));
         }
       } catch (error) {
-        show_error(`Weight coupling redraw failed: ${error.message}`);
+        show_error("Redraw failed.", {title: error.message});
       }
     };
 
@@ -365,17 +374,18 @@ window.addEventListener("load", () => {
       persist_pair(candidate);
       sync_viewer_controls();
       request_render();
-      show_error(
-        `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} is valid and will appear from the next recorded snapshot; earlier snapshots cannot be reconstructed.`
-      );
+      show_error("Starts next snapshot.", {
+        title: `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} will appear from the next recorded snapshot; earlier snapshots cannot be reconstructed.`,
+        tone: "info",
+      });
       return true;
     };
 
     const reject_unrecorded_pair = candidate => {
       const current = viewer_pair();
-      show_error(
-        `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} was not recorded for this completed view.`
-      );
+      show_error("Not recorded.", {
+        title: `Coupling ${candidate.model_feature} → ${candidate.intermediate_feature} was not recorded for this completed view.`,
+      });
       if (current) {
         write_input(by_id("weight_coupling_input"), current.model_feature);
         write_input(by_id("weight_coupling_output"), current.intermediate_feature);
@@ -392,7 +402,7 @@ window.addEventListener("load", () => {
         try {
           if (await schedule_capture_pair(candidate)) return true;
         } catch (error) {
-          show_error(`Weight coupling save failed: ${error.message}`);
+          show_error("Save failed.", {title: error.message});
           return false;
         }
         return reject_unrecorded_pair(candidate);
@@ -405,7 +415,7 @@ window.addEventListener("load", () => {
       const current = viewer_pair();
       const capability = viewer_capability();
       if (model_feature === null || intermediate_feature === null || model_feature < 0 || intermediate_feature < 0) {
-        show_error("Both coupling indices must be non-negative whole numbers.");
+        show_error("Use non-negative integers.");
         sync_viewer_controls();
         return false;
       }
@@ -416,8 +426,8 @@ window.addEventListener("load", () => {
       ) {
         show_error(
           capability.available
-            ? `Both coupling indices must be between 0 and ${capability.maximum}.`
-            : "Waiting for this run's matrix dimensions."
+            ? `Range: 0–${capability.maximum}.`
+            : "Waiting for dimensions."
         );
         if (current) {
           write_input(by_id("weight_coupling_input"), current.model_feature);
@@ -445,10 +455,11 @@ window.addEventListener("load", () => {
     };
 
     const handle_button = button_id => {
+      show_error("");
       const current = viewer_pair();
       const capability = viewer_capability();
       if (!capability.available || !current) {
-        show_error("Waiting for this run's matrix dimensions and first coupling.");
+        show_error("Waiting for first coupling.");
         sync_viewer_controls();
         return;
       }
@@ -462,7 +473,7 @@ window.addEventListener("load", () => {
           const any_changed = recorded.filter(pair => !same_pair(pair, current));
           const choices = both_changed.length ? both_changed : any_changed;
           if (!choices.length) {
-            show_error("No other recorded coupling is available for this completed view.");
+            show_error("Only one coupling recorded.");
             return;
           }
           void commit_pair(choices[Math.floor(Math.random() * choices.length)]);
@@ -470,7 +481,7 @@ window.addEventListener("load", () => {
         }
         const next_recorded = directional_recorded_pair(button_id, current, recorded);
         if (!next_recorded) {
-          show_error("No recorded coupling is available in that direction for this completed view.");
+          show_error("No recorded coupling that way.");
           return;
         }
         void commit_pair(next_recorded);
@@ -494,7 +505,7 @@ window.addEventListener("load", () => {
       if (button_id === "weight_branch_minus") next.intermediate_feature = Math.max(0, next.intermediate_feature - 1);
       if (button_id === "weight_branch_plus") next.intermediate_feature = Math.min(capability.maximum, next.intermediate_feature + 1);
       if (same_pair(next, current)) {
-        show_error(`Feature index is already at ${button_id.endsWith("minus") ? 0 : capability.maximum}.`);
+        show_error(`Already at ${button_id.endsWith("minus") ? 0 : capability.maximum}.`);
         return;
       }
       void commit_pair(next);
@@ -529,13 +540,9 @@ window.addEventListener("load", () => {
       const base = typeof hex_to_rgb === "function" ? hex_to_rgb(base_colour) : null;
       if (!base || maximum <= minimum) return base_colour;
       const position = Math.max(0, Math.min(1, (update - minimum) / (maximum - minimum)));
-      if (position === 0.5) return base_colour;
-      if (position < 0.5) {
-        const lightest = blend_rgb(base, [255, 255, 255], 0.64);
-        return rgb_to_hex(blend_rgb(lightest, base, position / 0.5));
-      }
-      const darkest = blend_rgb(base, [0, 0, 0], 0.42);
-      return rgb_to_hex(blend_rgb(base, darkest, (position - 0.5) / 0.5));
+      if (position >= 1) return base_colour;
+      const lightest = blend_rgb(base, [255, 255, 255], 0.64);
+      return rgb_to_hex(blend_rgb(lightest, base, position));
     };
 
     const trace_run_id = trace => String(
@@ -736,10 +743,10 @@ window.addEventListener("load", () => {
         try {
           const result = render_figures();
           if (result && typeof result.catch === "function") {
-            result.catch(error => show_error(`Weight hover redraw failed: ${error.message}`));
+            result.catch(error => show_error("Redraw failed.", {title: error.message}));
           }
         } catch (error) {
-          show_error(`Weight hover redraw failed: ${error.message}`);
+          show_error("Redraw failed.", {title: error.message});
         }
       });
     };
@@ -781,6 +788,16 @@ window.addEventListener("load", () => {
       };
     }
 
+    if (typeof select_run === "function") {
+      const base_select_run_weight_range_final = select_run;
+      select_run = function(...args) {
+        show_error("");
+        const result = base_select_run_weight_range_final(...args);
+        queueMicrotask(sync_viewer_controls);
+        return result;
+      };
+    }
+
     if (typeof render_runs === "function") {
       const base_render_runs_weight_range_final = render_runs;
       render_runs = function() {
@@ -800,12 +817,19 @@ window.addEventListener("load", () => {
       }
       .weight-coupling-view-error {
         color: #b42318;
+        display: inline-block;
+        flex: 0 1 150px;
         font-size: 10px;
         font-weight: 400;
         line-height: 1.2;
         margin-left: 5px;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
         white-space: nowrap;
       }
+      .weight-coupling-view-error[data-tone="info"] { color: #59636e; }
     `;
     document.head.appendChild(style);
 

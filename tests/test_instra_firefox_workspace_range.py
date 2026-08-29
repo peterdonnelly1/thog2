@@ -172,6 +172,9 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
               sequence: headers.filter(label => ['P_s', 'P_e', 'C_s', 'C_e'].includes(label)),
               curve_start: value('C_s'),
               curve_end: value('C_e'),
+              header_case: [...document.querySelectorAll(
+                '.probe-start-column, .probe-end-column, .curve-start-column, .curve-end-column'
+              )].map(cell => getComputedStyle(cell).textTransform),
             };
             """
         )
@@ -179,6 +182,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
             "sequence": ["P_s", "P_e", "C_s", "C_e"],
             "curve_start": "1,000",
             "curve_end": "1,004",
+            "header_case": ["none", "none", "none", "none"],
         }
 
         driver.execute_script(
@@ -317,9 +321,9 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                             luminance: lum(value.colour),
                           })),
                           passed: values.length === 3
-                            && sameColour(values[1].colour, base)
+                            && sameColour(values[2].colour, base)
                             && lum(values[0].colour) > lum(values[1].colour)
-                            && lum(values[2].colour) < lum(values[1].colour),
+                            && lum(values[1].colour) > lum(values[2].colour),
                         };
                       });
                     if (!pressed || !diagnostics.every(value => value.passed)) {
@@ -329,7 +333,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                     """
                 ) is True,
             timeout=20,
-            message="Workspace gradient did not use light/run-colour/dark step ordering",
+            message="Workspace gradient did not darken from lightest to the exact run colour",
         )
 
         _set_step_window(driver, 1002, 1003)

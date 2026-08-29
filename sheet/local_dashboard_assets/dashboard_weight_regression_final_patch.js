@@ -412,7 +412,13 @@ window.addEventListener("load", () => {
       .runs-table .instra-wandb-column { width: 92px !important; }
       .runs-table .instra-state-column { width: 88px !important; }
       .runs-table .instra-host-column { width: 96px !important; }
-      .runs-table .instra-duration-column { width: 58px !important; }
+      .runs-table .duration-column,
+      .runs-table .instra-duration-column {
+        width: 78px !important;
+        min-width: 78px !important;
+        text-transform: none !important;
+        white-space: nowrap;
+      }
       .runs-table .instra-updated-column { width: 110px !important; }
       .run-overview-pane .overview-metadata {
         grid-template-columns: 120px minmax(0, 1fr) !important;

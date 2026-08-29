@@ -276,7 +276,11 @@ def test_continuous_scalar_curve_uses_executed_layer_index_ruler(monkeypatch) ->
     assert coordinates[0] == pytest.approx(1.0)
     assert coordinates[-1] == pytest.approx(4.0)
     assert family["executed_layer_coordinates"] == (1.0, 2.0, 3.0, 4.0)
-    assert len(family["curves"]) == 1
+    assert 1 <= len(family["curves"]) <= 2
+    assert any(
+        curve["model_feature"] == 0 and curve["intermediate_feature"] == 0
+        for curve in family["curves"]
+    )
     assert len(family["curves"][0]["values"]) == 17
 # ^^^ THOG
 

@@ -562,7 +562,7 @@ window.addEventListener("load", () => {
         gradient.type = "button";
         gradient.className = "weight-step-button";
         gradient.textContent = "gradient";
-        gradient.title = "Colour retained curves from lightest at the earliest step through the run colour to darkest at the latest step";
+        gradient.title = "Colour retained curves from lightest at the earliest step to the exact run colour at the latest step";
         latest.insertAdjacentElement("afterend", gradient);
       }
       let overlap = by_id("weight_step_overlapping_range");

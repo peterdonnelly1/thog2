@@ -21,7 +21,7 @@ WEIGHT_SELECTION_PROTOCOL = "matched_six_v1"
 _SELECTION_FILE = ".instra_weight_selection.json"
 _DEFAULT_SELECTION = {
     "protocol": WEIGHT_SELECTION_PROTOCOL,
-    "user_selected": False,
+    "user_selected": True,
     "model_feature": 0,
     "intermediate_feature": 0,
 }
@@ -114,10 +114,17 @@ def _random_logical_coordinates(
     width: int,
     n_head: int,
     count: int,
+    required_head: Optional[int] = None,
 ) -> Tuple[int, Tuple[Tuple[int, int], ...]]:
     if width < 1 or n_head < 1 or width % n_head != 0:
         raise ValueError("n_embd must be positive and divisible by n_head")
-    head = random.Random(seed ^ 0xA771).randrange(n_head)
+    head = (
+        random.Random(seed ^ 0xA771).randrange(n_head)
+        if required_head is None
+        else int(required_head)
+    )
+    if head < 0 or head >= n_head:
+        raise ValueError("required attention head is outside the model")
     head_dim = width // n_head
     head_start = head * head_dim
     population = width * head_dim
@@ -137,12 +144,6 @@ def _matched_selection(
     n_head: int,
 ) -> Dict[str, Any]:
     seed = int(_depth._selection_seed(trainer, telemetry))
-    head, random_logical = _random_logical_coordinates(
-        seed=seed,
-        width=width,
-        n_head=n_head,
-        count=int(_depth._scalar_weights_per_matrix()),
-    )
     selection_root = _selection_root_for_telemetry(telemetry)
     configured = read_weight_selection(selection_root)
     model_feature = int(configured["model_feature"])
@@ -151,6 +152,17 @@ def _matched_selection(
         configured["user_selected"] is True
         and 0 <= model_feature < width
         and 0 <= intermediate_feature < width
+    )
+    if width < 1 or n_head < 1 or width % n_head != 0:
+        raise ValueError("n_embd must be positive and divisible by n_head")
+    head_dim = width // n_head
+    required_head = intermediate_feature // head_dim if user_valid else None
+    head, random_logical = _random_logical_coordinates(
+        seed=seed,
+        width=width,
+        n_head=n_head,
+        count=int(_depth._scalar_weights_per_matrix()),
+        required_head=required_head,
     )
     logical = list(random_logical)
     if user_valid and (model_feature, intermediate_feature) not in logical:

@@ -439,6 +439,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert ">P_e</th>" in html
     assert ">C_s</th>" in html
     assert ">C_e</th>" in html
+    assert ".runs-table th.probe-start-column" in stylesheet
+    assert ".runs-table th.curve-end-column" in stylesheet
+    assert "text-transform: none !important;" in stylesheet
     assert "run.heatmap_minimum_update" in javascript
     assert "run.depth_minimum_update" in javascript
     assert ">Logged</th>" in html

@@ -493,7 +493,7 @@ window.addEventListener("load", () => {
       .chart-card.maximized .explicit-trajectory-modes .explicit-mode-button {
         display: inline-flex !important; visibility: visible !important;
       }
-      .runs-table { min-width: 1560px; }
+      .runs-table { min-width: 1580px; }
       .run-shape-column { width: 52px !important; text-align: right !important; font-variant-numeric: tabular-nums; }
       .run-preset-column { width: 76px !important; text-align: left !important; text-transform: none !important; }
       [data-instra-run-shape-header="grad_accum"], [data-instra-run-shape-cell="grad_accum"] { width: 64px !important; }

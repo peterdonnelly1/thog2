@@ -226,10 +226,10 @@ async function main() {
   assert.match(prepared_weight.data[0].marker.color, /^hsl\(/);
 
   // The v0.58 compatibility layer installs after the final range owner in the
-  // browser. When gradient mode is active it must preserve the light/base/dark
+  // browser. When gradient mode is active it must preserve the light-to-base
   // colours already assigned to ordinary Workspace curves.
   gradient_enabled = true;
-  const gradient_colours = ["#f0d8d0", colours["run-a"], "#7d2424"];
+  const gradient_colours = ["#f0d8d0", "#d6a295", colours["run-a"]];
   const gradient_figure = {
     data: [10, 20, 30].map((step, index) => ({
       mode: "lines+markers",

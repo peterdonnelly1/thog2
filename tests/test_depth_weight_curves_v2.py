@@ -77,10 +77,24 @@ def test_matched_weight_selection_is_persisted_per_run(monkeypatch, tmp_path) ->
     assert matched_weights.read_weight_selection(first_root)["model_feature"] == 1010
     assert matched_weights.read_weight_selection(second_root) == {
         "protocol": matched_weights.WEIGHT_SELECTION_PROTOCOL,
-        "user_selected": False,
+        "user_selected": True,
         "model_feature": 0,
         "intermediate_feature": 0,
     }
+
+    default_selection = matched_weights._matched_selection(
+        _trainer(_trajectory()),
+        second,
+        width=8,
+        n_head=2,
+    )
+    for chart_name in depth_curves_v2._CHART_FAMILIES:
+        logical_coordinates = {
+            matched_weights._matrix_to_logical(chart_name, *coordinate)
+            for coordinate in default_selection[chart_name]
+        }
+        assert (0, 0) in logical_coordinates
+    assert default_selection["attention_head"] == 0
 
 
 # vvv THOG Q/K/V use the same selected head by output-row slice while attention output uses that same head by input-column slice

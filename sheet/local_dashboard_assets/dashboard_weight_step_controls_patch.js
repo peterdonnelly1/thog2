@@ -713,8 +713,14 @@ window.addEventListener("load", () => {
       const selection = selected_coupling();
       const input_feature = finite_integer(selection?.model_feature) ?? 0;
       const output_feature = finite_integer(selection?.intermediate_feature) ?? 0;
-      if (document.activeElement !== input) input.value = String(input_feature);
-      if (document.activeElement !== output) output.value = String(output_feature);
+      // Treat the two inputs as one editor. While focus moves between them, an
+      // asynchronous chart/header refresh must not restore the non-focused half
+      // of the pair and recreate the persistent old-value/1010 snapback.
+      const editing_pair = document.activeElement === input || document.activeElement === output;
+      if (!editing_pair) {
+        input.value = String(input_feature);
+        output.value = String(output_feature);
+      }
       if (maximum !== null) {
         input.max = String(maximum);
         output.max = String(maximum);

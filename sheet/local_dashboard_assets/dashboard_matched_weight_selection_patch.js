@@ -18,7 +18,7 @@ window.addEventListener("load", () => {
     const weight_chart_set = new Set(weight_chart_names);
     const default_selection = Object.freeze({
       protocol,
-      user_selected: false,
+      user_selected: true,
       model_feature: 0,
       intermediate_feature: 0,
     });

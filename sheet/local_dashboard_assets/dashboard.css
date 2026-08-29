@@ -144,6 +144,10 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .heatmap-column, .curve-column,
 .probe-start-column, .probe-end-column,
 .curve-start-column, .curve-end-column { width: 68px; }
+.runs-table th.probe-start-column, .runs-table th.probe-end-column,
+.runs-table th.curve-start-column, .runs-table th.curve-end-column {
+  text-transform: none !important;
+}
 .step-column { width: 78px; }
 .menu-column { width: 40px; padding: 0 4px !important; text-align: center !important; }
 .listed-pill { text-transform: none; letter-spacing: normal; }

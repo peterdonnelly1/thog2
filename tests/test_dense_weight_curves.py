@@ -54,7 +54,11 @@ def test_dense_snapshot_reuses_all_six_families_with_integer_layer_points(monkey
     for family in snapshot["families"].values():
         assert family["depth_coordinates"] == (1.0, 2.0, 3.0)
         assert family["executed_layer_coordinates"] == (1.0, 2.0, 3.0)
-        assert len(family["curves"]) == 1
+        assert 1 <= len(family["curves"]) <= 2
+        assert any(
+            curve["model_feature"] == 0 and curve["intermediate_feature"] == 0
+            for curve in family["curves"]
+        )
         assert len(family["curves"][0]["values"]) == 3
 
 

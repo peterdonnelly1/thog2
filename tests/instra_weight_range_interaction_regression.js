@@ -15,11 +15,20 @@ const superseded_source = fs.readFileSync(
   path.join(repository_root, "sheet/local_dashboard_assets/dashboard_weight_regression_final_patch.js"),
   "utf8",
 );
+const legacy_controls_source = fs.readFileSync(
+  path.join(repository_root, "sheet/local_dashboard_assets/dashboard_weight_step_controls_patch.js"),
+  "utf8",
+);
 
 assert.match(
   superseded_source,
   /if \(window\.__instra_weight_range_interaction_final\) return;[\s\S]*?event\.preventDefault\(\);/,
   "the superseded RND capture listener still blocks the run-aware final owner",
+);
+assert.match(
+  legacy_controls_source,
+  /const editing_pair = document\.activeElement === input \|\| document\.activeElement === output;[\s\S]*?if \(!editing_pair\) \{[\s\S]*?input\.value[\s\S]*?output\.value/,
+  "the older control owner can still reset one coupling field while the other is focused",
 );
 
 class FakeElement {
@@ -93,6 +102,7 @@ const figures = Object.fromEntries(chart_names.map((chart_name, chart_index) => 
     make_trace(chart_name, 10, 12, 14, 110 + chart_index, "user"),
     make_trace(chart_name, 11, 2, 3, 20 + chart_index, "random"),
     make_trace(chart_name, 11, 12, 14, 120 + chart_index, "user"),
+    make_trace(chart_name, 11, 13, 15, 130 + chart_index, "user"),
   ],
   layout: {},
 }]));
@@ -128,6 +138,7 @@ const capture_selection = {
 };
 let capture_save_count = 0;
 let gradient_enabled = false;
+let context_identifier = "run:R1";
 const rendered = new Map();
 const app = {
   current_run_id: "R1",
@@ -147,7 +158,7 @@ const context = {
       else add_listener(name, callback);
     },
     __instra_weight_stability_final: {
-      context_key: () => "run:R1",
+      context_key: () => context_identifier,
       selected_range: () => ({minimum: 10, maximum: 11}),
       gradient_enabled: () => gradient_enabled,
     },
@@ -230,6 +241,7 @@ context.window.window = context.window;
   assert.deepEqual(api.recorded_pairs(), [
     {model_feature: 2, intermediate_feature: 3},
     {model_feature: 12, intermediate_feature: 14},
+    {model_feature: 13, intermediate_feature: 15},
   ]);
   assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
   assert.equal(elements.get("weight_coupling_input").value, "12");
@@ -322,9 +334,9 @@ context.window.window = context.window;
     const [red, green, blue] = context.hex_to_rgb(colour);
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   };
-  assert.equal(gradient_colours[1], "#E8790C", "gradient midpoint is not the exact run colour");
-  assert.ok(luminance(gradient_colours[0]) > luminance(gradient_colours[1]), "earliest gradient curve is not lighter");
-  assert.ok(luminance(gradient_colours[2]) < luminance(gradient_colours[1]), "latest gradient curve is not darker");
+  assert.equal(gradient_colours[2], "#E8790C", "latest gradient curve is not the exact run colour");
+  assert.ok(luminance(gradient_colours[0]) > luminance(gradient_colours[1]), "earliest gradient curve is not lightest");
+  assert.ok(luminance(gradient_colours[1]) > luminance(gradient_colours[2]), "gradient does not darken towards the run colour");
 
   app.workspace_mode = true;
   const workspace_gradient_figure = {
@@ -342,10 +354,10 @@ context.window.window = context.window;
     const traces = workspace_gradient.data.filter(trace => trace.meta.instra_workspace_run_id === run_id);
     const colours = traces.map(trace => trace.line.color.toUpperCase());
     const base = context.colour_for_run(run_id).toUpperCase();
-    assert.equal(colours[1], base, `${run_id} gradient midpoint is not its exact run colour`);
+    assert.equal(colours[2], base, `${run_id} latest gradient curve is not its exact run colour`);
     assert.equal(new Set(colours).size, 3, `${run_id} did not receive its own three-colour gradient`);
-    assert.ok(luminance(colours[0]) > luminance(colours[1]), `${run_id} earliest curve is not lighter`);
-    assert.ok(luminance(colours[2]) < luminance(colours[1]), `${run_id} latest curve is not darker`);
+    assert.ok(luminance(colours[0]) > luminance(colours[1]), `${run_id} earliest curve is not lightest`);
+    assert.ok(luminance(colours[1]) > luminance(colours[2]), `${run_id} gradient does not darken towards its run colour`);
   }
   app.workspace_mode = false;
   gradient_enabled = false;
@@ -356,7 +368,14 @@ context.window.window = context.window;
   assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
   assert.equal(elements.get("weight_coupling_input").value, "2");
   assert.equal(elements.get("weight_coupling_output").value, "3");
-  assert.match(elements.get("weight_coupling_view_error").textContent, /was not recorded/);
+  assert.equal(elements.get("weight_coupling_view_error").textContent, "Not recorded.");
+  assert.match(elements.get("weight_coupling_view_error").title, /was not recorded/);
+  context_identifier = "run:R2";
+  api.sync();
+  assert.equal(elements.get("weight_coupling_view_error").hidden, true, "run change retained a stale coupling message");
+  assert.equal(elements.get("weight_coupling_view_error").textContent, "", "run change did not clear coupling text");
+  context_identifier = "run:R1";
+  api.sync();
   await Promise.resolve();
 
   app.current_status.run_state = "running";
@@ -369,7 +388,8 @@ context.window.window = context.window;
   await Promise.resolve();
   assert.deepEqual(api.pair(), {model_feature: 7, intermediate_feature: 8});
   assert.equal(capture_save_count, 1, "valid active-run coupling was not scheduled");
-  assert.match(elements.get("weight_coupling_view_error").textContent, /next recorded snapshot/);
+  assert.equal(elements.get("weight_coupling_view_error").textContent, "Starts next snapshot.");
+  assert.match(elements.get("weight_coupling_view_error").title, /next recorded snapshot/);
 
   api.select_pair(2, 3);
   context.Math.random = () => 0.4;
