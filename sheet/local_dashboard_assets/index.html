@@ -59,7 +59,7 @@
               <option value="monitoring">Monitoring</option>
               <option value="finished">Finished</option>
               <option value="stopped">Stopped</option>
-              <option value="crashed">Crashed</option>
+              <option value="timed_out">Timed out</option>
               <option value="data_lost">Data lost</option>
               <option value="unknown">Legacy / unknown</option>
             </select>
@@ -93,6 +93,7 @@
               <th class="numeric-column curve-start-column" title="First retained weight-curve capture step">C_s</th>
               <th class="numeric-column curve-end-column" title="Last retained weight-curve capture step">C_e</th>
               <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">Logged</th>
+              <th class="numeric-column duration-column" title="Elapsed run time">t</th>
               <th>Updated</th>
               <th class="menu-column"><span class="visually-hidden">Run menu</span></th>
             </tr>
@@ -428,12 +429,12 @@
         <button id="close_settings" type="button" aria-label="Close settings">×</button>
       </header>
       <div class="settings-content">
-        <label for="crash_timeout_minutes">Assume a run has crashed after no model heartbeat for</label>
+        <label for="timeout_minutes">Mark a run as timed out after no model heartbeat for</label>
         <div class="timeout-control">
-          <input id="crash_timeout_minutes" type="number" min="1" max="10080" step="1" value="15">
+          <input id="timeout_minutes" type="number" min="1" max="10080" step="1" value="15">
           <span>minutes</span>
         </div>
-        <p>This changes a stale active state to <strong>crashed</strong>. Terminal states remain unchanged.</p>
+        <p>This changes a stale active state to <strong>timed out</strong>. A later heartbeat restores its live state.</p>
       </div>
       <footer>
         <button id="cancel_settings" type="button">Cancel</button>

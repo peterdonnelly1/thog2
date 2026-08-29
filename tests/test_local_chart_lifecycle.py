@@ -209,6 +209,34 @@ def test_terminal_state_flushes_latest_throttled_model_update(
     assert metadata["run_state"] == "finished"
 
 
+def test_terminal_state_uses_observed_target_update(
+    tmp_path: Path,
+) -> None:
+    stopped_path = tmp_path / "stopped.sqlite3"
+    stopped = LocalChartStore(
+        stopped_path,
+        run_name="early-stop",
+        config={"max_iters": 3},
+    )
+    stopped.heartbeat(2, run_state="recording", force=True)
+    stopped.close(final_state="finished")
+    stopped_metadata = local_store.LocalChartReader(stopped_path).metadata()
+    assert stopped_metadata["current_update"] == "2"
+    assert stopped_metadata["run_state"] == "stopped"
+
+    finished_path = tmp_path / "finished.sqlite3"
+    finished = LocalChartStore(
+        finished_path,
+        run_name="complete",
+        config={"max_iters": 3},
+    )
+    finished.heartbeat(3, run_state="recording", force=True)
+    finished.close(final_state="stopped")
+    finished_metadata = local_store.LocalChartReader(finished_path).metadata()
+    assert finished_metadata["current_update"] == "3"
+    assert finished_metadata["run_state"] == "finished"
+
+
 def test_telemetry_finish_closes_remaining_sinks_after_local_store_failure(
     monkeypatch,
     capsys,

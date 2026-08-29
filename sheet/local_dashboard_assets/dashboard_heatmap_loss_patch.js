@@ -411,7 +411,7 @@ window.addEventListener("load", () => {
         .map(run_id => app.runs.find(run => run_identifier(run) === run_id))
         .filter(Boolean);
       const running_count = selected_runs.filter(run => (
-        is_active_run_state(run.run_state) && display_run_state(run) !== "crashed"
+        is_active_run_state(run.run_state) && display_run_state(run) !== "timed_out"
       )).length;
       const warning = running_count
         ? `\n\n${running_count} selected run${running_count === 1 ? " is" : "s are"} still marked running.`

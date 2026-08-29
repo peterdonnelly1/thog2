@@ -276,10 +276,10 @@ window.addEventListener("load", () => {
         show_toast("Overview default font size must be between 8 and 18 px.");
         return;
       }
-      // Avoid applying the Overview value if the established crash-timeout field
+      // Avoid applying the Overview value if the established run-timeout field
       // is invalid and the settings dialog is about to reject the save anyway.
-      const crash_timeout = finite_number(by_id("crash_timeout_minutes")?.value);
-      if (crash_timeout === null || crash_timeout < 1 || crash_timeout > 10080) {
+      const timeout = finite_number(by_id("timeout_minutes")?.value);
+      if (timeout === null || timeout < 1 || timeout > 10080) {
         return base_save_settings_presentation();
       }
       const rounded = Math.round(desired);

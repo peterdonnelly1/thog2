@@ -53,7 +53,10 @@ window.addEventListener("load", () => {
     if (!event.target?.matches?.("#weight_coupling_input, #weight_coupling_output")) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    viewer_controller?.commit_inputs?.();
+    queueMicrotask(() => {
+      if (document.activeElement?.matches?.("#weight_coupling_input, #weight_coupling_output")) return;
+      viewer_controller?.commit_inputs?.();
+    });
   }, true);
 
   window.addEventListener("keydown", event => {
@@ -196,6 +199,14 @@ window.addEventListener("load", () => {
       );
     };
 
+    const selected_run_is_active = () => {
+      const run = typeof current_run === "function" ? current_run() : app.current_status;
+      let state = "";
+      try { state = display_run_state(run); }
+      catch (_error) { state = String(run?.run_state || ""); }
+      return state === "preparing" || state === "recording" || state === "monitoring" || state === "running";
+    };
+
     const viewer_pair = () => {
       const pairs = recorded_pairs();
       const stored = stored_pair();
@@ -206,9 +217,11 @@ window.addEventListener("load", () => {
             intermediate_feature: finite_integer(captured.intermediate_feature),
           }
         : null;
+      const active = selected_run_is_active();
       const resolved = pairs.find(pair => same_pair(pair, stored))
-        || (pair_in_bounds(stored) ? stored : null)
-        || (pair_in_bounds(captured_pair) ? captured_pair : null)
+        || (active && pair_in_bounds(stored) ? stored : null)
+        || pairs.find(pair => same_pair(pair, captured_pair))
+        || (active && pair_in_bounds(captured_pair) ? captured_pair : null)
         || pairs.find(pair => pair.selection_kind !== "user")
         || pairs[0];
       if (!resolved) return null;
@@ -266,6 +279,10 @@ window.addEventListener("load", () => {
       else input.value = String(value);
     };
 
+    const coupling_input_is_being_edited = () => (
+      document.activeElement?.matches?.("#weight_coupling_input, #weight_coupling_output") === true
+    );
+
     const sync_viewer_controls = () => {
       const pairs = recorded_pairs();
       const pair = viewer_pair();
@@ -273,7 +290,7 @@ window.addEventListener("load", () => {
       const input = by_id("weight_coupling_input");
       const output = by_id("weight_coupling_output");
       if (!input || !output) return;
-      if (pair) {
+      if (pair && !coupling_input_is_being_edited()) {
         write_input(input, pair.model_feature);
         write_input(output, pair.intermediate_feature);
       }
@@ -339,14 +356,6 @@ window.addEventListener("load", () => {
       sync_viewer_controls();
       if (changed && render) request_render();
       return true;
-    };
-
-    const selected_run_is_active = () => {
-      const run = typeof current_run === "function" ? current_run() : app.current_status;
-      let state = "";
-      try { state = display_run_state(run); }
-      catch (_error) { state = String(run?.run_state || ""); }
-      return state === "preparing" || state === "recording" || state === "running";
     };
 
     const schedule_capture_pair = async candidate => {
@@ -421,6 +430,20 @@ window.addEventListener("load", () => {
       return true;
     };
 
+    const directional_recorded_pair = (button_id, current, pairs) => {
+      const input_axis = button_id.startsWith("weight_residual_");
+      const increasing = button_id.endsWith("_plus");
+      const axis = input_axis ? "model_feature" : "intermediate_feature";
+      const other = input_axis ? "intermediate_feature" : "model_feature";
+      return pairs
+        .filter(pair => increasing ? pair[axis] > current[axis] : pair[axis] < current[axis])
+        .sort((left, right) => (
+          Number(right[other] === current[other]) - Number(left[other] === current[other])
+          || Math.abs(left[axis] - current[axis]) - Math.abs(right[axis] - current[axis])
+          || Math.abs(left[other] - current[other]) - Math.abs(right[other] - current[other])
+        ))[0] || null;
+    };
+
     const handle_button = button_id => {
       const current = viewer_pair();
       const capability = viewer_capability();
@@ -429,13 +452,9 @@ window.addEventListener("load", () => {
         sync_viewer_controls();
         return;
       }
-      if (button_id === "weight_random_jump") {
-        // A completed run cannot reconstruct a coupling that was never retained,
-        // so RND must choose another recorded pair and redraw immediately. An
-        // active run can use the full matrix dimensions and schedule the newly
-        // selected pair for its next retained snapshot.
-        if (!selected_run_is_active()) {
-          const recorded = recorded_pairs();
+      if (!selected_run_is_active()) {
+        const recorded = recorded_pairs();
+        if (button_id === "weight_random_jump") {
           const both_changed = recorded.filter(pair => (
             pair.model_feature !== current.model_feature
             && pair.intermediate_feature !== current.intermediate_feature
@@ -449,6 +468,15 @@ window.addEventListener("load", () => {
           void commit_pair(choices[Math.floor(Math.random() * choices.length)]);
           return;
         }
+        const next_recorded = directional_recorded_pair(button_id, current, recorded);
+        if (!next_recorded) {
+          show_error("No recorded coupling is available in that direction for this completed view.");
+          return;
+        }
+        void commit_pair(next_recorded);
+        return;
+      }
+      if (button_id === "weight_random_jump") {
         const random_other = value => {
           if (capability.maximum < 1) return value;
           const draw = Math.floor(Math.random() * capability.maximum);
@@ -513,6 +541,19 @@ window.addEventListener("load", () => {
     const trace_run_id = trace => String(
       trace?.meta?.instra_workspace_run_id || app.current_run_id || "__instra_single_run__"
     );
+
+    const redraw_mounted_weight_figures = async () => {
+      if (typeof render_plot !== "function") return;
+      const jobs = [];
+      for (const chart_name of weight_chart_names) {
+        const mount = by_id(`${chart_name}_plot`);
+        const figure = mount?.__instraWeightFigure || app.figures?.depth?.[chart_name];
+        if (!mount || !figure) continue;
+        jobs.push(render_plot(mount, figure, chart_name));
+      }
+      await Promise.all(jobs);
+      sync_viewer_controls();
+    };
 
     const colour_weight_steps = prepared => {
       const use_gradient = stability.gradient_enabled?.() === true;
@@ -771,6 +812,7 @@ window.addEventListener("load", () => {
     window.__instra_weight_range_interaction_final = Object.freeze({
       installed: true,
       viewer: viewer_api,
+      redraw_mounted: redraw_mounted_weight_figures,
     });
     sync_viewer_controls();
     // The oldest header owner installs at 1.55 s and can briefly restore capture-

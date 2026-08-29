@@ -1452,7 +1452,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
 
     telemetry_exit_code: Optional[int] = None
-    telemetry_final_state = "crashed"
+    telemetry_final_state = "stopped"
     session_result_path = current_session_result_path(lifecycle)
     try:
         if trainer.distributed.is_primary:

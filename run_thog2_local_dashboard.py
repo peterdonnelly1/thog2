@@ -60,6 +60,42 @@ def _optional_metadata_integer(metadata: Dict[str, str], key: str) -> Optional[i
         return None
 
 
+def _target_update(configuration: Dict[str, Any]) -> Optional[int]:
+    candidates = (
+        configuration.get("max_iters"),
+        configuration.get("max_updates"),
+        configuration.get("lifecycle", {}).get("target_updates")
+        if isinstance(configuration.get("lifecycle"), dict)
+        else None,
+    )
+    for value in candidates:
+        try:
+            target = int(value)
+        except (TypeError, ValueError):
+            continue
+        if target >= 0:
+            return target
+    return None
+
+
+def _reported_run_state(
+    stored_state: str,
+    *,
+    current_update: Optional[int],
+    target_update: Optional[int],
+) -> str:
+    state = str(stored_state or "unknown")
+    if state in {"finished", "stopped", "crashed"}:
+        if target_update is None:
+            return "stopped" if state == "crashed" else state
+        return (
+            "finished"
+            if current_update is not None and current_update >= target_update
+            else "stopped"
+        )
+    return state
+
+
 def _weight_data_lost(
     metadata: Dict[str, str],
     *,
@@ -166,6 +202,12 @@ class RunDashboardState:
             ),
             default=None,
         )
+        target_update = _target_update(configuration)
+        run_state = _reported_run_state(
+            metadata.get("run_state", "unknown"),
+            current_update=maximum_update,
+            target_update=target_update,
+        )
         modified_at = _timestamp_from_epoch(_modified_time(self.database_path))
         artifact_name = metadata.get(
             "artifact_name",
@@ -188,7 +230,8 @@ class RunDashboardState:
             ),
             "wandb_run_id": wandb_run_id,
             "wandb_url": metadata.get("wandb_url", ""),
-            "run_state": metadata.get("run_state", "unknown"),
+            "run_state": run_state,
+            "target_update": target_update,
             "data_lost": _weight_data_lost(
                 metadata,
                 current_update=maximum_update,

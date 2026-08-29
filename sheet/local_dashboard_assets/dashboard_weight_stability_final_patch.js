@@ -604,6 +604,11 @@ window.addEventListener("load", () => {
 
     const redraw_weight_figures = async () => {
       await render_figures();
+      const final_redraw = window.__instra_weight_range_interaction_final?.redraw_mounted;
+      if (typeof final_redraw === "function") {
+        await final_redraw();
+        return;
+      }
       const rendered_context = context_key();
       if (!rendered_context || typeof render_plot !== "function") return;
       const fallback_jobs = [];

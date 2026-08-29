@@ -29,6 +29,15 @@ const default_palette = [
   "#865ed6", "#e76f38", "#f4ab83", "#ffb73d", "#91bf57", "#4d9d71",
   "#218d80", "#78c2b6", "#48b4cf", "#578adb", "#7a59d1", "#df79d9",
   "#cf47c5", "#ae317e", "#a96f54", "#9fa7ad",
+  "#6f63c2", "#c95f52", "#d98d55", "#d4a72c", "#6fae45", "#3f8f5f",
+  "#278f9d", "#4fa8b8", "#3e96c8", "#4f73c8", "#6950b8", "#b05ac8",
+  "#c93f91", "#963f72", "#9a6758", "#77838c",
+  "#b9a7ea", "#f3ad8a", "#f9cdb5", "#ffd68a", "#bddb93", "#91c4a3",
+  "#79beb5", "#afe0d8", "#99d5e4", "#9fb9e9", "#b5a3e8", "#efb8eb",
+  "#eaa5e4", "#d88fba", "#d3a798", "#c9cdd0",
+  "#b1a9dd", "#e8a89f", "#efc09b", "#ead184", "#acd18f", "#8fc1a0",
+  "#86c6cf", "#93ced8", "#8fc4df", "#9eafe1", "#aaa0d6", "#d3a4df",
+  "#e496bd", "#c794ae", "#c5a89f", "#b8c0c6",
 ];
 
 const plot_config = {
@@ -76,7 +85,10 @@ const app = {
   page_size: load_number("thog2_local_page_size", 50),
   current_page: 1,
   sort_descending: localStorage.getItem("thog2_local_sort_descending") !== "0",
-  crash_timeout_minutes: load_number("thog2_local_crash_timeout_minutes", 15),
+  timeout_minutes: load_number(
+    "thog2_local_timeout_minutes",
+    load_number("thog2_local_crash_timeout_minutes", 15),
+  ),
   selected: new Set(),
   group_by_host: false,
   maximized_chart: null,
@@ -152,8 +164,8 @@ function display_run_state(run) {
   if (is_active_run_state(stored_state)) {
     const heartbeat = Date.parse(run.heartbeat_at || run.updated_at || run.created_at || "");
     if (Number.isFinite(heartbeat)) {
-      const timeout_ms = app.crash_timeout_minutes * 60 * 1000;
-      if (Date.now() - heartbeat > timeout_ms) return "crashed";
+      const timeout_ms = app.timeout_minutes * 60 * 1000;
+      if (Date.now() - heartbeat > timeout_ms) return "timed_out";
     }
   }
   if (run?.data_lost === true) return "data_lost";
@@ -188,6 +200,19 @@ function format_time(value) {
   return timestamp.toLocaleString();
 }
 
+function format_run_duration(run) {
+  const start = Date.parse(run?.created_at || "");
+  const shown_state = display_run_state(run);
+  const end = is_active_run_state(run?.run_state) && shown_state !== "timed_out"
+    ? Date.now()
+    : Date.parse(run?.heartbeat_at || run?.updated_at || "");
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
+  const seconds = (end - start) / 1000;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`;
+  return `${(seconds / 3600).toFixed(1)}h`;
+}
+
 function text_cell(value, class_name = "") {
   const cell = document.createElement("td");
   cell.textContent = value;
@@ -201,7 +226,8 @@ function icon_svg(kind) {
     eye_closed: '<path d="M2 6.4c2.4 2.8 5 4 8 4s5.6-1.2 8-4"/><path d="M4.5 9.1 3.3 11M8 10.2l-.4 2.2M12 10.2l.4 2.2M15.5 9.1l1.2 1.9"/>',
     running: '<path d="M4.2 4.6A4.4 4.4 0 0 1 11.7 3L13 4.4M11.8 9.4A4.4 4.4 0 0 1 4.3 11L3 9.6"/><path d="M13 1.8v2.6h-2.6M3 12.2V9.6h2.6"/>',
     finished: '<circle cx="8" cy="8" r="5.2"/><path d="m5.2 8 1.8 1.8 3.8-4"/>',
-    crashed: '<circle cx="8" cy="8" r="5.2"/><path d="m6 6 4 4M10 6l-4 4"/>',
+    timed_out: '<circle cx="8" cy="8" r="5.2"/><path d="M8 4.7V8l2.1 1.3"/>',
+    data_lost: '<circle cx="8" cy="8" r="5.2"/><path d="m6 6 4 4M10 6l-4 4"/>',
     unknown: '<circle cx="8" cy="8" r="5.2"/><path d="M6.6 6.2A1.6 1.6 0 0 1 8.1 5c1 0 1.8.6 1.8 1.5 0 1.4-1.9 1.4-1.9 2.7M8 11.2h.01"/>',
   }[kind];
   const template = document.createElement("template");
@@ -325,12 +351,12 @@ function append_run_row(body, run) {
     : shown_state === "stopped"
       ? "finished"
       : shown_state === "data_lost"
-        ? "crashed"
-        : ["running", "finished", "crashed"].includes(shown_state) ? shown_state : "unknown";
+        ? "data_lost"
+        : ["running", "finished", "timed_out"].includes(shown_state) ? shown_state : "unknown";
   state_icon.appendChild(icon_svg(state_icon_name));
   badge.append(state_icon, document.createTextNode(format_run_state(shown_state)));
-  if (shown_state === "crashed") {
-    badge.title = `No model heartbeat for more than ${app.crash_timeout_minutes} minutes`;
+  if (shown_state === "timed_out") {
+    badge.title = `No model heartbeat for more than ${app.timeout_minutes} minutes`;
   } else if (shown_state === "data_lost") {
     badge.title = "A configured weight snapshot was due, but no local weight data is available";
   }
@@ -342,6 +368,7 @@ function append_run_row(body, run) {
   row.appendChild(text_cell(format_integer(run.depth_minimum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.depth_maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.maximum_update), "numeric-column"));
+  row.appendChild(text_cell(format_run_duration(run), "numeric-column duration-column"));
   row.appendChild(text_cell(format_time(run.updated_at)));
   const menu_cell = document.createElement("td");
   menu_cell.className = "menu-column";
@@ -396,7 +423,7 @@ function render_runs() {
       const group_row = document.createElement("tr");
       group_row.className = "group-row";
       const group_cell = document.createElement("td");
-      group_cell.colSpan = 11;
+      group_cell.colSpan = 14;
       group_cell.textContent = group;
       group_row.appendChild(group_cell);
       body.appendChild(group_row);
@@ -1787,7 +1814,7 @@ async function delete_menu_run() {
   if (!run) return;
   const run_id = run_identifier(run);
   const state = display_run_state(run);
-  const active_warning = is_active_run_state(run.run_state) && state !== "crashed"
+  const active_warning = is_active_run_state(run.run_state) && state !== "timed_out"
     ? "\n\nThis run still appears to be running. Its training process may recreate or continue writing the database."
     : "";
   const confirmed = window.confirm(
@@ -2146,11 +2173,11 @@ function open_settings() {
   close_run_menu();
   close_colour_picker();
   close_chart_settings();
-  by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
+  by_id("timeout_minutes").value = String(app.timeout_minutes);
   by_id("settings_overlay").hidden = false;
   by_id("settings_nav").classList.add("selected");
   by_id("runs_nav").classList.remove("selected");
-  by_id("crash_timeout_minutes").focus();
+  by_id("timeout_minutes").focus();
 }
 
 function close_settings() {
@@ -2160,13 +2187,13 @@ function close_settings() {
 }
 
 function save_settings() {
-  const value = Number(by_id("crash_timeout_minutes").value);
+  const value = Number(by_id("timeout_minutes").value);
   if (!Number.isFinite(value) || value < 1 || value > 10080) {
-    show_toast("Crash timeout must be between 1 and 10,080 minutes.");
+    show_toast("Run timeout must be between 1 and 10,080 minutes.");
     return;
   }
-  app.crash_timeout_minutes = Math.round(value);
-  localStorage.setItem("thog2_local_crash_timeout_minutes", String(app.crash_timeout_minutes));
+  app.timeout_minutes = Math.round(value);
+  localStorage.setItem("thog2_local_timeout_minutes", String(app.timeout_minutes));
   reset_pagination();
   render_run_heading();
   close_settings();
@@ -2278,7 +2305,7 @@ function open_colour_picker(run_id, anchor) {
   popover.hidden = false;
   const anchor_rect = anchor.getBoundingClientRect();
   const width = 282;
-  const height = 390;
+  const height = 590;
   popover.style.left = `${Math.max(8, Math.min(anchor_rect.left - 12, window.innerWidth - width - 8))}px`;
   popover.style.top = `${Math.max(8, Math.min(anchor_rect.bottom + 8, window.innerHeight - height - 8))}px`;
 }
@@ -2510,7 +2537,7 @@ async function start() {
   build_swatches();
   bind_events();
   by_id("page_size").value = String(app.page_size);
-  by_id("crash_timeout_minutes").value = String(app.crash_timeout_minutes);
+  by_id("timeout_minutes").value = String(app.timeout_minutes);
   update_sort_direction_ui();
   update_file_source_tabs();
   const saved_width = Number(localStorage.getItem("thog2_local_runs_width"));

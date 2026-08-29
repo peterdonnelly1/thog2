@@ -622,7 +622,7 @@ function local_overview_timestamp(value) {
 
 function local_overview_duration(run) {
   const start = Date.parse(run?.created_at || "");
-  const end = is_active_run_state(run?.run_state) && display_run_state(run) !== "crashed"
+  const end = is_active_run_state(run?.run_state) && display_run_state(run) !== "timed_out"
     ? Date.now()
     : Date.parse(run?.updated_at || "");
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return "—";
@@ -657,8 +657,8 @@ function local_state_badge(run) {
     : state === "stopped"
       ? "finished"
       : state === "data_lost"
-        ? "crashed"
-        : ["running", "finished", "crashed"].includes(state) ? state : "unknown";
+        ? "data_lost"
+        : ["running", "finished", "timed_out"].includes(state) ? state : "unknown";
   icon.appendChild(icon_svg(icon_state));
   badge.append(icon, document.createTextNode(format_run_state(state)));
   return badge;

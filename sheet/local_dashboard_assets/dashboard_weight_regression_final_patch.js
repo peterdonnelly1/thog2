@@ -384,6 +384,7 @@ window.addEventListener("load", () => {
         ["W&B ID", "instra-wandb-column"],
         ["State", "instra-state-column"],
         ["Host", "instra-host-column"],
+        ["t", "instra-duration-column"],
         ["Updated", "instra-updated-column"],
       ]);
       for (const header of header_row.children) {
@@ -411,6 +412,7 @@ window.addEventListener("load", () => {
       .runs-table .instra-wandb-column { width: 92px !important; }
       .runs-table .instra-state-column { width: 88px !important; }
       .runs-table .instra-host-column { width: 96px !important; }
+      .runs-table .instra-duration-column { width: 58px !important; }
       .runs-table .instra-updated-column { width: 110px !important; }
       .run-overview-pane .overview-metadata {
         grid-template-columns: 120px minmax(0, 1fr) !important;

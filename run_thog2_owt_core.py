@@ -735,7 +735,7 @@ def main() -> int:
     telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
     # vvv THOG preserve shell interrupt status while allowing W&B to record a clean intentional stop
     telemetry_exit_code: Optional[int] = None
-    telemetry_final_state = "crashed"
+    telemetry_final_state = "stopped"
     # ^^^ THOG
     try:
         if trainer.distributed.is_primary:

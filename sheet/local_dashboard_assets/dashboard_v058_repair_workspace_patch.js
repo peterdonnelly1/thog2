@@ -563,10 +563,10 @@ window.addEventListener("load", () => {
             : {};
           const run_id = meta.instra_workspace_run_id;
           const dense_trace = meta.instra_dense_weight === true;
-          const colour = dense_trace
-            ? dense_step_colour(meta.instra_dense_optimizer_update)
-            : gradient_enabled && run_id
+          const colour = gradient_enabled
             ? null
+            : dense_trace
+            ? dense_step_colour(meta.instra_dense_optimizer_update)
             : run_id
             ? colour_for_run(run_id)
             : meta.instra_workspace_colour;
@@ -580,7 +580,11 @@ window.addEventListener("load", () => {
             trace.marker = {
               ...(trace.marker || {}),
               size: marker_size === null ? 5 : Math.min(6, marker_size),
-              line: {...(trace.marker.line || {}), width: 0.35, color: colour},
+              line: {
+                ...(trace.marker.line || {}),
+                width: 0.35,
+                color: colour || trace.marker?.line?.color || trace.line?.color || trace.marker?.color,
+              },
             };
             trace.mode = "lines+markers";
             trace.line = {

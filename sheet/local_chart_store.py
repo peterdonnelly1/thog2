@@ -19,7 +19,7 @@ CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
 LOCAL_CHART_SCHEMA_VERSION = 2
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
-LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped", "crashed"))
+LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
 
 def _utc_timestamp() -> str:
@@ -136,6 +136,24 @@ def _json_compatible(value: Any) -> Any:
     return str(value)
 
 
+def _configured_target_update(config: Mapping[str, Any]) -> Optional[int]:
+    candidates = (
+        config.get("max_iters"),
+        config.get("max_updates"),
+        config.get("lifecycle", {}).get("target_updates")
+        if isinstance(config.get("lifecycle"), Mapping)
+        else None,
+    )
+    for value in candidates:
+        try:
+            target = int(value)
+        except (TypeError, ValueError):
+            continue
+        if target >= 0:
+            return target
+    return None
+
+
 def _open_database(path: Path, *, readonly: bool) -> sqlite3.Connection:
     if readonly:
         connection = sqlite3.connect(
@@ -217,6 +235,7 @@ class LocalChartStore:
         self._last_heartbeat_monotonic = 0.0
         self._latest_observed_update = 0
         self._last_heartbeat_state = "preparing"
+        self._target_update = _configured_target_update(config)
         self._has_heatmap_records = bool(
             self.connection.execute("SELECT EXISTS(SELECT 1 FROM heatmap_records)").fetchone()[0]
         )
@@ -395,6 +414,12 @@ class LocalChartStore:
         state = str(final_state)
         if state not in LOCAL_CHART_TERMINAL_STATES:
             raise ValueError(f"invalid terminal local chart state: {state!r}")
+        if self._target_update is not None:
+            state = (
+                "finished"
+                if self._latest_observed_update >= self._target_update
+                else "stopped"
+            )
         now = _utc_timestamp()
         self.connection.executemany(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",

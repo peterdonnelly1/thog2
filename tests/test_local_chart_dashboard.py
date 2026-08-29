@@ -49,6 +49,29 @@ def test_dashboard_reports_the_cli_preset(
     assert dashboard._preset_from_configuration(configuration) == expected
 
 
+@pytest.mark.parametrize(
+    ("stored_state", "current_update", "target_update", "expected"),
+    (
+        ("finished", 249, 250, "stopped"),
+        ("stopped", 250, 250, "finished"),
+        ("crashed", 249, 250, "stopped"),
+        ("crashed", 249, None, "stopped"),
+        ("recording", 249, 250, "recording"),
+    ),
+)
+def test_dashboard_reports_terminal_state_from_observed_target(
+    stored_state: str,
+    current_update: int,
+    target_update: int | None,
+    expected: str,
+) -> None:
+    assert dashboard._reported_run_state(
+        stored_state,
+        current_update=current_update,
+        target_update=target_update,
+    ) == expected
+
+
 def test_viewer_catalog_waits_when_started_before_training(tmp_path: Path) -> None:
     catalog = dashboard.DashboardCatalog(root=tmp_path)
 
@@ -433,7 +456,9 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "migrate_panel_layout" in javascript
     assert "toggle_chart_group" in javascript
     assert "eye_closed:" in javascript
-    assert "crashed:" in javascript
+    assert "timed_out:" in javascript
+    assert 'class="numeric-column duration-column">t</th>' in html
+    assert "format_run_duration(run)" in javascript
     assert "toggle_maximized_chart" in javascript
     assert "position_restore_button" in javascript
     assert "chart_axis_settings" in javascript

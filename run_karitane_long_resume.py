@@ -179,7 +179,7 @@ def main() -> int:
         },
     )
 
-    telemetry_final_state = "crashed"
+    telemetry_final_state = "stopped"
     try:
         if trainer.distributed.is_primary:
             telemetry.start()

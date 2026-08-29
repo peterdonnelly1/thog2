@@ -116,6 +116,10 @@ const emit = (name, target, extra = {}) => {
 };
 
 const storage = new Map();
+storage.set(
+  "thog2_local_weight_viewer_couplings_v2",
+  JSON.stringify({"run:R1": {model_feature: 10, intermediate_feature: 10}}),
+);
 const capture_selection = {
   protocol: "matched_six_v1",
   user_selected: true,
@@ -161,6 +165,7 @@ const context = {
     __instra_weight_coupling_reliability_final: {installed: true},
   },
   document: {
+    activeElement: null,
     head: {appendChild() {}},
     createElement() { return new FakeElement(); },
   },
@@ -229,6 +234,29 @@ context.window.window = context.window;
   assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
   assert.equal(elements.get("weight_coupling_input").value, "12");
   assert.equal(elements.get("weight_coupling_output").value, "14");
+  assert.deepEqual(
+    JSON.parse(storage.get("thog2_local_weight_viewer_couplings_v2"))["run:R1"],
+    {model_feature: 12, intermediate_feature: 14},
+    "completed view retained a stale valid-but-unrecorded coupling",
+  );
+
+  // Synchronisation must not replace either box while the user is editing the
+  // pair. This was the source of the persistent 1010/old-value snapback.
+  context.document.activeElement = elements.get("weight_coupling_input");
+  elements.get("weight_coupling_input").value = "7";
+  api.sync();
+  assert.equal(elements.get("weight_coupling_input").value, "7");
+  assert.equal(elements.get("weight_coupling_output").value, "14");
+
+  // Tabbing from the first box into the second must defer the pair commit so
+  // that the two fields are accepted together.
+  context.document.activeElement = elements.get("weight_coupling_output");
+  emit("change", elements.get("weight_coupling_input"));
+  assert.equal(elements.get("weight_coupling_input").value, "7");
+  assert.equal(elements.get("weight_coupling_output").value, "14");
+  context.document.activeElement = null;
+  api.sync();
+  assert.equal(elements.get("weight_coupling_input").value, "12");
 
   const before_values = rendered.get("attn_q_head_N").data.map(trace => trace.y[0]);
   const random_values = [0.14, 0.21];
@@ -247,6 +275,16 @@ context.window.window = context.window;
   assert.equal(capture_save_count, 0, "recorded RND selection scheduled a redundant capture");
   const after_values = rendered.get("attn_q_head_N").data.map(trace => trace.y[0]);
   assert.notDeepEqual(after_values, before_values, "RND changed boxes without changing curve values");
+
+  emit("click", elements.get("weight_residual_plus"));
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
+  emit("click", elements.get("weight_residual_minus"));
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
+  assert.equal(capture_save_count, 0, "recorded +/- selection scheduled a redundant capture");
 
   const prepared = rendered.get("attn_q_head_N");
   assert.equal(prepared.data.length, 2, "two-step viewer dropped a recorded curve");
@@ -287,6 +325,29 @@ context.window.window = context.window;
   assert.equal(gradient_colours[1], "#E8790C", "gradient midpoint is not the exact run colour");
   assert.ok(luminance(gradient_colours[0]) > luminance(gradient_colours[1]), "earliest gradient curve is not lighter");
   assert.ok(luminance(gradient_colours[2]) < luminance(gradient_colours[1]), "latest gradient curve is not darker");
+
+  app.workspace_mode = true;
+  const workspace_gradient_figure = {
+    data: ["R1", "R2"].flatMap(run_id => [10, 15, 20].map(step => ({
+      ...make_trace("attn_q_head_N", step, 2, 3, step, "random"),
+      meta: {
+        ...make_trace("attn_q_head_N", step, 2, 3, step, "random").meta,
+        instra_workspace_run_id: run_id,
+      },
+    }))),
+    layout: {},
+  };
+  const workspace_gradient = context.prepare_figure(workspace_gradient_figure, "attn_q_head_N");
+  for (const run_id of ["R1", "R2"]) {
+    const traces = workspace_gradient.data.filter(trace => trace.meta.instra_workspace_run_id === run_id);
+    const colours = traces.map(trace => trace.line.color.toUpperCase());
+    const base = context.colour_for_run(run_id).toUpperCase();
+    assert.equal(colours[1], base, `${run_id} gradient midpoint is not its exact run colour`);
+    assert.equal(new Set(colours).size, 3, `${run_id} did not receive its own three-colour gradient`);
+    assert.ok(luminance(colours[0]) > luminance(colours[1]), `${run_id} earliest curve is not lighter`);
+    assert.ok(luminance(colours[2]) < luminance(colours[1]), `${run_id} latest curve is not darker`);
+  }
+  app.workspace_mode = false;
   gradient_enabled = false;
 
   elements.get("weight_coupling_input").value = "7";

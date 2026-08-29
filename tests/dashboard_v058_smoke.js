@@ -234,10 +234,12 @@ async function main() {
     data: [10, 20, 30].map((step, index) => ({
       mode: "lines+markers",
       line: {color: gradient_colours[index]},
-      marker: {color: gradient_colours[index], line: {color: gradient_colours[index]}},
+      marker: {symbol: "x", color: gradient_colours[index], line: {color: gradient_colours[index]}},
       meta: {
         instra_workspace_run_id: "run-a",
         instra_workspace_optimizer_update: step,
+        instra_dense_weight: true,
+        instra_dense_optimizer_update: step,
       },
     })),
     layout: {},
@@ -252,6 +254,30 @@ async function main() {
     Array.from(preserved_gradient.data, trace => trace.marker.line.color),
     gradient_colours,
     "late Workspace repair replaced gradient marker outlines",
+  );
+
+  const single_run_gradient = {
+    data: gradient_figure.data.map(trace => ({
+      ...trace,
+      line: {...trace.line},
+      marker: {...trace.marker, line: {...trace.marker.line}},
+      meta: {
+        instra_dense_weight: true,
+        instra_dense_optimizer_update: trace.meta.instra_dense_optimizer_update,
+      },
+    })),
+    layout: {},
+  };
+  const preserved_single_run_gradient = context.prepare_figure(single_run_gradient, "mlp_down");
+  assert.deepEqual(
+    Array.from(preserved_single_run_gradient.data, trace => trace.line.color),
+    gradient_colours,
+    "late DENSE repair replaced an enabled gradient in Runs",
+  );
+  assert.deepEqual(
+    Array.from(preserved_single_run_gradient.data, trace => trace.marker.line.color),
+    gradient_colours,
+    "late DENSE repair replaced enabled gradient marker outlines in Runs",
   );
   gradient_enabled = false;
   assert.equal(prepared_weight.data[0].marker.color, prepared_weight.data[2].marker.color);
@@ -291,6 +317,50 @@ async function main() {
     throw new Error(`unterminated ${name}`);
   };
   const function_source = name => function_source_from(dashboard_source, name);
+  const run_list_context = {
+    Date,
+    Number,
+    String,
+    app: {timeout_minutes: 15},
+  };
+  vm.createContext(run_list_context);
+  vm.runInContext(
+    ["is_active_run_state", "display_run_state", "format_run_duration"]
+      .map(function_source)
+      .join("\n"),
+    run_list_context,
+  );
+  const terminal_run = (seconds, state = "finished") => ({
+    run_state: state,
+    created_at: "2026-08-01T00:00:00.000Z",
+    heartbeat_at: new Date(Date.parse("2026-08-01T00:00:00.000Z") + seconds * 1000).toISOString(),
+  });
+  assert.equal(run_list_context.format_run_duration(terminal_run(34)), "34s");
+  assert.equal(run_list_context.format_run_duration(terminal_run(52.25 * 60)), "52.3m");
+  assert.equal(run_list_context.format_run_duration(terminal_run(17.94 * 3600)), "17.9h");
+  assert.equal(run_list_context.format_run_duration(terminal_run(8 * 24 * 3600)), "192.0h");
+
+  const palette_start = dashboard_source.indexOf("const default_palette = [");
+  const palette_end = dashboard_source.indexOf("];", palette_start) + 2;
+  const palette_context = {};
+  vm.createContext(palette_context);
+  vm.runInContext(
+    `${dashboard_source.slice(palette_start, palette_end)} this.palette = default_palette;`,
+    palette_context,
+  );
+  assert.equal(palette_context.palette.length, 64, "run colour picker does not expose 64 colours");
+  assert.equal(new Set(palette_context.palette).size, 64, "run colour palette contains duplicates");
+  const palette_brightness = colour => [1, 3, 5]
+    .map(index => parseInt(colour.slice(index, index + 2), 16))
+    .reduce((total, value) => total + value, 0);
+  for (let index = 0; index < 32; index += 1) {
+    assert.ok(
+      palette_brightness(palette_context.palette[index + 32])
+        > palette_brightness(palette_context.palette[index]),
+      `lighter palette entry ${index + 33} is not lighter than its base entry`,
+    );
+  }
+
   const step_window_context = {Number, Set};
   vm.createContext(step_window_context);
   vm.runInContext(
