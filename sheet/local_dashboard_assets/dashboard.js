@@ -2266,10 +2266,23 @@ function draw_colour_plane() {
   context.stroke();
 }
 
-function queue_current_recolour() {
+function queue_current_recolour(run_id = app.colour_run_id) {
   clearTimeout(queue_current_recolour.timer);
   queue_current_recolour.timer = setTimeout(() => {
-    if (app.figures && app.current_run_id === app.colour_run_id) render_figures();
+    if (!run_id) return;
+    if (app.workspace_mode === true) {
+      window.__instra_workspace_depth_cache?.clear?.();
+      const performance = window.__thog2_dashboard_performance?.state;
+      if (performance) {
+        performance.depth_signature = null;
+        performance.pending_render = null;
+        performance.deferred_coefficients = true;
+      }
+      app.figure_revision = null;
+      refresh_current_run();
+      return;
+    }
+    if (app.figures && app.current_run_id === run_id) render_figures();
   }, 120);
 }
 
@@ -2294,7 +2307,9 @@ function set_picker_colour(rgb, persist = true) {
       if (dot) dot.style.background = colour;
     });
     if (app.current_run_id === app.colour_run_id) by_id("selected_run_mark").style.background = colour;
-    queue_current_recolour();
+    // Capture the owner now: closing the popover clears app.colour_run_id before
+    // the debounced redraw, which previously made colour changes intermittently stall.
+    queue_current_recolour(app.colour_run_id);
   }
 }
 
@@ -2497,7 +2512,7 @@ function bind_events() {
     set_picker_colour(hex_to_rgb(colour_for_run(run_id)), false);
     render_runs();
     render_run_heading();
-    if (app.current_run_id === run_id && app.figures) render_figures();
+    queue_current_recolour(run_id);
   });
   document.addEventListener("pointerdown", event => {
     const popover = by_id("colour_popover");

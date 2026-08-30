@@ -1290,6 +1290,8 @@ run_grid_point() {
   resolved_json="$("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
   artifact_name="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
   log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  weight_curves_console="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["console_header"]["weight_curves"])')"
+  dense_snapshot_console="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["console_header"]["dense_snapshot"])')"
   depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
   command=("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP")
   if (( NUM_GPUS > 1 )); then command=("$PYTHON_BIN" -m torch.distributed.run --standalone "--nproc-per-node=$NUM_GPUS" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP"); fi
@@ -1321,7 +1323,9 @@ scruffy OWT train
   JPEG_LIKE_V1:       compressor=$mlp_hidden_compressor_value group=$mlp_hidden_group_size_value Y=$O_MLP_HIDDEN
   backend/dtype:      $ATTENTION_BACKEND / $DTYPE
   instrumentation:    $INSTRUMENTATION
+  weight curves:      $weight_curves_console
   delta-loss heatmap: mode=${INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP:-disabled} destination=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_DESTINATION abs_limit=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_ABS_LIMIT log_every_probes=$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_LOG_EVERY_N_PROBES rendered_rows_max=512
+  DENSE snapshot:     $dense_snapshot_console
   non-finite updates: policy=skip max_skips=$MAX_NONFINITE_UPDATE_SKIPS
   fast discard:       $FAST_DISCARD
   semantic adapter bypass:                $BYPASS_SEMANTIC_QKV_ADAPTER

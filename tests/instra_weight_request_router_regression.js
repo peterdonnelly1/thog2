@@ -12,7 +12,7 @@ const source = fs.readFileSync(
   "utf8",
 );
 
-async function run_case(flags, range) {
+async function run_case(flags, range, {workspace = false, mode = "whole"} = {}) {
   const requests = [];
   const names = ["q", "k", "v", "o", "up", "down"];
   const settings = Object.fromEntries(names.map((name, index) => [name, {current_weights_only: flags[index]}]));
@@ -20,11 +20,13 @@ async function run_case(flags, range) {
     console,
     URL,
     depth_weight_chart_names: names,
+    app: {workspace_mode: workspace},
     normalize_chart_settings: name => settings[name],
     fetch_json: async url => { requests.push(String(url)); return {}; },
     window: {
       location: {origin: "http://127.0.0.1:6007"},
       __instra_weight_step_filter: {request_range: () => range},
+      __instra_weight_stability_final: {mode: () => mode},
       addEventListener(name, callback) { if (name === "load") callback(); },
     },
   };
@@ -61,6 +63,17 @@ async function run_case(flags, range) {
   request = await run_case([false, false, false, false, false, false], null);
   assert.equal(request.searchParams.has("current_only"), false);
   assert.equal(request.searchParams.has("step_min"), false);
+
+  // Workspace latest is run-relative: each visible run's independent family
+  // request asks the server for that run's own most recent retained snapshot.
+  request = await run_case(
+    [false, false, false, false, false, false],
+    null,
+    {workspace: true, mode: "latest"},
+  );
+  assert.equal(request.searchParams.get("current_only"), "1");
+  assert.equal(request.searchParams.has("step_min"), false);
+  assert.equal(request.searchParams.has("step_max"), false);
 
   console.log("instra weight request router regression: PASS");
 })().catch(error => {

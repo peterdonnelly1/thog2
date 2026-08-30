@@ -401,6 +401,24 @@ await emit_click(overlap_button);
 assert.equal(elements.get("weight_step_range_error").hidden, false);
 assert.equal(elements.get("weight_step_range_error").textContent, "No overlapping retained weight steps.");
 
+api.show_latest();
+assert.equal(api.mode(), "latest");
+assert.equal(api.selected_range(), null, "Workspace latest incorrectly became one shared step");
+const unequal_latest = context.prepare_figure({
+  data: [
+    {name: "A-20", meta: {optimizer_update: 20, kind: "random", instra_workspace_run_id: "A"}},
+    {name: "A-25", meta: {optimizer_update: 25, kind: "random", instra_workspace_run_id: "A"}},
+    {name: "B-450", meta: {optimizer_update: 450, kind: "random", instra_workspace_run_id: "B"}},
+    {name: "B-500", meta: {optimizer_update: 500, kind: "random", instra_workspace_run_id: "B"}},
+  ],
+  layout: {},
+}, "q");
+assert.deepEqual(
+  unequal_latest.data.map(trace => trace.name),
+  ["A-25", "B-500"],
+  "Workspace latest did not retain each run's own final trace",
+);
+
 const stale_d = {...runs.B, dashboard_run_id: "D", depth_minimum_update: null, depth_maximum_update: null};
 status_responses.D = {...stale_d, depth_minimum_update: 450, depth_maximum_update: 550};
 context.app.runs.push(stale_d);

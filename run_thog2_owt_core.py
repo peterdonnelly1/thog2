@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import pickle
+import shlex
 import socket
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -699,9 +701,96 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
     return config
 
 
+def _console_header_summary(config: OwtRunConfig, *, world_size: int) -> Dict[str, str]:
+    canonical = config.canonical_dict(world_size=world_size)
+
+    def instrumentation_value(name: str, environment: str, default: Any) -> Any:
+        if name in canonical:
+            return canonical[name]
+        return os.environ.get(environment, default)
+
+    capture_start = instrumentation_value(
+        "instrumentation__depth_weight_curves__start_step",
+        "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_START_STEP",
+        None,
+    )
+    capture_end = instrumentation_value(
+        "instrumentation__depth_weight_curves__end_step",
+        "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_END_STEP",
+        None,
+    )
+    capture = (
+        f"{capture_start if capture_start is not None else 'first'}.."
+        f"{capture_end if capture_end is not None else 'open'}"
+    )
+    weight_curves = " ".join(
+        (
+            "destination=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__destination",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DESTINATION",
+                "local",
+            )),
+            "mode=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__time_mode",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_TIME_MODE",
+                "latest",
+            )),
+            f"capture={capture}",
+            "every=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__log_every_n_steps",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS",
+                100,
+            )),
+            "history=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__history_length",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_HISTORY_LENGTH",
+                20,
+            )),
+            "scalars/matrix=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__scalar_weights_per_matrix",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SCALAR_WEIGHTS_PER_MATRIX",
+                3,
+            )),
+            "depth_points=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__depth_evaluation_points",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DEPTH_EVALUATION_POINTS",
+                256,
+            )),
+            "shared_coordinates=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__same_coordinates_all_runs",
+                "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COORDINATES_ALL_RUNS",
+                "false",
+            )).lower(),
+        )
+    )
+
+    if config.save_dense_initialisation_snapshot:
+        dense_snapshot = "A save step-zero tensors directory=dense_baseline_snapshots"
+    elif config.initialise_from_dense_snapshot is not None:
+        stage = "B compressor-baselined DENSE" if config.model_type == "dense" else "C Compact Run"
+        dense_snapshot = (
+            f"{stage} load={config.initialise_from_dense_snapshot} "
+            f"compressor=chebyshev order={config.dense_snapshot_chebyshev_order} "
+            f"version={config.dense_snapshot_chebyshev_version}"
+        )
+    else:
+        dense_snapshot = "disabled"
+    return {"weight_curves": weight_curves, "dense_snapshot": dense_snapshot}
+
+
 def resolved_payload(config: OwtRunConfig, *, world_size: int, log_timestamp: Optional[str]) -> Dict[str, Any]:
     paths = config.paths(log_timestamp=log_timestamp)
-    return {"artifact_name": config.artifact_name, "artifact_prefix": config.artifact_prefix, "model_type": config.model_type, "run_mode": config.run_mode, "world_size": world_size, "tokens_per_iter": config.tokens_per_iter(), "canonical_config": config.canonical_dict(world_size=world_size), "paths": {name: str(path) for name, path in paths.items()}}
+    return {
+        "artifact_name": config.artifact_name,
+        "artifact_prefix": config.artifact_prefix,
+        "model_type": config.model_type,
+        "run_mode": config.run_mode,
+        "world_size": world_size,
+        "tokens_per_iter": config.tokens_per_iter(),
+        "canonical_config": config.canonical_dict(world_size=world_size),
+        "console_header": _console_header_summary(config, world_size=world_size),
+        "paths": {name: str(path) for name, path in paths.items()},
+    }
 
 
 # vvv THOG print resolved model parameters and execution options immediately before training
@@ -810,7 +899,10 @@ def main() -> int:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)
     source = source_identity()
-    telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
+    main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+    launch_module = str(getattr(main_spec, "name", "") or Path(sys.argv[0]).stem)
+    launch_command = shlex.join((sys.executable, "-m", launch_module, *sys.argv[1:]))
+    telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "command": launch_command, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
     # vvv THOG preserve shell interrupt status while allowing W&B to record a clean intentional stop
     telemetry_exit_code: Optional[int] = None
     telemetry_final_state = "stopped"

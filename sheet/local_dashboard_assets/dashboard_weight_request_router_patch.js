@@ -42,6 +42,10 @@ window.addEventListener("load", () => {
     const flags = current_only_flags();
     const all_current_only = flags.length > 0 && flags.every(Boolean);
     const range = selected_range();
+    const run_relative_latest = (
+      window.__instra_weight_stability_final?.mode?.() === "latest"
+      && app.workspace_mode === true
+    );
 
     parsed.searchParams.delete("current_only");
     parsed.searchParams.delete("step_min");
@@ -53,7 +57,7 @@ window.addEventListener("load", () => {
     if (range) {
       parsed.searchParams.set("step_min", String(range.minimum));
       parsed.searchParams.set("step_max", String(range.maximum));
-    } else if (all_current_only) {
+    } else if (all_current_only || run_relative_latest) {
       parsed.searchParams.set("current_only", "1");
     }
     // Mixed no-range current/history mode intentionally fetches retained history once.

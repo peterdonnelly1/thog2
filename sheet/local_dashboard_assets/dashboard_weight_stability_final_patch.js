@@ -226,6 +226,10 @@ window.addEventListener("load", () => {
       const available = available_range();
       if (!state || !available || state.mode === "settings") return null;
       if (state.mode === "latest") {
+        // Workspace latest is deliberately run-relative. Each per-run family
+        // request uses current_only=1 and the merged payload is reduced again by
+        // run identity below, so unequal final capture steps remain visible.
+        if (app.workspace_mode === true) return null;
         return {minimum: available.maximum, maximum: available.maximum};
       }
       if (state.mode === "custom" && state.range) {
@@ -497,7 +501,10 @@ window.addEventListener("load", () => {
       }
 
       const range = selected_range();
-      if (!capture_limited && settings.current_weights_only === true) {
+      const run_relative_latest = (
+        app.workspace_mode === true && selected_range_mode() === "latest"
+      );
+      if (run_relative_latest || (!capture_limited && settings.current_weights_only === true)) {
         retain_latest(prepared);
         apply_run_colour(prepared);
       } else if (range) {

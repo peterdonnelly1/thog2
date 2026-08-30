@@ -72,6 +72,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_regression_final_patch.js",                                                                                                          # <<< THOG guard editable ranges, stacked layout, y headroom, Overview density, and retained-data RND last
     "dashboard_weight_range_interaction_final_patch.js",                                                                                                   # <<< THOG make explicit ranges authoritative, expose step hover, fit four-digit coupling indices, and restore functional RND
     "dashboard_consistency_final_patch.js",                                                                                                                # <<< THOG reconcile first-mount heatmaps, separate the colour key, and finalize the Overview allocation
+    "dashboard_aug30_enhancements_patch.js",                                                                                                               # <<< THOG preserve Overview state, stack/collapse panels, resize NAME, and place STEPS after preset p
 )
 
 
