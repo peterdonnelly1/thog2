@@ -1073,6 +1073,11 @@ def prepare_context(
     explicit: Set[str],
 ) -> Dict[str, Any]:
     mode, selector = _resolve_mode_and_selector(arguments, explicit)
+    core.validate_dense_snapshot_cli(
+        arguments,
+        explicit=explicit,
+        resolved_mode=mode,
+    )
     if mode == "fresh":
         values = vars(arguments)
         world_size = int(values["requested_world_size"] or os.environ.get("WORLD_SIZE", "1"))
@@ -1428,6 +1433,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 }
                 if trainer.distributed.is_primary:
                     write_run_manifest(paths["manifest_path"], lifecycle)
+    if getattr(trainer, "dense_snapshot_metadata", None) is not None:
+        lifecycle = {
+            **lifecycle,
+            "dense_snapshot_baselining": dict(trainer.dense_snapshot_metadata),
+        }
+        if trainer.distributed.is_primary:
+            write_run_manifest(paths["manifest_path"], lifecycle)
     trainer.lifecycle_metadata = dict(lifecycle)
 
     canonical = config.canonical_dict(world_size=int(context["world_size"]))

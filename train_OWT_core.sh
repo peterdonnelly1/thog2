@@ -148,6 +148,9 @@ DEPTH_COMPRESS_LAYER_NORM_AND_BIAS=false                                        
 RESIDUAL_INIT_POLICY="depth_scaled"
 RESIDUAL_INIT_DEPTH_SOURCE="dof_implied_depth"
 RESIDUAL_INIT_DEPTH_VALUE=12
+RESIDUAL_INIT_EXPLICIT=false
+SAVE_DENSE_INITIALISATION_SNAPSHOT=false
+INITIALISE_FROM_DENSE_SNAPSHOT=""
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
 FAST_DISCARD="${THOG2_FAST_DISCARD:-true}"
@@ -219,6 +222,10 @@ Systematic geometry (repeat --select-element as needed):
   --select-element SELECTOR
   --option TARGET.PROPERTY=VALUE
   --explain-geometry
+
+DENSE Snapshot Baselining:
+  --save-dense-initialisation-snapshot        save A Normal DENSE step-zero parameters
+  --initialise-from-dense-snapshot FILE       initialise B Compressor-baselined DENSE or C Compact Run
 
 HYPERBLOCK:
   --hyperblock
@@ -336,6 +343,7 @@ EOF_USAGE
 # vvv THOG accept long optimizer, geometry, and layer-dropout controls without disturbing established short-option parsing
 OPTIMIZER_FILTERED_ARGS=()
 GEOMETRY_UI_EXTRA_ARGS=()
+DENSE_SNAPSHOT_EXTRA_ARGS=()
 EXPLAIN_GEOMETRY=false
 OPTIMIZER_SAW_SEPARATOR=false
 while (( $# > 0 )); do
@@ -345,6 +353,23 @@ while (( $# > 0 )); do
     continue
   fi
   case "$1" in
+    --save-dense-initialisation-snapshot)
+      SAVE_DENSE_INITIALISATION_SNAPSHOT=true
+      DENSE_SNAPSHOT_EXTRA_ARGS+=("--save-dense-initialisation-snapshot")
+      shift
+      ;;
+    --initialise-from-dense-snapshot)
+      (( $# >= 2 )) || { echo "--initialise-from-dense-snapshot requires a file" >&2; exit 2; }
+      INITIALISE_FROM_DENSE_SNAPSHOT="$2"
+      DENSE_SNAPSHOT_EXTRA_ARGS+=("--initialise-from-dense-snapshot" "$2")
+      shift 2
+      ;;
+    --initialise-from-dense-snapshot=*)
+      INITIALISE_FROM_DENSE_SNAPSHOT="${1#*=}"
+      [[ -n "$INITIALISE_FROM_DENSE_SNAPSHOT" ]] || { echo "--initialise-from-dense-snapshot requires a file" >&2; exit 2; }
+      DENSE_SNAPSHOT_EXTRA_ARGS+=("--initialise-from-dense-snapshot=$INITIALISE_FROM_DENSE_SNAPSHOT")
+      shift
+      ;;
     --select-depth)
       GEOMETRY_UI_EXTRA_ARGS+=("--select-depth")
       shift
@@ -665,7 +690,10 @@ while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:s:M:H:D:C:
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; s) LAYER_DROPOUT_STRATUM_SIZE="$OPTARG" ;; M) LAYER_DROPOUT_ACTIVE_PER_STRATUM="$OPTARG" ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
-    E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;; r) RESIDUAL_INIT_POLICY="$OPTARG" ;; z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG" ;; Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG" ;;
+    E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;;
+    r) RESIDUAL_INIT_POLICY="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
+    z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
+    Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
     d) DATASET_NAME="$OPTARG"; DATA_DIR="data/$OPTARG" ;; t) DATA_DIR="$OPTARG" ;; o) CHECKPOINT_ROOT="$OPTARG" ;; j) LOG_ROOT="$OPTARG" ;; R) RESULT_ROOT="$OPTARG" ;; x) DRY_RUN="$OPTARG" ;;
     h) usage; exit 0 ;; :) echo "Option -$OPTARG requires an argument." >&2; exit 2 ;; \?) echo "Unknown option: -$OPTARG" >&2; usage >&2; exit 2 ;;
   esac
@@ -674,6 +702,7 @@ shift $((OPTIND - 1))
 if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
 EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
+EXTRA_ARGS+=("${DENSE_SNAPSHOT_EXTRA_ARGS[@]}")
 
 # vvv THOG normalize optimizer and apply its LR defaults only when -c/-f were omitted
 case "${OPTIMIZER,,}" in
@@ -971,6 +1000,18 @@ case "$DEPTH_CURVE_PLOTS" in none|final|eval) ;; *) echo "DEPTH_CURVE_PLOTS must
 case "$DEPTH_CURVE_RENDERER" in matplotlib|plotly|both) ;; *) echo "DEPTH_CURVE_RENDERER must be matplotlib, plotly, or both." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_POLICY" in depth_scaled|unscaled) ;; *) echo "RESIDUAL_INIT_POLICY must be depth_scaled or unscaled." >&2; exit 2 ;; esac
 case "$RESIDUAL_INIT_DEPTH_SOURCE" in true_layer_depth|dof_implied_depth|user_forced_depth) ;; *) echo "Bad RESIDUAL_INIT_DEPTH_SOURCE: $RESIDUAL_INIT_DEPTH_SOURCE" >&2; exit 2 ;; esac
+if [[ "$SAVE_DENSE_INITIALISATION_SNAPSHOT" == true && -n "$INITIALISE_FROM_DENSE_SNAPSHOT" ]]; then
+  echo "--save-dense-initialisation-snapshot and --initialise-from-dense-snapshot are mutually exclusive" >&2
+  exit 2
+fi
+if [[ ( "$SAVE_DENSE_INITIALISATION_SNAPSHOT" == true || -n "$INITIALISE_FROM_DENSE_SNAPSHOT" ) && "$RUN_MODE" != fresh ]]; then
+  echo "DENSE snapshot save/initialise may not be combined with resume or fork" >&2
+  exit 2
+fi
+if [[ -n "$INITIALISE_FROM_DENSE_SNAPSHOT" && "$RESIDUAL_INIT_EXPLICIT" == true ]]; then
+  echo "--initialise-from-dense-snapshot may not be combined with -r, -z, or -Z" >&2
+  exit 2
+fi
 for setting in "$STEPS" "$GRADIENT_ACCUMULATION_STEPS" "$NUM_GPUS" "$EVAL_ITERS" "$EVAL_INTERVAL" "$LOG_INTERVAL" "$N_LAYER" "$N_HEAD" "$N_EMBD" "$BLOCK_SIZE" "$CHECKPOINT_SEGMENT_SIZE" "$RESIDUAL_INIT_DEPTH_VALUE" "$DEPTH_CURVE_SAMPLE_ELEMENTS" "$LAPPED_COSINE_WINDOW_LENGTH"; do validate_positive_uint "$setting" "numeric setting"; done
 # vvv THOG fixed anisotropic HYPERBLOCK orders are validated before constructing any run
 for setting in "$HYPERBLOCK_COMMON_FAMILY_ORDER" "$HYPERBLOCK_ATTENTION_FAMILY_ORDER" "$HYPERBLOCK_MLP_FAMILY_ORDER" "$HYPERBLOCK_DEPTH_ORDER" "$HYPERBLOCK_D_MODEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_ORDER" "$HYPERBLOCK_ATTENTION_HEAD_CHANNEL_ORDER" "$HYPERBLOCK_MLP_HIDDEN_MULTIPLIER" "$HYPERBLOCK_LOOP_COUNT"; do validate_positive_uint "$setting" "HYPERBLOCK order or loop count"; done
@@ -1098,6 +1139,7 @@ run_grid_point() {
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status depth_curve_console depth_curve_done
+  local -a residual_init_args
   local -a compact_args compact_order_args optional_args train_args command
 
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
@@ -1220,6 +1262,11 @@ run_grid_point() {
     fi
   fi
 
+  residual_init_args=(--residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE")
+  if [[ -n "$INITIALISE_FROM_DENSE_SNAPSHOT" ]]; then
+    residual_init_args=()
+  fi
+
   run_name_value="$RUN_NAME"; [[ -z "$run_name_value" ]] && run_name_value="${run_tag}_OWT"
   train_args=(
     --model-type "$run_model_type" --run-mode "$RUN_MODE" --host-label "$HOST_LABEL" --run-name "$run_name_value"
@@ -1229,7 +1276,7 @@ run_grid_point() {
     --n-layer "$n_layer_value" --n-head "$n_head_value" --n-embd "$n_embd_value" --block-size "$BLOCK_SIZE"
     "${compact_order_args[@]}"
     "${compact_args[@]}" --attention-backend "$ATTENTION_BACKEND" --experiment-prefix "$EXPERIMENT_PREFIX" --dtype "$DTYPE"
-    --residual-init-policy "$RESIDUAL_INIT_POLICY" --residual-init-depth-source "$residual_init_depth_source_value" --residual-init-depth-value "$RESIDUAL_INIT_DEPTH_VALUE"
+    "${residual_init_args[@]}"
     "$CHECKPOINT_FLAG" --checkpoint-segment-size "$CHECKPOINT_SEGMENT_SIZE" "$WANDB_FLAG" --wandb-mode "$WANDB_MODE" "${optional_args[@]}" "${EXTRA_ARGS[@]}"
   )
 

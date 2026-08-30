@@ -24,6 +24,7 @@ from .chaos_bump_sampling import (
 )
 # ^^^ THOG
 from .compact_identity import (
+    BASIS_FAMILY_CHEBYSHEV,
     DEFAULT_MLP_HIDDEN_COMPRESSOR,
     DEFAULT_MLP_HIDDEN_GROUP_SIZE,
     GEOMETRY_PRESET_DEPTH,
@@ -212,6 +213,13 @@ class TrainingConfig:
     mlp_geometry: Optional[str] = None
     basis_family: Optional[str] = None
     resolved_geometry_plan: Optional[Dict[str, Any]] = None
+    # One-shot startup controls.  They are intentionally omitted from
+    # checkpoint configuration so resume/fork cannot replay them.
+    save_dense_initialisation_snapshot: bool = False
+    initialise_from_dense_snapshot: Optional[str] = None
+    dense_snapshot_chebyshev_order: Optional[int] = None
+    dense_snapshot_chebyshev_version: Optional[str] = None
+    dense_snapshot_host_label: Optional[str] = None
     # vvv THOG fixed coupled-field HYPERBLOCK model controls
     hyperblock_topology: Optional[str] = None
     hyperblock_compressor: str = "chebyshev"
@@ -309,6 +317,27 @@ class TrainingConfig:
     out_dir: str = "out-thog2"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.save_dense_initialisation_snapshot, bool):
+            raise ValueError("save_dense_initialisation_snapshot must be bool")
+        if self.save_dense_initialisation_snapshot and self.initialise_from_dense_snapshot is not None:
+            raise ValueError(
+                "save_dense_initialisation_snapshot and initialise_from_dense_snapshot "
+                "are mutually exclusive"
+            )
+        if self.save_dense_initialisation_snapshot and self.model_type != "dense":
+            raise ValueError("DENSE snapshot creation requires model_type='dense'")
+        if self.initialise_from_dense_snapshot is not None and self.model_type == "dense":
+            order = self.dense_snapshot_chebyshev_order
+            if isinstance(order, bool) or not isinstance(order, int) or not 1 <= order <= self.n_layer:
+                raise ValueError(
+                    "B Compressor-baselined DENSE Chebyshev order must satisfy "
+                    f"1 <= P <= L; got P={order!r}, L={self.n_layer}"
+                )
+            if self.dense_snapshot_chebyshev_version != BASIS_VERSION:
+                raise ValueError(
+                    "B Compressor-baselined DENSE requires the current "
+                    f"Chebyshev version {BASIS_VERSION!r}"
+                )
         if self.model_type not in MODEL_TYPES:
             raise ValueError(f"model_type must be one of {MODEL_TYPES}; got {self.model_type!r}")
         if self.resolved_geometry_plan is not None:
@@ -770,6 +799,19 @@ class TrainingConfig:
             identity = self.compact_identity_metadata()
             self.basis_version = str(identity["basis_version"])
             # ^^^ THOG
+        if self.initialise_from_dense_snapshot is not None and self.model_type == "thog2_sheet":
+            if self.hyperblock_enabled:
+                raise ValueError("C Compact Run v1 supports only pure DEPTH, not HYPERBLOCK")
+            if self.geometry_preset != GEOMETRY_PRESET_DEPTH:
+                raise ValueError("C Compact Run v1 supports only pure DEPTH geometry")
+            if self.basis_family != BASIS_FAMILY_CHEBYSHEV or self.basis_version != BASIS_VERSION:
+                raise ValueError(
+                    "C Compact Run v1 requires the current QR-stabilised Chebyshev compressor"
+                )
+            if self.depth_compress_layer_norm_and_bias:
+                raise ValueError("C Compact Run v1 keeps LayerNorm and bias outside compression")
+            if self.plastic__enabled:
+                raise ValueError("C Compact Run v1 does not support PLASTIC DEPTH")
         if not isinstance(self.bias, bool) or not isinstance(self.decay_learning_rate, bool):
             raise ValueError("bias and decay_learning_rate must be bool")
 
@@ -850,6 +892,14 @@ class TrainingConfig:
     # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        for name in (
+            "save_dense_initialisation_snapshot",
+            "initialise_from_dense_snapshot",
+            "dense_snapshot_chebyshev_order",
+            "dense_snapshot_chebyshev_version",
+            "dense_snapshot_host_label",
+        ):
+            values.pop(name, None)
         if not self.chaos_bump__sampling__enabled:
             for name in CHAOS_BUMP_SAMPLING_CONFIG_FIELDS:
                 values.pop(name, None)

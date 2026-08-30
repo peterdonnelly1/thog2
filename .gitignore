@@ -17,6 +17,7 @@ checkpoints/
 logs/
 generated_text/
 wandb/
+dense_baseline_snapshots/
 .env
 .env.*
 *.log

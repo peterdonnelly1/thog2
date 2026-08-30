@@ -324,6 +324,12 @@ class TrainerCheckpointResumeMixin:
         trainer.plastic_depth_count_audit = list(
             payload.get("plastic_depth_count_audit", ())
         )
+        trainer.dense_snapshot_metadata = payload.get("dense_snapshot_baselining")
+        if trainer.dense_snapshot_metadata is not None:
+            trainer.parameter_report = {
+                **trainer.parameter_report,
+                "dense_snapshot_baselining": dict(trainer.dense_snapshot_metadata),
+            }
         # ^^^ THOG
         trainer.distributed.barrier()
         trainer._record("checkpoint_resumed", path=str(path))

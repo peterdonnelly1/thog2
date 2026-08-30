@@ -267,6 +267,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mlp-geometry", choices=MLP_GEOMETRIES)
     parser.add_argument("--basis-family", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
     parser.add_argument("--basis-version", default="auto")
+    parser.add_argument(
+        "--save-dense-initialisation-snapshot",
+        action="store_true",
+        help="save immutable A Normal DENSE step-zero model parameters and continue",
+    )
+    parser.add_argument(
+        "--initialise-from-dense-snapshot",
+        metavar="FILE",
+        help="initialise B Compressor-baselined DENSE or C Compact Run from FILE",
+    )
     # vvv THOG coupled field machine HYPERBLOCK controls; the topology is implicit while it is the sole implementation
     parser.add_argument("--hyperblock", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--hyperblock-compressor", choices=BASIS_FAMILIES, default=BASIS_FAMILY_CHEBYSHEV)
@@ -430,7 +440,7 @@ def geometry_plan_from_arguments(arguments: argparse.Namespace):
         raise ValueError("--hyperblock cannot be combined with selector-based geometry controls")
     if not systematic_geometry_requested(arguments):
         return None
-    if arguments.model_type == "dense":
+    if arguments.model_type == "dense" and arguments.initialise_from_dense_snapshot is None:
         raise ValueError("the systematic geometry UI requires model_type='sheet' or an omitted --model-type")
     if arguments.geometry_preset not in (None, GEOMETRY_PRESET_DEPTH):
         raise ValueError("the systematic geometry UI cannot be mixed with a non-default --geometry-preset")
@@ -456,8 +466,67 @@ def geometry_plan_from_arguments(arguments: argparse.Namespace):
     )
 
 
+def _dense_snapshot_mapping_from_plan(arguments: argparse.Namespace, geometry_plan):
+    if arguments.initialise_from_dense_snapshot is None or arguments.model_type != "dense":
+        return None, None
+    if geometry_plan is None:
+        raise ValueError(
+            "B Compressor-baselined DENSE requires --select-depth and "
+            "--option DEPTH.order=P"
+        )
+    if not geometry_plan.depth_enabled or geometry_plan.selections:
+        raise ValueError("DENSE snapshot v1 supports only pure DEPTH geometry")
+    if geometry_plan.depth_compressor != BASIS_FAMILY_CHEBYSHEV:
+        raise ValueError(
+            "DENSE snapshot v1 supports only the Chebyshev compressor; "
+            f"got {geometry_plan.depth_compressor!r}"
+        )
+    if geometry_plan.depth_compressor_version != BASIS_VERSION:
+        raise ValueError(
+            "DENSE snapshot v1 requires the current QR-stabilised Chebyshev version; "
+            f"expected={BASIS_VERSION!r}, got={geometry_plan.depth_compressor_version!r}"
+        )
+    return int(geometry_plan.depth_order), str(geometry_plan.depth_compressor_version)
+
+
+def validate_dense_snapshot_cli(
+    arguments: argparse.Namespace,
+    *,
+    explicit=(),
+    resolved_mode: Optional[str] = None,
+) -> None:
+    save_requested = bool(arguments.save_dense_initialisation_snapshot)
+    initialise_requested = arguments.initialise_from_dense_snapshot is not None
+    if save_requested and initialise_requested:
+        raise ValueError(
+            "--save-dense-initialisation-snapshot and "
+            "--initialise-from-dense-snapshot are mutually exclusive"
+        )
+    mode = str(resolved_mode or arguments.run_mode or "fresh")
+    if (save_requested or initialise_requested) and mode != "fresh":
+        selected = (
+            "--save-dense-initialisation-snapshot"
+            if save_requested
+            else "--initialise-from-dense-snapshot"
+        )
+        raise ValueError(f"{selected} may not be combined with resume or fork")
+    residual_fields = {
+        "residual_init_policy": "--residual-init-policy/-r",
+        "residual_init_depth_source": "--residual-init-depth-source/-z",
+        "residual_init_depth_value": "--residual-init-depth-value/-Z",
+    }
+    conflicts = [option for name, option in residual_fields.items() if name in explicit]
+    if initialise_requested and conflicts:
+        raise ValueError(
+            "--initialise-from-dense-snapshot may not be combined with explicit "
+            "residual-initialisation options: " + ", ".join(conflicts)
+        )
+
+
 def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) -> OwtRunConfig:
     geometry_plan = geometry_plan if geometry_plan is not None else geometry_plan_from_arguments(arguments)
+    validate_dense_snapshot_cli(arguments)
+    snapshot_order, snapshot_version = _dense_snapshot_mapping_from_plan(arguments, geometry_plan)
     if geometry_plan is not None and not geometry_plan.materializer.implemented:
         raise ValueError(geometry_plan.materializer.message)
     # vvv THOG preserve the exact pre-HYPERBLOCK config derivation lines for source history
@@ -472,7 +541,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         raise ValueError("--model-type is required for legacy runs; systematic geometry selections imply model_type='sheet'")
     if arguments.hyperblock and model_type != "sheet":
         raise ValueError("--hyperblock requires --model-type sheet or an omitted --model-type")
-    adapter = None if geometry_plan is None else geometry_plan.materializer
+    dense_snapshot_target = arguments.model_type == "dense" and arguments.initialise_from_dense_snapshot is not None
+    adapter = None if geometry_plan is None or dense_snapshot_target else geometry_plan.materializer
     basis_version = arguments.basis_version if adapter is None else str(adapter.legacy_basis_version)
     selected_mlp_hidden_order = arguments.o_mlp_hidden
     if geometry_plan is not None:
@@ -519,7 +589,15 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         mlp_geometry=None if arguments.hyperblock else (arguments.mlp_geometry if adapter is None else None),
         basis_family=None if arguments.hyperblock else (arguments.basis_family if adapter is None else adapter.legacy_basis_family),
         basis_version=basis_version,
-        resolved_geometry_plan=None if geometry_plan is None else geometry_plan.to_dict(),
+        resolved_geometry_plan=(
+            None
+            if geometry_plan is None or dense_snapshot_target
+            else geometry_plan.to_dict()
+        ),
+        save_dense_initialisation_snapshot=arguments.save_dense_initialisation_snapshot,
+        initialise_from_dense_snapshot=arguments.initialise_from_dense_snapshot,
+        dense_snapshot_chebyshev_order=snapshot_order,
+        dense_snapshot_chebyshev_version=snapshot_version,
         # vvv THOG pass the sole v0 topology explicitly into resolved run identity
         hyperblock_topology=HYPERBLOCK_TOPOLOGY_COUPLED_FIELD_MACHINE if arguments.hyperblock else None,
         hyperblock_compressor=arguments.hyperblock_compressor,

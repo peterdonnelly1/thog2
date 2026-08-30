@@ -50,6 +50,11 @@ class TrainerCheckpointSaveMixin:
             "parameter_report": {**self.parameter_report, "compact_identity": compact_identity},
             "distributed_training": self.distributed.report(),
             "lifecycle": getattr(self, "lifecycle_metadata", None),                                                                                       # <<< THOG persist logical-run identity, lineage, W&B identity, target and LR phases
+            "dense_snapshot_baselining": getattr(
+                self,
+                "dense_snapshot_metadata",
+                None,
+            ),
             # vvv THOG enabled PLASTIC checkpoints alone carry COARSE/FINE phase and replayable count audits; disabled payloads remain unchanged
             **(
                 {

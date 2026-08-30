@@ -172,6 +172,12 @@ class OwtRunConfig:
     basis_family: Optional[str] = BASIS_FAMILY_CHEBYSHEV
     basis_version: str = BASIS_VERSION
     resolved_geometry_plan: Optional[Dict[str, Any]] = None
+    # DENSE Snapshot Baselining actions are fresh-start controls, not replayable
+    # run identity.  Provenance is recorded by the trainer after the action.
+    save_dense_initialisation_snapshot: bool = False
+    initialise_from_dense_snapshot: Optional[str] = None
+    dense_snapshot_chebyshev_order: Optional[int] = None
+    dense_snapshot_chebyshev_version: Optional[str] = None
     # vvv THOG fixed coupled-field HYPERBLOCK controls
     hyperblock_topology: Optional[str] = None
     hyperblock_compressor: str = "chebyshev"
@@ -280,6 +286,30 @@ class OwtRunConfig:
     artifact_name_limit: int = DEFAULT_COMPONENT_LIMIT
 
     def __post_init__(self) -> None:
+        if not isinstance(self.save_dense_initialisation_snapshot, bool):
+            raise ValueError("save_dense_initialisation_snapshot must be bool")
+        if self.save_dense_initialisation_snapshot and self.initialise_from_dense_snapshot is not None:
+            raise ValueError(
+                "--save-dense-initialisation-snapshot and "
+                "--initialise-from-dense-snapshot are mutually exclusive"
+            )
+        if (
+            self.save_dense_initialisation_snapshot
+            or self.initialise_from_dense_snapshot is not None
+        ) and self.run_mode != "fresh":
+            raise ValueError(
+                "--save-dense-initialisation-snapshot and "
+                "--initialise-from-dense-snapshot may be used only for a fresh run, "
+                "not resume or fork"
+            )
+        if self.save_dense_initialisation_snapshot and self.model_type != "dense":
+            raise ValueError("--save-dense-initialisation-snapshot requires model_type='dense'")
+        if self.initialise_from_dense_snapshot is not None and self.model_type == "dense":
+            if self.dense_snapshot_chebyshev_order is None or self.dense_snapshot_chebyshev_version is None:
+                raise ValueError(
+                    "B Compressor-baselined DENSE requires --select-depth with a "
+                    "Chebyshev DEPTH order"
+                )
         if self.model_type not in PUBLIC_MODEL_TYPES:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
         if self.run_mode not in ("fresh", "resume"):
@@ -1252,6 +1282,11 @@ class OwtRunConfig:
             n_embd=self.n_embd,
             dropout=self.dropout,
             bias=self.bias,
+            save_dense_initialisation_snapshot=self.save_dense_initialisation_snapshot,
+            initialise_from_dense_snapshot=self.initialise_from_dense_snapshot,
+            dense_snapshot_chebyshev_order=self.dense_snapshot_chebyshev_order,
+            dense_snapshot_chebyshev_version=self.dense_snapshot_chebyshev_version,
+            dense_snapshot_host_label=self.host_label,
             **sheet_kwargs,
             residual_init_policy=self.residual_init_policy,
             residual_init_depth_source=self.residual_init_depth_source,
@@ -1332,6 +1367,13 @@ class OwtRunConfig:
     # vvv THOG persistent disabled-run metadata excludes all dormant PLASTIC DEPTH controls
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        for name in (
+            "save_dense_initialisation_snapshot",
+            "initialise_from_dense_snapshot",
+            "dense_snapshot_chebyshev_order",
+            "dense_snapshot_chebyshev_version",
+        ):
+            values.pop(name, None)
         if not self.chaos_bump__sampling__enabled:
             for name in CHAOS_BUMP_SAMPLING_CONFIG_FIELDS:
                 values.pop(name, None)

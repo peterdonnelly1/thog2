@@ -9,6 +9,7 @@ from torch import Tensor
 from .batch_source import DeterministicBatchSource
 from .checkpoints import optimizer_group_names
 from .distributed import DistributedContext
+from .dense_snapshot import apply_dense_snapshot_startup
 from .optimizer_factory import build_optimizer
 from .trainer_checkpoint_resume import TrainerCheckpointResumeMixin
 from .trainer_checkpoint_save import TrainerCheckpointSaveMixin
@@ -42,6 +43,13 @@ class SharedTrainer(
         self.events: List[TrainerEvent] = []
 
         self.raw_model = build_training_model(config, device=self.device)
+        # Snapshot creation/initialisation is the first post-construction action:
+        # before parameter reporting, DDP, the optimizer, batches, or forwards.
+        self.dense_snapshot_metadata = apply_dense_snapshot_startup(
+            self.raw_model,
+            config,
+            self.distributed,
+        )
         checkpoint_setter = getattr(
             self.raw_model,
             "set_checkpoint_segment_size",
@@ -53,6 +61,11 @@ class SharedTrainer(
             self.raw_model,
             config.model_type,
         )
+        if self.dense_snapshot_metadata is not None:
+            self.parameter_report = {
+                **self.parameter_report,
+                "dense_snapshot_baselining": dict(self.dense_snapshot_metadata),
+            }
         # vvv THOG retained operational tensors disconnect compact parameters from the DDP forward graph until explicit gradient projection
         find_unused_parameters = False
         find_unused_requirement = getattr(
