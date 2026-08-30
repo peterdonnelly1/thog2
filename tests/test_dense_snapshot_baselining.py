@@ -12,6 +12,7 @@ import torch
 
 import sheet.dense_snapshot as dense_snapshot
 from run_thog2_owt_core import (
+    OwtTrainer,
     build_parser,
     config_from_arguments,
     geometry_plan_from_arguments,
@@ -490,3 +491,20 @@ def test_shared_trainer_runs_a_b_c_before_optimizer_and_persists_provenance(
             b.close()
     finally:
         a.close()
+
+
+def test_production_owt_trainer_runs_snapshot_startup(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(dense_snapshot, "repository_root", lambda: tmp_path)
+    tokens = torch.arange(64, dtype=torch.long) % 16
+    config = _dense_config(
+        save_dense_initialisation_snapshot=True,
+        dense_snapshot_host_label="production",
+    )
+    trainer = OwtTrainer(config, tokens, tokens)
+    try:
+        metadata = trainer.dense_snapshot_metadata
+        assert metadata["lifecycle_role"] == "A Normal DENSE"
+        assert Path(metadata["snapshot_path"]).is_file()
+        assert trainer.parameter_report["dense_snapshot_baselining"] == metadata
+    finally:
+        trainer.close()

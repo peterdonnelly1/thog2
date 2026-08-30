@@ -8,6 +8,7 @@ import torch
 from torch import Tensor, nn
 
 from .batch_source import DeterministicBatchSource
+from .dense_snapshot import apply_dense_snapshot_startup
 from .distributed import DistributedContext
 from .memory import MemoryTelemetry
 from .optimizer_factory import build_optimizer
@@ -70,6 +71,13 @@ class Stage4Trainer(SharedTrainer):
         self.events: List[TrainerEvent] = []
 
         self.raw_model = build_training_model(config, device=self.device)
+        # Stage4 owns the production construction path rather than delegating to
+        # SharedTrainer.__init__, so it must invoke the same pre-optimizer hook.
+        self.dense_snapshot_metadata = apply_dense_snapshot_startup(
+            self.raw_model,
+            config,
+            self.distributed,
+        )
         checkpoint_setter = getattr(
             self.raw_model,
             "set_checkpoint_segment_size",
@@ -82,6 +90,11 @@ class Stage4Trainer(SharedTrainer):
             self.raw_model,
             config.model_type,
         )
+        if self.dense_snapshot_metadata is not None:
+            self.parameter_report = {
+                **self.parameter_report,
+                "dense_snapshot_baselining": dict(self.dense_snapshot_metadata),
+            }
         # vvv THOG retained operational tensors disconnect compact parameters from the DDP forward graph until explicit gradient projection
         find_unused_parameters = False
         find_unused_requirement = getattr(

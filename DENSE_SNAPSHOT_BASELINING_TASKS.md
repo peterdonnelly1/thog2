@@ -20,6 +20,7 @@ Baseline: `master` at `b9b09b1e125633e451bae60d9d2f9ea3f0721987`
 - [x] Run focused DENSE snapshot tests.
 - [x] Run existing DENSE, DEPTH, geometry, optimizer, instrumentation, resume, and fork regression tests; classify baseline and environment failures.
 - [x] Review the final diff, update this task list and the implementation log, commit, and push to `origin/initialisation_baselining`.
+- [x] Correct the duplicated `Stage4Trainer` production construction path exposed by the first live A run, add a real-`OwtTrainer` regression test, and republish.
 
 ## Scope guard
 

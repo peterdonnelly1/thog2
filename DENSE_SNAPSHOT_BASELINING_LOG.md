@@ -40,3 +40,10 @@
 - Fresh final pass: 22 focused tests passed in 3.10 seconds; new implementation/test lint passed; Python compilation, Bash syntax, and `git diff --check` passed.
 - Reviewed the complete integration delta and staged only the snapshot implementation, its tests, its CLI/trainer/checkpoint integrations, `.gitignore`, and these two handover files.
 - Published the reviewed commit to `origin/initialisation_baselining` through the ChatGPT GitHub connector.
+
+## Production-path correction
+
+- A live A run exposed that `Stage4Trainer` owns a duplicated production constructor and therefore bypassed the snapshot hook added to `SharedTrainer`.
+- Added the same first-post-construction snapshot hook to `Stage4Trainer`, before parameter reporting, DDP, optimizer, batch source, or forward execution.
+- Added a regression test that constructs the real `OwtTrainer` hierarchy and requires an A snapshot file and provenance metadata.
+- Correction verification: 23 focused tests passed in 3.42 seconds; Python compilation, implementation/test lint, Bash syntax, and `git diff --check` passed.
