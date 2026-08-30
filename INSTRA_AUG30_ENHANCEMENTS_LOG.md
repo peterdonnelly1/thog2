@@ -33,3 +33,9 @@
 
 - Final branch: `initialisation_baselining`.
 - Publication method: ChatGPT GitHub connector, preserving the remote branch history.
+
+## Live B-run correction
+
+- The first B launch showed that `-I wandb` selects the lifecycle runner, whose resolved payload did not yet include `console_header`; the shell consequently raised `KeyError` before training.
+- Added the same effective header summary to the lifecycle payload.
+- Made both shell lookups defensive so missing optional presentation metadata can no longer prevent a run from starting.

@@ -1108,6 +1108,10 @@ def resolved_payload(context: Mapping[str, Any]) -> Dict[str, Any]:
         "target_updates": int(lifecycle["target_updates"]),
         "wandb_continue_run": bool(context["wandb_continue_run"]),
         "canonical_config": config.canonical_dict(world_size=int(context["world_size"])),
+        "console_header": core._console_header_summary(
+            config,
+            world_size=int(context["world_size"]),
+        ),
         "paths": {name: str(path) for name, path in paths.items()},
     }
 

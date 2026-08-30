@@ -73,7 +73,10 @@ def test_shell_header_and_overview_command_capture_are_wired():
     repository_root = Path(__file__).parents[1]
     shell = (repository_root / "train_OWT_core.sh").read_text()
     core = (repository_root / "run_thog2_owt_core.py").read_text()
+    lifecycle = (repository_root / "run_thog2_lifecycle.py").read_text()
     assert "weight curves:      $weight_curves_console" in shell
     assert "DENSE snapshot:     $dense_snapshot_console" in shell
+    assert '.get("console_header", {})' in shell
     assert '"command": launch_command' in core
+    assert '"console_header": core._console_header_summary(' in lifecycle
 # ^^^ THOG
