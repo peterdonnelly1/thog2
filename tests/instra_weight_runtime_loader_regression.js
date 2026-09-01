@@ -17,11 +17,13 @@ assert.equal(active_asset("dashboard_weight_stability_final_patch.js"), true);
 assert.equal(active_asset("dashboard_weight_coupling_reliability_patch.js"), true);
 assert.equal(active_asset("dashboard_consistency_final_patch.js"), true);
 assert.equal(active_asset("dashboard_aug30_enhancements_patch.js"), true);
+assert.equal(active_asset("dashboard_weight_inspector.js"), true);
 assert.ok(index_of("dashboard_weight_request_router_patch.js") < index_of("dashboard_performance_patch.js"));
 assert.ok(index_of("dashboard_weight_stability_final_patch.js") > index_of("dashboard_weight_step_controls_patch.js"));
 assert.ok(index_of("dashboard_weight_coupling_reliability_patch.js") > index_of("dashboard_weight_stability_final_patch.js"));
 assert.ok(index_of("dashboard_consistency_final_patch.js") > index_of("dashboard_weight_range_interaction_final_patch.js"));
 assert.ok(index_of("dashboard_aug30_enhancements_patch.js") > index_of("dashboard_consistency_final_patch.js"));
+assert.ok(index_of("dashboard_weight_inspector.js") > index_of("dashboard_instra_further_enhancements_patch.js"));
 
 for (const name of [
   "dashboard_current_weights_request_patch.js",

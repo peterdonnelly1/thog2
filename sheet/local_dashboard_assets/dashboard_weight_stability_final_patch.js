@@ -379,8 +379,11 @@ window.addEventListener("load", () => {
         latest.set(key, Math.max(update, latest.get(key) ?? -Infinity));
       }
       prepared.data = (prepared?.data || []).filter(trace => {
+        // Axis anchors are structural; an unidentified weight curve cannot be
+        // certified as the latest snapshot and must not leak through this view.
+        if (trace?.meta?.instra_top_axis_anchor === true) return true;
         const update = trace_update(trace);
-        if (update === null) return true;
+        if (update === null) return false;
         return update === latest.get(trace_run(trace));
       });
       return prepared;
@@ -457,6 +460,7 @@ window.addEventListener("load", () => {
       const render_override = app.chart_settings_render_override;
       const supplied = render_override?.chart_name === chart_name ? render_override.settings : null;
       const settings = final_normalize_chart_settings(chart_name, supplied);
+      const latest_selected = selected_range_mode() === "latest";
       const capture_limited = configured_capture_range()?.present === true;
       const coordinate_selected = selected_coordinate_enabled(chart_name);
       const colours = app.workspace_mode === true ? null : original_colours(figure);
@@ -480,7 +484,7 @@ window.addEventListener("load", () => {
         const normalized = saved_normalize(candidate, inner_supplied);
         if (candidate === chart_name) {
           normalized.current_weights_only = coordinate_selected;
-          if (capture_limited) {
+          if (capture_limited || latest_selected) {
             normalized.max_snapshots = 0;
             normalized.snapshot_window_mode = "rolling";
           }
@@ -493,7 +497,12 @@ window.addEventListener("load", () => {
 
       let prepared;
       try {
-        prepared = base_prepare_figure(figure, chart_name);
+        // Restrict time before any legacy global history limit or coordinate
+        // transform. In Workspace each run may finish at a different step.
+        const source = latest_selected
+          ? retain_latest({...figure, data: [...(figure?.data || [])]})
+          : figure;
+        prepared = base_prepare_figure(source, chart_name);
       } finally {
         normalize_chart_settings = saved_normalize;
         retain_latest_weight_snapshots = saved_retain;
@@ -502,10 +511,7 @@ window.addEventListener("load", () => {
       }
 
       const range = selected_range();
-      const run_relative_latest = (
-        app.workspace_mode === true && selected_range_mode() === "latest"
-      );
-      if (run_relative_latest || (!capture_limited && settings.current_weights_only === true)) {
+      if (latest_selected || (!capture_limited && settings.current_weights_only === true)) {
         retain_latest(prepared);
         apply_run_colour(prepared);
       } else if (range) {
@@ -679,7 +685,10 @@ window.addEventListener("load", () => {
         to.max = String(available.maximum);
       }
       if (whole) whole.disabled = !available;
-      if (latest) latest.disabled = !available;
+      if (latest) latest.disabled = !current_context_runs().some(run => (
+        finite_step(run?.depth_maximum_update) !== null
+        || Number(run?.depth_snapshot_count || 0) > 0
+      ));
       if (overlap) {
         overlap.hidden = app.workspace_mode !== true;
         overlap.disabled = false;

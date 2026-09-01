@@ -420,6 +420,28 @@ assert.deepEqual(
   "Workspace latest did not retain each run's own final trace",
 );
 
+// The earlier case has a capture window, which neutralizes the legacy max=1
+// history limit. Without a capture window that limit used to run BEFORE latest.
+const captured_configuration = runs.A.configuration;
+runs.A.configuration = {};
+context.app.current_status = runs.A;
+context.app.current_run_id = "A";
+context.window.__instra_workspace = {visible_runs: () => [runs.A, runs.B]};
+api.show_latest();
+const unbounded_latest = context.prepare_figure({data: [
+  {name: "A-20", meta: {optimizer_update: 20, kind: "random", instra_workspace_run_id: "A"}},
+  {name: "A-25", meta: {optimizer_update: 25, kind: "random", instra_workspace_run_id: "A"}},
+  {name: "B-450", meta: {optimizer_update: 450, kind: "random", instra_workspace_run_id: "B"}},
+  {name: "B-500", meta: {optimizer_update: 500, kind: "random", instra_workspace_run_id: "B"}},
+  {name: "unidentified old curve", meta: {kind: "random", instra_workspace_run_id: "B"}},
+], layout: {}}, "q");
+assert.deepEqual(unbounded_latest.data.map(trace => trace.name), ["A-25", "B-500"],
+  "legacy global history limit corrupted latest or admitted an unidentified curve");
+api.sync_header();
+assert.equal(elements.get("weight_step_latest").disabled, false,
+  "disjoint capture windows disabled per-run latest");
+runs.A.configuration = captured_configuration;
+
 const stale_d = {...runs.B, dashboard_run_id: "D", depth_minimum_update: null, depth_maximum_update: null};
 status_responses.D = {...stale_d, depth_minimum_update: 450, depth_maximum_update: 550};
 context.app.runs.push(stale_d);

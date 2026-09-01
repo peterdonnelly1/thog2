@@ -337,6 +337,12 @@
             <section class="chart-settings-panel" data-chart-settings-panel="display" hidden>
               <section class="chart-display-section chart-curve-only" id="chart_curve_display_options">
                 <h3 id="chart_curve_history_title">Curve history</h3>
+                <!-- vvv THOG raw-weight precision belongs to the Weights group -->
+                <label class="chart-editor-field" id="weights_group_precision_field" for="weights_group_precision" hidden>
+                  <span>Inspect weights: decimal places</span>
+                  <input id="weights_group_precision" type="number" min="0" max="12" step="1" value="4">
+                </label>
+                <!-- ^^^ THOG -->
                 <label class="chart-toggle-row" id="chart_current_weights_only_field" for="chart_current_weights_only" hidden>
                   <span><strong>Current weights only</strong><small>Show only the newest recorded optimizer step.</small></span>
                   <input class="chart-setting-input" id="chart_current_weights_only" type="checkbox">

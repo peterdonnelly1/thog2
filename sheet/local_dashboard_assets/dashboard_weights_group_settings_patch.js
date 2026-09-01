@@ -128,6 +128,7 @@ window.addEventListener("load", () => {
       chart_type: "lines",
       show_grid: true,
       scale_mode: "linear",
+      inspection_precision: 4,
     });
 
     const normalize_common_settings = supplied => {
@@ -150,6 +151,8 @@ window.addEventListener("load", () => {
         : "lines";
       normalized.show_grid = source.show_grid !== false;
       normalized.scale_mode = source.scale_mode === "log" ? "log" : "linear";
+      const precision = source.inspection_precision;
+      normalized.inspection_precision = Number.isInteger(precision) && precision >= 0 && precision <= 12 ? precision : 4;
       return normalized;
     };
 
@@ -249,6 +252,9 @@ window.addEventListener("load", () => {
       const chart_type = document.querySelector(`input[name="chart_type"][value="${normalized.chart_type}"]`);
       if (chart_type) chart_type.checked = true;
       by_id("chart_show_grid").checked = normalized.show_grid;
+      if (group_editor_active && by_id("weights_group_precision")) {
+        by_id("weights_group_precision").value = String(normalized.inspection_precision);
+      }
     };
 
     const install_group_form_fields = () => {
@@ -323,6 +329,7 @@ window.addEventListener("load", () => {
       const inherit = weight_chart && !group_editor_active && inheritance_checkbox()?.checked === true;
       if (inherit_field) inherit_field.hidden = !weight_chart || group_editor_active;
       by_id("weights_group_scale_field").hidden = !group_editor_active;
+      if (by_id("weights_group_precision_field")) by_id("weights_group_precision_field").hidden = !group_editor_active;
       for (const control of common_controls()) control.disabled = inherit;
       if (!inherit) {
         const current_only = weight_chart && by_id("chart_current_weights_only").checked;
@@ -386,6 +393,7 @@ window.addEventListener("load", () => {
       const data_tab = document.querySelector('[data-chart-settings-tab="data"]');
       if (data_tab) data_tab.hidden = false;
       by_id("weights_group_scale_field").hidden = true;
+      if (by_id("weights_group_precision_field")) by_id("weights_group_precision_field").hidden = true;
       update_group_button();
     };
 
@@ -447,12 +455,18 @@ window.addEventListener("load", () => {
     // vvv THOG make group Apply transactional with respect to its redraw: clear preview ownership, await one six-chart render, then close without launching the legacy duplicate redraw
     const apply_group_settings = async () => {
       const state = chart_settings_form_state();
+      const precision_text = by_id("weights_group_precision")?.value ?? "4";
+      const precision = Number(precision_text);
+      if (precision_text.trim() === "" || !Number.isInteger(precision) || precision < 0 || precision > 12) {
+        state.error = "Weight inspection precision must be a whole number from 0 to 12.";
+      }
       if (state.error) {
         by_id("chart_settings_error").textContent = state.error;
         by_id("chart_settings_error").hidden = false;
         return;
       }
       const group = common_settings_from_state(state.settings);
+      group.inspection_precision = precision;
       group.scale_mode = by_id("weights_group_scale_mode").value === "log" ? "log" : "linear";
       weight_group_settings[group_editor_scope] = group;
       save_group_store();
