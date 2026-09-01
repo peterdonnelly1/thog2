@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pickle
+import platform
 import shlex
 import socket
 import subprocess
@@ -48,11 +49,34 @@ from sheet.run_config import (
     OwtRunConfig,
 )
 from sheet.run_naming import compact_log_timestamp
+from sheet.dense_snapshot import print_dense_snapshot_completion                                                                                                                    # <<< THOG repeat the relative snapshot path at the actual end of every snapshot-baselined run
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
-from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry
+from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry, verbose_wandb_console_enabled
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent
+
+
+# vvv THOG capture the user's wrapper runstring and useful prospective environment identity for INSTRA Overview
+def runtime_overview_metadata(
+    *,
+    argv: Optional[list[str]] = None,
+    module_name: Optional[str] = None,
+) -> Dict[str, str]:
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    if module_name is None:
+        main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+        module_name = str(getattr(main_spec, "name", "") or Path(sys.argv[0]).stem)
+    python_command = shlex.join((sys.executable, "-m", module_name, *actual_argv))
+    return {
+        "command": str(os.environ.get("THOG2_RUNSTRING", "")).strip() or python_command,
+        "hostname": socket.gethostname(),
+        "os": platform.platform(),
+        "python_version": platform.python_version(),
+        "python_executable": sys.executable,
+        "git_repository": str(REPOSITORY_ROOT),
+    }
+# ^^^ THOG
 
 
 # vvv THOG
@@ -899,10 +923,8 @@ def main() -> int:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)
     source = source_identity()
-    main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
-    launch_module = str(getattr(main_spec, "name", "") or Path(sys.argv[0]).stem)
-    launch_command = shlex.join((sys.executable, "-m", launch_module, *sys.argv[1:]))
-    telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, "command": launch_command, "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
+    runtime_metadata = runtime_overview_metadata()
+    telemetry = WandbTelemetry(enabled=(config.wandb_enabled and trainer.distributed.is_primary), project=config.wandb_project, entity=config.wandb_entity, mode=config.wandb_mode, root=Path(config.wandb_root), name=config.artifact_name, group=config.experiment_prefix, job_type="dense2" if config.model_type == "dense" else "sheet", config={**canonical, **runtime_metadata, "git_commit": source["commit"], "source_commit": source["commit"], "source_branch": source["branch"], "dataset_record": dataset, "parameter_report": trainer.parameter_report})
     # vvv THOG preserve shell interrupt status while allowing W&B to record a clean intentional stop
     telemetry_exit_code: Optional[int] = None
     telemetry_final_state = "stopped"
@@ -924,7 +946,8 @@ def main() -> int:
         if trainer.distributed.is_primary:
             result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             telemetry.add_final_result(result)
-            print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
+            if verbose_wandb_console_enabled():                                                                                                                                    # <<< THOG keep the redundant terminal result epilogue only for DEBUG>99 forensic runs
+                print(json.dumps({"artifact_name": config.artifact_name, "checkpoint": str(checkpoint_path), "result": str(result_path), "completed_updates": result["budget"]["completed_updates"], "consumed_tokens": result["budget"]["consumed_tokens"], "final_validation_loss": (result["evaluations"][-1]["val"] if result["evaluations"] else None)}, indent=2, sort_keys=True))
         telemetry_final_state = "finished"
         return 0
     # vvv THOG convert Ctrl-C into a clean telemetry finish while retaining conventional process status 130
@@ -940,6 +963,7 @@ def main() -> int:
                 exit_code=telemetry_exit_code,
                 final_state=telemetry_final_state,
             )
+            print_dense_snapshot_completion(getattr(trainer, "dense_snapshot_metadata", None))                                                                                   # <<< THOG make the useful relative snapshot path the final trainer diagnostic
         trainer.close()
     # ^^^ THOG
 

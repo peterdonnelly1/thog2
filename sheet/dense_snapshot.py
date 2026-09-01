@@ -996,10 +996,18 @@ def _saved_snapshot_metadata(path: Path, payload: Mapping[str, Any]) -> Dict[str
     }
 
 
+def dense_snapshot_display_path(value: Union[str, Path]) -> str:
+    path = Path(value).expanduser()
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def print_dense_snapshot_startup(metadata: Mapping[str, Any]) -> None:
     print("DENSE Snapshot Baselining", flush=True)
     print(f"  lifecycle role:              {metadata['lifecycle_role']}", flush=True)
-    print(f"  snapshot path:               {metadata['snapshot_path']}", flush=True)
+    print(f"  snapshot path:               {dense_snapshot_display_path(metadata['snapshot_path'])}", flush=True)
     print(f"  snapshot schema:             {metadata['snapshot_schema_version']}", flush=True)
     print(f"  compatibility hash:          {str(metadata['compatibility_hash'])[:12]}", flush=True)
     print(f"  tensor payload hash:         {str(metadata['tensor_payload_hash'])[:12]}", flush=True)
@@ -1020,6 +1028,18 @@ def print_dense_snapshot_startup(metadata: Mapping[str, Any]) -> None:
                 flush=True,
             )
     print(flush=True)
+
+
+def print_dense_snapshot_completion(metadata: Optional[Mapping[str, Any]]) -> None:
+    if not metadata or not metadata.get("snapshot_path"):
+        return
+    if os.environ.get("THOG2_WRAPPER_OWNS_SNAPSHOT_FOOTER") == "true":
+        return
+    print(
+        "  snapshot path:               "
+        f"{dense_snapshot_display_path(metadata['snapshot_path'])}",
+        flush=True,
+    )
 
 
 def apply_dense_snapshot_startup(

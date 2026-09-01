@@ -77,6 +77,8 @@ def test_shell_header_and_overview_command_capture_are_wired():
     assert "weight curves:      $weight_curves_console" in shell
     assert "DENSE snapshot:     $dense_snapshot_console" in shell
     assert '.get("console_header", {})' in shell
-    assert '"command": launch_command' in core
+    assert "runtime_overview_metadata()" in core
+    assert "**runtime_metadata" in core
+    assert "THOG2_RUNSTRING" in shell
     assert '"console_header": core._console_header_summary(' in lifecycle
 # ^^^ THOG

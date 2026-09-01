@@ -16,7 +16,6 @@ window.addEventListener("load", () => {
   ]);
   const weight_chart_set = new Set(weight_chart_names);
   const protocol = "matched_six_v1";
-  const viewer_storage_key = "thog2_local_weight_viewer_couplings_v2";
   let viewer_controller = null;
 
   const finite_integer = value => {
@@ -81,18 +80,14 @@ window.addEventListener("load", () => {
     if (typeof prepare_figure !== "function" || typeof render_figures !== "function") return false;
 
     const context_key = () => String(stability.context_key?.() || "");
-    const read_viewer_store = () => {
-      const value = typeof load_json === "function"
-        ? load_json(viewer_storage_key, {})
-        : (() => {
-            try { return JSON.parse(localStorage.getItem(viewer_storage_key) || "{}"); }
-            catch (_error) { return {}; }
-          })();
-      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-    };
+    // Viewer coordinates are deliberately session-only. A hard reload therefore
+    // returns to 0,0 (when retained) instead of reviving a stale per-run choice.
+    let viewer_pair_by_context = {};
+    const read_viewer_store = () => ({...viewer_pair_by_context});
     const write_viewer_store = value => {
-      if (typeof save_json === "function") save_json(viewer_storage_key, value);
-      else localStorage.setItem(viewer_storage_key, JSON.stringify(value));
+      viewer_pair_by_context = value && typeof value === "object" && !Array.isArray(value)
+        ? {...value}
+        : {};
     };
     const stored_pair = () => {
       const value = read_viewer_store()[context_key()];
@@ -219,12 +214,13 @@ window.addEventListener("load", () => {
           }
         : null;
       const active = selected_run_is_active();
+      const zero_pair = {model_feature: 0, intermediate_feature: 0};
       const resolved = pairs.find(pair => same_pair(pair, stored))
         || (active && pair_in_bounds(stored) ? stored : null)
-        || pairs.find(pair => same_pair(pair, captured_pair))
-        || (active && pair_in_bounds(captured_pair) ? captured_pair : null)
+        || pairs.find(pair => same_pair(pair, zero_pair))
         || pairs.find(pair => pair.selection_kind !== "user")
-        || pairs[0];
+        || pairs[0]
+        || (active && pair_in_bounds(captured_pair) ? captured_pair : null);
       if (!resolved) return null;
       if (!same_pair(resolved, stored)) persist_pair(resolved);
       return {
@@ -395,6 +391,7 @@ window.addEventListener("load", () => {
 
     const commit_pair = candidate => {
       if (select_pair(candidate)) return true;
+      if (app.workspace_mode === true) return reject_unrecorded_pair(candidate);
       // Historical rejection is deliberately synchronous: the values and red
       // message must be corrected before the input event returns.
       if (!selected_run_is_active()) return reject_unrecorded_pair(candidate);
@@ -461,6 +458,30 @@ window.addEventListener("load", () => {
       if (!capability.available || !current) {
         show_error("Waiting for first coupling.");
         sync_viewer_controls();
+        return;
+      }
+      if (app.workspace_mode === true) {
+        const recorded = recorded_pairs();
+        if (button_id === "weight_random_jump") {
+          const both_changed = recorded.filter(pair => (
+            pair.model_feature !== current.model_feature
+            && pair.intermediate_feature !== current.intermediate_feature
+          ));
+          const any_changed = recorded.filter(pair => !same_pair(pair, current));
+          const choices = both_changed.length ? both_changed : any_changed;
+          if (!choices.length) {
+            show_error("Only one common coupling recorded.");
+            return;
+          }
+          void commit_pair(choices[Math.floor(Math.random() * choices.length)]);
+          return;
+        }
+        const next_recorded = directional_recorded_pair(button_id, current, recorded);
+        if (!next_recorded) {
+          show_error("No common recorded coupling that way.");
+          return;
+        }
+        void commit_pair(next_recorded);
         return;
       }
       if (!selected_run_is_active()) {

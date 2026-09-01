@@ -41,6 +41,10 @@ def _debug_wandb_enabled() -> bool:
     return int(getattr(_constants, "DEBUG", 0)) > 9
 
 
+def verbose_wandb_console_enabled() -> bool:
+    return int(getattr(_constants, "DEBUG", 0)) > 99
+
+
 def _wandb_scalar_metrics(metrics: Mapping[str, Any]) -> Dict[str, float | int]:
     scalars = _scalar_metrics(metrics)
     if _debug_wandb_enabled():
@@ -340,6 +344,11 @@ class WandbTelemetry:
         self.root.mkdir(parents=True, exist_ok=True)
         os.environ["WANDB_DIR"] = str(self.root)
         os.environ["WANDB_MODE"] = self.mode
+        # vvv THOG normal runs retain W&B telemetry but suppress its verbose terminal epilogue; DEBUG>99 restores it for diagnosis
+        if not verbose_wandb_console_enabled():
+            os.environ["WANDB_SILENT"] = "true"
+            os.environ["WANDB_CONSOLE"] = "off"
+        # ^^^ THOG
         module = importlib.import_module("wandb")
         run = init_resilient_telemetry(
             module,
@@ -639,6 +648,7 @@ __all__ = [
     "INSTRUMENTATION_BACKENDS",
     "WandbTelemetry",
     "_debug_wandb_enabled",
+    "verbose_wandb_console_enabled",
     "_wandb_scalar_metrics",
     "attach_telemetry",
 ]

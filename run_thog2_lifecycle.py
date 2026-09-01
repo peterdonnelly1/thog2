@@ -38,6 +38,7 @@ from sheet.run_lifecycle import (
     validate_start_label,
 )
 from sheet.run_manifest import write_run_manifest
+from sheet.dense_snapshot import print_dense_snapshot_completion                                                                                                                    # <<< THOG repeat the relative snapshot path after lifecycle telemetry shutdown
 # vvv THOG PLASTIC COARSE/FINE one-shot discovery, fresh FINE reconstruction and review-pause resume
 from sheet.distributed import DistributedContext
 from sheet.plastic_depth_coarse import (
@@ -1448,6 +1449,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     canonical = config.canonical_dict(world_size=int(context["world_size"]))
     source = core.source_identity()
+    runtime_metadata = core.runtime_overview_metadata(argv=actual_argv)                                                                                                                    # <<< THOG record lifecycle runstrings and prospective INSTRA system metadata too
     telemetry = core.WandbTelemetry(
         enabled=(str(context["backend"]) != "none" and trainer.distributed.is_primary),
         project=config.wandb_project,
@@ -1459,6 +1461,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         job_type="dense2" if config.model_type == "dense" else "sheet",
         config={
             **canonical,
+            **runtime_metadata,
+            "git_commit": source["commit"],
             "source_commit": source["commit"],
             "source_branch": source["branch"],
             "dataset_record": dataset,
@@ -1544,21 +1548,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             write_run_manifest(paths["manifest_path"], lifecycle)
             telemetry.add_final_result(result)
-            print(
-                json.dumps(
-                    {
-                        "artifact_name": str(lifecycle["artifact_name"]),
-                        "checkpoint": str(checkpoint_path),
-                        "result": str(paths["result_path"]),
-                        "session_result": str(session_result_path),
-                        "completed_updates": result["budget"]["completed_updates"],
-                        "consumed_tokens": result["budget"]["consumed_tokens"],
-                        "final_validation_loss": result["evaluations"][-1]["val"] if result["evaluations"] else None,
-                    },
-                    indent=2,
-                    sort_keys=True,
+            if core.verbose_wandb_console_enabled():                                                                                                                               # <<< THOG keep the redundant terminal result epilogue only for DEBUG>99 forensic runs
+                print(
+                    json.dumps(
+                        {
+                            "artifact_name": str(lifecycle["artifact_name"]),
+                            "checkpoint": str(checkpoint_path),
+                            "result": str(paths["result_path"]),
+                            "session_result": str(session_result_path),
+                            "completed_updates": result["budget"]["completed_updates"],
+                            "consumed_tokens": result["budget"]["consumed_tokens"],
+                            "final_validation_loss": result["evaluations"][-1]["val"] if result["evaluations"] else None,
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
                 )
-            )
         telemetry_final_state = "finished"
         return 0
     except KeyboardInterrupt:
@@ -1573,6 +1578,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 exit_code=telemetry_exit_code,
                 final_state=telemetry_final_state,
             )
+            print_dense_snapshot_completion(getattr(trainer, "dense_snapshot_metadata", None))                                                                                   # <<< THOG leave the relative snapshot path as the final trainer diagnostic
         trainer.close()
         if fresh_state is not None:
             fresh_state.trainer = None

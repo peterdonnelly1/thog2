@@ -128,7 +128,7 @@ window.addEventListener("load", () => {
   const name_width_storage_key = "thog2_local_run_name_column_width";
   const default_name_width = 390;
   const minimum_name_width = 180;
-  const maximum_name_width = 1100;
+  const maximum_name_width = () => Math.max(2200, window.innerWidth - 420);
   let table_patch_installed = false;
   let table_observer = null;
   let polish_scheduled = false;
@@ -138,14 +138,14 @@ window.addEventListener("load", () => {
     if (raw === null) return default_name_width;
     const value = Number(raw);
     return Number.isFinite(value)
-      ? Math.max(minimum_name_width, Math.min(maximum_name_width, Math.round(value)))
+      ? Math.max(minimum_name_width, Math.min(maximum_name_width(), Math.round(value)))
       : default_name_width;
   };
 
   const apply_name_width = width => {
     const table = document.querySelector(".runs-table");
     if (!table) return;
-    const pixels = Math.max(minimum_name_width, Math.min(maximum_name_width, Math.round(width)));
+    const pixels = Math.max(minimum_name_width, Math.min(maximum_name_width(), Math.round(width)));
     table.style.setProperty("--instra-run-name-width", `${pixels}px`);
     table.style.minWidth = `${1580 + pixels - default_name_width}px`;
   };

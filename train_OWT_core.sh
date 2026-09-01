@@ -1,6 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
+# vvv THOG preserve the exact user-facing wrapper invocation for prospective INSTRA Overview runstrings
+printf -v THOG2_RUNSTRING '%q ' "$0" "$@"
+export THOG2_RUNSTRING="${THOG2_RUNSTRING% }"
+export THOG2_WRAPPER_OWNS_SNAPSHOT_FOOTER=true
+# ^^^ THOG
+
 # vvv THOG
 # Current scruffy OpenWebText training wrapper for the PICTON compact-geometry contract.
 # Scruffy runtime defaults: bfloat16, flash2. Dense baseline is available as -p dense.
@@ -1138,7 +1144,7 @@ run_grid_point() {
   local mlp_hidden_group_size_value="$9"
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
   local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
-  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status depth_curve_console depth_curve_done
+  local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status depth_curve_console depth_curve_done snapshot_done
   local -a residual_init_args
   local -a compact_args compact_order_args optional_args train_args command
 
@@ -1351,6 +1357,7 @@ EOF_RUN
   fi
   mkdir -p "$(dirname "$log_path")"
   set +e; "${command[@]}" 2>&1 | tee "$log_path"; run_status=${PIPESTATUS[0]}; set -e
+  snapshot_done="$(awk '/^  snapshot path:[[:space:]]/ { line=$0 } END { print line }' "$log_path")"
   cat <<EOF_DONE
 scruffy OWT run finished
   status:             $run_status
@@ -1358,6 +1365,9 @@ scruffy OWT run finished
   log URL:            $log_url
 $depth_curve_done
 EOF_DONE
+  if [[ -n "$snapshot_done" ]]; then
+    printf '%s\n' "$snapshot_done"
+  fi
   return "$run_status"
 }
 

@@ -17,6 +17,7 @@ from sheet import local_dashboard_heatmap_window_patch as _local_dashboard_heatm
 from sheet import local_dashboard_performance_patch as _local_dashboard_performance_patch
 from sheet import local_dashboard_current_weights_performance_patch as _local_dashboard_current_weights_performance_patch
 from sheet import local_dashboard_weight_step_range_patch as _local_dashboard_weight_step_range_patch
+from sheet import local_dashboard_notes_patch as _local_dashboard_notes_patch                                                                                                             # <<< THOG add durable editable Overview notes without altering training telemetry
 from sheet import matched_weight_selection_patch as _matched_weight_selection_patch
 import run_thog2_local_dashboard as _dashboard
 
@@ -29,6 +30,7 @@ _local_dashboard_performance_patch.install(_dashboard)
 _matched_weight_selection_patch.install_dashboard(_dashboard)
 _local_dashboard_current_weights_performance_patch.install(_dashboard)
 _local_dashboard_weight_step_range_patch.install(_dashboard)
+_local_dashboard_notes_patch.install(_dashboard)                                                                                                                                          # <<< THOG install the notes API/status seam before constructing the dashboard handler
 
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
@@ -73,6 +75,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_range_interaction_final_patch.js",                                                                                                   # <<< THOG make explicit ranges authoritative, expose step hover, fit four-digit coupling indices, and restore functional RND
     "dashboard_consistency_final_patch.js",                                                                                                                # <<< THOG reconcile first-mount heatmaps, separate the colour key, and finalize the Overview allocation
     "dashboard_aug30_enhancements_patch.js",                                                                                                               # <<< THOG preserve Overview state, stack/collapse panels, resize NAME, and place STEPS after preset p
+    "dashboard_instra_further_enhancements_patch.js",                                                                                                      # <<< THOG finalize the August 31 Overview, table, fullscreen, live-weight, palette, and view-state requirements
 )
 
 

@@ -243,13 +243,13 @@ context.window.window = context.window;
     {model_feature: 12, intermediate_feature: 14},
     {model_feature: 13, intermediate_feature: 15},
   ]);
-  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
-  assert.equal(elements.get("weight_coupling_input").value, "12");
-  assert.equal(elements.get("weight_coupling_output").value, "14");
+  assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
+  assert.equal(elements.get("weight_coupling_input").value, "2");
+  assert.equal(elements.get("weight_coupling_output").value, "3");
   assert.deepEqual(
     JSON.parse(storage.get("thog2_local_weight_viewer_couplings_v2"))["run:R1"],
-    {model_feature: 12, intermediate_feature: 14},
-    "completed view retained a stale valid-but-unrecorded coupling",
+    {model_feature: 10, intermediate_feature: 10},
+    "viewer coordinates should not be persisted in browser storage",
   );
 
   // Synchronisation must not replace either box while the user is editing the
@@ -258,17 +258,17 @@ context.window.window = context.window;
   elements.get("weight_coupling_input").value = "7";
   api.sync();
   assert.equal(elements.get("weight_coupling_input").value, "7");
-  assert.equal(elements.get("weight_coupling_output").value, "14");
+  assert.equal(elements.get("weight_coupling_output").value, "3");
 
   // Tabbing from the first box into the second must defer the pair commit so
   // that the two fields are accepted together.
   context.document.activeElement = elements.get("weight_coupling_output");
   emit("change", elements.get("weight_coupling_input"));
   assert.equal(elements.get("weight_coupling_input").value, "7");
-  assert.equal(elements.get("weight_coupling_output").value, "14");
+  assert.equal(elements.get("weight_coupling_output").value, "3");
   context.document.activeElement = null;
   api.sync();
-  assert.equal(elements.get("weight_coupling_input").value, "12");
+  assert.equal(elements.get("weight_coupling_input").value, "2");
 
   const before_values = rendered.get("attn_q_head_N").data.map(trace => trace.y[0]);
   const random_values = [0.14, 0.21];
@@ -277,7 +277,7 @@ context.window.window = context.window;
   emit("click", elements.get("weight_random_jump"));
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
+  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
   assert.deepEqual(capture_selection, {
     protocol: "matched_six_v1",
     user_selected: true,
@@ -291,11 +291,11 @@ context.window.window = context.window;
   emit("click", elements.get("weight_residual_plus"));
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
+  assert.deepEqual(api.pair(), {model_feature: 13, intermediate_feature: 15});
   emit("click", elements.get("weight_residual_minus"));
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
+  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
   assert.equal(capture_save_count, 0, "recorded +/- selection scheduled a redundant capture");
 
   const prepared = rendered.get("attn_q_head_N");
@@ -318,6 +318,7 @@ context.window.window = context.window;
       && rows[1] === `step ${trace.meta.instra_thog_optimizer_update}`;
   }), "maximized hover did not retain the full artifact with step second");
   app.maximized_chart = null;
+  api.select_pair(2, 3);
 
   gradient_enabled = true;
   const gradient_figure = {
@@ -359,6 +360,61 @@ context.window.window = context.window;
     assert.ok(luminance(colours[0]) > luminance(colours[1]), `${run_id} earliest curve is not lightest`);
     assert.ok(luminance(colours[1]) > luminance(colours[2]), `${run_id} gradient does not darken towards its run colour`);
   }
+
+  // Workspace coupling selection is one shared intersection, never one hidden
+  // per-run choice. RND must redraw the same matrix coordinates for every run.
+  const single_run_figure_data = Object.fromEntries(
+    chart_names.map(chart_name => [chart_name, figures[chart_name].data]),
+  );
+  for (const chart_name of chart_names) {
+    figures[chart_name].data = ["R1", "R2"].flatMap(run_id => [
+      {model_feature: 2, intermediate_feature: 3, value: 20},
+      {model_feature: 12, intermediate_feature: 14, value: 120},
+      ...(run_id === "R2" ? [{model_feature: 13, intermediate_feature: 15, value: 130}] : []),
+    ].map(pair => ({
+      ...make_trace(
+        chart_name,
+        20,
+        pair.model_feature,
+        pair.intermediate_feature,
+        pair.value,
+        "random",
+      ),
+      meta: {
+        ...make_trace(
+          chart_name,
+          20,
+          pair.model_feature,
+          pair.intermediate_feature,
+          pair.value,
+          "random",
+        ).meta,
+        instra_workspace_run_id: run_id,
+      },
+    })));
+  }
+  context_identifier = "workspace:R1,R2";
+  api.sync();
+  assert.deepEqual(api.pair(), {model_feature: 2, intermediate_feature: 3});
+  context.Math.random = () => 0.75;
+  emit("click", elements.get("weight_random_jump"));
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(api.pair(), {model_feature: 12, intermediate_feature: 14});
+  const shared_workspace = context.prepare_figure(
+    figures.attn_q_head_N,
+    "attn_q_head_N",
+  );
+  assert.deepEqual(
+    [...new Set(shared_workspace.data.map(trace => trace.meta.instra_workspace_run_id))].sort(),
+    ["R1", "R2"],
+    "workspace RND did not retain the same coupling for every visible run",
+  );
+  assert.equal(capture_save_count, 0, "workspace RND mutated trainer capture settings");
+  for (const chart_name of chart_names) {
+    figures[chart_name].data = single_run_figure_data[chart_name];
+  }
+  context_identifier = "run:R1";
   app.workspace_mode = false;
   gradient_enabled = false;
 
