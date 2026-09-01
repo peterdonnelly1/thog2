@@ -100,13 +100,12 @@ def test_descriptor_registry_uses_actual_keys_and_explicit_missing_marker() -> N
 def test_descriptor_registry_covers_current_observability_and_plastic_controls() -> None:
     registry = descriptor_help.format_descriptor_registry()
     expected = (
-        "--instrumentation__depth_weight_curves__scalar_weights_per_matrix N",
+        "--instrumentation__depth_weight_curves__coupling_pairs_per_matrix N",
         "--instrumentation__depth_weight_curves__depth_evaluation_points N",
         "--instrumentation__depth_weight_curves__time_mode latest|accumulate",
         "--instrumentation__depth_weight_curves__history_length N",
         "--instrumentation__depth_weight_curves__log_every_n_steps N",
-        "--instrumentation__depth_weight_curves__same_coordinates_all_runs",
-        "--no-instrumentation__depth_weight_curves__same_coordinates_all_runs",
+        "--instrumentation__depth_weight_curves__same_coupling_pairs_all_runs true|false",
         "--instrumentation__depth_weight_curves__destination wandb|local|none",
         "--plastic__layer_count__same_batch_all_probes",
         "--no-plastic__layer_count__same_batch_all_probes",

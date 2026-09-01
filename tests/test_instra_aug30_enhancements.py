@@ -38,7 +38,7 @@ def test_cli_header_summarises_weight_instrumentation_and_snapshot_roles():
     )
     assert saved["weight_curves"] == (
         "destination=local mode=accumulate capture=1..200 every=1 history=200 "
-        "scalars/matrix=3 depth_points=256 shared_coordinates=true"
+        "coupling_pairs/matrix=3 depth_points=256 same_coupling_pairs=true"
     )
     assert saved["dense_snapshot"] == (
         "A save step-zero tensors directory=dense_baseline_snapshots"

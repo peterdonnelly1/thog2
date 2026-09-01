@@ -289,8 +289,67 @@ window.addEventListener("load", () => {
     }
   };
 
+  // Keep the circular draw order independent of table sorting and plot refreshes.
+  const workspace_z_order = [];
+  let workspace_front_run = null;
+  const sync_workspace_z_order = () => {
+    const visible_ids = (window.__instra_workspace?.visible_runs?.() || [])
+      .map(run => String(run_identifier(run)));
+    for (const identifier of visible_ids) {
+      if (!workspace_z_order.includes(identifier)) workspace_z_order.push(identifier);
+    }
+    const active = workspace_z_order.filter(identifier => visible_ids.includes(identifier));
+    if (!active.includes(workspace_front_run)) workspace_front_run = active.at(-1) || null;
+    return active;
+  };
+
+  const order_workspace_weight_traces = prepared => {
+    if (app.workspace_mode !== true || !prepared?.data) return;
+    const active = sync_workspace_z_order();
+    if (active.length < 2) return;
+    const front_index = active.indexOf(workspace_front_run);
+    const rotated = [...active.slice(front_index + 1), ...active.slice(0, front_index + 1)];
+    const rank = new Map(rotated.map((identifier, index) => [identifier, index]));
+    prepared.data.sort((left, right) => (
+      (rank.get(String(left?.meta?.instra_workspace_run_id || "")) ?? -1)
+      - (rank.get(String(right?.meta?.instra_workspace_run_id || "")) ?? -1)
+    ));
+  };
+
+  const ensure_z_cycle = () => {
+    const gradient = by_id("weight_step_gradient");
+    let button = by_id("weight_z_cycle");
+    if (!button && gradient) {
+      button = document.createElement("button");
+      button.id = "weight_z_cycle";
+      button.type = "button";
+      button.className = "weight-step-button";
+      button.textContent = "z";
+      button.title = "Bring the next Workspace run to the front";
+      button.setAttribute("aria-label", button.title);
+      gradient.insertAdjacentElement("afterend", button);
+      button.addEventListener("click", async () => {
+        const active = sync_workspace_z_order();
+        if (active.length < 2) return;
+        workspace_front_run = active[(active.indexOf(workspace_front_run) + 1) % active.length];
+        const jobs = [];
+        for (const chart_name of weight_chart_names) {
+          const mount = by_id(`${chart_name}_plot`);
+          const figure = mount?.__instraWeightFigure || app.figures?.depth?.[chart_name];
+          if (mount && figure) jobs.push(render_plot(mount, figure, chart_name));
+        }
+        await Promise.all(jobs);
+      });
+    }
+    if (button) {
+      button.hidden = app.workspace_mode !== true;
+      button.disabled = sync_workspace_z_order().length < 2;
+    }
+  };
+
   const polish_weight_header = () => {
     ensure_step_shortcuts();
+    ensure_z_cycle();
     if (app.workspace_mode !== true) return;
     const current = by_id("weight_step_current");
     if (current && current.textContent !== "") current.textContent = "";
@@ -397,6 +456,7 @@ window.addEventListener("load", () => {
           trace.line = {...(trace.line || {}), width};
         }
       }
+      order_workspace_weight_traces(prepared);
       return prepared;
     };
 

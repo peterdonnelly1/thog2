@@ -177,6 +177,7 @@ def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
     if bool(getattr(parser, _CLI_INSTALLED_ATTRIBUTE, False)):
         return
     parser.add_argument(
+        "--instrumentation__depth_weight_curves__coupling_pairs_per_matrix",
         "--instrumentation__depth_weight_curves__scalar_weights_per_matrix",
         type=int,
         default=_DEFAULT_SCALARS_PER_MATRIX,
@@ -206,6 +207,7 @@ def _ensure_cli_arguments(parser: argparse.ArgumentParser) -> None:
         default=_DEFAULT_LOG_EVERY_N_STEPS,
     )
     parser.add_argument(
+        "--instrumentation__depth_weight_curves__same_coupling_pairs_all_runs",
         "--instrumentation__depth_weight_curves__same_coordinates_all_runs",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -228,10 +230,21 @@ def _publish_cli_environment(namespace: argparse.Namespace) -> None:
         "SAME_COORDINATES_ALL_RUNS": "instrumentation__depth_weight_curves__same_coordinates_all_runs",
         "DESTINATION": "instrumentation__depth_weight_curves__destination",
     }
+    values = vars(namespace)
+    for canonical_suffix, legacy_suffix in (
+        ("coupling_pairs_per_matrix", "scalar_weights_per_matrix"),
+        ("same_coupling_pairs_all_runs", "same_coordinates_all_runs"),
+    ):
+        canonical = "instrumentation__depth_weight_curves__" + canonical_suffix
+        legacy = "instrumentation__depth_weight_curves__" + legacy_suffix
+        if canonical in values:
+            values[legacy] = values[canonical]
+        elif legacy in values:
+            values[canonical] = values[legacy]
     for suffix, attribute in mapping.items():
-        if not hasattr(namespace, attribute):
+        if attribute not in values:
             continue
-        value = getattr(namespace, attribute)
+        value = values[attribute]
         if isinstance(value, bool):
             text = "true" if value else "false"
         else:
@@ -552,8 +565,8 @@ def _log_depth_weight_snapshot(trainer: Any, telemetry: Any, *, optimizer_update
         metadata = {
             "depth/selection_seed": int(selection["seed"]),
             "depth/attention_head": int(selection["attention_head"]),
-            "depth/same_coordinates_all_runs": bool(_same_coordinates_all_runs()),
-            "depth/scalar_weights_per_matrix": int(_scalar_weights_per_matrix()),
+            "depth/same_coupling_pairs_all_runs": bool(_same_coordinates_all_runs()),
+            "depth/coupling_pairs_per_matrix": int(_scalar_weights_per_matrix()),
             "depth/evaluation_points": int(_depth_evaluation_points()),
         }
         try:

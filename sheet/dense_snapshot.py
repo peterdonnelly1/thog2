@@ -502,6 +502,8 @@ def save_dense_initialisation_snapshot(
         if temporary.exists():
             temporary.unlink()
         raise
+    from .dense_snapshot_overview import write_snapshot_overview
+    write_snapshot_overview(target.resolve(), payload, config)
     return target.resolve(), payload
 
 
@@ -926,7 +928,9 @@ def initialise_model_from_dense_snapshot(
     }
     mapping_fingerprint = _sha256_json(mapping_identity)
     step_zero_manifest_identifier = _physical_state_hash(physical_state)
+    from .dense_snapshot_overview import snapshot_overview_metadata
     metadata = {
+        **snapshot_overview_metadata(Path(snapshot_path).expanduser(), payload),
         "lifecycle_role": role,
         "snapshot_path": str(Path(snapshot_path).expanduser().resolve()),
         "snapshot_schema_version": DENSE_SNAPSHOT_SCHEMA_VERSION,
@@ -984,7 +988,9 @@ def initialise_model_from_dense_snapshot(
 
 
 def _saved_snapshot_metadata(path: Path, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    from .dense_snapshot_overview import snapshot_overview_metadata
     return {
+        **snapshot_overview_metadata(path, payload),
         "lifecycle_role": DENSE_SNAPSHOT_ROLE_A,
         "snapshot_path": str(path),
         "snapshot_schema_version": DENSE_SNAPSHOT_SCHEMA_VERSION,

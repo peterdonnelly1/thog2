@@ -729,8 +729,44 @@ function local_render_key_panel(container, title_text, values) {
   container.append(heading, search, rows);
 }
 
+function local_dense_snapshot_metadata(configuration) {
+  return configuration?.lifecycle?.dense_snapshot_baselining
+    || configuration?.parameter_report?.dense_snapshot_baselining
+    || configuration?.dense_snapshot_baselining || {};
+}
+
+function local_dense_snapshot_details(configuration) {
+  const metadata = local_dense_snapshot_metadata(configuration);
+  const used = metadata.effective_initialisation === "dense_snapshot"
+    || Boolean(configuration.initialise_from_dense_snapshot);
+  if (!used) return {filename: "-", parameters: null};
+  const path = String(metadata.snapshot_path || configuration.initialise_from_dense_snapshot || "");
+  let source = metadata.source_hyperparameters;
+  if (!source) {
+    // Old source runs already retain their complete configuration in chart storage.
+    const source_run = (app.runs || []).find(candidate => {
+      const candidate_metadata = local_dense_snapshot_metadata(candidate.configuration || {});
+      return candidate_metadata.effective_initialisation === "ordinary_dense_initialisation"
+        && metadata.tensor_payload_hash && metadata.compatibility_hash
+        && candidate_metadata.tensor_payload_hash === metadata.tensor_payload_hash
+        && candidate_metadata.compatibility_hash === metadata.compatibility_hash;
+    });
+    if (source_run) {
+      source = {...source_run.configuration};
+      delete source.parameter_report;
+      delete source.lifecycle;
+    }
+  }
+  const physical = metadata.snapshot_hyperparameters || {};
+  const parameters = {...(source || {})};
+  for (const [key, value] of Object.entries(physical)) parameters[`snapshot.${key}`] = value;
+  if (!source) parameters.source_hyperparameters = "Not recorded with this snapshot; source run configuration is unavailable.";
+  return {filename: path.split(/[\\/]/).pop() || "-", parameters};
+}
+
 function local_summary(run, configuration) {
   return {
+    dense_baseline_snapshot: local_dense_snapshot_details(configuration).filename,
     artifact_name: run?.artifact_name ?? "—",
     artifact_prefix: local_first_present(configuration, ["artifact_prefix"]),
     comparison_group: local_first_present(configuration, ["comparison_group", "experiment_prefix", "group"]),
@@ -777,7 +813,10 @@ function local_render_overview() {
   local_append_meta(metadata, "Job Type", local_first_present(configuration, ["job_type"], run.model_type || "—"));
   local_render_key_panel(by_id("overview_config_panel"), "Config", configuration);
   local_render_key_panel(by_id("overview_summary_panel"), "Summary", local_summary(run, configuration));
-  local_render_artifacts(by_id("overview_artifact_outputs"), run);
+  const snapshot = local_dense_snapshot_details(configuration);
+  const snapshot_panel = by_id("overview_snapshot_panel");
+  snapshot_panel.hidden = snapshot.parameters === null;
+  local_render_key_panel(snapshot_panel, "Dense baseline snapshot hyperparameters", snapshot.parameters || {});
 }
 
 function local_apply_detail_tab() {
@@ -816,7 +855,7 @@ function local_install_detail_tabs() {
   }
   toolbar.insertAdjacentElement("afterend", tabs);
   const overview = document.createElement("section"); overview.id = "run_overview_pane"; overview.className = "run-overview-pane"; overview.hidden = true;
-  overview.innerHTML = '<div class="overview-metadata" id="overview_metadata"></div><div class="overview-data-grid"><section class="overview-key-panel" id="overview_config_panel"></section><section class="overview-key-panel" id="overview_summary_panel"></section></div><section class="overview-artifact-outputs" id="overview_artifact_outputs"></section>';
+  overview.innerHTML = '<div class="overview-metadata" id="overview_metadata"></div><div class="overview-data-grid"><section class="overview-key-panel" id="overview_config_panel"></section><section class="overview-key-panel" id="overview_summary_panel"></section><section class="overview-key-panel" id="overview_snapshot_panel"></section></div>';
   const blank = document.createElement("section"); blank.id = "run_blank_detail_pane"; blank.className = "run-blank-detail-pane"; blank.hidden = true;
   by_id("charts_pane").append(overview, blank); local_apply_detail_tab();
 }

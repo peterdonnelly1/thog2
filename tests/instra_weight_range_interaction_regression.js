@@ -335,7 +335,7 @@ context.window.window = context.window;
     const [red, green, blue] = context.hex_to_rgb(colour);
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   };
-  assert.equal(gradient_colours[2], "#E8790C", "latest gradient curve is not the exact run colour");
+  assert.ok(luminance(gradient_colours[2]) < luminance("#E8790C"), "latest gradient curve must be darker than the run colour");
   assert.ok(luminance(gradient_colours[0]) > luminance(gradient_colours[1]), "earliest gradient curve is not lightest");
   assert.ok(luminance(gradient_colours[1]) > luminance(gradient_colours[2]), "gradient does not darken towards the run colour");
 
@@ -355,7 +355,7 @@ context.window.window = context.window;
     const traces = workspace_gradient.data.filter(trace => trace.meta.instra_workspace_run_id === run_id);
     const colours = traces.map(trace => trace.line.color.toUpperCase());
     const base = context.colour_for_run(run_id).toUpperCase();
-    assert.equal(colours[2], base, `${run_id} latest gradient curve is not its exact run colour`);
+    assert.ok(luminance(colours[2]) < luminance(base), `${run_id} latest gradient curve must be darker than its run colour`);
     assert.equal(new Set(colours).size, 3, `${run_id} did not receive its own three-colour gradient`);
     assert.ok(luminance(colours[0]) > luminance(colours[1]), `${run_id} earliest curve is not lightest`);
     assert.ok(luminance(colours[1]) > luminance(colours[2]), `${run_id} gradient does not darken towards its run colour`);

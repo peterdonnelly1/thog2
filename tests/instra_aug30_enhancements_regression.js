@@ -28,7 +28,7 @@ assert.match(enhancement_source, /data-instra-steps-cell/);
 for (const token of [
   "overview_summary_panel",
   "overview_config_panel",
-  "overview_artifact_outputs",
+  "overview_snapshot_panel",
   "selection_start",
   "scroll_top",
   "restore_overview_state",

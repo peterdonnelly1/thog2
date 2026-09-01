@@ -731,7 +731,10 @@ def _console_header_summary(config: OwtRunConfig, *, world_size: int) -> Dict[st
     def instrumentation_value(name: str, environment: str, default: Any) -> Any:
         if name in canonical:
             return canonical[name]
-        return os.environ.get(environment, default)
+        legacy_name = name.replace("coupling_pairs_per_matrix", "scalar_weights_per_matrix").replace(
+            "same_coupling_pairs_all_runs", "same_coordinates_all_runs"
+        )
+        return canonical.get(legacy_name, os.environ.get(environment, default))
 
     capture_start = instrumentation_value(
         "instrumentation__depth_weight_curves__start_step",
@@ -770,8 +773,8 @@ def _console_header_summary(config: OwtRunConfig, *, world_size: int) -> Dict[st
                 "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_HISTORY_LENGTH",
                 20,
             )),
-            "scalars/matrix=" + str(instrumentation_value(
-                "instrumentation__depth_weight_curves__scalar_weights_per_matrix",
+            "coupling_pairs/matrix=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__coupling_pairs_per_matrix",
                 "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SCALAR_WEIGHTS_PER_MATRIX",
                 3,
             )),
@@ -780,8 +783,8 @@ def _console_header_summary(config: OwtRunConfig, *, world_size: int) -> Dict[st
                 "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DEPTH_EVALUATION_POINTS",
                 256,
             )),
-            "shared_coordinates=" + str(instrumentation_value(
-                "instrumentation__depth_weight_curves__same_coordinates_all_runs",
+            "same_coupling_pairs=" + str(instrumentation_value(
+                "instrumentation__depth_weight_curves__same_coupling_pairs_all_runs",
                 "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COORDINATES_ALL_RUNS",
                 "false",
             )).lower(),

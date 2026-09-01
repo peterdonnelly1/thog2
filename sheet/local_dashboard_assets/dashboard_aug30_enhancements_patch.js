@@ -8,7 +8,7 @@ window.addEventListener("load", () => {
   const panel_ids = [
     "overview_summary_panel",
     "overview_config_panel",
-    "overview_artifact_outputs",
+    "overview_snapshot_panel",
   ];
 
   const capture_overview_state = () => {
@@ -105,10 +105,12 @@ window.addEventListener("load", () => {
     if (grid && summary && config) {
       grid.dataset.instraStacked = "true";
       grid.append(summary, config);
+      const snapshot = by_id("overview_snapshot_panel");
+      if (snapshot) grid.append(snapshot);
     }
     make_collapsible(summary, "Summary");
     make_collapsible(config, "Config");
-    make_collapsible(by_id("overview_artifact_outputs"), "Artifact Outputs");
+    make_collapsible(by_id("overview_snapshot_panel"), "Dense baseline snapshot hyperparameters");
     populate_historical_command_note();
   };
 

@@ -37,7 +37,7 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
 
     controls = (
         (
-            "instrumentation__depth_weight_curves__scalar_weights_per_matrix",
+            "instrumentation__depth_weight_curves__coupling_pairs_per_matrix",
             {"type": int, "default": _depth._DEFAULT_SCALARS_PER_MATRIX},
         ),
         (
@@ -67,6 +67,21 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
             },
         ),
     )
+    legacy_names = {
+        "instrumentation__depth_weight_curves__coupling_pairs_per_matrix":
+            "instrumentation__depth_weight_curves__scalar_weights_per_matrix",
+        "instrumentation__depth_weight_curves__same_coupling_pairs_all_runs":
+            "instrumentation__depth_weight_curves__same_coordinates_all_runs",
+    }
+
+    def add_legacy_alias(destination: str, kwargs: dict) -> None:
+        legacy = legacy_names.get(destination)
+        if legacy is None:
+            return
+        option = f"--{legacy}"
+        alias_kwargs = {**kwargs, "default": argparse.SUPPRESS, "help": argparse.SUPPRESS}
+        parser.add_argument(option, *_normalized_options(option), dest=destination, **alias_kwargs)
+
     for destination, kwargs in controls:
         canonical = f"--{destination}"
         parser_normalized, wrapper_normalized = _normalized_options(canonical)
@@ -78,7 +93,9 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
             **kwargs,
         )
 
-    destination = "instrumentation__depth_weight_curves__same_coordinates_all_runs"
+        add_legacy_alias(destination, kwargs)
+
+    destination = "instrumentation__depth_weight_curves__same_coupling_pairs_all_runs"
     canonical = f"--{destination}"
     parser_normalized, wrapper_normalized = _normalized_options(canonical)
     parser.add_argument(
@@ -92,6 +109,7 @@ def _ensure_cli_arguments_with_normalized_aliases(parser: argparse.ArgumentParse
         default=False,
         metavar="true|false",
     )
+    add_legacy_alias(destination, {"nargs": "?", "const": True, "type": _explicit_bool, "metavar": "true|false"})
     setattr(parser, _depth._CLI_INSTALLED_ATTRIBUTE, True)
 
 

@@ -321,7 +321,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                             luminance: lum(value.colour),
                           })),
                           passed: values.length === 3
-                            && sameColour(values[2].colour, base)
+                            && lum(values[2].colour) < lum(base)
                             && lum(values[0].colour) > lum(values[1].colour)
                             && lum(values[1].colour) > lum(values[2].colour),
                         };
@@ -333,7 +333,7 @@ def test_real_firefox_workspace_intersection_and_step_windows(tmp_path: Path) ->
                     """
                 ) is True,
             timeout=20,
-            message="Workspace gradient did not darken from lightest to the exact run colour",
+            message="Workspace gradient did not darken below the run colour at the latest step",
         )
 
         _set_step_window(driver, 1002, 1003)

@@ -22,7 +22,7 @@ _EXPLICIT_STEP_RANGE: dict[str, int] = {}
 
 _DEPTH_WEIGHT_ENVIRONMENT_ROWS = (
     (
-        "instrumentation__depth_weight_curves__scalar_weights_per_matrix",
+        "instrumentation__depth_weight_curves__coupling_pairs_per_matrix",
         "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SCALAR_WEIGHTS_PER_MATRIX",
         "3",
     ),
@@ -47,7 +47,7 @@ _DEPTH_WEIGHT_ENVIRONMENT_ROWS = (
         "100",
     ),
     (
-        "instrumentation__depth_weight_curves__same_coordinates_all_runs",
+        "instrumentation__depth_weight_curves__same_coupling_pairs_all_runs",
         "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COORDINATES_ALL_RUNS",
         "false",
     ),
@@ -166,6 +166,15 @@ def _local_chart_store_init_with_weight_step_range(
     config: Mapping[str, Any],
 ) -> None:
     enriched_config = dict(config)
+    # Persist the canonical names while leaving existing runtime environment keys compatible.
+    for name, environment, default in _DEPTH_WEIGHT_ENVIRONMENT_ROWS:
+        if name.endswith(("coupling_pairs_per_matrix", "same_coupling_pairs_all_runs")):
+            legacy_name = name.replace("coupling_pairs_per_matrix", "scalar_weights_per_matrix").replace(
+                "same_coupling_pairs_all_runs", "same_coordinates_all_runs"
+            )
+            value = enriched_config.get(name, enriched_config.get(legacy_name, os.environ.get(environment, default)))
+            enriched_config[name] = int(value) if name.endswith("pairs_per_matrix") else str(value).lower() == "true"
+            enriched_config.pop(legacy_name, None)
     for destination, environment in (
         (_START_DESTINATION, _START_ENVIRONMENT),
         (_END_DESTINATION, _END_ENVIRONMENT),

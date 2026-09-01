@@ -561,9 +561,9 @@ window.addEventListener("load", () => {
       const base = typeof hex_to_rgb === "function" ? hex_to_rgb(base_colour) : null;
       if (!base || maximum <= minimum) return base_colour;
       const position = Math.max(0, Math.min(1, (update - minimum) / (maximum - minimum)));
-      if (position >= 1) return base_colour;
       const lightest = blend_rgb(base, [255, 255, 255], 0.64);
-      return rgb_to_hex(blend_rgb(lightest, base, position));
+      const darkest = blend_rgb(base, [0, 0, 0], 0.30);
+      return rgb_to_hex(blend_rgb(lightest, darkest, position));
     };
 
     const trace_run_id = trace => String(
