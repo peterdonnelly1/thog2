@@ -18,7 +18,7 @@ const make_element = () => ({
   addEventListener(name, callback) { this.handlers[name] = callback; },
   insertAdjacentElement(_position, element) { elements.set(element.id, element); },
 });
-elements.set("weight_step_gradient", make_element());
+elements.set("weight_step_overlapping_range", make_element());
 const context = vm.createContext({app, window: {__instra_workspace: {visible_runs: () => visible_runs}},
   run_identifier: run => run.id, by_id: id => elements.get(id), document: {createElement: make_element},
   weight_chart_names: charts, render_plot: async (mount, figure, chart_name) => {

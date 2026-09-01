@@ -223,6 +223,7 @@ window.addEventListener("load", () => {
 
     const selected_range = () => {
       const state = state_for_context();
+      if (state?.mode === "custom" && state.range) return {...state.range};
       const available = available_range();
       if (!state || !available || state.mode === "settings") return null;
       if (state.mode === "latest") {
@@ -610,12 +611,12 @@ window.addEventListener("load", () => {
     };
 
     const redraw_weight_figures = async () => {
-      await render_figures();
       const final_redraw = window.__instra_weight_range_interaction_final?.redraw_mounted;
       if (typeof final_redraw === "function") {
         await final_redraw();
         return;
       }
+      await render_figures();
       const rendered_context = context_key();
       if (!rendered_context || typeof render_plot !== "function") return;
       const fallback_jobs = [];
@@ -686,6 +687,12 @@ window.addEventListener("load", () => {
       whole?.setAttribute("aria-pressed", String(mode === "whole"));
       latest?.setAttribute("aria-pressed", String(mode === "latest"));
       gradient?.setAttribute("aria-pressed", String(gradient_enabled));
+      by_id("weight_step_initial_values")?.setAttribute("aria-pressed", String(
+        mode === "custom" && range?.minimum === 0 && range?.maximum === 0
+      ));
+      by_id("weight_step_one")?.setAttribute("aria-pressed", String(
+        mode === "custom" && range?.minimum === 1 && range?.maximum === 1
+      ));
       controls?.classList?.toggle?.("active", range !== null);
       if (whole) whole.title = "Show every retained weight snapshot in this view";
 
@@ -726,6 +733,7 @@ window.addEventListener("load", () => {
         key
         && mount?.dataset?.plotReady === "true"
         && mount.dataset.instraWeightContext === key
+        && mount.dataset.instraWeightView === window.__instra_weight_step_filter?.signature?.()
         && Array.isArray(mount.data)
         && mount.data.length > 0
       );
@@ -742,6 +750,9 @@ window.addEventListener("load", () => {
       }
 
       if (range && runs.length) {
+        if (range.minimum === 0 && range.maximum === 0) {
+          return "No recorded initial weights (step 0) in this view.";
+        }
         const current_steps = runs.map(run => (
           finite_step(run?.maximum_update)
           ?? finite_step(run?.depth_maximum_update)
@@ -1177,6 +1188,7 @@ window.addEventListener("load", () => {
             && mount.data.length > 0
           ) {
             mount.dataset.instraWeightContext = rendered_context;
+            mount.dataset.instraWeightView = window.__instra_weight_step_filter?.signature?.() || "";
             mount.__instraWeightFigure = app.figures.depth[chart_name];
           }
         }

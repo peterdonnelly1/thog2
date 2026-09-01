@@ -168,7 +168,15 @@ window.addEventListener("load", () => {
           depth[chart_name] = merged;
         }
       }
-      return {depth};
+      const ranges = entries.map(entry => entry.payload?.weight_step_range);
+      const weight_step_range = ranges.length && ranges.every(range => range && Number.isInteger(range.snapshot_count))
+        ? {
+            minimum: ranges[0].minimum,
+            maximum: ranges[0].maximum,
+            snapshot_count: ranges.reduce((count, range) => count + range.snapshot_count, 0),
+          }
+        : null;
+      return {depth, weight_step_range};
     };
 
     const fetch_depth_payload = async request => {

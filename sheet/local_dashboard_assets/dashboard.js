@@ -1518,23 +1518,42 @@ async function refresh_current_run() {
   if (!app.current_run_id || app.refresh_in_flight) return;
   app.refresh_in_flight = true;
   const requested_id = app.current_run_id;
+  const view_signature = () => JSON.stringify([
+    app.workspace_mode === true,
+    window.__instra_workspace?.selection_key?.() || null,
+    window.__instra_weight_step_filter?.signature?.() || null,
+  ]);
+  let requested_view = view_signature();
+  let retry_view = false;
   try {
     const encoded = encodeURIComponent(requested_id);
     const status = await fetch_json(`/api/status?run=${encoded}`);
     if (requested_id !== app.current_run_id) return;
     app.current_status = status;
     render_run_heading();
-    const revision = JSON.stringify(status.revision);
+    requested_view = view_signature();
+    const revision = JSON.stringify([status.revision, requested_view]);
     if (revision === app.figure_revision) return;
     app.figure_revision = revision;
     const figures = await fetch_json(`/api/figures?run=${encoded}`);
     if (requested_id !== app.current_run_id) return;
+    if (requested_view !== view_signature()) {
+      retry_view = true;
+      app.figure_revision = null;
+      return;
+    }
     app.figures = figures;
     await render_figures();
+    if (requested_view !== view_signature()) {
+      retry_view = true;
+      app.figure_revision = null;
+    }
   } catch (error) {
     show_toast(`Run refresh failed: ${error.message}`);
+    app.figure_revision = null;
   } finally {
     app.refresh_in_flight = false;
+    if (retry_view) queueMicrotask(() => refresh_current_run());
   }
 }
 
@@ -2561,7 +2580,7 @@ async function start() {
   render_empty_state();
   await refresh_catalog();
   setInterval(refresh_catalog, 2500);
-  setInterval(refresh_current_run, 2000);
+  setInterval(() => refresh_current_run(), 2000);
 }
 
 start();

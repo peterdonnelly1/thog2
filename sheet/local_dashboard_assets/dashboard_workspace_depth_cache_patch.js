@@ -67,7 +67,13 @@ window.addEventListener("load", () => {
     workspace.fetch_depth_payload = async function(request) {
       const visible_by_id = visible_runs_by_id();
       prune_hidden_runs(visible_by_id);
-      const variant = current_only_variant() ? "current_only" : "history";
+      const range = window.__instra_weight_step_filter?.request_range?.();
+      const variant = JSON.stringify([
+        current_only_variant() ? "current_only" : "history",
+        window.__instra_weight_stability_final?.mode?.() || "settings",
+        range?.minimum ?? null,
+        range?.maximum ?? null,
+      ]);
 
       const cached_request = async url => {
         let parsed = null;

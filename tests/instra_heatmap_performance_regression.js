@@ -18,6 +18,8 @@ async function heatmap_family_demand_regression() {
   let refresh_calls = 0;
   let heatmap_renders = 0;
   let depth_renders = 0;
+  let cleared_plots = 0;
+  let range_signature = "whole";
   const depth_payloads = [];
   const requests = [];
   const click_handlers = new Map();
@@ -75,11 +77,13 @@ async function heatmap_family_demand_regression() {
         group_is_open: name => name === "heatmap" ? heatmap_open : coefficients_open,
       },
       __instra_workspace: null,
+      __instra_weight_step_filter: {signature: () => range_signature},
     },
     by_id: id => groups[id] || null,
     chart_titles: {heatmap: "Heatmap", q: "Q"},
     fetch_json: base_fetch,
     render_figures: async () => undefined,
+    clear_plot: mount => { cleared_plots += 1; mount.dataset.plotReady = "false"; },
     render_plot: async mount => {
       if (mount.id === "heatmap_plot") heatmap_renders += 1;
       else depth_renders += 1;
@@ -181,6 +185,26 @@ async function heatmap_family_demand_regression() {
   );
 
   assert.ok(click_handlers.has("heatmap"), "heatmap group toggle wake handler was not installed");
+
+  // The actual Weights toggle must refresh the depth family, retain confirmed
+  // empty-range metadata, clear old curves, and avoid repeatedly fetching zero.
+  range_signature = "0:0";
+  depth_payloads.push({depth: {}, weight_step_range: {minimum: 0, maximum: 0, snapshot_count: 0}});
+  click_handlers.get("coefficients")();
+  await new Promise(setImmediate);
+  assert.equal(app.figures.weight_step_range?.snapshot_count, 0, "Weights toggle dropped empty step-zero metadata");
+  assert.deepEqual(Object.keys(app.figures.depth), []);
+  assert.equal(cleared_plots, 1, "old curves remained on the empty initial-values plot");
+  const after_initial = requests.length;
+  payload = await context.fetch_json("/api/figures?run=R1");
+  assert.equal(requests.length, after_initial, "confirmed empty step zero was fetched repeatedly");
+  assert.equal(payload.weight_step_range?.snapshot_count, 0, "cached empty response lost its range metadata");
+
+  range_signature = "1:1";
+  depth_payloads.push({depth: {q: {data: [{meta: {optimizer_update: 1}}]}}, weight_step_range: {minimum: 1, maximum: 1, snapshot_count: 1}});
+  payload = await context.fetch_json("/api/figures?run=R1");
+  assert.equal(requests.length, after_initial + 1, "new range reused the empty-zero family cache");
+  assert.equal(payload.weight_step_range.snapshot_count, 1);
 }
 
 (async () => {

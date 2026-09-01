@@ -19,6 +19,7 @@ window.addEventListener("load", () => {
       heatmap: app.figures?.heatmap ?? null,
       heatmap_dimensions: app.figures?.heatmap_dimensions ?? {layers: 0, probes: 0},
       depth: app.figures?.depth ?? {},
+      weight_step_range: app.figures?.weight_step_range ?? null,
     });
 
     const synthetic_group_open = name => {
@@ -69,13 +70,17 @@ window.addEventListener("load", () => {
       status?.depth_snapshot_count ?? null,
       status?.depth_maximum_update ?? null,
       workspace_api()?.selection_key?.() || null,
+      window.__instra_weight_step_filter?.signature?.() || null,
     ]);
 
     const depth_figures_present = figures => Boolean(
       figures && Object.keys(figures).length > 0
     );
 
-    const depth_payload_present = () => depth_figures_present(app.figures?.depth);
+    const depth_payload_present = () => (
+      depth_figures_present(app.figures?.depth)
+      || app.figures?.weight_step_range?.snapshot_count === 0
+    );
 
     const depth_payload_expected = status => (
       Number(status?.depth_snapshot_count || 0) > 0
@@ -185,6 +190,9 @@ window.addEventListener("load", () => {
             ?? app.figures?.heatmap_dimensions
             ?? {layers: 0, probes: 0},
           depth: depth_payload?.depth ?? app.figures?.depth ?? {},
+          weight_step_range: fetch_depth
+            ? depth_payload?.weight_step_range ?? null
+            : app.figures?.weight_step_range ?? null,
         };
         if (fetch_heatmap) {
           performance_state.heatmap_signature = next_heatmap_signature;
@@ -193,6 +201,7 @@ window.addEventListener("load", () => {
         if (fetch_depth) {
           if (
             depth_figures_present(combined.depth)
+            || combined.weight_step_range?.snapshot_count === 0
             || !depth_payload_expected(app.current_status)
           ) {
             performance_state.depth_signature = next_depth_signature;
@@ -219,6 +228,7 @@ window.addEventListener("load", () => {
         if (synthetic_group_open("coefficients")) {
           if (
             depth_figures_present(payload?.depth)
+            || payload?.weight_step_range?.snapshot_count === 0
             || !depth_payload_expected(app.current_status)
           ) {
             performance_state.depth_signature = next_depth_signature;
@@ -282,8 +292,18 @@ window.addEventListener("load", () => {
           const render_jobs = [];
           for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
             const figure = app.figures.depth?.[chart_name];
-            if (!figure) continue;
             const mount = by_id(`${chart_name}_plot`);
+            if (!figure) {
+              // A completed empty range must replace old curves, not leave a
+              // previous view visible indefinitely beneath a loading label.
+              if (mount) {
+                if (mount.dataset?.plotReady === "true") clear_plot(mount);
+                delete mount.__instraWeightFigure;
+                delete mount.dataset.instraWeightContext;
+                delete mount.dataset.instraWeightView;
+              }
+              continue;
+            }
             const placeholder = by_id(`${chart_name}_placeholder`);
             const detail = by_id(`${chart_name}_detail`);
             if (placeholder) placeholder.hidden = true;
@@ -378,6 +398,7 @@ window.addEventListener("load", () => {
       if (family === "heatmap") performance_state.deferred_heatmap = true;
       else performance_state.deferred_coefficients = true;
       const run_id = String(app.current_run_id);
+      const requested_depth_signature = depth_signature(app.current_status || current_run());
       const refresh = (async () => {
         try {
           const payload = await fetch_family_payload(family, run_id);
@@ -385,6 +406,11 @@ window.addEventListener("load", () => {
             run_id !== String(app.current_run_id || "")
             || !synthetic_group_open(group_name)
           ) return;
+          if (family === "depth" && requested_depth_signature !== depth_signature(app.current_status || current_run())) {
+            app.figure_revision = null;
+            queueMicrotask(() => refresh_current_run());
+            return;
+          }
 
           app.figures = {
             heatmap: family === "heatmap"
@@ -396,6 +422,9 @@ window.addEventListener("load", () => {
             depth: family === "depth"
               ? payload?.depth ?? {}
               : app.figures?.depth ?? {},
+            weight_step_range: family === "depth"
+              ? payload?.weight_step_range ?? null
+              : app.figures?.weight_step_range ?? null,
           };
 
           const status = app.current_status || current_run();
@@ -434,7 +463,7 @@ window.addEventListener("load", () => {
       });
     };
     bind_synthetic_group("heatmap_group_toggle", "heatmap");
-    bind_synthetic_group("coefficients_group_toggle", "coefficients");
+    bind_synthetic_group("coefficients_group_toggle", "depth");
 
     // Switching runs invalidates family signatures immediately. Both synthetic
     // groups retain their current open/closed state, but closed families remain

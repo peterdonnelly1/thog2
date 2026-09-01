@@ -51,6 +51,7 @@ for (const name of weight_names) {
 }
 for (const id of [
   "weight_step_from", "weight_step_to", "weight_step_whole_range", "weight_step_current",
+  "weight_step_initial_values", "weight_step_one",
   "weight_step_availability", "chart_settings_overlay", "chart_current_weights_only",
   "chart_join_with_line_segments", "chart_inherit_weights_group", "weights_group_scale_field",
   "chart_current_weights_only_field", "chart_join_with_line_segments_field",
@@ -469,6 +470,21 @@ context.select_run("B");
 assert.equal(elements.get("q_placeholder").textContent, "Loading weight curves…");
 assert.ok(refresh_calls > 0);
 context.__resolve_refresh();
+
+// An explicit initial-values request must stay at step zero even when this run
+// only recorded steps 401..500. A completed empty response is not still loading.
+await Promise.resolve();
+refresh_resolver = null;
+context.app.current_run_id = "B";
+context.app.current_status = runs.B;
+context.app.figures = {depth: {}, weight_step_range: {minimum: 0, maximum: 0, snapshot_count: 0}};
+api.set_range(0, 0);
+await context.refresh_current_run();
+api.sync_header();
+assert.equal(elements.get("weight_step_initial_values")["aria-pressed"], "true", "initial-values selection was not highlighted");
+assert.equal(elements.get("weight_step_from").value, "0");
+assert.equal(elements.get("weight_step_to").value, "0");
+assert.equal(api.placeholder_message("q"), "No recorded initial weights (step 0) in this view.");
 
 console.log("instra weight stability regression: PASS");
 })().catch(error => {

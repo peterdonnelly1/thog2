@@ -575,7 +575,7 @@ window.addEventListener("load", () => {
       const jobs = [];
       for (const chart_name of weight_chart_names) {
         const mount = by_id(`${chart_name}_plot`);
-        const figure = mount?.__instraWeightFigure || app.figures?.depth?.[chart_name];
+        const figure = app.figures?.depth?.[chart_name];
         if (!mount || !figure) continue;
         jobs.push(render_plot(mount, figure, chart_name));
       }

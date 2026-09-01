@@ -12,6 +12,7 @@ const load_source = name => fs.readFileSync(asset(name), "utf8");
 
 async function workspace_depth_cache_regression() {
   let current_only = true;
+  let selected_range = null;
   let visible_runs = [
     {dashboard_run_id: "A", depth_snapshot_count: 100, depth_maximum_update: 1000},
     {dashboard_run_id: "B", depth_snapshot_count: 100, depth_maximum_update: 900},
@@ -45,6 +46,7 @@ async function workspace_depth_cache_regression() {
     window: {
       location: {origin: "http://127.0.0.1:6007"},
       __instra_workspace: workspace,
+      __instra_weight_step_filter: {request_range: () => selected_range},
       addEventListener(event, callback) { if (event === "load") callback(); },
     },
     setTimeout(callback) { callback(); return 1; },
@@ -116,6 +118,14 @@ async function workspace_depth_cache_regression() {
   assert.ok(stats.hits >= 20005, "Workspace depth cache recorded too few stress-test hits");
   assert.ok(stats.misses >= 8, "Workspace depth cache recorded too few misses");
   assert.equal(stats.entries, 2);
+  selected_range = {minimum: 0, maximum: 0};
+  await workspace.fetch_depth_payload(request);
+  assert.equal(requests.length, before_stress + 2, "step zero reused the whole-range cache");
+  await workspace.fetch_depth_payload(request);
+  assert.equal(requests.length, before_stress + 2, "unchanged step-zero view refetched");
+  selected_range = {minimum: 1, maximum: 1};
+  await workspace.fetch_depth_payload(request);
+  assert.equal(requests.length, before_stress + 4, "step one reused step-zero data");
 }
 
 async function render_visibility_regression() {
@@ -123,9 +133,12 @@ async function render_visibility_regression() {
   const cards = Object.fromEntries(chart_names.map(name => [name, {offsetParent: {}}]));
   const mounts = Object.fromEntries(chart_names.map(name => [name, {
     chart_name: name,
+    dataset: {},
     closest(selector) { return selector === ".chart-card" ? cards[name] : null; },
   }]));
   const rendered = [];
+  let view = "whole";
+  let placeholder_reconciliations = 0;
 
   const context = {
     console,
@@ -145,6 +158,11 @@ async function render_visibility_regression() {
     setTimeout(callback) { callback(); return 1; },
     window: {
       addEventListener(event, callback) { if (event === "load") callback(); },
+      __instra_weight_step_filter: {signature: () => view},
+      __instra_weight_stability_final: {
+        context_key: () => "workspace:R1",
+        reconcile_placeholders: () => { placeholder_reconciliations += 1; },
+      },
     },
   };
   context.window.window = context.window;
@@ -192,6 +210,8 @@ async function render_visibility_regression() {
     assert.equal(chart_renders[0].figure.version, 1000, `${chart_name} did not flush its newest hidden update`);
   }
   assert.equal(context.window.__instra_render_visibility_performance.pending_count(), 0);
+  assert.equal(mounts.k.dataset.instraWeightView, "whole", "deferred render never committed its view");
+  assert.ok(placeholder_reconciliations > 0, "deferred charts never reconcile their loading placeholders");
 
   context.app.maximized_chart = "q";
   await context.render_plot(mounts.k, {version: 2000}, "k");
@@ -201,6 +221,12 @@ async function render_visibility_regression() {
   context.restore_maximized_chart();
   await context.window.__instra_render_visibility_performance.flush();
   assert.ok(rendered.every(item => item.run_id === "R1"), "stale deferred figure leaked into the new run");
+  context.app.maximized_chart = "q";
+  await context.render_plot(mounts.k, {version: "old-range"}, "k");
+  view = "step-zero";
+  context.restore_maximized_chart();
+  await context.window.__instra_render_visibility_performance.flush();
+  assert.ok(rendered.every(item => item.figure.version !== "old-range"), "an obsolete hidden range reappeared on restore");
 }
 
 function preparing_observer_regression() {

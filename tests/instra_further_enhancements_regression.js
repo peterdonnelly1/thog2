@@ -46,7 +46,8 @@ assert.match(further, /chart_titles\.mlp_down = "MLP - contraction"/);
 assert.match(further, /stability\.mode\?\.\(\) === "latest" \? 2\.4 : 1\.0/);
 assert.match(further, /schedule_maximized_restore\(prior_maximized, run_id\)/);
 assert.match(further, /live_payload_is_stale\(\)/);
-assert.match(further, /const live_refresh_timer = setInterval/);
+assert.doesNotMatch(further, /const live_refresh_timer = setInterval/);
+assert.match(base_dashboard, /setInterval\(\(\) => refresh_current_run\(\), 2000\)/);
 assert.match(further, /\.state-badge\.finished[\s\S]*?color: #2f7d32/);
 assert.match(further, /explicit-trajectory-modes[\s\S]*?display: none !important/);
 

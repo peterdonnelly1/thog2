@@ -25,6 +25,21 @@ window.addEventListener("load", () => {
       return !card || card.offsetParent !== null;
     };
 
+    const view_signature = () => window.__instra_weight_step_filter?.signature?.() || "";
+    const render_visible = async (mount, figure, chart_name) => {
+      const rendered_view = view_signature();
+      const rendered_run = app.current_run_id;
+      await base_render_plot_visibility(mount, figure, chart_name);
+      if (!weight_chart_set.has(chart_name) || rendered_run !== app.current_run_id || rendered_view !== view_signature()) return;
+      // Deferred renders bypass render_figures: commit their own completion state.
+      if (mount.dataset) {
+        mount.dataset.instraWeightContext = window.__instra_weight_stability_final?.context_key?.() || "";
+        mount.dataset.instraWeightView = rendered_view;
+      }
+      mount.__instraWeightFigure = figure;
+      window.__instra_weight_stability_final?.reconcile_placeholders?.();
+    };
+
     const render_pending_job = async (chart_name, job) => {
       const latest = pending_by_chart.get(chart_name);
       if (!latest) return false;
@@ -35,12 +50,16 @@ window.addEventListener("load", () => {
         pending_by_chart.delete(chart_name);
         return false;
       }
+      if (job.view_signature !== view_signature()) {
+        pending_by_chart.delete(chart_name);
+        return false;
+      }
       const maximized = maximized_weight_chart();
       if (maximized && maximized !== chart_name) return false;
       if (!card_is_visible(job.mount)) return false;
       pending_by_chart.delete(chart_name);
       stats.flushed += 1;
-      await base_render_plot_visibility(job.mount, job.figure, chart_name);
+      await render_visible(job.mount, job.figure, chart_name);
       return true;
     };
 
@@ -79,13 +98,14 @@ window.addEventListener("load", () => {
           mount,
           figure,
           run_id: app.current_run_id,
+          view_signature: view_signature(),
         });
         stats.skipped += 1;
         return Promise.resolve();
       }
       pending_by_chart.delete(chart_name);
       stats.rendered += 1;
-      return base_render_plot_visibility(mount, figure, chart_name);
+      return render_visible(mount, figure, chart_name);
     };
 
     const queue_flush = () => {

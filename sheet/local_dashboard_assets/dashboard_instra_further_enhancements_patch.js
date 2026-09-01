@@ -317,9 +317,9 @@ window.addEventListener("load", () => {
   };
 
   const ensure_z_cycle = () => {
-    const gradient = by_id("weight_step_gradient");
+    const overlap = by_id("weight_step_overlapping_range");
     let button = by_id("weight_z_cycle");
-    if (!button && gradient) {
+    if (!button && overlap) {
       button = document.createElement("button");
       button.id = "weight_z_cycle";
       button.type = "button";
@@ -327,7 +327,7 @@ window.addEventListener("load", () => {
       button.textContent = "z";
       button.title = "Bring the next Workspace run to the front";
       button.setAttribute("aria-label", button.title);
-      gradient.insertAdjacentElement("afterend", button);
+      overlap.insertAdjacentElement("afterend", button);
       button.addEventListener("click", async () => {
         const active = sync_workspace_z_order();
         if (active.length < 2) return;
@@ -335,7 +335,7 @@ window.addEventListener("load", () => {
         const jobs = [];
         for (const chart_name of weight_chart_names) {
           const mount = by_id(`${chart_name}_plot`);
-          const figure = mount?.__instraWeightFigure || app.figures?.depth?.[chart_name];
+          const figure = app.figures?.depth?.[chart_name];
           if (mount && figure) jobs.push(render_plot(mount, figure, chart_name));
         }
         await Promise.all(jobs);
@@ -460,7 +460,10 @@ window.addEventListener("load", () => {
       return prepared;
     };
 
+    let maxima_figures = null;
+    let maxima_cache = new Map();
     const raw_depth_maxima = () => {
+      if (app.figures?.depth === maxima_figures) return maxima_cache;
       const maxima = new Map();
       for (const figure of Object.values(app.figures?.depth || {})) {
         for (const trace of figure?.data || []) {
@@ -475,11 +478,19 @@ window.addEventListener("load", () => {
           maxima.set(identifier, Math.max(maxima.get(identifier) ?? -1, update));
         }
       }
+      maxima_figures = app.figures?.depth;
+      maxima_cache = maxima;
       return maxima;
     };
 
     const live_payload_is_stale = () => {
       if (!["whole", "latest"].includes(String(stability.mode?.() || ""))) return false;
+      if (app.refresh_in_flight) return false;
+      const group = by_id("coefficients_chart_group");
+      if (!group || group.classList.contains("collapsed")) return false;
+      // An overlap/custom server window need not contain every run's final step.
+      // Compare with its expected window, not the unfiltered run maximum.
+      const range = stability.selected_range?.();
       const maxima = raw_depth_maxima();
       const runs = app.workspace_mode === true
         ? (window.__instra_workspace?.visible_runs?.() || [])
@@ -489,7 +500,9 @@ window.addEventListener("load", () => {
         let identifier = "";
         try { identifier = String(run_identifier(run)); }
         catch (_error) { identifier = String(app.current_run_id || ""); }
-        const expected = Number(run?.depth_maximum_update);
+        const maximum = Number(run?.depth_maximum_update);
+        if (range && Number(range.maximum) < maximum) continue;
+        const expected = maximum;
         if (Number.isInteger(expected) && (maxima.get(identifier) ?? -1) < expected) return true;
       }
       return false;
@@ -523,19 +536,9 @@ window.addEventListener("load", () => {
       return result;
     };
 
-    // The base dashboard registers its poller before deferred patch owners have
-    // necessarily installed. Resolve the current wrapper at tick time so whole
-    // range/latest views always use the cache-invalidation and catch-up path.
-    const live_refresh_timer = setInterval(() => {
-      if (!app.current_run_id) return;
-      if (!["whole", "latest"].includes(String(stability.mode?.() || ""))) return;
-      void refresh_current_run();
-    }, 2000);
-
     window.__instra_further_weight_owner = Object.freeze({
       live_payload_is_stale,
       raw_depth_maxima,
-      live_refresh_timer,
     });
     return true;
   };
@@ -566,6 +569,7 @@ window.addEventListener("load", () => {
     .overview-notes-save:disabled { opacity: .5; cursor: default; }
     .colour-swatch[title="#FFFFFF"] { border-color: #9ca3af; }
     #weight_step_initial_values { margin-left: 6px; }
+    #weight_z_cycle { margin-left: 12px; }
     #coefficients_chart_group.thog2-tab-maximized-group > .chart-group-header #weights_group_settings_button {
       order: 999 !important; margin-left: auto !important; margin-right: 8px !important;
       display: inline-flex !important; visibility: visible !important;
