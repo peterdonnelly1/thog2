@@ -115,7 +115,7 @@ const instra_weight_inspection = (() => {
     const compared = compare_runs && runs.length > 1;
     const columns_per_layer = runs.length + (compared ? 1 : 0);
     const columns = [...layers].sort((left, right) => left - right).flatMap(layer => [
-      ...(compared ? [{layer, key: `${layer}|spread`, difference: true, name: "max − min", colour: "#65758b"}] : []),
+      ...(compared ? [{layer, key: `${layer}|spread`, difference: true, name: "range / |mean| %", colour: "#65758b"}] : []),
       ...runs.map(run => ({...run, layer, key: `${layer}|${run.id}`})),
     ]);
     const multiple_pairs = new Set(rows.map(row => `${row.input}:${row.output}`)).size > 1;
@@ -127,7 +127,15 @@ const instra_weight_inspection = (() => {
     if (col.difference) {
       const values = model.runs.map(run => model.rows[row]?.values.get(String(run.id))?.get(col.layer));
       if (values.length < 2 || values.some(value => !Number.isFinite(value))) return null;
-      return Math.max(...values) - Math.min(...values);
+      const scale = Math.max(...values.map(Math.abs));
+      if (scale === 0) return 0;
+      const normalized = values.map(value => value / scale);
+      const range = Math.max(...normalized) - Math.min(...normalized);
+      if (range === 0) return 0;
+      const mean = normalized.reduce((sum, value) => sum + value, 0) / values.length;
+      if (mean === 0) return null;
+      const percentage = 100 * range / Math.abs(mean);
+      return Number.isFinite(percentage) ? percentage : null;
     }
     return model.rows[row]?.values.get(String(col.id))?.get(col.layer) ?? null;
   };
@@ -139,9 +147,9 @@ const instra_weight_inspection = (() => {
   };
   const cell_text = (model, row, column, places, missing = "—") => {
     const value = value_at(model, row, column);
-    // Tiny nonzero differences must remain distinguishable from exact equality.
-    return model.columns[column]?.difference && Number.isFinite(value) && value !== 0 && Math.abs(value) < 10 ** -precision(places)
+    const formatted = model.columns[column]?.difference && Number.isFinite(value) && value !== 0 && Math.abs(value) < 10 ** -precision(places)
       ? value.toExponential(Math.max(3, precision(places))) : format(value, places, missing);
+    return model.columns[column]?.difference && Number.isFinite(value) ? `${formatted}%` : formatted;
   };
   const bounds = selection => ({
     row_min: Math.min(selection.anchor.row, selection.focus.row), row_max: Math.max(selection.anchor.row, selection.focus.row),
@@ -163,7 +171,7 @@ const instra_weight_inspection = (() => {
   const csv = model => {
     const quote = value => `"${String(value ?? "").replace(/"/g, '\"\"')}"`;
     const header = ["step", "input_coupling", "output_coupling", ...model.columns.map(col =>
-      `layer_${col.layer} ${col.difference ? "max_minus_min" : `${col.name} [${col.id}]`}`)];
+      `layer_${col.layer} ${col.difference ? "range_percent_of_abs_mean" : `${col.name} [${col.id}]`}`)];
     const rows = [header.map(quote).join(",")];
     model.rows.forEach((row, index) => {
       const values = model.columns.map((_col, column) => value_at(model, index, column));
@@ -261,7 +269,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
           cell.id = `weight_inspection_cell_${row_index}_${col_index}`;
           cell.dataset.row = String(row_index);
           cell.dataset.column = String(col_index);
-          cell.title = `Step ${row.step}, layer ${col.layer}, input ${row.input ?? "unknown"}, output ${row.output ?? "unknown"}, ${col.name}: ${value ?? "not recorded"}`;
+          cell.title = `Step ${row.step}, layer ${col.layer}, input ${row.input ?? "unknown"}, output ${row.output ?? "unknown"}, ${col.name}: ${value === null ? (col.difference ? "undefined: missing data or zero mean" : "not recorded") : `${value}${col.difference ? "%" : ""}`}`;
           cell.style.setProperty("--run-colour", col.colour);
           const is_selected = Boolean(selected && row_index >= selected.row_min && row_index <= selected.row_max && col_index >= selected.col_min && col_index <= selected.col_max);
           cell.setAttribute("aria-selected", String(is_selected));
@@ -280,7 +288,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       for (let col_index = cols.start; col_index < cols.end; col_index += 1) {
         const col = model.columns[col_index];
         const header = element("div", "weight-inspection-col-header", col.name);
-        header.title = col.difference ? `Layer ${col.layer}: max minus min across all selected runs at the same step and coupling; blank if any run is missing.` : `Layer ${col.layer} · ${col.name}`;
+        header.title = col.difference ? `Layer ${col.layer}: 100 × (max − min) / |arithmetic mean| across all selected runs at the same step and coupling; blank if data are missing or the mean is zero with unequal weights.` : `Layer ${col.layer} · ${col.name}`;
         header.style.setProperty("--run-colour", col.colour);
         header.setAttribute("role", "columnheader");
         header.setAttribute("aria-colindex", String(col_index + 2));
@@ -459,7 +467,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       const select_all_button = action("Select all", "Select all weights (Ctrl+A)");
       const download = icon_action("download", "Download all displayed weights as CSV (full precision)");
       toolbar.append(back, metadata, copy, select_all_button, download);
-      const hint = element("div", "weight-inspection-hint", "Recorded layer weights · drag or Shift-click a rectangle · Shift+arrows to extend · Ctrl+A to select all · Ctrl+C to copy · max − min compares runs · — = not recorded");
+      const hint = element("div", "weight-inspection-hint", "Recorded layer weights · drag or Shift-click a rectangle · Shift+arrows to extend · Ctrl+A to select all · Ctrl+C to copy · range / |mean| % compares runs; — also means undefined percentage · — = not recorded");
       const grid = element("div", "weight-inspection-grid");
       grid.tabIndex = 0;
       grid.setAttribute("role", "grid");

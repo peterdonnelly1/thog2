@@ -64,18 +64,18 @@ assert.ok(visible_window.end - visible_window.start < 28, "virtualization grows 
 const comparison = data.build_table(source, visible, runs, chart);
 assert.deepEqual(comparison.columns.map(col => col.difference ? `${col.layer}:difference` : `${col.layer}:${col.id}`), ["1:difference", "1:a", "1:b", "2:difference", "2:a", "2:b", "3:difference", "3:a", "3:b"]);
 assert.equal(data.value_at(comparison, 0, 0), null, "partial run coverage invented a comparison");
-assert.ok(Math.abs(data.value_at(comparison, 1, 0) - 0.3333327) < 1e-15);
-assert.ok(Math.abs(data.value_at(comparison, 1, 3) - 0.901233) < 1e-15);
+assert.ok(Math.abs(data.value_at(comparison, 1, 0) - 66.66658666661067) < 1e-10);
+assert.ok(Math.abs(data.value_at(comparison, 1, 3) - 275.471213679524) < 1e-8);
 assert.equal(data.csv(model).split("\r\n")[1], "1,2,3,0.123456,,-0.000001,,,", "CSV rounded values or invented missing entries");
 const csv_model = data.build_table(source, visible, [{...runs[0], name: 'Alpha,"quoted"\nname'}, runs[1]], chart);
 assert.ok(data.csv(csv_model).includes('Alpha,""quoted""\nname [a]"'), "CSV headers did not escape quotes/newlines");
-assert.ok(data.csv(comparison).includes('layer_1 max_minus_min'));
+assert.ok(data.csv(comparison).includes('layer_1 range_percent_of_abs_mean'));
 
-const close_traces = [trace("a", 1, [0, 0, 0]), trace("b", 1, [1e-10, 0, 0]), trace("c", 1, [2e-10, 0, 0])];
+const close_traces = [trace("a", 1, [1, 0, 0]), trace("b", 1, [1 + 1e-12, 0, 0]), trace("c", 1, [1 + 2e-12, 0, 0])];
 const three_runs = [...runs, {id: "c", name: "Gamma"}];
 const close_model = data.build_table({data: close_traces}, {data: close_traces}, three_runs, chart);
-assert.equal(data.value_at(close_model, 0, 0), 2e-10);
-assert.equal(data.cell_text(close_model, 0, 0, 4), "2.0000e-10", "tiny difference rounded into false equality");
+assert.ok(Math.abs(data.value_at(close_model, 0, 0) - 2e-10) < 1e-13);
+assert.match(data.cell_text(close_model, 0, 0, 4), /^2\.0000e-10%$/, "tiny difference rounded into false equality");
 assert.equal(data.value_at(close_model, 0, 4), 0, "equal weights have nonzero difference");
 
 // Event-level DOM harness: production inspector handlers, fake layout/clipboard.
@@ -175,13 +175,13 @@ let grid = by_class("weight-inspection-grid");
 let canvas = by_class("weight-inspection-canvas");
 assert.equal(grid.getAttribute("aria-rowcount"), "5");
 assert.equal(grid.getAttribute("aria-colcount"), "10");
-assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Layer 1 · Input coupling 2 · Output coupling 3 · max − min/);
+assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Layer 1 · Input coupling 2 · Output coupling 3 · range \/ \|mean\| %/);
 (async () => {
   await grid.emit("keydown", {key: "ArrowRight", shiftKey: true});
   await grid.emit("keydown", {key: "ArrowDown", shiftKey: true});
   flush_frames();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "\t0.1235\n0.3333\t0.3333");
+  assert.equal(copied, "\t0.1235\n66.6666%\t0.3333");
   let keyboard_copy;
   await by_class("weight-inspection-panel").emit("copy", {clipboardData: {setData: (_type, value) => { keyboard_copy = value; }}});
   assert.equal(keyboard_copy, copied);
@@ -189,14 +189,14 @@ assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Laye
   current_precision = 6;
   inspector.sync();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "\t0.123456\n0.333333\t0.333333", "precision did not refresh without losing selection");
+  assert.equal(copied, "\t0.123456\n66.666587%\t0.333333", "precision did not refresh without losing selection");
   const first_cell = canvas.children.find(node => node.dataset.row === "0" && node.dataset.column === "0");
   await grid.emit("pointerdown", {target: first_cell, button: 0, pointerId: 1, clientX: 120, clientY: 65});
   await grid.emit("pointermove", {clientX: 365, clientY: 95});
   await grid.emit("pointerup");
   flush_frames();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "\t0.123456\t\n0.333333\t0.333333\t0.666666");
+  assert.equal(copied, "\t0.123456\t\n66.666587%\t0.333333\t0.666666");
   await grid.emit("keydown", {key: "End", ctrlKey: true, shiftKey: true});
   flush_frames();
   assert.match(by_class("weight-inspection-status").textContent, /3 × 9 selected/);

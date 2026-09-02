@@ -40,6 +40,7 @@ const app = {current_run_id: "a", dynamic_chart_figures: {}, dynamic_chart_metad
 const metric = vm.createContext({
   app, chart_titles: {}, front_by_chart: new Map(), workspace_api: () => workspace,
   document: {createElement: () => new Element()},
+  chart_size_icon: () => "<svg></svg>",
   chart_key: (group, id) => `local_metric_${group}_${id}`,
   normalize_chart_settings: key => ({title: key}), chart_settings_button: () => new Element(),
   add_panel_resizers() {}, default_palette: ["#000"],

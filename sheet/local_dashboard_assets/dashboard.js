@@ -1,6 +1,13 @@
 // vvv THOG
 "use strict";
 
+function chart_size_icon(maximized = false) {
+  const shape = maximized
+    ? '<path d="M8 8V4h12v12h-4"/><rect x="4" y="8" width="12" height="12" rx="1"/>'
+    : '<rect x="4" y="4" width="16" height="16" rx="1"/>';
+  return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true" style="pointer-events:none;vertical-align:middle">${shape}</svg>`;
+}
+
 const chart_titles = {
   heatmap: "Heatmap - True Loss vs Counterfactual Layer Count Loss",
   attn_q_head_N: "Attention query scalar trajectories",
@@ -1173,7 +1180,7 @@ function depth_card(chart_name) {
   maximize_button.type = "button";
   maximize_button.className = "maximize-button";
   maximize_button.dataset.maximize = chart_name;
-  maximize_button.textContent = "⛶";
+  maximize_button.innerHTML = chart_size_icon();
   maximize_button.title = "Maximize chart";
   maximize_button.setAttribute("aria-label", `Maximize ${title.textContent}`);
   actions.append(chart_settings_button(chart_name, title.textContent), maximize_button);
@@ -1676,7 +1683,7 @@ function toggle_maximized_chart(chart_name) {
     const selected = card.dataset.chart === chart_name;
     card.classList.toggle("maximized", selected);
     const button = card.querySelector(".maximize-button");
-    button.textContent = selected ? "↙" : "⛶";
+    button.innerHTML = chart_size_icon(selected);
     button.title = selected ? "Restore chart grid" : "Maximize chart";
     button.setAttribute("aria-label", selected ? "Restore chart grid" : `Maximize ${chart_titles[card.dataset.chart]}`);
   });
@@ -1713,7 +1720,7 @@ function restore_maximized_chart() {
   document.querySelectorAll(".chart-card").forEach(card => {
     card.classList.remove("maximized");
     const button = card.querySelector(".maximize-button");
-    button.textContent = "⛶";
+    button.innerHTML = chart_size_icon();
     button.title = "Maximize chart";
     button.setAttribute("aria-label", `Maximize ${chart_titles[card.dataset.chart]}`);
     button.style.removeProperty("top");

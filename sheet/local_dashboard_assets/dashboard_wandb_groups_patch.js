@@ -13,6 +13,7 @@ window.addEventListener("load", () => {
     let poll_in_flight = false;
     let last_run_id = null;
     const front_by_chart = new Map();
+    let pending_navigation = null;
 
     const workspace_api = () => {
       const candidate = window.__instra_workspace;
@@ -69,6 +70,46 @@ window.addEventListener("load", () => {
       group_revisions.clear();
       rendered_revisions.clear();
     };
+
+    const remember_metric_navigation = () => {
+      const viewport = by_id("charts_scroll");
+      const viewport_top = viewport?.getBoundingClientRect?.().top ?? 0;
+      const sections = [...document.querySelectorAll(".chart-group")];
+      const anchor = sections.find(section => section.getBoundingClientRect?.().bottom > viewport_top + 5);
+      for (const section of metric_group_sections()) {
+        save_group_collapsed(section.dataset.metricGroup, section.classList.contains("collapsed"));
+      }
+      return {
+        chart_name: String(app.maximized_chart || "").startsWith("local_metric_") ? app.maximized_chart : pending_navigation?.chart_name || null,
+        group_name: anchor?.dataset.chartGroup || pending_navigation?.group_name || null,
+        offset: anchor ? anchor.getBoundingClientRect().top - viewport_top : pending_navigation?.offset || 0,
+        scroll_top: Number(viewport?.scrollTop || 0),
+      };
+    };
+    const restore_metric_navigation = () => {
+      const saved = pending_navigation;
+      if (!saved || saved.view !== current_view_key()) return;
+      requestAnimationFrame(() => {
+        if (saved !== pending_navigation || saved.view !== current_view_key()) return;
+        const viewport = by_id("charts_scroll");
+        if (!viewport) return;
+        if (saved.chart_name) {
+          const card = document.querySelector(`.chart-card[data-chart="${CSS.escape(saved.chart_name)}"]`);
+          if (!card) return;
+          if (!app.maximized_chart) toggle_maximized_chart(saved.chart_name);
+        } else if (!app.maximized_chart) {
+          const anchor = [...document.querySelectorAll(".chart-group")].find(section => section.dataset.chartGroup === saved.group_name);
+          const viewport_top = viewport.getBoundingClientRect?.().top ?? 0;
+          viewport.scrollTop = anchor
+            ? viewport.scrollTop + anchor.getBoundingClientRect().top - viewport_top - saved.offset
+            : saved.scroll_top;
+        }
+        pending_navigation = null;
+      });
+    };
+    // A deliberate chart interaction supersedes a delayed navigation restoration.
+    by_id("charts_scroll")?.addEventListener?.("pointerdown", () => { pending_navigation = null; }, true);
+    by_id("charts_scroll")?.addEventListener?.("wheel", () => { pending_navigation = null; }, {passive: true});
 
     const sorted_group_summaries = groups => [...groups].sort((left, right) => {
       const left_order = group_order.has(left.name) ? group_order.get(left.name) : 100;
@@ -193,12 +234,13 @@ window.addEventListener("load", () => {
       maximize.type = "button";
       maximize.className = "maximize-button";
       maximize.dataset.maximize = key;
-      maximize.textContent = "⛶";
+      maximize.innerHTML = chart_size_icon();
       maximize.title = "Maximize chart";
       maximize.setAttribute("aria-label", `Maximize ${title.textContent}`);
       const actions = document.createElement("div");
       actions.className = "chart-card-actions";
       actions.append(chart_settings_button(key, title.textContent), maximize);
+      header.append(copy, actions);
       if (["train", "val"].includes(group_name)) {
         const cycle = document.createElement("button");
         cycle.type = "button";
@@ -216,9 +258,8 @@ window.addEventListener("load", () => {
           front_by_chart.set(key, ids[(ids.indexOf(current) + 1) % ids.length]);
           await render_plot(article.querySelector(".plot-mount"), figure, key);
         });
-        actions.appendChild(cycle);
+        header.appendChild(cycle);
       }
-      header.append(copy, actions);
 
       const shell = document.createElement("div");
       shell.className = "plot-shell";
@@ -392,6 +433,7 @@ window.addEventListener("load", () => {
             await refresh_group_data(summary.name);
           }
         }
+        restore_metric_navigation();
       } catch (error) {
         show_toast(`Local W&B charts failed: ${error.message}`);
       } finally {
@@ -401,11 +443,13 @@ window.addEventListener("load", () => {
 
     const base_select_run_metric_groups = select_run;
     select_run = function(run_id, options = {}) {
-      if (run_id !== app.current_run_id) {
+      const saved = run_id !== app.current_run_id ? remember_metric_navigation() : null;
+      if (saved) {
         clear_metric_groups();
         last_run_id = run_id;
       }
       const result = base_select_run_metric_groups(run_id, options);
+      if (saved) pending_navigation = {...saved, view: current_view_key()};
       setTimeout(refresh_metric_groups, 0);
       return result;
     };
@@ -423,7 +467,11 @@ window.addEventListener("load", () => {
 
     const style = document.createElement("style");
     style.textContent = `
-      .metric-z-cycle { margin-left: 36px; }
+      .local-metric-card > .chart-card-header { position: relative; }
+      .local-metric-card > .chart-card-header > .chart-heading-copy { max-width: calc(50% - 24px); }
+      .metric-z-cycle { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0; z-index: 5; }
+      .local-metric-card.maximized > .chart-card-header { position: relative !important; display: flex !important; visibility: visible !important; }
+      .local-metric-card.maximized > .chart-card-header > .metric-z-cycle:not([hidden]) { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; }
       .metric-z-cycle[hidden] { display: none !important; }
       .local-metric-group { min-height: 35px; }
       .local-metric-group:not(.collapsed) { min-height: 0; }
