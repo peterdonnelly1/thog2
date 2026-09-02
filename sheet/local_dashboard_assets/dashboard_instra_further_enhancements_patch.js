@@ -569,7 +569,7 @@ window.addEventListener("load", () => {
     .overview-notes-save:disabled { opacity: .5; cursor: default; }
     .colour-swatch[title="#FFFFFF"] { border-color: #9ca3af; }
     #weight_step_initial_values { margin-left: 6px; }
-    #weight_z_cycle { margin-left: 12px; }
+    #weight_z_cycle { margin-left: 36px; }
     #coefficients_chart_group.thog2-tab-maximized-group > .chart-group-header #weights_group_settings_button {
       order: 999 !important; margin-left: auto !important; margin-right: 8px !important;
       display: inline-flex !important; visibility: visible !important;

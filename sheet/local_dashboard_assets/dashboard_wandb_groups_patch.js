@@ -9,10 +9,10 @@ window.addEventListener("load", () => {
     const group_order = new Map([["train", 0], ["val", 1], ["system", 2]]);
     const group_revisions = new Map();
     const rendered_revisions = new Map();
-    let collapsed_group_context = "";
-    let collapsed_group_settings = new Map();
+    const collapsed_by_mode = new Map();
     let poll_in_flight = false;
     let last_run_id = null;
+    const front_by_chart = new Map();
 
     const workspace_api = () => {
       const candidate = window.__instra_workspace;
@@ -33,12 +33,11 @@ window.addEventListener("load", () => {
 
     const metric_group_sections = () => [...document.querySelectorAll(".local-metric-group")];
     const group_section = name => metric_group_sections().find(section => section.dataset.metricGroup === name) || null;
-    const group_collapsed_settings = (key = group_context_key()) => {
-      if (key !== collapsed_group_context) {
-        collapsed_group_context = key;
-        collapsed_group_settings = new Map();
-      }
-      return collapsed_group_settings;
+    const group_collapsed_settings = () => {
+      // Rebuilt groups inherit the user's choices across runs / Workspace membership changes.
+      const key = workspace_api() ? "workspace" : "runs";
+      if (!collapsed_by_mode.has(key)) collapsed_by_mode.set(key, new Map());
+      return collapsed_by_mode.get(key);
     };
 
     const group_is_collapsed = name => {
@@ -146,6 +145,23 @@ window.addEventListener("load", () => {
       }
     };
 
+    const ordered_metric_figure = (figure, chart_name) => {
+      if (!workspace_api() || !figure?.data) return figure;
+      const ids = [...new Set(figure.data.map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean))];
+      const front = front_by_chart.get(chart_name);
+      if (!ids.includes(front)) return figure;
+      const index = ids.indexOf(front);
+      const order = [...ids.slice(index + 1), ...ids.slice(0, index + 1)];
+      const rank = new Map(order.map((id, position) => [id, position]));
+      figure.data.sort((left, right) => (rank.get(left.meta?.instra_workspace_run_id) ?? -1) - (rank.get(right.meta?.instra_workspace_run_id) ?? -1));
+      return figure;
+    };
+    const base_prepare_metric_order = prepare_figure;
+    prepare_figure = function(figure, chart_name) {
+      const prepared = base_prepare_metric_order(figure, chart_name);
+      return String(chart_name).startsWith("local_metric_") ? ordered_metric_figure(prepared, chart_name) : prepared;
+    };
+
     const make_metric_card = (group_name, chart) => {
       const key = chart_key(group_name, chart.id);
       chart_titles[key] = chart.title || chart.id;
@@ -183,6 +199,25 @@ window.addEventListener("load", () => {
       const actions = document.createElement("div");
       actions.className = "chart-card-actions";
       actions.append(chart_settings_button(key, title.textContent), maximize);
+      if (["train", "val"].includes(group_name)) {
+        const cycle = document.createElement("button");
+        cycle.type = "button";
+        cycle.className = "weight-step-button metric-z-cycle";
+        cycle.textContent = "z";
+        cycle.title = "Bring the next Workspace run to the front";
+        cycle.setAttribute("aria-label", cycle.title);
+        cycle.hidden = !workspace_api();
+        cycle.addEventListener("click", async event => {
+          event.stopPropagation();
+          const figure = app.dynamic_chart_figures[key];
+          const ids = [...new Set((figure?.data || []).map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean))];
+          if (ids.length < 2) return;
+          const current = ids.includes(front_by_chart.get(key)) ? front_by_chart.get(key) : ids.at(-1);
+          front_by_chart.set(key, ids[(ids.indexOf(current) + 1) % ids.length]);
+          await render_plot(article.querySelector(".plot-mount"), figure, key);
+        });
+        actions.appendChild(cycle);
+      }
       header.append(copy, actions);
 
       const shell = document.createElement("div");
@@ -201,7 +236,8 @@ window.addEventListener("load", () => {
     const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
         type: "scattergl",
-        mode: "lines",
+        mode: series.x?.length === 1 ? "lines+markers" : "lines",
+        meta: {instra_workspace_run_id: series.instra_workspace_run_id || ""},
         x: Array.isArray(series.x) ? series.x : [],
         thog2_x_variants: series.x_variants || {},
         y: Array.isArray(series.y) ? series.y : [],
@@ -258,6 +294,11 @@ window.addEventListener("load", () => {
         available_x_axis_modes: chart.available_x_axis_modes || [],
       };
       const figure = metric_figure(article, chart);
+      const cycle = article.querySelector(".metric-z-cycle");
+      if (cycle) {
+        cycle.hidden = !workspace_api();
+        cycle.disabled = new Set(figure.data.map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean)).size < 2;
+      }
       app.dynamic_chart_figures[key] = figure;
       await render_plot(mount, figure, key);
       const detail = article.querySelector(".local-metric-detail");
@@ -382,6 +423,8 @@ window.addEventListener("load", () => {
 
     const style = document.createElement("style");
     style.textContent = `
+      .metric-z-cycle { margin-left: 36px; }
+      .metric-z-cycle[hidden] { display: none !important; }
       .local-metric-group { min-height: 35px; }
       .local-metric-group:not(.collapsed) { min-height: 0; }
       .local-metric-group .chart-group-header { position: sticky; top: 0; z-index: 5; }

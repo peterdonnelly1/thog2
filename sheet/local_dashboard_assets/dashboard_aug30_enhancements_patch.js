@@ -154,14 +154,16 @@ window.addEventListener("load", () => {
 
   const move_steps_after_preset = () => {
     const header_row = document.querySelector(".runs-table thead tr");
-    const preset_header = header_row?.querySelector('[data-instra-run-shape-header="preset"]');
+    const preset_header = header_row?.querySelector('[data-instra-run-shape-header="optimizer"]')
+      || header_row?.querySelector('[data-instra-run-shape-header="preset"]');
     const steps_header = header_row?.querySelector(".step-column");
     if (!preset_header || !steps_header) return false;
     if (preset_header.nextElementSibling !== steps_header) {
       preset_header.insertAdjacentElement("afterend", steps_header);
     }
     for (const row of document.querySelectorAll(".runs-table tbody tr[data-run-id]")) {
-      const preset = row.querySelector('[data-instra-run-shape-cell="preset"]');
+      const preset = row.querySelector('[data-instra-run-shape-cell="optimizer"]')
+        || row.querySelector('[data-instra-run-shape-cell="preset"]');
       let steps = row.querySelector('[data-instra-steps-cell="true"]');
       if (!steps) {
         steps = row.querySelector(".duration-column")?.previousElementSibling || null;

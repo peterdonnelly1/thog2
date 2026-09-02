@@ -37,7 +37,7 @@ const source = {data: [old_a, exact_a, marker, early_b, final_b, trace("a", 5, [
 // Visible values have been arbitrarily transformed by chart settings. These must
 // never replace the raw values. The extra coupling is not visible and is excluded.
 let visible = {data: [old_a, exact_a, early_b, final_b].map(value => ({...value, y: [9999, 9999, 9999]}))};
-const model = data.build_table(source, visible, runs, chart);
+const model = data.build_table(source, visible, runs, chart, "", false);
 assert.deepEqual(model.rows.map(row => row.step), [1, 5, 8]);
 assert.deepEqual(model.columns.map(col => `${col.layer}:${col.id}`), ["1:a", "1:b", "2:a", "2:b", "3:a", "3:b"]);
 assert.equal(data.value_at(model, 1, 0), 0.3333333, "lost exact executed-layer data");
@@ -54,12 +54,29 @@ assert.equal(data.precision(null), 4);
 assert.equal(data.build_table(source, {data: []}, runs, chart).rows.length, 0);
 const sparse = trace("a", 1, [1, 2, 3]);
 sparse.x = [1, 1.5, 3];
-assert.deepEqual(data.build_table({data: [sparse]}, {data: [sparse]}, runs, chart).columns.map(col => col.layer), [1, 1, 3, 3]);
+assert.deepEqual(data.build_table({data: [sparse]}, {data: [sparse]}, runs, chart, "", false).columns.map(col => col.layer), [1, 1, 3, 3]);
 const multiple = data.build_table(source, source, runs, "mlp_down");
 assert.equal(multiple.multiple_pairs, true, "distinct couplings were silently merged");
 assert.equal(multiple.rows.length, 4);
 const visible_window = data.window_range(280000, 700, 56, 28, 100000);
 assert.ok(visible_window.end - visible_window.start < 28, "virtualization grows with total history");
+
+const comparison = data.build_table(source, visible, runs, chart);
+assert.deepEqual(comparison.columns.map(col => col.difference ? `${col.layer}:difference` : `${col.layer}:${col.id}`), ["1:difference", "1:a", "1:b", "2:difference", "2:a", "2:b", "3:difference", "3:a", "3:b"]);
+assert.equal(data.value_at(comparison, 0, 0), null, "partial run coverage invented a comparison");
+assert.ok(Math.abs(data.value_at(comparison, 1, 0) - 0.3333327) < 1e-15);
+assert.ok(Math.abs(data.value_at(comparison, 1, 3) - 0.901233) < 1e-15);
+assert.equal(data.csv(model).split("\r\n")[1], "1,2,3,0.123456,,-0.000001,,,", "CSV rounded values or invented missing entries");
+const csv_model = data.build_table(source, visible, [{...runs[0], name: 'Alpha,"quoted"\nname'}, runs[1]], chart);
+assert.ok(data.csv(csv_model).includes('Alpha,""quoted""\nname [a]"'), "CSV headers did not escape quotes/newlines");
+assert.ok(data.csv(comparison).includes('layer_1 max_minus_min'));
+
+const close_traces = [trace("a", 1, [0, 0, 0]), trace("b", 1, [1e-10, 0, 0]), trace("c", 1, [2e-10, 0, 0])];
+const three_runs = [...runs, {id: "c", name: "Gamma"}];
+const close_model = data.build_table({data: close_traces}, {data: close_traces}, three_runs, chart);
+assert.equal(data.value_at(close_model, 0, 0), 2e-10);
+assert.equal(data.cell_text(close_model, 0, 0, 4), "2.0000e-10", "tiny difference rounded into false equality");
+assert.equal(data.value_at(close_model, 0, 4), 0, "equal weights have nonzero difference");
 
 // Event-level DOM harness: production inspector handlers, fake layout/clipboard.
 // This verifies behaviour without claiming a real-browser rendering result.
@@ -88,14 +105,17 @@ class FakeNode {
     const event = {target: this, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {}, ...extra};
     for (const handler of this.listeners[name] || []) await handler(event);
   }
+  click() { if (this.tagName === "a") downloaded_link = this; }
   focus() { document.activeElement = this; }
   select() { document.activeElement = this; }
+  querySelector(selector) { return find(this, node => node !== this && selector.startsWith(".") && node.classList.contains(selector.slice(1))); }
   closest(selector) { return selector.startsWith(".") && this.classList.contains(selector.slice(1)) ? this : this.parentElement?.closest(selector); }
   setPointerCapture() {}
   getBoundingClientRect() { return {left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight}; }
 }
 const root = new FakeNode();
 const card = new FakeNode(); card.dataset.chart = chart; root.appendChild(card);
+const actions = new FakeNode(); actions.className = "chart-card-actions"; card.appendChild(actions);
 const controls = new FakeNode(); controls.id = "weight_step_group_controls"; root.appendChild(controls);
 const overlay_node = new FakeNode(); overlay_node.id = "chart_settings_overlay"; overlay_node.hidden = true; root.appendChild(overlay_node);
 const find = (node, predicate) => predicate(node) ? node : node.children.map(child => find(child, predicate)).find(Boolean);
@@ -111,8 +131,12 @@ let next_frame = 1;
 const flush_frames = () => { const jobs = [...frames.values()]; frames.clear(); jobs.forEach(job => job()); };
 const window_events = {};
 let copied = "";
+let downloaded_blob;
+let downloaded_link;
+let revoked_url;
 const app = {maximized_chart: null, workspace_mode: true, current_run_id: "a", figures: {depth: {[chart]: source}}};
 const sandbox = {
+  Blob, URL: {createObjectURL: blob => { downloaded_blob = blob; return "blob:test"; }, revokeObjectURL: url => { revoked_url = url; }},
   console, document, app, depth_weight_chart_names: [chart],
   by_id: id => find(root, node => node.id === id),
   current_run: () => ({dashboard_run_id: "a", run_name: "Alpha"}),
@@ -150,33 +174,42 @@ const by_class = name => find(card, node => node.classList.contains(name));
 let grid = by_class("weight-inspection-grid");
 let canvas = by_class("weight-inspection-canvas");
 assert.equal(grid.getAttribute("aria-rowcount"), "5");
-assert.equal(grid.getAttribute("aria-colcount"), "7");
-assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Layer 1 · Input coupling 2 · Output coupling 3 · Alpha/);
+assert.equal(grid.getAttribute("aria-colcount"), "10");
+assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Layer 1 · Input coupling 2 · Output coupling 3 · max − min/);
 (async () => {
   await grid.emit("keydown", {key: "ArrowRight", shiftKey: true});
   await grid.emit("keydown", {key: "ArrowDown", shiftKey: true});
   flush_frames();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "0.1235\t\n0.3333\t0.6667");
+  assert.equal(copied, "\t0.1235\n0.3333\t0.3333");
   let keyboard_copy;
-  await grid.emit("copy", {clipboardData: {setData: (_type, value) => { keyboard_copy = value; }}});
+  await by_class("weight-inspection-panel").emit("copy", {clipboardData: {setData: (_type, value) => { keyboard_copy = value; }}});
   assert.equal(keyboard_copy, copied);
   assert.match(by_class("weight-inspection-status").textContent, /Copied/);
   current_precision = 6;
   inspector.sync();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "0.123456\t\n0.333333\t0.666666", "precision did not refresh without losing selection");
+  assert.equal(copied, "\t0.123456\n0.333333\t0.333333", "precision did not refresh without losing selection");
   const first_cell = canvas.children.find(node => node.dataset.row === "0" && node.dataset.column === "0");
   await grid.emit("pointerdown", {target: first_cell, button: 0, pointerId: 1, clientX: 120, clientY: 65});
   await grid.emit("pointermove", {clientX: 365, clientY: 95});
   await grid.emit("pointerup");
   flush_frames();
   await by_class("weight-inspection-toolbar").children[2].emit("click");
-  assert.equal(copied, "0.123456\t\t-0.000001\n0.333333\t0.666666\t-0.123456");
+  assert.equal(copied, "\t0.123456\t\n0.333333\t0.333333\t0.666666");
   await grid.emit("keydown", {key: "End", ctrlKey: true, shiftKey: true});
   flush_frames();
-  assert.match(by_class("weight-inspection-status").textContent, /3 × 6 selected/);
+  assert.match(by_class("weight-inspection-status").textContent, /3 × 9 selected/);
   assert.ok(grid.scrollLeft > 0, "keyboard navigation failed to reveal a column");
+  const toolbar = by_class("weight-inspection-toolbar");
+  assert.equal(toolbar.children[3].hidden, false, "maximized Select all button missing");
+  await toolbar.children[3].emit("click");
+  flush_frames();
+  assert.match(by_class("weight-inspection-status").textContent, /3 × 9 selected/);
+  await toolbar.children[4].emit("click");
+  assert.equal(downloaded_link.download, "instra_workspace_attn_q_head_N_weights.csv");
+  assert.ok((await downloaded_blob.text()).includes("0.3333333"), "download button lost full precision");
+  assert.equal(revoked_url, "blob:test", "download object URL leaked");
   await by_class("weight-inspection-toolbar").children[0].emit("click");
   assert.equal(card.classList.contains("weight-inspection-open"), false);
   assert.equal(app.maximized_chart, chart, "back arrow restored grid instead of chart");
@@ -190,6 +223,18 @@ assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Laye
   sandbox.restore_maximized_chart();
   assert.equal(button.hidden, true);
   assert.equal(by_class("weight-inspection-panel"), undefined);
+  const standard_button = actions.children.find(node => node.classList.contains("weight-inspect-icon"));
+  assert.ok(standard_button && !standard_button.hidden, "standard chart has no inspector icon");
+  await standard_button.emit("click");
+  assert.equal(by_class("weight-inspection-toolbar").children[3].hidden, true, "Select all leaked into standard view");
+  await by_class("weight-inspection-panel").emit("keydown", {key: "a", ctrlKey: true});
+  flush_frames();
+  assert.match(by_class("weight-inspection-status").textContent, /2 × 3 selected/);
+  copied = "";
+  await by_class("weight-inspection-panel").emit("keydown", {key: "c", ctrlKey: true});
+  await Promise.resolve();
+  assert.ok(copied.includes("\n"), "Ctrl+C did not copy the table through the actual key handler");
+  inspector.close();
   assert.equal(frames.size, 0, "animation/drag callback leaked after close");
   current_mode = "latest";
   const prepared = sandbox.prepare_figure(source, chart);
@@ -208,13 +253,13 @@ assert.match(by_class("weight-inspection-metadata").textContent, /Step 1 · Laye
   grid = by_class("weight-inspection-grid");
   canvas = by_class("weight-inspection-canvas");
   assert.equal(grid.getAttribute("aria-rowcount"), "1002");
-  assert.equal(grid.getAttribute("aria-colcount"), "289");
+  assert.equal(grid.getAttribute("aria-colcount"), "433");
   assert.ok(canvas.children.length < 180, "large table rendered all cells");
   await grid.emit("keydown", {key: "End", ctrlKey: true});
   flush_frames();
   assert.match(by_class("weight-inspection-metadata").textContent, /Step 999 · Layer 144.*Beta/);
   assert.ok(canvas.children.length < 180, "scrolled table rendered all cells");
-  const last_cell = canvas.children.find(node => node.dataset.row === "999" && node.dataset.column === "287");
+  const last_cell = canvas.children.find(node => node.dataset.row === "999" && node.dataset.column === "431");
   await grid.emit("pointerdown", {target: last_cell, button: 0, pointerId: 2, clientX: 590, clientY: 230});
   const old_scroll = grid.scrollLeft;
   await grid.emit("pointermove", {clientX: 80, clientY: 30});

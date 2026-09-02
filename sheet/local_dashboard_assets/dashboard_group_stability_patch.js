@@ -69,6 +69,13 @@ window.addEventListener("load", () => {
       section.append(header, grid);
     }
 
+    const collapsed = window.__thog2_metric_groups?.group_is_collapsed?.("train") ?? true;
+    section.classList.toggle("collapsed", collapsed);
+    const pending_grid = section.querySelector(".chart-grid");
+    const pending_toggle = section.querySelector(".chart-group-toggle");
+    if (pending_grid) pending_grid.hidden = collapsed;
+    pending_toggle?.setAttribute("aria-expanded", String(!collapsed));
+
     const first_metric_group = charts_scroll.querySelector(":scope > .local-metric-group");
     const depth_group = by_id("depth_chart_group");
     const anchor = first_metric_group || depth_group || charts_scroll.firstElementChild;

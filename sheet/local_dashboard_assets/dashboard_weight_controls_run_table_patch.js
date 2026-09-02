@@ -296,11 +296,31 @@ window.addEventListener("load", () => {
       return "—";
     };
 
+    const optimizer_text = run => {
+      const config = run?.configuration || {};
+      const lifecycle = config.lifecycle || {};
+      const raw = lifecycle.optimizer_name ?? config.optimizer_name ?? config.optimizer;
+      if (!raw) return "—";
+      const name = String(raw).toLowerCase();
+      const raw_momentum = lifecycle.optimizer_momentum ?? config.optimizer_momentum;
+      const momentum = raw_momentum === null || raw_momentum === undefined || raw_momentum === "" ? null : Number(raw_momentum);
+      return ["sgd", "sgd_nesterov", "rmsprop"].includes(name) && Number.isFinite(momentum) && momentum > 0
+        ? `${name}_${momentum}` : name;
+    };
+    const learning_rate_code = (run, ...names) => {
+      const raw = configuration_value(run, ...names);
+      if (raw === null || raw === undefined || raw === "") return "—";
+      const value = Number(raw);
+      // Wrapper c/f codes represent units of 1e-5; retain noninteger codes exactly enough for display.
+      return Number.isFinite(value) && value >= 0 ? String(Number((value * 100000).toFixed(8))) : "—";
+    };
+
     const run_shape_columns = Object.freeze([
       {
         key: "preset", label: "p", title: "preset", numeric: false,
         value: run => run?.preset || configuration_value(run, "geometry_preset", "model_type"),
       },
+      {key: "optimizer", label: "OPT", title: "optimizer (momentum suffix when used)", numeric: false, value: optimizer_text},
       {key: "layers", label: "L", title: "layers", value: run => configuration_value(run, "n_layer")},
       {
         key: "depth_order", label: "P", title: "depth order (not applicable to DENSE)",
@@ -319,6 +339,8 @@ window.addEventListener("load", () => {
         key: "activation_checkpointing", label: "S", title: "activation checkpointing",
         value: run => display_boolean(configuration_value(run, "activation_checkpointing")),
       },
+      {key: "learning_rate", label: "c", title: "maximum learning rate in units of 1e-5", value: run => learning_rate_code(run, "learning_rate")},
+      {key: "min_learning_rate", label: "f", title: "minimum learning rate in units of 1e-5", value: run => learning_rate_code(run, "min_learning_rate", "min_lr")},
     ]);
 
     const install_run_shape_headers = () => {
@@ -494,6 +516,7 @@ window.addEventListener("load", () => {
         display: inline-flex !important; visibility: visible !important;
       }
       .runs-table { min-width: 1580px; }
+      th.run-shape-column { text-transform: none !important; }
       .run-shape-column { width: 52px !important; text-align: right !important; font-variant-numeric: tabular-nums; }
       .run-preset-column { width: 76px !important; text-align: left !important; text-transform: none !important; }
       [data-instra-run-shape-header="grad_accum"], [data-instra-run-shape-cell="grad_accum"] { width: 64px !important; }

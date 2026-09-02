@@ -17,7 +17,7 @@ const runs = ["a", "b", "c", "d", "e", "f"].map((id, index) => ({
   host_label: "test", created_at: "2026-09-01T12:00:00Z", maximum_update: 500 - index * 10,
   depth_snapshot_count: 51, depth_minimum_update: 1, depth_maximum_update: 500 - index * 10,
   heatmap_count: 0, heatmap_maximum_update: null, revision: [52 - index, 500 - index * 10, id],
-  configuration: {n_layer: 144, n_embd: 16, n_head: 1},
+  configuration: {n_layer: 144, n_embd: 16, n_head: 1, checkpoint_segment_size: 4, activation_checkpointing: true, learning_rate: 0.0009, min_learning_rate: 0.00009, lifecycle: {optimizer_name: index ? "adamw" : "sgd", optimizer_momentum: 0.9}},
 }));
 
 function depth_payload(url) {
@@ -56,7 +56,12 @@ const server = http.createServer(async (request, response) => {
       result = depth_payload(url);
     } else if (url.pathname === "/api/figures") result = {heatmap: null, ...depth_payload(url)};
     else if (url.pathname.includes("weight-selection")) result = {protocol: "matched_six_v1", user_selected: false, model_feature: 0, intermediate_feature: 0};
-    else if (url.pathname.includes("chart-groups")) result = {available: true, groups: []};
+    else if (url.pathname === "/api/chart-groups") result = {available: true, groups: ["train", "val"].map(name => ({name, revision: 118, chart_count: 1}))};
+    else if (url.pathname === "/api/chart-group") {
+      const name = url.searchParams.get("group");
+      const x = Array.from({length: name === "train" ? 118 : 3}, (_, index) => index * (name === "train" ? 1 : 50));
+      result = {available: true, group: {name, revision: 118, charts: [{id: "loss", title: "Loss", x_title: "step", default_x_axis_mode: "step", available_x_axis_modes: ["step"], series: [{name: "Loss", x, x_variants: {step: x}, y: x.map(step => 5 - step / 200), points: x.length}]}]}};
+    }
     response.writeHead(200, {"Content-Type": "application/json"}); response.end(JSON.stringify(result)); return;
   }
   let file = url.pathname === "/plotly.min.js" ? plotly_path : path.join(assets, path.basename(url.pathname));

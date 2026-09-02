@@ -73,7 +73,7 @@ const instra_weight_inspection = (() => {
     });
   };
 
-  const build_table = (source, visible, runs, chart_name, fallback = "") => {
+  const build_table = (source, visible, runs, chart_name, fallback = "", compare_runs = runs.length > 1) => {
     const allowed = new Set((visible?.data || []).filter(trace => !anchor(trace)).map(trace => series_key(trace, fallback)));
     const selected = new Map();
     for (const trace of source?.data || []) {
@@ -112,19 +112,36 @@ const instra_weight_inspection = (() => {
     }
     const rows = [...row_map.values()].filter(row => [...row.values.values()].some(values => values.size))
       .sort((left, right) => left.step - right.step || (left.input ?? -1) - (right.input ?? -1) || (left.output ?? -1) - (right.output ?? -1));
-    const columns = [...layers].sort((left, right) => left - right).flatMap(layer => runs.map(run => ({...run, layer, key: `${layer}|${run.id}`})));
+    const compared = compare_runs && runs.length > 1;
+    const columns_per_layer = runs.length + (compared ? 1 : 0);
+    const columns = [...layers].sort((left, right) => left - right).flatMap(layer => [
+      ...(compared ? [{layer, key: `${layer}|spread`, difference: true, name: "max − min", colour: "#65758b"}] : []),
+      ...runs.map(run => ({...run, layer, key: `${layer}|${run.id}`})),
+    ]);
     const multiple_pairs = new Set(rows.map(row => `${row.input}:${row.output}`)).size > 1;
-    return {rows, columns, runs, multiple_pairs};
+    return {rows, columns, runs, multiple_pairs, columns_per_layer};
   };
   const value_at = (model, row, column) => {
     const col = model.columns[column];
-    return col ? model.rows[row]?.values.get(String(col.id))?.get(col.layer) ?? null : null;
+    if (!col) return null;
+    if (col.difference) {
+      const values = model.runs.map(run => model.rows[row]?.values.get(String(run.id))?.get(col.layer));
+      if (values.length < 2 || values.some(value => !Number.isFinite(value))) return null;
+      return Math.max(...values) - Math.min(...values);
+    }
+    return model.rows[row]?.values.get(String(col.id))?.get(col.layer) ?? null;
   };
   const precision = value => Number.isInteger(value) && value >= 0 && value <= 12 ? value : 4;
   const format = (value, places, missing = "—") => {
     if (value === null || value === undefined || !Number.isFinite(value)) return missing;
     const formatted = value.toFixed(precision(places));
     return /^-0(?:\.0+)?$/.test(formatted) ? formatted.slice(1) : formatted;
+  };
+  const cell_text = (model, row, column, places, missing = "—") => {
+    const value = value_at(model, row, column);
+    // Tiny nonzero differences must remain distinguishable from exact equality.
+    return model.columns[column]?.difference && Number.isFinite(value) && value !== 0 && Math.abs(value) < 10 ** -precision(places)
+      ? value.toExponential(Math.max(3, precision(places))) : format(value, places, missing);
   };
   const bounds = selection => ({
     row_min: Math.min(selection.anchor.row, selection.focus.row), row_max: Math.max(selection.anchor.row, selection.focus.row),
@@ -137,17 +154,28 @@ const instra_weight_inspection = (() => {
     for (let row = Math.max(0, range.row_min); row <= Math.min(model.rows.length - 1, range.row_max); row += 1) {
       const cells = [];
       for (let column = Math.max(0, range.col_min); column <= Math.min(model.columns.length - 1, range.col_max); column += 1) {
-        cells.push(format(value_at(model, row, column), places, ""));
+        cells.push(cell_text(model, row, column, places, ""));
       }
       rows.push(cells.join("\t"));
     }
     return rows.join("\n");
   };
+  const csv = model => {
+    const quote = value => `"${String(value ?? "").replace(/"/g, '\"\"')}"`;
+    const header = ["step", "input_coupling", "output_coupling", ...model.columns.map(col =>
+      `layer_${col.layer} ${col.difference ? "max_minus_min" : `${col.name} [${col.id}]`}`)];
+    const rows = [header.map(quote).join(",")];
+    model.rows.forEach((row, index) => {
+      const values = model.columns.map((_col, column) => value_at(model, index, column));
+      rows.push([row.step, row.input, row.output, ...values].map(value => value === null || value === undefined ? "" : String(value)).join(","));
+    });
+    return rows.join("\r\n") + "\r\n";
+  };
   const window_range = (scroll, size, header, cell, count) => ({
     start: Math.max(0, Math.floor(scroll / cell) - 1),
     end: Math.min(count, Math.ceil((scroll + Math.max(0, size - header)) / cell) + 1),
   });
-  return Object.freeze({step, scalar, series_key, coupling, latest_curves, build_table, value_at, precision, format, bounds, tsv, window_range});
+  return Object.freeze({step, scalar, series_key, coupling, latest_curves, build_table, value_at, precision, format, cell_text, bounds, tsv, csv, window_range});
 })();
 
 if (typeof module !== "undefined" && module.exports) module.exports = instra_weight_inspection;
@@ -159,6 +187,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
     const chart_names = new Set(depth_weight_chart_names);
     let active = null;
     let button = null;
+    const card_buttons = new Map();
     const row_height = 28;
     const header_height = 56;
     const row_width = 110;
@@ -175,6 +204,14 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       const node = element("button", "weight-step-button", label);
       node.type = "button";
       node.title = title || label;
+      node.setAttribute("aria-label", node.title);
+      return node;
+    };
+    const icon_action = (kind, title) => {
+      const node = action("", title);
+      node.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${kind === "search"
+        ? '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>'
+        : '<path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/>'}</svg>`;
       return node;
     };
     const position = (node, left, top, width, height = row_height) => {
@@ -199,6 +236,8 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
         ? `${range.row_max - range.row_min + 1} × ${range.col_max - range.col_min + 1} selected · ${state.places} decimal places`
         : "";
       state.copy.disabled = !range;
+      state.select_all.disabled = !range;
+      state.download.disabled = !state.model.rows.length;
     };
     const paint = () => {
       if (!active) return;
@@ -215,7 +254,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
         for (let col_index = cols.start; col_index < cols.end; col_index += 1) {
           const col = model.columns[col_index];
           const value = data.value_at(model, row_index, col_index);
-          const cell = element("div", "weight-inspection-cell", data.format(value, state.places));
+          const cell = element("div", "weight-inspection-cell", data.cell_text(model, row_index, col_index, state.places));
           cell.setAttribute("role", "gridcell");
           cell.setAttribute("aria-rowindex", String(row_index + 3));
           cell.setAttribute("aria-colindex", String(col_index + 2));
@@ -228,7 +267,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
           cell.setAttribute("aria-selected", String(is_selected));
           cell.classList.toggle("selected", is_selected);
           cell.classList.toggle("active", state.selection?.focus.row === row_index && state.selection?.focus.column === col_index);
-          cell.classList.toggle("layer-start", col_index % model.runs.length === 0);
+          cell.classList.toggle("layer-start", col_index % model.columns_per_layer === 0);
           position(cell, row_width + col_index * cell_width, top, cell_width);
           fragment.appendChild(cell);
         }
@@ -241,21 +280,21 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       for (let col_index = cols.start; col_index < cols.end; col_index += 1) {
         const col = model.columns[col_index];
         const header = element("div", "weight-inspection-col-header", col.name);
-        header.title = `Layer ${col.layer} · ${col.name}`;
+        header.title = col.difference ? `Layer ${col.layer}: max minus min across all selected runs at the same step and coupling; blank if any run is missing.` : `Layer ${col.layer} · ${col.name}`;
         header.style.setProperty("--run-colour", col.colour);
         header.setAttribute("role", "columnheader");
         header.setAttribute("aria-colindex", String(col_index + 2));
         position(header, row_width + col_index * cell_width, grid.scrollTop + row_height, cell_width);
         fragment.appendChild(header);
       }
-      const first_layer = Math.floor(cols.start / Math.max(1, model.runs.length));
-      const last_layer = Math.ceil(cols.end / Math.max(1, model.runs.length));
+      const first_layer = Math.floor(cols.start / Math.max(1, model.columns_per_layer));
+      const last_layer = Math.ceil(cols.end / Math.max(1, model.columns_per_layer));
       for (let layer_index = first_layer; layer_index < last_layer; layer_index += 1) {
-        const col = model.columns[layer_index * model.runs.length];
+        const col = model.columns[layer_index * model.columns_per_layer];
         if (!col) continue;
         const header = element("div", "weight-inspection-layer-header", `Layer ${col.layer}`);
         header.setAttribute("role", "columnheader");
-        position(header, row_width + layer_index * model.runs.length * cell_width, grid.scrollTop, model.runs.length * cell_width);
+        position(header, row_width + layer_index * model.columns_per_layer * cell_width, grid.scrollTop, model.columns_per_layer * cell_width);
         fragment.appendChild(header);
       }
       const corner = element("div", "weight-inspection-corner", model.multiple_pairs ? "Step · input→output" : "Step ↓ / Layer →");
@@ -284,9 +323,10 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       active.resize_observer?.disconnect();
       active.card.classList.remove("weight-inspection-open");
       active.panel.remove();
+      const opener = active.opener;
       active = null;
-      button?.setAttribute("aria-pressed", "false");
-      if (focus_button) button?.focus();
+      opener?.setAttribute("aria-pressed", "false");
+      if (focus_button) opener?.focus();
       resize_visible_plots();
     };
     const raw_figure = chart_name => {
@@ -302,7 +342,8 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
     const update = () => {
       if (!active) return;
       const state = active;
-      if (state.chart_name !== app.maximized_chart || state.context !== context()) { close(false); return; }
+      if ((app.maximized_chart && state.chart_name !== app.maximized_chart) || state.context !== context()) { close(false); return; }
+      state.select_all.hidden = app.maximized_chart !== state.chart_name;
       const source = raw_figure(state.chart_name);
       const view = window.__instra_weight_step_filter?.signature?.();
       const pair = window.__instra_weight_viewer_selection?.selection?.();
@@ -314,7 +355,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       const prior_rows = state.model?.rows || [];
       const prior_cols = state.model?.columns || [];
       const prior_selection = state.selection;
-      state.model = data.build_table(source, source ? prepare_figure(source, state.chart_name) : null, runs, state.chart_name, String(app.current_run_id || ""));
+      state.model = data.build_table(source, source ? prepare_figure(source, state.chart_name) : null, runs, state.chart_name, String(app.current_run_id || ""), app.workspace_mode === true);
       state.source = source;
       state.signature = signature;
       state.places = places;
@@ -381,10 +422,31 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       schedule_paint();
       state.drag_frame = requestAnimationFrame(drag_tick);
     };
-    const open = () => {
-      if (!chart_names.has(app.maximized_chart)) return;
-      if (active) { close(); return; }
-      const chart_name = app.maximized_chart;
+    const select_all = () => {
+      if (!active?.model.rows.length || !active.model.columns.length) return;
+      active.selection = {anchor: {row: 0, column: 0}, focus: {row: active.model.rows.length - 1, column: active.model.columns.length - 1}};
+      active.grid.focus({preventScroll: true});
+      schedule_paint();
+    };
+    const download_csv = () => {
+      if (!active?.model.rows.length) return;
+      const blob = new Blob(["\ufeff", data.csv(active.model)], {type: "text/csv;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const link = element("a", "");
+      link.href = url;
+      link.download = `instra_${app.workspace_mode ? "workspace" : String(app.current_run_id).replace(/[^a-z0-9_-]/gi, "_")}_${active.chart_name}_weights.csv`;
+      active.panel.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const open = (chart_name = app.maximized_chart) => {
+      if (!chart_names.has(chart_name)) return;
+      if (active) {
+        const same_chart = active.chart_name === chart_name;
+        close(false);
+        if (same_chart) return;
+      }
       const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
       if (!card) return;
       const panel = element("section", "weight-inspection-panel");
@@ -394,8 +456,10 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       back.setAttribute("aria-label", "Back to chart");
       const metadata = element("div", "weight-inspection-metadata");
       const copy = action("copy", "Copy selected rectangle as tab-separated values");
-      toolbar.append(back, metadata, copy);
-      const hint = element("div", "weight-inspection-hint", "Recorded layer weights · drag or Shift-click a rectangle · Shift+arrows to extend · Ctrl+C to copy · — = not recorded");
+      const select_all_button = action("Select all", "Select all weights (Ctrl+A)");
+      const download = icon_action("download", "Download all displayed weights as CSV (full precision)");
+      toolbar.append(back, metadata, copy, select_all_button, download);
+      const hint = element("div", "weight-inspection-hint", "Recorded layer weights · drag or Shift-click a rectangle · Shift+arrows to extend · Ctrl+A to select all · Ctrl+C to copy · max − min compares runs · — = not recorded");
       const grid = element("div", "weight-inspection-grid");
       grid.tabIndex = 0;
       grid.setAttribute("role", "grid");
@@ -410,10 +474,21 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
       panel.append(toolbar, hint, grid, empty, status);
       card.appendChild(panel);
       card.classList.add("weight-inspection-open");
-      active = {chart_name, card, panel, grid, canvas, metadata, empty, status, copy, context: context(), model: {rows: [], columns: []}, selection: null};
-      button.setAttribute("aria-pressed", "true");
+      active = {chart_name, card, panel, grid, canvas, metadata, empty, status, copy, select_all: select_all_button, download, opener: app.maximized_chart === chart_name ? button : card_buttons.get(chart_name), context: context(), model: {rows: [], columns: []}, selection: null};
+      active.opener?.setAttribute("aria-pressed", "true");
       back.addEventListener("click", () => close());
       copy.addEventListener("click", copy_selection);
+      select_all_button.addEventListener("click", select_all);
+      download.addEventListener("click", download_csv);
+      panel.addEventListener("keydown", event => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+        const key = event.key.toLowerCase();
+        if (!["a", "c"].includes(key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (key === "a") select_all();
+        else copy_selection();
+      });
       grid.addEventListener("scroll", schedule_paint, {passive: true});
       grid.addEventListener("pointerdown", event => {
         const cell = event.target.closest(".weight-inspection-cell");
@@ -437,7 +512,7 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
         schedule_paint();
       });
       for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) grid.addEventListener(name, stop_drag);
-      grid.addEventListener("copy", event => {
+      panel.addEventListener("copy", event => {
         if (!active?.selection || !event.clipboardData) return;
         event.preventDefault();
         event.clipboardData.setData("text/plain", data.tsv(active.model, active.selection, active.places));
@@ -449,8 +524,8 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
         const command = event.ctrlKey || event.metaKey;
         if (command && event.key.toLowerCase() === "a") {
           event.preventDefault();
-          active.selection = {anchor: {row: 0, column: 0}, focus: {row: active.model.rows.length - 1, column: active.model.columns.length - 1}};
-          schedule_paint(); return;
+          event.stopPropagation();
+          select_all(); return;
         }
         const moves = {ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], PageUp: [-Math.max(1, Math.floor((grid.clientHeight - header_height) / row_height)), 0], PageDown: [Math.max(1, Math.floor((grid.clientHeight - header_height) / row_height)), 0]};
         let {row, column} = active.selection.focus;
@@ -473,13 +548,28 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
     const sync_button = () => {
       const controls = by_id("weight_step_group_controls");
       if (!button && controls) {
-        button = action("inspect weights", "Inspect raw recorded weights");
+        button = icon_action("search", "Inspect raw recorded weights");
         button.id = "weight_inspect_button";
         button.setAttribute("aria-pressed", "false");
         controls.appendChild(button);
         button.addEventListener("click", event => { event.stopPropagation(); open(); });
       }
       if (button) button.hidden = !chart_names.has(app.maximized_chart);
+      for (const chart_name of chart_names) {
+        const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
+        const actions = card?.querySelector?.(".chart-card-actions");
+        if (!actions) continue;
+        let control = card_buttons.get(chart_name);
+        if (!control) {
+          control = icon_action("search", "Inspect raw recorded weights");
+          control.classList.add("weight-inspect-icon");
+          control.setAttribute("aria-pressed", "false");
+          actions.appendChild(control);
+          control.addEventListener("click", event => { event.stopPropagation(); open(chart_name); });
+          card_buttons.set(chart_name, control);
+        }
+        control.hidden = Boolean(app.maximized_chart);
+      }
       update();
     };
     const original_prepare = prepare_figure;
@@ -507,7 +597,12 @@ if (typeof window !== "undefined") window.addEventListener("load", () => {
     }, true);
     const style = element("style", "");
     style.textContent = `
-      #weight_inspect_button { margin-left: 28px; }
+      #weight_inspect_button { margin-left: 36px; }
+      .weight-inspect-icon { margin-left: clamp(12px, 2vw, 32px); flex-shrink: 0; }
+      .weight-inspect-icon[hidden], .weight-inspection-toolbar button[hidden] { display: none !important; }
+      .weight-inspection-toolbar button { flex-shrink: 0; }
+      .weight-inspection-open { position: relative; }
+      .weight-inspection-toolbar { flex-wrap: wrap; }
       #weight_inspect_button[hidden] { display: none !important; }
       #coefficients_chart_group.thog2-tab-maximized-group > .chart-group-header { height: auto; min-height: 35px; flex-wrap: wrap; padding: 4px 0; row-gap: 6px; }
       #coefficients_chart_group.thog2-tab-maximized-group .weight-step-group-controls { flex-wrap: wrap; row-gap: 6px; }

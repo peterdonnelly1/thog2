@@ -39,6 +39,7 @@ const context = {
   },
   by_id: id => id === "charts_scroll" ? {hidden: true} : null,
   run_identifier: run => run.local_run_id,
+  prepare_figure: figure => JSON.parse(JSON.stringify(figure)),
   select_run(run_id) { app.current_run_id = String(run_id); },
   setTimeout(callback) { callback(); return 1; },
   setInterval() { return 1; },
@@ -62,8 +63,8 @@ assert.equal(groups.group_is_collapsed("system"), false);
 
 app.current_run_id = "R2";
 assert.equal(groups.context_key(), "run:R2");
-assert.equal(groups.group_is_collapsed("train"), true, "train auto-opened after a run change");
-assert.equal(groups.group_is_collapsed("system"), true, "system auto-opened after a run change");
+assert.equal(groups.group_is_collapsed("train"), false, "train did not stay open after a run change");
+assert.equal(groups.group_is_collapsed("system"), false, "system did not stay open after a run change");
 
 app.workspace_mode = true;
 assert.equal(groups.context_key(), "workspace:R1|R2");
@@ -76,13 +77,13 @@ assert.equal(groups.group_is_collapsed("system"), false, "multiple explicit grou
 
 workspace_runs.pop();
 assert.equal(groups.context_key(), "workspace:R1");
-assert.equal(groups.group_is_collapsed("train"), true, "train auto-opened after Workspace membership changed");
-assert.equal(groups.group_is_collapsed("system"), true, "system auto-opened after Workspace membership changed");
+assert.equal(groups.group_is_collapsed("train"), false, "train did not stay open after Workspace membership changed");
+assert.equal(groups.group_is_collapsed("system"), false, "system did not stay open after Workspace membership changed");
 
 app.workspace_mode = false;
 app.current_run_id = "R1";
-assert.equal(groups.group_is_collapsed("train"), true, "old run context reopened train automatically");
-assert.equal(groups.group_is_collapsed("system"), true, "old run context reopened system automatically");
+assert.equal(groups.group_is_collapsed("train"), false, "returning to Runs lost train expansion");
+assert.equal(groups.group_is_collapsed("system"), false, "returning to Runs lost system expansion");
 
 console.log("instra metric group state regression: PASS");
 // ^^^ THOG

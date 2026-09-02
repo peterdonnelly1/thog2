@@ -290,7 +290,8 @@ window.addEventListener("load", () => {
           performance_state.deferred_coefficients = true;
         } else {
           const render_jobs = [];
-          for (const chart_name of Object.keys(chart_titles).filter(name => name !== "heatmap")) {
+          // chart_titles also contains scalar charts; a weight refresh must never clear them.
+          for (const chart_name of depth_weight_chart_names) {
             const figure = app.figures.depth?.[chart_name];
             const mount = by_id(`${chart_name}_plot`);
             if (!figure) {

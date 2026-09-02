@@ -74,6 +74,7 @@ window.addEventListener("load", () => {
 
     const enforce_workspace_train_state = () => {
       enforcement_queued = false;
+      if (window.__thog2_metric_groups) return;
       const active = workspace_active();
       if (active !== workspace_was_active) {
         workspace_was_active = active;
@@ -105,7 +106,7 @@ window.addEventListener("load", () => {
     };
 
     charts_scroll.addEventListener("click", event => {
-      if (!workspace_active()) return;
+      if (window.__thog2_metric_groups || !workspace_active()) return;
       const button = event.target.closest(".chart-group-toggle");
       const section = button?.closest(".chart-group");
       if (!button || !section) return;

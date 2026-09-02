@@ -31,6 +31,8 @@ async function heatmap_family_demand_regression() {
     heatmap_card_detail: {textContent: ""},
     heatmap_placeholder: {hidden: false},
     heatmap_plot: {id: "heatmap_plot", dataset: {}},
+    local_metric_train_plot: {id: "local_metric_train_plot", dataset: {plotReady: "true"}},
+    local_metric_val_plot: {id: "local_metric_val_plot", dataset: {plotReady: "true"}},
     q_detail: {textContent: ""},
     q_placeholder: {hidden: false},
     q_plot: {id: "q_plot", dataset: {}},
@@ -80,10 +82,11 @@ async function heatmap_family_demand_regression() {
       __instra_weight_step_filter: {signature: () => range_signature},
     },
     by_id: id => groups[id] || null,
-    chart_titles: {heatmap: "Heatmap", q: "Q"},
+    depth_weight_chart_names: ["q"],
+    chart_titles: {heatmap: "Heatmap", q: "Q", local_metric_train: "Loss", local_metric_val: "Val loss"},
     fetch_json: base_fetch,
     render_figures: async () => undefined,
-    clear_plot: mount => { cleared_plots += 1; mount.dataset.plotReady = "false"; },
+    clear_plot: mount => { assert.ok(!mount.id.startsWith("local_metric_"), "weight refresh erased a train/val chart"); cleared_plots += 1; mount.dataset.plotReady = "false"; },
     render_plot: async mount => {
       if (mount.id === "heatmap_plot") heatmap_renders += 1;
       else depth_renders += 1;
