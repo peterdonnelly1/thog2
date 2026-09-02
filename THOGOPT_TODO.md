@@ -1,5 +1,18 @@
 # thogopt implementation tasks
 
+## Active: CUDA OOM after first update (85%, verified locally)
+
+Baseline: 8e9beeb83826cb68db48297bf09956b001683568. User log: first update 5.6s, GPU candidates 2905MiB, next backward requests 2.30GiB with 1.58GiB free and 5.52GiB reserved/unallocated. Keep D=1024 and the existing A/B baselines. Candidate adoption can pin split allocator segments; fix storage lifetime before reducing model size.
+
+- [x] Read crash attachment and verify branch through GitHub connector.
+- [x] Stabilize persistent moment storage and avoid candidate placement during state initialization.
+- [x] Add storage-lifetime, initialization, rejection and resume regression coverage; 110 passed, 4 CUDA skipped.
+- [x] Document actual GPU evidence and remaining hardware validation limits in docs/thogopt/README.md.
+- [ ] Publish through GitHub connector on the same branch and provide download stanza.
+
+Correction: any active missing state forces a host transaction; validated CUDA initialization releases unused cache before creating stable history buffers. Routine commits copy into the existing buffers; GPU candidates remain transient. Ordinary scratch is function-local. First fresh timing line should show gpu_candidates=0MiB; later lines can use GPU. Test evidence: docs/thogopt/oom_followup_python_tests.txt. No representative GPU rerun yet. Runtime: ../thogopt_fix_venv/bin/python.
+
+
 Progress estimate: Implementation complete and pushed: 282ae4677bdbd611c62710a4a8bd29688d4af250. Verified remotely through GitHub connector. 96 Python tests and 22 JavaScript suites passed.
 
 Repository: peterdonnelly1/thog2. Branch: instra_weight_inspector.

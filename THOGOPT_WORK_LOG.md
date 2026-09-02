@@ -1,5 +1,20 @@
 # thogopt work log
 
+## CUDA OOM follow-up: active diagnosis (35%)
+
+Latest baseline 8e9beeb83826cb68db48297bf09956b001683568 verified through connector. Read user attachment Pasted text(20260902-233352).txt directly from uploaded scratch copy. Actual RTX4090 16GB run: first update 5.6s, stage3.139s prepare0.396s candidate0.245s commit0.005s, 2905MiB GPU candidates, async staging enabled. Next backward failed requesting2.30GiB; free1.58GiB, allocated7.81GiB, reserved/unallocated5.52GiB. One completed update is not a sustained throughput measurement.
+
+The preceding change adopted GPU candidate moments as persistent histories. This can strand unused space in split allocator segments needed by the next backward; summed free/cached bytes do not establish contiguous allocation feasibility. This is an identified lifetime defect and a plausible explanation of this crash, not a GPU reproduction here. User asked about D=768 and rerunning A/B; advised keeping D=1024 while correcting the regression. Scope: stable histories, initialization placement, targeted regression coverage, connector delivery; no unrelated optimizer or Instra changes.
+
+## CUDA OOM follow-up: correction verified (85%)
+
+Any active parameter missing persistent state now forces the entire transaction onto the host. Nonparticipating parameters do not block future GPU candidates. Before allocating missing CUDA histories, synchronize completed candidates (existing boundary) and release unused cached blocks; this happens only on initialization, not routine updates. Permanent histories are separately allocated and reused; device candidates commit via device-to-device copies instead of becoming permanent state. Moved ordinary AdamW calculations unchanged into a method to release their scratch before state allocation. Asynchronous gradient transfer and existing automatic history dimensions remain unchanged.
+
+New CPU regressions cover candidate-history lifetime and stable addresses for compressed plus ordinary state, and injected late-state allocation failure preserving weights, moments, storage and counters. Expanded existing CUDA test covers first-update host placement, subsequent GPU candidates, stable addresses, one cache cleanup and atomic rejection with interleaved64MiB temporary allocations; it remains unexecuted here. Consolidated CPU regression suite:110 passed,4 CUDA skipped in15.89s. Includes 500-update and full-model AdamW equivalence, SGD parity, real public-runner resume/reset fork, snapshots, telemetry and console output. Evidence: docs/thogopt/oom_followup_python_tests.txt. No UI code changed. No claim of GPU OOM reproduction or sustained speed measurement. Next: connector publication and exact remote/local hash verification.
+
+Regression sensitivity confirmed against the exact parent optimizer module: the candidate-history release assertion fails because old candidate tensors remain alive as permanent histories. See docs/thogopt/oom_followup_parent_regression.txt. Final transfer/storage suite passes7 tests with4 CUDA skips after simplifying the test instrumentation to use a method present on both versions; production code unchanged since the consolidated110-test run. See docs/thogopt/oom_followup_storage_tests.txt. Ready to publish the reviewed correction.
+
+
 ## 2026-09-02: baseline and scope (5%)
 
 User authorized implementation of the delivered v0.1 specification on the same branch, tagging the previous version, GitHub push and a final download stanza. Frequent informative percentage heartbeats and durable top-level handoff files are required.

@@ -9,10 +9,13 @@ from tests.test_thogopt import make_optimizer, supply
 
 
 def test_transient_budget_respects_released_peak_physical_memory_and_reserves():
-    assert candidate_memory_budget(allocated=400,reserved=900,peak=800,free=300,missing_state=50,workspace=100)==250
-    assert candidate_memory_budget(allocated=400,reserved=400,peak=800,free=200,missing_state=50,workspace=100)==50
+    assert candidate_memory_budget(allocated=400,reserved=900,peak=800,free=300,missing_state=0,workspace=100)==300
+    assert candidate_memory_budget(allocated=400,reserved=400,peak=800,free=200,missing_state=0,workspace=100)==100
     assert candidate_memory_budget(allocated=400,reserved=900,peak=400,free=300,missing_state=0,workspace=100)==300
     assert candidate_memory_budget(allocated=400,reserved=900,peak=800,free=300,missing_state=500,workspace=100)==0
+    # Even abundant aggregate headroom cannot justify placing candidates in
+    # backward's cached blocks while permanent histories are being initialized.
+    assert candidate_memory_budget(allocated=400,reserved=9000,peak=8000,free=3000,missing_state=1,workspace=100)==0
 
 
 def test_deferred_drain_waits_before_consuming_in_fifo_order_and_discards():
@@ -108,21 +111,40 @@ def test_cuda_async_staging_preserves_order_and_source_lifetime(dtype):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(),reason="CUDA training-machine validation required")
-def test_cuda_device_candidates_match_host_path_and_reject_atomically():
+def test_cuda_device_candidates_match_host_path_and_reject_atomically(monkeypatch):
     from sheet.thogopt import Thogopt
     trajectory,_,_=make_optimizer(dtype=torch.float32)
     trajectory=trajectory.to('cuda')
     parameter=trajectory.coefficients['attention_query_weight']
     optimizer=Thogopt([parameter],trajectory=trajectory,lr=.002,weight_decay=.03,betas=(.9,.95))
-    # Force the tiny test through the device path independent of unrelated peaks.
-    optimizer._transaction_budget=lambda: 2**20
+    cache_releases=[]
+    empty_cache=torch.cuda.empty_cache
+    def release_cache():
+        cache_releases.append(True)
+        empty_cache()
+    monkeypatch.setattr(torch.cuda,'empty_cache',release_cache)
     _,reference_parameter,reference=make_optimizer(dtype=torch.float32,async_staging=False,transaction_storage='host')
     with torch.no_grad():reference_parameter.copy_(parameter.cpu())
-    for _ in range(8):
+    pointers = None
+    for index in range(8):
+        # Leave a large cached allocation for candidate placement to reuse.
+        backward_scratch=torch.empty(64*2**20,device='cuda',dtype=torch.uint8)
+        backward_scratch.fill_(1)
+        del backward_scratch
         gradient=torch.randn(4,4)
         for current,values in ((optimizer,gradient.cuda()),(reference,gradient)):
             supply(current,values);current.step()
         torch.testing.assert_close(parameter.cpu(),reference_parameter,atol=2e-6,rtol=2e-5)
+        current_pointers = tuple(optimizer.state[parameter][key].data_ptr() for key in ('exp_avg','exp_avg_sq'))
+        if index == 0:
+            assert optimizer.last_step_metrics['transaction_device_candidate_bytes']==0
+            pointers = current_pointers
+            # Force later updates through device candidates independent of
+            # unrelated peaks, after the real initialization policy has run.
+            optimizer._transaction_budget=lambda: 2**20
+        else:
+            assert current_pointers == pointers
+        assert len(cache_releases)==1
     assert optimizer.last_step_metrics['transaction_device_candidate_bytes']>0
     before=parameter.detach().clone();state=deepcopy(optimizer.state_dict())
     supply(optimizer,torch.full((4,4),1e30,device='cuda'))
@@ -143,3 +165,58 @@ def test_reused_gradient_storage_overwrites_first_contribution_without_stale_val
     assert optimizer.raw_gradients['attention_query_weight'].data_ptr()==address
     expected=torch.full((4,4),2.,dtype=torch.float64);expected[0].add_(1.)
     torch.testing.assert_close(optimizer.raw_gradients['attention_query_weight'],expected,atol=0,rtol=0)
+
+
+def test_persistent_moments_keep_storage_and_release_compressed_candidates(monkeypatch):
+    import weakref
+    _,parameter,optimizer=make_optimizer()
+    ordinary=torch.nn.Parameter(torch.ones(7,dtype=torch.float64))
+    optimizer.add_param_group({'params':[ordinary]})
+    candidates=[]
+    original = optimizer._compressed_candidate
+    def capture(*args,**kwargs):
+        result=original(*args,**kwargs)
+        candidates.extend(weakref.ref(result[1][key]) for key in ('exp_avg','exp_avg_sq'))
+        return result
+    monkeypatch.setattr(optimizer,'_compressed_candidate',capture)
+    pointers=None
+    for _ in range(4):
+        supply(optimizer,torch.randn(4,4,dtype=torch.float64))
+        ordinary.grad=torch.randn_like(ordinary)
+        optimizer.step()
+        current=tuple(optimizer.state[p][key].data_ptr() for p in (parameter,ordinary) for key in ('exp_avg','exp_avg_sq'))
+        if pointers is not None: assert current==pointers
+        pointers=current
+        # Same-device candidates must not silently become permanent histories.
+        assert all(reference() is None for reference in candidates)
+        candidates.clear()
+
+
+def test_late_state_allocation_failure_leaves_existing_state_and_weights_unchanged(monkeypatch):
+    _,parameter,optimizer=make_optimizer()
+    ordinary=torch.nn.Parameter(torch.ones(7,dtype=torch.float64))
+    optimizer.add_param_group({'params':[ordinary]})
+    supply(optimizer,torch.ones(4,4,dtype=torch.float64));optimizer.step()
+    before=deepcopy(optimizer.state_dict())
+    weights=[p.detach().clone() for p in (parameter,ordinary)]
+    pointers=tuple(optimizer.state[parameter][key].data_ptr() for key in ('exp_avg','exp_avg_sq'))
+    supply(optimizer,torch.full((4,4),2.,dtype=torch.float64))
+    ordinary.grad=torch.ones_like(ordinary)
+    real_empty_like=torch.empty_like
+    allocations=[]
+    def fail_second_allocation(value,**kwargs):
+        allocations.append(value.shape)
+        if len(allocations)==2: raise torch.OutOfMemoryError('injected state allocation failure')
+        return real_empty_like(value,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(torch,'empty_like',fail_second_allocation)
+        with pytest.raises(torch.OutOfMemoryError,match='injected state allocation'):
+            optimizer.step()
+    assert len(allocations)==2
+    assert not optimizer.state.get(ordinary)
+    for p,weight in zip((parameter,ordinary),weights):
+        torch.testing.assert_close(p,weight,rtol=0,atol=0)
+    for key,pointer in zip(('exp_avg','exp_avg_sq'),pointers):
+        assert optimizer.state[parameter][key].data_ptr()==pointer
+        torch.testing.assert_close(optimizer.state[parameter][key],before['state'][0][key],rtol=0,atol=0)
+    assert optimizer.state[parameter]['step']==1

@@ -1,0 +1,11 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_persistent_moments_keep_storage_and_release_compressed_candidates ____
+tests/test_thogopt_transfers.py:191: in test_persistent_moments_keep_storage_and_release_compressed_candidates
+    assert all(reference() is None for reference in candidates)
+E   assert False
+E    +  where False = all(<generator object test_persistent_moments_keep_storage_and_release_compressed_candidates.<locals>.<genexpr> at 0x7f3d62667d30>)
+=========================== short test summary info ============================
+FAILED tests/test_thogopt_transfers.py::test_persistent_moments_keep_storage_and_release_compressed_candidates
+1 failed in 0.81s
+Expected parent-regression failure: True

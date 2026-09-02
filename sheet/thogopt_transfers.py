@@ -11,12 +11,16 @@ def candidate_memory_budget(*, allocated, reserved, peak, free, missing_state, w
     Cached allocator blocks are reusable; physical free memory alone understates
     availability. Reserving half the available memory permits small models to
     benefit too, without assigning every free byte to transaction candidates.
-    Missing persistent states and tile workspace are reserved separately.
+    State initialization uses host candidates so that persistent histories can
+    be allocated separately from temporary backward/candidate storage. Aggregate
+    free/cached bytes alone cannot establish that large blocks are reusable.
     """
+    if missing_state:
+        return 0
     available = max(0, free + reserved - allocated)
     released = max(0, peak - allocated)
     allowance = min(available, max(released, available // 2))
-    return max(0, allowance - missing_state - workspace)
+    return max(0, allowance - workspace)
 
 
 class HostGradientTransfers:

@@ -332,6 +332,27 @@ class Thogopt(torch.optim.Optimizer):
             size = 8 if parameter.dtype == torch.float64 else 4
         return parameter.numel() * parameter.element_size() + moments * size
 
+    def _ordinary_candidate(self, parameter, group, *, candidate_device):
+        # Keep ordinary AdamW scratch local, so no device intermediates survive
+        # into first-state allocation when candidates are on the host.
+        beta1, beta2 = group["betas"]
+        state_dtype = torch.float64 if parameter.dtype == torch.float64 else torch.float32
+        gradient = parameter.grad.detach().to(dtype=state_dtype)
+        if gradient.is_sparse:
+            raise ValueError("thogopt does not support sparse gradients")
+        old = self.state.get(parameter, {})
+        step = int(old.get("step", 0)) + 1
+        m = old["exp_avg"].clone() if old else torch.zeros_like(parameter, dtype=state_dtype)
+        v = old["exp_avg_sq"].clone() if old else torch.zeros_like(parameter, dtype=state_dtype)
+        m.lerp_(gradient, 1-beta1)
+        v.mul_(beta2).addcmul_(gradient, gradient, value=1-beta2)
+        denominator = v.sqrt() / math.sqrt(1-beta2**step) + group["eps"]
+        values = parameter.detach().mul(1-group["lr"]*group["weight_decay"])
+        values.addcdiv_(m, denominator, value=-group["lr"]/(1-beta1**step))
+        if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
+            raise FloatingPointError("thogopt non-finite ordinary parameter candidate")
+        return values.to(candidate_device), {"step": step, "exp_avg": m.to(candidate_device), "exp_avg_sq": v.to(candidate_device)}
+
     def _transaction_budget(self):
         device = self.weight_basis.device
         if device.type != "cuda" or self.transaction_storage == "host":
@@ -341,7 +362,8 @@ class Thogopt(torch.optim.Optimizer):
         reserved = torch.cuda.memory_reserved(device)
         peak = torch.cuda.max_memory_allocated(device)
         missing_state = sum(self._candidate_bytes(p) - p.numel()*p.element_size()
-            for group in self.param_groups for p in group["params"] if not self.state.get(p))
+            for group in self.param_groups for p in group["params"] if not self.state.get(p)
+            and (self.parameter_families.get(p) in self.raw_gradients if p in self.parameter_families else p.grad is not None))
         ordinary_workspace = max((6 * p.numel() * (8 if p.dtype == torch.float64 else 4)
             for group in self.param_groups for p in group["params"] if p not in self.parameter_families), default=0)
         tile_workspace = 16 * self.layers * self.tile_columns * torch.empty((),dtype=self.history_dtype).element_size()
@@ -389,23 +411,7 @@ class Thogopt(torch.optim.Optimizer):
                             reference["exp_avg_sq"].mul_(beta2).add_(gradient.square(), alpha=1-beta2)
                             reference["step"] = state["step"]
                     else:
-                        state_dtype = torch.float64 if parameter.dtype==torch.float64 else torch.float32
-                        gradient = parameter.grad.detach().to(dtype=state_dtype)
-                        if gradient.is_sparse:
-                            raise ValueError("thogopt does not support sparse gradients")
-                        old = self.state.get(parameter, {})
-                        step = int(old.get("step", 0)) + 1
-                        m = old["exp_avg"].clone() if old else torch.zeros_like(parameter,dtype=state_dtype)
-                        v = old["exp_avg_sq"].clone() if old else torch.zeros_like(parameter,dtype=state_dtype)
-                        m.lerp_(gradient, 1-beta1)
-                        v.mul_(beta2).addcmul_(gradient, gradient, value=1-beta2)
-                        denominator = v.sqrt() / math.sqrt(1-beta2**step) + group["eps"]
-                        values = parameter.detach().mul(1-group["lr"]*group["weight_decay"])
-                        values.addcdiv_(m, denominator, value=-group["lr"]/(1-beta1**step))
-                        if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
-                            raise FloatingPointError("thogopt non-finite ordinary parameter candidate")
-                        state = {"step": step, "exp_avg": m.to(candidate_device), "exp_avg_sq": v.to(candidate_device)}
-                        values = values.to(candidate_device)
+                        values, state = self._ordinary_candidate(parameter, group, candidate_device=candidate_device)
                     pending.append((parameter, values, state))
         except Exception as error:
             failure = error
@@ -421,13 +427,19 @@ class Thogopt(torch.optim.Optimizer):
         commit_states = []
         allocation_failure = None
         try:
+            if self.weight_basis.device.type == "cuda" and any(not self.state.get(parameter) for parameter, _, _ in pending):
+                # First-state candidates are on the host and CUDA work is done.
+                # Release unused backward blocks before allocating long-lived
+                # histories, rather than pinning slices of those large blocks.
+                # This runs only when adding state, not on every training step.
+                torch.cuda.empty_cache()
             for parameter, values, state in pending:
                 dtype = self.history_dtype if parameter in self.parameter_families else (torch.float64 if parameter.dtype==torch.float64 else torch.float32)
                 existing = self.state.get(parameter, {})
-                # Candidate histories already on the device become the committed
-                # state directly. Host candidates retain the established copy path.
-                destination = {key: state[key] if state[key].device == parameter.device else
-                               existing[key] if key in existing else torch.empty_like(state[key], device=parameter.device, dtype=dtype)
+                # Preserve storage identity: adopting temporary CUDA candidates
+                # can strand split allocator blocks needed by the next backward.
+                # Device-to-device copies still avoid host transaction transfers.
+                destination = {key: existing[key] if key in existing else torch.empty_like(state[key], device=parameter.device, dtype=dtype)
                                for key in ("exp_avg", "exp_avg_sq")}
                 commit_states.append(destination)
         except Exception as error:
