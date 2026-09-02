@@ -61,7 +61,7 @@ def benchmark(*,layers=8,order=3,width=16,steps=20,device='cpu'):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--layers',type=int,default=8);parser.add_argument('--order',type=int,default=3)
     parser.add_argument('--width',type=int,default=16);parser.add_argument('--steps',type=int,default=20);parser.add_argument('--device',default='cpu');parser.add_argument('--output',type=Path,required=True)
-    args=parser.parse_args();output=args.output;values={key:getattr(args,key) for key in ('layers','order','width','steps','device')}
+    args=parser.parse_args();output=args.output;values={key:vars(args)[key] for key in ('layers','order','width','steps','device')}
     result=benchmark(**values);output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(result,indent=2)+'\n');print(output)
 if __name__=='__main__':main()
 # ^^^ THOG

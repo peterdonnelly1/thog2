@@ -168,6 +168,14 @@ window.addEventListener("load", () => {
       let section = group_section(summary.name);
       if (!section) section = make_group_section(summary);
       section.querySelector(".local-metric-group-count").textContent = String(summary.chart_count || 0);
+      let message = section.querySelector(".local-metric-empty");
+      if (!message) {
+        message = document.createElement("p");
+        message.className = "local-metric-empty";
+        section.querySelector(".local-metric-grid").appendChild(message);
+      }
+      message.textContent = summary.reason || "No system metrics have been recorded for this run yet.";
+      message.hidden = Number(summary.chart_count || 0) > 0;
       group_revisions.set(summary.name, Number(summary.revision || 0));
       return section;
     };
@@ -421,11 +429,14 @@ window.addEventListener("load", () => {
           ? await workspace.fetch_metric_groups()
           : await fetch_json(`/api/chart-groups?run=${encodeURIComponent(app.current_run_id)}`);
         if (requested_run !== current_view_key()) return;
-        if (!payload.available) {
-          clear_metric_groups();
-          return;
-        }
         const summaries = (payload.groups || []).filter(summary => summary.name !== "depth");
+        if (!summaries.some(summary => summary.name === "system")) {
+          const reason = payload.error ? `Cannot read system metrics: ${payload.error}`
+            : payload.reason ? `System metrics unavailable: ${payload.reason}.`
+            : payload.catching_up ? "Loading system metrics from the local run file…"
+            : "No system metrics recorded yet. W&B system monitoring must be enabled and its local run file accessible.";
+          summaries.push({name: "system", chart_count: 0, revision: 0, reason});
+        }
         sync_group_order(summaries);
         for (const summary of summaries) {
           const section = group_section(summary.name);

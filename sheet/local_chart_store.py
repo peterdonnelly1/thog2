@@ -589,6 +589,15 @@ def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
         wandb_url=str(getattr(run, "url", "") or "") or None,
         config=getattr(telemetry, "config", {}),
     )
+    # Record the SDK's actual directory: custom roots and a dashboard launched
+    # elsewhere must not make existing system metrics undiscoverable.
+    run_directory = str(getattr(run, "dir", "") or "").strip()
+    if run_directory:
+        store.connection.execute(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            ("wandb_run_directory", str(Path(run_directory).resolve())),
+        )
+        store.connection.commit()
     setattr(telemetry, "_thog_local_chart_store", store)
     if not bool(getattr(telemetry, "_thog_local_chart_store_announced", False)):
         print(

@@ -24,3 +24,18 @@ Spec: ../THOG2_thogopt_Requirements_Specification_v0.1.docx.
 Handoff rule: update this file and THOGOPT_WORK_LOG.md after each meaningful milestone. Do not overwrite another sandbox. All remote repository interactions use the GitHub connector. No agents were requested.
 
 Remaining external verification: CUDA/AMP/NCCL, representative OpenWebText convergence and throughput, and rendered browser QA. See docs/thogopt/validation.md for the exact environment blocks.
+
+
+## Active follow-up: slowdown and missing System group
+
+Starting commit: f1b67b12ec8aad2ae38e1eadd3e2b16e7ce5c796. Same branch, GitHub connector only. Progress: 90%.
+
+- [x] Inspect reported 10.0s/update vs 4.9s/update screenshots and verify remote/local baseline.
+- [x] Remove full-history identity fitting; increase bounded tile size; eliminate redundant weight transfers and FP64 norm temporary.
+- [x] Keep System visible with missing/loading/error explanations and improve local W&B file discovery.
+- [x] JavaScript regression suite: 23/23 passed, including new System visibility/recovery test.
+- [x] Numerical/accumulation/checkpoint/rejection and backend regression tests: 106 passed.
+- [x] CPU before/after measurement: optimizer time -14.5%, whole-step time -9.3%; GPU unmeasured.
+- [ ] Update documentation and publish via GitHub connector; verify remote SHA and give download stanza.
+
+Verification interpreter: ../thogopt_fix_venv/bin/python (Python3.12.3, PyTorch2.8.0, CPU execution). Previous ../thogopt_venv interpreter missing in this runtime. Old package files remain intact. Baseline optimizer saved outside repo at ../thogopt_before.py for exact before/after comparison. No CUDA device accessible; do not claim measured GPU speedup or exact cause of System absence on user's machine.

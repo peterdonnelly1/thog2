@@ -30,7 +30,7 @@ class Thogopt(torch.optim.Optimizer):
     def __init__(self, params, *, trajectory: DepthTrajectory, lr=1e-3,
                  betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01,
                  momentum_history_coefficients="auto", scaling_history_coefficients="auto",
-                 tile_elements=131072):
+                 tile_elements=1048576):
         if not isinstance(trajectory, DepthTrajectory) or trajectory.legacy_sheet_col_vectors:
             raise ValueError("thogopt requires the public DEPTH materialiser")
         if trajectory.plastic_enabled or trajectory.basis_family != "chebyshev":
@@ -186,13 +186,13 @@ class Thogopt(torch.optim.Optimizer):
                     tile.div_(dist.get_world_size())
                     raw[:, start:start+self.tile_columns].copy_(tile.cpu())
             local_valid = local_valid and bool(torch.isfinite(raw).all())
-            norm_squared += raw.double().square().sum()
+            norm_squared += torch.linalg.vector_norm(raw, dtype=torch.float64).square()
         for group in self.param_groups:
             for parameter in group["params"]:
                 if parameter in self.parameter_families or parameter.grad is None:
                     continue
                 local_valid = local_valid and bool(torch.isfinite(parameter.grad).all())
-                norm_squared += parameter.grad.detach().double().square().sum().cpu()
+                norm_squared += torch.linalg.vector_norm(parameter.grad.detach(), dtype=torch.float64).square().cpu()
         if not self._distributed_all_true(local_valid):
             raise FloatingPointError("thogopt non-finite raw optimizer-step gradient")
         norm = float(norm_squared.sqrt())
@@ -236,38 +236,49 @@ class Thogopt(torch.optim.Optimizer):
         beta1, beta2 = group["betas"]
         raw = self.raw_gradients[name]
         columns = raw.shape[1]
-        candidate = parameter.detach().cpu().clone().reshape(columns, self.order)
+        # Read weights directly from their device tile; do not round-trip the
+        # entire family through CPU before calculating its candidate.
+        candidate = torch.empty((columns, self.order), dtype=parameter.dtype, device="cpu")
+        parameter_values = parameter.detach().reshape(columns, self.order)
+        full_momentum = self.q_m.shape[1] == self.layers
+        full_scaling = self.q_v.shape[1] == self.layers
         first = torch.empty((self.q_m.shape[1], columns), dtype=self.history_dtype, device="cpu")
         second = torch.empty((self.q_v.shape[1], columns), dtype=self.history_dtype, device="cpu")
-        metrics = {"constrained_columns": 0, "roundoff_corrections": 0, "maximum_roundoff_correction": 0., "fit_sweeps": 0, "fit_seconds": 0.}
+        metrics = {"constrained_columns": 0, "roundoff_corrections": 0, "maximum_roundoff_correction": 0., "fit_sweeps": 0, "fit_seconds": 0., "tiles": 0, "full_momentum": full_momentum, "full_scaling": full_scaling}
         for start in range(0, columns, self.tile_columns):
             end = min(start + self.tile_columns, columns)
+            metrics["tiles"] += 1
             gradient = raw[:, start:end].to(parameter.device)
             m = torch.zeros((self.q_m.shape[1], end-start), device=parameter.device, dtype=self.history_dtype) if not old else old["exp_avg"][:, start:end].clone()
             v = torch.zeros((self.q_v.shape[1], end-start), device=parameter.device, dtype=self.history_dtype) if not old else old["exp_avg_sq"][:, start:end]
-            m.mul_(beta1).add_(self.q_m.T @ gradient, alpha=1-beta1)
-            previous_values = self.q_v @ v
+            m.mul_(beta1).add_(gradient if full_momentum else self.q_m.T @ gradient, alpha=1-beta1)
+            previous_values = v if full_scaling else self.q_v @ v
             tolerance = 64 * torch.finfo(self.history_dtype).eps * previous_values.abs().amax(dim=0).clamp_min(torch.finfo(self.history_dtype).tiny)
             if bool((previous_values < -tolerance).any()):
                 raise FloatingPointError(f"thogopt negative previous second moment: {name}")
             target = previous_values.clamp_min(0).mul_(beta2).add_(gradient.square(), alpha=1-beta2)
             fit_started = time.perf_counter()
-            try:
-                v, fit_metrics = fit_nonnegative(self.q_v, target)
-            except (ValueError,FloatingPointError) as error:
-                raise FloatingPointError(f"thogopt {name} step {step}: {error}") from error
-            metrics["fit_seconds"] += time.perf_counter()-fit_started
-            for key in ("constrained_columns", "roundoff_corrections"):
-                metrics[key] += fit_metrics[key]
-            for key in ("maximum_roundoff_correction", "fit_sweeps"):
-                metrics[key] = max(metrics[key], fit_metrics[key])
-            m_hat = (self.q_m @ m) / (1-beta1**step)
-            v_hat = (self.q_v @ v).clamp_min(0) / (1-beta2**step)
+            if full_scaling:
+                # With H_v=L, Q_v is the identity: the nonnegative target is
+                # already the exact least-squares solution. No fit is needed.
+                v = target
+            else:
+                try:
+                    v, fit_metrics = fit_nonnegative(self.q_v, target)
+                except (ValueError,FloatingPointError) as error:
+                    raise FloatingPointError(f"thogopt {name} step {step}: {error}") from error
+                metrics["fit_seconds"] += time.perf_counter()-fit_started
+                for key in ("constrained_columns", "roundoff_corrections"):
+                    metrics[key] += fit_metrics[key]
+                for key in ("maximum_roundoff_correction", "fit_sweeps"):
+                    metrics[key] = max(metrics[key], fit_metrics[key])
+            m_hat = (m if full_momentum else self.q_m @ m) / (1-beta1**step)
+            v_hat = (v if full_scaling else self.q_v @ v).clamp_min(0) / (1-beta2**step)
             update = -group["lr"] * m_hat / (v_hat.sqrt() + group["eps"])
             coefficient_delta = (self.weight_analysis @ update).T
-            values = candidate[start:end].to(parameter.device)
+            values = parameter_values[start:end].clone()
             values.mul_(1-group["lr"]*group["weight_decay"]).add_(coefficient_delta.to(values.dtype))
-            if not all(bool(torch.isfinite(value).all()) for value in (m, v, values)):
+            if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
                 raise FloatingPointError(f"thogopt non-finite candidate: {name}")
             first[:, start:end].copy_(m.cpu())
             second[:, start:end].copy_(v.cpu())
@@ -320,7 +331,7 @@ class Thogopt(torch.optim.Optimizer):
                         denominator = v.sqrt() / math.sqrt(1-beta2**step) + group["eps"]
                         values = parameter.detach().mul(1-group["lr"]*group["weight_decay"])
                         values.addcdiv_(m, denominator, value=-group["lr"]/(1-beta1**step))
-                        if not all(bool(torch.isfinite(value).all()) for value in (m, v, values)):
+                        if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
                             raise FloatingPointError("thogopt non-finite ordinary parameter candidate")
                         state = {"step": step, "exp_avg": m.cpu(), "exp_avg_sq": v.cpu()}
                         values = values.cpu()

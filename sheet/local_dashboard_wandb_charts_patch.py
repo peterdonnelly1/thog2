@@ -449,7 +449,7 @@ class _ScannerCatalog:
         self.paths: Dict[str, Optional[Path]] = {}
         self.scanners: Dict[Path, _WandbRunScanner] = {}
 
-    def _find_path(self, run_id: str) -> Optional[Path]:
+    def _find_path(self, run_id: str, status: Optional[dict[str, Any]] = None) -> Optional[Path]:
         cached = self.paths.get(run_id)
         if cached is not None and cached.exists():
             return cached
@@ -458,7 +458,23 @@ class _ScannerCatalog:
             pass
 
         candidates = []
-        roots = [Path.cwd() / "wandb", Path.cwd(), Path(self.catalog.root).resolve().parent / "wandb"]
+        status = status or {}
+        recorded_directory = status.get("wandb_run_directory")
+        if recorded_directory:
+            directory = Path(recorded_directory)
+            # W&B run.dir usually ends in /files; accept the run directory too.
+            for parent in (directory, directory.parent):
+                recorded_path = parent / f"run-{run_id}.wandb"
+                if recorded_path.is_file():
+                    self.paths[run_id] = recorded_path.resolve()
+                    return self.paths[run_id]
+        project_root = Path(self.catalog.root).resolve().parent
+        roots = [Path.cwd() / "wandb", Path.cwd(), project_root / "wandb"]
+        configured_root = (status.get("configuration") or {}).get("wandb_root")
+        if configured_root:
+            configured_path = Path(configured_root)
+            for anchor in (Path.cwd(), project_root):
+                roots.extend((anchor / configured_path, anchor / configured_path / "wandb"))
         seen_roots = set()
         for root in roots:
             try:
@@ -468,8 +484,8 @@ class _ScannerCatalog:
             if resolved in seen_roots or not resolved.exists():
                 continue
             seen_roots.add(resolved)
-            direct = resolved.glob(f"run-*-{run_id}/run-{run_id}.wandb")
-            candidates.extend(path for path in direct if path.is_file())
+            for pattern in (f"run-*-{run_id}/run-{run_id}.wandb", f"offline-run-*-{run_id}/run-{run_id}.wandb"):
+                candidates.extend(path for path in resolved.glob(pattern) if path.is_file())
             if resolved == Path.cwd().resolve():
                 candidates.extend(path for path in resolved.glob(f"**/run-{run_id}.wandb") if path.is_file())
         unique = {path.resolve(): path.resolve() for path in candidates}
@@ -482,7 +498,7 @@ class _ScannerCatalog:
         run_id = str(status.get("wandb_run_id") or "").strip()
         if not run_id:
             return None
-        path = self._find_path(run_id)
+        path = self._find_path(run_id, status)
         if path is None:
             return None
         with self.lock:

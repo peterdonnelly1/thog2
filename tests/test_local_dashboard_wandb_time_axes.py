@@ -94,3 +94,25 @@ def test_downsampling_keeps_every_x_axis_aligned_with_y() -> None:
         assert relative_process == x_value + 200
         assert wall_time == x_value + 300
 # ^^^ THOG
+
+
+
+def test_system_source_discovery_uses_recorded_sdk_directory(tmp_path, monkeypatch):
+    from sheet.local_dashboard_wandb_charts_patch import _ScannerCatalog
+    unrelated = tmp_path / "viewer"; unrelated.mkdir(); monkeypatch.chdir(unrelated)
+    directory = tmp_path / "elsewhere" / "run-260903-test123"; (directory / "files").mkdir(parents=True)
+    source = directory / "run-test123.wandb"; source.write_bytes(b"placeholder")
+    catalog = _ScannerCatalog(SimpleNamespace(root=unrelated / "logs"))
+    assert catalog._find_path("test123", {"wandb_run_directory":str(directory / "files")}) == source
+
+
+def test_system_source_discovery_custom_root_offline_and_late_file(tmp_path, monkeypatch):
+    from sheet.local_dashboard_wandb_charts_patch import _ScannerCatalog
+    unrelated = tmp_path / "viewer"; unrelated.mkdir(); monkeypatch.chdir(unrelated)
+    project = tmp_path / "project"; (project / "logs").mkdir(parents=True)
+    catalog = _ScannerCatalog(SimpleNamespace(root=project / "logs"))
+    status = {"configuration":{"wandb_root":"monitoring"}}
+    assert catalog._find_path("test123",status) is None
+    directory = project / "monitoring" / "wandb" / "offline-run-260903-test123"; directory.mkdir(parents=True)
+    source = directory / "run-test123.wandb"; source.write_bytes(b"placeholder")
+    assert catalog._find_path("test123",status) == source

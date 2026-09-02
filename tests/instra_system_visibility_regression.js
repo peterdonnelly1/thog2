@@ -1,0 +1,46 @@
+// vvv THOG
+"use strict";
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const {JSDOM} = require("jsdom");
+const dom = new JSDOM('<html><head></head><body><div id="charts_scroll"><section id="depth_chart_group"></section></div></body></html>', {runScripts:"outside-only",url:"http://localhost"});
+const w = dom.window;
+w.app = {current_run_id:"first",dynamic_chart_figures:{},dynamic_chart_metadata:{}};
+w.chart_titles = {};
+w.by_id = id => w.document.getElementById(id);
+w.hash_text = text => [...text].reduce((value,letter) => ((value*31)+letter.charCodeAt(0))>>>0,0);
+w.prepare_figure = figure => figure;
+w.select_run = run_id => {w.app.current_run_id=run_id;};
+w.setInterval = () => 0;
+w.requestAnimationFrame = callback => callback();
+w.show_toast = message => {throw new Error(message);};
+let payload = {available:false,groups:[],reason:"no local W&B run file found for this run"};
+w.fetch_json = async () => payload;
+w.eval(fs.readFileSync("sheet/local_dashboard_assets/dashboard_wandb_groups_patch.js","utf8"));
+const settle = () => new Promise(resolve => setTimeout(resolve,30));
+(async () => {
+ await settle();
+ await w.__thog2_metric_groups.refresh();
+ let section = w.document.querySelector('[data-metric-group="system"]');
+ assert.ok(section,"System disappeared when local run file was missing");
+ assert.ok(section.textContent.includes("no local W&B run file"));
+ assert.ok(section.classList.contains("collapsed"),"placeholder should stay cheap until expanded");
+ payload = {available:true,groups:[],catching_up:true};
+ await w.__thog2_metric_groups.refresh();
+ assert.match(section.textContent,/Loading system metrics/);
+ payload = {available:true,groups:[],error:"unreadable record"};
+ await w.__thog2_metric_groups.refresh();
+ assert.match(section.textContent,/Cannot read system metrics: unreadable record/);
+ payload = {available:true,groups:[{name:"system",chart_count:2,revision:1}]};
+ await w.__thog2_metric_groups.refresh();
+ assert.equal(section.querySelector('.local-metric-empty').hidden,true,"stale unavailable notice remained after data arrived");
+ assert.equal(section.querySelector('.local-metric-group-count').textContent,"2");
+ w.select_run("second");payload = {available:false,groups:[],reason:"no local W&B run file found for this run"};
+ await settle();await w.__thog2_metric_groups.refresh();
+ section = w.document.querySelector('[data-metric-group="system"]');
+ assert.ok(section,"System disappeared after switching runs");
+ assert.equal(w.document.querySelectorAll('[data-metric-group="system"]').length,1);
+ console.log("PASS System remains visible for missing, loading and unreadable data; recovers when metrics arrive and survives run changes");
+ dom.window.close();
+})().catch(error => {console.error(error);dom.window.close();process.exitCode=1;});
+// ^^^ THOG

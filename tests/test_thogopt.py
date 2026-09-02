@@ -212,3 +212,42 @@ def test_ordinary_half_parameter_retains_fp32_moments():
     state=optimizer.state[parameter]
     assert state['exp_avg'].dtype==state['exp_avg_sq'].dtype==torch.float32
     assert bool((state['exp_avg_sq']>0).all())
+
+
+@pytest.mark.parametrize("momentum_count,scaling_count", [(4,4),(2,4),(4,2),(2,3)])
+def test_history_tile_sizes_preserve_updates(momentum_count, scaling_count):
+    """Exercise independent identity/compressed histories across tile boundaries."""
+    torch.manual_seed(912)
+    _, small_parameter, small = make_optimizer()
+    _, large_parameter, large = make_optimizer()
+    for optimizer in (small, large):
+        optimizer.q_m = history_basis(4, momentum_count, dtype=torch.float64, device=torch.device("cpu"))
+        optimizer.q_v = history_basis(4, scaling_count, dtype=torch.float64, device=torch.device("cpu"))
+    large.tile_columns = 262144
+    with torch.no_grad(): large_parameter.copy_(small_parameter)
+    for _ in range(12):
+        gradient = torch.randn(4,4,dtype=torch.float64)
+        for optimizer in (small,large):
+            supply(optimizer,gradient)
+            optimizer.prepare_gradients(loss_scale=2.,grad_clip=.8)
+            optimizer.step()
+        torch.testing.assert_close(small_parameter,large_parameter,atol=1e-12,rtol=1e-11)
+        for key in ("exp_avg","exp_avg_sq"):
+            torch.testing.assert_close(small.state[small_parameter][key],large.state[large_parameter][key],atol=1e-12,rtol=1e-11)
+    if scaling_count==4:
+        assert all(item["fit_seconds"]==0 for item in large.last_step_metrics["families"].values())
+
+
+def test_full_history_negative_state_rejection_remains_atomic():
+    _, parameter, optimizer = make_optimizer()
+    supply(optimizer,torch.ones(4,4,dtype=torch.float64));optimizer.step()
+    optimizer.state[parameter]["exp_avg_sq"][0,0] = -1.
+    previous_parameter = parameter.detach().clone()
+    previous_state = deepcopy(optimizer.state[parameter])
+    supply(optimizer,torch.ones(4,4,dtype=torch.float64))
+    with pytest.raises(FloatingPointError,match="negative previous second moment"):
+        optimizer.step()
+    torch.testing.assert_close(parameter,previous_parameter,atol=0,rtol=0)
+    for key in ("exp_avg","exp_avg_sq"):
+        torch.testing.assert_close(optimizer.state[parameter][key],previous_state[key],atol=0,rtol=0)
+    assert optimizer.state[parameter]["step"]==previous_state["step"]

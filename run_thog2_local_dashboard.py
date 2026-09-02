@@ -229,6 +229,7 @@ class RunDashboardState:
                 f"legacy:{local_run_id}" if is_legacy_layout else local_run_id
             ),
             "wandb_run_id": wandb_run_id,
+            "wandb_run_directory": metadata.get("wandb_run_directory", ""),
             "wandb_url": metadata.get("wandb_url", ""),
             "run_state": run_state,
             "target_update": target_update,
