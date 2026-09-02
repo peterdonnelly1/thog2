@@ -9,4 +9,6 @@ Local base is an exact tree snapshot in instra_sep02_followup_local; publish via
 - [x] 7 Preserve group and chart location, including maximized scalar charts, across run changes.
 - [x] Also: conventional maximize/restore icons across all charts.
 - [x] Targeted regressions, full relevant suite, review.
-- [ ] GitHub connector publication, remote verification, download stanza and outcome table.
+- [x] GitHub connector publication, remote verification, download stanza and outcome table.
+
+Complete (100%). Implementation commit 8388b8c2abb41fad6327679dfe5b70e9ba1d4694 pushed and verified; final handoff-only update records completion.

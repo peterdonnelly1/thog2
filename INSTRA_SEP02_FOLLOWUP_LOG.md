@@ -24,3 +24,7 @@ Browser: earlier full fixture navigation was blocked by ERR_BLOCKED_BY_CLIENT; d
 - No live browser acceptance pass is claimed; earlier browser navigation was blocked. No optimizer/training behavior changed. The historical factory default explains why choosing SGD alone can produce sgd_0.9.
 
 Review complete (90%). Publish through GitHub connector on instra_weight_inspector, parent 5408d1e475613d6e67fd2cb855770306810000e0; verify exact tree and ref, then record final delivery.
+
+## Delivery
+
+Implementation pushed and Git-ref verified at 8388b8c2abb41fad6327679dfe5b70e9ba1d4694. Published tree cc572e8bf41f8a793413bae002d409b3e69bad02 matches the local reviewed tree. This final handoff-only update records completion; final assistant response names the branch tip.
