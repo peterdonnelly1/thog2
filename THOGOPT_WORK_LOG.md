@@ -14,6 +14,12 @@ New CPU regressions cover candidate-history lifetime and stable addresses for co
 
 Regression sensitivity confirmed against the exact parent optimizer module: the candidate-history release assertion fails because old candidate tensors remain alive as permanent histories. See docs/thogopt/oom_followup_parent_regression.txt. Final transfer/storage suite passes7 tests with4 CUDA skips after simplifying the test instrumentation to use a method present on both versions; production code unchanged since the consolidated110-test run. See docs/thogopt/oom_followup_storage_tests.txt. Ready to publish the reviewed correction.
 
+## CUDA OOM follow-up: published and verified
+
+Feature b743bebc7b942686f54e05c3444ee7b3da6b56cf, parent8e9beeb83826cb68db48297bf09956b001683568, tree6c7bb021bbc2d3da7f9b3791574bf4b996e342ff. All9 uploaded blob hashes and the full tree matched the local index. Non-forced GitHub connector update succeeded; a subsequent connector ref read verified the branch. Local commit object reconstructed and hash-verified against connector metadata; local and tracking refs aligned. This handoff-only follow-up records completion. No shell GitHub network operation was used.
+
+User should retain D=1024 and existing A/B snapshots, pull this branch and restart/resume the same C run without resetting the optimizer. First fresh step uses host candidates and includes initialization; later steps retain budgeted GPU candidates and asynchronous gradient capture. Next required evidence is sustained GPU execution past the next backward, then timing after10-20 updates. Local result is110 passing CPU tests and4 CUDA skips, not proof that the actual4090 OOM is resolved. No unrelated optimizer/UI changes and no further code work planned before new GPU evidence.
+
 
 ## 2026-09-02: baseline and scope (5%)
 
