@@ -29,3 +29,7 @@ Difference columns use scientific notation for tiny nonzero spreads rather than 
 - Browser fixture expanded with train/val histories and optimizer/LR metadata for manual acceptance. Browser access remains blocked (ERR_BLOCKED_BY_CLIENT), so no real-browser/Firefox clipboard or pixel-layout pass is claimed.
 
 Review complete. Publish the reviewed files through connector blobs/tree/commit and a non-forced update of instra_weight_inspector from 1f8995063750910894007fb3a23fcce5a45ac4fd. Verify the new ref and tree before reporting success. The final assistant handoff gives the actual commit SHA; use git pull --ff-only, restart Instra, then Ctrl+Shift+R.
+
+## Published implementation
+
+Implementation commit c726e8622c90b5e75d1cb97d7a0dd889e045c926 is pushed to instra_weight_inspector through the GitHub connector. Direct Git-ref and commit reads confirm the SHA and exact reviewed tree fbecde21ec747c0f1e3a6c4017f88464b583f5e3. A cached branch response initially retained the parent; the direct Git-ref endpoint confirms the new head. All 15 published file blobs match local git hashes. This final handoff-only update completes the task list. Local HEAD remains the original parent because GitHub created the commit remotely; staged code/tree matches the published implementation. Use the connector-verified remote branch for future work.

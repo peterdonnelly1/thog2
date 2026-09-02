@@ -14,6 +14,6 @@ Delivery: same branch, GitHub connector publication, no force push.
 - [x] 8 Diagnose and repair Runs training curve missing/stale updates.
 - [x] 9 Uppercase S; integer c/f LR columns between S and P_s.
 - [x] Targeted regression coverage and existing relevant suite.
-- [ ] Review, publish via GitHub connector, verify remote commit, final numbered table/download stanza.
+- [x] Review, publish via GitHub connector, verify remote commit, final numbered table/download stanza.
 
-Current phase: implementation, review, and regression gates complete (90%). GitHub publication and remote verification remain; final handoff records the delivery SHA.
+Current phase: complete (100%). Implementation pushed and connector-verified at c726e8622c90b5e75d1cb97d7a0dd889e045c926; this final handoff-only commit records completion. Final response supplies the tip SHA and download stanza.
