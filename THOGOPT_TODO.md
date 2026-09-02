@@ -39,3 +39,12 @@ Starting commit: f1b67b12ec8aad2ae38e1eadd3e2b16e7ce5c796. Same branch, GitHub c
 - [x] Update documentation and publish via GitHub connector; remote SHA and complete tree verified. Download stanza supplied with delivery.
 
 Verification interpreter: ../thogopt_fix_venv/bin/python (Python3.12.3, PyTorch2.8.0, CPU execution). Previous ../thogopt_venv interpreter missing in this runtime. Old package files remain intact. Baseline optimizer saved outside repo at ../thogopt_before.py for exact before/after comparison. No CUDA device accessible; do not claim measured GPU speedup or exact cause of System absence on user's machine.
+
+## Active follow-up: remaining 7.9s/update overhead
+
+Starting commit bf18073a76a9b3310fee328ff9365498f522740b. Progress 85%. User GPU measured previous fix:10.0 ->7.9s/update, still vs4.8-4.9s SGD.
+- [x] Inspect host staging, transaction copies and synchronization.
+- [x] Implement two-buffer asynchronous staging, memory-budgeted device candidates and last-update timing output.
+- [x] Numerical/restart/rejection/staging tests:108 passed,4 CUDA skipped; budget suite rerun after final refinement. CPU timings essentially unchanged; GPU-specific changes unmeasured.
+- [ ] Document limitations and push same branch via connector; provide fetch stanza.
+Baseline optimizer: ../thogopt_before_transfer_fix.py. Runtime: ../thogopt_fix_venv/bin/python. CUDA unavailable locally. No agents requested.

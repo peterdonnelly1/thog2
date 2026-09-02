@@ -1,8 +1,9 @@
 # vvv THOG
 """Layer-space AdamW with independently compressed, raw-gradient histories.
 
-Raw step gradients and transaction candidates are staged on the host. Device
-history evaluation is tiled. No dense layer-moment replica is retained.
+Raw gradients use bounded asynchronous host staging on CUDA. Transaction
+candidates reuse released device headroom when available; otherwise they use
+the host. Persistent histories remain compact and history evaluation is tiled.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import torch.distributed as dist
 from torch import Tensor
 
 from .depth_trajectory import DepthTrajectory
+from .thogopt_transfers import HostGradientTransfers, candidate_memory_budget
 from .thogopt_math import comparison_errors, fit_nonnegative, history_basis, resolve_history_count
 
 
@@ -30,7 +32,9 @@ class Thogopt(torch.optim.Optimizer):
     def __init__(self, params, *, trajectory: DepthTrajectory, lr=1e-3,
                  betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01,
                  momentum_history_coefficients="auto", scaling_history_coefficients="auto",
-                 tile_elements=1048576):
+                 tile_elements=1048576, async_staging=True, transaction_storage="auto"):
+        if transaction_storage not in {"auto", "host"}:
+            raise ValueError("thogopt transaction_storage must be auto or host")
         if not isinstance(trajectory, DepthTrajectory) or trajectory.legacy_sheet_col_vectors:
             raise ValueError("thogopt requires the public DEPTH materialiser")
         if trajectory.plastic_enabled or trajectory.basis_family != "chebyshev":
@@ -38,6 +42,10 @@ class Thogopt(torch.optim.Optimizer):
         if lr < 0 or eps <= 0 or weight_decay < 0 or not all(0 <= b < 1 for b in betas):
             raise ValueError("invalid thogopt AdamW hyperparameters")
         super().__init__(params, dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay))
+        self.transaction_storage = transaction_storage
+        self.async_staging = bool(async_staging)
+        self.gradient_transfers = None
+        self.staging_fallback_reason = ""
         self.trajectory = trajectory
         self.layers = trajectory.config.n_layer
         self.order = trajectory.config.depth_order
@@ -77,7 +85,17 @@ class Thogopt(torch.optim.Optimizer):
             except (OSError,ValueError): pass
         if required>available:
             raise MemoryError(f"thogopt host staging needs approximately {required/2**20:.1f} MiB; budget/available {available/2**20:.1f} MiB")
+        if self.async_staging and reference.device.type == "cuda":
+            try:
+                self.gradient_transfers = HostGradientTransfers(
+                    capacity=max(p.numel() // self.order for p in self.families.values()),
+                    dtype=self.history_dtype, device=reference.device)
+            except RuntimeError as error:
+                # Pinned-memory availability is an execution detail, not a reason
+                # to change the optimizer's numerical or checkpoint contract.
+                self.staging_fallback_reason = str(error)
         self.raw_gradients = {}
+        self._raw_buffers = {}
         self.seen_layers = {}
         self.reference_histories = {}
         self.last_step_metrics = {}
@@ -103,7 +121,10 @@ class Thogopt(torch.optim.Optimizer):
         return {"schema_version": SCHEMA_VERSION, "optimizer": "thogopt", "layers": self.layers,
                 "weight_coefficients": self.order, "momentum_history": dict(self.momentum_count),
                 "scaling_history": dict(self.scaling_count), "history_dtype": str(self.history_dtype),
-                "fit": "unweighted_nonnegative_layer_ls_v1", "staging": "host_accumulation_and_transaction",
+                "fit": "unweighted_nonnegative_layer_ls_v1", "staging": "host_accumulation_budgeted_transaction",
+                "transaction_storage": self.transaction_storage,
+                "async_gradient_staging": self.gradient_transfers is not None,
+                "staging_fallback_reason": self.staging_fallback_reason,
                 "device_tile_columns": self.tile_columns, "weight_basis": self.weight_basis.detach().cpu(),
                 "history_basis_version":"chebyshev_equispaced_qr_positive_diagonal_or_full_samples_v1",
                 "history_coordinates":torch.linspace(-1,1,self.layers,dtype=torch.float64).tolist(),
@@ -117,13 +138,15 @@ class Thogopt(torch.optim.Optimizer):
         ordinary_bytes = sum(p.numel()*p.element_size() for group in self.param_groups for p in group["params"] if p not in self.parameter_families)
         ordinary_transaction_bytes = sum(p.numel()*(p.element_size()+2*(8 if p.dtype==torch.float64 else 4)) for group in self.param_groups for p in group["params"] if p not in self.parameter_families)
         size = torch.empty((), dtype=self.history_dtype).element_size()
-        return {"moment_entries": n * (self.q_m.shape[1] + self.q_v.shape[1]),
+        transfer_bytes = 2 * max(p.numel() // self.order for p in self.families.values()) * size if self.async_staging and self.weight_basis.device.type == "cuda" else 0
+        return {"gradient_transfer_pinned_bytes_budget": transfer_bytes,
+                "moment_entries": n * (self.q_m.shape[1] + self.q_v.shape[1]),
                 "moment_bytes": size * n * (self.q_m.shape[1] + self.q_v.shape[1]),
                 "raw_gradient_host_bytes": size * n * self.layers,
                 "weight_coefficient_bytes": sum(p.numel()*p.element_size() for p in self.families.values()),
                 "dense_adamw_moment_bytes": 2 * size * n * self.layers,
                 "tile_layer_elements": self.layers * self.tile_columns,
-                "transaction_host_bytes_estimate": size*n*(self.layers+self.q_m.shape[1]+self.q_v.shape[1])+sum(p.numel()*p.element_size() for p in self.families.values())+ordinary_transaction_bytes,
+                "transaction_host_bytes_estimate": size*n*(self.layers+self.q_m.shape[1]+self.q_v.shape[1])+sum(p.numel()*p.element_size() for p in self.families.values())+ordinary_transaction_bytes+transfer_bytes,
                 "ordinary_parameter_bytes": ordinary_bytes,
                 "shared_basis_bytes":sum(t.numel()*t.element_size() for t in (self.weight_basis,self.weight_analysis,self.q_m,self.q_v)),
                 "diagnostic_reference_bytes":sum(r[k].numel()*r[k].element_size() for r in getattr(self,"reference_histories",{}).values() for k in ("exp_avg","exp_avg_sq"))}
@@ -135,13 +158,26 @@ class Thogopt(torch.optim.Optimizer):
             raise RuntimeError("thogopt received a gradient after step preparation")
         if name not in self.raw_gradients:
             n = self.families[name].numel() // self.order
-            self.raw_gradients[name] = torch.zeros((self.layers, n), dtype=self.history_dtype, device="cpu")
+            if name not in self._raw_buffers:
+                self._raw_buffers[name] = torch.empty((self.layers, n), dtype=self.history_dtype, device="cpu")
+            self.raw_gradients[name] = self._raw_buffers[name]
             self.seen_layers[name] = torch.zeros(self.layers, dtype=torch.bool)
-        self.raw_gradients[name][layer_index].add_(gradient.detach().reshape(-1).to(device="cpu", dtype=self.history_dtype))
+        destination = self.raw_gradients[name][layer_index]
+        add = bool(self.seen_layers[name][layer_index])
+        if self.gradient_transfers is not None:
+            self.gradient_transfers.enqueue(gradient, destination, add=add)
+        else:
+            values = gradient.detach().reshape(-1).to(device="cpu", dtype=self.history_dtype)
+            if add:
+                destination.add_(values)
+            else:
+                destination.copy_(values)
         self.seen_layers[name][layer_index] = True
         self.gradient_staging_seconds += time.perf_counter()-started
 
     def zero_grad(self, set_to_none=True):
+        if self.gradient_transfers is not None:
+            self.gradient_transfers.drain(discard=True)
         super().zero_grad(set_to_none=set_to_none)
         self.raw_gradients.clear()
         self.seen_layers.clear()
@@ -164,6 +200,8 @@ class Thogopt(torch.optim.Optimizer):
             raise RuntimeError("thogopt gradients were already prepared")
         if not math.isfinite(loss_scale) or loss_scale <= 0:
             raise ValueError("thogopt loss scale must be positive and finite")
+        if self.gradient_transfers is not None:
+            self.gradient_transfers.drain()
         distributed = dist.is_available() and dist.is_initialized()
         norm_squared = torch.zeros((), dtype=torch.float64)
         local_valid = True
@@ -230,7 +268,7 @@ class Thogopt(torch.optim.Optimizer):
                 "exp_avg_sq": torch.zeros(self.layers, len(chosen), dtype=torch.float64)}
 
     @torch.no_grad()
-    def _compressed_candidate(self, parameter, name, group):
+    def _compressed_candidate(self, parameter, name, group, *, candidate_device="cpu"):
         old = self.state.get(parameter, {})
         step = int(old.get("step", 0)) + 1
         beta1, beta2 = group["betas"]
@@ -238,12 +276,12 @@ class Thogopt(torch.optim.Optimizer):
         columns = raw.shape[1]
         # Read weights directly from their device tile; do not round-trip the
         # entire family through CPU before calculating its candidate.
-        candidate = torch.empty((columns, self.order), dtype=parameter.dtype, device="cpu")
+        candidate = torch.empty((columns, self.order), dtype=parameter.dtype, device=candidate_device)
         parameter_values = parameter.detach().reshape(columns, self.order)
         full_momentum = self.q_m.shape[1] == self.layers
         full_scaling = self.q_v.shape[1] == self.layers
-        first = torch.empty((self.q_m.shape[1], columns), dtype=self.history_dtype, device="cpu")
-        second = torch.empty((self.q_v.shape[1], columns), dtype=self.history_dtype, device="cpu")
+        first = torch.empty((self.q_m.shape[1], columns), dtype=self.history_dtype, device=candidate_device)
+        second = torch.empty((self.q_v.shape[1], columns), dtype=self.history_dtype, device=candidate_device)
         metrics = {"constrained_columns": 0, "roundoff_corrections": 0, "maximum_roundoff_correction": 0., "fit_sweeps": 0, "fit_seconds": 0., "tiles": 0, "full_momentum": full_momentum, "full_scaling": full_scaling}
         for start in range(0, columns, self.tile_columns):
             end = min(start + self.tile_columns, columns)
@@ -280,10 +318,36 @@ class Thogopt(torch.optim.Optimizer):
             values.mul_(1-group["lr"]*group["weight_decay"]).add_(coefficient_delta.to(values.dtype))
             if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
                 raise FloatingPointError(f"thogopt non-finite candidate: {name}")
-            first[:, start:end].copy_(m.cpu())
-            second[:, start:end].copy_(v.cpu())
-            candidate[start:end].copy_(values.cpu())
+            first[:, start:end].copy_(m.to(candidate_device))
+            second[:, start:end].copy_(v.to(candidate_device))
+            candidate[start:end].copy_(values.to(candidate_device))
         return candidate.reshape(parameter.shape), {"step": step, "exp_avg": first, "exp_avg_sq": second}, metrics
+
+    def _candidate_bytes(self, parameter):
+        if parameter in self.parameter_families:
+            moments = (parameter.numel() // self.order) * (self.q_m.shape[1] + self.q_v.shape[1])
+            size = torch.empty((), dtype=self.history_dtype).element_size()
+        else:
+            moments = 2 * parameter.numel()
+            size = 8 if parameter.dtype == torch.float64 else 4
+        return parameter.numel() * parameter.element_size() + moments * size
+
+    def _transaction_budget(self):
+        device = self.weight_basis.device
+        if device.type != "cuda" or self.transaction_storage == "host":
+            return 0
+        free, _ = torch.cuda.mem_get_info(device)
+        allocated = torch.cuda.memory_allocated(device)
+        reserved = torch.cuda.memory_reserved(device)
+        peak = torch.cuda.max_memory_allocated(device)
+        missing_state = sum(self._candidate_bytes(p) - p.numel()*p.element_size()
+            for group in self.param_groups for p in group["params"] if not self.state.get(p))
+        ordinary_workspace = max((6 * p.numel() * (8 if p.dtype == torch.float64 else 4)
+            for group in self.param_groups for p in group["params"] if p not in self.parameter_families), default=0)
+        tile_workspace = 16 * self.layers * self.tile_columns * torch.empty((),dtype=self.history_dtype).element_size()
+        workspace = max(512 * 2**20, ordinary_workspace + tile_workspace)
+        return candidate_memory_budget(allocated=allocated, reserved=reserved, peak=peak,
+            free=free, missing_state=missing_state, workspace=workspace)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -294,7 +358,11 @@ class Thogopt(torch.optim.Optimizer):
         if not self.prepared:
             self.prepare_gradients()
         started = time.perf_counter()
-        if self.weight_basis.device.type=="cuda": torch.cuda.reset_peak_memory_stats(self.weight_basis.device)
+        transaction_budget = self._transaction_budget()
+        remaining_budget = transaction_budget
+        device_candidate_bytes = 0
+        candidate_seconds = 0.
+        commit_seconds = 0.
         pending = []
         references = deepcopy(self.reference_histories)
         diagnostics = {}
@@ -304,10 +372,15 @@ class Thogopt(torch.optim.Optimizer):
                 beta1, beta2 = group["betas"]
                 for parameter in group["params"]:
                     name = self.parameter_families.get(parameter)
+                    if (name is not None and name not in self.raw_gradients) or (name is None and parameter.grad is None):
+                        continue
+                    needed = self._candidate_bytes(parameter)
+                    candidate_device = parameter.device if parameter.device.type == "cuda" and needed <= remaining_budget else torch.device("cpu")
+                    if candidate_device.type == "cuda":
+                        remaining_budget -= needed
+                        device_candidate_bytes += needed
                     if name is not None:
-                        if name not in self.raw_gradients:
-                            continue
-                        values, state, metrics = self._compressed_candidate(parameter, name, group)
+                        values, state, metrics = self._compressed_candidate(parameter, name, group, candidate_device=candidate_device)
                         diagnostics[name] = metrics
                         if name in references:
                             reference = references[name]
@@ -316,8 +389,6 @@ class Thogopt(torch.optim.Optimizer):
                             reference["exp_avg_sq"].mul_(beta2).add_(gradient.square(), alpha=1-beta2)
                             reference["step"] = state["step"]
                     else:
-                        if parameter.grad is None:
-                            continue
                         state_dtype = torch.float64 if parameter.dtype==torch.float64 else torch.float32
                         gradient = parameter.grad.detach().to(dtype=state_dtype)
                         if gradient.is_sparse:
@@ -333,8 +404,8 @@ class Thogopt(torch.optim.Optimizer):
                         values.addcdiv_(m, denominator, value=-group["lr"]/(1-beta1**step))
                         if not bool(torch.stack([torch.isfinite(value).all() for value in (m, v, values)]).all()):
                             raise FloatingPointError("thogopt non-finite ordinary parameter candidate")
-                        state = {"step": step, "exp_avg": m.cpu(), "exp_avg_sq": v.cpu()}
-                        values = values.cpu()
+                        state = {"step": step, "exp_avg": m.to(candidate_device), "exp_avg_sq": v.to(candidate_device)}
+                        values = values.to(candidate_device)
                     pending.append((parameter, values, state))
         except Exception as error:
             failure = error
@@ -342,6 +413,10 @@ class Thogopt(torch.optim.Optimizer):
             if failure is not None:
                 raise failure
             raise FloatingPointError("thogopt candidate rejected on another rank")
+        if self.weight_basis.device.type == "cuda":
+            torch.cuda.current_stream(self.weight_basis.device).synchronize()
+        candidate_seconds = time.perf_counter() - started
+        commit_started = time.perf_counter()
         # Allocate missing persistent buffers before changing any parameter.
         commit_states = []
         allocation_failure = None
@@ -349,7 +424,10 @@ class Thogopt(torch.optim.Optimizer):
             for parameter, values, state in pending:
                 dtype = self.history_dtype if parameter in self.parameter_families else (torch.float64 if parameter.dtype==torch.float64 else torch.float32)
                 existing = self.state.get(parameter, {})
-                destination = {key: existing[key] if key in existing else torch.empty_like(state[key], device=parameter.device, dtype=dtype)
+                # Candidate histories already on the device become the committed
+                # state directly. Host candidates retain the established copy path.
+                destination = {key: state[key] if state[key].device == parameter.device else
+                               existing[key] if key in existing else torch.empty_like(state[key], device=parameter.device, dtype=dtype)
                                for key in ("exp_avg", "exp_avg_sq")}
                 commit_states.append(destination)
         except Exception as error:
@@ -360,16 +438,36 @@ class Thogopt(torch.optim.Optimizer):
             raise FloatingPointError("thogopt state allocation failed on another rank")
         for (parameter, values, state), destination in zip(pending, commit_states):
             parameter.copy_(values)
-            destination["exp_avg"].copy_(state["exp_avg"])
-            destination["exp_avg_sq"].copy_(state["exp_avg_sq"])
+            for key in ("exp_avg", "exp_avg_sq"):
+                if destination[key] is not state[key]:
+                    destination[key].copy_(state[key])
             destination["step"] = state["step"]
             self.state[parameter] = destination
         self.reference_histories = references
+        if self.weight_basis.device.type == "cuda":
+            torch.cuda.current_stream(self.weight_basis.device).synchronize()
+        commit_seconds = time.perf_counter() - commit_started
         self.last_step_metrics = {"families": diagnostics, "optimizer_seconds": time.perf_counter()-started,
+                                  "candidate_seconds": candidate_seconds, "commit_seconds": commit_seconds,
+                                  "transaction_device_budget_bytes": transaction_budget,
+                                  "transaction_device_candidate_bytes": device_candidate_bytes,
+                                  "async_gradient_staging": self.gradient_transfers is not None,
                                   "gradient_staging_seconds":self.gradient_staging_seconds, "gradient_preparation_seconds":self.gradient_preparation_seconds,
                                   "device_peak_allocated_bytes":torch.cuda.max_memory_allocated(self.weight_basis.device) if self.weight_basis.device.type=="cuda" else 0,
                                   **self.resource_report()}
         return loss
+
+    def timing_summary(self):
+        metrics = self.last_step_metrics
+        return (
+            "THOGOPT last update: "
+            f"stage={metrics.get('gradient_staging_seconds', 0.):.3f}s "
+            f"prepare={metrics.get('gradient_preparation_seconds', 0.):.3f}s "
+            f"candidate={metrics.get('candidate_seconds', 0.):.3f}s "
+            f"commit={metrics.get('commit_seconds', 0.):.3f}s "
+            f"gpu_candidates={metrics.get('transaction_device_candidate_bytes', 0.) / 2**20:.0f}MiB "
+            f"async_staging={'yes' if metrics.get('async_gradient_staging') else 'no'}"
+        )
 
     def state_dict(self):
         payload = super().state_dict()
@@ -417,6 +515,10 @@ def build_thogopt(model, parameter_groups, *, learning_rate, betas, weight_decay
         raise ValueError("thogopt initially requires all fixed layer coordinates: disable layer dropout and chaos bump sampling")
     momentum = config.thogopt__momentum_history_coefficients if config is not None else os.environ.get("THOG2_THOGOPT_MOMENTUM_HISTORY_COEFFICIENTS", "auto")
     scaling = config.thogopt__scaling_history_coefficients if config is not None else os.environ.get("THOG2_THOGOPT_SCALING_HISTORY_COEFFICIENTS", "auto")
+    async_setting = os.environ.get("THOG2_THOGOPT_ASYNC_STAGING", "true").lower()
+    if async_setting not in {"true", "false"}:
+        raise ValueError("THOG2_THOGOPT_ASYNC_STAGING must be true or false")
     return Thogopt(parameter_groups, trajectory=trajectory, lr=learning_rate, betas=betas, weight_decay=weight_decay,
-        momentum_history_coefficients=momentum, scaling_history_coefficients=scaling)
+        momentum_history_coefficients=momentum, scaling_history_coefficients=scaling,
+        async_staging=async_setting == "true", transaction_storage=os.environ.get("THOG2_THOGOPT_TRANSACTION_STORAGE", "auto"))
 # ^^^ THOG

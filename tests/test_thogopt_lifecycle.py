@@ -21,6 +21,8 @@ def test_fresh_resume_reset_fork_and_capture(tmp_path):
     def run(arguments):
         result=subprocess.run([sys.executable,'-m','run_thog2_owt',*arguments],env=environment,cwd=Path(__file__).resolve().parents[1],text=True,capture_output=True,timeout=60)
         assert result.returncode==0,result.stdout[-6000:]+result.stderr[-6000:]
+        assert 'THOGOPT last update: stage=' in result.stdout
+        assert 'gpu_candidates=0MiB async_staging=no' in result.stdout
     run(['--model-type','sheet','--geometry-preset','depth','--run-mode','fresh','--run-start-label','260902-1000',
         '--optimizer','thogopt','--run-name','THOGOPT_TEST','--experiment-prefix','THOGOPT_TEST','--max-iters','1',
         '--data-dir',str(data),'--checkpoint-root',str(checkpoints),'--log-root',str(tmp_path/'logs'),'--result-root',str(tmp_path/'results'),

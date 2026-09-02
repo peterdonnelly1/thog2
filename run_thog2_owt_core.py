@@ -163,6 +163,11 @@ class OwtTrainer(Stage6Trainer):
             values["session_consumed_tokens"] = int(values["session_consumed_tokens"]) * int(self.distributed.world_size)
         # ^^^ THOG
         super()._print_progress(run_id, event, **format_console_progress_payload(add_console_tokens_per_second(values)))                                   # <<< THOG console progress now includes right-aligned tok/s and stable numeric widths.
+        if event == "optimizer_progress" and self.distributed.is_primary:
+            from sheet.thogopt import Thogopt
+            if isinstance(self.optimizer, Thogopt):
+                print(self.optimizer.timing_summary(), flush=True)
+
 
     def run_pilot(self, **arguments: Any) -> Dict[str, Any]:
         result = super().run_pilot(**arguments)

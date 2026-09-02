@@ -1,0 +1,25 @@
+FF..F..                                                                  [100%]
+=================================== FAILURES ===================================
+_ test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green _
+tests/test_console_progress_pretty_rows.py:27: in test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green
+    assert line.startswith("T       2  00:03:16  tok/s=          63")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x7f6a30a93360>('T       2  00:03:16  tok/s=          63')
+E    +    where <built-in method startswith of str object at 0x7f6a30a93360> = 'T     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \x1b[1;38;2;0;255;0mΔ=  -0.123\x1b[0m  lr= 5.714e-05  g/n=   3.120'.startswith
+_______________ test_step_one_console_row_keeps_elapsed_seconds ________________
+tests/test_console_progress_pretty_rows.py:51: in test_step_one_console_row_keeps_elapsed_seconds
+    assert line.startswith("T       1        9s")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x7f6a30974710>('T       1        9s')
+E    +    where <built-in method startswith of str object at 0x7f6a30974710> = 'T     1        9s    0.003h  loss= 10.8831  Δ=     n/a'.startswith
+_ test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss _
+tests/test_console_progress_pretty_rows.py:112: in test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss
+    assert line.startswith("\033[33mV       2  00:03:16  tok/s=          63")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x7f6a30974a80>('\x1b[33mV       2  00:03:16  tok/s=          63')
+E    +    where <built-in method startswith of str object at 0x7f6a30974a80> = '\x1b[33mV     2      196s    0.054h  tok/s=    63  toks=     24,576  loss= 10.8831  \x1b[0;1;93mvalidation loss= 10.7777\x1b[33m\x1b[0m'.startswith
+=========================== short test summary info ============================
+FAILED tests/test_console_progress_pretty_rows.py::test_training_console_row_uses_hh_mm_ss_after_step_one_and_colors_negative_delta_bright_green
+FAILED tests/test_console_progress_pretty_rows.py::test_step_one_console_row_keeps_elapsed_seconds
+FAILED tests/test_console_progress_pretty_rows.py::test_validation_console_row_uses_bold_explicit_rgb_yellow_for_validation_loss
+3 failed, 4 passed in 1.73s
