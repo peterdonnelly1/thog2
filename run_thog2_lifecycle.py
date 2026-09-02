@@ -78,6 +78,7 @@ def _plastic_coarse_trial_checkpoint_from_payload(
 
 _WANDB_BACKENDS = {"wandb", "both"}
 _OPERATIONAL_CONFIG_DESTINATIONS = {
+    "instrumentation__optimizer_histories__full_matrix_every_n_steps",
     "max_wall_minutes",
     "eval_interval",
     "eval_iters",
@@ -140,6 +141,9 @@ _ARGUMENT_TO_CONFIG = {
     "weight_decay": "weight_decay",
     "beta1": "beta1",
     "beta2": "beta2",
+    "instrumentation__optimizer_histories__full_matrix_every_n_steps": "instrumentation__optimizer_histories__full_matrix_every_n_steps",
+    "thogopt__momentum_history_coefficients": "thogopt__momentum_history_coefficients",
+    "thogopt__scaling_history_coefficients": "thogopt__scaling_history_coefficients",
     "grad_clip": "grad_clip",
     "dropout": "dropout",
     "bias": "bias",
@@ -211,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
     )
+    parser.add_argument("--reset-optimizer", action="store_true", help="fork only: explicitly reset all optimizer histories; model/data position are preserved")
     parser.add_argument("--optimizer")
     parser.add_argument("--optimizer-momentum", type=float)
     # vvv THOG keep the optional direct HYPERBLOCK MLP switch available through resume/fork lifecycle parsing
@@ -439,6 +444,9 @@ def _run_config_from_training_config(
         weight_decay=training_config.weight_decay,
         beta1=training_config.beta1,
         beta2=training_config.beta2,
+        instrumentation__optimizer_histories__full_matrix_every_n_steps=training_config.instrumentation__optimizer_histories__full_matrix_every_n_steps,
+        thogopt__momentum_history_coefficients=training_config.thogopt__momentum_history_coefficients,
+        thogopt__scaling_history_coefficients=training_config.thogopt__scaling_history_coefficients,
         grad_clip=training_config.grad_clip,
         nonfinite_update_policy=training_config.nonfinite_update_policy,
         max_nonfinite_update_skips=training_config.max_nonfinite_update_skips,
@@ -749,6 +757,7 @@ def _training_config_for_lifecycle(
     values = asdict(checkpoint_config)
     values.update(
         {
+            "instrumentation__optimizer_histories__full_matrix_every_n_steps": config.instrumentation__optimizer_histories__full_matrix_every_n_steps,
             "max_updates": int(target_updates),
             "max_wall_minutes": int(config.max_wall_minutes),
             "eval_interval": int(config.eval_interval),
@@ -929,14 +938,14 @@ def _prepare_parent_context(
             f"{mode} world size mismatch: checkpoint={parent_world_size}, requested={world_size}"
         )
 
-    _assert_optimizer_identity(
-        arguments,
-        explicit,
-        optimizer_name,
-        optimizer_momentum,
-        mode,
-    )
-    _assert_material_arguments(arguments, explicit, parent_config, mode)
+    reset_optimizer = bool(values.get("reset_optimizer"))
+    reset_fields = {"thogopt__momentum_history_coefficients", "thogopt__scaling_history_coefficients"}
+    if reset_optimizer:
+        optimizer_name, optimizer_momentum = _selected_optimizer_for_fresh(arguments, explicit) if "optimizer" in explicit else (optimizer_name, optimizer_momentum)
+        _assert_material_arguments(arguments, explicit - reset_fields, parent_config, mode)
+    else:
+        _assert_optimizer_identity(arguments, explicit, optimizer_name, optimizer_momentum, mode)
+        _assert_material_arguments(arguments, explicit, parent_config, mode)
 
     backend, wandb_mode = _selected_instrumentation(
         arguments,
@@ -1015,6 +1024,8 @@ def _prepare_parent_context(
             child_changes["run_name"] = str(values["run_name"])
         if "experiment_prefix" in explicit:
             child_changes["experiment_prefix"] = str(values["experiment_prefix"])
+        if reset_optimizer:
+            child_changes.update({name:values[name] for name in reset_fields if name in explicit})
         config = replace(parent_config, **child_changes)
         config = _apply_operational_config(
             config,
@@ -1047,6 +1058,12 @@ def _prepare_parent_context(
                 phase_min_lr=phase_min_lr,
             ),
         )
+        if reset_optimizer:
+            lifecycle["optimizer_name"] = optimizer_name
+            lifecycle["optimizer_momentum"] = optimizer_momentum
+            lifecycle["optimizer_reset"] = {"history_origin_completed_update":completed_updates,"optimizer":optimizer_name,
+                "momentum_history_coefficients":config.thogopt__momentum_history_coefficients,
+                "scaling_history_coefficients":config.thogopt__scaling_history_coefficients}
         append_log = False
 
     return {
@@ -1057,6 +1074,7 @@ def _prepare_parent_context(
         "lifecycle": lifecycle,
         "resolved": resolved,
         "checkpoint_payload": payload,
+        "reset_optimizer": reset_optimizer,
         "checkpoint_training_config": checkpoint_training_config,
         "completed_updates": completed_updates,
         "world_size": world_size,
@@ -1074,6 +1092,8 @@ def prepare_context(
     explicit: Set[str],
 ) -> Dict[str, Any]:
     mode, selector = _resolve_mode_and_selector(arguments, explicit)
+    if vars(arguments).get("reset_optimizer") and mode != "fork":
+        raise ValueError("--reset-optimizer requires an explicit fork")
     core.validate_dense_snapshot_cli(
         arguments,
         explicit=explicit,
@@ -1185,16 +1205,21 @@ def _training_config_for_context(context: Mapping[str, Any], dataset: Mapping[st
             "dataset vocab size differs from checkpoint: "
             f"checkpoint={checkpoint_training_config.vocab_size}, current={dataset['vocab_size']}"
         )
-    return _training_config_for_lifecycle(
+    result = _training_config_for_lifecycle(
         checkpoint_training_config,
         config,
         target_updates=int(context["lifecycle"]["target_updates"]),
         out_dir=paths["checkpoint_dir"],
     )
+    if context.get("reset_optimizer"):
+        result = replace(result, thogopt__momentum_history_coefficients=config.thogopt__momentum_history_coefficients,
+            thogopt__scaling_history_coefficients=config.thogopt__scaling_history_coefficients)
+    return result
 
 
 def _resume_overrides(training_config: TrainingConfig) -> Dict[str, Any]:
     return {
+        "instrumentation__optimizer_histories__full_matrix_every_n_steps": training_config.instrumentation__optimizer_histories__full_matrix_every_n_steps,
         "device": training_config.device,
         "dtype": training_config.dtype,
         "max_updates": training_config.max_updates,
@@ -1360,13 +1385,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else None
         )
         try:
-            trainer = core.OwtTrainer.from_checkpoint(
-                resolved.checkpoint_path,
-                train_tokens,
-                validation_tokens,
-                expected_config=training_config,
-                overrides=_resume_overrides(training_config),
-            )
+            if context.get("reset_optimizer"):
+                from sheet.thogopt_fork import reset_optimizer_fork
+                trainer = reset_optimizer_fork(core.OwtTrainer, checkpoint_payload, training_config, train_tokens, validation_tokens)
+            else:
+                trainer = core.OwtTrainer.from_checkpoint(
+                    resolved.checkpoint_path,
+                    train_tokens,
+                    validation_tokens,
+                    expected_config=training_config,
+                    overrides=_resume_overrides(training_config),
+                )
         except BaseException:
             if coarse_resume_coordinator is not None:
                 coarse_resume_coordinator.close()

@@ -213,6 +213,8 @@ def _optimizer_summary(trainer: Any) -> str:
     group = optimizer.param_groups[0]
     name = str(group.get("thog2_optimizer_name", optimizer.__class__.__name__)).lower()
     learning_rate = float(group["lr"])
+    if name == "thogopt":
+        return f"thogopt (lr={learning_rate:.3e}, betas={optimizer.defaults['betas']}, H_m={optimizer.q_m.shape[1]}, H_v={optimizer.q_v.shape[1]}, raw layer gradients, host staging estimate={optimizer.resource_report()['transaction_host_bytes_estimate'] / 2**20:.1f} MiB)"
     if name == "adamw":
         fused = bool(optimizer.defaults.get("fused", False))
         betas = optimizer.defaults.get("betas", (0.9, 0.95))
@@ -665,6 +667,7 @@ def _enhanced_lifecycle_requested(argv: Sequence[str]) -> bool:
             "--fork",
             "--resume-from",
             "--fork-lr-mode",
+            "--reset-optimizer",
             "--fork-learning-rate",
             "--fork-min-lr",
             "--fork-rewarm-iters",

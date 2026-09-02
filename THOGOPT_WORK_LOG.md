@@ -1,0 +1,61 @@
+# thogopt work log
+
+## 2026-09-02: baseline and scope (5%)
+
+User authorized implementation of the delivered v0.1 specification on the same branch, tagging the previous version, GitHub push and a final download stanza. Frequent informative percentage heartbeats and durable top-level handoff files are required.
+
+GitHub connector verified instra_weight_inspector at e36fe2330d849ccee93514fb5349a21d6b3bea21, tree bb97f4d70832659f9308e7f067ccd012d1ed98d4. Previous sandpit's staged tree exactly matched. Created isolated thog2_sandpit here using local objects; reconstructed the unsigned remote commit from connector metadata and verified its exact Git object hash before checkout. Earlier sandpits remain untouched.
+
+Created local tag pre_thogopt_20260902 at the starting remote commit. The exposed connector supports blob/tree/commit creation and branch updates but has no tag-creation action. Do not claim the tag is remote unless verified. Do not substitute a branch for a tag.
+
+Initial integration seams: sheet/optimizer_factory.py; DepthTrajectory materialisation; sheet/trainer_step.py; Stage6Trainer and run_thog2_owt.py; depth-weight instrumentation and local dashboard assets. No AGENTS.md files found in available workspace repositories.
+
+Spec contract: raw materialised layer gradients, two independent histories (auto P and min(2P-1,L)), layer-space AdamW division followed by production-basis pseudoinverse projection, nonnegative layer-sample least-squares second-moment fit, persistent compact state. Retain existing optimizer paths and existing SGD parity. Capture accumulated/reduced gradients before squaring; do not silently substitute projected coefficient gradients. Separate numerical correctness from empirical training performance.
+
+## Current next actions
+
+Read exact training-step, materialiser and capture interfaces; implement a small testable numerical core first. Keep new runtime work isolated to thogopt selection. Progress and verification commands/results follow below.
+
+## Numerical core and training integration (30%)
+
+Added sheet/thogopt_math.py and sheet/thogopt.py. History basis uses stable QR, with identity sample storage at H=L. Constrained second-moment fitting uses Hildreth dual coordinate descent and explicit convergence/roundoff checks. Gradients are staged on CPU; history evaluation and distributed reduction are tiled. Candidate parameters/histories are staged before commit; missing persistent buffers are allocated before parameter mutation.
+
+Installed a dedicated CPU verification environment at ../thogopt_venv (PyTorch 2.8.0+cpu, pytest, scipy). Command: ../thogopt_venv/bin/python -m pytest -q tests/test_thogopt.py. Initial result: 9 passed in 8.70s, including 500-step FP64/FP32 AdamW parity, independent SciPy constrained-fit checks, raw microbatch accumulation, P<L projected oracle, restart, rejection without mutation and sampled reference state.
+
+Factory, trainer, public CLI/wrapper, config persistence and lifecycle comparison now recognise thogopt and independent history budgets. Existing default settings are omitted from persisted config to avoid changing old optimizer identities. Public DEPTH does not use the direct-factorised MLP bypass; existing direct MLP configuration remains usable. Initial thogopt rejects geometry mutation and partial layer dropout.
+
+Next: run tiny-model/checkpoint integration tests, add captured history storage/dashboard endpoints and Instra groups. GPU and real OpenWebText throughput have not been tested; CPU environment only.
+
+## Training and history integration (55%)
+
+Full Stage4 DEPTH model, two accumulated microbatches and exact checkpoint restart pass with THOG2_FAST_DISCARD=true and false. Confirmed five legacy tests/test_optimizer_wrapper.py failures independently on untouched baseline; current suite has exactly the same five failures. No unrelated test expectations altered.
+
+Added passive same-gradient sampled references, actual DENSE AdamW state sampling, compact/full snapshot retention, read-only dashboard endpoints, Momentum and Scaling groups, quantity selectors, curve/reference/error inspection and bounded full-matrix windows. Full snapshot cadence is independent and opt-in via --instrumentation__optimizer_histories__full_matrix_every_n_steps; ordinary sampled capture follows existing weight settings. Need verify these new paths, UI compatibility, DDP and model parity before publish.
+
+## Verification and delivery preparation (78%)
+
+Passed 500-update FP64/FP32 synthetic AdamW parity and the 100-step FP32 complete model trajectory. Added FP64 model trajectory coverage, which exposed an existing hard-coded FP32 layer-normalization weight cast; its FP64-only path now preserves dtype while ordinary execution is unchanged. New capture/backend tests verify all six families, sampled and full matrices, signed differences, retention cleanup and passive training. Explicit --reset-optimizer is fork-only and preserves model/data position while resetting bias counters. New DOM harness checks history groups, run selection, latest queries, differences, decimal precision and standard/maximized inspection actions.
+
+34 integration/recovery/local-chart tests passed. CPU Gloo could not initialize: Operation not permitted at gloo TCP device.cc:186, including loopback retry; no distributed execution claim. Browser binary download timed out; full rendered browser QA is unavailable here. A jsdom DOM harness is being used alongside the pre-existing Instra JavaScript suites. GPU/OpenWebText acceptance remains unmeasured.
+
+Current work: finish FP64 model result, run the synthetic CPU benchmark and legacy JS suites, audit changed files, document practical limits, then publish through GitHub connector. Remote tag still unsupported by exposed connector; local baseline tag exists.
+
+All 22 existing/new Instra JavaScript regression programs pass. The CPU microbenchmark (L=8,P=3,H_m=3,H_v=5,D=16,20 measured steps) reports 50% covered-family moment storage savings (98,304 vs 196,608 bytes). thogopt is slower on this tiny workload; fitting dominates its optimizer time. Exact numbers are in docs/thogopt/cpu_benchmark.json.
+
+FP64 model comparison exposed differing existing embedding decay policies: THOG excludes embeddings, the generic DENSE optimizer decays them. The reference fixture now aligns physical parameter groups explicitly; production group policies are preserved. This is a required condition for optimizer-equivalence comparisons, not a numerical-tolerance relaxation.
+
+## Final validation (92%)
+
+FP64 and FP32 full-model AdamW comparisons now both pass for 100 updates with matched physical decay groups. The FP32 100-update SGD regression passes. The real public runner test passes fresh training, checkpoint resume, full/sample history capture and a fork with explicit optimizer reset and a changed momentum-history count. The shell wrapper dry-run forwards both exact thogopt option names and the full-matrix cadence correctly.
+
+A combined targeted Python run passed 92 tests before adding the SGD and public lifecycle cases. All 22 JS regression programs passed; final consolidated rerun follows. Documentation and original requirements are in docs/thogopt. Remote branch was rechecked through the connector and remains at the preserved starting commit. No remote mutation yet.
+
+## Ready to publish (96%)
+
+Final combined targeted Python suite: 94 passed in 15.38s. Additional direct half-parameter test verifies persistent FP32 moments without small-square underflow. All 22 JS regression programs passed; the new UI harness was rerun after the final projected-error display change and passed. Shell syntax, exact argument forwarding and git diff whitespace checks pass.
+
+Implementation, original v0.1 requirements, usage notes, numerical conditions, CPU benchmark and environment limitations are under docs/thogopt. GitHub publication will use immutable blobs/tree/commit then a non-forced update of instra_weight_inspector, retaining the verified starting commit as parent.
+
+Final checkpoint review added thogopt-only GradScaler persistence, including its growth tracker. A CPU GradScaler fixture now reproduces the uninterrupted scale increase and exact model weights after restart. Existing optimizer checkpoint payloads remain unchanged. Captured missing UI values also remain unavailable rather than coercing null to zero. The final full targeted suite is rerun after these changes.
+
+Final consolidated verification: 96 Python tests passed in 15.27s. All 22 JavaScript suites passed, including the final updated history DOM harness. Remote branch remained unchanged at e36fe2330d849ccee93514fb5349a21d6b3bea21 immediately before publication.

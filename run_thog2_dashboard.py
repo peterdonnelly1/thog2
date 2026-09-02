@@ -32,6 +32,9 @@ _local_dashboard_current_weights_performance_patch.install(_dashboard)
 _local_dashboard_weight_step_range_patch.install(_dashboard)
 _local_dashboard_notes_patch.install(_dashboard)                                                                                                                                          # <<< THOG install the notes API/status seam before constructing the dashboard handler
 
+from sheet.thogopt_dashboard import install as _install_thogopt_dashboard
+_install_thogopt_dashboard(_dashboard)
+
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
 _EXTRA_ASSET_NAMES = (
@@ -77,6 +80,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_aug30_enhancements_patch.js",                                                                                                               # <<< THOG preserve Overview state, stack/collapse panels, resize NAME, and place STEPS after preset p
     "dashboard_instra_further_enhancements_patch.js",                                                                                                      # <<< THOG finalize the August 31 Overview, table, fullscreen, live-weight, palette, and view-state requirements
     "dashboard_weight_inspector.js",                                                                                                                       # <<< THOG inspect exact retained weights in a virtual grid and finalize latest-step deduplication
+    "dashboard_thogopt.js",
 )
 
 

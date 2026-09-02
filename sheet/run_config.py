@@ -257,6 +257,9 @@ class OwtRunConfig:
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
+    instrumentation__optimizer_histories__full_matrix_every_n_steps: int = 0
+    thogopt__momentum_history_coefficients: str | int = "auto"
+    thogopt__scaling_history_coefficients: str | int = "auto"
     grad_clip: float = 1.0
     # vvv THOG public bounded non-finite recovery controls
     nonfinite_update_policy: str = "skip"
@@ -1274,6 +1277,9 @@ class OwtRunConfig:
                 "resolved_geometry_plan": None,
             }
         return TrainingConfig(
+            instrumentation__optimizer_histories__full_matrix_every_n_steps=self.instrumentation__optimizer_histories__full_matrix_every_n_steps,
+            thogopt__momentum_history_coefficients=self.thogopt__momentum_history_coefficients,
+            thogopt__scaling_history_coefficients=self.thogopt__scaling_history_coefficients,
             model_type=self.internal_model_type,
             block_size=self.block_size,
             vocab_size=vocab_size,
@@ -1367,6 +1373,13 @@ class OwtRunConfig:
     # vvv THOG persistent disabled-run metadata excludes all dormant PLASTIC DEPTH controls
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        if values.get("instrumentation__optimizer_histories__full_matrix_every_n_steps") == 0:
+            values.pop("instrumentation__optimizer_histories__full_matrix_every_n_steps", None)
+        # vvv THOG default-off additions do not alter existing optimizer run identities
+        for name in ("thogopt__momentum_history_coefficients", "thogopt__scaling_history_coefficients"):
+            if values[name] == "auto":
+                values.pop(name)
+        # ^^^ THOG
         for name in (
             "save_dense_initialisation_snapshot",
             "initialise_from_dense_snapshot",

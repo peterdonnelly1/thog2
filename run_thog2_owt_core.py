@@ -54,6 +54,14 @@ from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry, verbose_wandb_console_enabled
 
+# vvv THOG attach optimizer history sampling before the first committed update
+_base_attach_telemetry = attach_telemetry
+def attach_telemetry(trainer, telemetry):
+    _base_attach_telemetry(trainer, telemetry)
+    from sheet.thogopt_telemetry import attach_history_telemetry
+    attach_history_telemetry(trainer, telemetry)
+# ^^^ THOG
+
 REPOSITORY_ROOT = Path(__file__).resolve().parent
 
 
@@ -248,6 +256,10 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
+    # vvv THOG independent polynomial history budgets; explicit counts retain more raw depth information
+    from sheet.thogopt_config import add_thogopt_arguments
+    add_thogopt_arguments(parser)
+    # ^^^ THOG
     parser.add_argument("--model-type", choices=("dense", "sheet"))
     parser.add_argument("--select-depth", action="store_true", help="select the universal registered DEPTH curve")
     parser.add_argument("--select-element", action="append", default=[], metavar="SELECTOR", help="select one registered permitted geometry; repeat for multiple elements")
@@ -576,6 +588,9 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
             if AXIS_MLP_HIDDEN in selection.orders:
                 selected_mlp_hidden_order = selection.orders[AXIS_MLP_HIDDEN]
     config = OwtRunConfig(
+        instrumentation__optimizer_histories__full_matrix_every_n_steps=vars(arguments).get("instrumentation__optimizer_histories__full_matrix_every_n_steps", 0),
+        thogopt__momentum_history_coefficients=vars(arguments).get("thogopt__momentum_history_coefficients", "auto"),
+        thogopt__scaling_history_coefficients=vars(arguments).get("thogopt__scaling_history_coefficients", "auto"),
         model_type=model_type,
         run_mode=arguments.run_mode,
         host_label=arguments.host_label,

@@ -350,6 +350,7 @@ EOF_USAGE
 OPTIMIZER_FILTERED_ARGS=()
 GEOMETRY_UI_EXTRA_ARGS=()
 DENSE_SNAPSHOT_EXTRA_ARGS=()
+THOGOPT_EXTRA_ARGS=()  # <<< THOG forward independent optimizer history budgets
 EXPLAIN_GEOMETRY=false
 OPTIMIZER_SAW_SEPARATOR=false
 while (( $# > 0 )); do
@@ -637,6 +638,11 @@ while (( $# > 0 )); do
       MAX_NONFINITE_UPDATE_SKIPS="${1#*=}"
       shift
       ;;
+    --thogopt__momentum_history_coefficients|--thogopt__scaling_history_coefficients|--instrumentation__optimizer_histories__full_matrix_every_n_steps)
+      (( $# >= 2 )) || { echo "$1 requires auto or a positive integer" >&2; exit 2; }
+      THOGOPT_EXTRA_ARGS+=("$1" "$2"); shift 2 ;;
+    --thogopt__momentum_history_coefficients=*|--thogopt__scaling_history_coefficients=*|--instrumentation__optimizer_histories__full_matrix_every_n_steps=*)
+      THOGOPT_EXTRA_ARGS+=("$1"); shift ;;
     --optimizer)
       (( $# >= 2 )) || { echo "--optimizer requires a name" >&2; exit 2; }
       OPTIMIZER="$2"
@@ -709,11 +715,14 @@ if [[ "${1:-}" == "--" ]]; then shift; fi
 EXTRA_ARGS=("$@")
 EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${DENSE_SNAPSHOT_EXTRA_ARGS[@]}")
+EXTRA_ARGS+=("${THOGOPT_EXTRA_ARGS[@]}")
 
 # vvv THOG normalize optimizer and apply its LR defaults only when -c/-f were omitted
 case "${OPTIMIZER,,}" in
   adam|adamw)
     OPTIMIZER="adamw"; OPTIMIZER_DEFAULT_LR_CODE="60"; OPTIMIZER_DEFAULT_MIN_LR_CODE="06" ;;
+  thogopt)
+    OPTIMIZER="thogopt"; OPTIMIZER_DEFAULT_LR_CODE="60"; OPTIMIZER_DEFAULT_MIN_LR_CODE="06" ;;
   sgd)
     OPTIMIZER="sgd"; OPTIMIZER_DEFAULT_LR_CODE="1000"; OPTIMIZER_DEFAULT_MIN_LR_CODE="100" ;;
   nesterov|sgd-nesterov|sgd_nesterov)

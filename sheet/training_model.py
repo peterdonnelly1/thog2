@@ -450,10 +450,13 @@ class TrainingSheetGPT(SheetGPT):
         layer_index: int,
     ) -> Tensor:
         with torch.autocast(device_type=inputs.device.type, enabled=False):
-            weight = self.trajectory.materialize_vector(weight_name, layer_index).float()
+            # vvv THOG preserve FP64 in the optimizer-equivalence reference; ordinary execution retains FP32 normalization weights
+            normalization_dtype = torch.float64 if inputs.dtype == torch.float64 else torch.float32
+            weight = self.trajectory.materialize_vector(weight_name, layer_index).to(dtype=normalization_dtype)
             bias = self._optional_bias(bias_name, layer_index)
             if bias is not None:
-                bias = bias.float()
+                bias = bias.to(dtype=normalization_dtype)
+            # ^^^ THOG
             return F.layer_norm(
                 inputs,
                 (self.config.n_embd,),

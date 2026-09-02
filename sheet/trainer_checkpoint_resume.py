@@ -306,6 +306,10 @@ class TrainerCheckpointResumeMixin:
                 "with checkpoint"
             )
         trainer.optimizer.load_state_dict(payload["optimizer"])
+        # vvv THOG resume the loss-scale growth tracker with the compact moment histories
+        if payload.get("thogopt_grad_scaler"):
+            trainer.scaler.load_state_dict(payload["thogopt_grad_scaler"])
+        # ^^^ THOG
         # trainer.state = TrainerState(**payload["trainer_state"])
         # vvv THOG restore new recovery counters safely from older schema-2 checkpoints
         trainer.state = _trainer_state_from_payload(payload)

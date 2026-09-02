@@ -963,7 +963,18 @@ class TrainerStepMixin:
             diagnostics_hook()
 
         gradient_norm: Optional[float] = None
-        if self.config.grad_clip > 0.0:
+        # vvv THOG thogopt squares only accumulated, reduced, unscaled and physically clipped gradients
+        from .thogopt import Thogopt
+        if isinstance(self.optimizer, Thogopt):
+            try:
+                gradient_norm = self.optimizer.prepare_gradients(
+                    loss_scale=float(self.scaler.get_scale()), grad_clip=self.config.grad_clip)
+            except FloatingPointError:
+                return self._handle_nonfinite_update(reason="thogopt_raw_gradient", learning_rate=learning_rate,
+                    training_loss=total_loss/accumulation_steps, gradient_norm=None, micro_step=None,
+                    microbatch_starts=microbatch_starts, scaler_unscaled=True)
+        # ^^^ THOG
+        elif self.config.grad_clip > 0.0:
             norm = torch.nn.utils.clip_grad_norm_(
                 self.raw_model.parameters(),
                 self.config.grad_clip,
@@ -1002,7 +1013,16 @@ class TrainerStepMixin:
         if self.config.plastic__enabled:
             self._plastic_depth_device_synchronize()
         plastic_optimizer_started = time.perf_counter() if self.config.plastic__enabled else None
-        self.scaler.step(self.optimizer)
+        # vvv THOG a failed thogopt candidate leaves all weights and histories unchanged
+        try:
+            self.scaler.step(self.optimizer)
+        except FloatingPointError:
+            if not isinstance(self.optimizer, Thogopt):
+                raise
+            return self._handle_nonfinite_update(reason="thogopt_candidate", learning_rate=learning_rate,
+                training_loss=total_loss/accumulation_steps, gradient_norm=gradient_norm, micro_step=None,
+                microbatch_starts=microbatch_starts, scaler_unscaled=True)
+        # ^^^ THOG
         self.scaler.update()
         # vvv THOG commit the selected count only after the stock AdamW step, then re-express model and coefficient state before the next forward
         # self._commit_plastic_depth_inline_update(plastic_inline_context)

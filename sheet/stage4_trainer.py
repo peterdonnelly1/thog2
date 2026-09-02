@@ -115,6 +115,7 @@ class Stage4Trainer(SharedTrainer):
             learning_rate=config.learning_rate,
             betas=(config.beta1, config.beta2),
             device_type=self.device.type,
+            thogopt_config=config,  # <<< THOG independent history counts are checkpointed configuration
         )
         self.memory_telemetry.snapshot("optimizer_allocation")
         self.batch_source = DeterministicBatchSource(

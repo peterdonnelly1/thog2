@@ -65,7 +65,7 @@ from .plastic_depth import (
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
@@ -301,6 +301,9 @@ class TrainingConfig:
     weight_decay: float = 0.1
     beta1: float = 0.9
     beta2: float = 0.95
+    instrumentation__optimizer_histories__full_matrix_every_n_steps: int = 0
+    thogopt__momentum_history_coefficients: str | int = "auto"
+    thogopt__scaling_history_coefficients: str | int = "auto"
     grad_clip: float = 1.0
     # vvv THOG bounded non-finite update recovery controls
     nonfinite_update_policy: str = "skip"
@@ -892,6 +895,13 @@ class TrainingConfig:
     # vvv THOG serialize no dormant PLASTIC DEPTH fields when disabled so checkpoint and report metadata remain exact regressions
     def persistent_dict(self) -> Dict[str, Any]:
         values = asdict(self)
+        if values.get("instrumentation__optimizer_histories__full_matrix_every_n_steps") == 0:
+            values.pop("instrumentation__optimizer_histories__full_matrix_every_n_steps", None)
+        # vvv THOG old optimizer checkpoint identity is unchanged at default settings
+        for name in ("thogopt__momentum_history_coefficients", "thogopt__scaling_history_coefficients"):
+            if values[name] == "auto":
+                values.pop(name)
+        # ^^^ THOG
         for name in (
             "save_dense_initialisation_snapshot",
             "initialise_from_dense_snapshot",

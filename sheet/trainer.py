@@ -86,6 +86,7 @@ class SharedTrainer(
             learning_rate=config.learning_rate,
             betas=(config.beta1, config.beta2),
             device_type=self.device.type,
+            thogopt_config=config,  # <<< THOG independent history counts are checkpointed configuration
         )
         self.batch_source = DeterministicBatchSource(
             train_tokens,

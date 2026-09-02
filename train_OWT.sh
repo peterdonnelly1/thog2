@@ -14,7 +14,7 @@ thog2_normalize_nonplastic_long_option() {
 THOG2_STRICT_LONG_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*)
+    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*)
       THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;
@@ -205,7 +205,7 @@ for THOG2_ARGUMENT in "$@"; do
     -h|--help)
       THOG2_LIFECYCLE_HELP=true
       ;;
-    --resume|--fork|--resume=*|--fork=*|--resume-from|--resume-from=*|--fork-lr-mode|--fork-lr-mode=*|--fork-learning-rate|--fork-learning-rate=*|--fork-min-lr|--fork-min-lr=*|--fork-rewarm-iters|--fork-rewarm-iters=*|--wandb-continue-run|--no-wandb-continue-run)
+    --reset-optimizer|--resume|--fork|--resume=*|--fork=*|--resume-from|--resume-from=*|--fork-lr-mode|--fork-lr-mode=*|--fork-learning-rate|--fork-learning-rate=*|--fork-min-lr|--fork-min-lr=*|--fork-rewarm-iters|--fork-rewarm-iters=*|--wandb-continue-run|--no-wandb-continue-run)
       THOG2_LIFECYCLE_DISPATCH=true
       ;;
     -qresume|-qfork)

@@ -38,6 +38,10 @@ class TrainerCheckpointSaveMixin:
             "row_order_scaling_rule": self.config.row_order_scaling_rule,
             "model": compact_model_state(self.raw_model, self.config.model_type),
             "optimizer": self.optimizer.state_dict(),
+            # vvv THOG preserve dynamic loss scaling across thogopt restarts; old optimizer payloads are unchanged
+            **({"thogopt_grad_scaler": self.scaler.state_dict()}
+               if any(group.get("thog2_optimizer_name") == "thogopt" for group in self.optimizer.param_groups) else {}),
+            # ^^^ THOG
             "optimizer_group_parameter_names": optimizer_group_names(self.optimizer),
             "trainer_state": asdict(self.state),
             "completed_updates": self.state.completed_updates,

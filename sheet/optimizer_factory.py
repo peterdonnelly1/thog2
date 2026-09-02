@@ -14,12 +14,14 @@ OPTIMIZER_SGD = "sgd"
 OPTIMIZER_SGD_NESTEROV = "sgd_nesterov"
 OPTIMIZER_ADAFACTOR = "adafactor"
 OPTIMIZER_RMSPROP = "rmsprop"
+OPTIMIZER_THOGOPT = "thogopt"  # <<< THOG layer-coordinate adaptive optimizer
 OPTIMIZER_NAMES = (
     OPTIMIZER_ADAMW,
     OPTIMIZER_SGD,
     OPTIMIZER_SGD_NESTEROV,
     OPTIMIZER_ADAFACTOR,
     OPTIMIZER_RMSPROP,
+    OPTIMIZER_THOGOPT,
 )
 DEFAULT_OPTIMIZER = OPTIMIZER_ADAMW
 DEFAULT_OPTIMIZER_MOMENTUM = 0.9
@@ -33,6 +35,7 @@ _OPTIMIZER_ALIASES = {
     "sgd-nesterov": OPTIMIZER_SGD_NESTEROV,
     "adafactor": OPTIMIZER_ADAFACTOR,
     "rmsprop": OPTIMIZER_RMSPROP,
+    "thogopt": OPTIMIZER_THOGOPT,
 }
 
 
@@ -117,12 +120,20 @@ def build_optimizer(
     learning_rate: float,
     betas: Tuple[float, float],
     device_type: str,
+    thogopt_config=None,
 ) -> torch.optim.Optimizer:
     optimizer_name = optimizer_name_from_environment()
     momentum = optimizer_momentum_from_environment()
     parameter_groups = optimizer_parameter_groups(model, weight_decay)
 
-    if optimizer_name == OPTIMIZER_ADAMW:
+    # vvv THOG only the selected thogopt path installs raw-gradient hooks
+    if optimizer_name == OPTIMIZER_THOGOPT:
+        from .thogopt import build_thogopt
+        optimizer = build_thogopt(model, parameter_groups, learning_rate=learning_rate,
+            betas=betas, weight_decay=weight_decay, config=thogopt_config)
+        details = f"layer-space AdamW betas={betas} H_m={optimizer.q_m.shape[1]} H_v={optimizer.q_v.shape[1]} host gradient staging"
+    # ^^^ THOG
+    elif optimizer_name == OPTIMIZER_ADAMW:
         fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == "cuda"
         optimizer = torch.optim.AdamW(

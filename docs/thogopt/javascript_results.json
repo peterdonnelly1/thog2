@@ -1,0 +1,112 @@
+[
+  {
+    "file": "tests/instra_aug30_enhancements_regression.js",
+    "returncode": 0,
+    "output": "instra August 30 enhancements regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_dashboard_consistency_final_regression.js",
+    "returncode": 0,
+    "output": "instra dashboard consistency final regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_dashboard_performance_regression.js",
+    "returncode": 0,
+    "output": "instra dashboard performance regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_further_enhancements_regression.js",
+    "returncode": 0,
+    "output": "instra further enhancements regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_heatmap_performance_regression.js",
+    "returncode": 0,
+    "output": "instra heatmap performance regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_legacy_heatmap_repair_regression.js",
+    "returncode": 0,
+    "output": "instra legacy heatmap repair regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_metric_group_state_regression.js",
+    "returncode": 0,
+    "output": "instra metric group state regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_sep01_enhancements_regression.js",
+    "returncode": 0,
+    "output": "instra September 1 behaviour regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_sep01_repair_regression.js",
+    "returncode": 0,
+    "output": "instra September 1 refresh/range repair regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_sep02_enhancements_regression.js",
+    "returncode": 0,
+    "output": "instra September 2 columns/metric controls regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_sep02_followup_regression.js",
+    "returncode": 0,
+    "output": "instra follow-up percentage/navigation/icons regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_thogopt_regression.js",
+    "returncode": 0,
+    "output": "PASS thogopt history groups, run switching, latest requests, signed differences, precision, bounded matrix windows, standard/maximized inspector actions\n"
+  },
+  {
+    "file": "tests/instra_weight_coupling_regression.js",
+    "returncode": 0,
+    "output": "instra weight coupling regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_inspector_regression.js",
+    "returncode": 0,
+    "output": "instra weight inspector data and event regressions: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_persistence_log_regression.js",
+    "returncode": 0,
+    "output": "instra weight persistence/log regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_precision_regression.js",
+    "returncode": 0,
+    "output": "instra weight inspection precision persistence regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_range_interaction_regression.js",
+    "returncode": 0,
+    "output": "instra weight range interaction regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_request_router_regression.js",
+    "returncode": 0,
+    "output": "instra weight request router regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_runtime_loader_regression.js",
+    "returncode": 0,
+    "output": "instra weight runtime loader regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_stability_regression.js",
+    "returncode": 0,
+    "output": "instra weight stability regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_weight_step_filter_regression.js",
+    "returncode": 0,
+    "output": "instra weight runtime loader regression: PASS\ninstra weight request router regression: PASS\ninstra weight stability regression: PASS\n"
+  },
+  {
+    "file": "tests/instra_workspace_weight_overlay_regression.js",
+    "returncode": 0,
+    "output": "instra workspace weight overlay regression: PASS\n"
+  }
+]
