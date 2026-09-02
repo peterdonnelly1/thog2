@@ -28,7 +28,7 @@ Remaining external verification: CUDA/AMP/NCCL, representative OpenWebText conve
 
 ## Active follow-up: slowdown and missing System group
 
-Starting commit: f1b67b12ec8aad2ae38e1eadd3e2b16e7ce5c796. Same branch, GitHub connector only. Progress: 90%.
+Starting commit: f1b67b12ec8aad2ae38e1eadd3e2b16e7ce5c796. Same branch, GitHub connector only. Progress: complete. Published feature commit 5d5356e9189577279ee310ea41c3bbddd84e7f3d, verified through GitHub connector.
 
 - [x] Inspect reported 10.0s/update vs 4.9s/update screenshots and verify remote/local baseline.
 - [x] Remove full-history identity fitting; increase bounded tile size; eliminate redundant weight transfers and FP64 norm temporary.
@@ -36,6 +36,6 @@ Starting commit: f1b67b12ec8aad2ae38e1eadd3e2b16e7ce5c796. Same branch, GitHub c
 - [x] JavaScript regression suite: 23/23 passed, including new System visibility/recovery test.
 - [x] Numerical/accumulation/checkpoint/rejection and backend regression tests: 106 passed.
 - [x] CPU before/after measurement: optimizer time -14.5%, whole-step time -9.3%; GPU unmeasured.
-- [ ] Update documentation and publish via GitHub connector; verify remote SHA and give download stanza.
+- [x] Update documentation and publish via GitHub connector; remote SHA and complete tree verified. Download stanza supplied with delivery.
 
 Verification interpreter: ../thogopt_fix_venv/bin/python (Python3.12.3, PyTorch2.8.0, CPU execution). Previous ../thogopt_venv interpreter missing in this runtime. Old package files remain intact. Baseline optimizer saved outside repo at ../thogopt_before.py for exact before/after comparison. No CUDA device accessible; do not claim measured GPU speedup or exact cause of System absence on user's machine.
