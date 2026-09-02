@@ -42,9 +42,9 @@ Verification interpreter: ../thogopt_fix_venv/bin/python (Python3.12.3, PyTorch2
 
 ## Active follow-up: remaining 7.9s/update overhead
 
-Starting commit bf18073a76a9b3310fee328ff9365498f522740b. Progress 85%. User GPU measured previous fix:10.0 ->7.9s/update, still vs4.8-4.9s SGD.
+Starting commit bf18073a76a9b3310fee328ff9365498f522740b. Progress complete. Feature c516a3eb2cf7dc9595acccbd4dc18d2acccccb89 published and verified. User GPU measured previous fix:10.0 ->7.9s/update, still vs4.8-4.9s SGD.
 - [x] Inspect host staging, transaction copies and synchronization.
 - [x] Implement two-buffer asynchronous staging, memory-budgeted device candidates and last-update timing output.
 - [x] Numerical/restart/rejection/staging tests:108 passed,4 CUDA skipped; budget suite rerun after final refinement. CPU timings essentially unchanged; GPU-specific changes unmeasured.
-- [ ] Document limitations and push same branch via connector; provide fetch stanza.
+- [x] Document limitations and push same branch via connector; remote tree and branch verified. Fetch stanza included in delivery.
 Baseline optimizer: ../thogopt_before_transfer_fix.py. Runtime: ../thogopt_fix_venv/bin/python. CUDA unavailable locally. No agents requested.
