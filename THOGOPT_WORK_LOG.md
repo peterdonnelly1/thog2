@@ -59,3 +59,11 @@ Implementation, original v0.1 requirements, usage notes, numerical conditions, C
 Final checkpoint review added thogopt-only GradScaler persistence, including its growth tracker. A CPU GradScaler fixture now reproduces the uninterrupted scale increase and exact model weights after restart. Existing optimizer checkpoint payloads remain unchanged. Captured missing UI values also remain unavailable rather than coercing null to zero. The final full targeted suite is rerun after these changes.
 
 Final consolidated verification: 96 Python tests passed in 15.27s. All 22 JavaScript suites passed, including the final updated history DOM harness. Remote branch remained unchanged at e36fe2330d849ccee93514fb5349a21d6b3bea21 immediately before publication.
+
+## Published and verified
+
+Implementation commit 282ae4677bdbd611c62710a4a8bd29688d4af250 was created with parent e36fe2330d849ccee93514fb5349a21d6b3bea21 and tree f2c961ff8594cbea7f537ad39891bd971b121a2e. Every uploaded blob SHA and the complete remote tree SHA matched the local staged tree. GitHub connector updated instra_weight_inspector without force; a fresh connector read verified the branch at the implementation commit. Local branch/tracking refs were aligned by reproducing and hash-verifying the exact connector commit object.
+
+This final handoff-only follow-up records delivery. The implementation is complete; no further code changes are planned. The preservation tag pre_thogopt_20260902 remains local because the connector has no tag-create operation. The final download stanza includes commands for the user to publish it. No shell GitHub write was used.
+
+Verification limits remain explicit: no GPU; Gloo initialization blocked; browser binary download unavailable. Do not interpret CPU storage savings or curve parity as demonstrated long-run OpenWebText convergence or GPU speed.
