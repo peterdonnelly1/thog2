@@ -17,6 +17,7 @@ from types import MethodType
 import torch
 import torch.distributed as dist
 from torch import Tensor
+import constants as _constants
 
 from .depth_trajectory import DepthTrajectory
 from .thogopt_transfers import HostGradientTransfers, candidate_memory_budget
@@ -43,6 +44,7 @@ class Thogopt(torch.optim.Optimizer):
             raise ValueError("invalid thogopt AdamW hyperparameters")
         super().__init__(params, dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay))
         self.transaction_storage = transaction_storage
+        self.timing_enabled = int(_constants.DEBUG) > 99
         self.async_staging = bool(async_staging)
         self.gradient_transfers = None
         self.staging_fallback_reason = ""
@@ -153,7 +155,7 @@ class Thogopt(torch.optim.Optimizer):
 
     @torch.no_grad()
     def accumulate_layer_gradient(self, name, layer_index, gradient):
-        started = time.perf_counter()
+        started = time.perf_counter() if self.timing_enabled else 0.
         if self.prepared:
             raise RuntimeError("thogopt received a gradient after step preparation")
         if name not in self.raw_gradients:
@@ -173,7 +175,8 @@ class Thogopt(torch.optim.Optimizer):
             else:
                 destination.copy_(values)
         self.seen_layers[name][layer_index] = True
-        self.gradient_staging_seconds += time.perf_counter()-started
+        if self.timing_enabled:
+            self.gradient_staging_seconds += time.perf_counter()-started
 
     def zero_grad(self, set_to_none=True):
         if self.gradient_transfers is not None:
@@ -195,7 +198,7 @@ class Thogopt(torch.optim.Optimizer):
 
     @torch.no_grad()
     def prepare_gradients(self, *, loss_scale=1., grad_clip=0.):
-        started = time.perf_counter()
+        started = time.perf_counter() if self.timing_enabled else 0.
         if self.prepared:
             raise RuntimeError("thogopt gradients were already prepared")
         if not math.isfinite(loss_scale) or loss_scale <= 0:
@@ -245,7 +248,8 @@ class Thogopt(torch.optim.Optimizer):
                     if parameter.grad is not None:
                         parameter.grad.mul_(factor)
         self.prepared = True
-        self.gradient_preparation_seconds = time.perf_counter()-started
+        if self.timing_enabled:
+            self.gradient_preparation_seconds = time.perf_counter()-started
         return norm
 
     def configure_reference(self, coordinates):
@@ -295,7 +299,7 @@ class Thogopt(torch.optim.Optimizer):
             if bool((previous_values < -tolerance).any()):
                 raise FloatingPointError(f"thogopt negative previous second moment: {name}")
             target = previous_values.clamp_min(0).mul_(beta2).add_(gradient.square(), alpha=1-beta2)
-            fit_started = time.perf_counter()
+            fit_started = time.perf_counter() if self.timing_enabled else 0.
             if full_scaling:
                 # With H_v=L, Q_v is the identity: the nonnegative target is
                 # already the exact least-squares solution. No fit is needed.
@@ -305,7 +309,8 @@ class Thogopt(torch.optim.Optimizer):
                     v, fit_metrics = fit_nonnegative(self.q_v, target)
                 except (ValueError,FloatingPointError) as error:
                     raise FloatingPointError(f"thogopt {name} step {step}: {error}") from error
-                metrics["fit_seconds"] += time.perf_counter()-fit_started
+                if self.timing_enabled:
+                    metrics["fit_seconds"] += time.perf_counter()-fit_started
                 for key in ("constrained_columns", "roundoff_corrections"):
                     metrics[key] += fit_metrics[key]
                 for key in ("maximum_roundoff_correction", "fit_sweeps"):
@@ -379,7 +384,7 @@ class Thogopt(torch.optim.Optimizer):
                 loss = closure()
         if not self.prepared:
             self.prepare_gradients()
-        started = time.perf_counter()
+        started = time.perf_counter() if self.timing_enabled else 0.
         transaction_budget = self._transaction_budget()
         remaining_budget = transaction_budget
         device_candidate_bytes = 0
@@ -419,15 +424,16 @@ class Thogopt(torch.optim.Optimizer):
             if failure is not None:
                 raise failure
             raise FloatingPointError("thogopt candidate rejected on another rank")
-        if self.weight_basis.device.type == "cuda":
+        initializing_state = any(not self.state.get(parameter) for parameter, _, _ in pending)
+        if self.weight_basis.device.type == "cuda" and (self.timing_enabled or initializing_state):
             torch.cuda.current_stream(self.weight_basis.device).synchronize()
-        candidate_seconds = time.perf_counter() - started
-        commit_started = time.perf_counter()
+        candidate_seconds = time.perf_counter() - started if self.timing_enabled else 0.
+        commit_started = time.perf_counter() if self.timing_enabled else 0.
         # Allocate missing persistent buffers before changing any parameter.
         commit_states = []
         allocation_failure = None
         try:
-            if self.weight_basis.device.type == "cuda" and any(not self.state.get(parameter) for parameter, _, _ in pending):
+            if self.weight_basis.device.type == "cuda" and initializing_state:
                 # First-state candidates are on the host and CUDA work is done.
                 # Release unused backward blocks before allocating long-lived
                 # histories, rather than pinning slices of those large blocks.
@@ -456,10 +462,11 @@ class Thogopt(torch.optim.Optimizer):
             destination["step"] = state["step"]
             self.state[parameter] = destination
         self.reference_histories = references
-        if self.weight_basis.device.type == "cuda":
+        if self.weight_basis.device.type == "cuda" and self.timing_enabled:
             torch.cuda.current_stream(self.weight_basis.device).synchronize()
-        commit_seconds = time.perf_counter() - commit_started
-        self.last_step_metrics = {"families": diagnostics, "optimizer_seconds": time.perf_counter()-started,
+        commit_seconds = time.perf_counter() - commit_started if self.timing_enabled else 0.
+        self.last_step_metrics = {"families": diagnostics, "optimizer_seconds": time.perf_counter()-started if self.timing_enabled else 0.,
+                                  "timing_enabled": self.timing_enabled,
                                   "candidate_seconds": candidate_seconds, "commit_seconds": commit_seconds,
                                   "transaction_device_budget_bytes": transaction_budget,
                                   "transaction_device_candidate_bytes": device_candidate_bytes,

@@ -1,6 +1,16 @@
 # thogopt implementation tasks
 
-## Completed: CUDA OOM correction (published; GPU rerun outstanding)
+## Forensic timing gate: verified and prepared for publication
+
+User requests keeping timing code only behind DEBUG>99. Starting commit fcd54e9c1ce349e60b9e2a49ade048530cb6e1cb verified through GitHub connector.
+- [x] Locate constants.DEBUG and the existing verbose console threshold.
+- [x] Gate clocks, measurement-only CUDA waits and the extra THOGOPT timing row; preserve initialization synchronization.
+- [x] Verify threshold, numerical neutrality, resume and normal progress output:45 passed,4 CUDA skipped.
+- [x] Update docs/log. This commit delivers the timing gate; publish on the same branch through the GitHub connector and provide the fetch stanza.
+
+GPU follow-up evidence: user completed30 updates at D=1024; first6.9s, later5.6-5.8s, gpu_candidates2905MiB, no repeat of the previous next-backward OOM through step30. Full500-update outcome remains unreported.
+
+## Completed: CUDA OOM correction (published; user run reached30 updates)
 
 Baseline: 8e9beeb83826cb68db48297bf09956b001683568. User log: first update 5.6s, GPU candidates 2905MiB, next backward requests 2.30GiB with 1.58GiB free and 5.52GiB reserved/unallocated. Keep D=1024 and the existing A/B baselines. Candidate adoption can pin split allocator segments; fix storage lifetime before reducing model size.
 
@@ -10,9 +20,9 @@ Baseline: 8e9beeb83826cb68db48297bf09956b001683568. User log: first update 5.6s,
 - [x] Document actual GPU evidence and remaining hardware validation limits in docs/thogopt/README.md.
 - [x] Publish through GitHub connector on the same branch; feature b743bebc7b942686f54e05c3444ee7b3da6b56cf verified remotely. Download stanza included in delivery.
 
-Correction: any active missing state forces a host transaction; validated CUDA initialization releases unused cache before creating stable history buffers. Routine commits copy into the existing buffers; GPU candidates remain transient. Ordinary scratch is function-local. First fresh timing line should show gpu_candidates=0MiB; later lines can use GPU. Test evidence: docs/thogopt/oom_followup_python_tests.txt. No representative GPU rerun yet. Runtime: ../thogopt_fix_venv/bin/python.
+Correction: any active missing state forces a host transaction; validated CUDA initialization releases unused cache before creating stable history buffers. Routine commits copy into the existing buffers; GPU candidates remain transient. Ordinary scratch is function-local. With DEBUG>99, first fresh timing line should show gpu_candidates=0MiB; later lines can use GPU. Test evidence: docs/thogopt/oom_followup_python_tests.txt. User GPU evidence now reaches30 updates without the previous OOM. Runtime: ../thogopt_fix_venv/bin/python.
 
-Next external action: rerun the same C configuration at D=1024 on scruffy; preserve A/B. Collect progress/timing lines after 10-20 updates or any traceback. No additional implementation is planned until that evidence arrives. No optimizer reset required.
+Next external action: let the same C configuration at D=1024 finish; preserve A/B. No additional implementation planned before new evidence. No optimizer reset required. Timing gate takes effect on the next restart/resume; do not interrupt the current run merely to hide diagnostics.
 
 
 Progress estimate: Implementation complete and pushed: 282ae4677bdbd611c62710a4a8bd29688d4af250. Verified remotely through GitHub connector. 96 Python tests and 22 JavaScript suites passed.

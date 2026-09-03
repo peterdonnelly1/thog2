@@ -1,5 +1,13 @@
 # thogopt work log
 
+## 2026-09-03: GPU follow-up and DEBUG timing gate
+
+User's same-shape D=1024 run reached30 updates: first6.9s with host candidates; subsequent5.6-5.8s with2905MiB GPU candidates, prepare0.48-0.52s, candidate0.23-0.28s, commit0.016s. No repeated OOM through step30; a complete500-update result has not been reported. This is user GPU evidence, not a local reproduction.
+
+User now requests retaining timing only behind DEBUG>99. Starting branch verified at fcd54e9c1ce349e60b9e2a49ade048530cb6e1cb. Use existing constants.DEBUG (currently9); retain normal progress rows. Gate component clocks and measurement-only CUDA synchronization as well as the timing row. Preserve CUDA synchronization before first-state cache release/allocation regardless of DEBUG. Metrics carry timing_enabled=false with zero placeholders when clocks are disabled; the standalone benchmark represents unavailable component times as null while keeping its independent total/optimizer measurements. No math, moment dimensions or checkpoint identity changes intended.
+
+Verification complete:45 passed,4 CUDA skipped in15.52s, recorded in docs/thogopt/debug_timing_tests.txt. Boundary tests exercise DEBUG99/100 with a clock that rejects any normal-run call, check the real console wrapper preserves ordinary progress, and compare updates/state exactly across timing settings. Existing full-model parity, optimizer histories, transfers, rejection and real fresh/resume/reset-fork lifecycle checks pass. Candidate synchronization remains unconditional when initializing state; copy-event safety remains unchanged. Existing constants.DEBUG stays9. User should let the current run finish; this change is picked up at the next restart/resume. Publication uses the connector with the verified parent and exact blob/tree hashes; no additional implementation planned after delivery.
+
 ## CUDA OOM follow-up: active diagnosis (35%)
 
 Latest baseline 8e9beeb83826cb68db48297bf09956b001683568 verified through connector. Read user attachment Pasted text(20260902-233352).txt directly from uploaded scratch copy. Actual RTX4090 16GB run: first update 5.6s, stage3.139s prepare0.396s candidate0.245s commit0.005s, 2905MiB GPU candidates, async staging enabled. Next backward failed requesting2.30GiB; free1.58GiB, allocated7.81GiB, reserved/unallocated5.52GiB. One completed update is not a sustained throughput measurement.

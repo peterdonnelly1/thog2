@@ -53,6 +53,10 @@ def benchmark(*,layers=8,order=3,width=16,steps=20,device='cpu'):
             'all_parameter_moment_bytes':moment_bytes,'process_peak_rss_bytes':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
             'instrumentation':'disabled; no telemetry attached','synthetic_tokens':True,**totals}
         if hasattr(trainer.optimizer,'resource_report'):report['compressed_families']=trainer.optimizer.resource_report()
+        if optimizer_name == 'thogopt':
+            report['component_timings_enabled'] = trainer.optimizer.timing_enabled
+            if not trainer.optimizer.timing_enabled:
+                for key in totals: report[key] = None
         reports.append(report)
         trainer.close()
     return {'torch_version':torch.__version__,'reports':reports,'limitations':['Synthetic tiny CPU workload is not OpenWebText training quality evidence.','Process peak RSS is cumulative across cases; not an isolated optimizer allocation peak.','Host gradient staging remains O(L * couplings); device moments use O((H_m + H_v) * couplings).']}
