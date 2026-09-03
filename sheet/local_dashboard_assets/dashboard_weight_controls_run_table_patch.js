@@ -321,6 +321,7 @@ window.addEventListener("load", () => {
         value: run => run?.preset || configuration_value(run, "geometry_preset", "model_type"),
       },
       {key: "optimizer", label: "OPT", title: "optimizer (momentum suffix when used)", numeric: false, value: optimizer_text},
+      {key: "warmup", label: "w", title: "warm-up steps", value: run => configuration_value(run, "warmup_iters", "warmup_steps", "warmup_updates")},
       {key: "layers", label: "L", title: "layers", value: run => configuration_value(run, "n_layer")},
       {
         key: "depth_order", label: "P", title: "depth order (not applicable to DENSE)",

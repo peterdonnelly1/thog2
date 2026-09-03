@@ -865,7 +865,7 @@ render_run_heading = function() { local_base_render_run_heading(); if (by_id("ru
 const local_base_render_empty_state = render_empty_state;
 render_empty_state = function() { local_base_render_empty_state(); if (by_id("run_detail_tabs")) local_apply_detail_tab(); };
 const local_base_select_run = select_run;
-select_run = function(run_id, options = {}) { local_active_detail_tab = "charts"; return local_base_select_run(run_id, options); };
+select_run = function(run_id, options = {}) { return local_base_select_run(run_id, options); };
 local_install_detail_tabs();
 // ^^^ THOG
 

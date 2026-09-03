@@ -46,7 +46,7 @@
     section.dataset.chartGroup = `optimizer_${kind}`;
     const header = element("header", undefined, "chart-group-header");
     const toggle = element("button", undefined, "chart-group-toggle"); toggle.type = "button";
-    toggle.append(element("span", "⌄", "group-caret"), element("strong", kind === "momentum" ? "Momentum history" : "Scaling history"));
+    toggle.append(element("span", "⌄", "group-caret"), element("strong", kind === "momentum" ? "momentum history" : "Scaling history"));
     const grid = element("div", undefined, "chart-grid"); grid.id = `optimizer_${kind}_grid`;
     toggle.setAttribute("aria-controls", grid.id); toggle.setAttribute("aria-expanded", "true");
     const quantity = select(quantities[kind].map(value => [value, value.replaceAll("_", " ")]), "History quantity");
@@ -56,7 +56,7 @@
     const latest_label = element("label", " Latest"); latest_label.prepend(latest);
     const refresh = element("button", "Refresh"); refresh.type = "button";
     const status = element("span", "Waiting for captured optimizer histories."); status.style.fontSize = "12px";
-    const toolbar = element("div"); toolbar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 16px";
+    const toolbar = element("div", undefined, "thogopt-toolbar"); toolbar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 16px";
     toolbar.append(quantity, start, end, latest_label, refresh, status);
     header.append(toggle); section.append(header, toolbar, grid);
     controls[kind] = {section, quantity, start, end, latest, status};

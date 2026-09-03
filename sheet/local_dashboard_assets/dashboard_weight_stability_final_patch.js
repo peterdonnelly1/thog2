@@ -141,7 +141,7 @@ window.addEventListener("load", () => {
       };
     };
 
-    const available_range = () => {
+    const available_range = (whole = false) => {
       const runs = current_context_runs();
       if (!runs.length) return null;
       let rendered_ranges = null;
@@ -198,8 +198,8 @@ window.addEventListener("load", () => {
         if (minimum === null || maximum === null || maximum < minimum) return null;
         ranges.push({minimum, maximum});
       }
-      const minimum = Math.max(...ranges.map(range => range.minimum));
-      const maximum = Math.min(...ranges.map(range => range.maximum));
+      const minimum = (whole ? Math.min : Math.max)(...ranges.map(range => range.minimum));
+      const maximum = (whole ? Math.max : Math.min)(...ranges.map(range => range.maximum));
       return minimum <= maximum ? {minimum, maximum} : null;
     };
 
@@ -214,7 +214,7 @@ window.addEventListener("load", () => {
     const seed_configured_range = () => {
       const state = state_for_context();
       if (!state || state.user_selected) return false;
-      const mode = configured_capture_range()?.present ? "whole" : "settings";
+      const mode = app.workspace_mode === true ? "overlap" : configured_capture_range()?.present ? "whole" : "settings";
       const changed = state.mode !== mode || state.range !== null;
       state.mode = mode;
       state.range = null;
@@ -224,7 +224,7 @@ window.addEventListener("load", () => {
     const selected_range = () => {
       const state = state_for_context();
       if (state?.mode === "custom" && state.range) return {...state.range};
-      const available = available_range();
+      const available = available_range(state?.mode === "whole");
       if (!state || !available || state.mode === "settings") return null;
       if (state.mode === "latest") {
         // Workspace latest is deliberately run-relative. Each per-run family
@@ -261,7 +261,7 @@ window.addEventListener("load", () => {
         return legacy_store[chart_scope(chart_name)] === true;
       }
       const groups = json_store(group_storage_key);
-      const group = groups[group_scope(chart_name)];
+      const group = groups[group_scope(chart_name)] || (app.workspace_mode !== true ? groups.runs : null);
       if (group && typeof group === "object" && own(group, field)) return group[field] === true;
       return false;
     };
@@ -277,7 +277,8 @@ window.addEventListener("load", () => {
         ? app.weight_current_only
         : app.weight_join_with_line_segments;
       if (own(legacy_store, override_scope)) return legacy_store[override_scope] === true;
-      const group = json_store(group_storage_key)[scope];
+      const groups = json_store(group_storage_key);
+      const group = groups[scope] || (scope.startsWith("run:") ? groups.runs : null);
       if (group && typeof group === "object" && own(group, field)) return group[field] === true;
       return null;
     };
@@ -585,9 +586,10 @@ window.addEventListener("load", () => {
         overlap.id = "weight_step_overlapping_range";
         overlap.type = "button";
         overlap.className = "weight-step-button";
-        overlap.textContent = "show overlapping range";
+        overlap.textContent = "overlapping range";
         overlap.title = "Show the optimizer-step range retained by every visible Workspace run";
-        gradient.insertAdjacentElement("afterend", overlap);
+        latest.insertAdjacentElement("afterend", overlap);
+        overlap.insertAdjacentElement("afterend", gradient);
       }
       let error = by_id("weight_step_range_error");
       if (!error) {
@@ -694,6 +696,7 @@ window.addEventListener("load", () => {
         overlap.disabled = false;
       }
       whole?.setAttribute("aria-pressed", String(mode === "whole"));
+      overlap?.setAttribute("aria-pressed", String(mode === "overlap"));
       latest?.setAttribute("aria-pressed", String(mode === "latest"));
       gradient?.setAttribute("aria-pressed", String(gradient_enabled));
       by_id("weight_step_initial_values")?.setAttribute("aria-pressed", String(
@@ -918,7 +921,7 @@ window.addEventListener("load", () => {
     const set_context_mode = (mode, {refresh = true, user = true} = {}) => {
       const state = state_for_context();
       if (!state) return false;
-      const normalized = ["whole", "latest", "settings"].includes(mode) ? mode : "whole";
+      const normalized = ["whole", "overlap", "latest", "settings"].includes(mode) ? mode : "whole";
       const changed = state.mode !== normalized || state.range !== null;
       window.__instra_clear_weight_step_input_drafts?.();
       state.mode = normalized;
@@ -1072,7 +1075,7 @@ window.addEventListener("load", () => {
           return;
         }
         show_range_error("");
-        set_context_range(available.minimum, available.maximum, {user: true, refresh: true});
+        set_context_mode("overlap", {user: true, refresh: true});
         return;
       }
       if (whole) {
@@ -1308,7 +1311,7 @@ window.addEventListener("load", () => {
         margin-left: 2px;
         white-space: nowrap;
       }
-      #weight_step_gradient { margin-left: 6px; }
+      #weight_step_gradient { margin-left: 18px; }
       .weight-step-button[aria-busy="true"] {
         opacity: .62;
         cursor: progress;
