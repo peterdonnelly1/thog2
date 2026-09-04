@@ -289,7 +289,7 @@ window.addEventListener("load", () => {
     app.workspace_mode = false;
     window.__instra_workspace = {
       active: () => app.workspace_mode === true,
-      selection_key: () => `workspace:${selection_key()}`,
+      selection_key: () => `workspace:${visible_runs().map(run_identifier).sort().join("|")}`,
       visible_runs,
       fetch_depth_payload,
       fetch_metric_groups,
@@ -333,7 +333,7 @@ window.addEventListener("load", () => {
         }
         app.figure_revision = null;
         if (app.figures) app.figures.depth = {};
-        window.__thog2_metric_groups?.clear?.();
+        window.__thog2_metric_groups?.invalidate?.();
         window.__thog2_metric_groups?.refresh?.();
         const retry = () => {
           if (!app.workspace_mode) return;
@@ -390,7 +390,7 @@ window.addEventListener("load", () => {
 
     const base_select_run_v058 = select_run;
     select_run = function(run_id, options = {}) {
-      if (app.workspace_mode && options.manual === true) leave_workspace();
+      // Selecting a run keeps Workspace open and emphasizes that run.
       const result = base_select_run_v058(run_id, options);
       set_heatmap_group_visibility();
       return result;

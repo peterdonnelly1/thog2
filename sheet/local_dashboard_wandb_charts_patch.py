@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 
+from sheet.local_dashboard_live_loss import LiveLossReader
+
 
 _MAX_POINTS_PER_SERIES = 1600
 _SCAN_TIME_BUDGET_SECONDS = 0.22
@@ -514,6 +516,8 @@ def install(dashboard_module: Any) -> None:
 
     def handler_for(catalog: Any):
         scanner_catalog = _ScannerCatalog(catalog)
+        live_readers: dict[str, LiveLossReader] = {}
+        live_readers_lock = threading.Lock()
         handler = original_handler_for(catalog)
         original_do_get = handler.do_GET
 
@@ -529,37 +533,29 @@ def install(dashboard_module: Any) -> None:
                 return
             try:
                 state = catalog.state_for_run(run_name)
+                with live_readers_lock:
+                    live = live_readers.setdefault(run_name, LiveLossReader())
+                live.refresh(catalog, state, dashboard_module)
                 scanner = scanner_catalog.scanner_for(state)
-                if scanner is None:
-                    self._send_json({
-                        "available": False,
-                        "groups": [],
-                        "reason": "no local W&B run file found for this run",
-                    })
-                    return
+                common = {
+                    "available": scanner is not None or live.path is not None,
+                    "source": str(scanner.path.resolve()) if scanner else str(live.path or ""),
+                    "record_count": scanner.record_count if scanner else 0,
+                    "catching_up": scanner.catching_up if scanner else False,
+                    "error": scanner.error if scanner else "",
+                }
+                if not common["available"]:
+                    common["reason"] = "no local W&B run file found for this run"
                 if parsed.path == "/api/chart-groups":
-                    groups = scanner.group_summaries()
-                    self._send_json({
-                        "available": True,
-                        "source": str(scanner.path.resolve()),
-                        "record_count": scanner.record_count,
-                        "catching_up": scanner.catching_up,
-                        "error": scanner.error,
-                        "groups": groups,
-                    })
+                    groups = scanner.group_summaries() if scanner else []
+                    self._send_json({**common, "groups": live.summaries(groups, scanner)})
                     return
                 group = query.get("group", [""])[0]
                 if not group:
                     self._send_json({"error": "group query parameter is required"}, status=dashboard_module.HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json({
-                    "available": True,
-                    "source": str(scanner.path.resolve()),
-                    "record_count": scanner.record_count,
-                    "catching_up": scanner.catching_up,
-                    "error": scanner.error,
-                    "group": scanner.group_payload(group),
-                })
+                payload = scanner.group_payload(group) if scanner else {"name": group, "charts": [], "revision": 0}
+                self._send_json({**common, "group": live.merge(payload)})
             except (FileNotFoundError, KeyError) as error:
                 self._send_json({"error": str(error)}, status=dashboard_module.HTTPStatus.NOT_FOUND)
             except Exception as error:

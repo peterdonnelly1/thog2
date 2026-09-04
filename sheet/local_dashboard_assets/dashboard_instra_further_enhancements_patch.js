@@ -78,7 +78,7 @@ window.addEventListener("load", () => {
     return result;
   };
 
-  let wandb_column_index = null;
+  // Use semantic cells: STATE and STEPS can move without corrupting hidden columns.
   const rename_run_name_header = header => {
     if (!header) return;
     const text_node = [...header.childNodes].find(node => node.nodeType === Node.TEXT_NODE);
@@ -93,16 +93,18 @@ window.addEventListener("load", () => {
     const header_row = table?.querySelector("thead tr");
     if (!table || !header_row) return;
     rename_run_name_header(header_row.querySelector(".name-column"));
-    if (wandb_column_index === null) {
-      wandb_column_index = [...header_row.children].findIndex(header => (
-        String(header.textContent || "").trim() === "W&B ID"
-      ));
+    const state_header = [...header_row.children].find(header => header.textContent.trim().toUpperCase() === "STATE");
+    const name_header = header_row.querySelector(".name-column");
+    const wandb_header = [...header_row.children].find(header => header.textContent.trim() === "W&B ID");
+    wandb_header?.classList.add("instra-hidden-wandb-column");
+    if (state_header && name_header && state_header.nextElementSibling !== name_header) {
+      header_row.insertBefore(state_header, name_header);
     }
-    if (wandb_column_index >= 0) {
-      header_row.children[wandb_column_index]?.classList.add("instra-hidden-wandb-column");
-      for (const row of table.querySelectorAll("tbody tr:not(.group-row)")) {
-        row.children[wandb_column_index]?.classList.add("instra-hidden-wandb-column");
-      }
+    for (const row of table.querySelectorAll("tbody tr[data-run-id]")) {
+      row.querySelector(".run-id")?.classList.add("instra-hidden-wandb-column");
+      const state_cell = row.querySelector(".state-badge")?.parentElement;
+      const name_cell = row.querySelector(".run-link")?.parentElement;
+      if (state_cell && name_cell && state_cell.nextElementSibling !== name_cell) row.insertBefore(state_cell, name_cell);
     }
     const search = by_id("run_search");
     if (search) search.placeholder = "Search runs by name";
@@ -327,7 +329,7 @@ window.addEventListener("load", () => {
       button.textContent = "z";
       button.title = "Bring the next Workspace run to the front";
       button.setAttribute("aria-label", button.title);
-      overlap.insertAdjacentElement("afterend", button);
+      (by_id("weight_step_gradient") || overlap).insertAdjacentElement("afterend", button);
       button.addEventListener("click", async () => {
         const active = sync_workspace_z_order();
         if (active.length < 2) return;
@@ -447,13 +449,23 @@ window.addEventListener("load", () => {
     const base_prepare_figure_further = prepare_figure;
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_figure_further(figure, chart_name);
-      if (!weight_chart_set.has(chart_name)) return prepared;
+      if (!weight_chart_set.has(chart_name)) {
+        if (String(chart_name).startsWith("local_metric_") || String(chart_name).startsWith("thogopt_")) {
+          for (const trace of prepared?.data || []) {
+            const identifier = trace.meta?.instra_workspace_run_id;
+            if (!identifier || trace.meta?.instra_top_axis_anchor) continue;
+            trace.line = {...(trace.line || {}), color: colour_for_run(identifier),
+              width: Number(trace.line?.width || 2.4) * (app.workspace_mode && identifier === app.current_run_id ? 1.7 : 1)};
+          }
+        }
+        return prepared;
+      }
       const width = stability.mode?.() === "latest" ? 2.4 : 1.0;
       for (const trace of prepared?.data || []) {
         if (trace?.meta?.instra_top_axis_anchor === true) continue;
         const mode = String(trace?.mode || "");
         if (mode.includes("lines") || trace.line) {
-          trace.line = {...(trace.line || {}), width};
+          trace.line = {...(trace.line || {}), width: width * (app.workspace_mode && trace.meta?.instra_workspace_run_id === app.current_run_id ? 1.7 : 1)};
         }
       }
       order_workspace_weight_traces(prepared);
@@ -546,6 +558,14 @@ window.addEventListener("load", () => {
   const style = document.createElement("style");
   style.id = "thog2_instra_further_enhancements_style";
   style.textContent = `
+    .runs-table .colour-dot { width: 18px; height: 12px; border-radius: 3px; }
+    .run-overview-pane .overview-metadata { width: 100% !important; max-width: none !important; }
+    .run-overview-pane .overview-meta-value,
+    .run-overview-pane .overview-meta-value a,
+    .run-overview-pane .overview-hardware-grid > span:nth-child(even),
+    .run-overview-pane .overview-notes-editor { color: #b36d16; }
+    .run-overview-pane .overview-meta-value { white-space: normal; overflow-wrap: anywhere; }
+    .thogopt-group.collapsed > .thogopt-toolbar { display: none !important; }
     .instra-hidden-wandb-column { display: none !important; }
     .state-badge.finished {
       color: #2f7d32 !important;

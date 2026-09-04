@@ -38,11 +38,21 @@ let restore_count = 0;
 const timers = [];
 const frames = [];
 const saved_groups = new Map([["train", false], ["val", false], ["system", true]]);
+const metric_card = name => ({
+  dataset: {chart: `local_metric_${name}_loss`},
+  querySelector: () => null,
+});
 const section = (name, top) => ({
   dataset: {metricGroup: name, chartGroup: name},
   classList: {contains: () => saved_groups.get(name) ?? true},
   getBoundingClientRect: () => ({top: 100 + top - viewport.scrollTop, bottom: 100 + top + 365 - viewport.scrollTop}),
-  querySelectorAll: selector => selector === ".local-metric-card" ? [{dataset: {chart: `local_metric_${name}_loss`}}] : [],
+  querySelectorAll: selector => selector === ".local-metric-card" ? [metric_card(name)] : [],
+  querySelector: selector => {
+    if (selector === ".local-metric-group-count") return {textContent: ""};
+    if (selector === ".local-metric-empty") return null;
+    if (selector === ".local-metric-grid") return {appendChild() {}};
+    return null;
+  },
   remove() { sections = sections.filter(value => value !== this); mounted.delete(`local_metric_${name}_loss`); },
 });
 const context = vm.createContext({
@@ -61,7 +71,9 @@ const context = vm.createContext({
   toggle_maximized_chart: key => { app.maximized_chart = key; },
   select_run: id => { app.current_run_id = id; viewport.scrollTop = 0; },
   fetch_json: async () => ({available: true, groups: [{name: "train"}, {name: "val"}]}),
-  sync_group_order: () => { sections = [section("train", 40), section("val", 440)]; },
+  sync_group_order: () => {
+    if (!sections.length) sections = [section("train", 40), section("val", 440)];
+  },
   refresh_group_data: async name => { mounted.set(`local_metric_${name}_loss`, {}); },
   show_toast: text => { throw new Error(text); },
   setTimeout: callback => timers.push(callback), requestAnimationFrame: callback => frames.push(callback),
@@ -70,11 +82,13 @@ vm.runInContext("let pending_navigation = null; let poll_in_flight = false; let 
 const install_old = () => { sections = [section("train", 80), section("val", 480)]; mounted.set("local_metric_train_loss", {}); };
 (async () => {
   install_old();
+  const original_sections = [...sections];
   context.select_run("b");
-  assert.equal(restore_count, 1, "production teardown was not exercised");
-  assert.equal(app.maximized_chart, null);
+  assert.equal(restore_count, 0, "run switch unnecessarily tore down the scalar chart");
+  assert.equal(app.maximized_chart, "local_metric_train_loss");
   await timers.shift()();
   while (frames.length) frames.shift()();
+  assert.deepEqual(sections, original_sections, "run switch replaced the scalar sections");
   assert.equal(app.maximized_chart, "local_metric_train_loss", "maximized scalar chart was lost during run switch");
   assert.equal(saved_groups.get("train"), false);
   assert.equal(saved_groups.get("val"), false);
@@ -91,7 +105,7 @@ const install_old = () => { sections = [section("train", 80), section("val", 480
   await timers.shift()();
   app.current_run_id = "newer_run";
   while (frames.length) frames.shift()();
-  assert.equal(app.maximized_chart, null, "obsolete frame maximized a chart in a newer run");
+  assert.equal(app.maximized_chart, "local_metric_train_loss", "newer run lost the preserved maximized scalar chart");
 
   const icon_context = vm.createContext({});
   const dashboard = read("dashboard.js");

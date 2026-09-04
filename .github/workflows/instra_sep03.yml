@@ -1,0 +1,53 @@
+# vvv THOG
+name: Instra September 3 regression
+on:
+  push:
+    branches: [instra_sep03_checkpoint]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependencies
+        run: |
+          python -m pip install -q pytest wandb plotly numpy psutil tensorboard tiktoken matplotlib
+          python -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          npm install --no-save playwright jsdom
+          npx playwright install --with-deps firefox
+      - name: Syntax and existing JavaScript regressions
+        run: |
+          python -m compileall -q sheet/local_dashboard_live_loss.py sheet/local_dashboard_wandb_charts_patch.py
+          for file in sheet/local_dashboard_assets/*.js; do node --check "$file"; done
+          failed=0
+          for file in tests/instra*regression.js; do
+            node "$file" || failed=1
+          done
+          exit "$failed"
+      - name: Python dashboard and live loss regressions
+        if: always()
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q tests/test_instra_live_loss.py tests/test_local_chart_dashboard.py tests/test_local_dashboard_wandb_time_axes.py tests/test_instra_weight_step_range.py tests/test_instra_further_enhancements.py tests/test_instra_aug30_enhancements.py
+      - name: Complete interface in Firefox
+        if: always()
+        run: |
+          export INSTRA_PLOTLY_BUNDLE="$(python -c 'import plotly; from pathlib import Path; print(Path(plotly.__file__).parent / "package_data/plotly.min.js")')"
+          node tests/instra_sep03_browser.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instra-sep03-browser
+          path: instra_sep03_browser.png
+          if-no-files-found: ignore
+# ^^^ THOG

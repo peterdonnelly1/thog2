@@ -10,6 +10,8 @@ w.chart_titles = {};
 w.by_id = id => w.document.getElementById(id);
 w.hash_text = text => [...text].reduce((value,letter) => ((value*31)+letter.charCodeAt(0))>>>0,0);
 w.prepare_figure = figure => figure;
+w.load_json = (_key, fallback) => fallback;
+w.save_json = () => {};
 w.select_run = run_id => {w.app.current_run_id=run_id;};
 w.setInterval = () => 0;
 w.requestAnimationFrame = callback => callback();

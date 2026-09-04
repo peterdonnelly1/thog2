@@ -157,8 +157,9 @@ window.addEventListener("load", () => {
     };
 
     const group_settings_for_scope = group_scope => {
-      if (!own(weight_group_settings, group_scope)) return null;
-      return normalize_common_settings(weight_group_settings[group_scope]);
+      const settings = weight_group_settings[group_scope]
+        || (group_scope.startsWith("run:") ? weight_group_settings.runs : null);
+      return settings ? normalize_common_settings(settings) : null;
     };
 
     const group_settings_for_chart = chart_name => (
@@ -469,6 +470,7 @@ window.addEventListener("load", () => {
       group.inspection_precision = precision;
       group.scale_mode = by_id("weights_group_scale_mode").value === "log" ? "log" : "linear";
       weight_group_settings[group_editor_scope] = group;
+      if (group_editor_scope.startsWith("run:")) weight_group_settings.runs = {...group};
       save_group_store();
       const scales = load_json(scale_storage_key, {});
       for (const chart_name of weight_chart_names) scales[chart_name] = group.scale_mode;

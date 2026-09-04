@@ -37,7 +37,10 @@ window.addEventListener("load", () => {
     const group_collapsed_settings = () => {
       // Rebuilt groups inherit the user's choices across runs / Workspace membership changes.
       const key = workspace_api() ? "workspace" : "runs";
-      if (!collapsed_by_mode.has(key)) collapsed_by_mode.set(key, new Map());
+      if (!collapsed_by_mode.has(key)) {
+        const stored = load_json("thog2_local_metric_group_collapsed_v2", {});
+        collapsed_by_mode.set(key, new Map(Object.entries(stored[key] || {})));
+      }
       return collapsed_by_mode.get(key);
     };
 
@@ -48,6 +51,9 @@ window.addEventListener("load", () => {
     const save_group_collapsed = (name, collapsed) => {
       const settings = group_collapsed_settings();
       settings.set(name, Boolean(collapsed));
+      const stored = load_json("thog2_local_metric_group_collapsed_v2", {});
+      stored[workspace_api() ? "workspace" : "runs"] = Object.fromEntries(settings);
+      save_json("thog2_local_metric_group_collapsed_v2", stored);
     };
 
     const chart_key = (group_name, chart_id) => `local_metric_${hash_text(`${group_name}\0${chart_id}`).toString(16)}`;
@@ -69,6 +75,21 @@ window.addEventListener("load", () => {
       }
       group_revisions.clear();
       rendered_revisions.clear();
+    };
+
+    const invalidate_metric_groups = (clear_values = false) => {
+      rendered_revisions.clear();
+      if (!clear_values) return;
+      group_revisions.clear();
+      for (const section of metric_group_sections()) {
+        for (const card of section.querySelectorAll(".local-metric-card")) {
+          delete app.dynamic_chart_figures[card.dataset.chart];
+          const mount = card.querySelector(".plot-mount");
+          if (mount) clear_plot(mount);
+          const detail = card.querySelector(".local-metric-detail");
+          if (detail) detail.textContent = "Waiting for this run's data…";
+        }
+      }
     };
 
     const remember_metric_navigation = () => {
@@ -186,7 +207,10 @@ window.addEventListener("load", () => {
       if (!parent) return;
       const wanted = new Set(summaries.map(summary => summary.name));
       for (const section of metric_group_sections()) {
-        if (!wanted.has(section.dataset.metricGroup)) section.remove();
+        if (!wanted.has(section.dataset.metricGroup)) {
+          update_group_section({name: section.dataset.metricGroup, chart_count: 0,
+            reason: "No data recorded for this run yet."});
+        }
       }
       for (const summary of sorted_group_summaries(summaries)) {
         const section = update_group_section(summary);
@@ -284,16 +308,17 @@ window.addEventListener("load", () => {
 
     const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
-        type: "scattergl",
+        type: "scatter",
         mode: series.x?.length === 1 ? "lines+markers" : "lines",
-        meta: {instra_workspace_run_id: series.instra_workspace_run_id || ""},
+        meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id},
         x: Array.isArray(series.x) ? series.x : [],
         thog2_x_variants: series.x_variants || {},
         y: Array.isArray(series.y) ? series.y : [],
         name: series.name || chart.title || chart.id,
-        hovertemplate: "%{y:.6g}<extra>%{fullData.name}</extra>",
+        customdata: series.point_sources || (series.y || []).map(() => "W&B"),
+        hovertemplate: "%{x}<br>%{y:.6g}<br>%{customdata}<extra>%{fullData.name}</extra>",
         line: {
-          width: 1.35,
+          width: 2.4,
           color: series.color || default_palette[index % default_palette.length],
         },
       }));
@@ -302,11 +327,14 @@ window.addEventListener("load", () => {
         autosize: true,
         paper_bgcolor: "white",
         plot_bgcolor: "white",
-        hovermode: multi_series ? "x unified" : "closest",
+        hovermode: "closest",
+        spikedistance: -1,
         showlegend: multi_series,
         margin: {l: 58, r: 18, t: 16, b: 48},
         xaxis: {
           title: {text: chart.x_title || "step", standoff: 8},
+          showspikes: true, spikemode: "across", spikesnap: "cursor",
+          spikecolor: "#555", spikethickness: 1, spikedash: "dot",
           automargin: true,
           gridcolor: "#e7ebf0",
           zerolinecolor: "#c8ced6",
@@ -421,7 +449,7 @@ window.addEventListener("load", () => {
       const requested_run = current_view_key();
       try {
         if (last_run_id !== requested_run) {
-          clear_metric_groups();
+          invalidate_metric_groups(true);
           last_run_id = requested_run;
         }
         const workspace = workspace_api();
@@ -430,6 +458,11 @@ window.addEventListener("load", () => {
           : await fetch_json(`/api/chart-groups?run=${encodeURIComponent(app.current_run_id)}`);
         if (requested_run !== current_view_key()) return;
         const summaries = (payload.groups || []).filter(summary => summary.name !== "depth");
+        for (const name of ["train", "val"]) {
+          if (!summaries.some(summary => summary.name === name)) summaries.push({
+            name, chart_count: 0, revision: 0, reason: `Waiting for ${name} data…`,
+          });
+        }
         if (!summaries.some(summary => summary.name === "system")) {
           const reason = payload.error ? `Cannot read system metrics: ${payload.error}`
             : payload.reason ? `System metrics unavailable: ${payload.reason}.`
@@ -456,8 +489,8 @@ window.addEventListener("load", () => {
     select_run = function(run_id, options = {}) {
       const saved = run_id !== app.current_run_id ? remember_metric_navigation() : null;
       if (saved) {
-        clear_metric_groups();
-        last_run_id = run_id;
+        invalidate_metric_groups(true);
+        last_run_id = null;
       }
       const result = base_select_run_metric_groups(run_id, options);
       if (saved) pending_navigation = {...saved, view: current_view_key()};
@@ -504,6 +537,7 @@ window.addEventListener("load", () => {
 
     window.__thog2_metric_groups = {
       clear: clear_metric_groups,
+      invalidate: invalidate_metric_groups,
       refresh: refresh_metric_groups,
       refresh_group: refresh_group_data,
       context_key: group_context_key,
