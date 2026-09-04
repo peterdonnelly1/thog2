@@ -24,8 +24,8 @@ Checkpoint branch: instra_sep03_checkpoint. Working branch must only be updated 
 
 - [x] Existing JavaScript regressions (23 scripts; local pass)
 - [ ] Existing Python regressions (first CI: 37 pass, one stale assertion repaired; rerun pending)
-- [ ] Full interface Firefox test
+- [x] Full interface Firefox test (GitHub Actions pass)
 - [ ] Publish verified changes to instra_weight_inspector
 - [ ] Deliver download stanza and 18-row table
 
-Progress: 82%. See INSTRA_SEP03_LOG.md.
+Progress: 92%. See INSTRA_SEP03_LOG.md.

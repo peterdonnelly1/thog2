@@ -637,7 +637,8 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "delete prepared.layout.legend;" in v058_repair_patch
     assert "delete prepared.layout.xaxis2.title;" in v058_repair_patch
     assert 'trace.mode = "lines+markers";' in v058_repair_patch
-    assert 'width: 0.35, color: colour' in v058_repair_patch
+    assert 'width: 0.35,' in v058_repair_patch
+    assert 'color: colour || trace.marker?.line?.color' in v058_repair_patch
     assert 'width: 0.45' in v058_repair_patch
     assert 'textContent = "weights"' in v058_repair_patch
     assert 'app.workspace_mode = false;' in v058_repair_patch

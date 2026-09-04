@@ -24,7 +24,7 @@ Reconstructed production JS passes syntax compilation. All 23 existing Instra Ja
 
 The first full-stack Firefox run verified detail-tab preservation, chart open/closed preservation, colour editing, stable chart nodes, early new-run plotting, selected-run emphasis, weights-style scalar hover, the visible table order/swatch/warmup column, Overview styling and overlap-button state. It then found a real pointer overlap between the step-range and feature-index toolbar groups. The range group is now intrinsically sized instead of shrinking beneath its neighbour. Scalar charts now use Plotly SVG traces, avoiding unavailable-WebGL contexts in Firefox while retaining point hover and the x spike.
 
-Test harnesses were updated for the new non-destructive group lifecycle and persisted collapse storage. GitHub Actions now installs both Playwright and jsdom. Corrected CI/Firefox rerun is pending before publication to the working branch.
+Test harnesses were updated for the new non-destructive group lifecycle and persisted collapse storage. GitHub Actions now installs both Playwright and jsdom. The corrected full-stack Firefox step passes. Its only remaining job failure is a second pre-existing source-format assertion that coupled marker width and colour to one line; it is now split into two semantic assertions. One final clean CI rerun is pending before publication to the working branch.
 
 ## Known review points
 
