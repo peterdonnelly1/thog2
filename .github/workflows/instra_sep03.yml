@@ -22,7 +22,7 @@ jobs:
         run: |
           python -m pip install -q pytest wandb plotly numpy psutil tensorboard tiktoken matplotlib
           python -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
-          npm install --no-save playwright
+          npm install --no-save playwright jsdom
           npx playwright install --with-deps firefox
       - name: Syntax and existing JavaScript regressions
         run: |

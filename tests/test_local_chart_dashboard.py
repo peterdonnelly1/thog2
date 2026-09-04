@@ -460,7 +460,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "toggle_chart_group" in javascript
     assert "eye_closed:" in javascript
     assert "timed_out:" in javascript
-    assert 'class="numeric-column duration-column">t</th>' in html
+    assert 'class="numeric-column duration-column" title="Elapsed run time">t</th>' in html
     assert "format_run_duration(run)" in javascript
     assert "toggle_maximized_chart" in javascript
     assert "position_restore_button" in javascript

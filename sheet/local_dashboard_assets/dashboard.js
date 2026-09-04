@@ -2296,6 +2296,9 @@ function queue_current_recolour(run_id = app.colour_run_id) {
   clearTimeout(queue_current_recolour.timer);
   queue_current_recolour.timer = setTimeout(() => {
     if (!run_id) return;
+    const metric_groups = window.__thog2_metric_groups;
+    metric_groups?.invalidate?.();
+    metric_groups?.refresh?.();
     if (app.workspace_mode === true) {
       window.__instra_workspace_depth_cache?.clear?.();
       const performance = window.__thog2_dashboard_performance?.state;

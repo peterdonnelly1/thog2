@@ -40,6 +40,8 @@ const context = {
   by_id: id => id === "charts_scroll" ? {hidden: true} : null,
   run_identifier: run => run.local_run_id,
   prepare_figure: figure => JSON.parse(JSON.stringify(figure)),
+  load_json: (_key, fallback) => fallback,
+  save_json() {},
   select_run(run_id) { app.current_run_id = String(run_id); },
   setTimeout(callback) { callback(); return 1; },
   setInterval() { return 1; },

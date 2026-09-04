@@ -921,7 +921,7 @@ window.addEventListener("load", () => {
         overflow: visible !important;
       }
       .weight-step-group-controls {
-        flex: 0 1 auto; min-width: 0; margin-left: 40px; display: inline-flex;
+        flex: 0 0 auto; min-width: max-content; margin-left: 40px; display: inline-flex;
         align-items: center; gap: 6px; white-space: nowrap; color: #414a55;
         font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums;
       }

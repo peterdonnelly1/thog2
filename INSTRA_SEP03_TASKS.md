@@ -22,9 +22,10 @@ Checkpoint branch: instra_sep03_checkpoint. Working branch must only be updated 
 - [ ] 17. Keep groups visible during new-run startup (implemented; verification pending)
 - [ ] 18. Plot early train data promptly (implemented; verification pending)
 
-- [ ] Existing JS and Python regressions
+- [x] Existing JavaScript regressions (23 scripts; local pass)
+- [ ] Existing Python regressions (first CI: 37 pass, one stale assertion repaired; rerun pending)
 - [ ] Full interface Firefox test
 - [ ] Publish verified changes to instra_weight_inspector
 - [ ] Deliver download stanza and 18-row table
 
-Progress: 60%. See INSTRA_SEP03_LOG.md.
+Progress: 82%. See INSTRA_SEP03_LOG.md.

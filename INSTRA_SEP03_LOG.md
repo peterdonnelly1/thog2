@@ -20,7 +20,11 @@ Base: instra_weight_inspector, 0e9e2f2659d1619108b093ff961a4e0e27453758. Isolate
 
 ## Validation
 
-Reconstructed production JS passes syntax compilation in the orchestration runtime. Full JS, Python and Firefox checks configured in .github/workflows/instra_sep03.yml. No complete test pass or browser acceptance claim yet. Check Actions before marking tasks complete.
+Reconstructed production JS passes syntax compilation. All 23 existing Instra JavaScript regression scripts pass locally. Four new incremental live-loss tests passed in the first GitHub Actions run; its selected Python suite reached 37 passing tests and exposed one stale HTML assertion, now repaired.
+
+The first full-stack Firefox run verified detail-tab preservation, chart open/closed preservation, colour editing, stable chart nodes, early new-run plotting, selected-run emphasis, weights-style scalar hover, the visible table order/swatch/warmup column, Overview styling and overlap-button state. It then found a real pointer overlap between the step-range and feature-index toolbar groups. The range group is now intrinsically sized instead of shrinking beneath its neighbour. Scalar charts now use Plotly SVG traces, avoiding unavailable-WebGL contexts in Firefox while retaining point hover and the x spike.
+
+Test harnesses were updated for the new non-destructive group lifecycle and persisted collapse storage. GitHub Actions now installs both Playwright and jsdom. Corrected CI/Firefox rerun is pending before publication to the working branch.
 
 ## Known review points
 

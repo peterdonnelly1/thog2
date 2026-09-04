@@ -308,7 +308,7 @@ window.addEventListener("load", () => {
 
     const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
-        type: "scattergl",
+        type: "scatter",
         mode: series.x?.length === 1 ? "lines+markers" : "lines",
         meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id},
         x: Array.isArray(series.x) ? series.x : [],
