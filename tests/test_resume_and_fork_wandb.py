@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+import tempfile
 import unittest
 from pathlib import Path
 
-from run_thog2_lifecycle import _configure_instrumentation_environment, _wandb_continue_policy, build_parser
+from run_thog2_lifecycle import _configure_instrumentation_environment, _inherited_instrumentation_configuration, _local_run_configuration, _wandb_continue_policy, build_parser
 from sheet.run_config import OwtRunConfig
 
 
@@ -13,7 +15,7 @@ class ResumeAndForkWandbTests(unittest.TestCase):
     def setUp(self) -> None:
         self.saved = {
             name: os.environ.get(name)
-            for name in ("THOG2_INSTRUMENTATION", "THOG2_CURVE_ROOT", "WANDB_MODE", "WANDB_RUN_ID", "WANDB_RESUME")
+            for name in ("THOG2_INSTRUMENTATION", "THOG2_CURVE_ROOT", "WANDB_MODE", "WANDB_RUN_ID", "WANDB_RESUME", "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS", "THOG2_DEPTH_CURVE_LOCAL_ROOT", "THOG2_INSTRUMENTATION_LOCAL_ROOT")
         }
 
     def tearDown(self) -> None:
@@ -124,6 +126,63 @@ class ResumeAndForkWandbTests(unittest.TestCase):
         self.assertNotIn("WANDB_RUN_ID", os.environ)
         self.assertNotIn("WANDB_RESUME", os.environ)
         self.assertEqual(os.environ["THOG2_INSTRUMENTATION"], "both")
+
+    # vvv THOG recorded curve instrumentation overrides parser/wrapper defaults on resume and fork
+    def test_recorded_instrumentation_configuration_is_restored(self) -> None:
+        os.environ["THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS"] = "999"
+        os.environ["THOG2_DEPTH_CURVE_LOCAL_ROOT"] = "current-child-artifact/depth_curves"
+        context = {
+            "backend": "tensorboard",
+            "mode": "resume",
+            "config": self.config(),
+            "wandb_continue_run": False,
+            "lifecycle": {
+                "wandb_run_id": None,
+                "tensorboard_dir": str(Path("curves") / "run"),
+                "instrumentation_configuration": {
+                    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS": "17",
+                    "THOG2_DEPTH_CURVE_LOCAL_ROOT": "parent-artifact/depth_curves",
+                },
+            },
+        }
+
+        _configure_instrumentation_environment(context)
+
+        self.assertEqual(
+            os.environ["THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS"],
+            "17",
+        )
+        self.assertEqual(
+            os.environ["THOG2_DEPTH_CURVE_LOCAL_ROOT"],
+            "current-child-artifact/depth_curves",
+        )                                                                                                                                                # <<< THOG fork output paths remain owned by the new artifact
+    # ^^^ THOG
+
+    # vvv THOG pre-enhancement checkpoints recover canonical weight-capture settings from the local W&B-linked run record
+    def test_local_run_configuration_backfills_instrumentation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["THOG2_INSTRUMENTATION_LOCAL_ROOT"] = directory
+            database = Path(directory) / "artifact" / "wandb123" / "charts.sqlite3"
+            database.parent.mkdir(parents=True)
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            connection.execute(
+                "INSERT INTO metadata(key, value) VALUES ('config_json', ?)",
+                ('{"instrumentation__depth_weight_curves__log_every_n_steps":17}',),
+            )
+            connection.commit()
+            connection.close()
+
+            recovered = _inherited_instrumentation_configuration(
+                {},
+                fallback_configuration=_local_run_configuration("artifact"),
+            )
+
+        self.assertEqual(
+            recovered["THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS"],
+            "17",
+        )
+    # ^^^ THOG
 
 
 if __name__ == "__main__":

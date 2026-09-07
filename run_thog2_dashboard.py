@@ -81,6 +81,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_instra_further_enhancements_patch.js",                                                                                                      # <<< THOG finalize the August 31 Overview, table, fullscreen, live-weight, palette, and view-state requirements
     "dashboard_weight_inspector.js",                                                                                                                       # <<< THOG inspect exact retained weights in a virtual grid and finalize latest-step deduplication
     "dashboard_thogopt.js",
+    "dashboard_sep07_fixes_and_enhancements.js",                                                                                                          # <<< THOG final owner for September functionality, memory, table and interaction fixes
 )
 
 

@@ -52,7 +52,7 @@ from sheet.run_naming import compact_log_timestamp
 from sheet.dense_snapshot import print_dense_snapshot_completion                                                                                                                    # <<< THOG repeat the relative snapshot path at the actual end of every snapshot-baselined run
 from sheet.stage6_trainer import Stage6Trainer
 from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
-from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry, verbose_wandb_console_enabled
+from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry, selected_gpu_index, verbose_wandb_console_enabled                                         # <<< THOG record physical GPU affinity in the run configuration and Instra table
 
 # vvv THOG attach optimizer history sampling before the first committed update
 _base_attach_telemetry = attach_telemetry
@@ -70,7 +70,7 @@ def runtime_overview_metadata(
     *,
     argv: Optional[list[str]] = None,
     module_name: Optional[str] = None,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:                                                                                                                                        # <<< THOG GPU index is deliberately numeric for W&B and Instra consumers
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     if module_name is None:
         main_spec = getattr(sys.modules.get("__main__"), "__spec__", None)
@@ -83,6 +83,8 @@ def runtime_overview_metadata(
         "python_version": platform.python_version(),
         "python_executable": sys.executable,
         "git_repository": str(REPOSITORY_ROOT),
+        "gpu_index": selected_gpu_index(),                                                                                                                 # <<< THOG display the selected physical GPU rather than the process-local CUDA ordinal
+        "cuda_visible_devices": str(os.environ.get("CUDA_VISIBLE_DEVICES", "")),                                                                           # <<< THOG retain the original GPU affinity evidence for resumed and forked runs
     }
 # ^^^ THOG
 

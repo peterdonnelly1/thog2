@@ -6,7 +6,9 @@
 // for expanded groups so a collapsed 20+ chart system group costs almost nothing.
 window.addEventListener("load", () => {
   setTimeout(() => {
-    const group_order = new Map([["train", 0], ["val", 1], ["system", 2]]);
+    // vvv THOG memory is a first-class group rather than a subset of device/system charts
+    const group_order = new Map([["train", 0], ["val", 1], ["memory", 2], ["system", 3]]);
+    // ^^^ THOG
     const group_revisions = new Map();
     const rendered_revisions = new Map();
     const collapsed_by_mode = new Map();
@@ -153,8 +155,7 @@ window.addEventListener("load", () => {
       button.className = "chart-group-toggle";
       button.setAttribute("aria-controls", `${section.id}_grid`);
       button.innerHTML = (
-        '<span class="group-grip" aria-hidden="true">⠿</span>'
-        + '<span class="group-caret" aria-hidden="true">⌄</span>'
+        '<span class="group-caret" aria-hidden="true">⌄</span>'                                                                                          // <<< THOG remove the noninteractive six-dot motif
       );
       const name = document.createElement("strong");
       name.textContent = summary.name;

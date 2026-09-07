@@ -33,10 +33,18 @@ from .stage6_source import (
 INSTRUMENTATION_BACKENDS = ("tensorboard", "wandb", "both", "local", "none")
 # ^^^ THOG
 _BYTES_PER_GIB = float(1024 ** 3)
-_NORMAL_WANDB_SCALARS = frozenset(("train/loss", "val/val_loss"))
+# vvv THOG normal W&B retains loss plus process-owned CUDA allocator data; native device totals are not run memory
+_NORMAL_WANDB_SCALARS = frozenset((
+    "train/loss",
+    "val/val_loss",
+    "gpu/memory_allocated_gb",
+    "gpu/memory_reserved_gb",
+    "gpu/max_memory_allocated_gb",
+))
+# ^^^ THOG
 
 
-# vvv THOG normal W&B runs expose only the two useful loss series; W&B itself owns the raw system/GPU memory charts
+# vvv THOG normal W&B runs expose the useful loss and process-memory series; W&B still owns native system sampling
 def _debug_wandb_enabled() -> bool:
     return int(getattr(_constants, "DEBUG", 0)) > 9
 
@@ -95,6 +103,47 @@ def _selected_backend() -> str:
 def _tensorboard_root(name: str) -> Path:
     root = Path(os.environ.get("THOG2_CURVE_ROOT", "curves"))
     return root / name
+
+
+# vvv THOG expose the physical GPU selected by CUDA_VISIBLE_DEVICES while PyTorch continues to use its logical index
+def selected_gpu_index() -> Optional[int]:
+    visible = str(os.environ.get("CUDA_VISIBLE_DEVICES", "")).strip()
+    if visible:
+        first = visible.split(",", 1)[0].strip()
+        try:
+            return int(first)
+        except ValueError:
+            pass
+    configured = str(os.environ.get("THOG2_DREEDLE_GPU", "")).strip()
+    if configured:
+        try:
+            return int(configured)
+        except ValueError:
+            pass
+    if torch.cuda.is_available():
+        try:
+            return int(torch.cuda.current_device())
+        except RuntimeError:
+            return None
+    return None
+# ^^^ THOG
+
+
+# vvv THOG record environment-backed instrumentation controls for fresh DENSE/THOG and lifecycle runs alike
+def instrumentation_environment_configuration() -> Dict[str, str]:
+    exact = {
+        "THOG2_DEPTH_CURVE_PLOTS",
+        "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS",
+        "THOG2_DEPTH_CURVE_RENDERER",
+        "THOG2_DEPTH_CURVE_LOCAL_HTML",
+        "THOG2_DEPTH_CURVE_LOCAL_ROOT",
+    }
+    return {
+        name: str(value)
+        for name, value in os.environ.items()
+        if name in exact or name.startswith("THOG2_INSTRUMENTATION_")
+    }
+# ^^^ THOG
 
 
 # vvv THOG
@@ -317,6 +366,11 @@ class WandbTelemetry:
         self.group = group
         self.job_type = job_type
         self.config = dict(config)
+        # vvv THOG record GPU affinity in every DENSE and THOG W&B/local configuration
+        self.config.setdefault("gpu_index", selected_gpu_index())
+        self.config.setdefault("cuda_visible_devices", str(os.environ.get("CUDA_VISIBLE_DEVICES", "")))
+        self.config.setdefault("instrumentation_configuration", instrumentation_environment_configuration())                                                     # <<< THOG make every effective environment-backed instrumentation setting resumable
+        # ^^^ THOG
         self.backend = _selected_backend()
         self.module: Optional[Any] = None
         self.run: Optional[Any] = None
@@ -360,7 +414,7 @@ class WandbTelemetry:
             config={**self.config, "instrumentation": self.backend},
         )
         define_metric = run.define_metric if hasattr(run, "define_metric") else module.define_metric
-        # vvv THOG define the historical metric surface only for forensic DEBUG runs; normal W&B uses its native step plus two loss scalars
+        # vvv THOG define the historical metric surface only for forensic DEBUG runs; normal W&B uses its native step with loss and allocator scalars
         if _debug_wandb_enabled():
             define_metric("optimizer/update")
             for metric in (
@@ -413,9 +467,17 @@ class WandbTelemetry:
         if not metrics:
             return
         step = int(metrics["optimizer/update"])
-        # vvv THOG avoid custom CUDA sampling and the duplicate fine namespace during normal W&B runs; raw memory remains available from W&B system telemetry
-        if _debug_wandb_enabled():
-            metrics.update(self.sampler.sample(step))
+        # vvv THOG sample allocator-owned memory for every run; unlike native GPU totals this excludes display and unrelated processes
+        memory_metrics = self.sampler.sample(step)
+        metrics.update(memory_metrics)
+        local_store = getattr(self, "_thog_local_chart_store", None)
+        if local_store is not None and memory_metrics:
+            local_store.update_runtime_metrics(
+                memory_metrics,
+                gpu_index=selected_gpu_index(),
+            )
+        # ^^^ THOG
+        # vvv THOG retain the duplicate fine namespace only for forensic DEBUG runs
         if _debug_wandb_enabled() and bool(self.config.get("plastic__enabled", False)):
             metrics["fine/update"] = step
             for name, value in tuple(metrics.items()):
@@ -561,8 +623,16 @@ class WandbTelemetry:
     def add_final_result(self, result: Mapping[str, Any]) -> None:
         metrics = _final_metrics(result)
         step = int(metrics["optimizer/update"])
-        if _debug_wandb_enabled():
-            metrics.update(self.sampler.sample(step, force=True))
+        # vvv THOG make the final allocator peak durable in W&B and the local Runs catalogue
+        final_memory_metrics = self.sampler.sample(step, force=True)
+        metrics.update(final_memory_metrics)
+        local_store = getattr(self, "_thog_local_chart_store", None)
+        if local_store is not None and final_memory_metrics:
+            local_store.update_runtime_metrics(
+                final_memory_metrics,
+                gpu_index=selected_gpu_index(),
+            )
+        # ^^^ THOG
         self._log_scalars(metrics, step)
         if self.run is not None:
             evaluations = result.get("evaluations", [])
@@ -649,6 +719,8 @@ __all__ = [
     "WandbTelemetry",
     "_debug_wandb_enabled",
     "verbose_wandb_console_enabled",
+    "selected_gpu_index",
+    "instrumentation_environment_configuration",
     "_wandb_scalar_metrics",
     "attach_telemetry",
 ]

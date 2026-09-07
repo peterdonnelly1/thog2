@@ -56,10 +56,18 @@ def test_latest_mode_preserves_requested_retention(monkeypatch, capsys) -> None:
 
 
 def test_weight_instrumentation_phase_is_independent_of_plastic_configuration() -> None:
-    assert lifecycle._weight_phase(11, start_step=300, end_step=400) == "preparing"
+    assert lifecycle._weight_phase(11, start_step=300, end_step=400) == "recording"                                                                          # <<< THOG active training is recording even before a finite chart window
     assert lifecycle._weight_phase(300, start_step=300, end_step=400) == "recording"
     assert lifecycle._weight_phase(400, start_step=300, end_step=400) == "recording"
-    assert lifecycle._weight_phase(401, start_step=300, end_step=400) == "monitoring"
+    assert lifecycle._weight_phase(401, start_step=300, end_step=400) == "recording"                                                                         # <<< THOG active training never changes to monitoring after capture ends
+
+
+def test_dashboard_normalizes_legacy_monitoring_state_to_recording() -> None:
+    assert dashboard._reported_run_state(
+        "monitoring",
+        current_update=401,
+        target_update=500,
+    ) == "recording"                                                                                                                                       # <<< THOG already-running old processes are corrected when Instra restarts
 
 
 def test_eager_attach_registers_run_before_first_weight_snapshot(monkeypatch) -> None:
@@ -113,7 +121,7 @@ def test_eager_attach_registers_run_before_first_weight_snapshot(monkeypatch) ->
                 "history_length": 101,
             },
         ),
-        ("heartbeat", 11, "preparing", True),
+        ("heartbeat", 11, "recording", True),                                                                                                              # <<< THOG resumed/forked nonzero updates register as recording immediately
     ]
     assert depth_curves._history_length() == 101
 
@@ -237,6 +245,26 @@ def test_terminal_state_uses_observed_target_update(
     assert finished_metadata["run_state"] == "finished"
 
 
+# vvv THOG process GPU identity and allocator peaks remain cheap catalogue metadata and never decrease
+def test_runtime_gpu_peak_metadata_is_monotonic(tmp_path: Path) -> None:
+    path = tmp_path / "gpu.sqlite3"
+    store = LocalChartStore(path, run_name="gpu-run", config={"gpu_index": 1})
+    store.update_runtime_metrics(
+        {"gpu/memory_allocated_gb": 4.25, "gpu/max_memory_allocated_gb": 5.5},
+        gpu_index=1,
+    )
+    store.update_runtime_metrics(
+        {"gpu/memory_allocated_gb": 2.0, "gpu/max_memory_allocated_gb": 3.0},
+        gpu_index=1,
+    )
+
+    status = local_store.LocalChartReader(path).status()
+    assert status["gpu_index"] == 1
+    assert status["gpu_peak_memory_allocated_gb"] == 5.5
+    store.close()
+# ^^^ THOG
+
+
 def test_telemetry_finish_closes_remaining_sinks_after_local_store_failure(
     monkeypatch,
     capsys,
@@ -304,10 +332,10 @@ def test_status_uses_heartbeat_and_reports_evidence_based_data_loss(tmp_path: Pa
     assert recorded["data_lost"] is False
     assert recorded["chart_maximum_update"] == 300
 
-    store.heartbeat(401, run_state="monitoring", force=True)
-    monitoring = state.status()
-    assert monitoring["run_state"] == "monitoring"
-    assert monitoring["maximum_update"] == 401
+    store.heartbeat(401, run_state="recording", force=True)                                                                                                 # <<< THOG active training remains recording after its finite capture window
+    recording = state.status()
+    assert recording["run_state"] == "recording"
+    assert recording["maximum_update"] == 401
 
     store.close(final_state="stopped")
     assert state.status()["run_state"] == "stopped"

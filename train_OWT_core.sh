@@ -1152,7 +1152,7 @@ run_grid_point() {
   local mlp_hidden_compressor_tag="$8"
   local mlp_hidden_group_size_value="$9"
   local learning_rate_value="${learning_rate_code}e-5" min_lr_value="$((10#$MIN_LR_CODE))e-5"                                                         # <<< THOG decode LR codes
-  local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path depth_curve_local_root
+  local run_model_type display_model_type preset_tag run_tag run_name_value LOG_TIMESTAMP resolved_json artifact_name log_path checkpoint_path depth_curve_local_root                # <<< THOG retain the resolved checkpoint for the final copy/paste resume command
   local residual_init_depth_source_value n_layer_value n_head_value n_embd_value shape_summary orders_summary start_time_friendly log_url viewer_url serve_url run_status depth_curve_console depth_curve_done snapshot_done
   local -a residual_init_args
   local -a compact_args compact_order_args optional_args train_args command
@@ -1305,6 +1305,7 @@ run_grid_point() {
   resolved_json="$("$PYTHON_BIN" -m "$RUN_MODULE" "${train_args[@]}" --log-timestamp "$LOG_TIMESTAMP" --print-resolved-json)"
   artifact_name="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["artifact_name"])')"
   log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["log_path"])')"
+  checkpoint_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["checkpoint_path"])')"                    # <<< THOG use the canonical last-checkpoint selector in the resume footer
   weight_curves_console="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin).get("console_header", {}).get("weight_curves", "unavailable"))')"
   dense_snapshot_console="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin).get("console_header", {}).get("dense_snapshot", "unavailable"))')"
   depth_curve_local_root="$(dirname "$log_path")/depth_curves"; export THOG2_DEPTH_CURVE_LOCAL_ROOT="$depth_curve_local_root"
@@ -1377,6 +1378,9 @@ EOF_DONE
   if [[ -n "$snapshot_done" ]]; then
     printf '%s\n' "$snapshot_done"
   fi
+  # vvv THOG leave a directly reusable host-pinned resume command as the final CLI line
+  printf 'export THOG2_HOST_LABEL=%q; ./train_OWT.sh --resume %q -n 40000 --host-label "$THOG2_HOST_LABEL"\n' "$HOST_LABEL" "$checkpoint_path"
+  # ^^^ THOG
   return "$run_status"
 }
 

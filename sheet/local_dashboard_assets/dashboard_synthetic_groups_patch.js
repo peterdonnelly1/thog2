@@ -47,8 +47,7 @@
   coefficients_toggle.setAttribute("aria-expanded", "false");
   coefficients_toggle.setAttribute("aria-controls", "coefficients_chart_grid");
   coefficients_toggle.innerHTML = (
-    '<span class="group-grip" aria-hidden="true">⠿</span>'
-    + '<span class="group-caret" aria-hidden="true">⌄</span>'
+    '<span class="group-caret" aria-hidden="true">⌄</span>'                                                                                              // <<< THOG remove the noninteractive six-dot motif
     + '<strong>weights</strong>'
     + `<span class="group-count">${coefficient_chart_names.length}</span>`
   );

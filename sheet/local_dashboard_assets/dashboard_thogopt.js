@@ -42,13 +42,14 @@
     return app.current_run_id ? [app.current_run_id] : [];
   }
   function group(kind) {
-    const section = element("section", undefined, "chart-group thogopt-group");
+    const section = element("section", undefined, "chart-group thogopt-group collapsed");                                                  // <<< THOG optimizer histories are closed on first render
     section.dataset.chartGroup = `optimizer_${kind}`;
     const header = element("header", undefined, "chart-group-header");
     const toggle = element("button", undefined, "chart-group-toggle"); toggle.type = "button";
-    toggle.append(element("span", "⌄", "group-caret"), element("strong", kind === "momentum" ? "momentum history" : "Scaling history"));
+    toggle.append(element("span", "⌄", "group-caret"), element("strong", kind === "momentum" ? "momentum history" : "scaling history"));                 // <<< THOG group names use consistent lower-case styling
     const grid = element("div", undefined, "chart-grid"); grid.id = `optimizer_${kind}_grid`;
-    toggle.setAttribute("aria-controls", grid.id); toggle.setAttribute("aria-expanded", "true");
+    grid.hidden = true;                                                                                                                    // <<< THOG prevent an open-before-startup-policy flash
+    toggle.setAttribute("aria-controls", grid.id); toggle.setAttribute("aria-expanded", "false");
     const quantity = select(quantities[kind].map(value => [value, value.replaceAll("_", " ")]), "History quantity");
     const start = input("First captured step", ""), end = input("Last captured step", "");
     start.placeholder = "First step"; end.placeholder = "Last step";
@@ -118,7 +119,7 @@
         else if (by_id(`${key}_plot`)) clear_plot(by_id(`${key}_plot`));
       }
       const count = results.reduce((sum, result) => sum + result.payload.steps.length, 0);
-      control.status.textContent = `${count} captured steps · × points: AdamW reference · dotted difference: legend toggle`;
+      control.status.textContent = `${count} captured steps · × points: AdamW reference · difference: legend toggle`;                                      // <<< THOG every rendered curve now uses a continuous line
     } catch (error) { if (serial === requests[kind]) control.status.textContent = error.message; }
   }
   function open_inspector(kind, family) {

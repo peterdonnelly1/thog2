@@ -104,6 +104,10 @@ log_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; pr
 append_log="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print("true" if json.load(sys.stdin)["append_log"] else "false")')"
 session_id="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["session_id"])')"
 target_updates="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["target_updates"])')"
+# vvv THOG resolve the exact checkpoint and inherited host for the final copy/paste resume command
+checkpoint_path="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["paths"]["checkpoint_path"])')"
+host_label="$(printf '%s' "$resolved_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["canonical_config"]["host_label"])')"
+# ^^^ THOG
 
 if [[ "$saw_dry_run" == true ]]; then
   printf '%s\n' "$resolved_json"
@@ -154,5 +158,8 @@ THOG2 lifecycle run finished
   artifact:           $artifact_name
   log:                file://$(realpath -m "$log_path")
 EOF_DONE
+# vvv THOG the wrapper footer owns the literal last CLI line after Python and tee have completed
+printf 'export THOG2_HOST_LABEL=%q; ./train_OWT.sh --resume %q -n 40000 --host-label "$THOG2_HOST_LABEL"\n' "$host_label" "$checkpoint_path"
+# ^^^ THOG
 exit "$run_status"
 # ^^^ THOG

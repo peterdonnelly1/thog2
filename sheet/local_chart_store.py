@@ -136,6 +136,18 @@ def _json_compatible(value: Any) -> Any:
     return str(value)
 
 
+# vvv THOG runtime resource metadata accepts only finite nonnegative scalar values
+def _safe_runtime_metric(value: Any) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric) or numeric < 0:
+        return None
+    return numeric
+# ^^^ THOG
+
+
 def _configured_target_update(config: Mapping[str, Any]) -> Optional[int]:
     candidates = (
         config.get("max_iters"),
@@ -311,6 +323,47 @@ class LocalChartStore:
         self._last_heartbeat_monotonic = monotonic_now
         self._last_heartbeat_state = state
 
+    # vvv THOG persist process-owned CUDA allocation peaks for the Runs table without rescanning every W&B file
+    def update_runtime_metrics(
+        self,
+        metrics: Mapping[str, Any],
+        *,
+        gpu_index: Optional[int] = None,
+    ) -> None:
+        allocated = _safe_runtime_metric(metrics.get("gpu/memory_allocated_gb"))
+        reserved = _safe_runtime_metric(metrics.get("gpu/memory_reserved_gb"))
+        sampled_peak = _safe_runtime_metric(metrics.get("gpu/max_memory_allocated_gb"))
+        existing = self.metadata_value("gpu_peak_memory_allocated_gb")
+        candidates = tuple(
+            value for value in (allocated, sampled_peak, existing) if value is not None
+        )
+        values = []
+        if allocated is not None:
+            values.append(("gpu_memory_allocated_gb", f"{allocated:.12g}"))
+        if reserved is not None:
+            values.append(("gpu_memory_reserved_gb", f"{reserved:.12g}"))
+        if candidates:
+            values.append(("gpu_peak_memory_allocated_gb", f"{max(candidates):.12g}"))
+        if gpu_index is not None:
+            values.append(("gpu_index", str(int(gpu_index))))
+        if not values:
+            return
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            values,
+        )
+        self.connection.commit()
+
+    def metadata_value(self, key: str) -> Optional[float]:
+        row = self.connection.execute(
+            "SELECT value FROM metadata WHERE key = ?",
+            (str(key),),
+        ).fetchone()
+        if row is None:
+            return None
+        return _safe_runtime_metric(row["value"])
+    # ^^^ THOG
+
     def append_heatmap_records(
         self,
         records: Iterable[Mapping[str, Any]],
@@ -482,6 +535,16 @@ class LocalChartReader:
                 else {}
             )
             # ^^^ THOG
+            # vvv THOG surface cheap process-specific GPU resource summaries directly in the Runs catalogue
+            resource_rows = connection.execute(
+                "SELECT key, value FROM metadata WHERE key IN (?, ?)",
+                ("gpu_index", "gpu_peak_memory_allocated_gb"),
+            ).fetchall()
+            resource_metadata = {
+                str(row["key"]): str(row["value"])
+                for row in resource_rows
+            }
+            # ^^^ THOG
         finally:
             connection.close()
         return {
@@ -501,6 +564,16 @@ class LocalChartReader:
             ),
             # vvv THOG consumed by the W&B-like local artifact Overview tab
             "configuration": configuration,
+            # ^^^ THOG
+            # vvv THOG top-level fields avoid per-row W&B scans for GPU and peak-memory columns
+            "gpu_index": (
+                int(float(resource_metadata["gpu_index"]))
+                if _safe_runtime_metric(resource_metadata.get("gpu_index")) is not None
+                else configuration.get("gpu_index")
+            ),
+            "gpu_peak_memory_allocated_gb": _safe_runtime_metric(
+                resource_metadata.get("gpu_peak_memory_allocated_gb")
+            ),
             # ^^^ THOG
         }
 

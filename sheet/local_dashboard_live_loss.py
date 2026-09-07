@@ -119,5 +119,9 @@ class LiveLossReader:
                 series["point_sources"] = ["W&B"] * count + ["train.log (printed precision)"] * len(tail)
                 series["points"] = len(series["x"])
                 chart["series"] = [series, *chart["series"][1:]]
+                # vvv THOG console-tail rows have no trustworthy wall/process timestamp; never plot their missing times as zero
+                chart["available_x_axis_modes"] = ["step"]
+                chart["default_x_axis_mode"] = "step"
+                # ^^^ THOG
             return {**payload, "charts": charts, "revision": int(payload.get("revision", 0)) + self.revision}
 # ^^^ THOG

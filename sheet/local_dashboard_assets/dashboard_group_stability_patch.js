@@ -40,8 +40,7 @@ window.addEventListener("load", () => {
       button.className = "chart-group-toggle";
       button.setAttribute("aria-expanded", "false");
       button.innerHTML = (
-        '<span class="group-grip" aria-hidden="true">⠿</span>'
-        + '<span class="group-caret" aria-hidden="true">⌄</span>'
+        '<span class="group-caret" aria-hidden="true">⌄</span>'                                                                                          // <<< THOG remove the noninteractive six-dot motif
         + '<strong>train</strong>'
         + '<span class="group-count">…</span>'
       );

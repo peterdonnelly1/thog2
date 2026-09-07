@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import socket
+import sqlite3                                                                                                                                             # <<< THOG recover pre-enhancement instrumentation from the run's local W&B-linked chart metadata
 import sys
 from dataclasses import asdict, fields, replace
 from datetime import datetime
@@ -77,6 +78,99 @@ def _plastic_coarse_trial_checkpoint_from_payload(
 
 
 _WANDB_BACKENDS = {"wandb", "both"}
+# vvv THOG checkpoint-authoritative instrumentation controls that live outside OwtRunConfig
+_INSTRUMENTATION_ENVIRONMENT_NAMES = (
+    "THOG2_DEPTH_CURVE_PLOTS",
+    "THOG2_DEPTH_CURVE_SAMPLE_ELEMENTS",
+    "THOG2_DEPTH_CURVE_RENDERER",
+    "THOG2_DEPTH_CURVE_LOCAL_HTML",
+    "THOG2_INSTRUMENTATION_LOCAL_ROOT",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_COUPLING_PAIRS_PER_MATRIX",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SCALAR_WEIGHTS_PER_MATRIX",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DEPTH_EVALUATION_POINTS",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_TIME_MODE",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_HISTORY_LENGTH",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_START_STEP",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_END_STEP",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COUPLING_PAIRS_ALL_RUNS",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COORDINATES_ALL_RUNS",
+    "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DESTINATION",
+)
+_LOCAL_CONFIGURATION_TO_INSTRUMENTATION_ENVIRONMENT = {
+    "instrumentation__depth_weight_curves__coupling_pairs_per_matrix": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SCALAR_WEIGHTS_PER_MATRIX",
+    "instrumentation__depth_weight_curves__depth_evaluation_points": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DEPTH_EVALUATION_POINTS",
+    "instrumentation__depth_weight_curves__time_mode": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_TIME_MODE",
+    "instrumentation__depth_weight_curves__history_length": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_HISTORY_LENGTH",
+    "instrumentation__depth_weight_curves__log_every_n_steps": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS",
+    "instrumentation__depth_weight_curves__start_step": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_START_STEP",
+    "instrumentation__depth_weight_curves__end_step": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_END_STEP",
+    "instrumentation__depth_weight_curves__same_coupling_pairs_all_runs": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_SAME_COORDINATES_ALL_RUNS",
+    "instrumentation__depth_weight_curves__destination": "THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_DESTINATION",
+}
+
+
+def _instrumentation_configuration() -> Dict[str, str]:
+    return {
+        name: str(os.environ[name])
+        for name in _INSTRUMENTATION_ENVIRONMENT_NAMES
+        if name in os.environ
+    }
+
+
+def _inherited_instrumentation_configuration(
+    lifecycle: Mapping[str, Any],
+    *,
+    fallback_configuration: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, str]:
+    inherited: Dict[str, str] = {}
+    if isinstance(fallback_configuration, Mapping):
+        embedded = fallback_configuration.get("instrumentation_configuration")
+        if isinstance(embedded, Mapping):
+            inherited.update({
+                str(name): str(value)
+                for name, value in embedded.items()
+                if str(name) in _INSTRUMENTATION_ENVIRONMENT_NAMES
+            })
+        for configuration_name, environment_name in _LOCAL_CONFIGURATION_TO_INSTRUMENTATION_ENVIRONMENT.items():
+            value = fallback_configuration.get(configuration_name)
+            if value is not None:
+                inherited[environment_name] = str(value)
+    recorded = lifecycle.get("instrumentation_configuration")
+    if isinstance(recorded, Mapping):
+        inherited.update({
+            str(name): str(value)
+            for name, value in recorded.items()
+            if str(name) in _INSTRUMENTATION_ENVIRONMENT_NAMES
+        })
+    return inherited or _instrumentation_configuration()
+
+
+def _local_run_configuration(artifact_name: str) -> Dict[str, Any]:
+    """Read the newest local W&B-linked chart config without requiring network access."""
+
+    root = Path(os.environ.get("THOG2_INSTRUMENTATION_LOCAL_ROOT", "logs"))
+    artifact_directory = root / Path(str(artifact_name)).name
+    candidates = [artifact_directory / "charts.sqlite3"]
+    if artifact_directory.is_dir():
+        candidates.extend(artifact_directory.glob("*/charts.sqlite3"))
+    existing = [path for path in candidates if path.is_file()]
+    if not existing:
+        return {}
+    database = max(existing, key=lambda path: path.stat().st_mtime)
+    try:
+        connection = sqlite3.connect(f"file:{database.resolve()}?mode=ro", uri=True)
+        try:
+            row = connection.execute(
+                "SELECT value FROM metadata WHERE key = 'config_json'"
+            ).fetchone()
+        finally:
+            connection.close()
+        payload = json.loads(str(row[0])) if row is not None else {}
+    except (OSError, sqlite3.Error, TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+# ^^^ THOG
 _OPERATIONAL_CONFIG_DESTINATIONS = {
     "instrumentation__optimizer_histories__full_matrix_every_n_steps",
     "max_wall_minutes",
@@ -848,6 +942,7 @@ def _prepare_fresh(
             "phase_warmup_iters": int(config.warmup_iters),
         },
     )
+    lifecycle["instrumentation_configuration"] = _instrumentation_configuration()                                                                          # <<< THOG persist all effective curve controls in checkpoint, manifest, local config and W&B config
     return {
         "early_exit": False,
         "mode": "fresh",
@@ -931,6 +1026,15 @@ def _prepare_parent_context(
             optimizer_name=optimizer_name,
             optimizer_momentum=optimizer_momentum,
         )
+
+    # vvv THOG resume/fork inherit the parent's complete recorded instrumentation surface
+    instrumentation_configuration = _inherited_instrumentation_configuration(
+        parent_lifecycle,
+        fallback_configuration=_local_run_configuration(resolved.artifact_name),
+    )                                                                                                                                                      # <<< THOG older checkpoints inherit the W&B-linked local config mirror instead of current wrapper defaults
+    parent_lifecycle = dict(parent_lifecycle)
+    parent_lifecycle["instrumentation_configuration"] = instrumentation_configuration
+    # ^^^ THOG
 
     parent_world_size = int(parent_lifecycle.get("world_size", world_size))
     if world_size != parent_world_size:
@@ -1066,6 +1170,8 @@ def _prepare_parent_context(
                 "scaling_history_coefficients":config.thogopt__scaling_history_coefficients}
         append_log = False
 
+    lifecycle["instrumentation_configuration"] = dict(instrumentation_configuration)                                                                        # <<< THOG fork constructors intentionally copy only schema fields, so restore this authoritative extension
+
     return {
         "early_exit": False,
         "mode": mode,
@@ -1134,6 +1240,7 @@ def resolved_payload(context: Mapping[str, Any]) -> Dict[str, Any]:
             world_size=int(context["world_size"]),
         ),
         "paths": {name: str(path) for name, path in paths.items()},
+        "instrumentation_configuration": dict(lifecycle.get("instrumentation_configuration", {})),                                                         # <<< THOG make inherited instrumentation visible during dry-run preflight
     }
 
 
@@ -1145,6 +1252,13 @@ def _configure_instrumentation_environment(context: Mapping[str, Any]) -> None:
     tensorboard_dir = Path(str(lifecycle["tensorboard_dir"]))
     os.environ["THOG2_CURVE_ROOT"] = str(tensorboard_dir.parent)
     os.environ["WANDB_MODE"] = config.wandb_mode
+    # vvv THOG apply checkpoint-authoritative curve controls after wrapper defaults have been parsed
+    recorded_instrumentation = lifecycle.get("instrumentation_configuration", {})
+    if isinstance(recorded_instrumentation, Mapping):
+        for name in _INSTRUMENTATION_ENVIRONMENT_NAMES:
+            if name in recorded_instrumentation:
+                os.environ[name] = str(recorded_instrumentation[name])
+    # ^^^ THOG
 
     wandb_continue_run = bool(context["wandb_continue_run"])
     if backend in _WANDB_BACKENDS and wandb_continue_run:
@@ -1497,6 +1611,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "dataset_record": dataset,
             "parameter_report": trainer.parameter_report,
             "lifecycle": lifecycle,
+            "instrumentation_configuration": dict(lifecycle.get("instrumentation_configuration", {})),                                                    # <<< THOG W&B/local data can seed later resume and fork instrumentation
         },
     )
 

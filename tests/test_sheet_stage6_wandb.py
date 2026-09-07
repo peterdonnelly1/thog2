@@ -51,7 +51,7 @@ class FakeWandb:
 
 
 class WandbTelemetryTests(unittest.TestCase):
-    # vvv THOG default W&B setup defines only the two application loss series; raw GPU memory remains W&B-owned system telemetry
+    # vvv THOG default W&B setup defines only application loss series; allocator scalars use the native step and system monitoring stays W&B-owned
     def test_default_wandb_surface_is_minimal(self) -> None:
         module = FakeWandb()
         with mock.patch.object(constants, "DEBUG", 9), tempfile.TemporaryDirectory() as directory:
@@ -81,6 +81,42 @@ class WandbTelemetryTests(unittest.TestCase):
             for arguments, _keywords in module.run.defined
         }
         self.assertEqual(defined_names, {"train/loss", "val/val_loss"})
+    # ^^^ THOG
+
+    # vvv THOG DENSE uses the same native W&B monitor and adds run-owned allocator memory in normal mode
+    def test_default_dense_wandb_logs_process_memory(self) -> None:
+        module = FakeWandb()
+        with mock.patch.object(constants, "DEBUG", 9), tempfile.TemporaryDirectory() as directory:
+            telemetry = WandbTelemetry(
+                enabled=True,
+                project="thog",
+                entity=None,
+                mode="offline",
+                root=Path(directory),
+                name="DENSE_scruffy__MEMORY",
+                group="TEST",
+                job_type="dense2",
+                config={"artifact_prefix": "DENSE", "model_type": "dense"},
+            )
+            telemetry.sampler = mock.Mock()
+            telemetry.sampler.sample.return_value = {
+                "gpu/memory_allocated_gb": 2.5,
+                "gpu/memory_reserved_gb": 3.0,
+                "gpu/max_memory_allocated_gb": 2.75,
+            }
+            with mock.patch("sheet.wandb_telemetry.importlib.import_module", return_value=module):
+                telemetry.start()
+            telemetry.log_event("optimizer_progress", {
+                "completed_updates": 1,
+                "consumed_tokens": 128,
+                "cumulative_training_seconds": 2.0,
+                "training_loss": 3.0,
+                "learning_rate": 1.0e-3,
+                "gradient_norm": 1.5,
+            })
+
+        self.assertTrue(any(row.get("gpu/memory_allocated_gb") == 2.5 for row in module.run.logged))
+        self.assertEqual(module.init_arguments["job_type"], "dense2")
     # ^^^ THOG
 
     def test_s6_36_direct_telemetry_logs_events_and_resources(self) -> None:

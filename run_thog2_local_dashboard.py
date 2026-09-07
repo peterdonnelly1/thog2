@@ -85,6 +85,8 @@ def _reported_run_state(
     target_update: Optional[int],
 ) -> str:
     state = str(stored_state or "unknown")
+    if state == "monitoring":
+        state = "recording"                                                                                                                               # <<< THOG normalize legacy live writers immediately; monitoring is not a user-facing training state
     if state in {"finished", "stopped", "crashed"}:
         if target_update is None:
             return "stopped" if state == "crashed" else state

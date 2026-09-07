@@ -25,6 +25,11 @@ _SCAN_TIME_BUDGET_SECONDS = 0.22
 _X_AXIS_MODE_ORDER = ("step", "relative_wall", "relative_process", "wall_time")
 _GPU_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
 _GPU_PROCESS_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./]process[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
+_MEMORY_NAME_PATTERN = re.compile(
+    r"(?:^|[./_])(?:memory|rss|vram)(?:$|[./_])"
+    r"|memory(?:allocated|reserved|used|usage|total|free|bytes|percent|peak|max)",
+    re.IGNORECASE,
+)                                                                                                                                                          # <<< THOG route memory capacity/use metrics, but not GPU memory-clock telemetry
 
 _SYSTEM_TITLES = {
     "gpu.fanspeed": "GPU Fan Speed (%)",
@@ -39,6 +44,7 @@ _SYSTEM_TITLES = {
     "memory": "System Memory Usage (%)",
     "proc.cpu.threads": "Process CPU Threads",
     "proc.memory.rssmb": "Process Memory RSS (MB)",
+    "gpu.process.peak_memory_allocated_gb": "Peak GPU Memory Allocated (GB)",                                                                              # <<< THOG monotonic process allocator high-water chart
 }
 
 
@@ -127,8 +133,17 @@ def _system_chart_identity(metric_name: str) -> tuple[str, str, str]:
 
 def _history_chart_identity(metric_name: str) -> tuple[str, str, str, str]:
     group = _group_name(metric_name)
+    if _MEMORY_NAME_PATTERN.search(metric_name):
+        group = "memory"                                                                                                                                    # <<< THOG custom process allocator history belongs in memory, not system/GPU
     title = metric_name.split("/", 1)[1] if "/" in metric_name else metric_name
-    return group, metric_name, _pretty_metric_name(title), metric_name
+    pretty_title = _pretty_metric_name(title)
+    if metric_name.strip("/.").lower() in {"gpu/max_memory_allocated_gb", "gpu/peak_allocated_gb"}:
+        return group, "gpu.process.peak_memory_allocated_gb", "Peak GPU Memory Allocated (GB)", "GPU process"                                             # <<< THOG one canonical monotonic process high-water chart
+    if metric_name.strip("/.").lower() == "gpu/memory_allocated_gb":
+        return group, "gpu.process.memory_allocated_gb", "GPU Memory Allocated (GB)", "GPU process"                                                       # <<< THOG canonical run-owned allocator series
+    if metric_name.strip("/.").lower() == "gpu/memory_reserved_gb":
+        return group, "gpu.process.memory_reserved_gb", "GPU Memory Reserved (GB)", "GPU process"                                                         # <<< THOG canonical run-owned allocator series
+    return group, metric_name, pretty_title, metric_name
 
 
 def _downsample_points(
@@ -167,8 +182,9 @@ def _downsample_points(
 
 
 class _WandbRunScanner:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, gpu_index: Optional[int] = None) -> None:
         self.path = Path(path)
+        self.gpu_index = gpu_index                                                                                                                           # <<< THOG suppress device-wide curves from GPUs not assigned to this run
         self.lock = threading.Lock()
         self.store: Any = None
         self.record_class: Any = None
@@ -177,6 +193,8 @@ class _WandbRunScanner:
         self.history_step = 0.0
         self.first_history_timestamp: Optional[float] = None
         self.first_stats_timestamp: Optional[float] = None
+        self.first_wall_timestamp: Optional[float] = None                                                                                                    # <<< THOG all chart families share one run-relative wall origin
+        self.first_process_runtime: Optional[float] = None                                                                                                   # <<< THOG W&B runtime is absolute and must be rebased for relative-process axes
         self.process_anchor_timestamp: Optional[float] = None
         self.process_anchor_runtime: Optional[float] = None
         self.series: Dict[
@@ -201,6 +219,7 @@ class _WandbRunScanner:
         self.group_revisions: Dict[str, int] = defaultdict(int)
         self.error = ""
         self.catching_up = True
+        self.has_custom_gpu_allocator_metrics = False                                                                                                       # <<< THOG prefer precise training-process allocator history over native device/process aliases
 
     def _open(self) -> None:
         from wandb.proto import wandb_internal_pb2
@@ -225,6 +244,8 @@ class _WandbRunScanner:
         self.first_stats_timestamp = None
         self.process_anchor_timestamp = None
         self.process_anchor_runtime = None
+        self.first_wall_timestamp = None                                                                                                                     # <<< THOG reset shared relative-time origin when the W&B file is replaced
+        self.first_process_runtime = None                                                                                                                    # <<< THOG reset process-time origin when the W&B file is replaced
         self.series.clear()
         self.chart_titles.clear()
         self.x_titles.clear()
@@ -232,6 +253,7 @@ class _WandbRunScanner:
         self.group_revisions.clear()
         self.error = ""
         self.catching_up = True
+        self.has_custom_gpu_allocator_metrics = False                                                                                                       # <<< THOG reset authoritative allocator discovery with the file scanner
 
     def _append(
         self,
@@ -250,6 +272,10 @@ class _WandbRunScanner:
         default_x_axis_mode: str,
     ) -> None:
         points = self.series[group][f"{chart_id}\0{series_name}"]
+        if group == "memory" and chart_id == "gpu.process.peak_memory_allocated_gb" and points:
+            y = max(float(y), float(points[-1][1]))                                                                                                         # <<< THOG peak memory remains monotonic across resumed process sessions
+        if points and points[-1][0] == float(x) and points[-1][1] == float(y):
+            return                                                                                                                                           # <<< THOG flat/nested W&B aliases must not duplicate a GPU series point
         points.append((
             float(x),
             float(y),
@@ -278,11 +304,25 @@ class _WandbRunScanner:
         self.history_step = explicit_step
         timestamp = _finite_number(values.get("_timestamp"))
         runtime = _finite_number(values.get("_runtime"))
+        if timestamp is not None and self.first_wall_timestamp is None:
+            self.first_wall_timestamp = timestamp                                                                                                           # <<< THOG establish one relative wall origin across history and system records
         if timestamp is not None and self.first_history_timestamp is None:
             self.first_history_timestamp = timestamp
         relative_wall_seconds = (
-            max(0.0, timestamp - self.first_history_timestamp)
-            if timestamp is not None and self.first_history_timestamp is not None
+            max(0.0, timestamp - self.first_wall_timestamp)
+            if timestamp is not None and self.first_wall_timestamp is not None
+            else None
+        )
+        if runtime is not None and self.first_process_runtime is None:
+            elapsed_from_run_origin = (
+                max(0.0, timestamp - self.first_wall_timestamp)
+                if timestamp is not None and self.first_wall_timestamp is not None
+                else 0.0
+            )
+            self.first_process_runtime = runtime - elapsed_from_run_origin                                                                                  # <<< THOG infer the process-runtime value at the shared first-record origin
+        relative_process_seconds = (
+            max(0.0, runtime - self.first_process_runtime)
+            if runtime is not None and self.first_process_runtime is not None
             else None
         )
         if timestamp is not None and runtime is not None:
@@ -293,6 +333,18 @@ class _WandbRunScanner:
             if metric_name.startswith("_"):
                 continue
             for flattened_name, numeric in _flatten_numeric(metric_name, value):
+                if flattened_name.strip("/.").lower() in {
+                    "gpu/memory_allocated_gb",
+                    "gpu/memory_reserved_gb",
+                    "gpu/max_memory_allocated_gb",
+                    "gpu/peak_allocated_gb",
+                }:
+                    if not self.has_custom_gpu_allocator_metrics:
+                        self.has_custom_gpu_allocator_metrics = True
+                        for encoded in tuple(self.series.get("memory", {})):
+                            if encoded.split("\0", 1)[0].lower().startswith("gpu.process."):
+                                del self.series["memory"][encoded]
+                        self.group_revisions["memory"] += 1                                                                                                # <<< THOG remove earlier native aliases once authoritative allocator data arrives
                 group, chart_id, title, series_name = _history_chart_identity(flattened_name)
                 self._append(
                     group,
@@ -304,7 +356,7 @@ class _WandbRunScanner:
                     "step",
                     step=explicit_step,
                     relative_wall_seconds=relative_wall_seconds,
-                    relative_process_seconds=runtime,
+                    relative_process_seconds=relative_process_seconds,
                     wall_time_epoch_seconds=timestamp,
                     default_x_axis_mode="step",
                 )
@@ -314,14 +366,21 @@ class _WandbRunScanner:
         seconds = float(getattr(timestamp, "seconds", 0) or 0)
         nanos = float(getattr(timestamp, "nanos", 0) or 0)
         epoch = seconds + nanos / 1_000_000_000.0
+        if self.first_wall_timestamp is None:
+            self.first_wall_timestamp = epoch                                                                                                               # <<< THOG stats-only runs still receive a correct relative wall origin
         if self.first_stats_timestamp is None:
             self.first_stats_timestamp = epoch
-        relative_wall_seconds = max(0.0, epoch - self.first_stats_timestamp)
+        relative_wall_seconds = max(0.0, epoch - self.first_wall_timestamp)
         elapsed_minutes = relative_wall_seconds / 60.0
-        relative_process_seconds = (
-            max(0.0, self.process_anchor_runtime + epoch - self.process_anchor_timestamp)
+        raw_process_seconds = (
+            self.process_anchor_runtime + epoch - self.process_anchor_timestamp
             if self.process_anchor_timestamp is not None and self.process_anchor_runtime is not None
             else None
+        )
+        relative_process_seconds = (
+            max(0.0, raw_process_seconds - self.first_process_runtime)
+            if raw_process_seconds is not None and self.first_process_runtime is not None
+            else relative_wall_seconds                                                                                                                      # <<< THOG stats before the first history row still have a valid run-relative process estimate
         )
 
         for item in getattr(stats, "item", ()):
@@ -330,21 +389,53 @@ class _WandbRunScanner:
                 continue
             value = _json_value(getattr(item, "value_json", "null"))
             for flattened_name, numeric in _flatten_numeric(key, value):
+                clean_name = flattened_name.strip("/.")
+                process_match = _GPU_PROCESS_METRIC_PATTERN.match(clean_name)
+                gpu_match = _GPU_METRIC_PATTERN.match(clean_name)
+                if process_match and self.gpu_index is not None and int(process_match.group("index")) != int(self.gpu_index):
+                    continue                                                                                                                                # <<< THOG process GPU series also remain limited to the run's assigned device
+                if gpu_match and self.gpu_index is not None and int(gpu_match.group("index")) != int(self.gpu_index):
+                    continue                                                                                                                                # <<< THOG a run assigned to one GPU must not acquire every device's curves
+                is_memory = bool(_MEMORY_NAME_PATTERN.search(clean_name))
+                if is_memory and gpu_match and process_match is None:
+                    continue                                                                                                                                # <<< THOG device-total VRAM includes display/unrelated processes and is not run memory
+                if is_memory and process_match and self.has_custom_gpu_allocator_metrics:
+                    continue                                                                                                                                # <<< THOG avoid duplicate native memory curves when precise allocator history is available
                 chart_id, title, series_name = _system_chart_identity(flattened_name)
+                group = "memory" if is_memory else "system"
                 self._append(
-                    "system",
+                    group,
                     chart_id,
                     title,
                     series_name,
                     elapsed_minutes,
                     numeric,
                     "Time (minutes)",
-                    step=None,
+                    step=float(self.history_step),                                                                                                          # <<< THOG native system samples now support optimizer steps as an x axis
                     relative_wall_seconds=relative_wall_seconds,
                     relative_process_seconds=relative_process_seconds,
                     wall_time_epoch_seconds=epoch,
                     default_x_axis_mode="relative_wall",
                 )
+                if process_match and "allocated" in clean_name.lower() and "max" not in clean_name.lower():
+                    peak_key = f"gpu.process.peak_memory_allocated_gb\0{series_name}"
+                    prior = self.series["memory"].get(peak_key, ())
+                    value_gb = numeric / float(1024 ** 3) if numeric > 1024 ** 2 else numeric
+                    peak_gb = max(value_gb, prior[-1][1] if prior else value_gb)
+                    self._append(
+                        "memory",
+                        "gpu.process.peak_memory_allocated_gb",
+                        "Peak GPU Memory Allocated (GB)",
+                        series_name,
+                        elapsed_minutes,
+                        peak_gb,
+                        "Time (minutes)",
+                        step=float(self.history_step),
+                        relative_wall_seconds=relative_wall_seconds,
+                        relative_process_seconds=relative_process_seconds,
+                        wall_time_epoch_seconds=epoch,
+                        default_x_axis_mode="relative_wall",
+                    )                                                                                                                                         # <<< THOG cumulative maximum can only increase
 
     def _consume_record(self, record: Any) -> None:
         record_type = record.WhichOneof("record_type")
@@ -391,7 +482,8 @@ class _WandbRunScanner:
         self.refresh()
         with self.lock:
             groups = []
-            for group in sorted(self.series, key=lambda name: (name not in {"train", "val", "system"}, {"train": 0, "val": 1, "system": 2}.get(name, 99), name)):
+            group_order = {"train": 0, "val": 1, "memory": 2, "system": 3}                                                                                # <<< THOG memory is a first-class W&B-style group
+            for group in sorted(self.series, key=lambda name: (name not in group_order, group_order.get(name, 99), name)):
                 chart_ids = {key.split("\0", 1)[0] for key in self.series[group]}
                 if not chart_ids:
                     continue
@@ -412,7 +504,7 @@ class _WandbRunScanner:
                 x_variants = {}
                 for mode_index, mode_name in enumerate(_X_AXIS_MODE_ORDER, start=2):
                     values = [point[mode_index] for point in selected]
-                    if any(value is not None for value in values):
+                    if values and all(value is not None for value in values):
                         x_variants[mode_name] = values
                 chart_series[chart_id].append({
                     "name": series_name,
@@ -506,7 +598,30 @@ class _ScannerCatalog:
         with self.lock:
             scanner = self.scanners.get(path)
             if scanner is None:
-                scanner = _WandbRunScanner(path)
+                # vvv THOG recover GPU affinity from current config first and legacy command/host labels second
+                configuration = status.get("configuration") or {}
+                raw_gpu_index = status.get("gpu_index", configuration.get("gpu_index"))
+                try:
+                    gpu_index = int(raw_gpu_index) if raw_gpu_index is not None and str(raw_gpu_index).strip() else None
+                except (TypeError, ValueError):
+                    gpu_index = None
+                if gpu_index is None:
+                    identity_text = " ".join(
+                        str(value or "")
+                        for value in (
+                            configuration.get("cuda_visible_devices"),
+                            configuration.get("command"),
+                            configuration.get("host_label"),
+                            status.get("host_label"),
+                        )
+                    )
+                    match = re.search(r"(?:CUDA_VISIBLE_DEVICES\s*=|(?:^|[_ -])gpu[_ -]?)(\d+)", identity_text, re.IGNORECASE)
+                    if match:
+                        gpu_index = int(match.group(1))
+                    elif re.search(r"(?:^|[_ -])scruffy(?:$|[_ -])", identity_text, re.IGNORECASE):
+                        gpu_index = 0                                                                                                                       # <<< THOG recover the physical index for current single-GPU scruffy history
+                scanner = _WandbRunScanner(path, gpu_index=gpu_index)
+                # ^^^ THOG
                 self.scanners[path] = scanner
             return scanner
 

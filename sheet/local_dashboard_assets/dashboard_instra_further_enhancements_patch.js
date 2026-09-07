@@ -20,8 +20,8 @@ window.addEventListener("load", () => {
     "#8B5CF6", "#6D28D9", "#6366F1", "#4338CA", "#4F46E5", "#312E81", "#7C3AED", "#5B21B6",
     "#0D9488", "#115E59", "#0891B2", "#155E75", "#0284C7", "#075985", "#2563EB", "#1E40AF",
     "#92400E", "#78350F", "#A0522D", "#6B4423", "#708090", "#475569", "#334155", "#1E293B",
-    "#FF6B6B", "#FF922B", "#FCC419", "#51CF66", "#20C997", "#845EF7", "#000000", "#FFFFFF",
-  ]);
+    "#FF0000", "#00FF00", "#0000FF", "#00FFFF", "#FF00FF", "#FFFF00", "#000000", "#FFFFFF",
+  ]);                                                                                                                                                    // <<< THOG bottom row is R G B C M Y followed by unchanged black and white
 
   const selected_run = () => {
     let run = null;

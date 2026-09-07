@@ -166,15 +166,26 @@ def _local_chart_store_init_with_weight_step_range(
     config: Mapping[str, Any],
 ) -> None:
     enriched_config = dict(config)
-    # Persist the canonical names while leaving existing runtime environment keys compatible.
+    # vvv THOG persist every canonical depth-weight instrumentation value, not only the two renamed aliases
+    # for name, environment, default in _DEPTH_WEIGHT_ENVIRONMENT_ROWS:
+    #     if name.endswith(("coupling_pairs_per_matrix", "same_coupling_pairs_all_runs")):
     for name, environment, default in _DEPTH_WEIGHT_ENVIRONMENT_ROWS:
-        if name.endswith(("coupling_pairs_per_matrix", "same_coupling_pairs_all_runs")):
-            legacy_name = name.replace("coupling_pairs_per_matrix", "scalar_weights_per_matrix").replace(
-                "same_coupling_pairs_all_runs", "same_coordinates_all_runs"
-            )
-            value = enriched_config.get(name, enriched_config.get(legacy_name, os.environ.get(environment, default)))
-            enriched_config[name] = int(value) if name.endswith("pairs_per_matrix") else str(value).lower() == "true"
+        legacy_name = name.replace("coupling_pairs_per_matrix", "scalar_weights_per_matrix").replace(
+            "same_coupling_pairs_all_runs", "same_coordinates_all_runs"
+        )
+        value = enriched_config.get(name, enriched_config.get(legacy_name, os.environ.get(environment, default)))
+        if value is None:
+            continue
+        if name.endswith(("pairs_per_matrix", "depth_evaluation_points", "history_length", "log_every_n_steps", "start_step", "end_step")):
+            value = int(value)
+        elif name.endswith("same_coupling_pairs_all_runs"):
+            value = str(value).lower() == "true"
+        else:
+            value = str(value)
+        enriched_config[name] = value
+        if legacy_name != name:
             enriched_config.pop(legacy_name, None)
+    # ^^^ THOG
     for destination, environment in (
         (_START_DESTINATION, _START_ENVIRONMENT),
         (_END_DESTINATION, _END_ENVIRONMENT),

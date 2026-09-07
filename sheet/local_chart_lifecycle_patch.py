@@ -114,11 +114,11 @@ def _weight_phase(
     update = max(0, int(optimizer_update))
     first_step = max(1, int(start_step)) if start_step is not None else 1
     if end_step is not None and int(end_step) < first_step:
-        return "monitoring"
+        return "recording" if update > 0 else "preparing"                                                                                                  # <<< THOG capture configuration must not mislabel a live training process
     if update < first_step:
-        return "preparing"
+        return "recording" if update > 0 else "preparing"                                                                                                  # <<< THOG resumed and forked runs are recording even before their next capture point
     if end_step is not None and update > int(end_step):
-        return "monitoring"
+        return "recording"                                                                                                                                 # <<< THOG completed capture windows do not turn active training into monitoring
     return "recording"
 
 
@@ -131,6 +131,10 @@ def _active_phase(
     start_step: Optional[int],
     end_step: Optional[int],
 ) -> str:
+    # vvv THOG lifecycle state describes the active run, independently of a chart's finite sampling window
+    if max(0, int(optimizer_update)) > 0 or store._has_recorded_data:
+        return "recording"
+    # ^^^ THOG
     if heatmap_local and store._has_heatmap_records:
         return "recording"
     if weight_local:
