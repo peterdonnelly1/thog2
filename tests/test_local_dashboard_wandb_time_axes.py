@@ -107,6 +107,7 @@ def test_memory_group_is_process_specific_gpu_filtered_and_monotonic() -> None:
                 _item("gpu.1.memoryClock", 3000.0),
                 _item("gpu.1.memoryAllocatedBytes", allocated * 2),
                 _item("gpu.process.1.memoryAllocatedBytes", allocated),
+                _item("proc.memory.rssMB", 2048.0),
             ),
         )
 
@@ -118,6 +119,12 @@ def test_memory_group_is_process_specific_gpu_filtered_and_monotonic() -> None:
     assert {chart["series"][0]["name"] for chart in system["charts"]} == {"GPU 1"}
     assert {chart["id"] for chart in system["charts"]} == {"gpu.gpu", "gpu.memoryClock"}
     memory = scanner.group_payload("memory")
+    allocated_chart = next(chart for chart in memory["charts"] if chart["id"] == "gpu.process.memoryAllocatedBytes")
+    assert allocated_chart["title"] == "GPU Process Memory Allocated (GB)"
+    assert allocated_chart["series"][0]["y"] == [4.0, 3.0]
+    rss_chart = next(chart for chart in memory["charts"] if chart["id"] == "proc.memory.rssMB")
+    assert rss_chart["title"] == "Process Memory RSS (GB)"
+    assert rss_chart["series"][0]["y"] == [2.0, 2.0]
     peak = next(chart for chart in memory["charts"] if chart["id"] == "gpu.process.peak_memory_allocated_gb")
     assert peak["series"][0]["y"] == [4.0, 4.0]
 # ^^^ THOG

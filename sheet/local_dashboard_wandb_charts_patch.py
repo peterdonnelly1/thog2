@@ -131,6 +131,27 @@ def _system_chart_identity(metric_name: str) -> tuple[str, str, str]:
     return chart_id, title, metric_name
 
 
+def _memory_value_in_gb(
+    metric_name: str,
+    value: float,
+    title: str,
+) -> tuple[float, str, bool]:
+    """Normalize byte/MB memory telemetry to the dashboard's single GB scale."""
+
+    clean = metric_name.strip("/.").lower()
+    if "byte" in clean:
+        gb_value = float(value) / float(1024 ** 3)
+    elif clean.endswith("mb") or clean.endswith("mib"):
+        gb_value = float(value) / 1024.0
+    elif clean.endswith("gb") or clean.endswith("gib"):
+        gb_value = float(value)
+    else:
+        return float(value), title, False
+    gb_title = re.sub(r"\s*\((?:M|G)i?B\)\s*$", "", title, flags=re.IGNORECASE)
+    gb_title = re.sub(r"\s+(?:Bytes?|M(?:i)?B|G(?:i)?B)\s*$", "", gb_title, flags=re.IGNORECASE)
+    return gb_value, f"{gb_title} (GB)", True                                                                                                               # <<< THOG memory charts never mix byte/MB/GiB axis scales
+
+
 def _history_chart_identity(metric_name: str) -> tuple[str, str, str, str]:
     group = _group_name(metric_name)
     if _MEMORY_NAME_PATTERN.search(metric_name):
@@ -403,13 +424,21 @@ class _WandbRunScanner:
                     continue                                                                                                                                # <<< THOG avoid duplicate native memory curves when precise allocator history is available
                 chart_id, title, series_name = _system_chart_identity(flattened_name)
                 group = "memory" if is_memory else "system"
+                plotted_value = numeric
+                plotted_as_gb = False
+                if is_memory:
+                    plotted_value, title, plotted_as_gb = _memory_value_in_gb(
+                        clean_name,
+                        numeric,
+                        title,
+                    )                                                                                                                                       # <<< THOG process RSS and allocator bytes share a GB y axis
                 self._append(
                     group,
                     chart_id,
                     title,
                     series_name,
                     elapsed_minutes,
-                    numeric,
+                    plotted_value,
                     "Time (minutes)",
                     step=float(self.history_step),                                                                                                          # <<< THOG native system samples now support optimizer steps as an x axis
                     relative_wall_seconds=relative_wall_seconds,
@@ -417,11 +446,10 @@ class _WandbRunScanner:
                     wall_time_epoch_seconds=epoch,
                     default_x_axis_mode="relative_wall",
                 )
-                if process_match and "allocated" in clean_name.lower() and "max" not in clean_name.lower():
+                if process_match and plotted_as_gb and "allocated" in clean_name.lower() and "max" not in clean_name.lower():
                     peak_key = f"gpu.process.peak_memory_allocated_gb\0{series_name}"
                     prior = self.series["memory"].get(peak_key, ())
-                    value_gb = numeric / float(1024 ** 3) if numeric > 1024 ** 2 else numeric
-                    peak_gb = max(value_gb, prior[-1][1] if prior else value_gb)
+                    peak_gb = max(plotted_value, prior[-1][1] if prior else plotted_value)
                     self._append(
                         "memory",
                         "gpu.process.peak_memory_allocated_gb",

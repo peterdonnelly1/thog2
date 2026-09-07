@@ -234,6 +234,14 @@ window.addEventListener("load", () => {
 
   const install_table_patch = () => {
     if (table_patch_installed) return true;
+    // The final September table owner performs the ordering, sizing and resize
+    // work synchronously after each render.  Do not add this legacy subtree
+    // observer as well: two owners can repeatedly react to one another's DOM
+    // moves and cause avoidable repaint churn.
+    if (document.querySelector('.run-name-column-resizer[data-instra-owner="sep07-feedback"]')) {
+      table_patch_installed = true;
+      return true;
+    }
     if (!move_steps_after_preset() || !install_name_resizer()) return false;
     table_patch_installed = true;
     const base_render_runs_aug30 = render_runs;

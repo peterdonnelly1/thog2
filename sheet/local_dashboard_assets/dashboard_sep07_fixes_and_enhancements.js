@@ -5,8 +5,8 @@
 window.addEventListener("load", () => {
   setTimeout(() => {
     const ordinary_text_storage_key = "thog2_local_ordinary_text_size";
-    const updated_text_by_run = new Map();
-    let table_polish_scheduled = false;
+    const run_name_width_storage_key = "thog2_local_run_name_column_width";
+    const default_run_name_width = 390;
     let workspace_hover_run_id = null;
 
     const finite_number = value => {
@@ -221,6 +221,59 @@ window.addEventListener("load", () => {
           ?? configuration(run).instrumentation_configuration?.THOG2_INSTRUMENTATION_DEPTH_WEIGHT_CURVES_LOG_EVERY_N_STEPS,
       },
     });
+    const table_column_order = Object.freeze([
+      "select", "visibility", "state", "duration", "name", "wandb", "host", "gpu",
+      "preset", "optimizer", "steps", "gb", "warmup", "layers", "depth_order", "parms", "equiv",
+      "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
+      "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
+      "updated", "menu",
+    ]);                                                                                                                                                    // <<< THOG one semantic order owns both headings and cells
+    const table_column_widths = Object.freeze({
+      select: 34, visibility: 34, state: 88, duration: 72, wandb: 0, host: 84, gpu: 42,
+      preset: 64, optimizer: 70, steps: 62, gb: 52, warmup: 42, layers: 42, depth_order: 42,
+      parms: 58, equiv: 58, context: 46, d_model: 46, heads: 42, grad_accum: 46,
+      activation_checkpointing: 42, learning_rate: 42, min_learning_rate: 42,
+      probe_start: 50, probe_end: 50, curve_start: 50, curve_end: 50, capture_period: 50,
+      updated: 92, menu: 36,
+    });
+    const tag_column = (element, key) => {
+      if (element) element.dataset.instraColumnKey = key;
+      return element;
+    };
+    const tag_base_headers = () => {
+      const row = document.querySelector(".runs-table thead tr");
+      if (!row) return;
+      const by_text = text => [...row.children].find(cell => String(cell.textContent || "").trim().toUpperCase() === text);
+      tag_column(row.querySelector(".check-column"), "select");
+      tag_column(row.querySelector(".visibility-column"), "visibility");
+      tag_column(row.querySelector(".name-column"), "name");
+      tag_column(by_text("W&B ID"), "wandb");
+      tag_column(by_text("STATE"), "state");
+      tag_column(by_text("HOST"), "host");
+      tag_column(row.querySelector(".probe-start-column"), "probe_start");
+      tag_column(row.querySelector(".probe-end-column"), "probe_end");
+      tag_column(row.querySelector(".curve-start-column"), "curve_start");
+      tag_column(row.querySelector(".curve-end-column"), "curve_end");
+      tag_column(row.querySelector(".step-column"), "steps");
+      tag_column(row.querySelector(".duration-column"), "duration");
+      tag_column(by_text("UPDATED"), "updated");
+      tag_column(row.querySelector(".menu-column"), "menu");
+    };
+    tag_base_headers();
+
+    const base_append_run_row_sep07 = append_run_row;
+    append_run_row = function(body, run) {
+      const result = base_append_run_row_sep07(body, run);
+      const row = body.lastElementChild;
+      if (!row?.matches?.("tr[data-run-id]")) return result;
+      const keys = [
+        "select", "visibility", "name", "wandb", "state", "host", "probe_start", "probe_end",
+        "curve_start", "curve_end", "steps", "duration", "updated", "menu",
+      ];
+      [...row.children].forEach((cell, index) => tag_column(cell, keys[index]));
+      return result;
+    };                                                                                                                                                     // <<< THOG tag base cells before delayed hyperparameter patches insert their columns
+
     const display_cell_value = value => {
       if (value === null || value === undefined || value === "") return "—";
       const numeric = finite_number(value);
@@ -237,6 +290,7 @@ window.addEventListener("load", () => {
         header.className = "numeric-column instra-sep07-column";
         header.textContent = definition.label;
         header.title = definition.title;
+        tag_column(header, key);
       }
       if (placement !== "afterend" || marker.nextElementSibling !== header) marker.insertAdjacentElement(placement, header);
       return header;
@@ -248,6 +302,7 @@ window.addEventListener("load", () => {
         cell = document.createElement("td");
         cell.dataset.instraSep07Cell = key;
         cell.className = "numeric-column instra-sep07-column";
+        tag_column(cell, key);
       }
       const definition = table_definitions[key];
       const shown = display_cell_value(definition.value(run));
@@ -257,89 +312,152 @@ window.addEventListener("load", () => {
       return cell;
     };
 
+    const tag_generated_columns = root => {
+      for (const header of root.querySelectorAll?.("[data-instra-run-shape-header]") || []) {
+        tag_column(header, header.dataset.instraRunShapeHeader);
+      }
+      for (const cell of root.querySelectorAll?.("[data-instra-run-shape-cell]") || []) {
+        tag_column(cell, cell.dataset.instraRunShapeCell);
+      }
+      for (const key of Object.keys(table_definitions)) {
+        root.querySelectorAll?.(`[data-instra-sep07-header="${key}"], [data-instra-sep07-cell="${key}"]`)
+          .forEach(element => tag_column(element, key));
+      }
+    };
+    const reorder_columns = row => {
+      const elements = new Map(
+        [...row.children]
+          .filter(element => element.dataset.instraColumnKey)
+          .map(element => [element.dataset.instraColumnKey, element]),
+      );
+      const ordered = table_column_order.map(key => elements.get(key)).filter(Boolean);
+      const current = [...row.children];
+      if (ordered.length !== current.length || ordered.some((element, index) => current[index] !== element)) {
+        const fragment = document.createDocumentFragment();
+        ordered.forEach(element => fragment.appendChild(element));
+        current.filter(element => !ordered.includes(element)).forEach(element => fragment.appendChild(element));
+        row.appendChild(fragment);
+      }
+    };
+    const stored_run_name_width = () => {
+      const value = finite_number(localStorage.getItem(run_name_width_storage_key));
+      return value === null ? default_run_name_width : clamp_integer(value, 180, 2200);
+    };
+    const apply_table_geometry = name_width => {
+      const table = document.querySelector(".runs-table");
+      const header_row = table?.querySelector("thead tr");
+      if (!table || !header_row) return;
+      const resolved_name_width = clamp_integer(name_width, 180, 2200);
+      let fixed_width = 0;
+      for (const header of header_row.children) {
+        const key = header.dataset.instraColumnKey;
+        if (!key) continue;
+        if (key === "name") {
+          header.style.setProperty("width", "auto", "important");
+          header.style.setProperty("min-width", "0", "important");
+          header.style.setProperty("max-width", "none", "important");
+          continue;
+        }
+        const width = table_column_widths[key];
+        if (width === undefined) continue;
+        fixed_width += width;
+        header.style.setProperty("width", `${width}px`, "important");
+        header.style.setProperty("min-width", `${width}px`, "important");
+        header.style.setProperty("max-width", `${width}px`, "important");
+      }
+      table.style.setProperty("--instra-run-name-width", `${resolved_name_width}px`);
+      table.style.setProperty("width", "100%", "important");
+      table.style.setProperty("min-width", `${fixed_width + resolved_name_width}px`, "important");
+    };                                                                                                                                                     // <<< THOG surplus Runs-pane width belongs solely to RUN NAME
+    const set_run_name_width = (width, persist = false) => {
+      const resolved = clamp_integer(width, 180, 2200);
+      if (persist) localStorage.setItem(run_name_width_storage_key, String(resolved));
+      apply_table_geometry(resolved);
+    };
+    const install_run_name_resizer = () => {
+      const header = document.querySelector('.runs-table th[data-instra-column-key="name"]');
+      if (!header) return;
+      const existing = header.querySelector(".run-name-column-resizer");
+      if (existing?.dataset.instraOwner === "sep07-feedback") return;
+      existing?.remove();
+      const handle = document.createElement("span");
+      handle.className = "run-name-column-resizer";
+      handle.dataset.instraOwner = "sep07-feedback";
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-orientation", "vertical");
+      handle.setAttribute("aria-label", "Resize RUN NAME column");
+      handle.title = "Drag to resize RUN NAME; double-click to reset";
+      handle.addEventListener("pointerdown", event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const start_x = event.clientX;
+        const start_width = header.getBoundingClientRect().width;
+        handle.classList.add("dragging");
+        const move = pointer_event => set_run_name_width(start_width + pointer_event.clientX - start_x);
+        const finish = pointer_event => {
+          handle.classList.remove("dragging");
+          window.removeEventListener("pointermove", move, true);
+          window.removeEventListener("pointerup", finish, true);
+          set_run_name_width(start_width + pointer_event.clientX - start_x, true);
+        };
+        window.addEventListener("pointermove", move, true);
+        window.addEventListener("pointerup", finish, true);
+      });
+      handle.addEventListener("dblclick", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        localStorage.removeItem(run_name_width_storage_key);
+        set_run_name_width(default_run_name_width);
+      });
+      header.appendChild(handle);
+    };
+
     const polish_run_table = () => {
       const table = document.querySelector(".runs-table");
       const header_row = table?.querySelector("thead tr");
       if (!table || !header_row) return;
-      const state_header = [...header_row.children].find(cell => cell.textContent.trim().toUpperCase() === "STATE");
-      const name_header = header_row.querySelector(".name-column");
-      const duration_header = header_row.querySelector(".duration-column");
-      const host_header = [...header_row.children].find(cell => cell.textContent.trim().toUpperCase() === "HOST");
+      tag_base_headers();
+      tag_generated_columns(table);
+      const host_header = header_row.querySelector('[data-instra-column-key="host"]');
       const steps_header = header_row.querySelector(".step-column");
       const depth_order_header = header_row.querySelector('[data-instra-run-shape-header="depth_order"]');
       const curve_end_header = header_row.querySelector(".curve-end-column");
-      if (state_header && duration_header && name_header) {
-        state_header.insertAdjacentElement("afterend", duration_header);
-        duration_header.insertAdjacentElement("afterend", name_header);
-      }
-      const gpu_header = ensure_header("gpu", host_header);
+      ensure_header("gpu", host_header);
       ensure_header("gb", steps_header);
       const parms_header = ensure_header("parms", depth_order_header);
       ensure_header("equiv", parms_header);
       ensure_header("capture_period", curve_end_header);
+      tag_generated_columns(table);
 
       for (const row of table.querySelectorAll("tbody tr[data-run-id]")) {
         const run = app.runs.find(candidate => String(run_identifier(candidate)) === String(row.dataset.runId));
         if (!run) continue;
-        const state_cell = row.querySelector(".state-badge")?.parentElement;
-        const name_cell = row.querySelector(".run-link")?.parentElement;
-        const duration_cell = row.querySelector(".duration-column");
-        const preset_cell = row.querySelector('[data-instra-run-shape-cell="preset"]');
-        let host_cell = row.querySelector('[data-instra-sep07-anchor="host"]');
-        if (!host_cell) {
-          host_cell = preset_cell?.previousElementSibling;
-          if (host_cell) host_cell.dataset.instraSep07Anchor = "host";
-        }
-        const steps_cell = row.querySelector('[data-instra-steps-cell="true"]');
+        const host_cell = row.querySelector('[data-instra-column-key="host"]');
+        const steps_cell = row.querySelector('[data-instra-column-key="steps"]');
         const depth_order_cell = row.querySelector('[data-instra-run-shape-cell="depth_order"]');
-        const menu_cell = row.querySelector(".menu-column");
-        const updated_cell = menu_cell?.previousElementSibling;
-        let curve_end_cell = row.querySelector('[data-instra-sep07-anchor="curve_end"]');
-        if (!curve_end_cell) {
-          curve_end_cell = duration_cell?.previousElementSibling;
-          if (curve_end_cell) curve_end_cell.dataset.instraSep07Anchor = "curve_end";
-        }
-        if (state_cell && duration_cell && name_cell) {
-          state_cell.insertAdjacentElement("afterend", duration_cell);
-          duration_cell.insertAdjacentElement("afterend", name_cell);
-        }
+        const curve_end_cell = row.querySelector('[data-instra-column-key="curve_end"]');
         ensure_row_cell(row, run, "gpu", host_cell);
         ensure_row_cell(row, run, "gb", steps_cell);
         const parms_cell = ensure_row_cell(row, run, "parms", depth_order_cell);
         ensure_row_cell(row, run, "equiv", parms_cell);
         ensure_row_cell(row, run, "capture_period", curve_end_cell);
-        if (updated_cell) {
-          updated_cell.classList.add("instra-updated-cell");
-          const next_text = String(updated_cell.textContent || "").trim().toLowerCase();
-          const previous_text = updated_text_by_run.get(row.dataset.runId);
-          updated_text_by_run.set(row.dataset.runId, next_text);
-          if (next_text === "just now" && previous_text !== "just now") {
-            updated_cell.classList.add("instra-just-now-flash");
-            setTimeout(() => updated_cell.classList.remove("instra-just-now-flash"), 500);
-          }
-        }
+        tag_generated_columns(row);
+        reorder_columns(row);
       }
+      reorder_columns(header_row);
+      install_run_name_resizer();
+      apply_table_geometry(stored_run_name_width());
       const column_count = header_row.children.length;
       table.querySelectorAll("tbody .group-row td").forEach(cell => { cell.colSpan = column_count; });
-      void gpu_header;
-    };
-    const schedule_table_polish = () => {
-      if (table_polish_scheduled) return;
-      table_polish_scheduled = true;
-      requestAnimationFrame(() => {
-        table_polish_scheduled = false;
-        polish_run_table();
-      });
     };
     const base_render_runs_sep07 = render_runs;
     render_runs = function() {
       const result = base_render_runs_sep07();
-      schedule_table_polish();
+      polish_run_table();                                                                                                                                    // <<< THOG one bounded post-render pass; no observer can retrigger itself
       return result;
     };
-    const runs_table = document.querySelector(".runs-table");
-    if (runs_table) new MutationObserver(schedule_table_polish).observe(runs_table, {childList: true, subtree: true});
-    schedule_table_polish();
+    render_runs();
 
     const trace_run_id = trace => String(trace?.meta?.instra_workspace_run_id || "");
     const restyle_workspace_curves = highlighted_run_id => {
@@ -384,6 +502,7 @@ window.addEventListener("load", () => {
     const base_render_plot_sep07 = render_plot;
     render_plot = async function(mount, figure, chart_name) {
       const result = await base_render_plot_sep07(mount, figure, chart_name);
+      align_chart_actions(mount?.closest?.(".chart-card") || document);                                                                                     // <<< THOG align only the card just rendered; never rescan on Plotly DOM mutations
       bind_plot_hover(mount);
       if (app.workspace_mode === true) restyle_workspace_curves(workspace_hover_run_id);
       return result;
@@ -391,7 +510,10 @@ window.addEventListener("load", () => {
     document.querySelectorAll(".plot-mount.js-plotly-plot").forEach(bind_plot_hover);
 
     const align_chart_actions = root => {
-      for (const card of root.querySelectorAll?.(".chart-card") || []) {
+      const cards = root?.matches?.(".chart-card")
+        ? [root]
+        : [...(root?.querySelectorAll?.(".chart-card") || [])];
+      for (const card of cards) {
         const header = card.querySelector(":scope > .chart-card-header");
         const maximize = header?.querySelector(".maximize-button");
         if (!header || !maximize) continue;
@@ -409,8 +531,6 @@ window.addEventListener("load", () => {
       }
     };
     align_chart_actions(document);
-    const chart_root = by_id("charts_scroll");
-    if (chart_root) new MutationObserver(() => align_chart_actions(chart_root)).observe(chart_root, {childList: true, subtree: true});
 
     const sync_navigation_selection = () => {
       const settings_open = by_id("settings_overlay")?.hidden === false;
@@ -454,6 +574,7 @@ window.addEventListener("load", () => {
     });
     let selected_latest = false;
     let requested_workspace = false;
+    let startup_split_applied = false;
     let startup_done = false;
     const apply_startup_policy = () => {
       if (startup_done) return;
@@ -470,6 +591,12 @@ window.addEventListener("load", () => {
         }
       }
       if (selected_latest && !requested_workspace) {
+        if (!startup_split_applied) {
+          const workspace_width = by_id("workspace")?.clientWidth || Math.max(560, window.innerWidth - 58);
+          const divider_width = by_id("workspace_divider")?.offsetWidth || 9;
+          set_runs_pane_width((workspace_width - divider_width) / 2);                                                                                       // <<< THOG default maximized loss receives half the workspace, leaving half for run parameters
+          startup_split_applied = true;
+        }
         requested_workspace = true;
         by_id("workspace_nav")?.click();
       }
@@ -487,12 +614,9 @@ window.addEventListener("load", () => {
       const optimizer_groups = document.querySelectorAll('.thogopt-group[data-instra-startup-applied="true"]');
       if (app.workspace_mode === true && loss_card && app.maximized_chart === loss_card.dataset.chart && optimizer_groups.length === 2) {
         startup_done = true;
-        startup_observer.disconnect();
       }
       sync_navigation_selection();
     };
-    const startup_observer = new MutationObserver(apply_startup_policy);
-    if (chart_root) startup_observer.observe(chart_root, {childList: true, subtree: true});
     const startup_timer = setInterval(() => {
       apply_startup_policy();
       if (startup_done) clearInterval(startup_timer);
@@ -520,8 +644,21 @@ window.addEventListener("load", () => {
       .chart-card-header .chart-card-actions { order: 999; margin-left: auto !important; padding-right: 2px; }
       .chart-card-header .chart-card-actions .maximize-button { order: 9999; margin-left: 5px; }
       #runs_body tr.instra-curve-hover > td { background: #f3f4f6 !important; }
-      .instra-just-now-flash { font-weight: 800 !important; }
       .runs-table .instra-sep07-column { white-space: nowrap; text-align: right; }
+      .runs-table .name-column {
+        position: relative; width: auto !important; min-width: 0 !important; max-width: none !important;
+      }
+      .runs-table [data-instra-column-key="wandb"] { display: none !important; }
+      .local-metric-group[data-metric-group="memory"]:not(.maximized) > .local-metric-grid:not(.is-maximized) {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        grid-auto-rows: 365px !important;
+        gap: 10px !important;
+      }
+      .local-metric-group[data-metric-group="memory"]:not(.maximized) > .local-metric-grid:not(.is-maximized) > .local-metric-card {
+        width: 100% !important; min-width: 0 !important; max-width: none !important;
+        height: 365px !important; margin: 0 !important; flex: none !important;
+      }
       .plotly .hoverlayer .hovertext text { fill: #ffffff !important; }
     `;
     document.head.appendChild(style);

@@ -12,7 +12,11 @@ const http = require("node:http");
 const root = path.resolve(__dirname, "..");
 const assets = path.join(root, "sheet/local_dashboard_assets");
 const chart_names = ["attn_q_head_N", "attn_k_head_N", "attn_v_head_N", "attn_out_head_N", "mlp_up", "mlp_down"];
-const plotly_path = process.env.INSTRA_PLOTLY_BUNDLE || require.resolve("plotly.js-dist-min");
+let plotly_path = process.env.INSTRA_PLOTLY_BUNDLE;
+if (!plotly_path) {
+  try { plotly_path = require.resolve("plotly.js-dist-min"); }
+  catch (_error) { plotly_path = path.join(__dirname, "fixtures/plotly_stub.js"); }
+}
 const runs = ["a", "b", "c"].map((id, index) => ({
   dashboard_run_id: id, local_run_id: id, run_name: id,
   artifact_name: `260901-120${index}_test_${id}`, run_state: "finished", model_type: index ? "thog2_sheet" : "dense",
@@ -92,7 +96,13 @@ const server = http.createServer(async (request, response) => {
 
 (async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await firefox.launch({headless: true});
+  let browser;
+  try {
+    browser = await firefox.launch({headless: true});
+  } catch (error) {
+    await new Promise(resolve => server.close(resolve));
+    throw error;
+  }
   const page = await browser.newPage({viewport: {width: 1800, height: 1000}});
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -128,8 +138,9 @@ const server = http.createServer(async (request, response) => {
 
     const headers = await page.locator(".runs-table thead th").evaluateAll(nodes => nodes.filter(node => getComputedStyle(node).display !== "none").map(node => node.textContent.trim()));
     const state_index = headers.findIndex(value => value.toUpperCase() === "STATE");
-    assert.match(headers[state_index + 1], /RUN NAME/);
-    assert.equal(headers[headers.findIndex(value => value.toUpperCase() === "STEPS") + 1], "w");
+    assert.equal(headers[state_index + 1], "t");
+    assert.match(headers[state_index + 2], /RUN NAME/);
+    assert.equal(headers[headers.findIndex(value => value.toUpperCase() === "STEPS") + 1], "GB");
     const swatch = await page.locator('tr[data-run-id="b"] .colour-dot').evaluate(node => {
       const style = getComputedStyle(node); return [style.width, style.height, style.borderRadius];
     });
@@ -162,12 +173,15 @@ const server = http.createServer(async (request, response) => {
     assert.equal(await page.evaluate(() => app.workspace_mode), true, "selecting a Workspace run left Workspace");
     await page.waitForTimeout(1600);
     let widths = await section("train").locator(".plot-mount").evaluate(node => Object.fromEntries(node.data.map(trace => [trace.meta.instra_workspace_run_id, trace.line.width])));
-    assert.ok(widths.b > widths.a, "selected run not emphasized");
+    assert.ok(widths.b > widths.a, "hovered run not emphasized");
+    await page.locator(".topbar").hover();
+    widths = await section("train").locator(".plot-mount").evaluate(node => Object.fromEntries(node.data.map(trace => [trace.meta.instra_workspace_run_id, trace.line.width])));
+    assert.ok(Math.abs(widths.a - widths.b) < .001, "run emphasis survived after row hover ended");
     await choose("a");
     await wait_plot("train");
     await page.waitForTimeout(1600);
     widths = await section("train").locator(".plot-mount").evaluate(node => Object.fromEntries(node.data.map(trace => [trace.meta.instra_workspace_run_id, trace.line.width])));
-    assert.ok(widths.a > widths.b && Math.abs(widths.b - 2.4) < .001, "previous run width not restored");
+    assert.ok(widths.a > widths.b && Math.abs(widths.b - 1.25) < .001, "previous hovered run width not restored");
     const hover = await section("train").locator(".plot-mount").evaluate(node => ({mode: node.layout.hovermode, spikes: node.layout.xaxis.showspikes}));
     assert.deepEqual(hover, {mode: "closest", spikes: true});
     await page.evaluate(() => { window.test_workspace_train_node = document.querySelector('[data-metric-group="train"]'); });
