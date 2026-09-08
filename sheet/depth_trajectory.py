@@ -54,32 +54,51 @@ class _PrematerializedDepthBundle(torch.autograd.Function):
     def forward(ctx, cached: Tensor, *coefficient_depth_pairs: Tensor) -> Tensor:
         if not coefficient_depth_pairs or len(coefficient_depth_pairs) % 2:
             raise RuntimeError("prematerialised DEPTH binding requires coefficient/depth-row pairs")
-        ctx.save_for_backward(*coefficient_depth_pairs)
-        ctx.row_counts = tuple(
-            int(coefficient_depth_pairs[index].shape[0])
-            for index in range(0, len(coefficient_depth_pairs), 2)
-        )
+        saved = []
+        pair_specs = []
+        for index in range(0, len(coefficient_depth_pairs), 2):
+            coefficient = coefficient_depth_pairs[index]
+            depth_row = coefficient_depth_pairs[index + 1]
+            coefficient_needs_gradient = bool(coefficient.requires_grad)
+            depth_needs_gradient = bool(depth_row.requires_grad)
+            # Match ordinary einsum's saved-tensor contract: a coefficient
+            # gradient needs only the depth row, while a depth gradient needs
+            # only the coefficient.  Saving both unconditionally made fused
+            # QKV checkpoint forward retain three tensors more than replay.
+            if coefficient_needs_gradient:
+                saved.append(depth_row)
+            if depth_needs_gradient:
+                saved.append(coefficient)
+            pair_specs.append(
+                (
+                    int(coefficient.shape[0]),
+                    coefficient_needs_gradient,
+                    depth_needs_gradient,
+                )
+            )
+        ctx.save_for_backward(*saved)
+        ctx.pair_specs = tuple(pair_specs)
         return cached.view_as(cached)
 
     @staticmethod
     def backward(ctx, gradient: Tensor):
-        saved = ctx.saved_tensors
+        saved = iter(ctx.saved_tensors)
         result = [None]
         row_start = 0
-        for pair_index, row_count in enumerate(ctx.row_counts):
-            coefficient = saved[2 * pair_index]
-            depth_row = saved[2 * pair_index + 1]
+        for pair_index, (row_count, coefficient_needs_gradient, depth_needs_gradient) in enumerate(ctx.pair_specs):
+            depth_row = next(saved) if coefficient_needs_gradient else None
+            coefficient = next(saved) if depth_needs_gradient else None
             family_gradient = gradient[row_start : row_start + row_count]
             coefficient_input = 1 + 2 * pair_index
             depth_input = coefficient_input + 1
             coefficient_gradient = (
                 torch.einsum("rc,p->rcp", family_gradient, depth_row)
-                if ctx.needs_input_grad[coefficient_input]
+                if coefficient_needs_gradient and ctx.needs_input_grad[coefficient_input]
                 else None
             )
             depth_gradient = (
                 torch.einsum("rc,rcp->p", family_gradient, coefficient)
-                if ctx.needs_input_grad[depth_input]
+                if depth_needs_gradient and ctx.needs_input_grad[depth_input]
                 else None
             )
             result.extend((coefficient_gradient, depth_gradient))

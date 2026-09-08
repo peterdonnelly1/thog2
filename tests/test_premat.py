@@ -583,10 +583,17 @@ def test_prematerialized_depth_binding_matches_ordinary_autograd_on_cpu(
     )
     trajectory = model.trajectory
     layer_index = 1
-    ordinary = torch.cat(
-        tuple(trajectory.materialize(name, layer_index) for name in family_names),
-        dim=0,
-    )
+    ordinary_saved = []
+
+    def pack_ordinary(tensor):
+        ordinary_saved.append((tuple(tensor.shape), tensor.dtype, tensor.device))
+        return tensor
+
+    with torch.autograd.graph.saved_tensors_hooks(pack_ordinary, lambda tensor: tensor):
+        ordinary = torch.cat(
+            tuple(trajectory.materialize(name, layer_index) for name in family_names),
+            dim=0,
+        )
     multiplier = torch.linspace(0.25, 1.25, ordinary.numel()).reshape_as(ordinary)
     (ordinary * multiplier).sum().backward()
     expected_gradients = {
@@ -599,11 +606,19 @@ def test_prematerialized_depth_binding_matches_ordinary_autograd_on_cpu(
             tuple(trajectory.materialize(name, layer_index) for name in family_names),
             dim=0,
         )
-    attached = trajectory.attach_prematerialized(
-        tuple(family_names),
-        layer_index,
-        cached,
-    )
+    attached_saved = []
+
+    def pack_attached(tensor):
+        attached_saved.append((tuple(tensor.shape), tensor.dtype, tensor.device))
+        return tensor
+
+    with torch.autograd.graph.saved_tensors_hooks(pack_attached, lambda tensor: tensor):
+        attached = trajectory.attach_prematerialized(
+            tuple(family_names),
+            layer_index,
+            cached,
+        )
+    assert attached_saved == ordinary_saved
     torch.testing.assert_close(attached, ordinary.detach())
     (attached * multiplier).sum().backward()
     for name in family_names:

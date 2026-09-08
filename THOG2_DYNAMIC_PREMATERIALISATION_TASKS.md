@@ -141,3 +141,5 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Add step, exact candidate labels, arrows, larger boxes/key, and aggregate success counters to Instra.
 - [ ] Confirm with `-K flash2` that headroom produces admissions/hits and no `AccumulateGrad` stream warning.
 - [ ] Compare a matched Premat-disabled peak-memory control.
+- [x] Fix the first successful-admission checkpoint mismatch (131 forward tensors versus 128 replay tensors).
+- [ ] Re-run L32/P10 with `-K flash2` and confirm first backward completes.

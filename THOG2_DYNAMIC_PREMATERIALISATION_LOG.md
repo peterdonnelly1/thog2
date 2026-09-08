@@ -148,3 +148,9 @@
 - Removed checkpoint-segment-local Premat ownership. The whole-model forward alone owns l/l+1 scheduling and telemetry.
 - Instra now includes the optimizer step, exact layer numbers, arrows, larger boxes/key and spacing, aggregate admission/hit/fallback counts, `ATTN FUSED · QKV` / `ATTN UNFUSED · QK` / `ATTN UNFUSED · V`, and `MLP UP` / `MLP DN` labels.
 - Python compilation, JavaScript syntax, launcher shell syntax, checkpoint-ownership search, and `git diff --check` all pass. Pytest/CUDA execution remains unavailable in this container.
+
+## 2026-09-08 - Successful-admission checkpoint repair
+
+- The first L32/P10 `-K flash2` run after fused-envelope correction reached backward without OOM, then reported 131 tensors saved in checkpoint forward versus 128 in recomputation.
+- The exact excess of three came from fused QKV attachment saving each coefficient tensor even though fixed DEPTH rows do not require gradients. Ordinary Q/K/V einsums save only their three depth rows.
+- The Premat autograd attachment now follows the ordinary einsum save contract: save a depth row only when its coefficient needs a gradient, and save a coefficient only when its depth row needs a gradient. Forward and recomputation therefore retain the same tensor count and metadata while preserving exact gradients.
