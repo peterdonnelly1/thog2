@@ -16,6 +16,7 @@ class _RawModel:
         direct_factorised_mlp=True,
         direct_factorised_hyperblock_mlp=False,
         depth_compress_layer_norm_and_bias=False,
+        fast_discard=False,
     )
     trajectory = None
 
@@ -43,6 +44,12 @@ def _config():
         n_layer=24,
         layer_dropout_resample_steps=1,
         activation_checkpointing=True,
+        premat="enabled",
+        premat_attention_mode="fused",
+        premat_headroom_stay_below_current_peak=True,
+        premat_headroom_stay_within_global_buffer=False,
+        premat_logging="enabled",
+        premat_instra="disabled",
         plastic__enabled=True,
         plastic__runtime_phase="fine",
         plastic__coarse_phase="disabled",
@@ -93,6 +100,11 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "wall stop:" in output
     assert "layer dropout:" in output
     assert "execution:" in output
+    assert "PREMAT:" in output
+    assert "premat=enabled" in output
+    assert "premat_attention_mode=fused" in output
+    assert "headroom=stay_below_current_peak" in output
+    assert "effective_fast_discard=true" in output
     assert "plastic\n" in output
     assert "plastic__runtime_phase:" in output
     assert "plastic__coarse_phase_roll_through:" in output

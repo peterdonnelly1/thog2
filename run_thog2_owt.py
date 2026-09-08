@@ -427,6 +427,28 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}  "
             f"depth_materialisation_matmul={depth_materialisation_matmul}",
         )
+        # vvv THOG dynamic pre-materialisation is explicit in the authoritative
+        # lifecycle runner as well as the lower-level core runner.
+        headroom_mode = (
+            "stay_within_global_buffer"
+            if config.premat_headroom_stay_within_global_buffer
+            else "stay_below_current_peak"
+        )
+        effective_fast_discard = (
+            True if config.premat == "enabled" else model_config.fast_discard
+        )
+        _core._print_model_option(
+            "PREMAT:",
+            f"premat={config.premat} "
+            f"premat_attention_mode={config.premat_attention_mode} "
+            f"headroom={headroom_mode} "
+            f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
+            f"premat_logging={config.premat_logging} "
+            f"premat_instra={config.premat_instra} "
+            f"effective_fast_discard={str(effective_fast_discard).lower()} "
+            "lookahead=l+1",
+        )
+        # ^^^ THOG
         hyperblock = report.get("hyperblock")
         if isinstance(hyperblock, dict):
             plan = hyperblock["plan"]

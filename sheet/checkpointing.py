@@ -32,6 +32,12 @@ def _end_premat_segment(owner: object, owned: bool) -> None:
     end = getattr(owner, "_premat_end_pass", None)
     if callable(end):
         end(owned)
+
+
+def _premat_requires_reentrant_checkpoint(logical_block: LogicalBlock) -> bool:
+    """Keep adaptive premat scheduling outside non-reentrant saved-tensor matching."""
+    owner = getattr(logical_block, "__self__", None)
+    return owner is not None and getattr(owner, "_premat_runtime", None) is not None
 # ^^^ THOG
 
 
@@ -134,7 +140,10 @@ def execute_logical_layers(
             hidden = checkpoint(
                 run_segment,
                 hidden,
-                use_reentrant=False,
+                # vvv THOG premat admission can legitimately differ as CUDA headroom
+                # changes; reentrant checkpointing records only the fresh recompute.
+                use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+                # ^^^ THOG
                 preserve_rng_state=True,
             )
             checkpoint_segments += 1
@@ -184,7 +193,9 @@ def execute_logical_layers(
         hidden = checkpoint(
             run_sparse_segment,
             hidden,
-            use_reentrant=False,
+            # vvv THOG see the dense checkpoint path above
+            use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+            # ^^^ THOG
             preserve_rng_state=True,
         )
         checkpoint_segments += 1
@@ -260,7 +271,9 @@ def execute_logical_layer_checkpoints(
             hidden = checkpoint(
                 run_segment,
                 hidden,
-                use_reentrant=False,
+                # vvv THOG PLASTIC prefix segments use the same safe premat boundary
+                use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+                # ^^^ THOG
                 preserve_rng_state=True,
             )
             checkpoint_segments += 1

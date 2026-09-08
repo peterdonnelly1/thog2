@@ -35,7 +35,7 @@
 - Retired `--plastic__layer_count__memory_budget_gib`. Supplying it fails with a diagnostic naming `--premat_gpu_memory_buffer_gb` as the replacement.
 - PLASTIC `memory_budget` now derives its ceiling from current device free memory plus this process's reserved pool, minus the shared global buffer, so unrelated GPU users remain accounted for.
 - Existing checkpoints drop the retired key during normalization. Live premat stream, event, queue, and candidate state are never serialized.
-- Activation-checkpoint recomputation starts fresh segment-local premat state while the original checkpointed forward continues to use the surrounding forward pass.
+- Activation-checkpoint original execution and recomputation both start fresh segment-local premat state. Premat uses reentrant checkpointing so changing CUDA-headroom admission decisions cannot be mistaken for corresponding saved tensors; checkpointing without premat remains on the existing non-reentrant path.
 - Enabled mode is rejected on CPU before model execution. The current host has a CUDA-enabled PyTorch build but no accessible CUDA device.
 - Added resolved policy, telemetry schema, l+1 limit, and effective fast-discard provenance to the canonical run configuration.
 - Preserved the exact premat underscore option spellings through the repository's process-wide CLI alias normalizer.
@@ -69,3 +69,12 @@
 
 - Published implementation commit `32b94f59fec30688deca166f2623d7d5cc849e41` through the GitHub connector.
 - Advanced the named branch with a non-forced fast-forward and verified the remote head before handoff.
+
+## 2026-09-08 - Post-publication activation-checkpoint repair
+
+- Peter's first S4 CUDA run failed on the initial backward pass with `torch.utils.checkpoint.CheckpointError`: original-forward and recompute saved tensors had different metadata and ordering.
+- Root cause: the original checkpointed forward inherited one whole-forward premat queue, while recomputation created a new queue per segment. Adaptive admission also means CUDA memory headroom can legitimately change the order in which differentiable materialisation operations run.
+- Repair: checkpoint closures now own fresh premat state in both original execution and recomputation, and premat checkpoint calls use the reentrant variant. Its original forward runs without recording an autograd graph and its full recomputation creates the gradient-bearing graph, removing the invalid saved-tensor pairing. Non-premat checkpoint calls still use the established non-reentrant variant.
+- Added a CPU lifecycle/numerical/gradient regression that verifies two S2 forward passes run without gradients, the two reverse-order recomputations run with gradients, all pass state ends cleanly, and results match non-checkpointed execution.
+- Added the missing unconditional `PREMAT:` diagnostics row to `run_thog2_owt.py`; the first real run proved the earlier row in `run_thog2_owt_core.py` was not the active presentation path.
+- Static Python compilation and `git diff --check` pass in the resumed scratch environment. Its Python runtime does not currently contain PyTorch, so the executable test suite cannot be repeated here; CUDA validation remains explicit above.

@@ -359,6 +359,112 @@ def test_plastic_budget_accounts_for_other_gpu_users(monkeypatch) -> None:
     assert budget == pytest.approx(4.0)
 
 
+class _CpuCheckpointPrematRuntime:
+    """CPU lifecycle double for checkpoint boundary and gradient regression coverage."""
+
+    def __init__(self, model: TrainingSheetGPT) -> None:
+        self.model = model
+        self.active = False
+        self.passes = []
+
+    def begin(self, layer_indices, *, reference) -> None:
+        assert not self.active
+        self.active = True
+        self.passes.append(
+            {
+                "layers": tuple(layer_indices),
+                "grad_enabled": torch.is_grad_enabled(),
+                "ended": False,
+            }
+        )
+
+    def end(self) -> None:
+        assert self.active
+        self.passes[-1]["ended"] = True
+        self.active = False
+
+    def layer_start(self, _layer_index: int) -> None:
+        assert self.active
+
+    def event(self, _name: str, *, layer_index: int) -> None:
+        assert self.active
+
+    def acquire(self, family: str, layer_index: int):
+        assert self.active
+        return self.model._premat_materialize_candidate(family, layer_index)
+
+    def consumed(self, _family: str, _layer_index: int) -> None:
+        assert self.active
+
+
+def test_checkpointed_premat_uses_fresh_reentrant_segment_passes_on_cpu() -> None:
+    common = dict(
+        block_size=4,
+        vocab_size=16,
+        n_layer=4,
+        n_head=2,
+        n_embd=8,
+        dropout=0.0,
+        bias=True,
+        depth_order=2,
+        base_row_order=1,
+        geometry_preset="depth",
+        basis_family="chebyshev",
+        direct_factorised_mlp=False,
+        fast_discard=True,
+        premat="disabled",
+    )
+    torch.manual_seed(23)
+    reference = TrainingSheetGPT(SheetGPTConfig(**common))
+    checkpointed = TrainingSheetGPT(SheetGPTConfig(**common))
+    checkpointed.load_state_dict(reference.state_dict())
+    checkpointed.set_checkpoint_segment_size(2)
+    fake_runtime = _CpuCheckpointPrematRuntime(checkpointed)
+    checkpointed._premat_runtime = fake_runtime
+    tokens = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    targets = torch.tensor([[2, 3, 4, 5]], dtype=torch.long)
+
+    def run(model):
+        model.zero_grad(set_to_none=True)
+        logits, loss = model(tokens, targets)
+        assert loss is not None
+        loss.backward()
+        gradients = {
+            name: parameter.grad.detach().clone()
+            for name, parameter in model.named_parameters()
+            if parameter.grad is not None
+        }
+        return logits.detach(), loss.detach(), gradients
+
+    reference_result = run(reference)
+    checkpointed_result = run(checkpointed)
+    torch.testing.assert_close(checkpointed_result[0], reference_result[0])
+    torch.testing.assert_close(checkpointed_result[1], reference_result[1])
+    assert checkpointed_result[2].keys() == reference_result[2].keys()
+    for name in checkpointed_result[2]:
+        torch.testing.assert_close(
+            checkpointed_result[2][name],
+            reference_result[2][name],
+            rtol=1.0e-5,
+            atol=1.0e-6,
+        )
+
+    assert [entry["layers"] for entry in fake_runtime.passes] == [
+        (0, 1),
+        (2, 3),
+        (2, 3),
+        (0, 1),
+    ]
+    assert [entry["grad_enabled"] for entry in fake_runtime.passes] == [
+        False,
+        False,
+        True,
+        True,
+    ]
+    assert all(entry["ended"] for entry in fake_runtime.passes)
+    assert not fake_runtime.active
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA acceptance host required")
 @pytest.mark.parametrize("attention_mode", ("fused", "unfused"))
 @pytest.mark.parametrize("checkpoint_segment_size", (0, 2))

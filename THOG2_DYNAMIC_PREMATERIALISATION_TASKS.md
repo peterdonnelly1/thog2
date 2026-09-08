@@ -23,6 +23,8 @@ Authoritative plan: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation
 - [x] Include score, scale, mask, softmax, and probability/value pressure in unfused admission.
 - [x] Implement completion events, deadline ownership, event waits, main fallback, and `record_stream` lifetime handling.
 - [x] Give activation-checkpoint recomputation fresh local premat state.
+- [x] Make checkpointed original forwards use the same segment-scoped premat lifetime as recomputation.
+- [x] Isolate adaptive premat scheduling from non-reentrant saved-tensor matching.
 - [x] Fail before the first forward when premat is enabled without CUDA.
 - [x] Persist supplied/resolved configuration, aggregate counters, and CUDA timing fields.
 - [x] Persist aggregate telemetry even when detailed logging and Instra are disabled.
@@ -38,12 +40,15 @@ Authoritative plan: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation
 - [x] Run the combined premat/Instra/PLASTIC group: 498 passed, 6 CUDA-only skipped.
 - [x] Run Python compilation, shell syntax, JavaScript syntax, and `git diff --check`.
 - [x] Check the THOG source-marker convention in new and modified implementation areas.
+- [x] Add a CPU checkpoint lifecycle/gradient regression test for fresh forward and recompute passes.
+- [x] Add the missing `PREMAT:` startup row to the authoritative lifecycle runner.
 
 ## CUDA-host acceptance still required
 
 - [ ] Execute fused enabled-versus-disabled forward, loss, and trajectory-gradient equivalence.
 - [ ] Execute unfused enabled-versus-disabled forward, loss, and trajectory-gradient equivalence.
 - [ ] Repeat both numerical checks with activation checkpointing enabled.
+- [ ] Re-run Peter's reported S4 CUDA command and confirm the checkpoint metadata error is gone.
 - [ ] Capture an Nsight or PyTorch-profiler trace proving real overlap and no forbidden global synchronization (A19).
 - [ ] Measure representative steady-state step time and confirm a material benefit before considering default-on (A21).
 - [ ] Stress both headroom modes on a shared GPU and confirm observed peaks stay inside the admitted envelope.
@@ -54,3 +59,4 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 
 - [x] Push the completed tree through the GitHub connector.
 - [x] Verify the remote branch head and provide the download stanza.
+- [ ] Publish and verify the post-publication checkpoint repair commit.
