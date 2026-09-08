@@ -20,6 +20,14 @@
   white-space: nowrap;
 }
 .premat-mode { margin-left: 9px; }
+.premat-update {
+  width: 210px;
+  flex: 0 0 210px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
 .premat-playback-control input { width: 112px; }
 .premat-playback-control output {
   min-width: 42px;

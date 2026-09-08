@@ -169,3 +169,4 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Run all dependency-free static and direct harness checks available in this container.
 - [ ] On scruffy, confirm the first sampled microstep replays coherently for all layers and the inspector matches its final grid.
 - [ ] On scruffy, confirm every green `AVAILABLE` follows visible blue/white `MATERIALISING`, waited paths are orange, and main materialisation is red.
+- [x] Rename the view `Premat Recapitulation - Step N` and eliminate state-text-driven control jitter.
