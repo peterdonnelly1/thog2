@@ -72,21 +72,21 @@ def test_premat_view_declares_every_required_lifecycle_visual() -> None:
     for state in ("materialising", "available", "consuming", "consumed", "critical-path-miss"):
         assert f".{state}" in css
     for stage in (
-        "QKV",
-        "SDPA",
-        "QK",
+        "ATTN FUSED · QKV",
+        "ATTN UNFUSED · QK",
+        "ATTN UNFUSED · V",
         "score",
         "scale / mask",
         "softmax",
-        "V",
-        "probabilities × V",
+        "attention",
         "O",
-        "UP",
+        "MLP UP",
         "GELU",
-        "DOWN",
+        "MLP DN",
     ):
         assert stage in javascript
     assert "premat-neutral" in javascript
+    assert '[["ATTN FUSED · QKV","QKV"],["attention",null],["O","O"]]' in javascript
     assert "premat_event_filter" in javascript
     for field in (
         "Process reserved",
@@ -208,11 +208,14 @@ console.log(JSON.stringify({{
         check=True,
     )
     rendered = json.loads(completed.stdout)
-    assert rendered["layers"].index("lookahead · layer 5") < rendered["layers"].index("current · layer 4")
+    assert rendered["layers"].index("step 9 · lookahead · layer 5") < rendered["layers"].index("step 9 · current · layer 4")
     assert "premat-neutral" in rendered["layers"]
     assert "premat-stage-arrow" in rendered["layers"]
-    assert "probabilities × V" in rendered["layers"]
+    assert "ATTN UNFUSED · QK" in rendered["layers"]
+    assert "ATTN UNFUSED · V" in rendered["layers"]
     assert "Process reserved" in rendered["memory"]
+    assert "Premat admitted" in rendered["memory"]
+    assert "Premat hits" in rendered["memory"]
     assert "global_device_buffer" in rendered["memory"]
     assert "MATERIALISING → CONSUMING" in rendered["events"]
     assert "0.250 ms · MISS" in rendered["events"]
@@ -244,6 +247,8 @@ def test_premat_pipeline_is_tall_borderless_and_has_a_key() -> None:
     assert 'class="premat-key"' in index
     assert "ordinary compute / unavailable" in index
     assert "critical-path miss" in index
-    assert "min-height: 148px" in css
+    assert "min-height: 164px" in css
     assert "border: 0" in css
+    assert "width: 38px" in css
+    assert "margin: 14px 11px 22px" in css
 # ^^^ THOG

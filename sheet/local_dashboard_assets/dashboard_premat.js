@@ -49,15 +49,16 @@ function premat_stage_markup(layer_index, label, family, candidates) {
 
 function premat_layer_markup(layer_index, role, snapshot, candidates) {
   const attention = snapshot.attention_mode === "unfused"
-    ? [["QK","QK"],["score",null],["scale / mask",null],["softmax",null],["V","V"],["probabilities × V",null],["O","O"]]
-    : [["QKV","QKV"],["SDPA","SDPA"],["O","O"]];
-  const stages = [["LN1",null], ...attention, ["resid",null], ["LN2",null], ["UP","UP"], ["GELU",null], ["DOWN","DOWN"], ["resid",null]];
+    ? [["ATTN UNFUSED · QK","QK"],["score",null],["scale / mask",null],["softmax",null],["ATTN UNFUSED · V","V"],["attention",null],["O","O"]]
+    : [["ATTN FUSED · QKV","QKV"],["attention",null],["O","O"]];
+  const stages = [["LN1",null], ...attention, ["resid",null], ["LN2",null], ["MLP UP","UP"], ["GELU",null], ["MLP DN","DOWN"], ["resid",null]];
   const resolved_layer = layer_index === null || layer_index === undefined ? null : layer_index;
-  const layer_label = resolved_layer === null ? "no next layer" : `layer ${resolved_layer}`;
+  const layer_label = resolved_layer === null ? "none (final layer)" : `layer ${resolved_layer}`;
+  const step_label = `step ${snapshot.optimizer_update ?? "—"}`;
   const stage_markup = stages
     .map(([label, family]) => premat_stage_markup(resolved_layer, label, family, candidates))
     .join('<span class="premat-stage-arrow" aria-hidden="true">→</span>');
-  return `<article class="premat-layer"><header><strong>${role} · ${layer_label}</strong></header><div class="premat-stage-row">${stage_markup}</div></article>`;
+  return `<article class="premat-layer"><header><strong>${step_label} · ${role} · ${layer_label}</strong></header><div class="premat-stage-row">${stage_markup}</div></article>`;
 }
 
 function premat_pair(value, other) {
@@ -129,6 +130,12 @@ function render_premat(payload) {
     ["Premat headroom", memory.premat_headroom_bytes],
     ["Premat retained", memory.premat_retained_bytes],
   ];
+  const aggregate = snapshot.aggregate || {};
+  memory_items.push(
+    ["Premat admitted", String(aggregate.admitted ?? 0)],
+    ["Premat hits", `${aggregate.fully_hidden_hits ?? 0} hidden · ${aggregate.waited_hits ?? 0} waited`],
+    ["Main fallbacks", String(aggregate.ordinary_deadline_materialisations ?? 0)],
+  );
   const queue_head = snapshot.queue_head || memory.next_candidate;
   const queue_label = queue_head
     ? `layer ${queue_head.layer_index} ${queue_head.family}${queue_head.deferred ? ` · defer: ${queue_head.admission_reason}` : ""}`

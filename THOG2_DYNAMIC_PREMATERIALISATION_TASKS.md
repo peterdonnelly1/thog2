@@ -132,3 +132,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [ ] On scruffy, verify the startup row says `checkpoint_recompute_segment=4` and `cuda_allocator=expandable_segments:True`.
 - [ ] Re-run L12/P6, then L12/P7, and compare against a current Premat-disabled L12/P7 control.
 - [ ] Confirm the Instra key, borderless pipeline, and buffer-margin indicator.
+
+## 2026-09-08 final field correction
+
+- [x] Remove the erroneous quadratic fused-attention envelope charge.
+- [x] Restore ordinary autograd for main fallback and checkpoint replay.
+- [x] Make the whole-model forward the sole Premat scheduler owner.
+- [x] Add step, exact candidate labels, arrows, larger boxes/key, and aggregate success counters to Instra.
+- [ ] Confirm with `-K flash2` that headroom produces admissions/hits and no `AccumulateGrad` stream warning.
+- [ ] Compare a matched Premat-disabled peak-memory control.

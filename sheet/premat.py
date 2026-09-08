@@ -469,8 +469,10 @@ class PrematRuntime:
             materialise_end = torch.cuda.Event(enable_timing=True)
             materialise_start.record(current_stream)
             try:
-                with torch.no_grad():
-                    candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
+                # The admission miss is the ordinary critical-path operation.
+                # Keep its native autograd graph instead of routing it through
+                # the no-grad Premat binding used only by auxiliary-stream hits.
+                candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
             except BaseException as error:
                 self._record(
                     "main_materialisation_failed",
@@ -513,12 +515,14 @@ class PrematRuntime:
             raise RuntimeError(f"premat candidate {key} cannot be acquired from {candidate.state.value}")
         if candidate.tensor is None:
             raise RuntimeError(f"premat candidate {key} has no tensor at its deadline")
+        if candidate.owner == "main":
+            return candidate.tensor
         return self._attach(candidate.family, candidate.layer_index, candidate.tensor)
 
     def materialize_for_consumption(self, family: str, layer_index: int) -> Tensor:
-        with torch.no_grad():
-            generated = self._materialize(family, layer_index)
-        return self._attach(family, layer_index, generated)
+        # Checkpoint replay has no schedulable lookahead lifetime.  Recreate the
+        # exact ordinary differentiable materialisation on its execution stream.
+        return self._materialize(family, layer_index)
 
     def consumed(self, family: str, layer_index: int) -> None:
         key = (int(layer_index), str(family))
@@ -649,20 +653,22 @@ class PrematRuntime:
         columns = 4 * width if family == "DOWN" else width
         retained = rows * columns * self._dtype_bytes
         materialisation_peak = 2 * retained if family in ("QKV", "QK") else retained
-        # vvv THOG conservatively cover the largest known foreground interval through
-        # the deadline, including explicit unfused [B,H,T,T] score/probability tensors.
-        score_bytes = (
-            self._batch_size
-            * self._n_head
-            * self._sequence_length
-            * self._sequence_length
-            * self._dtype_bytes
-        )
-        causal_mask_bytes = self._sequence_length * self._sequence_length
-        attention_peak = 4 * self._activation_bytes + 2 * score_bytes
+        # vvv THOG the fused Premat path does not explicitly materialise
+        # [B,H,T,T] score/probability tensors.  Charge those quadratic tensors
+        # only to the deliberately unfused path; the fused foreground bound is
+        # the Q/K/V/result activation quartet.
+        attention_peak = 4 * self._activation_bytes
         if self._attention_mode == "unfused":
-            attention_peak += causal_mask_bytes
-        foreground_overlap = max(8 * self._activation_bytes, attention_peak)
+            score_bytes = (
+                self._batch_size
+                * self._n_head
+                * self._sequence_length
+                * self._sequence_length
+                * self._dtype_bytes
+            )
+            causal_mask_bytes = self._sequence_length * self._sequence_length
+            attention_peak += 2 * score_bytes + causal_mask_bytes
+        foreground_overlap = max(4 * self._activation_bytes, attention_peak)
         # ^^^ THOG
         return CandidateEnvelope(
             retained_bytes=retained,

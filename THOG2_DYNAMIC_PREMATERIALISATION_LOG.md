@@ -139,3 +139,12 @@
 - Consumption records a main-stream completion event. The scheduler retains its memory charge and cannot launch another auxiliary candidate until that event confirms the consuming kernel has completed. Actual CUDA free/allocated state remains authoritative if autograd or the allocator still owns storage.
 - Instra's pipeline cards are taller and borderless, removing the grey separator. An always-visible key explains neutral, materialising, available, consuming, consumed, and critical-path-miss fills. The memory summary now labels the admission buffer precisely and reports its current met/breached margin.
 - Python compilation, shell syntax, JavaScript syntax, and `git diff --check` pass. Pytest is not installed in this resumed container, so the focused CPU/CUDA tests remain unexecuted here.
+
+## 2026-09-08 - Final fused-envelope and Instra correction
+
+- Scruffy with a 0.5 GiB admission buffer progressed through L11/P7, L12/P7, L14/P7, L16/P7, L24/P7, L24/P8, L32/P9, and L32/P10, exceeding the previously reported non-Premat L12/P7 boundary.
+- Fixed a fused-mode admission bug that charged full `[B,H,T,T]` score/probability tensors; those allocations remain charged only to explicit unfused attention. This was the reason real multi-GiB headroom produced no admissions.
+- Main-stream fallback and checkpoint replay now use the ordinary differentiable materialiser. The custom auxiliary-result binding is used only after a genuine Premat launch, addressing the reported `AccumulateGrad` stream mismatch without suppressing the warning.
+- Removed checkpoint-segment-local Premat ownership. The whole-model forward alone owns l/l+1 scheduling and telemetry.
+- Instra now includes the optimizer step, exact layer numbers, arrows, larger boxes/key and spacing, aggregate admission/hit/fallback counts, `ATTN FUSED · QKV` / `ATTN UNFUSED · QK` / `ATTN UNFUSED · V`, and `MLP UP` / `MLP DN` labels.
+- Python compilation, JavaScript syntax, launcher shell syntax, checkpoint-ownership search, and `git diff --check` all pass. Pytest/CUDA execution remains unavailable in this container.

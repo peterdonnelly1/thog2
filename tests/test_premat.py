@@ -113,6 +113,7 @@ def _runtime(
     *,
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
+    attach=None,
 ):
     fake_cuda = _FakeCuda()
     fake_cuda.install(monkeypatch)
@@ -124,6 +125,7 @@ def _runtime(
 
     runtime = PrematRuntime(
         materialize=materialize,
+        attach=attach,
         n_embd=8,
         n_head=2,
         attention_mode=attention_mode,
@@ -317,6 +319,27 @@ def test_deadline_unavailable_is_claimed_by_main_without_late_premat_launch(monk
     )
 
 
+def test_main_fallback_and_checkpoint_replay_keep_the_ordinary_autograd_path(monkeypatch) -> None:
+    attached = []
+
+    def attach(family, layer_index, tensor):
+        attached.append((family, layer_index))
+        return tensor
+
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=True,
+        attach=attach,
+    )
+    runtime.layer_start(3)
+    runtime.acquire("QKV", 3)
+    assert attached == []
+    runtime.end()
+    runtime.materialize_for_consumption("O", 3)
+    assert calls[-1] == ("O", 3)
+    assert attached == []
+
+
 def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> None:
     runtime, fake_cuda, calls = _runtime(
         monkeypatch,
@@ -400,6 +423,18 @@ def test_unfused_envelope_includes_score_probability_and_mask_tensors(monkeypatc
     assert qk.envelope.foreground_overlap_bytes >= (
         4 * activation_bytes + 2 * score_bytes + mask_bytes
     )
+
+
+def test_fused_envelope_does_not_charge_quadratic_attention_tensors(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=True,
+        attention_mode="fused",
+    )
+    runtime.layer_start(3)
+    qkv = runtime._candidates[(3, "QKV")]
+    activation_bytes = 2 * 4 * 8 * 2
+    assert qkv.envelope.foreground_overlap_bytes == 4 * activation_bytes
 
 
 def test_plastic_budget_accounts_for_other_gpu_users(monkeypatch) -> None:

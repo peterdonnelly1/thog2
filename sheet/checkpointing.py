@@ -1,10 +1,8 @@
 # vvv THOG
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
-from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Callable, Iterator, Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -14,66 +12,6 @@ from torch.utils.checkpoint import checkpoint
 LogicalBlock = Callable[[Tensor, int], Tensor]
 # vvv THOG regional compilation hooks one cached compiled callable to each existing checkpoint segment
 RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Tensor]]
-# ^^^ THOG
-
-
-# vvv THOG non-reentrant checkpoint replay must reconstruct the ordinary
-# consumption graph, but it has no useful l+1 lifetime to exploit: the forward
-# Premat pass has already committed and released its candidates.  Mark replay
-# explicitly so it cannot start a second auxiliary-stream scheduler while
-# backward activations and gradients are live.
-_CHECKPOINT_RECOMPUTATION = ContextVar(
-    "thog2_checkpoint_recomputation",
-    default=False,
-)
-
-
-@contextmanager
-def _checkpoint_recomputation_scope() -> Iterator[None]:
-    token = _CHECKPOINT_RECOMPUTATION.set(True)
-    try:
-        yield
-    finally:
-        _CHECKPOINT_RECOMPUTATION.reset(token)
-
-
-def _checkpoint_contexts():
-    return nullcontext(), _checkpoint_recomputation_scope()
-
-
-def checkpoint_recomputation_active() -> bool:
-    return bool(_CHECKPOINT_RECOMPUTATION.get())
-# ^^^ THOG
-
-
-# vvv THOG the outer forward owns Premat.  Recompute preserves the same
-# consumption graph without starting another auxiliary-stream scheduler.
-def _begin_premat_segment(
-    logical_block: LogicalBlock,
-    layer_indices: Sequence[int],
-    reference: Tensor,
-) -> Tuple[object, bool]:
-    owner = getattr(logical_block, "__self__", None)
-    if checkpoint_recomputation_active():
-        return owner, False
-    begin = getattr(owner, "_premat_begin_pass", None)
-    if owner is None or not callable(begin):
-        return owner, False
-    return owner, bool(begin(tuple(layer_indices), reference))
-
-
-def _end_premat_segment(owner: object, owned: bool) -> None:
-    end = getattr(owner, "_premat_end_pass", None)
-    if callable(end):
-        end(owned)
-
-
-def _effective_checkpoint_segment_size(
-    logical_block: LogicalBlock,
-    configured_segment_size: int,
-) -> int:
-    """Premat preserves the configured checkpoint boundary."""
-    return configured_segment_size
 # ^^^ THOG
 
 
@@ -137,7 +75,7 @@ def execute_logical_layers(
         and torch.is_grad_enabled()
         and segment_size > 0
     )
-    effective_segment_size = _effective_checkpoint_segment_size(logical_block, segment_size)
+    effective_segment_size = segment_size
 
     # vvv THOG preserve the pre-layer-dropout fast path byte-for-byte in its inner loops unless regional compilation explicitly supplies segment runners
     if layer_indices is None:
@@ -163,14 +101,10 @@ def execute_logical_layers(
                     segment_end: int = end,
                 ) -> Tensor:
                     segment_indices = tuple(range(segment_start, segment_end))
-                    premat_owner, premat_owned = _begin_premat_segment(logical_block, segment_indices, segment_input)
-                    try:
-                        segment_output = segment_input
-                        for layer_index in segment_indices:
-                            segment_output = logical_block(segment_output, layer_index)
-                        return segment_output
-                    finally:
-                        _end_premat_segment(premat_owner, premat_owned)
+                    segment_output = segment_input
+                    for layer_index in segment_indices:
+                        segment_output = logical_block(segment_output, layer_index)
+                    return segment_output
             else:
                 run_segment = regional_segment_runner_factory(tuple(range(start, end)))
 
@@ -182,7 +116,6 @@ def execute_logical_layers(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
-                context_fn=_checkpoint_contexts,
             )
             checkpoint_segments += 1
 
@@ -219,14 +152,10 @@ def execute_logical_layers(
             *,
             nominal_indices: Tuple[int, ...] = segment_indices,
         ) -> Tensor:
-            premat_owner, premat_owned = _begin_premat_segment(logical_block, nominal_indices, segment_input)
-            try:
-                segment_output = segment_input
-                for layer_index in nominal_indices:
-                    segment_output = logical_block(segment_output, layer_index)
-                return segment_output
-            finally:
-                _end_premat_segment(premat_owner, premat_owned)
+            segment_output = segment_input
+            for layer_index in nominal_indices:
+                segment_output = logical_block(segment_output, layer_index)
+            return segment_output
 
         hidden = checkpoint(
             run_sparse_segment,
@@ -235,7 +164,6 @@ def execute_logical_layers(
             use_reentrant=False,
             # ^^^ THOG
             preserve_rng_state=True,
-            context_fn=_checkpoint_contexts,
         )
         checkpoint_segments += 1
 
@@ -279,7 +207,7 @@ def execute_logical_layer_checkpoints(
         )
 
     use_checkpointing = training and torch.is_grad_enabled() and segment_size > 0
-    effective_segment_size = _effective_checkpoint_segment_size(logical_block, segment_size)
+    effective_segment_size = segment_size
     outputs = []
     checkpoint_segments = 0
     position = 0
@@ -298,14 +226,10 @@ def execute_logical_layer_checkpoints(
             *,
             nominal_indices: Tuple[int, ...] = segment_indices,
         ) -> Tensor:
-            premat_owner, premat_owned = _begin_premat_segment(logical_block, nominal_indices, segment_input)
-            try:
-                segment_output = segment_input
-                for layer_index in nominal_indices:
-                    segment_output = logical_block(segment_output, layer_index)
-                return segment_output
-            finally:
-                _end_premat_segment(premat_owner, premat_owned)
+            segment_output = segment_input
+            for layer_index in nominal_indices:
+                segment_output = logical_block(segment_output, layer_index)
+            return segment_output
 
         if use_checkpointing:
             hidden = checkpoint(
@@ -315,7 +239,6 @@ def execute_logical_layer_checkpoints(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
-                context_fn=_checkpoint_contexts,
             )
             checkpoint_segments += 1
         else:
