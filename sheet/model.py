@@ -627,6 +627,13 @@ class SheetGPT(nn.Module):
     def premat_report(self) -> Optional[Dict[str, object]]:
         return None if self._premat_runtime is None else self._premat_runtime.report()
 
+    # vvv THOG attach/detach the primary-process Instra sink without coupling the
+    # model or scheduler to local storage.
+    def set_premat_live_reporter(self, reporter) -> None:
+        if self._premat_runtime is not None:
+            self._premat_runtime.set_live_reporter(reporter)
+    # ^^^ THOG
+
     def _premat_weight(self, family: str, layer_index: int) -> Tensor:
         if self._premat_runtime is None or not self._premat_runtime.active:
             return self._premat_materialize_candidate(family, layer_index)

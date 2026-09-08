@@ -452,6 +452,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"checkpoint_recompute_segment={effective_checkpoint_segment} "
+            f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             "lookahead=l+1",
         )
         # ^^^ THOG

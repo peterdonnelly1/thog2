@@ -559,6 +559,66 @@ class LocalChartStore:
         self.connection = None
 
 
+# vvv THOG a dedicated telemetry thread uses its own SQLite connection so live
+# Premat publication cannot stall the CUDA scheduling thread.
+class LocalPrematLiveWriter:
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.connection: Optional[sqlite3.Connection] = None
+
+    def append(
+        self,
+        optimizer_update: int,
+        snapshot: Mapping[str, Any],
+        *,
+        history_length: int = 128,
+    ) -> None:
+        if self.connection is None:
+            self.connection = _open_database(self.path, readonly=False)
+            self.connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS premat_snapshots (
+                    optimizer_update INTEGER PRIMARY KEY,
+                    payload BLOB NOT NULL
+                )
+                """
+            )
+        update = int(optimizer_update)
+        payload = dict(_json_compatible(snapshot))
+        payload["optimizer_update"] = update
+        now = _utc_timestamp()
+        self.connection.execute(
+            "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
+            (update, _encode_payload(payload)),
+        )
+        self.connection.execute(
+            """
+            DELETE FROM premat_snapshots
+            WHERE optimizer_update NOT IN (
+                SELECT optimizer_update FROM premat_snapshots
+                ORDER BY optimizer_update DESC LIMIT ?
+            )
+            """,
+            (max(1, int(history_length)),),
+        )
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            (
+                ("run_state", "recording"),
+                ("data_updated_at", now),
+                ("updated_at", now),
+            ),
+        )
+        self.connection.commit()
+
+    def close(self) -> None:
+        if self.connection is None:
+            return
+        self.connection.close()
+        self.connection = None
+# ^^^ THOG
+
+
 class LocalChartReader:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -807,6 +867,7 @@ __all__ = [
     "LOCAL_CHART_DATABASE_NAME",
     "LOCAL_CHART_TERMINAL_STATES",
     "LocalChartReader",
+    "LocalPrematLiveWriter",
     "LocalChartStore",
     "close_local_chart_store",
     "ensure_local_chart_store",

@@ -6,6 +6,8 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
+import threading
 from typing import Any, Dict, Mapping, Optional
 
 import torch
@@ -20,7 +22,7 @@ from .depth_curve_diagnostics import (
     write_depth_curve_local_viewer,
 )
 # vvv THOG local chart WAL state closes and checkpoints with the established telemetry lifecycle
-from .local_chart_store import close_local_chart_store, ensure_local_chart_store                                                                           # <<< THOG premat Instra persists independently of scalar backend
+from .local_chart_store import LocalPrematLiveWriter, close_local_chart_store, ensure_local_chart_store                                                   # <<< THOG premat Instra persists independently of scalar backend
 # ^^^ THOG
 from .stage6_source import (
     evaluation_metric_payload,
@@ -41,6 +43,74 @@ _NORMAL_WANDB_SCALARS = frozenset((
     "gpu/memory_reserved_gb",
     "gpu/max_memory_allocated_gb",
 ))
+# ^^^ THOG
+
+
+# vvv THOG latest-only asynchronous live feed: a bounded queue prevents Instra
+# disk latency from changing scheduler timing or accumulating host memory.
+class _PrematLiveSink:
+    _STOP = object()
+
+    def __init__(self, database_path: Path) -> None:
+        self._database_path = Path(database_path)
+        self._queue: queue.Queue[object] = queue.Queue(maxsize=1)
+        self._closed = False
+        self._error: Optional[BaseException] = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="thog2-premat-instra",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def publish(self, optimizer_update: int, snapshot: Mapping[str, Any]) -> None:
+        if self._closed or self._error is not None:
+            return
+        item = (int(optimizer_update), snapshot)
+        try:
+            self._queue.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+        try:
+            self._queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            pass
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._error is not None:
+            self._thread.join(timeout=10.0)
+            raise RuntimeError("Premat live telemetry writer failed") from self._error
+        try:
+            self._queue.put(self._STOP, timeout=10.0)
+        except queue.Full as error:
+            raise RuntimeError("Premat live telemetry writer did not drain") from error
+        self._thread.join(timeout=10.0)
+        if self._thread.is_alive():
+            raise RuntimeError("Premat live telemetry writer did not stop")
+        if self._error is not None:
+            raise RuntimeError("Premat live telemetry writer failed") from self._error
+
+    def _run(self) -> None:
+        writer = LocalPrematLiveWriter(self._database_path)
+        try:
+            while True:
+                item = self._queue.get()
+                if item is self._STOP:
+                    return
+                optimizer_update, snapshot = item
+                writer.append(optimizer_update, snapshot)
+        except BaseException as error:  # pragma: no cover - filesystem failures are environment-specific
+            self._error = error
+        finally:
+            writer.close()
 # ^^^ THOG
 
 
@@ -690,6 +760,17 @@ class WandbTelemetry:
         exit_code: Optional[int] = None,
         final_state: str = "finished",
     ) -> None:
+        live_sink = getattr(self, "_thog_premat_live_sink", None)
+        if live_sink is not None:
+            try:
+                live_sink.close()
+            except Exception as error:
+                print(
+                    "THOG2 WARNING: Premat live telemetry could not be closed cleanly; "
+                    f"continuing telemetry shutdown: {error}",
+                    flush=True,
+                )
+            self._thog_premat_live_sink = None
         try:
             close_local_chart_store(self, final_state=final_state)
         except Exception as error:
@@ -741,6 +822,35 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
             # ^^^ THOG
 
     trainer._print_progress = progress
+
+    # vvv THOG detailed Premat Instra is a live transition feed, not merely an
+    # optimizer-log-interval snapshot.  Replacing the row for the active update
+    # keeps SQLite history bounded while the dashboard polls it.
+    premat_reporter_setter = getattr(
+        getattr(trainer, "raw_model", None),
+        "set_premat_live_reporter",
+        None,
+    )
+    premat_instra_enabled = (
+        str(getattr(trainer.config, "premat_instra", "disabled")) == "enabled"
+    )
+    if (
+        callable(premat_reporter_setter)
+        and trainer.distributed.is_primary
+        and premat_instra_enabled
+    ):
+        local_store = ensure_local_chart_store(telemetry)
+        live_sink = _PrematLiveSink(local_store.path)
+        telemetry._thog_premat_live_sink = live_sink
+
+        def publish_premat(snapshot: Mapping[str, Any]) -> None:
+            live_sink.publish(
+                max(1, int(trainer.state.completed_updates) + 1),
+                snapshot,
+            )
+
+        premat_reporter_setter(publish_premat)
+    # ^^^ THOG
 
 
 __all__ = [

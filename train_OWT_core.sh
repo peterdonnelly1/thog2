@@ -1215,7 +1215,13 @@ export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"         
 export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
 export THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP="$DIRECT_FACTORISED_HYPERBLOCK_MLP"                                                                      # <<< THOG pass independent direct HYPERBLOCK MLP option
 export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
-#export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# vvv THOG reentrant Premat checkpoint recomputation changes allocation sizes
+# repeatedly; expandable segments prevent the large unusable cache slivers seen
+# in scruffy field tests.  An explicit user allocator policy remains authoritative.
+if [[ "$PREMAT" == enabled && -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
+  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+fi
+# ^^^ THOG
 
 run_grid_point() {
   local geometry_preset_value="$1"

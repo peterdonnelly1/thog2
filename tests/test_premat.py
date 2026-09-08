@@ -163,6 +163,23 @@ def test_peak_free_admission_enforces_process_and_device_guards_separately() -> 
     assert process_blocked.device_guard_passed
 
 
+def test_live_reporter_publishes_pass_boundaries_and_total_event_count(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    snapshots = []
+    runtime.set_live_reporter(snapshots.append)
+    runtime.end()
+
+    assert snapshots
+    latest = snapshots[-1]
+    assert latest["latest_event_sequence"] == latest["event_count"]
+    assert latest["event_count"] >= len(latest["events"])
+    assert latest["events"][-1]["event"] == "pass_end"
+    assert latest["event_window_limit"] == 256
+
+
 def test_global_admission_does_not_assume_fragmented_allocator_cache_is_reusable() -> None:
     decision = decide_candidate_admission(
         observation=_observation(allocated=100, reserved=180),

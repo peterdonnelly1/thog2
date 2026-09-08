@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 
 from run_thog2_local_dashboard import RunDashboardState
-from sheet.local_chart_store import LocalChartReader, LocalChartStore
+from sheet.local_chart_store import LocalChartReader, LocalChartStore, LocalPrematLiveWriter
 
 
 def _snapshot(update: int) -> dict:
@@ -46,6 +46,22 @@ def test_premat_snapshot_history_is_bounded_and_served(tmp_path: Path) -> None:
         assert payload["latest"]["optimizer_update"] == 140
         assert payload["latest"]["next_layer_index"] == 4
     finally:
+        store.close(final_state="finished")
+
+
+def test_live_writer_replaces_the_active_update_without_growing_history(tmp_path: Path) -> None:
+    database = tmp_path / "charts.sqlite3"
+    store = LocalChartStore(database, run_name="premat-live", config={})
+    writer = LocalPrematLiveWriter(database)
+    try:
+        writer.append(3, _snapshot(1))
+        writer.append(3, _snapshot(2))
+        snapshots = LocalChartReader(database).premat_snapshots()
+        assert len(snapshots) == 1
+        assert snapshots[0]["optimizer_update"] == 3
+        assert snapshots[0]["events"][0]["sequence"] == 2
+    finally:
+        writer.close()
         store.close(final_state="finished")
 
 
@@ -112,6 +128,8 @@ def test_premat_javascript_renders_live_pair_and_forensic_fields() -> None:
     snapshot = _snapshot(9)
     snapshot.update(
         {
+            "event_count": 300,
+            "latest_event_sequence": 300,
             "attention_mode": "unfused",
             "queue_head": {
                 "layer_index": 4,
@@ -179,6 +197,8 @@ console.log(JSON.stringify({{
   layers: element("premat_layers").innerHTML,
   memory: element("premat_memory").innerHTML,
   events: element("premat_events_body").innerHTML,
+  count: element("premat_event_count").textContent,
+  update: element("premat_update").textContent,
 }}));
 """
     completed = subprocess.run(
@@ -195,4 +215,12 @@ console.log(JSON.stringify({{
     assert "global_device_buffer" in rendered["memory"]
     assert "MATERIALISING → CONSUMING" in rendered["events"]
     assert "0.250 ms · MISS" in rendered["events"]
+    assert rendered["count"] == "1 shown · 300 total"
+    assert rendered["update"].endswith("event 300")
+
+
+def test_premat_dashboard_polls_at_human_visible_cadence() -> None:
+    asset = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets" / "dashboard_premat.js"
+    javascript = asset.read_text(encoding="utf-8")
+    assert "setInterval(refresh_premat, 750)" in javascript
 # ^^^ THOG

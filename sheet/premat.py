@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 import math
 import time
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -181,6 +181,7 @@ class _PendingCudaTiming:
 
 
 MaterializeCandidate = Callable[[str, int], Tensor]
+PrematLiveReporter = Callable[[Mapping[str, object]], None]
 
 
 class PrematRuntime:
@@ -229,6 +230,13 @@ class PrematRuntime:
         self._sequence = 0
         self._event_sequence = 0
         self._events: List[Dict[str, object]] = []
+        # vvv THOG Instra receives bounded transition snapshots on the training
+        # thread; no polling thread or CUDA synchronization enters the scheduler.
+        self._live_reporter: Optional[PrematLiveReporter] = None
+        self._last_live_publish_ns = 0
+        self._live_publish_interval_ns = 250_000_000
+        self._live_publish_error: Optional[str] = None
+        # ^^^ THOG
         self._pending_timings: List[_PendingCudaTiming] = []
         self._display_layer_pair: Optional[Tuple[int, Optional[int]]] = None
         self._display_candidates: List[Dict[str, object]] = []
@@ -260,6 +268,17 @@ class PrematRuntime:
     @property
     def active(self) -> bool:
         return self._active
+
+    # vvv THOG the reporter is observational and deliberately absent unless
+    # --premat_instra is enabled on the primary process.
+    def set_live_reporter(
+        self,
+        reporter: Optional[PrematLiveReporter],
+    ) -> None:
+        self._live_reporter = reporter
+        self._last_live_publish_ns = 0
+        self._live_publish_error = None
+    # ^^^ THOG
 
     def begin(
         self,
@@ -555,9 +574,13 @@ class PrematRuntime:
             "effective_fast_discard": True,
             "queue_head": self._queue_head_payload(),
             "candidates": candidates,
-            "events": list(self._events[-256:]),
+            "events": [dict(event) for event in self._events[-256:]],
+            "event_count": self._event_sequence,
+            "latest_event_sequence": self._event_sequence,
+            "event_window_limit": 256,
             "memory": memory,
             "aggregate": aggregate,
+            "live_publish_error": self._live_publish_error,
         }
 
     def _families(self) -> Tuple[str, ...]:
@@ -875,6 +898,26 @@ class PrematRuntime:
         self._events.append(payload)
         if len(self._events) > 2048:
             del self._events[:1024]
+        # vvv THOG publish at human-visible cadence and at every pass boundary.
+        # A failing UI sink is isolated from model execution after recording the
+        # diagnostic; scheduler decisions never depend on publication success.
+        reporter = self._live_reporter
+        publish_due = (
+            reporter is not None
+            and (
+                event in {"pass_begin", "pass_end"}
+                or now_ns - self._last_live_publish_ns
+                >= self._live_publish_interval_ns
+            )
+        )
+        if publish_due:
+            try:
+                reporter(self.report())
+                self._last_live_publish_ns = now_ns
+            except Exception as error:  # pragma: no cover - sink failures are environment-specific
+                self._live_publish_error = f"{type(error).__name__}: {error}"
+                self._live_reporter = None
+        # ^^^ THOG
         return payload
 
     def _candidate_payload(self, candidate: _Candidate) -> Dict[str, object]:

@@ -105,6 +105,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "premat_attention_mode=fused" in output
     assert "headroom=stay_below_current_peak" in output
     assert "effective_fast_discard=true" in output
+    assert "cuda_allocator=" in output
     assert "plastic\n" in output
     assert "plastic__runtime_phase:" in output
     assert "plastic__coarse_phase_roll_through:" in output

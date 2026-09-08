@@ -23,7 +23,7 @@ Authoritative plan: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation
 - [x] Include score, scale, mask, softmax, and probability/value pressure in unfused admission.
 - [x] Implement completion events, deadline ownership, event waits, main fallback, and `record_stream` lifetime handling.
 - [x] Give activation-checkpoint recomputation fresh local premat state.
-- [x] Make checkpointed original forwards use the same segment-scoped premat lifetime as recomputation.
+- [x] Keep original-forward and checkpoint-recompute Premat ownership separate; recomputation starts with fresh pass-local state.
 - [x] Isolate adaptive premat scheduling from non-reentrant saved-tensor matching.
 - [x] Fail before the first forward when premat is enabled without CUDA.
 - [x] Persist supplied/resolved configuration, aggregate counters, and CUDA timing fields.
@@ -70,3 +70,17 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Add regressions for effective one-layer recomputation, conservative fragmented-cache admission, and real-tab registration.
 - [ ] Re-run Peter's L8/P4 S4 command on scruffy and compare peak allocated/reserved memory with Premat disabled.
 - [ ] Verify the visible Instra tab and live Premat snapshot on scruffy.
+
+## 2026-09-08 live/fragmentation follow-up
+
+- [x] Record the observed capacity boundary: Premat L10/P5 succeeds; L10/P6 OOMs with both 1.0 and 0.5 GiB buffers; matched non-Premat L12/P7 previously succeeds.
+- [x] Confirm from Instra that the failing architecture is not retaining a large Premat tensor (`premat_retained=0 KiB`) while the allocator has a very large reserved/allocated gap.
+- [x] Default Premat wrapper launches to expandable CUDA allocator segments without overriding an explicit user allocator configuration.
+- [x] Record the effective CUDA allocator configuration in run metadata and startup diagnostics.
+- [x] Replace optimizer-log-cadence-only Premat snapshots with bounded asynchronous live publication.
+- [x] Display the total event sequence separately from the newest 256 retained table events.
+- [x] Add live publication, bounded-writer, count-label, and polling-cadence regressions.
+- [x] Re-run static Python, JavaScript, shell, whitespace, and direct persistence-writer checks.
+- [ ] Re-run L10/P6 on scruffy with the new allocator default and compare peak allocated/reserved values.
+- [ ] If L10/P6 passes, probe L12/P7 against the matched non-Premat reference before declaring DPE-SAFE-005 satisfied.
+- [ ] Verify that the Instra event sequence increments during an update and that l/l+1 promotes at human-visible cadence.

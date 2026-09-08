@@ -100,7 +100,9 @@ function render_premat(payload) {
   premat_sync_tab();
   if (!snapshot) return;
   by_id("premat_mode").textContent = `${snapshot.attention_mode} · ${String(snapshot.headroom_mode || "").replaceAll("_", " ")}`;
-  by_id("premat_update").textContent = `optimizer update ${snapshot.optimizer_update ?? "—"}`;
+  const shown_events = (snapshot.events || []).length;
+  const total_events = Number(snapshot.event_count ?? shown_events);
+  by_id("premat_update").textContent = `optimizer update ${snapshot.optimizer_update ?? "—"} · event ${snapshot.latest_event_sequence ?? total_events}`;
   const memory = snapshot.memory || {};
   const memory_items = [
     ["Process allocated", memory.process_allocated_bytes],
@@ -124,7 +126,9 @@ function render_premat(payload) {
     premat_layer_markup(snapshot.next_layer_index, "lookahead · l+1", snapshot, candidates)
     + premat_layer_markup(snapshot.current_layer_index, "current · l", snapshot, candidates);
   const events = premat_visible_events(snapshot);
-  by_id("premat_event_count").textContent = `${events.length} event${events.length === 1 ? "" : "s"}`;
+  by_id("premat_event_count").textContent = total_events > shown_events
+    ? `${events.length} shown · ${total_events} total`
+    : `${events.length} event${events.length === 1 ? "" : "s"}`;
   by_id("premat_events_body").innerHTML = events.map(event => {
     const transition = `${event.old_state || "—"} → ${event.new_state || event.state || "—"}`;
     const verdict = [event.decision, event.outcome, event.reason].filter(Boolean).join(" · ") || "—";
@@ -179,6 +183,6 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   premat_sync_tab();
   refresh_premat();
-  setInterval(refresh_premat, 2000);
+  setInterval(refresh_premat, 750);
 });
 // ^^^ THOG

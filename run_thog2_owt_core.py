@@ -85,6 +85,7 @@ def runtime_overview_metadata(
         "git_repository": str(REPOSITORY_ROOT),
         "gpu_index": selected_gpu_index(),                                                                                                                 # <<< THOG display the selected physical GPU rather than the process-local CUDA ordinal
         "cuda_visible_devices": str(os.environ.get("CUDA_VISIBLE_DEVICES", "")),                                                                           # <<< THOG retain the original GPU affinity evidence for resumed and forked runs
+        "pytorch_cuda_alloc_conf": str(os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")),                                                                     # <<< THOG record Premat fragmentation mitigation or an explicit user override
     }
 # ^^^ THOG
 
@@ -938,6 +939,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
+            f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             "lookahead=l+1",
         )
         # ^^^ THOG
