@@ -131,7 +131,8 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("LNW", "--plastic__layer_count_probe__window_size_as_number_of_probes N", "paired-score history window"),
             ("LNL", "--plastic__layer_count_probe_noise_lambda VALUE", "directional_coherence robust significance threshold; ignored by Sen/Kendall and jump modes"),
             ("LW", "--plastic__layer_count_cost_weight VALUE", "layer-cost penalty weight"),
-            ("LMB", "--plastic__layer_count__memory_budget_gib VALUE", "memory_budget objective limit"),
+            # ("LMB", "--plastic__layer_count__memory_budget_gib VALUE", "memory_budget objective limit"),                                               # <<< THOG retired fixed budget
+            ("—", "--premat_gpu_memory_buffer_gb VALUE", "global CUDA reserve shared with memory_budget"),
             ("—", "--plastic__layer_count__cuda_allocator_reserve_gib VALUE", "upward-probe free-memory reserve"),
             ("LG", "--plastic__geometry_learning_rate_multiplier VALUE", "sampling-geometry LR multiplier"),
             ("LF", "--plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup", "freeze or permit geometry changes during warmup"),

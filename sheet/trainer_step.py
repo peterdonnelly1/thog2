@@ -287,7 +287,7 @@ class TrainerStepMixin:
                 maximum_layers=lattice.maximum_layers,
                 cost_weight=float(self.config.plastic__layer_count_cost_weight),
                 reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
+                memory_budget_gib=self.config.resolved_plastic_memory_budget_gib(),                                                                        # <<< THOG shared capacity-minus-global-buffer ceiling
             )
             self.distributed.assert_identical_object(
                 selected.active_layers,
@@ -453,7 +453,7 @@ class TrainerStepMixin:
                     maximum_layers=lattice.maximum_layers,
                     cost_weight=float(self.config.plastic__layer_count_cost_weight),
                     reference_training_time=reference_time if math.isfinite(reference_time) else None,
-                    memory_budget_gib=self.config.plastic__layer_count__memory_budget_gib,
+                    memory_budget_gib=self.config.resolved_plastic_memory_budget_gib(),                                                                    # <<< THOG shared capacity-minus-global-buffer ceiling
                 )
             except RuntimeError as error:
                 current_count = int(context["current_count"])

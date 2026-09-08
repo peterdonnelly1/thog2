@@ -306,6 +306,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--o-mlp-hidden", type=int, default=DEFAULT_O_MLP_HIDDEN)
     parser.add_argument("--mlp-hidden-group-size", type=int, default=DEFAULT_MLP_HIDDEN_GROUP_SIZE)
     parser.add_argument("--mlp-hidden-compressor", choices=BASIS_FAMILIES, default=DEFAULT_MLP_HIDDEN_COMPRESSOR)
+    # vvv THOG dynamic pre-materialisation public surface and mutually-exclusive headroom policies
+    parser.add_argument("--premat", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--premat_attention_mode", choices=("fused", "unfused"), default="fused")
+    premat_headroom = parser.add_mutually_exclusive_group()
+    premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
+    premat_headroom.add_argument("--premat_headroom_stay_within_global_buffer", action="store_true")
+    parser.add_argument("--premat_gpu_memory_buffer_gb", type=float, default=1.0)
+    parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
+    # ^^^ THOG
     parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
     parser.add_argument("--attention-geometry", choices=ATTENTION_GEOMETRIES)
@@ -365,7 +375,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_window", dest="plastic__wall_time_equivalent_time_gain_loss_rate_window", type=int, default=64)
     parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", dest="plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", type=int, default=16)
     parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
-    parser.add_argument("--plastic__layer_count__memory_budget_gib", dest="plastic__layer_count__memory_budget_gib", type=float)
+    # parser.add_argument("--plastic__layer_count__memory_budget_gib", dest="plastic__layer_count__memory_budget_gib", type=float)                         # <<< THOG retired fixed PLASTIC budget
+    parser.add_argument(
+        "--plastic__layer_count__memory_budget_gib",
+        help=argparse.SUPPRESS,
+        type=lambda _value: (_ for _ in ()).throw(
+            argparse.ArgumentTypeError(
+                "--plastic__layer_count__memory_budget_gib is retired; "
+                "use --premat_gpu_memory_buffer_gb"
+            )
+        ),
+    )
     parser.add_argument("--plastic__layer_count__cuda_allocator_reserve_gib", dest="plastic__layer_count__cuda_allocator_reserve_gib", type=float, default=0.5)
     parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
     parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
@@ -689,7 +709,13 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__wall_time_equivalent_time_gain_loss_rate_window=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_window,
         plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=arguments.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
-        plastic__layer_count__memory_budget_gib=arguments.plastic__layer_count__memory_budget_gib,
+        premat=arguments.premat,
+        premat_attention_mode=arguments.premat_attention_mode,
+        premat_headroom_stay_below_current_peak=arguments.premat_headroom_stay_below_current_peak,
+        premat_headroom_stay_within_global_buffer=arguments.premat_headroom_stay_within_global_buffer,
+        premat_gpu_memory_buffer_gb=arguments.premat_gpu_memory_buffer_gb,
+        premat_logging=arguments.premat_logging,
+        premat_instra=arguments.premat_instra,
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
@@ -894,6 +920,18 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         # vvv THOG preserve the pre-HYPERBLOCK-direct execution row exactly for source history
         # _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
         _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  direct_factorised_hyperblock_mlp={model_config.direct_factorised_hyperblock_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        if config.premat == "enabled":
+            headroom_mode = (
+                "stay_within_global_buffer"
+                if config.premat_headroom_stay_within_global_buffer
+                else "stay_below_current_peak"
+            )
+            _print_model_option(
+                "PREMAT:",
+                f"enabled mode={config.premat_attention_mode} headroom={headroom_mode} "
+                f"global_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
+                "effective_fast_discard=true (-E is accepted but does not alter this)",
+            )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
         hyperblock = report.get("hyperblock")

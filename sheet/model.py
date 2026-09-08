@@ -7,7 +7,7 @@ import os
 from dataclasses import asdict, dataclass, field
 # vvv THOG HYPERBLOCK layer bundles are passed as a typed matrix mapping
 # from typing import Dict, List, Optional, Tuple
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple                                                                                          # <<< THOG premat pass accepts sparse active-layer sequences
 # ^^^ THOG
 
 import torch
@@ -47,6 +47,9 @@ from .plastic_depth import (
     validate_plastic_layer_count_objective,
     validate_plastic_sampling_initialisation,
 )
+# ^^^ THOG
+# vvv THOG dynamic pre-materialisation configuration and CUDA runtime
+from .premat import PrematRuntime, validate_premat_configuration
 # ^^^ THOG
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
@@ -133,11 +136,20 @@ class SheetGPTConfig:
     plastic__layer_count_probe__window_size_as_number_of_probes: int = 50
     plastic__layer_count_probe_noise_lambda: float = 3.0
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_count__memory_budget_gib: Optional[float] = None
+    # plastic__layer_count__memory_budget_gib: Optional[float] = None                                                                                      # <<< THOG retired; use premat_gpu_memory_buffer_gb
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__sampling_seed: int = 1337
     plastic__initial_active_layers: int = 0
+    # ^^^ THOG
+    # vvv THOG dynamic pre-materialisation is disabled by default and shares one global GPU reserve with PLASTIC
+    premat: str = "disabled"
+    premat_attention_mode: str = "fused"
+    premat_headroom_stay_below_current_peak: bool = False
+    premat_headroom_stay_within_global_buffer: bool = False
+    premat_gpu_memory_buffer_gb: float = 1.0
+    premat_logging: str = "disabled"
+    premat_instra: str = "disabled"
     # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
@@ -238,23 +250,8 @@ class SheetGPTConfig:
                 "plastic__layer_count_cost_weight must be finite and non-negative; "
                 f"got {self.plastic__layer_count_cost_weight!r}"
             )
-        if (
-            self.plastic__layer_count__memory_budget_gib is not None
-            and (
-                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
-                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
-            )
-        ):
-            raise ValueError(
-                "plastic__layer_count__memory_budget_gib must be finite and positive or None; "
-                f"got {self.plastic__layer_count__memory_budget_gib!r}"
-            )
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
-            raise ValueError(
-                "plastic__layer_count__memory_budget_gib is required for memory_budget"
-            )
+        # if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:                              # <<< THOG retired fixed PLASTIC budget gate
+        #     raise ValueError("plastic__layer_count__memory_budget_gib is required for memory_budget")
         if (
             isinstance(self.plastic__geometry_learning_rate_multiplier, bool)
             or not isinstance(self.plastic__geometry_learning_rate_multiplier, (int, float))
@@ -308,6 +305,19 @@ class SheetGPTConfig:
             )
         if not isinstance(self.fast_discard, bool):
             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
+        # vvv THOG validate the seven public premat controls and force pass-local materialisation lifetimes when enabled
+        validate_premat_configuration(
+            premat=self.premat,
+            attention_mode=self.premat_attention_mode,
+            stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
+            stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            logging=self.premat_logging,
+            instra=self.premat_instra,
+        )
+        if self.premat == "enabled":
+            self.fast_discard = True
+        # ^^^ THOG
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
             raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
         # if not isinstance(self.direct_thog_mlp_application, bool):                                                                                      # <<< THOG retired old option validation
@@ -536,6 +546,23 @@ class SheetGPT(nn.Module):
         self.transformer.wte.weight = self.lm_head.weight
         self.apply(self._init_conventional_weights)
         self.trajectory.reset_parameters()
+        # vvv THOG disabled runs allocate no stream, events, or scheduler state beyond this None reference
+        self._premat_runtime: Optional[PrematRuntime] = None
+        if config.premat == "enabled":
+            if not isinstance(self.trajectory, DepthTrajectory):
+                raise ValueError("--premat enabled currently requires the DEPTH trajectory")
+            self._premat_runtime = PrematRuntime(
+                materialize=self._premat_materialize_candidate,
+                n_embd=config.n_embd,
+                attention_mode=config.premat_attention_mode,
+                stay_below_current_peak=(
+                    config.premat_headroom_stay_below_current_peak
+                    or not config.premat_headroom_stay_within_global_buffer
+                ),
+                gpu_memory_buffer_gb=config.premat_gpu_memory_buffer_gb,
+                logging_enabled=config.premat_logging == "enabled",
+            )
+        # ^^^ THOG
 
     @staticmethod
     def _init_conventional_weights(module: nn.Module) -> None:
@@ -551,12 +578,68 @@ class SheetGPT(nn.Module):
             return None
         return self.trajectory.materialize_vector(name, layer_index)
 
+    # vvv THOG authoritative candidate materialisers and pass lifecycle shared by eager and checkpoint recomputation
+    def _premat_materialize_candidate(self, family: str, layer_index: int) -> Tensor:
+        if family == "QKV":
+            if self.config.bypass_semantic_qkv_adapter:
+                return self.trajectory.materialize("attention_input_weight", layer_index)
+            return self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+        if family == "QK":
+            return torch.cat(
+                (
+                    self.trajectory.materialize("attention_query_weight", layer_index),
+                    self.trajectory.materialize("attention_key_weight", layer_index),
+                ),
+                dim=0,
+            )
+        if family == "V":
+            return self.trajectory.materialize("attention_value_weight", layer_index)
+        family_names = {
+            "O": "attention_output_weight",
+            "UP": "mlp_expansion_weight",
+            "DOWN": "mlp_contraction_weight",
+        }
+        try:
+            return self.trajectory.materialize(family_names[family], layer_index)
+        except KeyError as exc:
+            raise KeyError(f"unknown premat candidate family: {family}") from exc
+
+    def _premat_begin_pass(self, layer_indices: Sequence[int], reference: Tensor) -> bool:
+        runtime = self._premat_runtime
+        if runtime is None or runtime.active:
+            return False
+        runtime.begin(tuple(layer_indices), reference=reference)
+        return True
+
+    def _premat_end_pass(self, owned: bool) -> None:
+        if owned and self._premat_runtime is not None:
+            self._premat_runtime.end()
+
+    def premat_report(self) -> Optional[Dict[str, object]]:
+        return None if self._premat_runtime is None else self._premat_runtime.report()
+
+    def _premat_weight(self, family: str, layer_index: int) -> Tensor:
+        if self._premat_runtime is None or not self._premat_runtime.active:
+            return self._premat_materialize_candidate(family, layer_index)
+        return self._premat_runtime.acquire(family, layer_index)
+
+    def _premat_consumed(self, family: str, layer_index: int) -> None:
+        if self._premat_runtime is not None and self._premat_runtime.active:
+            self._premat_runtime.consumed(family, layer_index)
+
+    def _premat_event(self, name: str, layer_index: int) -> None:
+        if self._premat_runtime is not None and self._premat_runtime.active:
+            self._premat_runtime.event(name, layer_index=layer_index)
+    # ^^^ THOG
+
     def _sheet_layer_norm(self, inputs: Tensor, weight_name: str, bias_name: str, layer_index: int) -> Tensor:
+        self._premat_event(f"before_{weight_name}", layer_index)
         weight = self.trajectory.materialize_vector(weight_name, layer_index)
         bias = self._optional_bias(bias_name, layer_index)
         output = F.layer_norm(inputs, (self.config.n_embd,), weight, bias, 1.0e-5)
         if self.config.fast_discard:
             del weight, bias
+        self._premat_event(f"after_{weight_name}", layer_index)
         return output
 
     # vvv THOG preserve the pre-bundle attention signature for source history
@@ -569,8 +652,42 @@ class SheetGPT(nn.Module):
         layer_materializations: Optional[Mapping[str, Tensor]] = None,
     ) -> Tensor:
         batch_size, sequence_length, embedding_width = inputs.shape
+        use_unfused_attention = self.config.premat_attention_mode == "unfused"
+        # vvv THOG unfused topology exposes QK and V as separate pre-materialisation deadlines
+        if use_unfused_attention:
+            if layer_materializations is not None:
+                raise RuntimeError("unfused premat attention is not supported by HYPERBLOCK")
+            qk_weight = self._premat_weight("QK", layer_index)
+            qk_bias = None
+            value_bias = None
+            packed_bias = None
+            if self.config.bias:
+                packed_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
+                qk_bias = packed_bias[: 2 * self.config.n_embd]
+                value_bias = packed_bias[2 * self.config.n_embd :]
+            query, key = F.linear(inputs, qk_weight, qk_bias).split(self.config.n_embd, dim=2)
+            self._premat_consumed("QK", layer_index)
+            if self.config.fast_discard:
+                del qk_weight, qk_bias
+            head_width = embedding_width // self.config.n_head
+            key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
+            causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
+            scores = scores.masked_fill(~causal_mask.view(1, 1, sequence_length, sequence_length), float("-inf"))
+            probabilities = F.softmax(scores, dim=-1)
+            probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
+            self._premat_event("after_attention_softmax", layer_index)
+            value_weight = self._premat_weight("V", layer_index)
+            value = F.linear(inputs, value_weight, value_bias)
+            self._premat_consumed("V", layer_index)
+            value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            attended = probabilities @ value
+            if self.config.fast_discard:
+                del packed_bias, query, key, scores, causal_mask, probabilities, value, value_weight, value_bias
+        # ^^^ THOG
         # vvv THOG consume the already-batched HYPERBLOCK layer matrices before legacy materialisation paths
-        if layer_materializations is not None:
+        elif layer_materializations is not None:
             attention_weight = layer_materializations["attention_input_weight"]
             attention_bias = self._optional_bias("attention_input_bias", layer_index)
         # ^^^ THOG
@@ -579,54 +696,59 @@ class SheetGPT(nn.Module):
         # ^^^ THOG
         # vvv THOG selectable semantic-QKV adapter bypass for exact A/B timing comparisons
         elif self.config.bypass_semantic_qkv_adapter:
-            attention_weight = self.trajectory.materialize("attention_input_weight", layer_index)
+            attention_weight = self._premat_weight("QKV", layer_index)
             attention_bias = None
             if self.config.bias:
                 attention_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
         else:
-            attention_weight = self.semantic_materializer.reconstructed_attention_input_weight(layer_index)
+            attention_weight = self._premat_weight("QKV", layer_index)
             attention_bias = None
             if self.config.bias:
                 attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
         # ^^^ THOG
-        query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
-        if self.config.fast_discard:
-            del attention_weight, attention_bias
-        head_width = embedding_width // self.config.n_head
-        key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
-        query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
-        value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
-        if hasattr(F, "scaled_dot_product_attention"):
-            attended = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=None,
-                dropout_p=self.config.dropout if self.training else 0.0,
-                is_causal=True,
-            )
-        else:
-            scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
-            causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
-            scores = scores.masked_fill(~causal_mask.view(1, 1, sequence_length, sequence_length), float("-inf"))
-            probabilities = F.softmax(scores, dim=-1)
-            probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
-            attended = probabilities @ value
+        if not use_unfused_attention:
+            query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
+            if layer_materializations is None:
+                self._premat_consumed("QKV", layer_index)
             if self.config.fast_discard:
-                del scores, causal_mask, probabilities
-        if self.config.fast_discard:
-            del query, key, value
+                del attention_weight, attention_bias
+            head_width = embedding_width // self.config.n_head
+            key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
+            if hasattr(F, "scaled_dot_product_attention"):
+                attended = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=None,
+                    dropout_p=self.config.dropout if self.training else 0.0,
+                    is_causal=True,
+                )
+            else:
+                scores = (query @ key.transpose(-2, -1)) * (1.0 / math.sqrt(head_width))
+                causal_mask = torch.tril(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=inputs.device))
+                scores = scores.masked_fill(~causal_mask.view(1, 1, sequence_length, sequence_length), float("-inf"))
+                probabilities = F.softmax(scores, dim=-1)
+                probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
+                attended = probabilities @ value
+                if self.config.fast_discard:
+                    del scores, causal_mask, probabilities
+            if self.config.fast_discard:
+                del query, key, value
         attended = attended.transpose(1, 2).contiguous().view(batch_size, sequence_length, embedding_width)
         # vvv THOG preserve the pre-bundle output-weight line and reuse the layer bundle when present
         # output_weight = self.trajectory.materialize("attention_output_weight", layer_index)
         output_weight = (
-            self.trajectory.materialize("attention_output_weight", layer_index)
+            self._premat_weight("O", layer_index)
             if layer_materializations is None
             else layer_materializations["attention_output_weight"]
         )
         # ^^^ THOG
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
+        if layer_materializations is None:
+            self._premat_consumed("O", layer_index)
         if self.config.fast_discard:
             del attended, output_weight, output_bias
         output = F.dropout(projected, p=self.config.dropout, training=self.training)
@@ -702,17 +824,20 @@ class SheetGPT(nn.Module):
             # vvv THOG preserve the pre-bundle expansion materialisation and use the shared layer result for HYPERBLOCK
             # expansion_weight = self.trajectory.materialize("mlp_expansion_weight", layer_index)
             expansion_weight = (
-                self.trajectory.materialize("mlp_expansion_weight", layer_index)
+                self._premat_weight("UP", layer_index)
                 if layer_materializations is None
                 else layer_materializations["mlp_expansion_weight"]
             )
             # ^^^ THOG
             hidden = F.linear(inputs, expansion_weight, expansion_bias)
+            if layer_materializations is None:
+                self._premat_consumed("UP", layer_index)
             if self.config.fast_discard:
                 del expansion_weight
         if self.config.fast_discard:
             del expansion_bias
         hidden = F.gelu(hidden)
+        self._premat_event("after_gelu", layer_index)
         contraction_bias = self._optional_bias("mlp_contraction_bias", layer_index)
         # vvv THOG direct HYPERBLOCK contraction bypasses the dense [D_MODEL,MLP_HIDDEN] matrix
         if hyperblock_mlp_factors is not None:
@@ -736,12 +861,14 @@ class SheetGPT(nn.Module):
             # vvv THOG preserve the pre-bundle contraction materialisation and use the shared layer result for HYPERBLOCK
             # contraction_weight = self.trajectory.materialize("mlp_contraction_weight", layer_index)
             contraction_weight = (
-                self.trajectory.materialize("mlp_contraction_weight", layer_index)
+                self._premat_weight("DOWN", layer_index)
                 if layer_materializations is None
                 else layer_materializations["mlp_contraction_weight"]
             )
             # ^^^ THOG
             output = F.linear(hidden, contraction_weight, contraction_bias)
+            if layer_materializations is None:
+                self._premat_consumed("DOWN", layer_index)
             if self.config.fast_discard:
                 del contraction_weight
         if self.config.fast_discard:
@@ -787,6 +914,8 @@ class SheetGPT(nn.Module):
 
     # def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:                                                                              # <<< THOG preserved pre-loop block entry point
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
+        if self._premat_runtime is not None and self._premat_runtime.active:
+            self._premat_runtime.layer_start(layer_index)
         layer_materializations = None
         hyperblock_mlp_factors = None
         is_hyperblock = isinstance(self.trajectory, CoupledFieldTrajectory)
@@ -878,6 +1007,8 @@ class SheetGPT(nn.Module):
     def forward(self, idx: Tensor, targets: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
+        if self.config.premat == "enabled" and idx.device.type != "cuda":
+            raise RuntimeError("--premat enabled requires CUDA and cannot execute a CPU forward")
         _, sequence_length = idx.shape
         if sequence_length > self.config.block_size:
             raise ValueError(f"Cannot forward sequence of length {sequence_length}; block size is {self.config.block_size}")
@@ -893,9 +1024,14 @@ class SheetGPT(nn.Module):
         )
         # vvv THOG preserve the original fixed-depth traversal while allowing PLASTIC DEPTH active ranks
         # for layer_index in range(self.config.n_layer):
-        for layer_index in layer_indices:
-        # ^^^ THOG
-            hidden = self._logical_block(hidden, layer_index)
+        premat_layer_indices = tuple(layer_indices)
+        premat_owned = self._premat_begin_pass(premat_layer_indices, hidden)
+        try:
+            for layer_index in premat_layer_indices:
+            # ^^^ THOG
+                hidden = self._logical_block(hidden, layer_index)
+        finally:
+            self._premat_end_pass(premat_owned)
         # ^^^ THOG
         hidden = self.transformer.ln_f(hidden)
         if targets is not None:

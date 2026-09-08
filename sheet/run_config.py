@@ -56,6 +56,9 @@ from .plastic_depth import (
     validate_plastic_sampling_initialisation,
 )
 # ^^^ THOG
+# vvv THOG dynamic pre-materialisation public configuration validation
+from .premat import validate_premat_configuration
+# ^^^ THOG
 # vvv THOG PLASTIC COARSE/FINE lifecycle configuration and candidate resolution
 from .plastic_depth_coarse import (
     resolve_plastic_coarse_config,
@@ -102,7 +105,7 @@ PLASTIC_RUN_CONFIG_FIELDS = (
     "plastic__wall_time_equivalent_time_gain_loss_rate_window",
     "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
-    "plastic__layer_count__memory_budget_gib",
+    # "plastic__layer_count__memory_budget_gib",                                                                                                          # <<< THOG retired; use global premat buffer
     "plastic__layer_count__cuda_allocator_reserve_gib",
     "plastic__geometry_learning_rate_multiplier",
     "plastic__freeze_geometry_during_warmup",
@@ -221,11 +224,20 @@ class OwtRunConfig:
     plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
     plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_count__memory_budget_gib: Optional[float] = None
+    # plastic__layer_count__memory_budget_gib: Optional[float] = None                                                                                       # <<< THOG retired; use premat_gpu_memory_buffer_gb
     plastic__layer_count__cuda_allocator_reserve_gib: float = 0.5
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
+    # ^^^ THOG
+    # vvv THOG seven dynamic pre-materialisation public controls
+    premat: str = "disabled"
+    premat_attention_mode: str = "fused"
+    premat_headroom_stay_below_current_peak: bool = False
+    premat_headroom_stay_within_global_buffer: bool = False
+    premat_gpu_memory_buffer_gb: float = 1.0
+    premat_logging: str = "disabled"
+    premat_instra: str = "disabled"
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls
     chaos_bump__sampling__enabled: bool = False
@@ -315,6 +327,8 @@ class OwtRunConfig:
                 )
         if self.model_type not in PUBLIC_MODEL_TYPES:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
+        if self.premat == "enabled" and self.model_type != "sheet":
+            raise ValueError("--premat enabled requires --model-type sheet")
         if self.run_mode not in ("fresh", "resume"):
             raise ValueError("run_mode must be fresh or resume")
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
@@ -530,18 +544,15 @@ class OwtRunConfig:
             or float(self.plastic__layer_count_cost_weight) < 0.0
         ):
             raise ValueError("plastic__layer_count_cost_weight must be finite and non-negative")
-        if (
-            self.plastic__layer_count__memory_budget_gib is not None
-            and (
-                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
-                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
-            )
-        ):
-            raise ValueError("plastic__layer_count__memory_budget_gib must be finite and positive or None")
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
-            raise ValueError("plastic__layer_count__memory_budget_gib is required for memory_budget")
+        validate_premat_configuration(
+            premat=self.premat,
+            attention_mode=self.premat_attention_mode,
+            stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
+            stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            logging=self.premat_logging,
+            instra=self.premat_instra,
+        )
         # vvv THOG universal CUDA safety reserve is independent of the learned-count objective and may be disabled with zero
         if (
             isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, bool)
@@ -949,7 +960,7 @@ class OwtRunConfig:
                 layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-                layer_memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+                layer_memory_budget_gib=None,                                                                                                             # <<< THOG runtime derives device capacity minus global buffer
                 cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
                 geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
@@ -1145,8 +1156,8 @@ class OwtRunConfig:
                 ])
             if float(self.plastic__layer_count_cost_weight) != 0.0:
                 plastic_fields.append(f"LW_{self._artifact_float(self.plastic__layer_count_cost_weight)}")
-            if self.plastic__layer_count__memory_budget_gib is not None:
-                plastic_fields.append(f"LMB_{self._artifact_float(self.plastic__layer_count__memory_budget_gib)}")
+            # if self.plastic__layer_count__memory_budget_gib is not None:                                                                                  # <<< THOG retired fixed budget artifact component
+            #     plastic_fields.append(f"LMB_{self._artifact_float(self.plastic__layer_count__memory_budget_gib)}")
             if float(self.plastic__geometry_learning_rate_multiplier) != 0.1:
                 plastic_fields.append(f"LG_{self._artifact_float(self.plastic__geometry_learning_rate_multiplier)}")
             if not self.plastic__freeze_geometry_during_warmup:
@@ -1327,7 +1338,13 @@ class OwtRunConfig:
             plastic__wall_time_equivalent_time_gain_loss_rate_window=self.plastic__wall_time_equivalent_time_gain_loss_rate_window,
             plastic__wall_time_equivalent_time_gain_loss_rate_min_observations=self.plastic__wall_time_equivalent_time_gain_loss_rate_min_observations,
             plastic__layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-            plastic__layer_count__memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+            premat=self.premat,
+            premat_attention_mode=self.premat_attention_mode,
+            premat_headroom_stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
+            premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            premat_gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
+            premat_logging=self.premat_logging,
+            premat_instra=self.premat_instra,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
             plastic__freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
@@ -1437,7 +1454,7 @@ class OwtRunConfig:
                 "plastic__layer_count_objective",
                 "plastic__layer_count_update_brake",
                 "plastic__layer_count_cost_weight",
-                "plastic__layer_count__memory_budget_gib",
+                # "plastic__layer_count__memory_budget_gib",                                                                                              # <<< THOG retired fixed budget
                 "plastic__layer_count__cuda_allocator_reserve_gib",
                 "plastic__geometry_learning_rate_multiplier",
                 "plastic__freeze_geometry_during_warmup",

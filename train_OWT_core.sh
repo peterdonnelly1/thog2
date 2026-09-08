@@ -93,7 +93,7 @@ PLASTIC_LAYER_COUNT_UPDATE_BRAKE=5
 PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES=50
 PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="3.0"
 PLASTIC_LAYER_COUNT_COST_WEIGHT="0.0"
-PLASTIC_LAYER_MEMORY_BUDGET_GIB=""
+# PLASTIC_LAYER_MEMORY_BUDGET_GIB=""                                                                                                                     # <<< THOG retired fixed PLASTIC budget
 PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="0.5"
 PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="0.1"
 PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP=true
@@ -160,6 +160,16 @@ INITIALISE_FROM_DENSE_SNAPSHOT=""
 ACTIVATION_CHECKPOINTING=true
 CHECKPOINT_SEGMENT_SIZE=12
 FAST_DISCARD="${THOG2_FAST_DISCARD:-true}"
+# vvv THOG dynamic pre-materialisation wrapper defaults
+PREMAT="disabled"
+PREMAT_ATTENTION_MODE="fused"
+PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=false
+PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
+PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
+PREMAT_LOGGING="disabled"
+PREMAT_INSTRA="disabled"
+FAST_DISCARD_EXPLICIT=false
+# ^^^ THOG
 BYPASS_SEMANTIC_QKV_ADAPTER="${THOG2_BYPASS_SEMANTIC_QKV_ADAPTER:-true}"                                                                                  # <<< THOG default-on selectable semantic-QKV adapter bypass
 DIRECT_FACTORISED_MLP="${THOG2_DIRECT_FACTORISED_MLP:-true}"                                                                                              # <<< THOG renamed default-on exact factorised MLP application
 DIRECT_FACTORISED_HYPERBLOCK_MLP="${THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP:-false}"                                                                      # <<< THOG independent default-off direct HYPERBLOCK UP/DOWN application
@@ -273,12 +283,21 @@ PLASTIC DEPTH:
   --plastic__layer_count_probe__window_size_as_number_of_probes N=${PLASTIC_LAYER_COUNT_PROBE_WINDOW_SIZE_AS_NUMBER_OF_PROBES}
   --plastic__layer_count_probe_noise_lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
   --plastic__layer_count_cost_weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
-  --plastic__layer_count__memory_budget_gib VALUE
+  --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}  global CUDA reserve; replaces plastic__layer_count__memory_budget_gib
   --plastic__layer_count__cuda_allocator_reserve_gib VALUE=${PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB}
   --plastic__geometry_learning_rate_multiplier VALUE=${PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER}
   --plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup
   --plastic__log_interval_coarse N=${PLASTIC_LOG_INTERVAL_COARSE}
   --plastic__coarse_phase_roll_through | --no-plastic__coarse_phase_roll_through
+
+Dynamic pre-materialisation:
+  --premat enabled|disabled=${PREMAT}
+  --premat_attention_mode fused|unfused=${PREMAT_ATTENTION_MODE}
+  --premat_headroom_stay_below_current_peak       default when neither headroom flag is supplied
+  --premat_headroom_stay_within_global_buffer
+  --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
+  --premat_logging enabled|disabled=${PREMAT_LOGGING}
+  --premat_instra enabled|disabled=${PREMAT_INSTRA}
 
 Sampling-only chaos bump:
   --chaos_bump__sampling__enabled | --no-chaos_bump__sampling__enabled
@@ -455,6 +474,45 @@ while (( $# > 0 )); do
       shift
       ;;
     # ^^^ THOG
+    # vvv THOG consume the seven premat controls before getopts; retired PLASTIC budget fails with its replacement
+    --plastic__layer_count__memory_budget_gib|--plastic__layer_count__memory_budget_gib=*)
+      echo "--plastic__layer_count__memory_budget_gib is retired; use --premat_gpu_memory_buffer_gb" >&2
+      exit 2
+      ;;
+    --premat_headroom_stay_below_current_peak)
+      [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == false ]] || { echo "premat headroom flags are mutually exclusive" >&2; exit 2; }
+      PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=true
+      shift
+      ;;
+    --premat_headroom_stay_within_global_buffer)
+      [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == false ]] || { echo "premat headroom flags are mutually exclusive" >&2; exit 2; }
+      PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
+      shift
+      ;;
+    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_logging|--premat_instra)
+      (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
+      case "$1" in
+        --premat) PREMAT="$2" ;;
+        --premat_attention_mode) PREMAT_ATTENTION_MODE="$2" ;;
+        --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$2" ;;
+        --premat_logging) PREMAT_LOGGING="$2" ;;
+        --premat_instra) PREMAT_INSTRA="$2" ;;
+      esac
+      shift 2
+      ;;
+    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_logging=*|--premat_instra=*)
+      premat_name="${1%%=*}"; premat_value="${1#*=}"
+      case "$premat_name" in
+        --premat) PREMAT="$premat_value" ;;
+        --premat_attention_mode) PREMAT_ATTENTION_MODE="$premat_value" ;;
+        --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$premat_value" ;;
+        --premat_logging) PREMAT_LOGGING="$premat_value" ;;
+        --premat_instra) PREMAT_INSTRA="$premat_value" ;;
+      esac
+      unset premat_name premat_value
+      shift
+      ;;
+    # ^^^ THOG
     # vvv THOG consume PLASTIC DEPTH controls before getopts and emit one canonical Python configuration
     # vvv THOG consume the exact heatmap instrumentation namespace before ordinary getopts parsing
     --instrumentation__delta_loss_v_layer_heatmap|--instrumentation__delta_loss_v_layer_heatmap__destination|--instrumentation__delta_loss_v_layer_heatmap_abs_limit|--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes)
@@ -533,7 +591,7 @@ while (( $# > 0 )); do
       ;;
     # ^^^ THOG
     # --plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence|--plastic__layer_count_cost_weight|--plastic__layer_memory_budget_gib|--plastic__geometry_learning_rate_multiplier)
-    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__probe_every_n_steps|--plastic__layer_count_probe__number_of_sampled_valid_tokens|--plastic__layer_count_probe_radius|--plastic__layer_count__max_allowable_layer_change|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence|--plastic__layer_count_cost_weight|--plastic__layer_count__memory_budget_gib|--plastic__layer_count__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
+    --plastic__coarse_phase|--plastic__phase_1_n_steps|--plastic__phase_1_starting_layer_count|--plastic__phase_1__number_of_trials|--plastic__phase_1_evaluation_steps_count|--plastic__log_interval_coarse|--plastic__layers_to_sample|--plastic__initial_layer_count|--plastic__max_permitted_layers|--plastic__layer_sampling_initialisation|--plastic__layer_count_objective|--plastic__layer_count_update_brake|--plastic__layer_count_probe__probe_every_n_steps|--plastic__layer_count_probe__number_of_sampled_valid_tokens|--plastic__layer_count_probe_radius|--plastic__layer_count__max_allowable_layer_change|--plastic__layer_count_probe__window_size_as_number_of_probes|--plastic__layer_count_probe_noise_lambda|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence|--plastic__layer_count_cost_weight|--plastic__layer_count__cuda_allocator_reserve_gib|--plastic__geometry_learning_rate_multiplier)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$2" ;;
@@ -556,14 +614,14 @@ while (( $# > 0 )); do
         --plastic__layer_count_probe_noise_lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$2" ;;
         --plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence) PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT="$2" ;;
         --plastic__layer_count_cost_weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$2" ;;
-        --plastic__layer_count__memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$2" ;;
+        # --plastic__layer_count__memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$2" ;;                                                              # <<< THOG retired fixed budget
         --plastic__layer_count__cuda_allocator_reserve_gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$2" ;;
         --plastic__geometry_learning_rate_multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$2" ;;
       esac
       shift 2
       ;;
     # --plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe__window_size_as_number_of_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=*|--plastic__layer_count_cost_weight=*|--plastic__layer_memory_budget_gib=*|--plastic__geometry_learning_rate_multiplier=*)
-    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe__probe_every_n_steps=*|--plastic__layer_count_probe__number_of_sampled_valid_tokens=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count__max_allowable_layer_change=*|--plastic__layer_count_probe__window_size_as_number_of_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=*|--plastic__layer_count_cost_weight=*|--plastic__layer_count__memory_budget_gib=*|--plastic__layer_count__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
+    --plastic__coarse_phase=*|--plastic__phase_1_n_steps=*|--plastic__phase_1_starting_layer_count=*|--plastic__phase_1__number_of_trials=*|--plastic__phase_1_evaluation_steps_count=*|--plastic__log_interval_coarse=*|--plastic__layers_to_sample=*|--plastic__initial_layer_count=*|--plastic__max_permitted_layers=*|--plastic__layer_sampling_initialisation=*|--plastic__layer_count_objective=*|--plastic__layer_count_update_brake=*|--plastic__layer_count_probe__probe_every_n_steps=*|--plastic__layer_count_probe__number_of_sampled_valid_tokens=*|--plastic__layer_count_probe_radius=*|--plastic__layer_count__max_allowable_layer_change=*|--plastic__layer_count_probe__window_size_as_number_of_probes=*|--plastic__layer_count_probe_noise_lambda=*|--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=*|--plastic__layer_count_cost_weight=*|--plastic__layer_count__cuda_allocator_reserve_gib=*|--plastic__geometry_learning_rate_multiplier=*)
       plastic_name="${1%%=*}"; plastic_value="${1#*=}"
       case "$plastic_name" in
         --plastic__coarse_phase) PLASTIC_COARSE_PHASE="$plastic_value" ;;
@@ -586,7 +644,7 @@ while (( $# > 0 )); do
         --plastic__layer_count_probe_noise_lambda) PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA="$plastic_value" ;;
         --plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence) PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT="$plastic_value" ;;
         --plastic__layer_count_cost_weight) PLASTIC_LAYER_COUNT_COST_WEIGHT="$plastic_value" ;;
-        --plastic__layer_count__memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$plastic_value" ;;
+        # --plastic__layer_count__memory_budget_gib) PLASTIC_LAYER_MEMORY_BUDGET_GIB="$plastic_value" ;;                                                  # <<< THOG retired fixed budget
         --plastic__layer_count__cuda_allocator_reserve_gib) PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB="$plastic_value" ;;
         --plastic__geometry_learning_rate_multiplier) PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER="$plastic_value" ;;
       esac
@@ -702,7 +760,7 @@ while getopts ":q:g:n:b:c:f:y:A:G:u:e:l:w:k:I:F:N:U:V:p:B:v:W:i:a:m:L:s:M:H:D:C:
     p) GEOMETRY_PRESET="$OPTARG" ;; B) BASIS_FAMILY="$OPTARG" ;; v) BASIS_VERSION="$OPTARG" ;; W) LAPPED_COSINE_WINDOW_LENGTH="$OPTARG" ;; i) LAPPED_COSINE_OVERLAP_FRACTION="$OPTARG" ;; a) ATTENTION_GEOMETRY="$OPTARG" ;; m) MLP_GEOMETRY="$OPTARG" ;;
     L) N_LAYER="$OPTARG"; N_LAYER_EXPLICIT=true ;; s) LAYER_DROPOUT_STRATUM_SIZE="$OPTARG" ;; M) LAYER_DROPOUT_ACTIVE_PER_STRATUM="$OPTARG" ;; H) N_HEAD="$OPTARG"; N_HEAD_EXPLICIT=true ;; D) N_EMBD="$OPTARG"; N_EMBD_EXPLICIT=true ;;
     C) BLOCK_SIZE="$OPTARG" ;; P) O_DEPTH="$OPTARG" ;; Q) O_ATTN_D_MODEL="$OPTARG" ;; J) O_ATTN_QKV_PER_CHANNEL="$OPTARG" ;; O) O_ATTN_OUT_PER_CHANNEL="$OPTARG" ;; X) O_MLP_D_MODEL="$OPTARG" ;; Y) O_MLP_HIDDEN="$OPTARG" ;; S) CHECKPOINT_SEGMENT_SIZE="$OPTARG" ;;
-    E) FAST_DISCARD="$OPTARG" ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;;
+    E) FAST_DISCARD="$OPTARG"; FAST_DISCARD_EXPLICIT=true ;; T) DTYPE="$OPTARG" ;; K) ATTENTION_BACKEND="$OPTARG" ;;                                    # <<< THOG track ignored -E when premat owns discard lifetime
     r) RESIDUAL_INIT_POLICY="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
     z) RESIDUAL_INIT_DEPTH_SOURCE="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
     Z) RESIDUAL_INIT_DEPTH_VALUE="$OPTARG"; RESIDUAL_INIT_EXPLICIT=true ;;
@@ -908,6 +966,24 @@ validate_lr_code "$MIN_LR_CODE" "MIN_LR_CODE" 100                               
 [[ -z "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" ]] || validate_positive_uint "$LAYER_DROPOUT_ACTIVE_PER_STRATUM" "N_ACTIVE_PER_STRATUM"
 validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_STEPS"
 # ^^^ THOG
+# vvv THOG validate premat independently of PLASTIC and make its early-discard ownership explicit
+case "$PREMAT" in enabled|disabled) ;; *) echo "PREMAT must be enabled or disabled." >&2; exit 2 ;; esac
+case "$PREMAT_ATTENTION_MODE" in fused|unfused) ;; *) echo "PREMAT_ATTENTION_MODE must be fused or unfused." >&2; exit 2 ;; esac
+case "$PREMAT_LOGGING" in enabled|disabled) ;; *) echo "PREMAT_LOGGING must be enabled or disabled." >&2; exit 2 ;; esac
+case "$PREMAT_INSTRA" in enabled|disabled) ;; *) echo "PREMAT_INSTRA must be enabled or disabled." >&2; exit 2 ;; esac
+validate_true_false "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" "PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK"
+validate_true_false "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" "PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER"
+validate_nonnegative_number "$PREMAT_GPU_MEMORY_BUFFER_GB" "PREMAT_GPU_MEMORY_BUFFER_GB"
+if [[ "$PREMAT" == enabled ]]; then
+  [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false && "$HYPERBLOCK" == false ]] || { echo "--premat enabled currently requires every selected preset to be DEPTH." >&2; exit 2; }
+  if [[ "$FAST_DISCARD_EXPLICIT" == true ]]; then
+    echo "THOG2 PREMAT: -E was supplied but is ignored; effective fast discard is true." >&2
+  else
+    echo "THOG2 PREMAT: forcing effective fast discard=true." >&2
+  fi
+  FAST_DISCARD=true
+fi
+# ^^^ THOG
 # vvv THOG validate PLASTIC DEPTH wrapper controls before runner construction
 validate_true_false "$PLASTIC_ENABLED" "PLASTIC_ENABLED"
 validate_true_false "$PLASTIC_DO_LEARN_LAYER_COUNT" "PLASTIC_DO_LEARN_LAYER_COUNT"
@@ -941,7 +1017,7 @@ if [[ "$PLASTIC_ENABLED" == true && "$PLASTIC_DO_LEARN_LAYER_COUNT" == true ]]; 
   [[ -z "$PLASTIC_LAYERS_TO_SAMPLE" ]] || { echo "--plastic__layers_to_sample conflicts with learned layer count." >&2; exit 2; }
   [[ -n "$PLASTIC_MAX_PERMITTED_LAYERS" ]] || { echo "--plastic__max_permitted_layers is required for learned layer count." >&2; exit 2; }
 fi
-[[ "$PLASTIC_ENABLED" == false || "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_count__memory_budget_gib." >&2; exit 2; }
+# [[ "$PLASTIC_ENABLED" == false || "$PLASTIC_LAYER_COUNT_OBJECTIVE" != memory_budget || -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] || { echo "memory_budget requires --plastic__layer_count__memory_budget_gib." >&2; exit 2; } # <<< THOG global buffer replaces fixed budget
 # ^^^ THOG
 # vvv THOG relative wall-time learning needs ordinary (non-probe) updates from which to fit its loss-rate model
 if [[ "$PLASTIC_ENABLED" == true && "$PLASTIC_DO_LEARN_LAYER_COUNT" == true && "$PLASTIC_LAYER_COUNT_OBJECTIVE" == relative_training_wall_time ]]; then
@@ -1160,6 +1236,15 @@ run_grid_point() {
   n_layer_value="$N_LAYER"; n_head_value="$N_HEAD"; n_embd_value="$N_EMBD"
   residual_init_depth_source_value="$RESIDUAL_INIT_DEPTH_SOURCE"
   optional_args=(); compact_args=(); compact_order_args=()
+  # vvv THOG every run receives the global memory buffer and explicit premat topology/policy identity
+  optional_args+=(--premat "$PREMAT")
+  optional_args+=(--premat_attention_mode "$PREMAT_ATTENTION_MODE")
+  [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == true ]] && optional_args+=(--premat_headroom_stay_below_current_peak)
+  [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == true ]] && optional_args+=(--premat_headroom_stay_within_global_buffer)
+  optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
+  optional_args+=(--premat_logging "$PREMAT_LOGGING")
+  optional_args+=(--premat_instra "$PREMAT_INSTRA")
+  # ^^^ THOG
   # vvv THOG instrumentation and read-only observational probes are forwarded independently of both PLASTIC mutation switches
   [[ -n "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP" ]] && optional_args+=(--instrumentation__delta_loss_v_layer_heatmap "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP")
   optional_args+=(--instrumentation__delta_loss_v_layer_heatmap__destination "$INSTRUMENTATION_DELTA_LOSS_V_LAYER_HEATMAP_DESTINATION")
@@ -1199,7 +1284,7 @@ run_grid_point() {
     optional_args+=(--plastic__layer_count_probe_noise_lambda "$PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA")
     optional_args+=(--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence "$PLASTIC_LAYER_COUNT_EXTRAPOLATION_WEIGHT")
     optional_args+=(--plastic__layer_count_cost_weight "$PLASTIC_LAYER_COUNT_COST_WEIGHT")
-    [[ -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] && optional_args+=(--plastic__layer_count__memory_budget_gib "$PLASTIC_LAYER_MEMORY_BUDGET_GIB")
+    # [[ -n "$PLASTIC_LAYER_MEMORY_BUDGET_GIB" ]] && optional_args+=(--plastic__layer_count__memory_budget_gib "$PLASTIC_LAYER_MEMORY_BUDGET_GIB")              # <<< THOG retired fixed budget
     optional_args+=(--plastic__layer_count__cuda_allocator_reserve_gib "$PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB")
     optional_args+=(--plastic__geometry_learning_rate_multiplier "$PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER")
     if [[ "$PLASTIC_FREEZE_GEOMETRY_DURING_WARMUP" == true ]]; then optional_args+=(--plastic__freeze_geometry_during_warmup); else optional_args+=(--no-plastic__freeze_geometry_during_warmup); fi

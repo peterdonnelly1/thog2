@@ -15,6 +15,26 @@ RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Te
 # ^^^ THOG
 
 
+# vvv THOG activation-checkpoint recomputation owns fresh pass-local premat state when the outer forward has ended
+def _begin_premat_segment(
+    logical_block: LogicalBlock,
+    layer_indices: Sequence[int],
+    reference: Tensor,
+) -> Tuple[object, bool]:
+    owner = getattr(logical_block, "__self__", None)
+    begin = getattr(owner, "_premat_begin_pass", None)
+    if owner is None or not callable(begin):
+        return owner, False
+    return owner, bool(begin(tuple(layer_indices), reference))
+
+
+def _end_premat_segment(owner: object, owned: bool) -> None:
+    end = getattr(owner, "_premat_end_pass", None)
+    if callable(end):
+        end(owned)
+# ^^^ THOG
+
+
 @dataclass(frozen=True)
 class CheckpointExecutionReport:
     checkpointing_used: bool
@@ -99,10 +119,15 @@ def execute_logical_layers(
                     segment_start: int = start,
                     segment_end: int = end,
                 ) -> Tensor:
-                    segment_output = segment_input
-                    for layer_index in range(segment_start, segment_end):
-                        segment_output = logical_block(segment_output, layer_index)
-                    return segment_output
+                    segment_indices = tuple(range(segment_start, segment_end))
+                    premat_owner, premat_owned = _begin_premat_segment(logical_block, segment_indices, segment_input)
+                    try:
+                        segment_output = segment_input
+                        for layer_index in segment_indices:
+                            segment_output = logical_block(segment_output, layer_index)
+                        return segment_output
+                    finally:
+                        _end_premat_segment(premat_owner, premat_owned)
             else:
                 run_segment = regional_segment_runner_factory(tuple(range(start, end)))
 
@@ -147,10 +172,14 @@ def execute_logical_layers(
             *,
             nominal_indices: Tuple[int, ...] = segment_indices,
         ) -> Tensor:
-            segment_output = segment_input
-            for layer_index in nominal_indices:
-                segment_output = logical_block(segment_output, layer_index)
-            return segment_output
+            premat_owner, premat_owned = _begin_premat_segment(logical_block, nominal_indices, segment_input)
+            try:
+                segment_output = segment_input
+                for layer_index in nominal_indices:
+                    segment_output = logical_block(segment_output, layer_index)
+                return segment_output
+            finally:
+                _end_premat_segment(premat_owner, premat_owned)
 
         hidden = checkpoint(
             run_sparse_segment,
@@ -218,10 +247,14 @@ def execute_logical_layer_checkpoints(
             *,
             nominal_indices: Tuple[int, ...] = segment_indices,
         ) -> Tensor:
-            segment_output = segment_input
-            for layer_index in nominal_indices:
-                segment_output = logical_block(segment_output, layer_index)
-            return segment_output
+            premat_owner, premat_owned = _begin_premat_segment(logical_block, nominal_indices, segment_input)
+            try:
+                segment_output = segment_input
+                for layer_index in nominal_indices:
+                    segment_output = logical_block(segment_output, layer_index)
+                return segment_output
+            finally:
+                _end_premat_segment(premat_owner, premat_owned)
 
         if use_checkpointing:
             hidden = checkpoint(

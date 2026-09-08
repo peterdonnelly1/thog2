@@ -25,8 +25,21 @@
 
 ## Test record
 
-No tests run yet.
+- Baseline test attempt: `python -m pytest ...` failed before collection because the sandpit runtime has neither `pytest` nor `torch` installed.
+- Static Python validation: all repository Python files compile successfully with `python -m py_compile`.
+- Shell validation: `bash -n train_OWT_core.sh` passes.
+- Added `tests/test_premat.py` for pure admission guards, allocator-cache accounting, option exclusivity, retired-option diagnostics, and fused/unfused CPU numerical equivalence.
+
+## 2026-09-08 - Core implementation checkpoint
+
+- Added `sheet/premat.py`: deterministic admission engine, lifecycle model, strict two-layer candidate window, one-in-flight scheduler, one lazy persistent CUDA stream, completion events, main-stream deadlines, `record_stream` ownership, event history, and aggregate telemetry.
+- Fused execution routes QKV/O/UP/DOWN through the scheduler. QKV admission accounts for the packed output plus separately materialised Q/K/V operation peak.
+- Unfused execution routes QK and later V as distinct deadlines, uses explicit causal score/softmax/value application, and includes the larger foreground activation envelope.
+- Activation-checkpoint forward uses one outer pass; backward recomputation creates fresh segment-local state and cannot reuse stale tensors/events.
+- `--premat enabled` forces effective early discard. The shell accepts `-E` but reports it as ignored under premat.
+- Retired `--plastic__layer_count__memory_budget_gib`; supplying it now fails with `--premat_gpu_memory_buffer_gb` as the replacement. PLASTIC `memory_budget` now derives capacity minus the shared global buffer at runtime.
+- Deliberately rejects premat with HYPERBLOCK/non-DEPTH, torch.compile, and PLASTIC inline-probe replay in v1 rather than silently entering an unsupported execution path.
 
 ## Known blockers or deferred work
 
-None at initialization.
+- CUDA correctness, stream-overlap, peak-envelope, and profiler gates require a torch/CUDA host and remain unexecuted in this sandpit.

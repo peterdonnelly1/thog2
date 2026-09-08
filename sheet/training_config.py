@@ -60,6 +60,9 @@ from .plastic_depth import (
     validate_plastic_sampling_initialisation,
 )
 # ^^^ THOG
+# vvv THOG dynamic pre-materialisation configuration validation
+from .premat import validate_premat_configuration
+# ^^^ THOG
 
 
 CHECKPOINT_SCHEMA_VERSION = 2
@@ -95,7 +98,7 @@ PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__wall_time_equivalent_time_gain_loss_rate_window",
     "plastic__wall_time_equivalent_time_gain_loss_rate_min_observations",
     "plastic__layer_count_cost_weight",
-    "plastic__layer_count__memory_budget_gib",
+    # "plastic__layer_count__memory_budget_gib",                                                                                                          # <<< THOG retired; global buffer is shared by premat and PLASTIC
     "plastic__layer_count__cuda_allocator_reserve_gib",
     "plastic__geometry_learning_rate_multiplier",
     "plastic__freeze_geometry_during_warmup",
@@ -108,13 +111,15 @@ PLASTIC_V0541_RENAMED_CONFIG_FIELDS = {
     "plastic__layer_count_extrapolation_weight": "plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence",
     "plastic__layer_count_max_step": "plastic__layer_count__max_allowable_layer_change",
     # vvv THOG accept the pre-namespace-cleanup names only while reconstructing checkpoints; public parsers expose only the canonical layer_count names
-    "plastic__layer_memory_budget_gib": "plastic__layer_count__memory_budget_gib",
+    # "plastic__layer_memory_budget_gib": "plastic__layer_count__memory_budget_gib",                                                                       # <<< THOG retired public budget alias
     "plastic__cuda_allocator_reserve_gib": "plastic__layer_count__cuda_allocator_reserve_gib",
     # ^^^ THOG
 }
 
 def normalize_plastic_v0541_config_fields(values: Mapping[str, Any]) -> Dict[str, Any]:
     normalized = dict(values)
+    normalized.pop("plastic__layer_count__memory_budget_gib", None)                                                                                       # <<< THOG retire legacy fixed budget while loading older checkpoints
+    normalized.pop("plastic__layer_memory_budget_gib", None)                                                                                              # <<< THOG retire pre-v0.541 alias as well
     for old_name, new_name in PLASTIC_V0541_RENAMED_CONFIG_FIELDS.items():
         if old_name not in normalized:
             continue
@@ -264,11 +269,20 @@ class TrainingConfig:
     plastic__wall_time_equivalent_time_gain_loss_rate_window: int = 64
     plastic__wall_time_equivalent_time_gain_loss_rate_min_observations: int = 16
     plastic__layer_count_cost_weight: float = 0.0
-    plastic__layer_count__memory_budget_gib: Optional[float] = None
+    # plastic__layer_count__memory_budget_gib: Optional[float] = None                                                                                       # <<< THOG retired; use premat_gpu_memory_buffer_gb
     plastic__layer_count__cuda_allocator_reserve_gib: float = 0.5
     plastic__geometry_learning_rate_multiplier: float = 0.1
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
+    # ^^^ THOG
+    # vvv THOG dynamic pre-materialisation persistent execution identity
+    premat: str = "disabled"
+    premat_attention_mode: str = "fused"
+    premat_headroom_stay_below_current_peak: bool = False
+    premat_headroom_stay_within_global_buffer: bool = False
+    premat_gpu_memory_buffer_gb: float = 1.0
+    premat_logging: str = "disabled"
+    premat_instra: str = "disabled"
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls; disabled is the exact established path
     chaos_bump__sampling__enabled: bool = False
@@ -530,21 +544,17 @@ class TrainingConfig:
                 "plastic__layer_count_cost_weight must be finite and non-negative; "
                 f"got {self.plastic__layer_count_cost_weight!r}"
             )
-        if (
-            self.plastic__layer_count__memory_budget_gib is not None
-            and (
-                isinstance(self.plastic__layer_count__memory_budget_gib, bool)
-                or not isinstance(self.plastic__layer_count__memory_budget_gib, (int, float))
-                or not math.isfinite(float(self.plastic__layer_count__memory_budget_gib))
-                or float(self.plastic__layer_count__memory_budget_gib) <= 0.0
-            )
-        ):
-            raise ValueError(
-                "plastic__layer_count__memory_budget_gib must be finite and positive or None; "
-                f"got {self.plastic__layer_count__memory_budget_gib!r}"
-            )
-        if self.plastic__layer_count_objective == "memory_budget" and self.plastic__layer_count__memory_budget_gib is None:
-            raise ValueError("plastic__layer_count__memory_budget_gib is required for memory_budget")
+        # vvv THOG the global reserve replaces the fixed PLASTIC memory budget and configures premat even while scheduling is disabled
+        validate_premat_configuration(
+            premat=self.premat,
+            attention_mode=self.premat_attention_mode,
+            stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
+            stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            logging=self.premat_logging,
+            instra=self.premat_instra,
+        )
+        # ^^^ THOG
         # vvv THOG universal CUDA safety reserve is execution state, configured in GiB and allowed to be explicitly disabled with zero
         if (
             isinstance(self.plastic__layer_count__cuda_allocator_reserve_gib, bool)
@@ -569,6 +579,7 @@ class TrainingConfig:
                 "plastic__geometry_learning_rate_multiplier must be finite and non-negative; "
                 f"got {self.plastic__geometry_learning_rate_multiplier!r}"
             )
+
         if self.plastic__enabled and self.model_type != "thog2_sheet":
             raise ValueError("PLASTIC DEPTH requires model_type='thog2_sheet'")
         if self.plastic__enabled and self.hyperblock_enabled:
@@ -818,6 +829,19 @@ class TrainingConfig:
         if not isinstance(self.bias, bool) or not isinstance(self.decay_learning_rate, bool):
             raise ValueError("bias and decay_learning_rate must be bool")
 
+    # vvv THOG PLASTIC memory_budget shares the physical device ceiling defined by the global premat buffer
+    def resolved_plastic_memory_budget_gib(self) -> Optional[float]:
+        if self.plastic__layer_count_objective != "memory_budget":
+            return None
+        import torch
+        from .premat import plastic_memory_budget_gib
+
+        return plastic_memory_budget_gib(
+            device=torch.device(self.device),
+            gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
+        )
+    # ^^^ THOG
+
     @property
     def head_dim(self) -> int:
         return self.n_embd // self.n_head
@@ -975,6 +999,15 @@ class TrainingConfig:
                     "attention_geometry": self.attention_geometry,
                     "mlp_geometry": self.mlp_geometry,
                     "basis_family": self.basis_family,
+                    # vvv THOG pass all premat topology and policy controls into SheetGPTConfig; disabled remains allocation-free
+                    "premat": self.premat,
+                    "premat_attention_mode": self.premat_attention_mode,
+                    "premat_headroom_stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
+                    "premat_headroom_stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
+                    "premat_gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
+                    "premat_logging": self.premat_logging,
+                    "premat_instra": self.premat_instra,
+                    # ^^^ THOG
                 })
                 # vvv THOG disabled PLASTIC DEPTH passes no new model arguments; enabled runs carry the complete Plasticity Engine identity
                 if self.plastic__enabled:
@@ -990,7 +1023,7 @@ class TrainingConfig:
                         "plastic__layer_count_probe__window_size_as_number_of_probes": self.plastic__layer_count_probe__window_size_as_number_of_probes,
                         "plastic__layer_count_probe_noise_lambda": float(self.plastic__layer_count_probe_noise_lambda),
                         "plastic__layer_count_cost_weight": float(self.plastic__layer_count_cost_weight),
-                        "plastic__layer_count__memory_budget_gib": self.plastic__layer_count__memory_budget_gib,
+                        # "plastic__layer_count__memory_budget_gib": self.plastic__layer_count__memory_budget_gib,                                         # <<< THOG retired fixed PLASTIC ceiling
                         "plastic__geometry_learning_rate_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
                         "plastic__freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
                         "plastic__sampling_seed": self.model_seed,
@@ -1082,7 +1115,7 @@ class TrainingConfig:
                 layer_count_probe__window_size_as_number_of_probes=self.plastic__layer_count_probe__window_size_as_number_of_probes,
                 layer_count_probe_noise_lambda=float(self.plastic__layer_count_probe_noise_lambda),
                 layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
-                layer_memory_budget_gib=self.plastic__layer_count__memory_budget_gib,
+                layer_memory_budget_gib=None,                                                                                                             # <<< THOG runtime derives capacity minus global buffer
                 cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
                 geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
                 freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
@@ -1105,6 +1138,16 @@ class TrainingConfig:
             # ^^^ THOG
             # ^^^ THOG
         # ^^^ THOG
+        if self.model_type == "thog2_sheet":
+            identity["premat"] = {
+                "enabled": self.premat,
+                "attention_mode": self.premat_attention_mode,
+                "stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
+                "stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
+                "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
+                "logging": self.premat_logging,
+                "instra": self.premat_instra,
+            }
         return identity
 
     # vvv THOG schema-2 checkpoint signatures must stay available after execution-only fields such as max_wall_minutes are added

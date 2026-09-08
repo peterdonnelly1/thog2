@@ -85,6 +85,8 @@ class TrainingDenseGPT(GPT):
         resolved_mode = _validate_torch_compile_mode(mode)
         if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
             raise ValueError("regional torch compilation requires checkpoint_segment_size > 0")
+        if resolved_mode != "false" and self.config.premat == "enabled":
+            raise ValueError("--premat enabled currently requires eager execution; torch.compile is unsupported")
         self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
 
@@ -449,6 +451,7 @@ class TrainingSheetGPT(SheetGPT):
         bias_name: str,
         layer_index: int,
     ) -> Tensor:
+        self._premat_event(f"before_{weight_name}", layer_index)
         with torch.autocast(device_type=inputs.device.type, enabled=False):
             # vvv THOG preserve FP64 in the optimizer-equivalence reference; ordinary execution retains FP32 normalization weights
             normalization_dtype = torch.float64 if inputs.dtype == torch.float64 else torch.float32
@@ -457,13 +460,15 @@ class TrainingSheetGPT(SheetGPT):
             if bias is not None:
                 bias = bias.to(dtype=normalization_dtype)
             # ^^^ THOG
-            return F.layer_norm(
+            output = F.layer_norm(
                 inputs,
                 (self.config.n_embd,),
                 weight,
                 bias,
                 1.0e-5,
             )
+        self._premat_event(f"after_{weight_name}", layer_index)
+        return output
 
     # vvv THOG PLASTIC DEPTH evaluates detached candidate heads at shared prefix checkpoints, then one selected grad-bearing head
     def _plastic_depth_candidate_head_loss(
@@ -694,6 +699,8 @@ class TrainingSheetGPT(SheetGPT):
     ) -> Tuple[Tensor, Optional[Tensor]]:
         if idx.ndim != 2:
             raise ValueError(f"idx must have shape [batch, time]; got {tuple(idx.shape)}")
+        if self.config.premat == "enabled" and idx.device.type != "cuda":
+            raise RuntimeError("--premat enabled requires CUDA and cannot execute a CPU forward")
         _, sequence_length = idx.shape
         if sequence_length > self.config.block_size:
             raise ValueError(
@@ -708,6 +715,8 @@ class TrainingSheetGPT(SheetGPT):
             raise ValueError("PLASTIC DEPTH inline probing requires targets")
         if self._active_layer_indices is not None and plastic_depth_probe_request is not None:
             raise RuntimeError("PLASTIC DEPTH inline probing cannot be combined with layer dropout")
+        if self.config.premat == "enabled" and plastic_depth_probe_request is not None:
+            raise RuntimeError("dynamic pre-materialisation does not support PLASTIC inline probe replay in v1")
 
         # vvv THOG fast-discard forwards own one basis each; retained-materialisation updates prepare one basis before all microbatches
         if self.plastic_depth_enabled and not self._update_retained_materializations.active:
@@ -815,25 +824,30 @@ class TrainingSheetGPT(SheetGPT):
                     "regional torch.compile does not support a PLASTIC DEPTH active count below the persistent maximum"
                 )
             regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
-            if layer_indices is None:
-                hidden, self.last_execution_report = execute_logical_layers(
-                    hidden,
-                    n_layer=self.config.n_layer,
-                    segment_size=self.checkpoint_segment_size,
-                    logical_block=self._logical_block,
-                    training=self.training,
-                    regional_segment_runner_factory=regional_segment_runner_factory,
-                )
-            else:
-                hidden, self.last_execution_report = execute_logical_layers(
-                    hidden,
-                    n_layer=self.config.n_layer,
-                    segment_size=self.checkpoint_segment_size,
-                    logical_block=self._logical_block,
-                    training=self.training,
-                    layer_indices=layer_indices,
-                    regional_segment_runner_factory=regional_segment_runner_factory,
-                )
+            premat_layer_indices = tuple(range(self.config.n_layer)) if layer_indices is None else layer_indices
+            premat_owned = self._premat_begin_pass(premat_layer_indices, hidden)
+            try:
+                if layer_indices is None:
+                    hidden, self.last_execution_report = execute_logical_layers(
+                        hidden,
+                        n_layer=self.config.n_layer,
+                        segment_size=self.checkpoint_segment_size,
+                        logical_block=self._logical_block,
+                        training=self.training,
+                        regional_segment_runner_factory=regional_segment_runner_factory,
+                    )
+                else:
+                    hidden, self.last_execution_report = execute_logical_layers(
+                        hidden,
+                        n_layer=self.config.n_layer,
+                        segment_size=self.checkpoint_segment_size,
+                        logical_block=self._logical_block,
+                        training=self.training,
+                        layer_indices=layer_indices,
+                        regional_segment_runner_factory=regional_segment_runner_factory,
+                    )
+            finally:
+                self._premat_end_pass(premat_owned)
             # ^^^ THOG
 
         hidden = self.transformer.ln_f(hidden)
