@@ -46,6 +46,20 @@ DEPTH_MATRIX_FAMILIES = (
 )
 
 
+# vvv THOG a metadata-only edge created on the consumer stream prevents a
+# Premat custom node's gradient from reaching a persistent leaf AccumulateGrad
+# directly with the cached tensor's auxiliary-stream provenance.
+class _PrematConsumerStreamAnchor(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, value: Tensor) -> Tensor:
+        return value.view_as(value)
+
+    @staticmethod
+    def backward(ctx, gradient: Tensor):
+        return gradient
+# ^^^ THOG
+
+
 # vvv THOG bind a no-grad prematerialised value to its ordinary differentiable
 # DEPTH identity only when the layer consumes it.  Physical CUDA timing can
 # therefore move earlier without moving the autograd/checkpoint operation.
@@ -828,7 +842,16 @@ class DepthTrajectory(nn.Module):
                 )
             coefficient = self.coefficients[name]
             depth_row = self._depth_row(layer_index, coefficient)
-            pairs.extend((coefficient, depth_row))
+            # The anchor allocates no tensor storage.  It gives the leaf
+            # accumulator a stable consumer-stream producer across gradient
+            # accumulation even when Premat admission differs by microbatch.
+            coefficient_input = _PrematConsumerStreamAnchor.apply(coefficient)
+            depth_input = (
+                _PrematConsumerStreamAnchor.apply(depth_row)
+                if depth_row.requires_grad
+                else depth_row
+            )
+            pairs.extend((coefficient_input, depth_input))
             expected_rows += item.output_rows
             expected_width = item.row_width if expected_width is None else expected_width
             if item.row_width != expected_width:

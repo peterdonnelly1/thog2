@@ -228,8 +228,59 @@ def test_premat_dashboard_polls_at_human_visible_cadence() -> None:
     javascript = asset.read_text(encoding="utf-8")
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "PREMAT_PLAYBACK_QUEUE_LIMIT = 128" in javascript
+    assert "Math.max(250" in javascript
     assert "PREMAT_PLAYBACK_BASE_MS / premat_view.playback_rate" in javascript
     assert "premat_playback_speed" in javascript
+
+
+def test_premat_browser_replays_sampled_update_by_exact_layer() -> None:
+    asset = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets" / "dashboard_premat.js"
+    snapshot = _snapshot(10)
+    snapshot.update(
+        {
+            "latest_event_sequence": 4,
+            "event_count": 4,
+            "events": [
+                {"sequence": 1, "event": "pass_begin", "current_layer_index": 3, "next_layer_index": 4},
+                {"sequence": 2, "event": "layer_start", "current_layer_index": 3, "next_layer_index": 4},
+                {
+                    "sequence": 3, "event": "available", "layer_index": 4, "family": "QKV",
+                    "new_state": "AVAILABLE", "owner": "premat", "admission_reason": "admitted",
+                    "current_layer_index": 3, "next_layer_index": 4,
+                },
+                {"sequence": 4, "event": "layer_start", "current_layer_index": 4, "next_layer_index": 7},
+            ],
+        }
+    )
+    harness = f"""
+const elements = new Map();
+function element(id) {{
+  if (!elements.has(id)) elements.set(id, {{
+    id, hidden: false, innerHTML: "", textContent: "", value: "",
+    classList: {{toggle() {{}}, add() {{}}, remove() {{}}}},
+    setAttribute() {{}}, addEventListener() {{}}
+  }});
+  return elements.get(id);
+}}
+global.by_id = element;
+global.document = {{getElementById: element, querySelector: () => null, querySelectorAll: () => []}};
+global.window = {{addEventListener() {{}}}};
+global.app = {{current_run_id: "run"}};
+global.fetch_json = async () => ({{}});
+{asset.read_text(encoding="utf-8")}
+premat_view.run_id = "run";
+premat_enqueue_frame({json.dumps({"latest": snapshot})});
+console.log(JSON.stringify([premat_view.latest_payload, ...premat_view.frame_queue].map(item => ({{
+  current: item.latest.current_layer_index,
+  next: item.latest.next_layer_index,
+  qkv: (item.latest.candidates || []).find(candidate => candidate.family === "QKV")?.state || null,
+}}))));
+"""
+    completed = subprocess.run(("node", "-e", harness), text=True, capture_output=True, check=True)
+    frames = json.loads(completed.stdout)
+    assert [frame["current"] for frame in frames] == [3, 3, 3, 4]
+    assert frames[2]["qkv"] == "AVAILABLE"
+    assert frames[-1]["next"] == 7
 
 
 def test_premat_view_exposes_client_only_playback_speed_control() -> None:

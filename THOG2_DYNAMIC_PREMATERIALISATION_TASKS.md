@@ -144,3 +144,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Fix the first successful-admission checkpoint mismatch (131 forward tensors versus 128 replay tensors).
 - [ ] Re-run L32/P10 with `-K flash2` and confirm first backward completes.
 - [x] Match the saved depth-row shape and autocast dtype (`[1,1,P]`, BF16 in the reported run) to ordinary einsum replay.
+- [x] Add a zero-copy consumer-stream autograd anchor before persistent DEPTH leaf accumulation.
+- [x] Make CUDA Premat equivalence tests reject the AccumulateGrad stream warning rather than suppress it.
+- [x] Diagnose the fixed-terminal-layer Instra display as latest-row overwrite between browser polls.
+- [x] Carry exact current/next logical layer indices on each bounded Premat event.
+- [x] Reconstruct and pseudo-scroll sampled updates from unseen browser-side events.
+- [x] Hold every rendered Premat lifecycle state for at least 250 ms at all playback speeds.
+- [x] Confirm from Peter's field observation that a candidate reached `AVAILABLE` and then `CONSUMED`.
+- [ ] On scruffy, confirm Instra pseudo-scrolls through exact layers and visibly holds the striped `CONSUMING` frame.
+- [ ] On scruffy, confirm the consumer-stream anchor removes the AccumulateGrad stream warning.

@@ -155,3 +155,14 @@
 - The exact excess of three came from fused QKV attachment saving each coefficient tensor even though fixed DEPTH rows do not require gradients. Ordinary Q/K/V einsums save only their three depth rows.
 - The Premat autograd attachment now follows the ordinary einsum save contract: save a depth row only when its coefficient needs a gradient, and save a coefficient only when its depth row needs a gradient. Forward and recomputation therefore retain the same tensor count and metadata while preserving exact gradients.
 - The next scruffy trace confirmed the count repair and exposed the remaining metadata detail: Premat saved three `[8]` FP32 depth rows while autocast einsum replay saved `[1,1,8]` BF16 working views. Attachment now stores the exact einsum working shape and generated-output dtype, while converting back to parameter dtype for its unchanged analytical gradient.
+- The corrected L12/P8 run completed update 1 but emitted PyTorch's AccumulateGrad producer/consumer stream warning. Gradient accumulation can retain a coefficient leaf accumulator while different microbatches reach it through admitted Premat or ordinary replay. A zero-copy autograd anchor now sits between every trainable DEPTH input and the Premat binding; it is created at ordinary consumption and makes the final producer into the persistent leaf explicitly consumer-stream-owned.
+- CUDA equivalence coverage now fails if this specific warning is emitted; the warning is not suppressed globally.
+
+## 2026-09-08 - Exact-layer Instra replay
+
+- Peter observed the first real `AVAILABLE` (orange) Premat candidate and its later `CONSUMED` state. This confirms admission, auxiliary materialisation, ownership hand-off, and consumption are active in the field run.
+- The apparently permanent layer 11/31 display was a presentation defect: the live SQLite row deliberately retains only the newest snapshot for an optimizer update, so several layer transitions could be replaced before Instra's 750 ms poll.
+- Every retained event now records the exact current and next logical layer indices. Instra reconstructs candidate state from unseen bounded events and replays each sampled `-l` update through its actual layer sequence instead of repeatedly presenting the terminal layer.
+- Replay preserves separate `MATERIALISING`, `AVAILABLE`, `CONSUMING`, and `CONSUMED` frames. Each frame has a minimum visible duration of 250 ms at every playback-slider setting, making short consuming transitions perceptible.
+- This is browser-only replay over the existing bounded event window. It adds no CUDA tensor retention, training-process queue, W&B call, or telemetry capture interval.
+- JavaScript syntax, Python compilation, the direct Node replay harness, and `git diff --check` pass. Pytest/PyTorch remain unavailable in this container; the CUDA stream-warning regression requires the scruffy rerun.

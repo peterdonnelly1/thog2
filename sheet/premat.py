@@ -906,6 +906,17 @@ class PrematRuntime:
                 else "stay_within_global_buffer"
             ),
         }
+        # Every retained event carries its exact display window.  The browser
+        # can therefore replay a sampled update layer by layer even when the
+        # live SQLite row has already advanced to the end of the forward.
+        display_position = self._position if self._position >= 0 else 0
+        if 0 <= display_position < len(self._layer_indices):
+            payload["current_layer_index"] = self._layer_indices[display_position]
+            payload["next_layer_index"] = (
+                self._layer_indices[display_position + 1]
+                if display_position + 1 < len(self._layer_indices)
+                else None
+            )
         if layer is not None:
             payload["layer_index"] = int(layer)
         if candidate is not None:
@@ -921,6 +932,7 @@ class PrematRuntime:
                     "new_state": candidate.state.value,
                     "state": candidate.state.value,
                     "owner": candidate.owner,
+                    "admission_reason": candidate.admission_reason,
                     "critical_path_miss": candidate.critical_path_miss,
                     "predicted_retained_bytes": candidate.envelope.retained_bytes,
                     "predicted_materialisation_peak_bytes": (

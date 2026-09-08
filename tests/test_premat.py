@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import warnings
 
 import pytest
 import torch
@@ -523,7 +524,13 @@ def test_checkpointed_premat_preserves_configured_segments_and_gradients_on_cpu(
         model.zero_grad(set_to_none=True)
         logits, loss = model(tokens, targets)
         assert loss is not None
-        loss.backward()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loss.backward()
+        assert not any(
+            "AccumulateGrad node's stream does not match" in str(item.message)
+            for item in caught
+        )
         gradients = {
             name: parameter.grad.detach().clone()
             for name, parameter in model.named_parameters()
@@ -673,7 +680,13 @@ def test_cuda_premat_forward_backward_matches_same_mode_disabled(
         model.zero_grad(set_to_none=True)
         logits, loss = model(tokens, targets)
         assert loss is not None
-        loss.backward()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loss.backward()
+        assert not any(
+            "AccumulateGrad node's stream does not match" in str(item.message)
+            for item in caught
+        )
         gradients = {
             name: parameter.grad.detach().clone()
             for name, parameter in model.named_parameters()

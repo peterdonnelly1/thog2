@@ -9,6 +9,8 @@ const premat_view = {
   latest_payload: null,
   newest_frame_key: null,
   frame_queue: [],
+  last_event_sequence: 0,
+  replay_candidates: new Map(),
   playback_rate: 1,
   playback_timer: null,
 };
@@ -164,10 +166,45 @@ function premat_frame_key(payload) {
   return `${premat_view.run_id || ""}:${snapshot.optimizer_update ?? ""}:${snapshot.latest_event_sequence ?? snapshot.event_count ?? ""}`;
 }
 
+function premat_replay_frame(payload, event) {
+  const latest = payload.latest;
+  const memory = {...(latest.memory || {})};
+  for (const name of [
+    "process_allocated_bytes", "process_reserved_bytes",
+    "process_ordinary_peak_bytes", "device_free_bytes", "device_used_bytes",
+    "device_total_bytes", "global_buffer_bytes", "device_ceiling_bytes",
+    "process_headroom_bytes", "device_headroom_bytes", "premat_headroom_bytes",
+  ]) {
+    if (event[name] !== undefined) memory[name] = event[name];
+  }
+  return {
+    ...payload,
+    latest: {
+      ...latest,
+      current_layer_index: event.current_layer_index ?? latest.current_layer_index,
+      next_layer_index: event.next_layer_index === null
+        ? null
+        : (event.next_layer_index ?? latest.next_layer_index),
+      latest_event_sequence: event.sequence,
+      candidates: Array.from(premat_view.replay_candidates.values(), candidate => ({...candidate})),
+      memory,
+    },
+  };
+}
+
+function premat_event_changes_picture(event) {
+  return event.event === "pass_begin"
+    || event.event === "pass_end"
+    || event.event === "layer_start"
+    || ["MATERIALISING", "AVAILABLE", "CONSUMING", "CONSUMED"].includes(event.new_state || event.state);
+}
+
 // vvv THOG browser-only playback buffers polled display frames.  It never
 // changes scheduler capture, the SQLite writer, training cadence, or W&B.
 function premat_playback_delay_ms() {
-  return Math.max(100, Math.round(PREMAT_PLAYBACK_BASE_MS / premat_view.playback_rate));
+  // Each retained lifecycle state remains visible long enough to perceive;
+  // playback speed only compresses the interval down to this floor.
+  return Math.max(250, Math.round(PREMAT_PLAYBACK_BASE_MS / premat_view.playback_rate));
 }
 
 function premat_schedule_playback() {
@@ -181,20 +218,46 @@ function premat_schedule_playback() {
 }
 
 function premat_enqueue_frame(payload) {
+  const snapshot = payload?.latest;
   const key = premat_frame_key(payload);
-  if (key === null) {
+  if (key === null || !snapshot) {
     render_premat(payload);
     return;
   }
   if (key === premat_view.newest_frame_key) return;
   premat_view.newest_frame_key = key;
-  if (!premat_view.latest_payload) {
-    render_premat(payload);
-    return;
+  const unseen_events = (snapshot.events || [])
+    .filter(event => Number(event.sequence) > premat_view.last_event_sequence)
+    .sort((left, right) => Number(left.sequence) - Number(right.sequence));
+  for (const event of unseen_events) {
+    if (event.event === "pass_begin") premat_view.replay_candidates.clear();
+    if (event.family) {
+      const candidate_key = `${event.layer_index}:${event.family}`;
+      const previous = premat_view.replay_candidates.get(candidate_key) || {};
+      premat_view.replay_candidates.set(candidate_key, {
+        ...previous,
+        layer_index: event.layer_index,
+        family: event.family,
+        state: event.new_state || event.state || previous.state,
+        owner: event.owner ?? previous.owner ?? "none",
+        admission_reason: event.admission_reason ?? previous.admission_reason ?? "not_checked",
+        critical_path_miss: Boolean(event.critical_path_miss),
+      });
+    }
+    premat_view.last_event_sequence = Math.max(
+      premat_view.last_event_sequence,
+      Number(event.sequence) || 0,
+    );
+    if (premat_event_changes_picture(event)) {
+      premat_view.frame_queue.push(premat_replay_frame(payload, event));
+    }
   }
-  premat_view.frame_queue.push(payload);
+  if (!unseen_events.length && !premat_view.latest_payload) render_premat(payload);
   if (premat_view.frame_queue.length > PREMAT_PLAYBACK_QUEUE_LIMIT) {
     premat_view.frame_queue.splice(0, premat_view.frame_queue.length - PREMAT_PLAYBACK_QUEUE_LIMIT);
+  }
+  if (!premat_view.latest_payload && premat_view.frame_queue.length) {
+    render_premat(premat_view.frame_queue.shift());
   }
 }
 // ^^^ THOG
@@ -206,6 +269,8 @@ async function refresh_premat() {
     premat_view.latest_payload = null;
     premat_view.newest_frame_key = null;
     premat_view.frame_queue = [];
+    premat_view.last_event_sequence = 0;
+    premat_view.replay_candidates.clear();
     premat_sync_tab();
     return;
   }
@@ -213,6 +278,8 @@ async function refresh_premat() {
     premat_view.latest_payload = null;
     premat_view.newest_frame_key = null;
     premat_view.frame_queue = [];
+    premat_view.last_event_sequence = 0;
+    premat_view.replay_candidates.clear();
     premat_sync_tab();
   }
   const serial = ++premat_view.request_serial;
