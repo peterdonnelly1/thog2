@@ -32,7 +32,14 @@ _ASSET_ROOT = Path(__file__).resolve().parent / "sheet" / "local_dashboard_asset
 # _ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js"))
 # vvv THOG serve the local heatmap/view-size patch after the established dashboard script
 # _ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js", "dashboard_heatmap_patch.js"))
-_ASSET_NAMES = frozenset(("dashboard.css", "dashboard.js", "dashboard_heatmap_patch.js", "dashboard_ui_patch.css"))
+_ASSET_NAMES = frozenset((
+    "dashboard.css",
+    "dashboard.js",
+    "dashboard_heatmap_patch.js",
+    "dashboard_ui_patch.css",
+    "dashboard_premat.css",
+    "dashboard_premat.js",
+))                                                                                                                                                       # <<< THOG serve dedicated Premat view assets
 # ^^^ THOG
 _WANDB_FILE_CACHE_SECONDS = 30.0
 _WANDB_FILE_LIMIT = 5000
@@ -181,6 +188,8 @@ class RunDashboardState:
             status["heatmap_maximum_update"],
             status["depth_snapshot_count"],
             status["depth_maximum_update"],
+            status["premat_snapshot_count"],
+            status["premat_maximum_update"],
             data_updated_at,
         )
         configuration = json.loads(metadata.get("config_json", "{}"))
@@ -190,6 +199,7 @@ class RunDashboardState:
                 for value in (
                     status["heatmap_maximum_update"],
                     status["depth_maximum_update"],
+                    status["premat_maximum_update"],
                 )
                 if value is not None
             ),
@@ -267,6 +277,16 @@ class RunDashboardState:
             "run_directory": str(self.database_path.parent.resolve()),
             "revision": revision,
         }
+
+    # vvv THOG dedicated Premat API carries the latest l/l+1 view plus bounded event history
+    def premat(self) -> Dict[str, Any]:
+        snapshots = self.reader.premat_snapshots()
+        return {
+            "latest": snapshots[-1] if snapshots else None,
+            "history": snapshots,
+            "snapshot_count": len(snapshots),
+        }
+    # ^^^ THOG
 
     def figures(self) -> Dict[str, Any]:
         status = self.status()
@@ -893,7 +913,7 @@ def _handler_for(catalog: DashboardCatalog):
                         download=query.get("download", ["0"])[0] == "1",
                     )
                     return
-                if path in {"/api/status", "/api/figures"}:
+                if path in {"/api/status", "/api/figures", "/api/premat"}:
                     run_name = query.get("run", [""])[0]
                     if not run_name:
                         self._send_json(
@@ -902,7 +922,12 @@ def _handler_for(catalog: DashboardCatalog):
                         )
                         return
                     state = catalog.state_for_run(run_name)
-                    value = state.status() if path == "/api/status" else state.figures()
+                    if path == "/api/status":
+                        value = state.status()
+                    elif path == "/api/figures":
+                        value = state.figures()
+                    else:
+                        value = state.premat()
                     self._send_json(value)
                     return
                 self._send(

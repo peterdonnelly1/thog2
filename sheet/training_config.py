@@ -180,6 +180,15 @@ MODEL_COMPATIBILITY_FIELDS = (
     "hyperblock_loop_count",
     "hyperblock_loop_decay",
     # ^^^ THOG
+    # vvv THOG premat topology and memory policy are persistent resume compatibility identity
+    "premat",
+    "premat_attention_mode",
+    "premat_headroom_stay_below_current_peak",
+    "premat_headroom_stay_within_global_buffer",
+    "premat_gpu_memory_buffer_gb",
+    "premat_logging",
+    "premat_instra",
+    # ^^^ THOG
     # vvv THOG PLASTIC DEPTH compatibility is carried by compact_identity so pre-feature schema-2 checkpoints remain resumable
     # ^^^ THOG
 )
@@ -554,6 +563,14 @@ class TrainingConfig:
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
+        if self.premat == "enabled" and not str(self.device).startswith("cuda"):
+            raise ValueError("--premat enabled requires a CUDA device")
+        if (
+            self.premat == "enabled"
+            and not self.premat_headroom_stay_below_current_peak
+            and not self.premat_headroom_stay_within_global_buffer
+        ):
+            self.premat_headroom_stay_below_current_peak = True
         # ^^^ THOG
         # vvv THOG universal CUDA safety reserve is execution state, configured in GiB and allowed to be explicitly disabled with zero
         if (

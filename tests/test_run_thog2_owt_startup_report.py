@@ -61,7 +61,7 @@ def _config():
         plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence=0.8,
         plastic__layer_count_probe_noise_lambda=2.0,
         plastic__layer_count_cost_weight=0.04,
-        plastic__layer_count__memory_budget_gib=None,
+        premat_gpu_memory_buffer_gb=1.0,
         plastic__layer_count__cuda_allocator_reserve_gib=1.0,
         plastic__geometry_learning_rate_multiplier=0.15,
         plastic__freeze_geometry_during_warmup=True,

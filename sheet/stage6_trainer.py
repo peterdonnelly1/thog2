@@ -610,6 +610,14 @@ class Stage6Trainer(Stage4Trainer):
                 }
                 if sampled_values is not None:
                     progress_payload["sampled_values"] = sampled_values
+                # vvv THOG every premat run persists aggregate evidence; Instra additionally retains the detailed live snapshot
+                if getattr(self.config, "premat", "disabled") == "enabled":
+                    premat_reporter = getattr(self.raw_model, "premat_report", None)
+                    if callable(premat_reporter):
+                        premat_snapshot = premat_reporter()
+                        if premat_snapshot is not None:
+                            progress_payload["premat"] = premat_snapshot
+                # ^^^ THOG
                 self._print_progress(
                     run_id,
                     "optimizer_progress",
@@ -649,8 +657,12 @@ class Stage6Trainer(Stage4Trainer):
         wall_seconds = time.perf_counter() - wall_started
 
         diagnostics: Optional[Dict[str, Any]] = None
+        premat_diagnostics: Optional[Dict[str, Any]] = None
         if isinstance(self.raw_model, TrainingSheetGPT):
             diagnostics = stage6_sheet_diagnostics(self.raw_model)
+            premat_reporter = getattr(self.raw_model, "premat_report", None)
+            if callable(premat_reporter):
+                premat_diagnostics = premat_reporter()
 
         optimizer_trace = self.optimizer_batch_trace()
         train_stream_trace = self.batch_source.training_trace()
@@ -711,6 +723,8 @@ class Stage6Trainer(Stage4Trainer):
             "sheet_diagnostics": diagnostics,
             "checkpoint": {"path": str(checkpoint_path), "bytes": checkpoint_path.stat().st_size},
         }
+        if premat_diagnostics is not None:
+            result["premat"] = premat_diagnostics
         finite_values = [training_seconds, evaluation_seconds, checkpoint_seconds, wall_seconds]
         if not all(math.isfinite(value) and value >= 0.0 for value in finite_values):
             raise FloatingPointError("non-finite Stage 6 timing evidence")

@@ -20,7 +20,7 @@ from .depth_curve_diagnostics import (
     write_depth_curve_local_viewer,
 )
 # vvv THOG local chart WAL state closes and checkpoints with the established telemetry lifecycle
-from .local_chart_store import close_local_chart_store
+from .local_chart_store import close_local_chart_store, ensure_local_chart_store                                                                           # <<< THOG premat Instra persists independently of scalar backend
 # ^^^ THOG
 from .stage6_source import (
     evaluation_metric_payload,
@@ -199,7 +199,7 @@ def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
     metric = training_metric_payload(payload)
     update = int(metric["optimizer_update"])
     training_loss = float(metric["training_loss"])
-    return {
+    result = {
         "optimizer/update": update,
         "tokens/seen": int(metric["tokens_seen"]),
         "time/train_seconds": float(metric["clean_training_seconds"]),
@@ -207,6 +207,15 @@ def _training_metrics(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "optim/lr": float(metric["learning_rate"]),
         "optim/grad_norm": float(metric["gradient_norm"]),
     }
+    # vvv THOG aggregate premat evidence remains scalar-visible even when detailed Instra capture is disabled
+    premat = payload.get("premat")
+    aggregate = premat.get("aggregate") if isinstance(premat, Mapping) else None
+    if isinstance(aggregate, Mapping):
+        for name, value in aggregate.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                result[f"premat/{name}"] = value
+    # ^^^ THOG
+    return result
 
 
 # vvv THOG validation-pass metrics use one explicit namespace: sampled train split versus held-out validation split
@@ -294,6 +303,14 @@ def _final_metrics(result: Mapping[str, Any]) -> Dict[str, Any]:
         metrics["sheet/compact_state_violation_count"] = len(
             diagnostics["compact_state_violations"]
         )
+    # vvv THOG final run metrics retain the same cumulative premat counters and timing evidence as progress rows
+    premat = result.get("premat")
+    aggregate = premat.get("aggregate") if isinstance(premat, Mapping) else None
+    if isinstance(aggregate, Mapping):
+        for name, value in aggregate.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                metrics[f"premat/{name}"] = value
+    # ^^^ THOG
     return metrics
 
 
@@ -461,6 +478,18 @@ class WandbTelemetry:
         )
 
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        # vvv THOG persist bounded premat snapshots before scalar-backend early returns
+        premat_snapshot = payload.get("premat")
+        if event == "optimizer_progress" and isinstance(premat_snapshot, Mapping):
+            optimizer_update = int(payload.get("completed_updates", 0))
+            local_store = ensure_local_chart_store(self)
+            local_store.update_premat_aggregate(optimizer_update, premat_snapshot)
+            if str(self.config.get("premat_instra", "disabled")) == "enabled":
+                local_store.append_premat_snapshot(
+                    optimizer_update,
+                    premat_snapshot,
+                )
+        # ^^^ THOG
         if not self.enabled or self.backend == "none":
             return
         metrics = _event_metrics(event, payload)

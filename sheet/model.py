@@ -316,6 +316,11 @@ class SheetGPTConfig:
             instra=self.premat_instra,
         )
         if self.premat == "enabled":
+            if (
+                not self.premat_headroom_stay_below_current_peak
+                and not self.premat_headroom_stay_within_global_buffer
+            ):
+                self.premat_headroom_stay_below_current_peak = True
             self.fast_discard = True
         # ^^^ THOG
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
@@ -554,13 +559,17 @@ class SheetGPT(nn.Module):
             self._premat_runtime = PrematRuntime(
                 materialize=self._premat_materialize_candidate,
                 n_embd=config.n_embd,
+                n_head=config.n_head,
                 attention_mode=config.premat_attention_mode,
                 stay_below_current_peak=(
                     config.premat_headroom_stay_below_current_peak
                     or not config.premat_headroom_stay_within_global_buffer
                 ),
                 gpu_memory_buffer_gb=config.premat_gpu_memory_buffer_gb,
-                logging_enabled=config.premat_logging == "enabled",
+                logging_enabled=(
+                    config.premat_logging == "enabled"
+                    or config.premat_instra == "enabled"
+                ),
             )
         # ^^^ THOG
 

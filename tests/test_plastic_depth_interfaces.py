@@ -349,7 +349,7 @@ def test_memory_budget_rejects_cpu_execution() -> None:
                 "4",
                 "--plastic__layer_count_objective",
                 "memory_budget",
-                "--plastic__layer_count__memory_budget_gib",
+                "--premat_gpu_memory_buffer_gb",
                 "4",
             )
         )

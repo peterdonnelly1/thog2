@@ -57,7 +57,7 @@ from .plastic_depth import (
 )
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation public configuration validation
-from .premat import validate_premat_configuration
+from .premat import PREMAT_TELEMETRY_VERSION, validate_premat_configuration
 # ^^^ THOG
 # vvv THOG PLASTIC COARSE/FINE lifecycle configuration and candidate resolution
 from .plastic_depth_coarse import (
@@ -329,6 +329,8 @@ class OwtRunConfig:
             raise ValueError(f"model_type must be one of {PUBLIC_MODEL_TYPES}")
         if self.premat == "enabled" and self.model_type != "sheet":
             raise ValueError("--premat enabled requires --model-type sheet")
+        if self.premat == "enabled" and not str(self.device).startswith("cuda"):
+            raise ValueError("--premat enabled requires a CUDA device")
         if self.run_mode not in ("fresh", "resume"):
             raise ValueError("run_mode must be fresh or resume")
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
@@ -1164,6 +1166,27 @@ class OwtRunConfig:
                 plastic_fields.append("LF_0")
             sections.append("P__" + "_".join(plastic_fields))
         # ^^^ THOG
+        # vvv THOG premat execution topology/policy must not collide with otherwise-identical run artifacts
+        if self.model_type == "sheet" and (
+            self.premat != "disabled"
+            or self.premat_attention_mode != "fused"
+            or self.premat_headroom_stay_below_current_peak
+            or self.premat_headroom_stay_within_global_buffer
+            or float(self.premat_gpu_memory_buffer_gb) != 1.0
+            or self.premat_logging != "disabled"
+            or self.premat_instra != "disabled"
+        ):
+            headroom_code = "G" if self.premat_headroom_stay_within_global_buffer else "P"
+            sections.append(
+                "PM__"
+                f"{self.premat[0].upper()}_"
+                f"{self.premat_attention_mode[0].upper()}_"
+                f"H{headroom_code}_"
+                f"B{self._artifact_float(self.premat_gpu_memory_buffer_gb)}_"
+                f"L{self.premat_logging[0].upper()}_"
+                f"I{self.premat_instra[0].upper()}"
+            )
+        # ^^^ THOG
         if self.model_type == "sheet":
             if self.hyperblock_enabled:
                 order_fields = [
@@ -1464,6 +1487,17 @@ class OwtRunConfig:
         else:
             values["compact_identity"] = self.compact_identity()
             values["compact_artifact_fragment"] = self.compact_artifact_fragment()
+            # vvv THOG persist resolved premat provenance in addition to the exact supplied selector fields
+            values["premat_resolved_headroom_mode"] = (
+                "stay_within_global_buffer"
+                if self.premat_headroom_stay_within_global_buffer
+                else "stay_below_current_peak"
+            )
+            if self.premat == "enabled":
+                values["premat_effective_fast_discard"] = True
+            values["premat_schema_version"] = PREMAT_TELEMETRY_VERSION
+            values["premat_lookahead_layer_limit"] = 1
+            # ^^^ THOG
         values.update({
             "artifact_name": self.artifact_name,
             "artifact_prefix": self.artifact_prefix,

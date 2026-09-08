@@ -261,8 +261,19 @@ def validate_resume_controls(checkpoint_path: Path, expected: TrainingConfig) ->
         raise ValueError("resume control mismatch: " + "; ".join(mismatches))
 
 
+class _ThogArgumentParser(argparse.ArgumentParser):
+    # vvv THOG reject the retired PLASTIC ceiling without keeping it in the active argparse/help surface
+    def parse_known_args(self, args=None, namespace=None):
+        resolved_args = list(sys.argv[1:] if args is None else args)
+        retired = "--plastic__layer_count__memory_budget_gib"
+        if any(value == retired or value.startswith(f"{retired}=") for value in resolved_args):
+            self.error(f"{retired} is retired; use --premat_gpu_memory_buffer_gb")
+        return super().parse_known_args(resolved_args, namespace)
+    # ^^^ THOG
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
+    parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     # vvv THOG independent polynomial history budgets; explicit counts retain more raw depth information
     from sheet.thogopt_config import add_thogopt_arguments
     add_thogopt_arguments(parser)
@@ -376,16 +387,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", dest="plastic__wall_time_equivalent_time_gain_loss_rate_min_observations", type=int, default=16)
     parser.add_argument("--plastic__layer_count_cost_weight", dest="plastic__layer_count_cost_weight", type=float, default=0.0)
     # parser.add_argument("--plastic__layer_count__memory_budget_gib", dest="plastic__layer_count__memory_budget_gib", type=float)                         # <<< THOG retired fixed PLASTIC budget
-    parser.add_argument(
-        "--plastic__layer_count__memory_budget_gib",
-        help=argparse.SUPPRESS,
-        type=lambda _value: (_ for _ in ()).throw(
-            argparse.ArgumentTypeError(
-                "--plastic__layer_count__memory_budget_gib is retired; "
-                "use --premat_gpu_memory_buffer_gb"
-            )
-        ),
-    )
     parser.add_argument("--plastic__layer_count__cuda_allocator_reserve_gib", dest="plastic__layer_count__cuda_allocator_reserve_gib", type=float, default=0.5)
     parser.add_argument("--plastic__geometry_learning_rate_multiplier", dest="plastic__geometry_learning_rate_multiplier", type=float, default=0.1)
     parser.add_argument("--plastic__freeze_geometry_during_warmup", dest="plastic__freeze_geometry_during_warmup", action=argparse.BooleanOptionalAction, default=True)
@@ -920,18 +921,25 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         # vvv THOG preserve the pre-HYPERBLOCK-direct execution row exactly for source history
         # _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
         _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  direct_factorised_hyperblock_mlp={model_config.direct_factorised_hyperblock_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
-        if config.premat == "enabled":
-            headroom_mode = (
-                "stay_within_global_buffer"
-                if config.premat_headroom_stay_within_global_buffer
-                else "stay_below_current_peak"
-            )
-            _print_model_option(
-                "PREMAT:",
-                f"enabled mode={config.premat_attention_mode} headroom={headroom_mode} "
-                f"global_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
-                "effective_fast_discard=true (-E is accepted but does not alter this)",
-            )
+        headroom_mode = (
+            "stay_within_global_buffer"
+            if config.premat_headroom_stay_within_global_buffer
+            else "stay_below_current_peak"
+        )
+        effective_fast_discard = (
+            True if config.premat == "enabled" else model_config.fast_discard
+        )
+        _print_model_option(
+            "PREMAT:",
+            f"premat={config.premat} "
+            f"premat_attention_mode={config.premat_attention_mode} "
+            f"headroom={headroom_mode} "
+            f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
+            f"premat_logging={config.premat_logging} "
+            f"premat_instra={config.premat_instra} "
+            f"effective_fast_discard={str(effective_fast_discard).lower()} "
+            "lookahead=l+1",
+        )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
         hyperblock = report.get("hyperblock")
@@ -964,6 +972,10 @@ def main() -> int:
     if arguments.print_resolved_json or arguments.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    # vvv THOG an actual premat run fails before model construction/first forward when CUDA is unavailable
+    if config.premat == "enabled" and not torch.cuda.is_available():
+        raise RuntimeError("--premat enabled requires CUDA, but CUDA is unavailable")
+    # ^^^ THOG
     paths = config.paths(log_timestamp=arguments.log_timestamp)
     checkpoint_path = paths["checkpoint_path"]
     result_path = paths["result_path"]

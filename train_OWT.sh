@@ -14,10 +14,16 @@ thog2_normalize_nonplastic_long_option() {
 THOG2_STRICT_LONG_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*)
+    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*|--premat|--premat_*)
       THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;
+    # vvv THOG premat public names are exact underscore spellings and must survive the canonical wrapper unchanged
+    --premat-*)
+      echo "Non-canonical premat option rejected: $1; use the exact --premat_* spelling." >&2
+      exit 2
+      ;;
+    # ^^^ THOG
     --plastic-*|--no-plastic-*|--plastic_[!_]*|--no-plastic_[!_]*)
       echo "Non-canonical PLASTIC option rejected: $1; use the exact --plastic__... or --no-plastic__... spelling." >&2
       exit 2

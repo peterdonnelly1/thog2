@@ -35,6 +35,7 @@ def _normalise_long_option(argument: str) -> str:
             "--chaos_bump__",
             "--no-chaos_bump__",
             "--instrumentation__",
+            "--premat_",
         )
     ):
         return option + (separator + value if separator else "")

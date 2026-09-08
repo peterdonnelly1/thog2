@@ -85,8 +85,6 @@ class TrainingDenseGPT(GPT):
         resolved_mode = _validate_torch_compile_mode(mode)
         if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
             raise ValueError("regional torch compilation requires checkpoint_segment_size > 0")
-        if resolved_mode != "false" and self.config.premat == "enabled":
-            raise ValueError("--premat enabled currently requires eager execution; torch.compile is unsupported")
         self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
 
@@ -433,6 +431,10 @@ class TrainingSheetGPT(SheetGPT):
         resolved_mode = _validate_torch_compile_mode(mode)
         if resolved_mode == "regional" and self.checkpoint_segment_size <= 0:
             raise ValueError("regional torch compilation requires checkpoint_segment_size > 0")
+        # vvv THOG the CUDA event scheduler is intentionally eager-only in v1
+        if resolved_mode != "false" and self.config.premat == "enabled":
+            raise ValueError("--premat enabled currently requires eager execution; torch.compile is unsupported")
+        # ^^^ THOG
         self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
 

@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 2
+LOCAL_CHART_SCHEMA_VERSION = 3                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
 LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
@@ -213,6 +213,10 @@ class LocalChartStore:
                 optimizer_update INTEGER PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS premat_snapshots (
+                optimizer_update INTEGER PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
             """
         )
         now = _utc_timestamp()
@@ -254,7 +258,10 @@ class LocalChartStore:
         self._has_depth_records = bool(
             self.connection.execute("SELECT EXISTS(SELECT 1 FROM depth_weight_snapshots)").fetchone()[0]
         )
-        self._has_recorded_data = self._has_heatmap_records or self._has_depth_records
+        self._has_premat_records = bool(
+            self.connection.execute("SELECT EXISTS(SELECT 1 FROM premat_snapshots)").fetchone()[0]
+        )
+        self._has_recorded_data = self._has_heatmap_records or self._has_depth_records or self._has_premat_records
 
     def _touch(self) -> None:
         now = _utc_timestamp()
@@ -461,6 +468,69 @@ class LocalChartStore:
         self._has_depth_records = True
         self.connection.commit()
 
+    # vvv THOG retain light versioned premat history; graphical state is latest-only in Instra v1
+    def append_premat_snapshot(
+        self,
+        optimizer_update: int,
+        snapshot: Mapping[str, Any],
+        *,
+        history_length: int = 128,
+    ) -> None:
+        update = int(optimizer_update)
+        payload = dict(_json_compatible(snapshot))
+        payload["optimizer_update"] = update
+        self.connection.execute(
+            "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
+            (update, _encode_payload(payload)),
+        )
+        self.connection.execute(
+            """
+            DELETE FROM premat_snapshots
+            WHERE optimizer_update NOT IN (
+                SELECT optimizer_update FROM premat_snapshots
+                ORDER BY optimizer_update DESC LIMIT ?
+            )
+            """,
+            (max(1, int(history_length)),),
+        )
+        self._latest_observed_update = max(self._latest_observed_update, update)
+        self._touch()
+        self._has_premat_records = True
+        self.connection.commit()
+
+    def update_premat_aggregate(
+        self,
+        optimizer_update: int,
+        snapshot: Mapping[str, Any],
+    ) -> None:
+        aggregate = snapshot.get("aggregate")
+        memory = snapshot.get("memory")
+        if not isinstance(aggregate, Mapping):
+            return
+        update = int(optimizer_update)
+        self._latest_observed_update = max(self._latest_observed_update, update)
+        values = (
+            ("premat_schema_version", str(snapshot.get("schema_version", snapshot.get("version", "")))),
+            ("premat_last_update", str(update)),
+            ("premat_attention_mode", str(snapshot.get("attention_mode", ""))),
+            ("premat_headroom_mode", str(snapshot.get("headroom_mode", ""))),
+            (
+                "premat_aggregate_json",
+                json.dumps(_json_compatible(aggregate), ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            ),
+            (
+                "premat_memory_json",
+                json.dumps(_json_compatible(memory), ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            ),
+        )
+        self.connection.executemany(
+            "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+            values,
+        )
+        self._touch()
+        self.connection.commit()
+    # ^^^ THOG
+
     def close(self, *, final_state: str = "finished") -> None:
         if self.connection is None:
             return
@@ -525,6 +595,17 @@ class LocalChartReader:
                 FROM depth_weight_snapshots
                 """
             ).fetchone()
+            try:
+                premat = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count,
+                           MIN(optimizer_update) AS minimum_update,
+                           MAX(optimizer_update) AS maximum_update
+                    FROM premat_snapshots
+                    """
+                ).fetchone()
+            except sqlite3.OperationalError:
+                premat = {"count": 0, "minimum_update": None, "maximum_update": None}
             # vvv THOG expose the already-recorded full run configuration to local dashboard consumers without duplicating storage
             config_row = connection.execute(
                 "SELECT value FROM metadata WHERE key = 'config_json'"
@@ -561,6 +642,13 @@ class LocalChartReader:
             ),
             "depth_maximum_update": (
                 None if depth["maximum_update"] is None else int(depth["maximum_update"])
+            ),
+            "premat_snapshot_count": int(premat["count"]),
+            "premat_minimum_update": (
+                None if premat["minimum_update"] is None else int(premat["minimum_update"])
+            ),
+            "premat_maximum_update": (
+                None if premat["maximum_update"] is None else int(premat["maximum_update"])
             ),
             # vvv THOG consumed by the W&B-like local artifact Overview tab
             "configuration": configuration,
@@ -633,6 +721,19 @@ class LocalChartReader:
                 ORDER BY optimizer_update
                 """
             ).fetchall()
+        finally:
+            connection.close()
+        return tuple(_decode_payload(row["payload"]) for row in rows)
+
+    def premat_snapshots(self) -> Tuple[Dict[str, Any], ...]:
+        connection = self._connection()
+        try:
+            try:
+                rows = connection.execute(
+                    "SELECT payload FROM premat_snapshots ORDER BY optimizer_update"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = ()
         finally:
             connection.close()
         return tuple(_decode_payload(row["payload"]) for row in rows)

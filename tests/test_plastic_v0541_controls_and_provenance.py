@@ -83,7 +83,7 @@ def test_v0541_checkpoint_key_normalization_is_explicit():
     })
     assert normalized["plastic__layer_count__max_allowable_layer_change"] == 2
     assert normalized["plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence"] == pytest.approx(0.9)
-    assert normalized["plastic__layer_count__memory_budget_gib"] == pytest.approx(12.0)
+    assert "plastic__layer_count__memory_budget_gib" not in normalized
     assert normalized["plastic__layer_count__cuda_allocator_reserve_gib"] == pytest.approx(0.5)
     assert "plastic__layer_count_max_step" not in normalized
     assert "plastic__layer_count_extrapolation_weight" not in normalized
