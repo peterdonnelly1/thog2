@@ -798,6 +798,19 @@ class LocalChartReader:
             connection.close()
         return tuple(_decode_payload(row["payload"]) for row in rows)
 
+    def latest_premat_snapshot(self) -> Optional[Dict[str, Any]]:
+        connection = self._connection()
+        try:
+            try:
+                row = connection.execute(
+                    "SELECT payload FROM premat_snapshots ORDER BY optimizer_update DESC LIMIT 1"
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None
+        finally:
+            connection.close()
+        return None if row is None else _decode_payload(row["payload"])
+
 
 def ensure_local_chart_store(telemetry: Any) -> LocalChartStore:
     existing = getattr(telemetry, "_thog_local_chart_store", None)

@@ -823,10 +823,8 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
 
     trainer._print_progress = progress
 
-    # vvv THOG detailed Premat Instra captures one complete optimizer update at
-    # the established training log interval.  Within that sampled update it is
-    # a live transition feed; replacing the active row keeps SQLite history
-    # bounded while the dashboard polls it.
+    # vvv THOG detailed Premat Instra captures exactly the first accumulation
+    # microstep's completed forward pass at each established update interval.
     premat_reporter_setter = getattr(
         getattr(trainer, "raw_model", None),
         "set_premat_live_reporter",
@@ -843,6 +841,8 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         local_store = ensure_local_chart_store(telemetry)
         live_sink = _PrematLiveSink(local_store.path)
         telemetry._thog_premat_live_sink = live_sink
+        captured_update: Optional[int] = None
+        captured_pass_sequence: Optional[int] = None
 
         def publish_premat(snapshot: Mapping[str, Any]) -> None:
             live_sink.publish(
@@ -850,14 +850,21 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
                 snapshot,
             )
 
-        def capture_premat_update() -> bool:
+        def capture_premat_update(pass_sequence: int) -> bool:
+            nonlocal captured_update, captured_pass_sequence
             update = max(1, int(trainer.state.completed_updates) + 1)
             interval = max(1, int(trainer.config.log_interval))
-            return (
+            sampled = (
                 update == 1
                 or update == int(trainer.config.max_updates)
                 or update % interval == 0
             )
+            if not sampled:
+                return False
+            if captured_update != update:
+                captured_update = update
+                captured_pass_sequence = int(pass_sequence)
+            return int(pass_sequence) == captured_pass_sequence
 
         premat_reporter_setter(publish_premat, capture_premat_update)
     # ^^^ THOG

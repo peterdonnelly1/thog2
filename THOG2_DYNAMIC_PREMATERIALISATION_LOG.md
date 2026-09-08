@@ -166,3 +166,13 @@
 - Replay preserves separate `MATERIALISING`, `AVAILABLE`, `CONSUMING`, and `CONSUMED` frames. Each frame has a minimum visible duration of 250 ms at every playback-slider setting, making short consuming transitions perceptible.
 - This is browser-only replay over the existing bounded event window. It adds no CUDA tensor retention, training-process queue, W&B call, or telemetry capture interval.
 - JavaScript syntax, Python compilation, the direct Node replay harness, and `git diff --check` pass. Pytest/PyTorch remain unavailable in this container; the CUDA stream-warning regression requires the scruffy rerun.
+
+## 2026-09-08 - Complete-microstep all-layer Instra view
+
+- Replaced the polled l/l+1 tail with an atomic capture of the first original-forward accumulation microstep at each existing `-l` optimizer-update interval. Checkpoint recomputation remains excluded, pass events cannot be combined across microsteps, and only a completed pass is published.
+- Instra now waits for the completed capture and replays every meaningful matrix transition across a permanent all-layer grid. Layer numbers are 1-based, layer 1 is at the bottom, row height contracts to a readable floor before the view scrolls, and terminal outcomes persist without adding artificial dwell time.
+- The state-duration slider now controls the dwell for each timed state (default 0.25 s). Pause freezes the current frame; resume completes it. The final outcome grid holds for one second before playback moves directly to the newest completed capture, dropping older pending captures.
+- The visual grammar distinguishes neutral work, full hits, waited/partial hits, and main-stream misses. `MATERIALISING`, `AVAILABLE`, `CONSUMING`, `WAITING FOR PREMAT`, `MAIN MATERIALISING`, `NO PREMAT`, and `TOO LATE` are all represented in the permanent bottom key.
+- Candidate labels are `ATTN FUSED · QKV` or `ATTN UNFUSED · QK/V`, `ATTN O`, `MLP UP`, and `MLP DN`. An inspect control opens a vertically scrollable, complete one-row-per-opportunity table using the same nouns and verbs, including outcome, wait, materialisation timing, and admission reason.
+- The dashboard API now returns only the newest snapshot after the client's last received update, avoiding repeated decoding and transfer of the retained history. SQLite history remains bounded and local.
+- Python compilation, JavaScript syntax, DOM-ID/CSS structure checks, whitespace validation, a direct atomic-reporter harness, SQLite persistence checks, and a direct Node state/outcome reducer harness pass. PyTorch, Plotly, and pytest are not installed in this container, so the committed executable suites and scruffy CUDA/UI acceptance remain field checks.

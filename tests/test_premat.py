@@ -170,7 +170,7 @@ def test_peak_free_admission_enforces_process_and_device_guards_separately() -> 
     assert process_blocked.device_guard_passed
 
 
-def test_live_reporter_publishes_pass_boundaries_and_total_event_count(monkeypatch) -> None:
+def test_live_reporter_publishes_only_the_completed_microstep(monkeypatch) -> None:
     runtime, _fake_cuda, _calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
@@ -179,12 +179,15 @@ def test_live_reporter_publishes_pass_boundaries_and_total_event_count(monkeypat
     runtime.set_live_reporter(snapshots.append)
     runtime.end()
 
-    assert snapshots
-    latest = snapshots[-1]
+    assert len(snapshots) == 1
+    latest = snapshots[0]
+    assert latest["pass_complete"] is True
+    assert latest["pass_sequence"] == 1
     assert latest["latest_event_sequence"] == latest["event_count"]
-    assert latest["event_count"] >= len(latest["events"])
+    assert latest["event_count"] == len(latest["events"])
     assert latest["events"][-1]["event"] == "pass_end"
-    assert latest["event_window_limit"] == 256
+    assert latest["event_window_limit"] == "complete_pass"
+    assert {event["pass_sequence"] for event in latest["events"]} == {1}
 
 
 def test_live_reporter_skips_uncaptured_updates(monkeypatch) -> None:
@@ -193,9 +196,25 @@ def test_live_reporter_skips_uncaptured_updates(monkeypatch) -> None:
         stay_below_current_peak=False,
     )
     snapshots = []
-    runtime.set_live_reporter(snapshots.append, lambda: False)
+    runtime.set_live_reporter(snapshots.append, lambda _pass_sequence: False)
     runtime.end()
     assert snapshots == []
+
+
+def test_live_reporter_never_combines_adjacent_microsteps(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    snapshots = []
+    runtime.set_live_reporter(snapshots.append)
+    runtime.end()
+    runtime.begin((3, 5, 7), reference=_FakeTensor())
+    runtime.end()
+
+    assert [snapshot["pass_sequence"] for snapshot in snapshots] == [1, 2]
+    assert {event["pass_sequence"] for event in snapshots[0]["events"]} == {1}
+    assert {event["pass_sequence"] for event in snapshots[1]["events"]} == {2}
 
 
 def test_global_admission_does_not_assume_fragmented_allocator_cache_is_reusable() -> None:

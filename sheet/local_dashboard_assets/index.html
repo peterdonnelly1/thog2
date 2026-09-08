@@ -148,64 +148,54 @@
       </div>
 
       <div class="charts-scroll" id="charts_scroll" hidden>
-        <!-- vvv THOG dedicated live two-layer Premat view -->
+        <!-- vvv THOG completed-microstep Premat playback and outcome inspector -->
         <section class="chart-group premat-group" id="premat_chart_group" data-chart-group="premat" hidden>
           <header class="chart-group-header premat-header">
             <div>
-              <strong>Premat · live layer pipeline</strong>
+              <strong>Premat · Step <span id="premat_step">—</span></strong>
               <span class="premat-mode" id="premat_mode">waiting</span>
             </div>
             <div class="premat-header-controls">
-              <label class="premat-playback-control" for="premat_playback_speed">
-                Playback
-                <input id="premat_playback_speed" type="range" min="-2" max="2" step="1" value="0">
-                <output id="premat_playback_speed_label" for="premat_playback_speed">1×</output>
+              <button class="premat-icon-button" id="premat_play_toggle" type="button" aria-label="Pause Premat playback" title="Pause Premat playback">Ⅱ</button>
+              <label class="premat-playback-control" for="premat_state_duration">
+                State duration
+                <input id="premat_state_duration" type="range" min="50" max="1000" step="50" value="250">
+                <output id="premat_state_duration_label" for="premat_state_duration">0.25 s</output>
               </label>
-              <span class="premat-update" id="premat_update">No snapshot</span>
+              <button class="premat-icon-button" id="premat_inspect_button" type="button" aria-label="Inspect Premat data" title="Inspect Premat data" disabled><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
+              <span class="premat-update" id="premat_update">No complete microstep</span>
             </div>
           </header>
-          <div class="premat-memory" id="premat_memory"></div>
-          <div class="premat-layers" id="premat_layers"></div>
+          <div class="premat-summary" id="premat_summary"></div>
+          <div class="premat-layers-scroll"><div class="premat-layers" id="premat_layers"></div></div>
           <div class="premat-key" aria-label="Premat pipeline key">
             <strong>Key</strong>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage premat-neutral"></span>ordinary compute / unavailable</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage materialising"></span>materialising</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage available"></span>available</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage consuming"></span>consuming</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage consumed"></span>consumed</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-stage consumed critical-path-miss"></span>critical-path miss</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-neutral"></span>neutral / NO PREMAT</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-materialising"></span>MATERIALISING</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-available"></span>AVAILABLE</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-full"></span>CONSUMING full hit</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-full"></span>full hit CONSUMED</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-waiting"></span>WAITING FOR PREMAT</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-waited"></span>CONSUMING after wait</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-waited"></span>waited hit CONSUMED</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-materialising"></span>MAIN MATERIALISING</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-consuming"></span>main-path CONSUMING</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-main"></span>main-path CONSUMED</span>
+            <span class="premat-key-item"><span class="premat-key-swatch premat-state-too-late"></span>TOO LATE</span>
           </div>
-          <article class="premat-events-card">
-            <header>
-              <strong>Event history</strong>
-              <label class="premat-event-filter">Filter <input id="premat_event_filter" type="search" placeholder="state, reason, candidate…" autocomplete="off"></label>
-              <span id="premat_event_count">0 events</span>
-            </header>
-            <div class="premat-events-scroll">
-              <table class="premat-events-table">
-                <thead><tr>
-                  <th data-premat-sort="sequence">#</th>
-                  <th data-premat-sort="elapsed_ms">t ms</th>
-                  <th data-premat-sort="layer_index">Layer</th>
-                  <th data-premat-sort="family">Candidate</th>
-                  <th data-premat-sort="new_state">Transition / state</th>
-                  <th data-premat-sort="headroom_policy">Policy</th>
-                  <th data-premat-sort="process_allocated_bytes">Process current / peak</th>
-                  <th data-premat-sort="device_used_bytes">Device used / free</th>
-                  <th data-premat-sort="global_buffer_bytes">Buffer</th>
-                  <th data-premat-sort="premat_headroom_bytes">Headroom</th>
-                  <th data-premat-sort="predicted_retained_bytes">Retained</th>
-                  <th data-premat-sort="predicted_materialisation_peak_bytes">Transient</th>
-                  <th data-premat-sort="predicted_foreground_overlap_bytes">Foreground</th>
-                  <th data-premat-sort="predicted_envelope_bytes">Envelope</th>
-                  <th data-premat-sort="outcome">Decision / outcome / reason</th>
-                  <th data-premat-sort="wait_ms">Wait / miss</th>
-                </tr></thead>
-                <tbody id="premat_events_body"></tbody>
-              </table>
-            </div>
-          </article>
         </section>
+        <dialog class="premat-inspector" id="premat_inspector">
+          <header>
+            <div><strong>Premat data · Step <span id="premat_inspector_step">—</span></strong><span id="premat_inspector_detail"></span></div>
+            <button id="premat_inspector_close" type="button" aria-label="Close Premat data inspector" title="Close">×</button>
+          </header>
+          <div class="premat-inspector-scroll">
+            <table class="premat-inspector-table">
+              <thead><tr><th>Layer</th><th>Matrix</th><th>State trace</th><th>Outcome</th><th>Wait</th><th>Premat mat</th><th>Main mat</th><th>Admission</th></tr></thead>
+              <tbody id="premat_inspector_body"></tbody>
+            </table>
+          </div>
+        </dialog>
         <!-- ^^^ THOG -->
         <section class="chart-group" id="depth_chart_group" data-chart-group="depth">
           <header class="chart-group-header">

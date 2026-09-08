@@ -153,3 +153,19 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Confirm from Peter's field observation that a candidate reached `AVAILABLE` and then `CONSUMED`.
 - [ ] On scruffy, confirm Instra pseudo-scrolls through exact layers and visibly holds the striped `CONSUMING` frame.
 - [ ] On scruffy, confirm the consumer-stream anchor removes the AccumulateGrad stream warning.
+
+## 2026-09-08 complete-microstep all-layer Instra view
+
+- [x] Capture only the first original-forward accumulation microstep at each selected `-l` optimizer update.
+- [x] Publish only complete passes and prevent adjacent microstep event histories from mixing.
+- [x] Show every layer simultaneously, 1-based with layer 1 at the bottom and responsive row height plus scrolling.
+- [x] Replay meaningful states at a user-controlled 0.25 s default; make terminal outcomes persistent but zero-duration.
+- [x] Pause/resume the active capture, hold its completed grid for one second, then jump to the newest completed capture.
+- [x] Distinguish full hits, waited partial hits, and main materialisation with a complete persistent key.
+- [x] Rename `O` to `ATTN O` and use the agreed fused/unfused attention and MLP matrix nouns everywhere.
+- [x] Move complete per-matrix data behind a magnifying-glass inspector with a vertically scrollable table and Outcome column.
+- [x] Make the dashboard poll incrementally for only the newest unseen completed capture.
+- [x] Add focused runtime, persistence, API, reducer, markup, layout, and visual-contract regressions.
+- [x] Run all dependency-free static and direct harness checks available in this container.
+- [ ] On scruffy, confirm the first sampled microstep replays coherently for all layers and the inspector matches its final grid.
+- [ ] On scruffy, confirm every green `AVAILABLE` follows visible blue/white `MATERIALISING`, waited paths are orange, and main materialisation is red.

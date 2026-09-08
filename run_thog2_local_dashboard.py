@@ -278,13 +278,26 @@ class RunDashboardState:
             "revision": revision,
         }
 
-    # vvv THOG dedicated Premat API carries the latest l/l+1 view plus bounded event history
-    def premat(self) -> Dict[str, Any]:
-        snapshots = self.reader.premat_snapshots()
+    # vvv THOG the Premat player needs only the newest complete microstep; an
+    # incremental response avoids retransmitting its full trace every poll.
+    def premat(self, *, after_update: Optional[int] = None) -> Dict[str, Any]:
+        snapshot = self.reader.latest_premat_snapshot()
+        latest_update = (
+            None
+            if snapshot is None
+            else int(snapshot.get("optimizer_update", 0))
+        )
+        unchanged = (
+            latest_update is not None
+            and after_update is not None
+            and latest_update <= int(after_update)
+        )
+        status = self.reader.status()
         return {
-            "latest": snapshots[-1] if snapshots else None,
-            "history": snapshots,
-            "snapshot_count": len(snapshots),
+            "latest": None if unchanged else snapshot,
+            "latest_update": latest_update,
+            "unchanged": unchanged,
+            "snapshot_count": int(status["premat_snapshot_count"]),
         }
     # ^^^ THOG
 
@@ -927,7 +940,9 @@ def _handler_for(catalog: DashboardCatalog):
                     elif path == "/api/figures":
                         value = state.figures()
                     else:
-                        value = state.premat()
+                        raw_after = query.get("after", [""])[0]
+                        after_update = int(raw_after) if raw_after else None
+                        value = state.premat(after_update=after_update)
                     self._send_json(value)
                     return
                 self._send(

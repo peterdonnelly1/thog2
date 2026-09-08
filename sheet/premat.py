@@ -189,7 +189,7 @@ class _PendingRelease:
 MaterializeCandidate = Callable[[str, int], Tensor]
 AttachCandidate = Callable[[str, int, Tensor], Tensor]
 PrematLiveReporter = Callable[[Mapping[str, object]], None]
-PrematLiveCapturePredicate = Callable[[], bool]
+PrematLiveCapturePredicate = Callable[[int], bool]
 
 
 class PrematRuntime:
@@ -239,13 +239,12 @@ class PrematRuntime:
         self._candidates: Dict[Tuple[int, str], _Candidate] = {}
         self._sequence = 0
         self._event_sequence = 0
+        self._pass_sequence = 0
         self._events: List[Dict[str, object]] = []
         # vvv THOG Instra receives bounded transition snapshots on the training
         # thread; no polling thread or CUDA synchronization enters the scheduler.
         self._live_reporter: Optional[PrematLiveReporter] = None
         self._live_capture_enabled: Optional[PrematLiveCapturePredicate] = None
-        self._last_live_publish_ns = 0
-        self._live_publish_interval_ns = 250_000_000
         self._live_publish_error: Optional[str] = None
         # ^^^ THOG
         self._pending_timings: List[_PendingCudaTiming] = []
@@ -290,7 +289,6 @@ class PrematRuntime:
     ) -> None:
         self._live_reporter = reporter
         self._live_capture_enabled = capture_enabled
-        self._last_live_publish_ns = 0
         self._live_publish_error = None
     # ^^^ THOG
 
@@ -318,6 +316,10 @@ class PrematRuntime:
             self._stream = torch.cuda.Stream(device=reference.device)
         self._layer_indices = resolved
         self._position = -1
+        # One forward pass is one accumulation microstep's complete Premat
+        # timeline.  Never carry event fragments across microsteps.
+        self._events.clear()
+        self._pass_sequence += 1
         self._candidates.clear()
         self._pending_releases.clear()
         self._display_layer_pair = None
@@ -599,6 +601,10 @@ class PrematRuntime:
             if pass_ms > 0.0
             else None
         )
+        pass_complete = bool(
+            self._events
+            and self._events[-1].get("event") == "pass_end"
+        )
         return {
             "version": PREMAT_TELEMETRY_VERSION,
             "schema_version": PREMAT_TELEMETRY_VERSION,
@@ -613,12 +619,15 @@ class PrematRuntime:
             "next_layer_index": next_layer,
             "lookahead_layer_limit": 1,
             "effective_fast_discard": True,
+            "pass_sequence": self._pass_sequence,
+            "pass_complete": pass_complete,
+            "layer_indices": list(self._layer_indices),
             "queue_head": self._queue_head_payload(),
             "candidates": candidates,
-            "events": [dict(event) for event in self._events[-256:]],
-            "event_count": self._event_sequence,
+            "events": [dict(event) for event in self._events],
+            "event_count": len(self._events),
             "latest_event_sequence": self._event_sequence,
-            "event_window_limit": 256,
+            "event_window_limit": "complete_pass",
             "memory": memory,
             "aggregate": aggregate,
             "live_publish_error": self._live_publish_error,
@@ -900,6 +909,7 @@ class PrematRuntime:
             ),
             "event": event,
             "event_type": event,
+            "pass_sequence": self._pass_sequence,
             "headroom_policy": (
                 "stay_below_current_peak"
                 if self._stay_below_current_peak
@@ -971,26 +981,22 @@ class PrematRuntime:
         if detail:
             payload["detail"] = detail
         self._events.append(payload)
-        if len(self._events) > 2048:
-            del self._events[:1024]
-        # vvv THOG publish at human-visible cadence and at every pass boundary.
-        # A failing UI sink is isolated from model execution after recording the
-        # diagnostic; scheduler decisions never depend on publication success.
+        # vvv THOG publish only the completed sampled microstep.  Partial live
+        # rows cannot be mistaken for coherent snapshots, and the browser owns
+        # all deliberately slowed playback.
         reporter = self._live_reporter
         capture_enabled = self._live_capture_enabled
         publish_due = (
             reporter is not None
-            and (capture_enabled is None or capture_enabled())
+            and event == "pass_end"
             and (
-                event in {"pass_begin", "pass_end"}
-                or now_ns - self._last_live_publish_ns
-                >= self._live_publish_interval_ns
+                capture_enabled is None
+                or capture_enabled(self._pass_sequence)
             )
         )
         if publish_due:
             try:
                 reporter(self.report())
-                self._last_live_publish_ns = now_ns
             except Exception as error:  # pragma: no cover - sink failures are environment-specific
                 self._live_publish_error = f"{type(error).__name__}: {error}"
                 self._live_reporter = None
