@@ -78,3 +78,4 @@
 - Added a CPU lifecycle/numerical/gradient regression that verifies two S2 forward passes run without gradients, the two reverse-order recomputations run with gradients, all pass state ends cleanly, and results match non-checkpointed execution.
 - Added the missing unconditional `PREMAT:` diagnostics row to `run_thog2_owt.py`; the first real run proved the earlier row in `run_thog2_owt_core.py` was not the active presentation path.
 - Static Python compilation and `git diff --check` pass in the resumed scratch environment. Its Python runtime does not currently contain PyTorch, so the executable test suite cannot be repeated here; CUDA validation remains explicit above.
+- Published repair commit `2ee7d80b6e435484a457d0d436385acb144eb715` through the GitHub connector and verified it is exactly one fast-forward commit after the prior branch head.

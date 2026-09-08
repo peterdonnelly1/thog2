@@ -59,4 +59,4 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 
 - [x] Push the completed tree through the GitHub connector.
 - [x] Verify the remote branch head and provide the download stanza.
-- [ ] Publish and verify the post-publication checkpoint repair commit.
+- [x] Publish and verify the post-publication checkpoint repair commit.
