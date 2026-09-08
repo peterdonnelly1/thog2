@@ -85,3 +85,13 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [ ] Re-run L10/P6 on scruffy with the new allocator default and compare peak allocated/reserved values.
 - [ ] If L10/P6 passes, probe L12/P7 against the matched non-Premat reference before declaring DPE-SAFE-005 satisfied.
 - [ ] Verify that the Instra event sequence increments during an update and that l/l+1 promotes at human-visible cadence.
+
+## 2026-09-08 sampled Instra playback
+
+- [x] Confirm detailed Premat Instra uses local SQLite rather than per-transition W&B calls.
+- [x] Gate detailed live publication to update 1, every existing `-l` interval, and the final update.
+- [x] Preserve the 250 ms transition cadence inside a selected update.
+- [x] Add a bounded client-only playback queue and 0.25× through 4× speed slider.
+- [x] Keep playback control isolated from training and telemetry capture.
+- [x] Run static Python, JavaScript, shell, and whitespace checks.
+- [ ] Confirm on scruffy that `-l 10` produces live captures at updates 1, 10, 20, ... and that all five playback speeds work.

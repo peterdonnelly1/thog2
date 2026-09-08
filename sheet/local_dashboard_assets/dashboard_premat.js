@@ -7,7 +7,14 @@ const premat_view = {
   sort_key: "sequence",
   sort_descending: true,
   latest_payload: null,
+  newest_frame_key: null,
+  frame_queue: [],
+  playback_rate: 1,
+  playback_timer: null,
 };
+
+const PREMAT_PLAYBACK_BASE_MS = 750;
+const PREMAT_PLAYBACK_QUEUE_LIMIT = 128;
 
 function premat_escape(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
@@ -137,16 +144,61 @@ function render_premat(payload) {
   }).join("");
 }
 
+function premat_frame_key(payload) {
+  const snapshot = payload?.latest;
+  if (!snapshot) return null;
+  return `${premat_view.run_id || ""}:${snapshot.optimizer_update ?? ""}:${snapshot.latest_event_sequence ?? snapshot.event_count ?? ""}`;
+}
+
+// vvv THOG browser-only playback buffers polled display frames.  It never
+// changes scheduler capture, the SQLite writer, training cadence, or W&B.
+function premat_playback_delay_ms() {
+  return Math.max(100, Math.round(PREMAT_PLAYBACK_BASE_MS / premat_view.playback_rate));
+}
+
+function premat_schedule_playback() {
+  if (premat_view.playback_timer !== null) clearTimeout(premat_view.playback_timer);
+  premat_view.playback_timer = setTimeout(() => {
+    premat_view.playback_timer = null;
+    const payload = premat_view.frame_queue.shift();
+    if (payload) render_premat(payload);
+    premat_schedule_playback();
+  }, premat_playback_delay_ms());
+}
+
+function premat_enqueue_frame(payload) {
+  const key = premat_frame_key(payload);
+  if (key === null) {
+    render_premat(payload);
+    return;
+  }
+  if (key === premat_view.newest_frame_key) return;
+  premat_view.newest_frame_key = key;
+  if (!premat_view.latest_payload) {
+    render_premat(payload);
+    return;
+  }
+  premat_view.frame_queue.push(payload);
+  if (premat_view.frame_queue.length > PREMAT_PLAYBACK_QUEUE_LIMIT) {
+    premat_view.frame_queue.splice(0, premat_view.frame_queue.length - PREMAT_PLAYBACK_QUEUE_LIMIT);
+  }
+}
+// ^^^ THOG
+
 async function refresh_premat() {
   const run_id = app.current_run_id;
   if (!run_id) {
     premat_view.run_id = null;
     premat_view.latest_payload = null;
+    premat_view.newest_frame_key = null;
+    premat_view.frame_queue = [];
     premat_sync_tab();
     return;
   }
   if (premat_view.run_id !== run_id) {
     premat_view.latest_payload = null;
+    premat_view.newest_frame_key = null;
+    premat_view.frame_queue = [];
     premat_sync_tab();
   }
   const serial = ++premat_view.request_serial;
@@ -154,7 +206,7 @@ async function refresh_premat() {
     const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}`);
     if (serial !== premat_view.request_serial || run_id !== app.current_run_id) return;
     premat_view.run_id = run_id;
-    render_premat(payload);
+    premat_enqueue_frame(payload);
   } catch (_error) {
     if (serial === premat_view.request_serial) {
       premat_view.latest_payload = null;
@@ -166,6 +218,15 @@ async function refresh_premat() {
 window.premat_refresh = refresh_premat;
 
 window.addEventListener("DOMContentLoaded", () => {
+  const playback = by_id("premat_playback_speed");
+  const playback_label = by_id("premat_playback_speed_label");
+  const update_playback_rate = () => {
+    premat_view.playback_rate = 2 ** Number(playback?.value || 0);
+    if (playback_label) playback_label.textContent = `${premat_view.playback_rate}×`;
+    premat_schedule_playback();
+  };
+  playback?.addEventListener("input", update_playback_rate);
+  update_playback_rate();
   by_id("premat_event_filter")?.addEventListener("input", () => {
     if (premat_view.latest_payload) render_premat(premat_view.latest_payload);
   });

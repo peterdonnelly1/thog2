@@ -155,7 +155,14 @@
               <strong>Premat · live l / l+1</strong>
               <span class="premat-mode" id="premat_mode">waiting</span>
             </div>
-            <span class="premat-update" id="premat_update">No snapshot</span>
+            <div class="premat-header-controls">
+              <label class="premat-playback-control" for="premat_playback_speed">
+                Playback
+                <input id="premat_playback_speed" type="range" min="-2" max="2" step="1" value="0">
+                <output id="premat_playback_speed_label" for="premat_playback_speed">1×</output>
+              </label>
+              <span class="premat-update" id="premat_update">No snapshot</span>
+            </div>
           </header>
           <div class="premat-memory" id="premat_memory"></div>
           <div class="premat-layers" id="premat_layers"></div>

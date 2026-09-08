@@ -223,4 +223,15 @@ def test_premat_dashboard_polls_at_human_visible_cadence() -> None:
     asset = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets" / "dashboard_premat.js"
     javascript = asset.read_text(encoding="utf-8")
     assert "setInterval(refresh_premat, 750)" in javascript
+    assert "PREMAT_PLAYBACK_QUEUE_LIMIT = 128" in javascript
+    assert "PREMAT_PLAYBACK_BASE_MS / premat_view.playback_rate" in javascript
+    assert "premat_playback_speed" in javascript
+
+
+def test_premat_view_exposes_client_only_playback_speed_control() -> None:
+    asset_root = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets"
+    index = (asset_root / "index.html").read_text(encoding="utf-8")
+    assert 'id="premat_playback_speed"' in index
+    assert 'min="-2" max="2" step="1" value="0"' in index
+    assert 'id="premat_playback_speed_label"' in index
 # ^^^ THOG

@@ -7,6 +7,23 @@
   padding: 14px 2px 10px;
 }
 .premat-header strong { font-size: 15px; }
+.premat-header-controls, .premat-playback-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.premat-header-controls { justify-content: flex-end; }
+.premat-playback-control {
+  color: var(--muted-text, #777f8c);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.premat-playback-control input { width: 104px; }
+.premat-playback-control output {
+  min-width: 28px;
+  color: var(--text, #343942);
+  font-variant-numeric: tabular-nums;
+}
 .premat-mode, .premat-update, .premat-events-card header span {
   margin-left: 10px;
   color: var(--muted-text, #777f8c);
@@ -74,5 +91,7 @@
 @media (max-width: 1050px) {
   .premat-memory { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
   .premat-event-filter input { width: 150px; }
+  .premat-header { align-items: flex-start; }
+  .premat-header-controls { align-items: flex-end; flex-direction: column; }
 }
 /* ^^^ THOG */

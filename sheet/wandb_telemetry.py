@@ -823,9 +823,10 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
 
     trainer._print_progress = progress
 
-    # vvv THOG detailed Premat Instra is a live transition feed, not merely an
-    # optimizer-log-interval snapshot.  Replacing the row for the active update
-    # keeps SQLite history bounded while the dashboard polls it.
+    # vvv THOG detailed Premat Instra captures one complete optimizer update at
+    # the established training log interval.  Within that sampled update it is
+    # a live transition feed; replacing the active row keeps SQLite history
+    # bounded while the dashboard polls it.
     premat_reporter_setter = getattr(
         getattr(trainer, "raw_model", None),
         "set_premat_live_reporter",
@@ -849,7 +850,16 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
                 snapshot,
             )
 
-        premat_reporter_setter(publish_premat)
+        def capture_premat_update() -> bool:
+            update = max(1, int(trainer.state.completed_updates) + 1)
+            interval = max(1, int(trainer.config.log_interval))
+            return (
+                update == 1
+                or update == int(trainer.config.max_updates)
+                or update % interval == 0
+            )
+
+        premat_reporter_setter(publish_premat, capture_premat_update)
     # ^^^ THOG
 
 

@@ -182,6 +182,7 @@ class _PendingCudaTiming:
 
 MaterializeCandidate = Callable[[str, int], Tensor]
 PrematLiveReporter = Callable[[Mapping[str, object]], None]
+PrematLiveCapturePredicate = Callable[[], bool]
 
 
 class PrematRuntime:
@@ -233,6 +234,7 @@ class PrematRuntime:
         # vvv THOG Instra receives bounded transition snapshots on the training
         # thread; no polling thread or CUDA synchronization enters the scheduler.
         self._live_reporter: Optional[PrematLiveReporter] = None
+        self._live_capture_enabled: Optional[PrematLiveCapturePredicate] = None
         self._last_live_publish_ns = 0
         self._live_publish_interval_ns = 250_000_000
         self._live_publish_error: Optional[str] = None
@@ -274,8 +276,10 @@ class PrematRuntime:
     def set_live_reporter(
         self,
         reporter: Optional[PrematLiveReporter],
+        capture_enabled: Optional[PrematLiveCapturePredicate] = None,
     ) -> None:
         self._live_reporter = reporter
+        self._live_capture_enabled = capture_enabled
         self._last_live_publish_ns = 0
         self._live_publish_error = None
     # ^^^ THOG
@@ -902,8 +906,10 @@ class PrematRuntime:
         # A failing UI sink is isolated from model execution after recording the
         # diagnostic; scheduler decisions never depend on publication success.
         reporter = self._live_reporter
+        capture_enabled = self._live_capture_enabled
         publish_due = (
             reporter is not None
+            and (capture_enabled is None or capture_enabled())
             and (
                 event in {"pass_begin", "pass_end"}
                 or now_ns - self._last_live_publish_ns

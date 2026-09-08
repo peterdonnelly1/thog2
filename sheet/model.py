@@ -629,9 +629,9 @@ class SheetGPT(nn.Module):
 
     # vvv THOG attach/detach the primary-process Instra sink without coupling the
     # model or scheduler to local storage.
-    def set_premat_live_reporter(self, reporter) -> None:
+    def set_premat_live_reporter(self, reporter, capture_enabled=None) -> None:
         if self._premat_runtime is not None:
-            self._premat_runtime.set_live_reporter(reporter)
+            self._premat_runtime.set_live_reporter(reporter, capture_enabled)
     # ^^^ THOG
 
     def _premat_weight(self, family: str, layer_index: int) -> Tensor:

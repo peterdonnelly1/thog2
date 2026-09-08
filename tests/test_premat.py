@@ -180,6 +180,17 @@ def test_live_reporter_publishes_pass_boundaries_and_total_event_count(monkeypat
     assert latest["event_window_limit"] == 256
 
 
+def test_live_reporter_skips_uncaptured_updates(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    snapshots = []
+    runtime.set_live_reporter(snapshots.append, lambda: False)
+    runtime.end()
+    assert snapshots == []
+
+
 def test_global_admission_does_not_assume_fragmented_allocator_cache_is_reusable() -> None:
     decision = decide_candidate_admission(
         observation=_observation(allocated=100, reserved=180),

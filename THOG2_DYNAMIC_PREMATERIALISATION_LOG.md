@@ -101,3 +101,12 @@
 - Added regressions for live pass-boundary reporting, total-versus-window event counts, human-visible polling cadence, and same-update SQLite replacement. The persistence writer smoke passed through a direct module load.
 - Static Python compilation, JavaScript syntax, shell syntax, and `git diff --check` pass. The current container still has no PyTorch or pytest, so the L10/P6/L12/P7 CUDA capacity boundary and numerical/autograd tests require the scruffy field rerun.
 - Published follow-up commit `84893008ef50312421be2b7f84cee83676c98611` through the GitHub connector and verified the named remote branch points to it.
+
+## 2026-09-08 - Sampled Instra capture and client playback
+
+- Detailed Premat visualisation does not issue a W&B call per transition. Its live path is the bounded local SQLite writer; W&B receives only aggregate numeric scalars on the ordinary optimizer-progress cadence.
+- Live Instra publication is now limited to one complete optimizer update at the existing `log_interval` (`-l`). Update 1 and the final update are also captured. With `-l 10`, the detailed view captures updates 1, 10, 20, and so on while retaining the 250 ms intra-update feed.
+- No new training hyperparameter was added. The existing `-l` setting remains the single capture-cadence control.
+- Added a browser-only playback buffer and a 0.25×, 0.5×, 1×, 2×, 4× slider. Playback speed affects only how quickly already-polled frames are presented; it cannot affect training, CUDA scheduling, local capture, or W&B traffic.
+- The client queue is bounded to 128 frames and the training-side writer remains latest-only, preventing either slow playback or disk latency from creating unbounded memory growth in the training process.
+- Python compilation, JavaScript syntax, shell syntax, and whitespace validation pass in the current environment.
