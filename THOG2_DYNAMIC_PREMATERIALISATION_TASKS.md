@@ -143,3 +143,4 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [ ] Compare a matched Premat-disabled peak-memory control.
 - [x] Fix the first successful-admission checkpoint mismatch (131 forward tensors versus 128 replay tensors).
 - [ ] Re-run L32/P10 with `-K flash2` and confirm first backward completes.
+- [x] Match the saved depth-row shape and autocast dtype (`[1,1,P]`, BF16 in the reported run) to ordinary einsum replay.

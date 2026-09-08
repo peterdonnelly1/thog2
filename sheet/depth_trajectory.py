@@ -66,12 +66,25 @@ class _PrematerializedDepthBundle(torch.autograd.Function):
             # only the coefficient.  Saving both unconditionally made fused
             # QKV checkpoint forward retain three tensors more than replay.
             if coefficient_needs_gradient:
-                saved.append(depth_row)
+                # torch.einsum("p,rcp->rc", ...) lowers to a batched matrix
+                # product under autocast and saves this [1,1,P] working view in
+                # the generated output dtype.  Match that metadata exactly so
+                # non-reentrant checkpoint replay can pair the saved tensors.
+                saved.append(
+                    depth_row.to(device=cached.device, dtype=cached.dtype).reshape(1, 1, -1)
+                )
             if depth_needs_gradient:
-                saved.append(coefficient)
+                saved.append(
+                    coefficient.to(device=cached.device, dtype=cached.dtype)
+                    .permute(2, 0, 1)
+                    .reshape(1, coefficient.shape[2], -1)
+                )
             pair_specs.append(
                 (
                     int(coefficient.shape[0]),
+                    int(coefficient.shape[1]),
+                    coefficient.dtype,
+                    depth_row.dtype,
                     coefficient_needs_gradient,
                     depth_needs_gradient,
                 )
@@ -85,9 +98,27 @@ class _PrematerializedDepthBundle(torch.autograd.Function):
         saved = iter(ctx.saved_tensors)
         result = [None]
         row_start = 0
-        for pair_index, (row_count, coefficient_needs_gradient, depth_needs_gradient) in enumerate(ctx.pair_specs):
-            depth_row = next(saved) if coefficient_needs_gradient else None
-            coefficient = next(saved) if depth_needs_gradient else None
+        for pair_index, (
+            row_count,
+            column_count,
+            coefficient_dtype,
+            depth_dtype,
+            coefficient_needs_gradient,
+            depth_needs_gradient,
+        ) in enumerate(ctx.pair_specs):
+            depth_row = (
+                next(saved).reshape(-1).to(dtype=coefficient_dtype)
+                if coefficient_needs_gradient
+                else None
+            )
+            coefficient = None
+            if depth_needs_gradient:
+                coefficient_working = next(saved)
+                coefficient = (
+                    coefficient_working.reshape(-1, row_count, column_count)
+                    .permute(1, 2, 0)
+                    .to(dtype=depth_dtype)
+                )
             family_gradient = gradient[row_start : row_start + row_count]
             coefficient_input = 1 + 2 * pair_index
             depth_input = coefficient_input + 1
