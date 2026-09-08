@@ -1,8 +1,10 @@
 # vvv THOG
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Iterator, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -15,15 +17,45 @@ RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Te
 # ^^^ THOG
 
 
-# vvv THOG activation-checkpoint recomputation owns fresh pass-local premat
-# state when the outer forward has ended.  Prematerialised values bind to
-# autograd only at consumption, so checkpoint operation ordering stays stable.
+# vvv THOG non-reentrant checkpoint replay must reconstruct the ordinary
+# consumption graph, but it has no useful l+1 lifetime to exploit: the forward
+# Premat pass has already committed and released its candidates.  Mark replay
+# explicitly so it cannot start a second auxiliary-stream scheduler while
+# backward activations and gradients are live.
+_CHECKPOINT_RECOMPUTATION = ContextVar(
+    "thog2_checkpoint_recomputation",
+    default=False,
+)
+
+
+@contextmanager
+def _checkpoint_recomputation_scope() -> Iterator[None]:
+    token = _CHECKPOINT_RECOMPUTATION.set(True)
+    try:
+        yield
+    finally:
+        _CHECKPOINT_RECOMPUTATION.reset(token)
+
+
+def _checkpoint_contexts():
+    return nullcontext(), _checkpoint_recomputation_scope()
+
+
+def checkpoint_recomputation_active() -> bool:
+    return bool(_CHECKPOINT_RECOMPUTATION.get())
+# ^^^ THOG
+
+
+# vvv THOG the outer forward owns Premat.  Recompute preserves the same
+# consumption graph without starting another auxiliary-stream scheduler.
 def _begin_premat_segment(
     logical_block: LogicalBlock,
     layer_indices: Sequence[int],
     reference: Tensor,
 ) -> Tuple[object, bool]:
     owner = getattr(logical_block, "__self__", None)
+    if checkpoint_recomputation_active():
+        return owner, False
     begin = getattr(owner, "_premat_begin_pass", None)
     if owner is None or not callable(begin):
         return owner, False
@@ -150,6 +182,7 @@ def execute_logical_layers(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
+                context_fn=_checkpoint_contexts,
             )
             checkpoint_segments += 1
 
@@ -202,6 +235,7 @@ def execute_logical_layers(
             use_reentrant=False,
             # ^^^ THOG
             preserve_rng_state=True,
+            context_fn=_checkpoint_contexts,
         )
         checkpoint_segments += 1
 
@@ -281,6 +315,7 @@ def execute_logical_layer_checkpoints(
                 use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
+                context_fn=_checkpoint_contexts,
             )
             checkpoint_segments += 1
         else:

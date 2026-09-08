@@ -128,3 +128,14 @@
 - Restored the established non-reentrant activation-checkpoint implementation and the user's configured segment size. Premat no longer selects a different checkpoint algorithm merely because it is enabled.
 - Added CPU forward/gradient equivalence coverage for both a single materialised family and a fused QKV bundle, plus configured-segment checkpoint lifecycle coverage.
 - The intermediate nested-reentrant checkpoint experiment was rejected before publication.
+
+## 2026-09-08 - Strict release ordering and allocator launch repair
+
+- Scruffy's L11/P6 run completed with only about 442 MiB driver-reported free memory; L12/P6 still OOMed. The configured 1.0 GiB value is a Premat admission buffer, not a reservation that can prevent ordinary training allocations from later crossing that floor.
+- The startup row exposed a real launch defect: `cuda_allocator=default`. Premat controls placed beyond the core wrapper's pass-through separator reached Python but were invisible to the shell-only allocator setup. The wrapper now resolves the last forwarded `--premat` value before validation and allocator configuration, so the same runstring activates `expandable_segments:True` unless the user supplied an explicit policy.
+- The same row's `checkpoint_recompute_segment=1` was stale diagnostic text. It now reports the configured segment size; the actual implementation already used the configured value after the autograd-transparent correction.
+- Activation checkpointing itself is not treated as the residual memory cause. The remaining Premat-specific fault was a second auxiliary scheduler inside non-reentrant checkpoint recomputation. Recompute now reconstructs the consumption graph without starting Premat; the original forward remains the sole owner of l+1 scheduling.
+- Early discard ordering is now explicit at every QK, V, QKV, O, UP, and DOWN call site: the caller deletes its final dense-weight reference before notifying the runtime of consumption.
+- Consumption records a main-stream completion event. The scheduler retains its memory charge and cannot launch another auxiliary candidate until that event confirms the consuming kernel has completed. Actual CUDA free/allocated state remains authoritative if autograd or the allocator still owns storage.
+- Instra's pipeline cards are taller and borderless, removing the grey separator. An always-visible key explains neutral, materialising, available, consuming, consumed, and critical-path-miss fills. The memory summary now labels the admission buffer precisely and reports its current met/breached margin.
+- Python compilation, shell syntax, JavaScript syntax, and `git diff --check` pass. Pytest is not installed in this resumed container, so the focused CPU/CUDA tests remain unexecuted here.

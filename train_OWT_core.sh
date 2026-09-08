@@ -775,6 +775,26 @@ EXTRA_ARGS+=("${GEOMETRY_UI_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${DENSE_SNAPSHOT_EXTRA_ARGS[@]}")
 EXTRA_ARGS+=("${THOGOPT_EXTRA_ARGS[@]}")
 
+# vvv THOG options beyond the wrapper separator are intentionally forwarded to
+# Python, but launch-time CUDA allocator policy must still see the resolved
+# Premat mode before Python imports torch.  Honour the last forwarded value in
+# the same way argparse does.
+PREMAT_EFFECTIVE="$PREMAT"
+for (( premat_argument_index=0; premat_argument_index < ${#EXTRA_ARGS[@]}; premat_argument_index++ )); do
+  premat_argument="${EXTRA_ARGS[premat_argument_index]}"
+  case "$premat_argument" in
+    --premat)
+      if (( premat_argument_index + 1 < ${#EXTRA_ARGS[@]} )); then
+        PREMAT_EFFECTIVE="${EXTRA_ARGS[premat_argument_index + 1]}"
+      fi
+      ;;
+    --premat=*) PREMAT_EFFECTIVE="${premat_argument#*=}" ;;
+  esac
+done
+unset premat_argument premat_argument_index
+PREMAT="$PREMAT_EFFECTIVE"
+# ^^^ THOG
+
 # vvv THOG normalize optimizer and apply its LR defaults only when -c/-f were omitted
 case "${OPTIMIZER,,}" in
   adam|adamw)
@@ -1215,10 +1235,10 @@ export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"         
 export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
 export THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP="$DIRECT_FACTORISED_HYPERBLOCK_MLP"                                                                      # <<< THOG pass independent direct HYPERBLOCK MLP option
 export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
-# vvv THOG reentrant Premat checkpoint recomputation changes allocation sizes
-# repeatedly; expandable segments prevent the large unusable cache slivers seen
-# in scruffy field tests.  An explicit user allocator policy remains authoritative.
-if [[ "$PREMAT" == enabled && -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
+# vvv THOG Premat changes allocation timing and stream ownership; expandable
+# segments prevent the large unusable cache slivers seen in scruffy field tests.
+# An explicit user allocator policy remains authoritative.
+if [[ "$PREMAT_EFFECTIVE" == enabled && -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
   export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 fi
 # ^^^ THOG

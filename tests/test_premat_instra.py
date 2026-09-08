@@ -235,4 +235,15 @@ def test_premat_view_exposes_client_only_playback_speed_control() -> None:
     assert 'id="premat_playback_speed"' in index
     assert 'min="-2" max="2" step="1" value="0"' in index
     assert 'id="premat_playback_speed_label"' in index
+
+
+def test_premat_pipeline_is_tall_borderless_and_has_a_key() -> None:
+    asset_root = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets"
+    index = (asset_root / "index.html").read_text(encoding="utf-8")
+    css = (asset_root / "dashboard_premat.css").read_text(encoding="utf-8")
+    assert 'class="premat-key"' in index
+    assert "ordinary compute / unavailable" in index
+    assert "critical-path miss" in index
+    assert "min-height: 148px" in css
+    assert "border: 0" in css
 # ^^^ THOG

@@ -437,11 +437,6 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
         effective_fast_discard = (
             True if config.premat == "enabled" else model_config.fast_discard
         )
-        effective_checkpoint_segment = (
-            1
-            if config.premat == "enabled" and config.checkpoint_segment_size > 0
-            else config.checkpoint_segment_size
-        )
         _core._print_model_option(
             "PREMAT:",
             f"premat={config.premat} "
@@ -451,7 +446,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
-            f"checkpoint_recompute_segment={effective_checkpoint_segment} "
+            f"checkpoint_recompute_segment={config.checkpoint_segment_size} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
             "lookahead=l+1",
         )

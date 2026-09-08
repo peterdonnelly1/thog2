@@ -117,3 +117,18 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Add single-family and fused-bundle forward/gradient equivalence regressions.
 - [ ] Run the focused executable CPU tests in a PyTorch environment.
 - [ ] Re-run L12/P6 and then L12/P7 on scruffy against the matched Premat-disabled reference.
+
+## 2026-09-08 strict release and launch correction
+
+- [x] Record L11/P6 success, L12/P6 OOM, and the approximately 442 MiB free-memory observation with a 1.0 GiB Premat admission buffer.
+- [x] Fix Premat detection beyond the wrapper separator so the default expandable allocator policy is actually active.
+- [x] Correct the startup checkpoint-segment diagnostic to report configured `-S`.
+- [x] Prevent any auxiliary Premat scheduler from starting inside non-reentrant checkpoint recomputation.
+- [x] Move dense-weight early discard before the runtime consumption notification at every Premat deadline.
+- [x] Gate the next auxiliary candidate on a recorded main-stream completion event for the prior consumer.
+- [x] Remove the Instra layer separator, enlarge the pipeline, and add a lifecycle key.
+- [x] Show whether the current device-free value meets or breaches the Premat admission buffer.
+- [x] Run Python compilation, shell syntax, JavaScript syntax, and whitespace validation.
+- [ ] On scruffy, verify the startup row says `checkpoint_recompute_segment=4` and `cuda_allocator=expandable_segments:True`.
+- [ ] Re-run L12/P6, then L12/P7, and compare against a current Premat-disabled L12/P7 control.
+- [ ] Confirm the Instra key, borderless pipeline, and buffer-margin indicator.

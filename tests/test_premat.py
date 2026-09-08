@@ -61,7 +61,10 @@ class _FakeEvent:
         self.complete = False
 
     def record(self, stream) -> None:
-        self.complete = stream.kind == "main" or self.cuda.complete_premat_on_record
+        self.complete = (
+            (stream.kind == "main" and self.cuda.complete_main_on_record)
+            or self.cuda.complete_premat_on_record
+        )
 
     def query(self) -> bool:
         return self.complete
@@ -75,6 +78,7 @@ class _FakeCuda:
         self.main_stream = _FakeStream("main")
         self.premat_stream = _FakeStream("premat")
         self.complete_premat_on_record = False
+        self.complete_main_on_record = True
         self.stream_creations = 0
         self.allocated = 100
         self.reserved = 120
@@ -334,6 +338,29 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
     assert report["aggregate"]["main_stream_wait_ms_total"] == pytest.approx(0.25)
 
 
+def test_next_premat_launch_waits_for_consuming_main_stream_event(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    runtime.layer_start(3)
+    assert calls == [("QKV", 3)]
+    weight = runtime.acquire("QKV", 3)
+    fake_cuda.complete_main_on_record = False
+    del weight
+    runtime.consumed("QKV", 3)
+
+    assert runtime._pending_releases
+    assert calls == [("QKV", 3)]
+    runtime.event("after_qkv", layer_index=3)
+    assert calls == [("QKV", 3)]
+
+    for release in runtime._pending_releases:
+        release.end_event.complete = True
+    runtime.event("after_qkv_complete", layer_index=3)
+    assert calls == [("QKV", 3), ("O", 3)]
+
+
 def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(monkeypatch) -> None:
     runtime, _fake_cuda, calls = _runtime(
         monkeypatch,
@@ -425,6 +452,10 @@ class _CpuCheckpointPrematRuntime:
     def consumed(self, _family: str, _layer_index: int) -> None:
         assert self.active
 
+    def materialize_for_consumption(self, family: str, layer_index: int):
+        assert not self.active
+        return self.model._premat_materialize_candidate(family, layer_index)
+
 
 def test_checkpointed_premat_preserves_configured_segments_and_gradients_on_cpu() -> None:
     common = dict(
@@ -479,11 +510,7 @@ def test_checkpointed_premat_preserves_configured_segments_and_gradients_on_cpu(
         )
 
     assert checkpointed.last_execution_report.segment_size == 2
-    assert [entry["layers"] for entry in fake_runtime.passes] == [
-        (0, 1, 2, 3),
-        (2, 3),
-        (0, 1),
-    ]
+    assert [entry["layers"] for entry in fake_runtime.passes] == [(0, 1, 2, 3)]
     assert all(entry["grad_enabled"] for entry in fake_runtime.passes)
     assert all(entry["ended"] for entry in fake_runtime.passes)
     assert not fake_runtime.active

@@ -44,6 +44,7 @@ def _config():
         n_layer=24,
         layer_dropout_resample_steps=1,
         activation_checkpointing=True,
+        checkpoint_segment_size=4,
         premat="enabled",
         premat_attention_mode="fused",
         premat_headroom_stay_below_current_peak=True,
@@ -105,6 +106,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "premat_attention_mode=fused" in output
     assert "headroom=stay_below_current_peak" in output
     assert "effective_fast_discard=true" in output
+    assert "checkpoint_recompute_segment=4" in output
     assert "cuda_allocator=" in output
     assert "plastic\n" in output
     assert "plastic__runtime_phase:" in output

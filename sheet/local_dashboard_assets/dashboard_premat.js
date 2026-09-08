@@ -120,7 +120,12 @@ function render_premat(payload) {
     ["Device free", memory.device_free_bytes],
     ["Device used", memory.device_used_bytes],
     [`Active ceiling · ${String(memory.active_ceiling_scope || "unknown").replaceAll("_", " ")}`, memory.active_ceiling_bytes],
-    ["Global buffer", memory.global_buffer_bytes],
+    ["Premat admission buffer", memory.global_buffer_bytes],
+    ["Buffer margin now", (
+      Number(memory.device_free_bytes) >= Number(memory.global_buffer_bytes)
+        ? `met · +${premat_bytes(Number(memory.device_free_bytes) - Number(memory.global_buffer_bytes))}`
+        : `BREACHED · −${premat_bytes(Number(memory.global_buffer_bytes) - Number(memory.device_free_bytes))}`
+    )],
     ["Premat headroom", memory.premat_headroom_bytes],
     ["Premat retained", memory.premat_retained_bytes],
   ];

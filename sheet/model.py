@@ -709,9 +709,9 @@ class SheetGPT(nn.Module):
                 qk_bias = packed_bias[: 2 * self.config.n_embd]
                 value_bias = packed_bias[2 * self.config.n_embd :]
             query, key = F.linear(inputs, qk_weight, qk_bias).split(self.config.n_embd, dim=2)
-            self._premat_consumed("QK", layer_index)
             if self.config.fast_discard:
                 del qk_weight, qk_bias
+            self._premat_consumed("QK", layer_index)
             head_width = embedding_width // self.config.n_head
             key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
             query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
@@ -723,11 +723,13 @@ class SheetGPT(nn.Module):
             self._premat_event("after_attention_softmax", layer_index)
             value_weight = self._premat_weight("V", layer_index)
             value = F.linear(inputs, value_weight, value_bias)
+            if self.config.fast_discard:
+                del value_weight
             self._premat_consumed("V", layer_index)
             value = value.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
             attended = probabilities @ value
             if self.config.fast_discard:
-                del packed_bias, query, key, scores, causal_mask, probabilities, value, value_weight, value_bias
+                del packed_bias, query, key, scores, causal_mask, probabilities, value, value_bias
         # ^^^ THOG
         # vvv THOG consume the already-batched HYPERBLOCK layer matrices before legacy materialisation paths
         elif layer_materializations is not None:
@@ -751,10 +753,10 @@ class SheetGPT(nn.Module):
         # ^^^ THOG
         if not use_unfused_attention:
             query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
-            if layer_materializations is None:
-                self._premat_consumed("QKV", layer_index)
             if self.config.fast_discard:
                 del attention_weight, attention_bias
+            if layer_materializations is None:
+                self._premat_consumed("QKV", layer_index)
             head_width = embedding_width // self.config.n_head
             key = key.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
             query = query.view(batch_size, sequence_length, self.config.n_head, head_width).transpose(1, 2)
@@ -790,10 +792,10 @@ class SheetGPT(nn.Module):
         # ^^^ THOG
         output_bias = self._optional_bias("attention_output_bias", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
-        if layer_materializations is None:
-            self._premat_consumed("O", layer_index)
         if self.config.fast_discard:
             del attended, output_weight, output_bias
+        if layer_materializations is None:
+            self._premat_consumed("O", layer_index)
         output = F.dropout(projected, p=self.config.dropout, training=self.training)
         if self.config.fast_discard:
             del projected
@@ -873,10 +875,10 @@ class SheetGPT(nn.Module):
             )
             # ^^^ THOG
             hidden = F.linear(inputs, expansion_weight, expansion_bias)
-            if layer_materializations is None:
-                self._premat_consumed("UP", layer_index)
             if self.config.fast_discard:
                 del expansion_weight
+            if layer_materializations is None:
+                self._premat_consumed("UP", layer_index)
         if self.config.fast_discard:
             del expansion_bias
         hidden = F.gelu(hidden)
@@ -910,10 +912,10 @@ class SheetGPT(nn.Module):
             )
             # ^^^ THOG
             output = F.linear(hidden, contraction_weight, contraction_bias)
-            if layer_materializations is None:
-                self._premat_consumed("DOWN", layer_index)
             if self.config.fast_discard:
                 del contraction_weight
+            if layer_materializations is None:
+                self._premat_consumed("DOWN", layer_index)
         if self.config.fast_discard:
             del hidden, contraction_bias
         dropped = F.dropout(output, p=self.config.dropout, training=self.training)

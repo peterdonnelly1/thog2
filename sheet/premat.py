@@ -180,6 +180,12 @@ class _PendingCudaTiming:
     event_payload: Optional[Dict[str, object]]
 
 
+@dataclass
+class _PendingRelease:
+    end_event: torch.cuda.Event
+    retained_bytes: int
+
+
 MaterializeCandidate = Callable[[str, int], Tensor]
 AttachCandidate = Callable[[str, int, Tensor], Tensor]
 PrematLiveReporter = Callable[[Mapping[str, object]], None]
@@ -243,6 +249,7 @@ class PrematRuntime:
         self._live_publish_error: Optional[str] = None
         # ^^^ THOG
         self._pending_timings: List[_PendingCudaTiming] = []
+        self._pending_releases: List[_PendingRelease] = []
         self._display_layer_pair: Optional[Tuple[int, Optional[int]]] = None
         self._display_candidates: List[Dict[str, object]] = []
         self._ordinary_peak_bytes = 0
@@ -312,6 +319,7 @@ class PrematRuntime:
         self._layer_indices = resolved
         self._position = -1
         self._candidates.clear()
+        self._pending_releases.clear()
         self._display_layer_pair = None
         self._display_candidates = []
         self._retained_bytes = 0
@@ -353,6 +361,7 @@ class PrematRuntime:
             candidate.materialisation_start_event = None
             candidate.completion_event = None
         self._retained_bytes = 0
+        self._pending_releases.clear()
         self._active = False
 
     def layer_start(self, layer_index: int) -> None:
@@ -516,12 +525,25 @@ class PrematRuntime:
         candidate = self._candidates.get(key)
         if candidate is None or candidate.state != CandidateState.CONSUMING:
             raise RuntimeError(f"premat candidate {key} was not consuming")
-        if candidate.retained_counted:
-            self._retained_bytes = max(
-                0,
-                self._retained_bytes - candidate.envelope.retained_bytes,
+        # vvv THOG callers discard their final Python weight reference before
+        # entering here.  A main-stream event then proves that the consuming
+        # kernel has finished before the scheduler treats the storage as
+        # reusable or launches another auxiliary-stream candidate.
+        current_stream = torch.cuda.current_stream(device=self._device)
+        release_event = torch.cuda.Event(enable_timing=False)
+        release_event.record(current_stream)
+        self._pending_releases.append(
+            _PendingRelease(
+                end_event=release_event,
+                retained_bytes=(
+                    candidate.envelope.retained_bytes
+                    if candidate.retained_counted
+                    else 0
+                ),
             )
-            candidate.retained_counted = False
+        )
+        candidate.retained_counted = False
+        # ^^^ THOG
         candidate.tensor = None
         candidate.materialisation_start_event = None
         candidate.completion_event = None
@@ -532,10 +554,12 @@ class PrematRuntime:
             "consumed",
             outcome="consumption_complete",
         )
+        self._resolve_pending_releases()
         self._advance()
 
     def report(self) -> Dict[str, object]:
         self._resolve_pending_timings()
+        self._resolve_pending_releases()
         candidates = [
             self._candidate_payload(candidate)
             for candidate in sorted(
@@ -671,6 +695,7 @@ class PrematRuntime:
 
     def _refresh_available(self) -> None:
         self._resolve_pending_timings()
+        self._resolve_pending_releases()
         for candidate in self._candidates.values():
             if (
                 candidate.state != CandidateState.MATERIALISING
@@ -691,6 +716,8 @@ class PrematRuntime:
 
     def _advance(self) -> None:
         self._refresh_available()
+        if self._pending_releases:
+            return
         if any(
             item.state == CandidateState.MATERIALISING
             for item in self._candidates.values()
@@ -793,6 +820,22 @@ class PrematRuntime:
         )
         self._retained_bytes += candidate.envelope.retained_bytes
         candidate.retained_counted = True
+
+    def _resolve_pending_releases(self) -> None:
+        remaining: List[_PendingRelease] = []
+        for release in self._pending_releases:
+            try:
+                complete = bool(release.end_event.query())
+            except RuntimeError:
+                complete = False
+            if not complete:
+                remaining.append(release)
+                continue
+            self._retained_bytes = max(
+                0,
+                self._retained_bytes - release.retained_bytes,
+            )
+        self._pending_releases = remaining
 
     def _transition(
         self,
