@@ -64,3 +64,8 @@
 - A19 profiler proof of real stream overlap and A21 representative steady-state speed benefit require a CUDA host and remain unexecuted.
 - Peak-envelope stress under shared-device pressure also remains a CUDA-host task.
 - The feature remains default-off. It must not be made default-on unless the required A19 and A21 evidence passes.
+
+## 2026-09-08 - Publication
+
+- Published implementation commit `32b94f59fec30688deca166f2623d7d5cc849e41` through the GitHub connector.
+- Advanced the named branch with a non-forced fast-forward and verified the remote head before handoff.

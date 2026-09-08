@@ -52,5 +52,5 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 
 ## Publication
 
-- [ ] Push the completed tree through the GitHub connector.
-- [ ] Verify the remote branch head and provide the download stanza.
+- [x] Push the completed tree through the GitHub connector.
+- [x] Verify the remote branch head and provide the download stanza.
