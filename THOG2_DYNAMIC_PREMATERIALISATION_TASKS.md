@@ -106,3 +106,14 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Update the checkpoint lifecycle/gradient regression for direct recomputation.
 - [ ] Re-run L10/P6 on scruffy with this isolation repair.
 - [ ] If L10/P6 passes, re-run L12/P7 and compare peak allocated/reserved memory against the matched Premat-disabled reference.
+
+## 2026-09-08 autograd-transparent correction
+
+- [x] Record the L11/P6 success and L12/P6 OOM boundary after recomputation-stream isolation.
+- [x] Identify differentiable prematerialisation crossing checkpoint boundaries as the underlying incompatibility.
+- [x] Move physical pre-materialisation outside autograd while binding coefficient/depth-row identity at ordinary consumption.
+- [x] Preserve the cached dense allocation for fused QK/QKV binding without a second concatenation.
+- [x] Restore non-reentrant checkpointing and the configured `-S` segment size for Premat runs.
+- [x] Add single-family and fused-bundle forward/gradient equivalence regressions.
+- [ ] Run the focused executable CPU tests in a PyTorch environment.
+- [ ] Re-run L12/P6 and then L12/P7 on scruffy against the matched Premat-disabled reference.

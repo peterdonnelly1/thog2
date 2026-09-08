@@ -46,6 +46,48 @@ DEPTH_MATRIX_FAMILIES = (
 )
 
 
+# vvv THOG bind a no-grad prematerialised value to its ordinary differentiable
+# DEPTH identity only when the layer consumes it.  Physical CUDA timing can
+# therefore move earlier without moving the autograd/checkpoint operation.
+class _PrematerializedDepthBundle(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, cached: Tensor, *coefficient_depth_pairs: Tensor) -> Tensor:
+        if not coefficient_depth_pairs or len(coefficient_depth_pairs) % 2:
+            raise RuntimeError("prematerialised DEPTH binding requires coefficient/depth-row pairs")
+        ctx.save_for_backward(*coefficient_depth_pairs)
+        ctx.row_counts = tuple(
+            int(coefficient_depth_pairs[index].shape[0])
+            for index in range(0, len(coefficient_depth_pairs), 2)
+        )
+        return cached.view_as(cached)
+
+    @staticmethod
+    def backward(ctx, gradient: Tensor):
+        saved = ctx.saved_tensors
+        result = [None]
+        row_start = 0
+        for pair_index, row_count in enumerate(ctx.row_counts):
+            coefficient = saved[2 * pair_index]
+            depth_row = saved[2 * pair_index + 1]
+            family_gradient = gradient[row_start : row_start + row_count]
+            coefficient_input = 1 + 2 * pair_index
+            depth_input = coefficient_input + 1
+            coefficient_gradient = (
+                torch.einsum("rc,p->rcp", family_gradient, depth_row)
+                if ctx.needs_input_grad[coefficient_input]
+                else None
+            )
+            depth_gradient = (
+                torch.einsum("rc,rcp->p", family_gradient, coefficient)
+                if ctx.needs_input_grad[depth_input]
+                else None
+            )
+            result.extend((coefficient_gradient, depth_gradient))
+            row_start += row_count
+        return tuple(result)
+# ^^^ THOG
+
+
 # vvv THOG model-wide prepared transition keeps the old model untouched until verification passes
 @dataclass(frozen=True)
 class PlasticDepthCoefficientReplacement:
@@ -711,6 +753,44 @@ class DepthTrajectory(nn.Module):
         if representation == "legacy_sheet_col":
             return self._materialize_legacy_vector(name, layer_index)
         return self._materialize_conventional_parameter(name, layer_index)
+
+    # vvv THOG no copied dense tensor is created here: the cached value keeps
+    # its storage while the custom autograd node supplies the exact linear
+    # coefficient/depth-row derivatives of ordinary materialisation.
+    def attach_prematerialized(
+        self,
+        names: Tuple[str, ...],
+        layer_index: int,
+        generated: Tensor,
+    ) -> Tensor:
+        if not names:
+            raise ValueError("prematerialised DEPTH binding requires at least one family")
+        if not torch.is_grad_enabled():
+            return generated
+        pairs = []
+        expected_rows = 0
+        expected_width: Optional[int] = None
+        for name in names:
+            item = self.family_metadata(name)
+            if self._representation(item) != "depth_coefficients":
+                raise RuntimeError(
+                    f"prematerialised family {name} is not represented by DEPTH coefficients"
+                )
+            coefficient = self.coefficients[name]
+            depth_row = self._depth_row(layer_index, coefficient)
+            pairs.extend((coefficient, depth_row))
+            expected_rows += item.output_rows
+            expected_width = item.row_width if expected_width is None else expected_width
+            if item.row_width != expected_width:
+                raise RuntimeError("prematerialised DEPTH bundle has inconsistent row widths")
+        expected_shape = (expected_rows, int(expected_width))
+        if tuple(generated.shape) != expected_shape:
+            raise RuntimeError(
+                f"prematerialised DEPTH bundle has shape {tuple(generated.shape)}; "
+                f"expected {expected_shape}"
+            )
+        return _PrematerializedDepthBundle.apply(generated.detach(), *pairs)
+    # ^^^ THOG
 
     def materialize_vector(self, name: str, layer_index: int) -> Tensor:
         generated = self.materialize(name, layer_index)

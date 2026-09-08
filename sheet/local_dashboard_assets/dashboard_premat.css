@@ -48,6 +48,12 @@
 .premat-layer > header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
 .premat-layer > header span { color: #777f8c; font-size: 11px; }
 .premat-stage-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.premat-stage-arrow {
+  align-self: center;
+  color: #8b929c;
+  font-size: 15px;
+  line-height: 1;
+}
 .premat-stage {
   min-width: 52px;
   padding: 7px 8px;

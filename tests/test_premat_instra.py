@@ -208,8 +208,9 @@ console.log(JSON.stringify({{
         check=True,
     )
     rendered = json.loads(completed.stdout)
-    assert rendered["layers"].index("lookahead · l+1") < rendered["layers"].index("current · l")
+    assert rendered["layers"].index("lookahead · layer 5") < rendered["layers"].index("current · layer 4")
     assert "premat-neutral" in rendered["layers"]
+    assert "premat-stage-arrow" in rendered["layers"]
     assert "probabilities × V" in rendered["layers"]
     assert "Process reserved" in rendered["memory"]
     assert "global_device_buffer" in rendered["memory"]

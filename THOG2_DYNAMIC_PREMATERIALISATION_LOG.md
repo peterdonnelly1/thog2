@@ -118,3 +118,13 @@
 - Those single-layer auxiliary-stream materialisations added no useful overlap while creating a second allocator-stream lifetime during the largest backward allocations. This is the remaining Premat-specific memory-path difference after one-layer checkpointing and expandable allocator segments.
 - Reentrant backward now bypasses the Premat runtime and materialises its single replayed layer on the ordinary main stream. The original checkpointed forward retains whole-model l/l+1 scheduling, and Premat-disabled checkpoint behaviour is unchanged.
 - Updated the CPU checkpoint regression to require a single outer Premat pass, gradient-equivalent direct recomputation, effective one-layer replay, and clean pass shutdown.
+
+## 2026-09-08 - Autograd-transparent Premat correction
+
+- Scruffy improved to L11/P6 but L12/P6 still OOMed, confirming that removing the recomputation-side CUDA stream reduced rather than eliminated the regression.
+- The remaining cause was architectural: Premat had moved differentiable weight-materialisation operations to their physical prefetch time, sometimes across activation-checkpoint boundaries. The earlier checkpoint repairs changed checkpoint mode and segment size to accommodate that ordering.
+- Corrected the ownership rule: physical weight generation now runs without autograd at admission time; the cached numerical tensor is bound to its DEPTH coefficients and depth row only at the ordinary consumption point.
+- The binding uses the exact linear DEPTH derivatives for single families and fused QK/QKV bundles without copying the cached dense tensor. Admission timing can therefore vary between original execution and recomputation without changing checkpoint-visible operation order or gradients.
+- Restored the established non-reentrant activation-checkpoint implementation and the user's configured segment size. Premat no longer selects a different checkpoint algorithm merely because it is enabled.
+- Added CPU forward/gradient equivalence coverage for both a single materialised family and a fused QKV bundle, plus configured-segment checkpoint lifecycle coverage.
+- The intermediate nested-reentrant checkpoint experiment was rejected before publication.

@@ -48,14 +48,16 @@ function premat_stage_markup(layer_index, label, family, candidates) {
 }
 
 function premat_layer_markup(layer_index, role, snapshot, candidates) {
-  if (layer_index === null || layer_index === undefined) {
-    return `<article class="premat-layer"><header><strong>${role}</strong><span>none</span></header><div class="premat-stage-row"><span class="premat-stage">—</span></div></article>`;
-  }
   const attention = snapshot.attention_mode === "unfused"
     ? [["QK","QK"],["score",null],["scale / mask",null],["softmax",null],["V","V"],["probabilities × V",null],["O","O"]]
     : [["QKV","QKV"],["SDPA","SDPA"],["O","O"]];
   const stages = [["LN1",null], ...attention, ["resid",null], ["LN2",null], ["UP","UP"], ["GELU",null], ["DOWN","DOWN"], ["resid",null]];
-  return `<article class="premat-layer"><header><strong>${role}</strong><span>logical layer ${layer_index}</span></header><div class="premat-stage-row">${stages.map(([label, family]) => premat_stage_markup(layer_index, label, family, candidates)).join("")}</div></article>`;
+  const resolved_layer = layer_index === null || layer_index === undefined ? null : layer_index;
+  const layer_label = resolved_layer === null ? "no next layer" : `layer ${resolved_layer}`;
+  const stage_markup = stages
+    .map(([label, family]) => premat_stage_markup(resolved_layer, label, family, candidates))
+    .join('<span class="premat-stage-arrow" aria-hidden="true">→</span>');
+  return `<article class="premat-layer"><header><strong>${role} · ${layer_label}</strong></header><div class="premat-stage-row">${stage_markup}</div></article>`;
 }
 
 function premat_pair(value, other) {
@@ -124,14 +126,14 @@ function render_premat(payload) {
   ];
   const queue_head = snapshot.queue_head || memory.next_candidate;
   const queue_label = queue_head
-    ? `l${queue_head.layer_index} ${queue_head.family}${queue_head.deferred ? ` · defer: ${queue_head.admission_reason}` : ""}`
+    ? `layer ${queue_head.layer_index} ${queue_head.family}${queue_head.deferred ? ` · defer: ${queue_head.admission_reason}` : ""}`
     : "none";
   memory_items.push(["Next candidate", queue_label]);
   by_id("premat_memory").innerHTML = memory_items.map(([label, value]) => `<div class="premat-memory-item"><span>${premat_escape(label)}</span><strong>${typeof value === "number" ? premat_bytes(value) : premat_escape(value)}</strong></div>`).join("");
   const candidates = premat_candidate_map(snapshot);
   by_id("premat_layers").innerHTML =
-    premat_layer_markup(snapshot.next_layer_index, "lookahead · l+1", snapshot, candidates)
-    + premat_layer_markup(snapshot.current_layer_index, "current · l", snapshot, candidates);
+    premat_layer_markup(snapshot.next_layer_index, "lookahead", snapshot, candidates)
+    + premat_layer_markup(snapshot.current_layer_index, "current", snapshot, candidates);
   const events = premat_visible_events(snapshot);
   by_id("premat_event_count").textContent = total_events > shown_events
     ? `${events.length} shown · ${total_events} total`

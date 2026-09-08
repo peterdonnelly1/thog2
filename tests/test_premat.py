@@ -426,7 +426,7 @@ class _CpuCheckpointPrematRuntime:
         assert self.active
 
 
-def test_checkpointed_premat_bypasses_auxiliary_stream_during_recompute_on_cpu() -> None:
+def test_checkpointed_premat_preserves_configured_segments_and_gradients_on_cpu() -> None:
     common = dict(
         block_size=4,
         vocab_size=16,
@@ -478,11 +478,77 @@ def test_checkpointed_premat_bypasses_auxiliary_stream_during_recompute_on_cpu()
             atol=1.0e-6,
         )
 
-    assert checkpointed.last_execution_report.segment_size == 1
-    assert [entry["layers"] for entry in fake_runtime.passes] == [(0, 1, 2, 3)]
-    assert [entry["grad_enabled"] for entry in fake_runtime.passes] == [True]
+    assert checkpointed.last_execution_report.segment_size == 2
+    assert [entry["layers"] for entry in fake_runtime.passes] == [
+        (0, 1, 2, 3),
+        (2, 3),
+        (0, 1),
+    ]
+    assert all(entry["grad_enabled"] for entry in fake_runtime.passes)
     assert all(entry["ended"] for entry in fake_runtime.passes)
     assert not fake_runtime.active
+
+
+@pytest.mark.parametrize(
+    "family_names",
+    (
+        ("attention_output_weight",),
+        (
+            "attention_query_weight",
+            "attention_key_weight",
+            "attention_value_weight",
+        ),
+    ),
+)
+def test_prematerialized_depth_binding_matches_ordinary_autograd_on_cpu(
+    family_names,
+) -> None:
+    model = SheetGPT(
+        SheetGPTConfig(
+            block_size=4,
+            vocab_size=16,
+            n_layer=3,
+            n_head=2,
+            n_embd=8,
+            dropout=0.0,
+            bias=True,
+            depth_order=2,
+            base_row_order=1,
+            geometry_preset="depth",
+            basis_family="chebyshev",
+            direct_factorised_mlp=False,
+        )
+    )
+    trajectory = model.trajectory
+    layer_index = 1
+    ordinary = torch.cat(
+        tuple(trajectory.materialize(name, layer_index) for name in family_names),
+        dim=0,
+    )
+    multiplier = torch.linspace(0.25, 1.25, ordinary.numel()).reshape_as(ordinary)
+    (ordinary * multiplier).sum().backward()
+    expected_gradients = {
+        name: trajectory.coefficients[name].grad.detach().clone()
+        for name in family_names
+    }
+    model.zero_grad(set_to_none=True)
+    with torch.no_grad():
+        cached = torch.cat(
+            tuple(trajectory.materialize(name, layer_index) for name in family_names),
+            dim=0,
+        )
+    attached = trajectory.attach_prematerialized(
+        tuple(family_names),
+        layer_index,
+        cached,
+    )
+    torch.testing.assert_close(attached, ordinary.detach())
+    (attached * multiplier).sum().backward()
+    for name in family_names:
+        torch.testing.assert_close(
+            trajectory.coefficients[name].grad,
+            expected_gradients[name],
+        )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA acceptance host required")

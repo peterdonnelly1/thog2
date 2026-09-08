@@ -181,6 +181,7 @@ class _PendingCudaTiming:
 
 
 MaterializeCandidate = Callable[[str, int], Tensor]
+AttachCandidate = Callable[[str, int, Tensor], Tensor]
 PrematLiveReporter = Callable[[Mapping[str, object]], None]
 PrematLiveCapturePredicate = Callable[[], bool]
 
@@ -209,6 +210,7 @@ class PrematRuntime:
         self,
         *,
         materialize: MaterializeCandidate,
+        attach: Optional[AttachCandidate] = None,
         n_embd: int,
         n_head: int,
         attention_mode: str,
@@ -217,6 +219,7 @@ class PrematRuntime:
         logging_enabled: bool,
     ) -> None:
         self._materialize = materialize
+        self._attach = attach or (lambda _family, _layer_index, tensor: tensor)
         self._n_embd = int(n_embd)
         self._n_head = int(n_head)
         self._attention_mode = attention_mode
@@ -457,7 +460,8 @@ class PrematRuntime:
             materialise_end = torch.cuda.Event(enable_timing=True)
             materialise_start.record(current_stream)
             try:
-                candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
+                with torch.no_grad():
+                    candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
             except BaseException as error:
                 self._record(
                     "main_materialisation_failed",
@@ -500,7 +504,12 @@ class PrematRuntime:
             raise RuntimeError(f"premat candidate {key} cannot be acquired from {candidate.state.value}")
         if candidate.tensor is None:
             raise RuntimeError(f"premat candidate {key} has no tensor at its deadline")
-        return candidate.tensor
+        return self._attach(candidate.family, candidate.layer_index, candidate.tensor)
+
+    def materialize_for_consumption(self, family: str, layer_index: int) -> Tensor:
+        with torch.no_grad():
+            generated = self._materialize(family, layer_index)
+        return self._attach(family, layer_index, generated)
 
     def consumed(self, family: str, layer_index: int) -> None:
         key = (int(layer_index), str(family))
@@ -741,10 +750,11 @@ class PrematRuntime:
                 )
                 candidate.completion_event = torch.cuda.Event(enable_timing=True)
                 candidate.materialisation_start_event.record(self._stream)
-                candidate.tensor = self._materialize(
-                    candidate.family,
-                    candidate.layer_index,
-                )
+                with torch.no_grad():
+                    candidate.tensor = self._materialize(
+                        candidate.family,
+                        candidate.layer_index,
+                    )
                 actual_retained_bytes = int(
                     candidate.tensor.numel() * candidate.tensor.element_size()
                 )

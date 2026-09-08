@@ -828,8 +828,8 @@ class TrainingSheetGPT(SheetGPT):
             regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
             premat_layer_indices = tuple(range(self.config.n_layer)) if layer_indices is None else layer_indices
             # vvv THOG the original checkpointed forward owns one whole-model pass,
-            # preserving l+1 lookahead.  Reentrant backward closures replay one
-            # layer on the main stream because they have no l+1 opportunity.
+            # preserving l+1 lookahead.  Checkpoint recomputation owns fresh
+            # segment-local physical scheduling; autograd binds only at consume.
             premat_owned = self._premat_begin_pass(premat_layer_indices, hidden)
             # ^^^ THOG
             try:

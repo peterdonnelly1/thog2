@@ -15,10 +15,9 @@ RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Te
 # ^^^ THOG
 
 
-# vvv THOG reentrant checkpoint recomputation runs a single logical layer and
-# therefore has no l+1 work to overlap.  Starting the auxiliary stream there
-# only fragments allocator pools during backward, so recomputation deliberately
-# takes the ordinary main-stream materialisation path.
+# vvv THOG activation-checkpoint recomputation owns fresh pass-local premat
+# state when the outer forward has ended.  Prematerialised values bind to
+# autograd only at consumption, so checkpoint operation ordering stays stable.
 def _begin_premat_segment(
     logical_block: LogicalBlock,
     layer_indices: Sequence[int],
@@ -27,11 +26,6 @@ def _begin_premat_segment(
     owner = getattr(logical_block, "__self__", None)
     begin = getattr(owner, "_premat_begin_pass", None)
     if owner is None or not callable(begin):
-        return owner, False
-    if (
-        torch.is_grad_enabled()
-        and getattr(owner, "_premat_runtime", None) is not None
-    ):
         return owner, False
     return owner, bool(begin(tuple(layer_indices), reference))
 
@@ -42,28 +36,11 @@ def _end_premat_segment(owner: object, owned: bool) -> None:
         end(owned)
 
 
-def _premat_requires_reentrant_checkpoint(logical_block: LogicalBlock) -> bool:
-    """Keep adaptive premat scheduling outside non-reentrant saved-tensor matching."""
-    owner = getattr(logical_block, "__self__", None)
-    return owner is not None and getattr(owner, "_premat_runtime", None) is not None
-
-
 def _effective_checkpoint_segment_size(
     logical_block: LogicalBlock,
     configured_segment_size: int,
 ) -> int:
-    """Bound reentrant recomputation to one logical layer for Premat.
-
-    Reentrant checkpointing must replay an entire checkpoint function during
-    backward.  Replaying a multi-layer segment constructs the whole segment's
-    autograd graph at once, defeating the configured activation-memory bound.
-    Premat therefore keeps the user's checkpointing switch but uses one-layer
-    recomputation segments.  That single-layer replay materialises on the main
-    stream because no next layer exists to pre-materialise; the ordinary
-    non-Premat path remains unchanged.
-    """
-    if configured_segment_size > 0 and _premat_requires_reentrant_checkpoint(logical_block):
-        return 1
+    """Premat preserves the configured checkpoint boundary."""
     return configured_segment_size
 # ^^^ THOG
 
@@ -168,9 +145,9 @@ def execute_logical_layers(
             hidden = checkpoint(
                 run_segment,
                 hidden,
-                # vvv THOG premat admission can legitimately differ as CUDA headroom
-                # changes; reentrant checkpointing records only the fresh recompute.
-                use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+                # vvv THOG premat's physical scheduling is autograd-transparent,
+                # so the established non-reentrant checkpoint path is retained.
+                use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
             )
@@ -222,7 +199,7 @@ def execute_logical_layers(
             run_sparse_segment,
             hidden,
             # vvv THOG see the dense checkpoint path above
-            use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+            use_reentrant=False,
             # ^^^ THOG
             preserve_rng_state=True,
         )
@@ -301,7 +278,7 @@ def execute_logical_layer_checkpoints(
                 run_segment,
                 hidden,
                 # vvv THOG PLASTIC prefix segments use the same safe premat boundary
-                use_reentrant=_premat_requires_reentrant_checkpoint(logical_block),
+                use_reentrant=False,
                 # ^^^ THOG
                 preserve_rng_state=True,
             )

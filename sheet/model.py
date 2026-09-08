@@ -558,6 +558,7 @@ class SheetGPT(nn.Module):
                 raise ValueError("--premat enabled currently requires the DEPTH trajectory")
             self._premat_runtime = PrematRuntime(
                 materialize=self._premat_materialize_candidate,
+                attach=self._premat_attach_candidate,
                 n_embd=config.n_embd,
                 n_head=config.n_head,
                 attention_mode=config.premat_attention_mode,
@@ -613,6 +614,30 @@ class SheetGPT(nn.Module):
         except KeyError as exc:
             raise KeyError(f"unknown premat candidate family: {family}") from exc
 
+    def _premat_attach_candidate(
+        self,
+        family: str,
+        layer_index: int,
+        generated: Tensor,
+    ) -> Tensor:
+        family_names = {
+            "QKV": (
+                "attention_query_weight",
+                "attention_key_weight",
+                "attention_value_weight",
+            ),
+            "QK": ("attention_query_weight", "attention_key_weight"),
+            "V": ("attention_value_weight",),
+            "O": ("attention_output_weight",),
+            "UP": ("mlp_expansion_weight",),
+            "DOWN": ("mlp_contraction_weight",),
+        }
+        try:
+            names = family_names[family]
+        except KeyError as exc:
+            raise KeyError(f"unknown premat candidate family: {family}") from exc
+        return self.trajectory.attach_prematerialized(names, layer_index, generated)
+
     def _premat_begin_pass(self, layer_indices: Sequence[int], reference: Tensor) -> bool:
         runtime = self._premat_runtime
         if runtime is None or runtime.active:
@@ -636,7 +661,9 @@ class SheetGPT(nn.Module):
 
     def _premat_weight(self, family: str, layer_index: int) -> Tensor:
         if self._premat_runtime is None or not self._premat_runtime.active:
-            return self._premat_materialize_candidate(family, layer_index)
+            if self._premat_runtime is None:
+                return self._premat_materialize_candidate(family, layer_index)
+            return self._premat_runtime.materialize_for_consumption(family, layer_index)
         return self._premat_runtime.acquire(family, layer_index)
 
     def _premat_consumed(self, family: str, layer_index: int) -> None:
