@@ -81,6 +81,7 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Display the total event sequence separately from the newest 256 retained table events.
 - [x] Add live publication, bounded-writer, count-label, and polling-cadence regressions.
 - [x] Re-run static Python, JavaScript, shell, whitespace, and direct persistence-writer checks.
+- [x] Publish and verify the live/fragmentation follow-up through the GitHub connector.
 - [ ] Re-run L10/P6 on scruffy with the new allocator default and compare peak allocated/reserved values.
 - [ ] If L10/P6 passes, probe L12/P7 against the matched non-Premat reference before declaring DPE-SAFE-005 satisfied.
 - [ ] Verify that the Instra event sequence increments during an update and that l/l+1 promotes at human-visible cadence.
