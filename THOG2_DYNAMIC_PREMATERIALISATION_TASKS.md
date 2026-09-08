@@ -95,3 +95,14 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Keep playback control isolated from training and telemetry capture.
 - [x] Run static Python, JavaScript, shell, and whitespace checks.
 - [ ] Confirm on scruffy that `-l 10` produces live captures at updates 1, 10, 20, ... and that all five playback speeds work.
+
+## 2026-09-08 backward-stream memory isolation
+
+- [x] Attribute the remaining L10/P6 regression to the Premat-specific checkpoint recomputation path rather than an up-front stream reservation or retained candidate tensor.
+- [x] Confirm one-layer reentrant replay has no l+1 candidate and therefore no useful Premat overlap.
+- [x] Bypass the auxiliary Premat stream during gradient-bearing checkpoint recomputation.
+- [x] Preserve whole-model l/l+1 Premat scheduling during the original checkpointed forward.
+- [x] Keep Premat-disabled checkpoint execution unchanged.
+- [x] Update the checkpoint lifecycle/gradient regression for direct recomputation.
+- [ ] Re-run L10/P6 on scruffy with this isolation repair.
+- [ ] If L10/P6 passes, re-run L12/P7 and compare peak allocated/reserved memory against the matched Premat-disabled reference.

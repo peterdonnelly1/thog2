@@ -15,7 +15,10 @@ RegionalSegmentRunnerFactory = Callable[[Tuple[int, ...]], Callable[[Tensor], Te
 # ^^^ THOG
 
 
-# vvv THOG activation-checkpoint recomputation owns fresh pass-local premat state when the outer forward has ended
+# vvv THOG reentrant checkpoint recomputation runs a single logical layer and
+# therefore has no l+1 work to overlap.  Starting the auxiliary stream there
+# only fragments allocator pools during backward, so recomputation deliberately
+# takes the ordinary main-stream materialisation path.
 def _begin_premat_segment(
     logical_block: LogicalBlock,
     layer_indices: Sequence[int],
@@ -24,6 +27,11 @@ def _begin_premat_segment(
     owner = getattr(logical_block, "__self__", None)
     begin = getattr(owner, "_premat_begin_pass", None)
     if owner is None or not callable(begin):
+        return owner, False
+    if (
+        torch.is_grad_enabled()
+        and getattr(owner, "_premat_runtime", None) is not None
+    ):
         return owner, False
     return owner, bool(begin(tuple(layer_indices), reference))
 
@@ -50,7 +58,9 @@ def _effective_checkpoint_segment_size(
     backward.  Replaying a multi-layer segment constructs the whole segment's
     autograd graph at once, defeating the configured activation-memory bound.
     Premat therefore keeps the user's checkpointing switch but uses one-layer
-    recomputation segments; the ordinary non-Premat path remains unchanged.
+    recomputation segments.  That single-layer replay materialises on the main
+    stream because no next layer exists to pre-materialise; the ordinary
+    non-Premat path remains unchanged.
     """
     if configured_segment_size > 0 and _premat_requires_reentrant_checkpoint(logical_block):
         return 1

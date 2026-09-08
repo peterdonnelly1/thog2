@@ -426,7 +426,7 @@ class _CpuCheckpointPrematRuntime:
         assert self.active
 
 
-def test_checkpointed_premat_uses_fresh_reentrant_segment_passes_on_cpu() -> None:
+def test_checkpointed_premat_bypasses_auxiliary_stream_during_recompute_on_cpu() -> None:
     common = dict(
         block_size=4,
         vocab_size=16,
@@ -479,20 +479,8 @@ def test_checkpointed_premat_uses_fresh_reentrant_segment_passes_on_cpu() -> Non
         )
 
     assert checkpointed.last_execution_report.segment_size == 1
-    assert [entry["layers"] for entry in fake_runtime.passes] == [
-        (0, 1, 2, 3),
-        (3,),
-        (2,),
-        (1,),
-        (0,),
-    ]
-    assert [entry["grad_enabled"] for entry in fake_runtime.passes] == [
-        True,
-        True,
-        True,
-        True,
-        True,
-    ]
+    assert [entry["layers"] for entry in fake_runtime.passes] == [(0, 1, 2, 3)]
+    assert [entry["grad_enabled"] for entry in fake_runtime.passes] == [True]
     assert all(entry["ended"] for entry in fake_runtime.passes)
     assert not fake_runtime.active
 

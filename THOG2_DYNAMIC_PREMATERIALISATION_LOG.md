@@ -110,3 +110,11 @@
 - Added a browser-only playback buffer and a 0.25×, 0.5×, 1×, 2×, 4× slider. Playback speed affects only how quickly already-polled frames are presented; it cannot affect training, CUDA scheduling, local capture, or W&B traffic.
 - The client queue is bounded to 128 frames and the training-side writer remains latest-only, preventing either slow playback or disk latency from creating unbounded memory growth in the training process.
 - Python compilation, JavaScript syntax, shell syntax, and whitespace validation pass in the current environment.
+
+## 2026-09-08 - Backward-stream memory isolation
+
+- The updated scruffy boundary is L9/P5 and L10/P5 successful, with L10/P6 failing. This confirms a Premat-path regression relative to the matched non-Premat L12/P7 reference.
+- The active whole-model forward is the only phase with an l+1 scheduling opportunity. Reentrant checkpoint backward replays exactly one logical layer, so its fresh Premat pass could only put the current layer's materialisation on the auxiliary stream; it could never pre-materialise l+1.
+- Those single-layer auxiliary-stream materialisations added no useful overlap while creating a second allocator-stream lifetime during the largest backward allocations. This is the remaining Premat-specific memory-path difference after one-layer checkpointing and expandable allocator segments.
+- Reentrant backward now bypasses the Premat runtime and materialises its single replayed layer on the ordinary main stream. The original checkpointed forward retains whole-model l/l+1 scheduling, and Premat-disabled checkpoint behaviour is unchanged.
+- Updated the CPU checkpoint regression to require a single outer Premat pass, gradient-equivalent direct recomputation, effective one-layer replay, and clean pass shutdown.
