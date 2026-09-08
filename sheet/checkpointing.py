@@ -38,6 +38,23 @@ def _premat_requires_reentrant_checkpoint(logical_block: LogicalBlock) -> bool:
     """Keep adaptive premat scheduling outside non-reentrant saved-tensor matching."""
     owner = getattr(logical_block, "__self__", None)
     return owner is not None and getattr(owner, "_premat_runtime", None) is not None
+
+
+def _effective_checkpoint_segment_size(
+    logical_block: LogicalBlock,
+    configured_segment_size: int,
+) -> int:
+    """Bound reentrant recomputation to one logical layer for Premat.
+
+    Reentrant checkpointing must replay an entire checkpoint function during
+    backward.  Replaying a multi-layer segment constructs the whole segment's
+    autograd graph at once, defeating the configured activation-memory bound.
+    Premat therefore keeps the user's checkpointing switch but uses one-layer
+    recomputation segments; the ordinary non-Premat path remains unchanged.
+    """
+    if configured_segment_size > 0 and _premat_requires_reentrant_checkpoint(logical_block):
+        return 1
+    return configured_segment_size
 # ^^^ THOG
 
 
@@ -101,6 +118,7 @@ def execute_logical_layers(
         and torch.is_grad_enabled()
         and segment_size > 0
     )
+    effective_segment_size = _effective_checkpoint_segment_size(logical_block, segment_size)
 
     # vvv THOG preserve the pre-layer-dropout fast path byte-for-byte in its inner loops unless regional compilation explicitly supplies segment runners
     if layer_indices is None:
@@ -115,8 +133,8 @@ def execute_logical_layers(
             )
 
         checkpoint_segments = 0
-        for start in range(0, n_layer, segment_size):
-            end = min(start + segment_size, n_layer)
+        for start in range(0, n_layer, effective_segment_size):
+            end = min(start + effective_segment_size, n_layer)
 
             if regional_segment_runner_factory is None:
                 def run_segment(
@@ -152,7 +170,7 @@ def execute_logical_layers(
             checkpointing_used=True,
             checkpoint_segments=checkpoint_segments,
             logical_layers=n_layer,
-            segment_size=segment_size,
+            segment_size=effective_segment_size,
         )
     # ^^^ THOG
 
@@ -172,8 +190,8 @@ def execute_logical_layers(
         )
 
     checkpoint_segments = 0
-    for start in range(0, active_count, segment_size):
-        end = min(start + segment_size, active_count)
+    for start in range(0, active_count, effective_segment_size):
+        end = min(start + effective_segment_size, active_count)
         segment_indices = active_layer_indices[start:end]
 
         def run_sparse_segment(
@@ -204,7 +222,7 @@ def execute_logical_layers(
         checkpointing_used=True,
         checkpoint_segments=checkpoint_segments,
         logical_layers=active_count,
-        segment_size=segment_size,
+        segment_size=effective_segment_size,
     )
     # ^^^ THOG
 
@@ -240,13 +258,14 @@ def execute_logical_layer_checkpoints(
         )
 
     use_checkpointing = training and torch.is_grad_enabled() and segment_size > 0
+    effective_segment_size = _effective_checkpoint_segment_size(logical_block, segment_size)
     outputs = []
     checkpoint_segments = 0
     position = 0
     count_set = set(counts)
     while position < len(active_layer_indices):
         if use_checkpointing:
-            regular_end = min(position + segment_size, len(active_layer_indices))
+            regular_end = min(position + effective_segment_size, len(active_layer_indices))
             candidate_boundaries = [count for count in counts if position < count <= regular_end]
             end = min(candidate_boundaries) if candidate_boundaries else regular_end
         else:
@@ -287,7 +306,7 @@ def execute_logical_layer_checkpoints(
         checkpointing_used=use_checkpointing,
         checkpoint_segments=checkpoint_segments,
         logical_layers=len(active_layer_indices),
-        segment_size=segment_size,
+        segment_size=effective_segment_size,
     )
 # ^^^ THOG
 

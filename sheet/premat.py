@@ -114,10 +114,11 @@ def decide_candidate_admission(
     gpu_memory_buffer_bytes: int,
 ) -> AdmissionDecision:
     predicted_process = observation.process_allocated_bytes + envelope.process_envelope_bytes
-    physical_growth = max(
-        0,
-        envelope.process_envelope_bytes - observation.reusable_allocator_bytes,
-    )
+    # A CUDA allocator's reserved-but-unused total is not a promise that a
+    # suitably sized block is reusable, especially across streams.  Charge the
+    # complete envelope to physical device use so fragmentation cannot turn an
+    # admitted prefetch into an OOM.
+    physical_growth = envelope.process_envelope_bytes
     predicted_device_used = observation.device_used_bytes + physical_growth
     device_ceiling = max(0, observation.device_total_bytes - gpu_memory_buffer_bytes)
     process_ok = (
@@ -147,9 +148,7 @@ def decide_candidate_admission(
         ),
         device_headroom_bytes=max(
             0,
-            observation.reusable_allocator_bytes
-            + observation.device_free_bytes
-            - gpu_memory_buffer_bytes,
+            observation.device_free_bytes - gpu_memory_buffer_bytes,
         ),
     )
 
@@ -946,9 +945,7 @@ class PrematRuntime:
         )
         device_headroom = max(
             0,
-            resolved.reusable_allocator_bytes
-            + resolved.device_free_bytes
-            - self._buffer_bytes,
+            resolved.device_free_bytes - self._buffer_bytes,
         )
         premat_headroom = (
             min(process_headroom, device_headroom)
@@ -1015,9 +1012,7 @@ class PrematRuntime:
             )
             device_headroom = max(
                 0,
-                observation.reusable_allocator_bytes
-                + observation.device_free_bytes
-                - self._buffer_bytes,
+                observation.device_free_bytes - self._buffer_bytes,
             )
             headroom_bytes = (
                 min(process_headroom, device_headroom)

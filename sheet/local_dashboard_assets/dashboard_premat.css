@@ -1,21 +1,5 @@
 /* vvv THOG dedicated Premat l/l+1 lifecycle view */
 .premat-group { padding: 0 18px 20px; }
-.premat-tabs {
-  display: inline-flex;
-  overflow: hidden;
-  border: 1px solid var(--border, #dfe2e7);
-  border-radius: 6px;
-}
-.premat-tabs button {
-  border: 0;
-  border-right: 1px solid var(--border, #dfe2e7);
-  padding: 6px 10px;
-  background: #fff;
-  color: #666e79;
-  cursor: pointer;
-}
-.premat-tabs button:last-child { border-right: 0; }
-.premat-tabs button.selected { background: #444c58; color: #fff; }
 .premat-header {
   display: flex;
   align-items: center;

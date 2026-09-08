@@ -590,7 +590,7 @@ if (app.figures && app.current_run_id) {
 // vvv THOG
 // W&B-like per-artifact navigation and Overview. Charts remains the default;
 // Files is the navigable instra/W&B browser; Logs and Artifacts remain placeholders.
-const local_detail_tabs = Object.freeze(["charts", "overview", "logs", "files", "artifacts"]);
+const local_detail_tabs = Object.freeze(["charts", "premat", "overview", "logs", "files", "artifacts"]);
 let local_active_detail_tab = "charts";
 
 function local_first_present(object, keys, fallback = "—") {
@@ -827,13 +827,15 @@ function local_apply_detail_tab() {
     button.classList.toggle("active", active); button.setAttribute("aria-selected", String(active));
   });
   const charts = local_active_detail_tab === "charts";
+  const premat = local_active_detail_tab === "premat";
   const overview = local_active_detail_tab === "overview";
   const files = local_active_detail_tab === "files";
   by_id("charts_empty").hidden = has_run || !charts;
-  by_id("charts_scroll").hidden = !has_run || !charts;
+  by_id("charts_scroll").hidden = !has_run || (!charts && !premat);
   by_id("run_overview_pane").hidden = !has_run || !overview;
   by_id("files_workspace").hidden = !has_run || !files;
-  by_id("run_blank_detail_pane").hidden = !has_run || charts || overview || files;
+  by_id("run_blank_detail_pane").hidden = !has_run || charts || premat || overview || files;
+  if (typeof window.premat_apply_detail_tab === "function") window.premat_apply_detail_tab(premat);
   if (overview && has_run) local_render_overview();
   if (files && has_run) render_files();
   if (charts && has_run) requestAnimationFrame(() => requestAnimationFrame(resize_visible_plots));
@@ -844,6 +846,7 @@ function local_set_detail_tab(tab_name) {
   if (app.maximized_chart) restore_maximized_chart();
   local_active_detail_tab = tab_name; local_apply_detail_tab();
   if (tab_name === "files") refresh_files();
+  if (tab_name === "premat" && typeof window.premat_refresh === "function") window.premat_refresh();
 }
 
 function local_install_detail_tabs() {

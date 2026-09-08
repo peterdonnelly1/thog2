@@ -163,15 +163,16 @@ def test_peak_free_admission_enforces_process_and_device_guards_separately() -> 
     assert process_blocked.device_guard_passed
 
 
-def test_aggressive_admission_reuses_allocator_cache_without_double_counting() -> None:
+def test_global_admission_does_not_assume_fragmented_allocator_cache_is_reusable() -> None:
     decision = decide_candidate_admission(
         observation=_observation(allocated=100, reserved=180),
         envelope=CandidateEnvelope(50, 75, 0),
         stay_below_current_peak=False,
         gpu_memory_buffer_bytes=480,
     )
-    assert decision.predicted_device_used_bytes == 500
-    assert decision.admitted
+    assert decision.predicted_device_used_bytes == 575
+    assert not decision.admitted
+    assert decision.reason == "global_device_buffer"
 
 
 def test_premat_headroom_flags_are_mutually_exclusive() -> None:
@@ -449,15 +450,18 @@ def test_checkpointed_premat_uses_fresh_reentrant_segment_passes_on_cpu() -> Non
             atol=1.0e-6,
         )
 
+    assert checkpointed.last_execution_report.segment_size == 1
     assert [entry["layers"] for entry in fake_runtime.passes] == [
-        (0, 1),
-        (2, 3),
-        (2, 3),
-        (0, 1),
+        (0, 1, 2, 3),
+        (3,),
+        (2,),
+        (1,),
+        (0,),
     ]
     assert [entry["grad_enabled"] for entry in fake_runtime.passes] == [
-        False,
-        False,
+        True,
+        True,
+        True,
         True,
         True,
     ]

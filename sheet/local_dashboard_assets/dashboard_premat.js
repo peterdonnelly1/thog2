@@ -4,7 +4,6 @@
 const premat_view = {
   run_id: null,
   request_serial: 0,
-  selected_tab: "charts",
   sort_key: "sequence",
   sort_descending: true,
   latest_payload: null,
@@ -80,16 +79,20 @@ function premat_visible_events(snapshot) {
   return events.slice(0, 256);
 }
 
-function premat_sync_tab() {
-  const premat_selected = premat_view.selected_tab === "premat";
-  by_id("charts_tab")?.classList.toggle("selected", !premat_selected);
-  by_id("charts_tab")?.setAttribute("aria-selected", String(!premat_selected));
-  by_id("premat_tab")?.classList.toggle("selected", premat_selected);
-  by_id("premat_tab")?.setAttribute("aria-selected", String(premat_selected));
+function premat_sync_tab(premat_selected = null) {
+  if (premat_selected === null) {
+    premat_selected = Boolean(document.querySelector?.('[data-detail-tab="premat"].active'));
+  }
   const snapshot = premat_view.latest_payload?.latest;
-  by_id("premat_chart_group").hidden = !premat_selected || !snapshot;
+  by_id("premat_chart_group").hidden = !premat_selected;
   by_id("depth_chart_group").hidden = premat_selected;
+  if (premat_selected && !snapshot) {
+    by_id("premat_mode").textContent = "waiting for telemetry";
+    by_id("premat_update").textContent = "No Premat snapshot for this run";
+  }
 }
+
+window.premat_apply_detail_tab = premat_sync_tab;
 
 function render_premat(payload) {
   premat_view.latest_payload = payload;
@@ -156,15 +159,9 @@ async function refresh_premat() {
   }
 }
 
+window.premat_refresh = refresh_premat;
+
 window.addEventListener("DOMContentLoaded", () => {
-  by_id("charts_tab")?.addEventListener("click", () => {
-    premat_view.selected_tab = "charts";
-    premat_sync_tab();
-  });
-  by_id("premat_tab")?.addEventListener("click", () => {
-    premat_view.selected_tab = "premat";
-    premat_sync_tab();
-  });
   by_id("premat_event_filter")?.addEventListener("input", () => {
     if (premat_view.latest_payload) render_premat(premat_view.latest_payload);
   });

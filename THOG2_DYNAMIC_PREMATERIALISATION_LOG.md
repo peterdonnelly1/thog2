@@ -79,3 +79,13 @@
 - Added the missing unconditional `PREMAT:` diagnostics row to `run_thog2_owt.py`; the first real run proved the earlier row in `run_thog2_owt_core.py` was not the active presentation path.
 - Static Python compilation and `git diff --check` pass in the resumed scratch environment. Its Python runtime does not currently contain PyTorch, so the executable test suite cannot be repeated here; CUDA validation remains explicit above.
 - Published repair commit `2ee7d80b6e435484a457d0d436385acb144eb715` through the GitHub connector and verified it is exactly one fast-forward commit after the prior branch head.
+
+## 2026-09-08 - Field-test memory and Instra repair
+
+- Peter's scruffy field test removed the checkpoint metadata mismatch but exposed a first-backward CUDA OOM. The failing allocation was 3.07 GiB with 5.88 GiB allocator-reserved but unallocated.
+- Root cause: the metadata repair selected reentrant checkpointing while retaining configured S4 segments. Reentrant backward reconstructs the complete segment graph, so four logical layers were simultaneously live and defeated the intended activation-memory bound.
+- Premat checkpoint recomputation is now bounded to one logical layer. The original no-gradient forward again owns a whole-model Premat pass, retaining actual l+1 scheduling; each backward recompute gets fresh one-layer state. Non-Premat checkpoint segmentation is unchanged.
+- Device admission now charges the complete candidate envelope against driver-reported free memory and the configured global buffer. It no longer assumes the allocator's aggregate unused reserve contains a reusable block of the required size, closing the fragmentation failure exposed on scruffy.
+- Instra's visible run-detail navigation is generated from a separate fixed tab list. Premat is now registered in that list and controls the shared chart pane directly; the easy-to-miss toolbar toggle was removed.
+- Added/updated focused regressions for gradient-equivalent one-layer Premat recomputation, conservative cache-fragmentation admission, and membership in the actual Instra tab strip.
+- Static Python compilation, JavaScript syntax checks, and whitespace validation pass locally. This resumed container has no pytest executable, so executable unit/CUDA validation remains assigned to the scruffy acceptance run.

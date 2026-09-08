@@ -827,20 +827,10 @@ class TrainingSheetGPT(SheetGPT):
                 )
             regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
             premat_layer_indices = tuple(range(self.config.n_layer)) if layer_indices is None else layer_indices
-            # vvv THOG checkpointed premat must use identical segment lifetimes in the
-            # original forward and backward recomputation.  The checkpoint closures
-            # own those passes; eager execution retains the whole-forward pass.
-            checkpoint_scoped_premat = (
-                self._premat_runtime is not None
-                and self.training
-                and torch.is_grad_enabled()
-                and self.checkpoint_segment_size > 0
-            )
-            premat_owned = (
-                False
-                if checkpoint_scoped_premat
-                else self._premat_begin_pass(premat_layer_indices, hidden)
-            )
+            # vvv THOG the original checkpointed forward owns one whole-model pass,
+            # preserving l+1 lookahead.  Reentrant backward closures begin fresh
+            # one-layer passes after this outer lifetime has ended.
+            premat_owned = self._premat_begin_pass(premat_layer_indices, hidden)
             # ^^^ THOG
             try:
                 if layer_indices is None:

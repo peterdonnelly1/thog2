@@ -71,7 +71,6 @@ def test_premat_view_declares_every_required_lifecycle_visual() -> None:
     ):
         assert stage in javascript
     assert "premat-neutral" in javascript
-    assert "premat_tab" in javascript
     assert "premat_event_filter" in javascript
     for field in (
         "Process reserved",
@@ -82,6 +81,15 @@ def test_premat_view_declares_every_required_lifecycle_visual() -> None:
         "predicted_foreground_overlap_bytes",
     ):
         assert field in javascript
+
+
+def test_premat_is_in_the_actual_instra_run_detail_tab_strip() -> None:
+    asset_root = Path(__file__).resolve().parents[1] / "sheet" / "local_dashboard_assets"
+    navigation = (asset_root / "dashboard_heatmap_patch.js").read_text(encoding="utf-8")
+    index = (asset_root / "index.html").read_text(encoding="utf-8")
+    assert '["charts", "premat", "overview", "logs", "files", "artifacts"]' in navigation
+    assert 'local_active_detail_tab === "premat"' in navigation
+    assert 'id="premat_chart_group"' in index
 
 
 def test_premat_aggregate_persists_without_detailed_snapshot(tmp_path: Path) -> None:
@@ -161,12 +169,11 @@ function element(id) {{
   return elements.get(id);
 }}
 global.by_id = element;
-global.document = {{getElementById: element, querySelectorAll: () => []}};
+global.document = {{getElementById: element, querySelector: () => null, querySelectorAll: () => []}};
 global.window = {{addEventListener() {{}}}};
 global.app = {{current_run_id: null}};
 global.fetch_json = async () => ({{}});
 {asset.read_text(encoding="utf-8")}
-premat_view.selected_tab = "premat";
 render_premat({json.dumps({"latest": snapshot})});
 console.log(JSON.stringify({{
   layers: element("premat_layers").innerHTML,

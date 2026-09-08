@@ -60,3 +60,13 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Push the completed tree through the GitHub connector.
 - [x] Verify the remote branch head and provide the download stanza.
 - [x] Publish and verify the post-publication checkpoint repair commit.
+
+## 2026-09-08 field-test repair
+
+- [x] Diagnose the first-backward OOM as multi-layer reentrant graph reconstruction introduced by the checkpoint metadata repair.
+- [x] Bound Premat reentrant recomputation to one logical layer while preserving whole-forward l+1 scheduling.
+- [x] Stop treating allocator-reserved-but-unused bytes as guaranteed reusable physical capacity.
+- [x] Put Premat in Instra's generated run-detail tab strip instead of a secondary toolbar toggle.
+- [x] Add regressions for effective one-layer recomputation, conservative fragmented-cache admission, and real-tab registration.
+- [ ] Re-run Peter's L8/P4 S4 command on scruffy and compare peak allocated/reserved memory with Premat disabled.
+- [ ] Verify the visible Instra tab and live Premat snapshot on scruffy.
