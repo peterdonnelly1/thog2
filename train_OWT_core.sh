@@ -166,6 +166,7 @@ PREMAT_ATTENTION_MODE="fused"
 PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=false
 PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
 PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
+PREMAT_CUDA_STREAM_PRIORITY="normal"
 PREMAT_LOGGING="disabled"
 PREMAT_INSTRA="disabled"
 FAST_DISCARD_EXPLICIT=false
@@ -284,6 +285,7 @@ PLASTIC DEPTH:
   --plastic__layer_count_probe_noise_lambda VALUE=${PLASTIC_LAYER_COUNT_PROBE_NOISE_LAMBDA}
   --plastic__layer_count_cost_weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}  global CUDA reserve; replaces plastic__layer_count__memory_budget_gib
+  --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
   --plastic__layer_count__cuda_allocator_reserve_gib VALUE=${PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB}
   --plastic__geometry_learning_rate_multiplier VALUE=${PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER}
   --plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup
@@ -296,6 +298,7 @@ Dynamic pre-materialisation:
   --premat_headroom_stay_below_current_peak       default when neither headroom flag is supplied
   --premat_headroom_stay_within_global_buffer
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
+  --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
 
@@ -489,23 +492,25 @@ while (( $# > 0 )); do
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
       shift
       ;;
-    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_logging|--premat_instra)
+    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_logging|--premat_instra)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --premat) PREMAT="$2" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$2" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$2" ;;
+        --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$2" ;;
         --premat_logging) PREMAT_LOGGING="$2" ;;
         --premat_instra) PREMAT_INSTRA="$2" ;;
       esac
       shift 2
       ;;
-    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_logging=*|--premat_instra=*)
+    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_logging=*|--premat_instra=*)
       premat_name="${1%%=*}"; premat_value="${1#*=}"
       case "$premat_name" in
         --premat) PREMAT="$premat_value" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$premat_value" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$premat_value" ;;
+        --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$premat_value" ;;
         --premat_logging) PREMAT_LOGGING="$premat_value" ;;
         --premat_instra) PREMAT_INSTRA="$premat_value" ;;
       esac
@@ -989,6 +994,7 @@ validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_S
 # vvv THOG validate premat independently of PLASTIC and make its early-discard ownership explicit
 case "$PREMAT" in enabled|disabled) ;; *) echo "PREMAT must be enabled or disabled." >&2; exit 2 ;; esac
 case "$PREMAT_ATTENTION_MODE" in fused|unfused) ;; *) echo "PREMAT_ATTENTION_MODE must be fused or unfused." >&2; exit 2 ;; esac
+case "$PREMAT_CUDA_STREAM_PRIORITY" in normal|high) ;; *) echo "PREMAT_CUDA_STREAM_PRIORITY must be normal or high." >&2; exit 2 ;; esac
 case "$PREMAT_LOGGING" in enabled|disabled) ;; *) echo "PREMAT_LOGGING must be enabled or disabled." >&2; exit 2 ;; esac
 case "$PREMAT_INSTRA" in enabled|disabled) ;; *) echo "PREMAT_INSTRA must be enabled or disabled." >&2; exit 2 ;; esac
 validate_true_false "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" "PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK"
@@ -1270,6 +1276,7 @@ run_grid_point() {
   [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == true ]] && optional_args+=(--premat_headroom_stay_below_current_peak)
   [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == true ]] && optional_args+=(--premat_headroom_stay_within_global_buffer)
   optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
+  optional_args+=(--premat_cuda_stream_priority "$PREMAT_CUDA_STREAM_PRIORITY")
   optional_args+=(--premat_logging "$PREMAT_LOGGING")
   optional_args+=(--premat_instra "$PREMAT_INSTRA")
   # ^^^ THOG

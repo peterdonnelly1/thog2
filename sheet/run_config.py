@@ -236,6 +236,7 @@ class OwtRunConfig:
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
+    premat_cuda_stream_priority: str = "normal"
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -552,6 +553,7 @@ class OwtRunConfig:
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            cuda_stream_priority=self.premat_cuda_stream_priority,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -1173,6 +1175,7 @@ class OwtRunConfig:
             or self.premat_headroom_stay_below_current_peak
             or self.premat_headroom_stay_within_global_buffer
             or float(self.premat_gpu_memory_buffer_gb) != 1.0
+            or self.premat_cuda_stream_priority != "normal"
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
         ):
@@ -1183,6 +1186,7 @@ class OwtRunConfig:
                 f"{self.premat_attention_mode[0].upper()}_"
                 f"H{headroom_code}_"
                 f"B{self._artifact_float(self.premat_gpu_memory_buffer_gb)}_"
+                f"S{self.premat_cuda_stream_priority[0].upper()}_"
                 f"L{self.premat_logging[0].upper()}_"
                 f"I{self.premat_instra[0].upper()}"
             )
@@ -1367,6 +1371,7 @@ class OwtRunConfig:
             premat_headroom_stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             premat_gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
+            premat_cuda_stream_priority=self.premat_cuda_stream_priority,
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),

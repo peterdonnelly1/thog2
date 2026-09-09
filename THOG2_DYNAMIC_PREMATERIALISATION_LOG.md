@@ -223,3 +223,11 @@
 - The Instra key is now one flowing sequence: `OUTCOMES` follows the last `PROCESSING` item directly, allowing the combined key to wrap into two compact lines. The inspector's wide-column rule now correctly applies to State trace rather than Size.
 - Exact retained sizes are intentionally small: for D=1024 FP32 materialised weights they are 12 MiB QKV, 4 MiB ATTN O and 16 MiB for each MLP matrix. They exclude the separate transient admission envelope and activations.
 - Python and JavaScript syntax, whitespace validation, and a dependency-free fused/unfused scheduler harness pass. PyTorch and pytest remain unavailable in this container.
+
+## 2026-09-09 - Parameterised Premat CUDA stream priority
+
+- Added `--premat_cuda_stream_priority normal|high`, defaulting to the established normal-priority behavior.
+- `high` requests the highest CUDA stream priority supported by the active device; PyTorch clamps the deliberately low request value to the device range.
+- The setting is propagated through the wrapper, CLI, run/training/model identity, checkpoint compatibility, artifact identity, runtime construction, startup reporting, local telemetry and Instra summary.
+- Priority changes dispatch preference only. It does not make a materialisation kernel intrinsically faster and cannot preempt a kernel already executing, so acceptance must compare step time and Premat wait/outcome counts rather than green cells alone.
+- Python, shell and JavaScript syntax plus whitespace checks pass. PyTorch/pytest and CUDA execution remain unavailable in this container.

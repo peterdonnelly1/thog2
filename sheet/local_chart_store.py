@@ -514,6 +514,7 @@ class LocalChartStore:
             ("premat_last_update", str(update)),
             ("premat_attention_mode", str(snapshot.get("attention_mode", ""))),
             ("premat_headroom_mode", str(snapshot.get("headroom_mode", ""))),
+            ("premat_cuda_stream_priority", str(snapshot.get("cuda_stream_priority", "normal"))),
             (
                 "premat_aggregate_json",
                 json.dumps(_json_compatible(aggregate), ensure_ascii=False, separators=(",", ":"), sort_keys=True),

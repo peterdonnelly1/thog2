@@ -148,6 +148,7 @@ class SheetGPTConfig:
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
+    premat_cuda_stream_priority: str = "normal"
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -312,6 +313,7 @@ class SheetGPTConfig:
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            cuda_stream_priority=self.premat_cuda_stream_priority,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -567,6 +569,7 @@ class SheetGPT(nn.Module):
                     or not config.premat_headroom_stay_within_global_buffer
                 ),
                 gpu_memory_buffer_gb=config.premat_gpu_memory_buffer_gb,
+                cuda_stream_priority=config.premat_cuda_stream_priority,
                 logging_enabled=(
                     config.premat_logging == "enabled"
                     or config.premat_instra == "enabled"

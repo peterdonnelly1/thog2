@@ -347,6 +347,7 @@ function premat_render_summary(snapshot, model) {
   by_id("premat_summary").innerHTML = [
     ["mode", model.attention_mode],
     ["order", snapshot.target_order === "reverse_execution" ? "reverse l+1" : "—"],
+    ["priority", snapshot.cuda_stream_priority || "normal"],
     ["buffer margin", margin_text],
     ["headroom", premat_bytes(memory.premat_headroom_bytes)],
     ["full hits", String(outcomes["FULL HIT"])],

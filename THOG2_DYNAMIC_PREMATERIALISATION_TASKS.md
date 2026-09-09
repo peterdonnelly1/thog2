@@ -229,3 +229,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Verify retained matrix-size arithmetic and correct the inspector Size/State-trace column width.
 - [x] Run all available static and dependency-free scheduler checks.
 - [ ] Confirm on scruffy that later-deadline MLP outcomes improve without a material memory-capacity regression.
+
+## 2026-09-09 Premat CUDA stream priority experiment
+
+- [x] Add an opt-in `--premat_cuda_stream_priority high` selector with `normal` as the default.
+- [x] Resolve `high` through PyTorch's device-specific priority clamping rather than exposing a hardware-specific integer.
+- [x] Propagate the setting through wrapper, persistent configuration, runtime, startup and Instra telemetry.
+- [x] Add focused normal/high constructor and CLI regression coverage.
+- [x] Run all available static checks.
+- [ ] On scruffy, compare matched normal/high runs for tok/s, full hits, partial hits, complete misses and wait time.

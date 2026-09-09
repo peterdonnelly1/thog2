@@ -13,6 +13,8 @@ from torch import Tensor
 
 PREMAT_SWITCHES = ("enabled", "disabled")
 PREMAT_ATTENTION_MODES = ("fused", "unfused")
+PREMAT_CUDA_STREAM_PRIORITIES = ("normal", "high")
+PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST = -(2 ** 31)
 PREMAT_DEFAULT_GPU_MEMORY_BUFFER_GB = 1.0
 PREMAT_TELEMETRY_VERSION = 2
 
@@ -24,6 +26,7 @@ def validate_premat_configuration(
     stay_below_current_peak: bool,
     stay_within_global_buffer: bool,
     gpu_memory_buffer_gb: float,
+    cuda_stream_priority: str,
     logging: str,
     instra: str,
 ) -> None:
@@ -34,6 +37,11 @@ def validate_premat_configuration(
         raise ValueError(
             f"premat_attention_mode must be one of {PREMAT_ATTENTION_MODES}; "
             f"got {attention_mode!r}"
+        )
+    if cuda_stream_priority not in PREMAT_CUDA_STREAM_PRIORITIES:
+        raise ValueError(
+            "premat_cuda_stream_priority must be one of "
+            f"{PREMAT_CUDA_STREAM_PRIORITIES}; got {cuda_stream_priority!r}"
         )
     if not isinstance(stay_below_current_peak, bool):
         raise ValueError("premat_headroom_stay_below_current_peak must be bool")
@@ -225,6 +233,7 @@ class PrematRuntime:
         attention_mode: str,
         stay_below_current_peak: bool,
         gpu_memory_buffer_gb: float,
+        cuda_stream_priority: str,
         logging_enabled: bool,
     ) -> None:
         self._materialize = materialize
@@ -234,6 +243,7 @@ class PrematRuntime:
         self._attention_mode = attention_mode
         self._stay_below_current_peak = bool(stay_below_current_peak)
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
+        self._cuda_stream_priority = cuda_stream_priority
         self._logging_enabled = bool(logging_enabled)
         self._stream: Optional[torch.cuda.Stream] = None
         self._device: Optional[torch.device] = None
@@ -316,7 +326,15 @@ class PrematRuntime:
             )
         self._device = reference.device
         if self._stream is None:
-            self._stream = torch.cuda.Stream(device=reference.device)
+            priority = (
+                PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST
+                if self._cuda_stream_priority == "high"
+                else 0
+            )
+            self._stream = torch.cuda.Stream(
+                device=reference.device,
+                priority=priority,
+            )
         self._layer_indices = resolved
         self._position = -1
         # One forward pass is one accumulation microstep's complete Premat
@@ -616,6 +634,7 @@ class PrematRuntime:
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "enabled": True,
             "attention_mode": self._attention_mode,
+            "cuda_stream_priority": self._cuda_stream_priority,
             "headroom_mode": (
                 "stay_below_current_peak"
                 if self._stay_below_current_peak

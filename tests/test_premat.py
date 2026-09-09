@@ -17,6 +17,7 @@ from sheet.premat import (
     CandidateState,
     PrematMemoryObservation,
     PrematRuntime,
+    PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST,
     decide_candidate_admission,
     plastic_memory_budget_gib,
     validate_premat_configuration,
@@ -82,6 +83,7 @@ class _FakeCuda:
         self.complete_premat_on_record = False
         self.complete_main_on_record = True
         self.stream_creations = 0
+        self.stream_priorities = []
         self.allocated = 100
         self.reserved = 120
         self.free = 10_000_000
@@ -95,8 +97,9 @@ class _FakeCuda:
         monkeypatch.setattr(torch.cuda, "current_stream", lambda device=None: self.main_stream)
         monkeypatch.setattr(torch.cuda, "stream", lambda _stream: nullcontext())
 
-        def create_stream(*, device=None):
+        def create_stream(*, device=None, priority=0):
             self.stream_creations += 1
+            self.stream_priorities.append(priority)
             return self.premat_stream
 
         monkeypatch.setattr(torch.cuda, "Stream", create_stream)
@@ -115,6 +118,7 @@ def _runtime(
     *,
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
+    cuda_stream_priority: str = "normal",
     attach=None,
 ):
     fake_cuda = _FakeCuda()
@@ -133,6 +137,7 @@ def _runtime(
         attention_mode=attention_mode,
         stay_below_current_peak=stay_below_current_peak,
         gpu_memory_buffer_gb=0.0,
+        cuda_stream_priority=cuda_stream_priority,
         logging_enabled=True,
     )
     runtime.begin((3, 5, 7), reference=_FakeTensor())
@@ -238,6 +243,7 @@ def test_premat_headroom_flags_are_mutually_exclusive() -> None:
             stay_below_current_peak=True,
             stay_within_global_buffer=True,
             gpu_memory_buffer_gb=1.0,
+            cuda_stream_priority="normal",
             logging="disabled",
             instra="disabled",
         )
@@ -249,13 +255,23 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_seven_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
         for action in parser._actions
         for option in action.option_strings
         if option.startswith("--premat")
+    }
+    assert option_strings == {
+        "--premat",
+        "--premat_attention_mode",
+        "--premat_headroom_stay_below_current_peak",
+        "--premat_headroom_stay_within_global_buffer",
+        "--premat_gpu_memory_buffer_gb",
+        "--premat_cuda_stream_priority",
+        "--premat_logging",
+        "--premat_instra",
     }
 
 
@@ -265,15 +281,23 @@ def test_wrapper_reclaims_unused_allocator_cache_for_premat_by_default() -> None
         'PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,'
         'garbage_collection_threshold:0.8"'
     ) in wrapper
-    assert option_strings == {
-        "--premat",
-        "--premat_attention_mode",
-        "--premat_headroom_stay_below_current_peak",
-        "--premat_headroom_stay_within_global_buffer",
-        "--premat_gpu_memory_buffer_gb",
-        "--premat_logging",
-        "--premat_instra",
-    }
+
+
+def test_premat_cuda_stream_priority_is_opt_in(monkeypatch) -> None:
+    normal_runtime, normal_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    assert normal_cuda.stream_priorities == [0]
+    assert normal_runtime.report()["cuda_stream_priority"] == "normal"
+
+    high_runtime, high_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        cuda_stream_priority="high",
+    )
+    assert high_cuda.stream_priorities == [PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST]
+    assert high_runtime.report()["cuda_stream_priority"] == "high"
 
 
 def test_underscore_alias_normaliser_preserves_exact_premat_names() -> None:
@@ -292,6 +316,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
         out_dir=tmp_path,
     )
     assert training_config.premat_headroom_stay_below_current_peak is True
+    assert training_config.premat_cuda_stream_priority == "normal"
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_resolved_headroom_mode"] == "stay_below_current_peak"
     assert canonical["premat_effective_fast_discard"] is True
@@ -299,6 +324,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
     assert canonical["premat_lookahead_layer_limit"] == 1
     assert canonical["premat_target_scope"] == "next_layer_only"
     assert canonical["premat_target_order"] == "reverse_execution"
+    assert canonical["premat_cuda_stream_priority"] == "normal"
 
 
 def test_unfused_attention_matches_fused_math_on_cpu() -> None:
