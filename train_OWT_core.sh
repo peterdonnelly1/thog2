@@ -167,6 +167,7 @@ PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=false
 PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
 PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
 PREMAT_CUDA_STREAM_PRIORITY="normal"
+PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="0"
 PREMAT_LOGGING="disabled"
 PREMAT_INSTRA="disabled"
 FAST_DISCARD_EXPLICIT=false
@@ -286,6 +287,7 @@ PLASTIC DEPTH:
   --plastic__layer_count_cost_weight VALUE=${PLASTIC_LAYER_COUNT_COST_WEIGHT}
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}  global CUDA reserve; replaces plastic__layer_count__memory_budget_gib
   --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
+  --premat_diagnostic_layer_delay_ms VALUE=${PREMAT_DIAGNOSTIC_LAYER_DELAY_MS}
   --plastic__layer_count__cuda_allocator_reserve_gib VALUE=${PLASTIC_CUDA_ALLOCATOR_RESERVE_GIB}
   --plastic__geometry_learning_rate_multiplier VALUE=${PLASTIC_GEOMETRY_LEARNING_RATE_MULTIPLIER}
   --plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup
@@ -299,6 +301,7 @@ Dynamic pre-materialisation:
   --premat_headroom_stay_within_global_buffer
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
   --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
+  --premat_diagnostic_layer_delay_ms VALUE=${PREMAT_DIAGNOSTIC_LAYER_DELAY_MS}  diagnostic host-dispatch delay after each non-final layer
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
 
@@ -492,25 +495,27 @@ while (( $# > 0 )); do
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
       shift
       ;;
-    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_logging|--premat_instra)
+    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_logging|--premat_instra)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --premat) PREMAT="$2" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$2" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$2" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$2" ;;
+        --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$2" ;;
         --premat_logging) PREMAT_LOGGING="$2" ;;
         --premat_instra) PREMAT_INSTRA="$2" ;;
       esac
       shift 2
       ;;
-    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_logging=*|--premat_instra=*)
+    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_logging=*|--premat_instra=*)
       premat_name="${1%%=*}"; premat_value="${1#*=}"
       case "$premat_name" in
         --premat) PREMAT="$premat_value" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$premat_value" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$premat_value" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$premat_value" ;;
+        --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$premat_value" ;;
         --premat_logging) PREMAT_LOGGING="$premat_value" ;;
         --premat_instra) PREMAT_INSTRA="$premat_value" ;;
       esac
@@ -1000,6 +1005,7 @@ case "$PREMAT_INSTRA" in enabled|disabled) ;; *) echo "PREMAT_INSTRA must be ena
 validate_true_false "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" "PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK"
 validate_true_false "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" "PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER"
 validate_nonnegative_number "$PREMAT_GPU_MEMORY_BUFFER_GB" "PREMAT_GPU_MEMORY_BUFFER_GB"
+validate_nonnegative_number "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS" "PREMAT_DIAGNOSTIC_LAYER_DELAY_MS"
 if [[ "$PREMAT" == enabled ]]; then
   [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false && "$HYPERBLOCK" == false ]] || { echo "--premat enabled currently requires every selected preset to be DEPTH." >&2; exit 2; }
   if [[ "$FAST_DISCARD_EXPLICIT" == true ]]; then
@@ -1277,6 +1283,7 @@ run_grid_point() {
   [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == true ]] && optional_args+=(--premat_headroom_stay_within_global_buffer)
   optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
   optional_args+=(--premat_cuda_stream_priority "$PREMAT_CUDA_STREAM_PRIORITY")
+  optional_args+=(--premat_diagnostic_layer_delay_ms "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS")
   optional_args+=(--premat_logging "$PREMAT_LOGGING")
   optional_args+=(--premat_instra "$PREMAT_INSTRA")
   # ^^^ THOG

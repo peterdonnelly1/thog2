@@ -237,6 +237,7 @@ class OwtRunConfig:
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
     premat_cuda_stream_priority: str = "normal"
+    premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -554,6 +555,7 @@ class OwtRunConfig:
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
             cuda_stream_priority=self.premat_cuda_stream_priority,
+            diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -1176,10 +1178,16 @@ class OwtRunConfig:
             or self.premat_headroom_stay_within_global_buffer
             or float(self.premat_gpu_memory_buffer_gb) != 1.0
             or self.premat_cuda_stream_priority != "normal"
+            or float(self.premat_diagnostic_layer_delay_ms) != 0.0
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
         ):
             headroom_code = "G" if self.premat_headroom_stay_within_global_buffer else "P"
+            delay_fragment = (
+                f"LD{self._artifact_float(self.premat_diagnostic_layer_delay_ms)}_"
+                if float(self.premat_diagnostic_layer_delay_ms) != 0.0
+                else ""
+            )
             premat_fragment = (
                 "PM__"
                 f"{self.premat[0].upper()}_"
@@ -1187,6 +1195,7 @@ class OwtRunConfig:
                 f"H{headroom_code}_"
                 f"B{self._artifact_float(self.premat_gpu_memory_buffer_gb)}_"
                 f"S{self.premat_cuda_stream_priority[0].upper()}_"
+                f"{delay_fragment}"
                 f"L{self.premat_logging[0].upper()}_"
                 f"I{self.premat_instra[0].upper()}"
             )
@@ -1372,6 +1381,7 @@ class OwtRunConfig:
             premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             premat_gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
             premat_cuda_stream_priority=self.premat_cuda_stream_priority,
+            premat_diagnostic_layer_delay_ms=float(self.premat_diagnostic_layer_delay_ms),
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),

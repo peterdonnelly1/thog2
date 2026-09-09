@@ -187,6 +187,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "premat_headroom_stay_within_global_buffer",
     "premat_gpu_memory_buffer_gb",
     "premat_cuda_stream_priority",
+    "premat_diagnostic_layer_delay_ms",
     "premat_logging",
     "premat_instra",
     # ^^^ THOG
@@ -292,6 +293,7 @@ class TrainingConfig:
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
     premat_cuda_stream_priority: str = "normal"
+    premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -563,6 +565,7 @@ class TrainingConfig:
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
             cuda_stream_priority=self.premat_cuda_stream_priority,
+            diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -1026,6 +1029,7 @@ class TrainingConfig:
                     "premat_headroom_stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
                     "premat_gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
                     "premat_cuda_stream_priority": self.premat_cuda_stream_priority,
+                    "premat_diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
                     "premat_logging": self.premat_logging,
                     "premat_instra": self.premat_instra,
                     # ^^^ THOG
@@ -1169,6 +1173,7 @@ class TrainingConfig:
                 "target_order": "reverse_execution",
                 "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
                 "cuda_stream_priority": self.premat_cuda_stream_priority,
+                "diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
                 "logging": self.premat_logging,
                 "instra": self.premat_instra,
             }

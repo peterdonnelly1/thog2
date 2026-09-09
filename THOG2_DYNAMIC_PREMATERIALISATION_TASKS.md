@@ -250,3 +250,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Give `PRE-MATERIALISING` frames 1.5 times the selected state duration.
 - [x] Pass JavaScript syntax, direct reducer/timing assertions, Python syntax, and whitespace validation.
 - [ ] On scruffy, confirm partial-hit proportions agree directionally with wait/materialisation timings and remain legible at useful row widths.
+
+## 2026-09-09 controlled post-layer timing diagnostic
+
+- [x] Add `--premat_diagnostic_layer_delay_ms`, default 0, across wrapper, configuration, identity, startup and telemetry.
+- [x] Pause host submission after each non-final logical layer without synchronizing the main CUDA stream.
+- [x] Keep polling and chaining eligible next-layer Premat candidates throughout the controlled interval.
+- [x] Move the Instra `OUTCOMES` key group farther right.
+- [x] Pass Python, JavaScript, shell and whitespace validation; executable pytest is unavailable on this host.
+- [ ] On scruffy, compare matched 0 ms and delayed runs to distinguish insufficient lead time from another scheduler bottleneck.

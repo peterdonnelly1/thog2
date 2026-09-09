@@ -185,7 +185,7 @@
 }
 .premat-key > strong { flex: 0 0 auto; }
 .premat-key strong { color: var(--text, #343942); }
-.premat-key-outcomes { margin-left: 28px; }
+.premat-key-outcomes { margin-left: 72px; }
 .premat-key-item { display: inline-flex; align-items: center; gap: 5px; line-height: 1.15; }
 .premat-key-swatch {
   display: inline-block;

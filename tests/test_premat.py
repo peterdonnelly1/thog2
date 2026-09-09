@@ -119,6 +119,7 @@ def _runtime(
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
     cuda_stream_priority: str = "normal",
+    diagnostic_layer_delay_ms: float = 0.0,
     attach=None,
 ):
     fake_cuda = _FakeCuda()
@@ -138,6 +139,7 @@ def _runtime(
         stay_below_current_peak=stay_below_current_peak,
         gpu_memory_buffer_gb=0.0,
         cuda_stream_priority=cuda_stream_priority,
+        diagnostic_layer_delay_ms=diagnostic_layer_delay_ms,
         logging_enabled=True,
     )
     runtime.begin((3, 5, 7), reference=_FakeTensor())
@@ -244,6 +246,7 @@ def test_premat_headroom_flags_are_mutually_exclusive() -> None:
             stay_within_global_buffer=True,
             gpu_memory_buffer_gb=1.0,
             cuda_stream_priority="normal",
+            diagnostic_layer_delay_ms=0.0,
             logging="disabled",
             instra="disabled",
         )
@@ -255,7 +258,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_nine_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -270,6 +273,7 @@ def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
         "--premat_headroom_stay_within_global_buffer",
         "--premat_gpu_memory_buffer_gb",
         "--premat_cuda_stream_priority",
+        "--premat_diagnostic_layer_delay_ms",
         "--premat_logging",
         "--premat_instra",
     }
@@ -300,6 +304,37 @@ def test_premat_cuda_stream_priority_is_opt_in(monkeypatch) -> None:
     assert high_runtime.report()["cuda_stream_priority"] == "high"
 
 
+def test_diagnostic_layer_delay_polls_and_chains_next_layer_candidates(monkeypatch) -> None:
+    clock_ns = [0]
+
+    def perf_counter_ns() -> int:
+        clock_ns[0] += 100_000
+        return clock_ns[0]
+
+    monkeypatch.setattr("sheet.premat.time.perf_counter_ns", perf_counter_ns)
+    monkeypatch.setattr("sheet.premat.time.sleep", lambda _seconds: None)
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        diagnostic_layer_delay_ms=1.0,
+    )
+    fake_cuda.complete_premat_on_record = True
+    runtime.layer_start(3)
+    runtime.layer_complete(3)
+
+    assert calls == [("DOWN", 5), ("UP", 5), ("O", 5), ("QKV", 5)]
+    report = runtime.report()
+    assert report["diagnostic_layer_delay_ms"] == 1.0
+    assert report["aggregate"]["diagnostic_layer_delay_count"] == 1
+    assert report["aggregate"]["diagnostic_layer_delay_ms_requested_total"] == 1.0
+    assert report["aggregate"]["diagnostic_layer_delay_ms_actual_total"] >= 1.0
+
+
+def test_negative_diagnostic_layer_delay_is_rejected() -> None:
+    with pytest.raises(ValueError, match="diagnostic_layer_delay"):
+        SheetGPTConfig(premat_diagnostic_layer_delay_ms=-0.1)
+
+
 def test_underscore_alias_normaliser_preserves_exact_premat_names() -> None:
     import sitecustomize
 
@@ -317,6 +352,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
     )
     assert training_config.premat_headroom_stay_below_current_peak is True
     assert training_config.premat_cuda_stream_priority == "normal"
+    assert training_config.premat_diagnostic_layer_delay_ms == 0.0
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_resolved_headroom_mode"] == "stay_below_current_peak"
     assert canonical["premat_effective_fast_discard"] is True
@@ -325,6 +361,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
     assert canonical["premat_target_scope"] == "next_layer_only"
     assert canonical["premat_target_order"] == "reverse_execution"
     assert canonical["premat_cuda_stream_priority"] == "normal"
+    assert canonical["premat_diagnostic_layer_delay_ms"] == 0.0
 
 
 def test_unfused_attention_matches_fused_math_on_cpu() -> None:
@@ -607,6 +644,9 @@ class _CpuCheckpointPrematRuntime:
         self.active = False
 
     def layer_start(self, _layer_index: int) -> None:
+        assert self.active
+
+    def layer_complete(self, _layer_index: int) -> None:
         assert self.active
 
     def event(self, _name: str, *, layer_index: int) -> None:

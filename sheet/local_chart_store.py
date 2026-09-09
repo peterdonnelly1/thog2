@@ -515,6 +515,7 @@ class LocalChartStore:
             ("premat_attention_mode", str(snapshot.get("attention_mode", ""))),
             ("premat_headroom_mode", str(snapshot.get("headroom_mode", ""))),
             ("premat_cuda_stream_priority", str(snapshot.get("cuda_stream_priority", "normal"))),
+            ("premat_diagnostic_layer_delay_ms", str(snapshot.get("diagnostic_layer_delay_ms", 0.0))),
             (
                 "premat_aggregate_json",
                 json.dumps(_json_compatible(aggregate), ensure_ascii=False, separators=(",", ":"), sort_keys=True),

@@ -149,6 +149,7 @@ class SheetGPTConfig:
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
     premat_cuda_stream_priority: str = "normal"
+    premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -314,6 +315,7 @@ class SheetGPTConfig:
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
             cuda_stream_priority=self.premat_cuda_stream_priority,
+            diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -570,6 +572,7 @@ class SheetGPT(nn.Module):
                 ),
                 gpu_memory_buffer_gb=config.premat_gpu_memory_buffer_gb,
                 cuda_stream_priority=config.premat_cuda_stream_priority,
+                diagnostic_layer_delay_ms=config.premat_diagnostic_layer_delay_ms,
                 logging_enabled=(
                     config.premat_logging == "enabled"
                     or config.premat_instra == "enabled"
@@ -1003,6 +1006,8 @@ class SheetGPT(nn.Module):
 
         if self.config.fast_discard:
             del layer_materializations, hyperblock_mlp_factors
+        if self._premat_runtime is not None and self._premat_runtime.active:
+            self._premat_runtime.layer_complete(layer_index)
         return inputs
     # ^^^ THOG
 

@@ -240,3 +240,11 @@
 - The combined key now begins in line with the matrix grid, gives `OUTCOMES` additional left separation, and places labels before swatches.
 - The state-duration slider now reaches 0.010 seconds. `PRE-MATERIALISING` is deliberately held for 1.5 times the selected state duration while the one-second final-outcome hold remains unchanged.
 - JavaScript syntax, a direct Node reducer/timing harness, Python syntax, and `git diff --check` pass. Full pytest import remains unavailable because Plotly is absent from this container.
+
+## 2026-09-09 - Controlled post-layer timing diagnostic
+
+- Added `--premat_diagnostic_layer_delay_ms FLOAT`, default 0. A positive value pauses host dispatch after every non-final original-forward layer; checkpoint recomputation remains outside Premat and therefore outside this diagnostic.
+- The delay deliberately does not synchronize the main CUDA stream. During the requested wall interval the scheduler repeatedly refreshes completed auxiliary work and may launch the next reverse-order l+1 candidate, isolating whether additional lead time improves outcomes.
+- Requested and actual delay totals plus invocation count are included in aggregate telemetry; the configured delay appears in startup, local metadata and the Instra summary.
+- Increased the left separation before the `OUTCOMES` key section from 28 px to 72 px.
+- Python compilation, JavaScript syntax, shell syntax and whitespace checks pass. This host has no pytest executable; CUDA acceptance remains the matched scruffy experiment.

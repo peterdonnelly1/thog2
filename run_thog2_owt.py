@@ -444,6 +444,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"headroom={headroom_mode} "
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
             f"premat_cuda_stream_priority={config.premat_cuda_stream_priority} "
+            f"premat_diagnostic_layer_delay_ms={config.premat_diagnostic_layer_delay_ms:g} "
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "

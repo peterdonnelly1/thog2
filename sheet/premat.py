@@ -27,6 +27,7 @@ def validate_premat_configuration(
     stay_within_global_buffer: bool,
     gpu_memory_buffer_gb: float,
     cuda_stream_priority: str,
+    diagnostic_layer_delay_ms: float,
     logging: str,
     instra: str,
 ) -> None:
@@ -59,6 +60,15 @@ def validate_premat_configuration(
         or float(gpu_memory_buffer_gb) < 0.0
     ):
         raise ValueError("premat_gpu_memory_buffer_gb must be finite and non-negative")
+    if (
+        isinstance(diagnostic_layer_delay_ms, bool)
+        or not isinstance(diagnostic_layer_delay_ms, (int, float))
+        or not math.isfinite(float(diagnostic_layer_delay_ms))
+        or float(diagnostic_layer_delay_ms) < 0.0
+    ):
+        raise ValueError(
+            "premat_diagnostic_layer_delay_ms must be finite and non-negative"
+        )
 
 
 class CandidateState(str, Enum):
@@ -234,6 +244,7 @@ class PrematRuntime:
         stay_below_current_peak: bool,
         gpu_memory_buffer_gb: float,
         cuda_stream_priority: str,
+        diagnostic_layer_delay_ms: float,
         logging_enabled: bool,
     ) -> None:
         self._materialize = materialize
@@ -244,6 +255,7 @@ class PrematRuntime:
         self._stay_below_current_peak = bool(stay_below_current_peak)
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
         self._cuda_stream_priority = cuda_stream_priority
+        self._diagnostic_layer_delay_ms = float(diagnostic_layer_delay_ms)
         self._logging_enabled = bool(logging_enabled)
         self._stream: Optional[torch.cuda.Stream] = None
         self._device: Optional[torch.device] = None
@@ -284,6 +296,9 @@ class PrematRuntime:
             "main_stream_wait_ms_total": 0.0,
             "main_stream_materialisation_ms_total": 0.0,
             "captured_pass_host_ms_total": 0.0,
+            "diagnostic_layer_delay_count": 0,
+            "diagnostic_layer_delay_ms_requested_total": 0.0,
+            "diagnostic_layer_delay_ms_actual_total": 0.0,
             "observed_peak_allocated_bytes": 0,
             "observed_peak_reserved_bytes": 0,
             "minimum_headroom_bytes": None,
@@ -409,6 +424,50 @@ class PrematRuntime:
         self._update_ordinary_peak()
         self._record("layer_start", layer=layer_index, outcome="reconsider")
         self._advance()
+
+    def layer_complete(self, layer_index: int) -> None:
+        """Apply the optional diagnostic host-dispatch delay after a layer.
+
+        This deliberately does not synchronize the main CUDA stream: all work
+        for the layer has been submitted, and pausing the host prevents the next
+        layer from being submitted while Premat continues to advance.  Polling
+        permits several l+1 candidates to chain within one controlled interval.
+        """
+        self._require_active()
+        if self._diagnostic_layer_delay_ms <= 0.0:
+            return
+        if self._position < 0 or self._layer_indices[self._position] != int(layer_index):
+            raise RuntimeError(
+                f"logical layer {layer_index} completed outside the active premat position"
+            )
+        if self._position + 1 >= len(self._layer_indices):
+            return
+        requested_ms = self._diagnostic_layer_delay_ms
+        start_ns = time.perf_counter_ns()
+        deadline_ns = start_ns + int(requested_ms * 1_000_000.0)
+        self._aggregate["diagnostic_layer_delay_count"] += 1
+        self._aggregate["diagnostic_layer_delay_ms_requested_total"] += requested_ms
+        self._record(
+            "diagnostic_layer_delay_begin",
+            layer=layer_index,
+            outcome="host_dispatch_paused",
+            detail={"requested_ms": requested_ms},
+        )
+        while True:
+            self._advance(record_defer=False)
+            remaining_ns = deadline_ns - time.perf_counter_ns()
+            if remaining_ns <= 0:
+                break
+            time.sleep(min(0.00025, remaining_ns / 1_000_000_000.0))
+        self._advance(record_defer=False)
+        actual_ms = max(0.0, (time.perf_counter_ns() - start_ns) / 1_000_000.0)
+        self._aggregate["diagnostic_layer_delay_ms_actual_total"] += actual_ms
+        self._record(
+            "diagnostic_layer_delay_end",
+            layer=layer_index,
+            outcome="host_dispatch_resumed",
+            detail={"requested_ms": requested_ms, "actual_ms": actual_ms},
+        )
 
     def event(self, name: str, *, layer_index: int) -> None:
         self._require_active()
@@ -635,6 +694,7 @@ class PrematRuntime:
             "enabled": True,
             "attention_mode": self._attention_mode,
             "cuda_stream_priority": self._cuda_stream_priority,
+            "diagnostic_layer_delay_ms": self._diagnostic_layer_delay_ms,
             "headroom_mode": (
                 "stay_below_current_peak"
                 if self._stay_below_current_peak
@@ -756,7 +816,7 @@ class PrematRuntime:
                     outcome="premat_complete",
                 )
 
-    def _advance(self) -> None:
+    def _advance(self, *, record_defer: bool = True) -> None:
         self._refresh_available()
         if any(
             item.state == CandidateState.MATERIALISING
@@ -776,15 +836,16 @@ class PrematRuntime:
         )
         candidate.admission_reason = decision.reason
         if not decision.admitted:
-            self._aggregate["deferred"] += 1
-            self._record(
-                "admission_deferred",
-                candidate=candidate,
-                decision="defer",
-                outcome="not_launched",
-                reason=decision.reason,
-                detail=asdict(decision),
-            )
+            if record_defer:
+                self._aggregate["deferred"] += 1
+                self._record(
+                    "admission_deferred",
+                    candidate=candidate,
+                    decision="defer",
+                    outcome="not_launched",
+                    reason=decision.reason,
+                    detail=asdict(decision),
+                )
             return
         if self._stream is None or self._device is None:
             raise RuntimeError("premat stream is not initialized")

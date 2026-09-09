@@ -50,6 +50,7 @@ def _config():
         premat_headroom_stay_below_current_peak=True,
         premat_headroom_stay_within_global_buffer=False,
         premat_cuda_stream_priority="high",
+        premat_diagnostic_layer_delay_ms=12.5,
         premat_logging="enabled",
         premat_instra="disabled",
         plastic__enabled=True,
@@ -107,6 +108,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "premat_attention_mode=fused" in output
     assert "headroom=stay_below_current_peak" in output
     assert "premat_cuda_stream_priority=high" in output
+    assert "premat_diagnostic_layer_delay_ms=12.5" in output
     assert "matrix_target=next_layer_only" in output
     assert "target_order=reverse_execution" in output
     assert "effective_fast_discard=true" in output

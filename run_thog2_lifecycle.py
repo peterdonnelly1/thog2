@@ -581,6 +581,7 @@ def _run_config_from_training_config(
         premat_headroom_stay_within_global_buffer=training_config.premat_headroom_stay_within_global_buffer,
         premat_gpu_memory_buffer_gb=training_config.premat_gpu_memory_buffer_gb,
         premat_cuda_stream_priority=training_config.premat_cuda_stream_priority,
+        premat_diagnostic_layer_delay_ms=training_config.premat_diagnostic_layer_delay_ms,
         premat_logging=training_config.premat_logging,
         premat_instra=training_config.premat_instra,
         plastic__layer_count__cuda_allocator_reserve_gib=training_config.plastic__layer_count__cuda_allocator_reserve_gib,

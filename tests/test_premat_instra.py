@@ -276,6 +276,8 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "&after=${after}" in javascript
     assert "--premat-partial-progress" in css
     assert ".premat-key-outcomes" in css
+    assert ".premat-key-outcomes { margin-left: 72px; }" in css
+    assert '"layer delay"' in javascript
     assert "PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5" in javascript
     assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
