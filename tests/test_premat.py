@@ -381,7 +381,7 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
     assert report["aggregate"]["main_stream_wait_ms_total"] == pytest.approx(0.25)
 
 
-def test_next_premat_launch_waits_for_consuming_main_stream_event(monkeypatch) -> None:
+def test_pending_premat_release_stays_charged_without_blocking_next_launch(monkeypatch) -> None:
     runtime, fake_cuda, calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
@@ -394,13 +394,33 @@ def test_next_premat_launch_waits_for_consuming_main_stream_event(monkeypatch) -
     runtime.consumed("QKV", 3)
 
     assert runtime._pending_releases
-    assert calls == [("QKV", 3)]
-    runtime.event("after_qkv", layer_index=3)
-    assert calls == [("QKV", 3)]
+    release = runtime._pending_releases[0]
+    assert release.retained_bytes > 0
+    assert release.tensor is not None
+    assert calls == [("QKV", 3), ("O", 3)]
+    retained_before_release = runtime._retained_bytes
 
-    for release in runtime._pending_releases:
-        release.end_event.complete = True
+    release.end_event.complete = True
     runtime.event("after_qkv_complete", layer_index=3)
+    assert runtime._pending_releases == []
+    assert runtime._retained_bytes == retained_before_release - release.retained_bytes
+
+
+def test_main_fallback_creates_no_zero_byte_release_gate(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=True,
+    )
+    runtime.layer_start(3)
+    assert calls == []
+    weight = runtime.acquire("QKV", 3)
+    assert calls == [("QKV", 3)]
+    fake_cuda.complete_main_on_record = False
+    runtime._stay_below_current_peak = False
+    del weight
+    runtime.consumed("QKV", 3)
+
+    assert runtime._pending_releases == []
     assert calls == [("QKV", 3), ("O", 3)]
 
 

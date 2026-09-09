@@ -170,3 +170,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [ ] On scruffy, confirm the first sampled microstep replays coherently for all layers and the inspector matches its final grid.
 - [ ] On scruffy, confirm every green `AVAILABLE` follows visible blue/white `MATERIALISING`, waited paths are orange, and main materialisation is red.
 - [x] Rename the view `Premat Recapitulation - Step N` and eliminate state-text-driven control jitter.
+
+## 2026-09-09 pending-release starvation correction
+
+- [x] Correlate the L6/P3 and L4/P2 initial-green-prefix/all-red-tail captures with the scheduler release gate.
+- [x] Remove zero-byte main-path pending releases.
+- [x] Allow independent candidate admission while a prior Premat tensor remains pending release.
+- [x] Keep each pending Premat tensor strongly referenced and memory-charged until its main-stream completion event resolves.
+- [x] Add regressions for non-blocking charged Premat release and main-fallback non-gating.
+- [ ] Confirm on scruffy that Premat continues attempting candidates beyond the first main-path fallback.

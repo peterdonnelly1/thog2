@@ -184,6 +184,7 @@ class _PendingCudaTiming:
 class _PendingRelease:
     end_event: torch.cuda.Event
     retained_bytes: int
+    tensor: Tensor
 
 
 MaterializeCandidate = Callable[[str, int], Tensor]
@@ -532,22 +533,25 @@ class PrematRuntime:
         if candidate is None or candidate.state != CandidateState.CONSUMING:
             raise RuntimeError(f"premat candidate {key} was not consuming")
         # vvv THOG callers discard their final Python weight reference before
-        # entering here.  A main-stream event then proves that the consuming
-        # kernel has finished before the scheduler treats the storage as
-        # reusable or launches another auxiliary-stream candidate.
-        current_stream = torch.cuda.current_stream(device=self._device)
-        release_event = torch.cuda.Event(enable_timing=False)
-        release_event.record(current_stream)
-        self._pending_releases.append(
-            _PendingRelease(
-                end_event=release_event,
-                retained_bytes=(
-                    candidate.envelope.retained_bytes
-                    if candidate.retained_counted
-                    else 0
-                ),
+        # entering here.  Keep an admitted Premat tensor charged and strongly
+        # referenced until a main-stream event proves its consuming kernel has
+        # finished.  This pending storage participates in the ordinary memory
+        # guards, but does not globally block a later independently affordable
+        # candidate.  Main-path materialisations have no Premat storage to
+        # release and must never create a zero-byte scheduler gate.
+        if candidate.retained_counted:
+            if candidate.tensor is None:
+                raise RuntimeError(f"premat candidate {key} lost its retained tensor")
+            current_stream = torch.cuda.current_stream(device=self._device)
+            release_event = torch.cuda.Event(enable_timing=False)
+            release_event.record(current_stream)
+            self._pending_releases.append(
+                _PendingRelease(
+                    end_event=release_event,
+                    retained_bytes=candidate.envelope.retained_bytes,
+                    tensor=candidate.tensor,
+                )
             )
-        )
         candidate.retained_counted = False
         # ^^^ THOG
         candidate.tensor = None
@@ -731,8 +735,6 @@ class PrematRuntime:
 
     def _advance(self) -> None:
         self._refresh_available()
-        if self._pending_releases:
-            return
         if any(
             item.state == CandidateState.MATERIALISING
             for item in self._candidates.values()

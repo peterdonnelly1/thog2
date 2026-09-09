@@ -177,3 +177,10 @@
 - The dashboard API now returns only the newest snapshot after the client's last received update, avoiding repeated decoding and transfer of the retained history. SQLite history remains bounded and local.
 - Python compilation, JavaScript syntax, DOM-ID/CSS structure checks, whitespace validation, a direct atomic-reporter harness, SQLite persistence checks, and a direct Node state/outcome reducer harness pass. PyTorch, Plotly, and pytest are not installed in this container, so the committed executable suites and scruffy CUDA/UI acceptance remain field checks.
 - Field follow-up renamed the view `Premat Recapitulation - Step N` and reserved a fixed-width state/event field, preventing its changing text length from shifting the playback controls horizontally.
+
+## 2026-09-09 - Pending-release starvation correction
+
+- Scruffy field captures at L6/P3 and L4/P2 showed the same signature: a short initial run of full Premat hits followed by only main-path materialisations, despite respectively about 13.86 GiB and 659.8 MiB of reported admissible headroom. The latter still exceeds every individual fused candidate envelope (about 132--144 MiB).
+- Root cause: every consumed matrix created a pending-release record, including ordinary main-path tensors with zero Premat-retained bytes, and `_advance()` treated any such record as a global launch prohibition. Once CPU dispatch outran the main CUDA stream, each fallback left an incomplete event and forced the following fallback, making starvation self-sustaining.
+- Main-path consumption no longer creates a zero-byte pending release. An admitted Premat tensor remains strongly referenced and fully charged until its main-stream completion event resolves, but that pending allocation does not prevent another candidate being admitted against independently observed headroom.
+- Added regressions for both sides of the invariant: an incomplete Premat release remains charged while the next affordable candidate launches, and an ordinary fallback cannot create a zero-byte release gate.
