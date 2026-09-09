@@ -200,8 +200,10 @@ class PrematRuntime:
     Candidate launch is strictly ordered, and admission always precedes launch.
     """
 
-    _FUSED_FAMILIES = ("QKV", "O", "UP", "DOWN")
-    _UNFUSED_FAMILIES = ("QK", "V", "O", "UP", "DOWN")
+    # The sole scheduling order is the reverse of execution order within l+1.
+    # This gives the latest-deadline, largest matrices the longest useful lead.
+    _FUSED_FAMILIES = ("DOWN", "UP", "O", "QKV")
+    _UNFUSED_FAMILIES = ("DOWN", "UP", "O", "V", "QK")
     _LEGAL_TRANSITIONS = {
         CandidateState.UNAVAILABLE: (CandidateState.MATERIALISING,),
         CandidateState.MATERIALISING: (
@@ -623,6 +625,7 @@ class PrematRuntime:
             "next_layer_index": next_layer,
             "lookahead_layer_limit": 1,
             "target_scope": "next_layer_only",
+            "target_order": "reverse_execution",
             "effective_fast_discard": True,
             "pass_sequence": self._pass_sequence,
             "pass_complete": pass_complete,

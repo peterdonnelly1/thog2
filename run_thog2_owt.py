@@ -448,7 +448,7 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"checkpoint_recompute_segment={config.checkpoint_segment_size} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
-            "lookahead=l+1",
+            "lookahead=l+1 matrix_target=next_layer_only target_order=reverse_execution",
         )
         # ^^^ THOG
         hyperblock = report.get("hyperblock")

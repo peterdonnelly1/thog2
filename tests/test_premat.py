@@ -298,6 +298,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
     assert canonical["premat_schema_version"] == 2
     assert canonical["premat_lookahead_layer_limit"] == 1
     assert canonical["premat_target_scope"] == "next_layer_only"
+    assert canonical["premat_target_order"] == "reverse_execution"
 
 
 def test_unfused_attention_matches_fused_math_on_cpu() -> None:
@@ -349,19 +350,19 @@ def test_deadline_unavailable_is_claimed_by_main_without_late_premat_launch(monk
     )
 
 
-def test_premat_targets_every_matrix_in_the_next_layer_only(monkeypatch) -> None:
+def test_premat_targets_every_matrix_in_reverse_execution_order_in_next_layer(monkeypatch) -> None:
     runtime, fake_cuda, calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
     )
     fake_cuda.complete_premat_on_record = True
     runtime.layer_start(3)
-    assert calls == [("QKV", 5)]
+    assert calls == [("DOWN", 5)]
 
     runtime.event("after_ln1", layer_index=3)
     runtime.event("after_attention", layer_index=3)
     runtime.event("after_gelu", layer_index=3)
-    assert calls == [("QKV", 5), ("O", 5), ("UP", 5), ("DOWN", 5)]
+    assert calls == [("DOWN", 5), ("UP", 5), ("O", 5), ("QKV", 5)]
     assert all(
         runtime._candidates[(3, family)].owner == "none"
         for family in ("QKV", "O", "UP", "DOWN")
@@ -372,7 +373,21 @@ def test_premat_targets_every_matrix_in_the_next_layer_only(monkeypatch) -> None
     )
 
     runtime.layer_start(5)
-    assert calls[-1] == ("QKV", 7)
+    assert calls[-1] == ("DOWN", 7)
+    assert runtime.report()["target_order"] == "reverse_execution"
+
+
+def test_unfused_premat_uses_reverse_execution_order(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        attention_mode="unfused",
+    )
+    fake_cuda.complete_premat_on_record = True
+    runtime.layer_start(3)
+    for event_name in ("after_ln1", "after_qk", "after_attention", "after_gelu"):
+        runtime.event(event_name, layer_index=3)
+    assert calls == [("DOWN", 5), ("UP", 5), ("O", 5), ("V", 5), ("QK", 5)]
 
 
 def test_main_fallback_and_checkpoint_replay_keep_the_ordinary_autograd_path(monkeypatch) -> None:
@@ -402,14 +417,14 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
         stay_below_current_peak=False,
     )
     runtime.layer_start(3)
-    assert calls == [("QKV", 5)]
+    assert calls == [("DOWN", 5)]
     assert fake_cuda.stream_creations == 1
     runtime.layer_start(5)
-    weight = runtime.acquire("QKV", 5)
-    assert calls == [("QKV", 5)]
+    weight = runtime.acquire("DOWN", 5)
+    assert calls == [("DOWN", 5)]
     assert weight.recorded_streams[-1] is fake_cuda.main_stream
     assert len(fake_cuda.main_stream.waited_events) == 1
-    candidate = runtime._candidates[(5, "QKV")]
+    candidate = runtime._candidates[(5, "DOWN")]
     assert candidate.owner == "premat"
     assert candidate.state == CandidateState.CONSUMING
     assert candidate.critical_path_miss
@@ -424,18 +439,18 @@ def test_pending_premat_release_stays_charged_without_blocking_next_launch(monke
         stay_below_current_peak=False,
     )
     runtime.layer_start(3)
-    assert calls == [("QKV", 5)]
+    assert calls == [("DOWN", 5)]
     runtime.layer_start(5)
-    weight = runtime.acquire("QKV", 5)
+    weight = runtime.acquire("DOWN", 5)
     fake_cuda.complete_main_on_record = False
     del weight
-    runtime.consumed("QKV", 5)
+    runtime.consumed("DOWN", 5)
 
     assert runtime._pending_releases
     release = runtime._pending_releases[0]
     assert release.retained_bytes > 0
     assert release.tensor is not None
-    assert calls == [("QKV", 5), ("QKV", 7)]
+    assert calls == [("DOWN", 5), ("DOWN", 7)]
     retained_before_release = runtime._retained_bytes
 
     release.end_event.complete = True
@@ -459,7 +474,7 @@ def test_main_fallback_creates_no_zero_byte_release_gate(monkeypatch) -> None:
     runtime.consumed("QKV", 3)
 
     assert runtime._pending_releases == []
-    assert calls == [("QKV", 3), ("QKV", 5)]
+    assert calls == [("QKV", 3), ("DOWN", 5)]
 
 
 def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(monkeypatch) -> None:
@@ -470,7 +485,7 @@ def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(mo
     runtime.layer_start(3)
     assert calls == []
     report = runtime.report()
-    assert report["queue_head"]["family"] == "QKV"
+    assert report["queue_head"]["family"] == "DOWN"
     assert report["queue_head"]["layer_index"] == 5
     assert report["queue_head"]["deferred"] is True
     assert {candidate["layer_index"] for candidate in report["candidates"]} == {3, 5}
@@ -514,6 +529,18 @@ def test_fused_envelope_does_not_charge_quadratic_attention_tensors(monkeypatch)
     qkv = runtime._candidates[(3, "QKV")]
     activation_bytes = 2 * 4 * 8 * 2
     assert qkv.envelope.foreground_overlap_bytes == 4 * activation_bytes
+
+
+def test_retained_matrix_sizes_are_fp32_dense_tensor_sizes(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=True,
+    )
+    runtime.layer_start(3)
+    assert runtime._candidates[(3, "QKV")].envelope.retained_bytes == 3 * 8 * 8 * 4
+    assert runtime._candidates[(3, "O")].envelope.retained_bytes == 8 * 8 * 4
+    assert runtime._candidates[(3, "UP")].envelope.retained_bytes == 4 * 8 * 8 * 4
+    assert runtime._candidates[(3, "DOWN")].envelope.retained_bytes == 4 * 8 * 8 * 4
 
 
 def test_plastic_budget_accounts_for_other_gpu_users(monkeypatch) -> None:

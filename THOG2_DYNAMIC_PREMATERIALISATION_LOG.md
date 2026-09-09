@@ -214,3 +214,12 @@
 - Processing labels now match the inspector trace: `PRE-MATERIALISING`, `AVAILABLE`, `CONSUMING - NO WAITING`, `WAITING FOR PRE-MATERIALISATION`, `CONSUMING AFTER WAIT`, `PREMAT NOT STARTED - MAIN CODE MATERIALISING`, and `MAIN CODE CONSUMING`.
 - Each materialisable column now displays its retained dense-matrix size in MiB above the layer grid. The same value is included in the inspector table; it is deliberately distinct from the larger admission envelope.
 - JavaScript syntax, whitespace validation, the direct reducer harness, and a mocked-DOM size/alignment harness pass. PyTorch and pytest are unavailable in this container.
+
+## 2026-09-09 - Reverse next-layer scheduling
+
+- Replaced next-layer execution-order scheduling with the sole fixed reverse order. Fused attention now schedules `MLP DN`, `MLP UP`, `ATTN O`, then `QKV`; unfused schedules `MLP DN`, `MLP UP`, `ATTN O`, `V`, then `QK`.
+- The policy still targets only layer `l+1` and still uses one auxiliary stream. It gives the largest, latest-deadline matrices the longest lead; the former left-to-right order is not retained as an option.
+- Runtime, canonical, training-identity and startup diagnostics report `target_order=reverse_execution`.
+- The Instra key is now one flowing sequence: `OUTCOMES` follows the last `PROCESSING` item directly, allowing the combined key to wrap into two compact lines. The inspector's wide-column rule now correctly applies to State trace rather than Size.
+- Exact retained sizes are intentionally small: for D=1024 FP32 materialised weights they are 12 MiB QKV, 4 MiB ATTN O and 16 MiB for each MLP matrix. They exclude the separate transient admission envelope and activations.
+- Python and JavaScript syntax, whitespace validation, and a dependency-free fused/unfused scheduler harness pass. PyTorch and pytest remain unavailable in this container.

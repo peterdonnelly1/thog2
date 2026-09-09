@@ -1162,6 +1162,7 @@ class TrainingConfig:
                 "stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                 "stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
                 "target_scope": "next_layer_only",
+                "target_order": "reverse_execution",
                 "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
                 "logging": self.premat_logging,
                 "instra": self.premat_instra,

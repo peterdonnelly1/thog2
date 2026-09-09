@@ -1499,6 +1499,7 @@ class OwtRunConfig:
             values["premat_schema_version"] = PREMAT_TELEMETRY_VERSION
             values["premat_lookahead_layer_limit"] = 1
             values["premat_target_scope"] = "next_layer_only"
+            values["premat_target_order"] = "reverse_execution"
             # ^^^ THOG
         values.update({
             "artifact_name": self.artifact_name,

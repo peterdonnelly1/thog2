@@ -940,7 +940,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
-            "lookahead=l+1 matrix_target=next_layer_only",
+            "lookahead=l+1 matrix_target=next_layer_only target_order=reverse_execution",
         )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics

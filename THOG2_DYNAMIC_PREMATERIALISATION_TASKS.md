@@ -217,4 +217,15 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Show each retained materialised matrix size in MiB above its matrix column and in the inspector.
 - [x] Run all available dependency-free focused checks.
 - [ ] On scruffy, confirm size headings align with the matrix rectangles in both fused and unfused layouts.
-- [ ] Consider an isolated reverse-order next-layer scheduler experiment (`MLP DN`, `MLP UP`, `ATTN O`, attention input) after visual acceptance.
+- [x] Replace execution-order next-layer scheduling with reverse order (`MLP DN`, `MLP UP`, `ATTN O`, attention input).
+
+## 2026-09-09 reverse next-layer scheduling
+
+- [x] Make reverse execution order the sole layer `l+1` scheduling policy.
+- [x] Cover fused (`DOWN`, `UP`, `O`, `QKV`) and unfused (`DOWN`, `UP`, `O`, `V`, `QK`) order explicitly.
+- [x] Remove any need for a compatibility flag or retained left-to-right path.
+- [x] Propagate `reverse_execution` through runtime, canonical, training-identity and startup telemetry.
+- [x] Flow `OUTCOMES` directly after `PROCESSING` and compact the combined key.
+- [x] Verify retained matrix-size arithmetic and correct the inspector Size/State-trace column width.
+- [x] Run all available static and dependency-free scheduler checks.
+- [ ] Confirm on scruffy that later-deadline MLP outcomes improve without a material memory-capacity regression.

@@ -106,6 +106,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "premat_attention_mode=fused" in output
     assert "headroom=stay_below_current_peak" in output
     assert "matrix_target=next_layer_only" in output
+    assert "target_order=reverse_execution" in output
     assert "effective_fast_discard=true" in output
     assert "checkpoint_recompute_segment=4" in output
     assert "cuda_allocator=" in output
