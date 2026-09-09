@@ -238,3 +238,15 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Add focused normal/high constructor and CLI regression coverage.
 - [x] Run all available static checks.
 - [ ] On scruffy, compare matched normal/high runs for tok/s, full hits, partial hits, complete misses and wait time.
+
+## 2026-09-09 partial-hit progress and replay emphasis
+
+- [x] Derive a faithful partial-hit time-progress estimate from completed Premat CUDA duration minus the measured main-stream wait.
+- [x] Round the estimate to 5%, retain an unknown fallback when CUDA timings are unresolved, and cap waited hits below 100%.
+- [x] Render terminal `PARTIAL HIT` cells horizontally as completed green versus remaining light grey.
+- [x] Include the same approximate ready percentage in the per-matrix inspector outcome.
+- [x] Move both key section headings right, add extra separation before `OUTCOMES`, and place every label before its swatch.
+- [x] Extend state-duration playback down to 0.010 seconds.
+- [x] Give `PRE-MATERIALISING` frames 1.5 times the selected state duration.
+- [x] Pass JavaScript syntax, direct reducer/timing assertions, Python syntax, and whitespace validation.
+- [ ] On scruffy, confirm partial-hit proportions agree directionally with wait/materialisation timings and remain legible at useful row widths.

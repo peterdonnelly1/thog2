@@ -65,6 +65,7 @@ def _playback_snapshot() -> dict:
             "sequence": 7, "event": "materialising", "layer_index": 0,
             "current_layer_index": 0, "family": "O", "new_state": "MATERIALISING",
             "owner": "premat", "decision": "admit", "admission_reason": "admitted",
+            "materialisation_ms": 1.0,
             "predicted_retained_bytes": 4 * 1024**2,
         },
         {
@@ -203,6 +204,7 @@ def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
     assert records[(0, "QKV")]["retained_bytes"] == 12 * 1024**2
     assert records[(0, "O")]["trace"] == ["PRE-MATERIALISING", "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT", "PARTIAL HIT"]
     assert records[(0, "O")]["outcome"] == "PARTIAL HIT"
+    assert records[(0, "O")]["completion_at_deadline_percent"] == 75
     assert records[(0, "UP")]["trace"] == ["PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING", "COMPLETE MISS"]
     assert records[(0, "UP")]["outcome"] == "COMPLETE MISS"
     assert records[(1, "DOWN")]["trace"] == ["PRE-MATERIALISING", "INCOMPLETE PASS"]
@@ -215,6 +217,15 @@ def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
         "PRE-MATERIALISING", "COMPLETE",
     ]
     assert rendered["frames"][-1]["final"] is True
+    assert rendered["frames"][0]["duration_multiplier"] == 1.5
+    assert rendered["frames"][1]["duration_multiplier"] == 1
+    waited_final = next(
+        update
+        for frame in rendered["frames"]
+        for update in frame["updates"]
+        if update["key"] == "0:O" and update["state"] == "consumed-waited"
+    )
+    assert waited_final["completion_at_deadline_percent"] == 75
 
 
 def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector() -> None:
@@ -256,13 +267,17 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "ATTN O", "MLP UP", "MLP DN",
     ):
         assert label in javascript
-    assert 'min="25" max="2000" step="25" value="250"' in index
+    assert 'min="10" max="2000" step="10" value="250"' in index
     assert "state duration" in index
     assert "rule: do not cross global buffer - currently" in javascript
     assert "rule: stay below current peak memory" in javascript
     assert "PREMAT_FINAL_HOLD_MS = 1000" in javascript
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "&after=${after}" in javascript
+    assert "--premat-partial-progress" in css
+    assert ".premat-key-outcomes" in css
+    assert "PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5" in javascript
+    assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
 
 def test_premat_layer_rows_are_one_indexed_descending_and_shrink_with_a_floor() -> None:

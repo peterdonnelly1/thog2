@@ -231,3 +231,12 @@
 - The setting is propagated through the wrapper, CLI, run/training/model identity, checkpoint compatibility, artifact identity, runtime construction, startup reporting, local telemetry and Instra summary.
 - Priority changes dispatch preference only. It does not make a materialisation kernel intrinsically faster and cannot preempt a kernel already executing, so acceptance must compare step time and Premat wait/outcome counts rather than green cells alone.
 - Python, shell and JavaScript syntax plus whitespace checks pass. PyTorch/pytest and CUDA execution remain unavailable in this container.
+
+## 2026-09-09 - Partial-hit progress and replay emphasis
+
+- A CUDA materialisation is an opaque kernel sequence, so Instra does not claim internal FLOP completion. For a waited hit it now estimates elapsed time-progress as `(total Premat materialisation time - main-stream wait time) / total Premat materialisation time`, rounded to 5%.
+- The terminal `PARTIAL HIT` rectangle shows that estimate horizontally: green is the portion already elapsed when the main path reached the matrix and light grey is the remaining portion. A waited hit is capped at 95% so it cannot look identical to a full hit; unresolved CUDA timing produces an unquantified representative split rather than fabricated data.
+- The inspector Outcome cell carries the same approximate `~N% READY` value when available.
+- The combined key now begins in line with the matrix grid, gives `OUTCOMES` additional left separation, and places labels before swatches.
+- The state-duration slider now reaches 0.010 seconds. `PRE-MATERIALISING` is deliberately held for 1.5 times the selected state duration while the one-second final-outcome hold remains unchanged.
+- JavaScript syntax, a direct Node reducer/timing harness, Python syntax, and `git diff --check` pass. Full pytest import remains unavailable because Plotly is absent from this container.

@@ -159,7 +159,7 @@
               <button class="premat-icon-button" id="premat_play_toggle" type="button" aria-label="Pause Premat playback" title="Pause Premat playback">Ⅱ</button>
               <label class="premat-playback-control" for="premat_state_duration">
                 state duration
-                <input id="premat_state_duration" type="range" min="25" max="2000" step="25" value="250">
+                <input id="premat_state_duration" type="range" min="10" max="2000" step="10" value="250">
                 <output id="premat_state_duration_label" for="premat_state_duration">0.25 s</output>
               </label>
               <button class="premat-icon-button" id="premat_inspect_button" type="button" aria-label="Inspect Premat data" title="Inspect Premat data" disabled><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path></svg></button>
@@ -170,19 +170,19 @@
           <div class="premat-layers-scroll"><div class="premat-layers" id="premat_layers"></div></div>
           <div class="premat-key" aria-label="Premat pipeline key">
             <strong>PROCESSING</strong>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-neutral"></span>OUT OF SCOPE</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-pending"></span>NOT YET REACHED</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-materialising"></span>PRE-MATERIALISING</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-available"></span>AVAILABLE</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-full"></span><span>CONSUMING -<br>NO WAITING</span></span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-waiting"></span><span>WAITING FOR<br>PRE-MATERIALISATION</span></span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-waited"></span>CONSUMING AFTER WAIT</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-materialising"></span><span>PREMAT NOT STARTED -<br>MAIN CODE MATERIALISING</span></span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-consuming"></span>MAIN CODE CONSUMING</span>
-            <strong>OUTCOMES</strong>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-full"></span>FULL HIT</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-waited"></span>PARTIAL HIT</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-main"></span>COMPLETE MISS</span>
+            <span class="premat-key-item"><span>OUT OF SCOPE</span><span class="premat-key-swatch premat-neutral"></span></span>
+            <span class="premat-key-item"><span>NOT YET REACHED</span><span class="premat-key-swatch premat-pending"></span></span>
+            <span class="premat-key-item"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span>
+            <span class="premat-key-item"><span>AVAILABLE</span><span class="premat-key-swatch premat-state-available"></span></span>
+            <span class="premat-key-item"><span>CONSUMING -<br>NO WAITING</span><span class="premat-key-swatch premat-state-consuming-full"></span></span>
+            <span class="premat-key-item"><span>WAITING FOR<br>PRE-MATERIALISATION</span><span class="premat-key-swatch premat-state-waiting"></span></span>
+            <span class="premat-key-item"><span>CONSUMING AFTER WAIT</span><span class="premat-key-swatch premat-state-consuming-waited"></span></span>
+            <span class="premat-key-item"><span>PREMAT NOT STARTED -<br>MAIN CODE MATERIALISING</span><span class="premat-key-swatch premat-state-main-materialising"></span></span>
+            <span class="premat-key-item"><span>MAIN CODE CONSUMING</span><span class="premat-key-swatch premat-state-main-consuming"></span></span>
+            <strong class="premat-key-outcomes">OUTCOMES</strong>
+            <span class="premat-key-item"><span>FULL HIT</span><span class="premat-key-swatch premat-state-consumed-full"></span></span>
+            <span class="premat-key-item"><span>PARTIAL HIT</span><span class="premat-key-swatch premat-state-consumed-waited"></span></span>
+            <span class="premat-key-item"><span>COMPLETE MISS</span><span class="premat-key-swatch premat-state-consumed-main"></span></span>
           </div>
         </section>
         <dialog class="premat-inspector" id="premat_inspector">

@@ -139,7 +139,15 @@
 .premat-state-consumed-full { background: #238451; color: #fff; }
 .premat-state-waiting { background: repeating-linear-gradient(135deg, #ee9b31 0 7px, #4eaf72 7px 14px); color: #1e241b; }
 .premat-state-consuming-waited { background: repeating-linear-gradient(135deg, #ee9b31 0 7px, #fff4e2 7px 14px); color: #3e260c; }
-.premat-state-consumed-waited { background: #dd861e; color: #fff; }
+.premat-state-consumed-waited {
+  --premat-partial-progress: 50%;
+  background: linear-gradient(
+    90deg,
+    #238451 0 var(--premat-partial-progress),
+    #e2e7eb var(--premat-partial-progress) 100%
+  );
+  color: #173326;
+}
 .premat-state-main-materialising { background: repeating-linear-gradient(135deg, #ef3340 0 7px, #fff 7px 14px); color: #4b090e; }
 .premat-state-main-consuming { background: repeating-linear-gradient(135deg, #ed3945 0 7px, #9ca5af 7px 14px); color: #27080b; }
 .premat-state-consumed-main { background: #b94149; color: #fff; }
@@ -171,12 +179,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  margin: 14px 11px 24px;
+  margin: 14px 11px 24px 54px;
   color: var(--muted-text, #777f8c);
   font-size: 9px;
 }
 .premat-key > strong { flex: 0 0 auto; }
 .premat-key strong { color: var(--text, #343942); }
+.premat-key-outcomes { margin-left: 28px; }
 .premat-key-item { display: inline-flex; align-items: center; gap: 5px; line-height: 1.15; }
 .premat-key-swatch {
   display: inline-block;

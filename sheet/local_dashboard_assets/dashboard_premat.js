@@ -2,6 +2,7 @@
 "use strict";
 
 const PREMAT_FINAL_HOLD_MS = 1000;
+const PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5;
 const PREMAT_STATE_CLASSES = [
   "premat-neutral",
   "premat-pending",
@@ -121,6 +122,7 @@ function premat_new_record(layer_index, family, attention_mode) {
     wait_ms: null,
     materialisation_ms: null,
     main_materialisation_ms: null,
+    completion_at_deadline_percent: null,
     retained_bytes: null,
   };
 }
@@ -149,6 +151,23 @@ function premat_update_from_event(record, event) {
   }
 }
 
+function premat_partial_hit_progress(record) {
+  const total_value = record?.materialisation_ms;
+  const wait_value = record?.wait_ms;
+  const total_ms = Number(total_value);
+  const wait_ms = Number(wait_value);
+  if (total_value === null || total_value === undefined
+      || wait_value === null || wait_value === undefined
+      || !Number.isFinite(total_ms) || total_ms <= 0
+      || !Number.isFinite(wait_ms) || wait_ms < 0) {
+    return null;
+  }
+  const raw_percent = 100 * Math.max(0, Math.min(1, (total_ms - wait_ms) / total_ms));
+  // A waited hit was observably incomplete at its deadline. Keep its rounded
+  // estimate below 100% so it cannot be mistaken for a full hit.
+  return Math.max(0, Math.min(95, Math.round(raw_percent / 5) * 5));
+}
+
 function premat_build_model(snapshot) {
   const attention_mode = snapshot.attention_mode === "unfused" ? "unfused" : "fused";
   const layers = premat_layer_indices(snapshot);
@@ -170,6 +189,9 @@ function premat_build_model(snapshot) {
       active_layer_index: Number(event.current_layer_index ?? event.layer_index),
       event_sequence: Number(event.sequence),
       frame_state,
+      duration_multiplier: update.state === "materialising"
+        ? PREMAT_PREMATERIALISING_DURATION_MULTIPLIER
+        : 1,
       final: false,
     });
     pending_updates = [];
@@ -256,8 +278,16 @@ function premat_build_model(snapshot) {
         record.path = "main";
         record.outcome = "COMPLETE MISS";
       }
+      if (record.path === "waited") {
+        record.completion_at_deadline_percent = premat_partial_hit_progress(record);
+      }
       premat_append_trace(record, record.outcome);
-      add_zero_update({key, state: terminal_state, outcome: record.outcome});
+      add_zero_update({
+        key,
+        state: terminal_state,
+        outcome: record.outcome,
+        completion_at_deadline_percent: record.completion_at_deadline_percent,
+      });
       continue;
     }
 
@@ -361,9 +391,23 @@ function premat_apply_update(update) {
   if (!element) return;
   element.classList.remove(...PREMAT_STATE_CLASSES);
   element.classList.add(premat_state_class(update.state));
+  element.style.removeProperty("--premat-partial-progress");
   const record = premat_view.active_model?.records.get(update.key);
+  const progress_value = update.completion_at_deadline_percent;
+  const progress = Number(progress_value);
+  const has_progress = update.state === "consumed-waited"
+    && progress_value !== null
+    && progress_value !== undefined
+    && Number.isFinite(progress);
+  if (has_progress) element.style.setProperty("--premat-partial-progress", `${progress}%`);
   const state_label = String(update.state).replaceAll("-", " ").toUpperCase();
-  element.title = `${record?.label || update.key}; ${state_label}; ${update.outcome || record?.outcome || ""}`;
+  const progress_label = has_progress ? `; approximately ${progress}% time-progress at deadline` : "";
+  element.title = `${record?.label || update.key}; ${state_label}; ${update.outcome || record?.outcome || ""}${progress_label}`;
+}
+
+function premat_frame_delay(frame) {
+  if (frame?.final) return PREMAT_FINAL_HOLD_MS;
+  return premat_view.state_duration_ms * Number(frame?.duration_multiplier || 1);
 }
 
 function premat_set_active_layer(layer_index) {
@@ -407,7 +451,7 @@ function premat_advance_playback() {
   }
   const frame = premat_view.frames[premat_view.frame_index++];
   premat_apply_frame(frame);
-  const delay = frame.final ? PREMAT_FINAL_HOLD_MS : premat_view.state_duration_ms;
+  const delay = premat_frame_delay(frame);
   premat_view.playback_timer = setTimeout(premat_advance_playback, delay);
 }
 
@@ -423,7 +467,15 @@ function premat_render_inspector(snapshot, model) {
   for (const layer_index of [...model.layers].sort((left, right) => right - left)) {
     for (const family of model.families) {
       const record = model.records.get(premat_candidate_key(layer_index, family));
-      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_escape(record.trace.join(" → ") || "—")}</td><td>${premat_escape(record.outcome)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td><td>${premat_escape(record.admission_reason)}</td></tr>`);
+      const progress_value = record.completion_at_deadline_percent;
+      const progress = Number(progress_value);
+      const outcome = record.outcome === "PARTIAL HIT"
+          && progress_value !== null
+          && progress_value !== undefined
+          && Number.isFinite(progress)
+        ? `PARTIAL HIT · ~${progress}% TIME-PROGRESS`
+        : record.outcome;
+      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_escape(record.trace.join(" → ") || "—")}</td><td>${premat_escape(outcome)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td><td>${premat_escape(record.admission_reason)}</td></tr>`);
     }
   }
   by_id("premat_inspector_step").textContent = String(snapshot.optimizer_update ?? "—");
@@ -554,12 +606,12 @@ window.addEventListener("DOMContentLoaded", () => {
   const duration = by_id("premat_state_duration");
   const duration_label = by_id("premat_state_duration_label");
   const update_duration = () => {
-    premat_view.state_duration_ms = Math.max(25, Number(duration?.value || 250));
+    premat_view.state_duration_ms = Math.max(10, Number(duration?.value || 250));
     if (duration_label) duration_label.textContent = `${(premat_view.state_duration_ms / 1000).toFixed(2)} s`;
     if (premat_view.playback_running && premat_view.playing) {
       premat_clear_timer();
       const visible_frame = premat_view.frames[premat_view.frame_index - 1];
-      const delay = visible_frame?.final ? PREMAT_FINAL_HOLD_MS : premat_view.state_duration_ms;
+      const delay = premat_frame_delay(visible_frame);
       premat_view.playback_timer = setTimeout(premat_advance_playback, delay);
     }
   };
@@ -585,6 +637,7 @@ if (typeof module !== "undefined" && module.exports) {
     premat_family_label,
     premat_matrix_size,
     premat_memory_rule,
+    premat_partial_hit_progress,
     premat_render_layout,
     premat_snapshot_complete,
   };
