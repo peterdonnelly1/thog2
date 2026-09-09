@@ -115,7 +115,6 @@ def _runtime(
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
     attach=None,
-    allow_immediate_next: bool = True,
 ):
     fake_cuda = _FakeCuda()
     fake_cuda.install(monkeypatch)
@@ -132,7 +131,6 @@ def _runtime(
         n_head=2,
         attention_mode=attention_mode,
         stay_below_current_peak=stay_below_current_peak,
-        allow_premat_of_immediate_next_matrix=allow_immediate_next,
         gpu_memory_buffer_gb=0.0,
         logging_enabled=True,
     )
@@ -238,7 +236,6 @@ def test_premat_headroom_flags_are_mutually_exclusive() -> None:
             attention_mode="fused",
             stay_below_current_peak=True,
             stay_within_global_buffer=True,
-            allow_premat_of_immediate_next_matrix=False,
             gpu_memory_buffer_gb=1.0,
             logging="disabled",
             instra="disabled",
@@ -251,7 +248,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_seven_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -264,7 +261,6 @@ def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
         "--premat_attention_mode",
         "--premat_headroom_stay_below_current_peak",
         "--premat_headroom_stay_within_global_buffer",
-        "--premat_allow_premat_of_immediate_next_matrix",
         "--premat_gpu_memory_buffer_gb",
         "--premat_logging",
         "--premat_instra",
@@ -277,10 +273,6 @@ def test_underscore_alias_normaliser_preserves_exact_premat_names() -> None:
     assert sitecustomize._normalise_long_option(  # noqa: SLF001 - public CLI compatibility contract
         "--premat_gpu_memory_buffer_gb=4"
     ) == "--premat_gpu_memory_buffer_gb=4"
-    arguments = build_parser().parse_args(
-        ["--premat_allow_premat_of_immediate_next_matrix"]
-    )
-    assert arguments.premat_allow_premat_of_immediate_next_matrix is True
 
 
 def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path) -> None:
@@ -291,30 +283,12 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
         out_dir=tmp_path,
     )
     assert training_config.premat_headroom_stay_below_current_peak is True
-    assert training_config.premat_allow_premat_of_immediate_next_matrix is False
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_resolved_headroom_mode"] == "stay_below_current_peak"
     assert canonical["premat_effective_fast_discard"] is True
     assert canonical["premat_schema_version"] == 2
     assert canonical["premat_lookahead_layer_limit"] == 1
-    assert canonical["premat_minimum_matrix_lead"] == 1
-
-
-def test_immediate_next_option_propagates_and_changes_run_identity(tmp_path) -> None:
-    run_config = OwtRunConfig(
-        model_type="sheet",
-        premat="enabled",
-        premat_allow_premat_of_immediate_next_matrix=True,
-        device="cuda",
-    )
-    training_config = run_config.to_training_config(
-        vocab_size=32,
-        world_size=1,
-        out_dir=tmp_path,
-    )
-    assert training_config.premat_allow_premat_of_immediate_next_matrix is True
-    assert run_config.canonical_dict(world_size=1)["premat_minimum_matrix_lead"] == 0
-    assert "_AIN" in run_config.parameter_artifact_fragment()
+    assert canonical["premat_target_scope"] == "next_layer_only"
 
 
 def test_unfused_attention_matches_fused_math_on_cpu() -> None:
@@ -366,27 +340,30 @@ def test_deadline_unavailable_is_claimed_by_main_without_late_premat_launch(monk
     )
 
 
-def test_next_plus_one_default_primes_once_then_maintains_matrix_lead(monkeypatch) -> None:
+def test_premat_targets_every_matrix_in_the_next_layer_only(monkeypatch) -> None:
     runtime, fake_cuda, calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
-        allow_immediate_next=False,
     )
     fake_cuda.complete_premat_on_record = True
     runtime.layer_start(3)
-    assert calls == [("O", 3)]
+    assert calls == [("QKV", 5)]
 
-    first = runtime.acquire("QKV", 3)
-    assert runtime._candidates[(3, "QKV")].owner == "main"
-    del first
-    runtime.consumed("QKV", 3)
-    assert calls == [("O", 3), ("QKV", 3), ("UP", 3)]
+    runtime.event("after_ln1", layer_index=3)
+    runtime.event("after_attention", layer_index=3)
+    runtime.event("after_gelu", layer_index=3)
+    assert calls == [("QKV", 5), ("O", 5), ("UP", 5), ("DOWN", 5)]
+    assert all(
+        runtime._candidates[(3, family)].owner == "none"
+        for family in ("QKV", "O", "UP", "DOWN")
+    )
+    assert all(
+        runtime._candidates[(5, family)].owner == "premat"
+        for family in ("QKV", "O", "UP", "DOWN")
+    )
 
-    second = runtime.acquire("O", 3)
-    assert runtime._candidates[(3, "O")].critical_path_miss is False
-    del second
-    runtime.consumed("O", 3)
-    assert calls == [("O", 3), ("QKV", 3), ("UP", 3), ("DOWN", 3)]
+    runtime.layer_start(5)
+    assert calls[-1] == ("QKV", 7)
 
 
 def test_main_fallback_and_checkpoint_replay_keep_the_ordinary_autograd_path(monkeypatch) -> None:
@@ -416,13 +393,14 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
         stay_below_current_peak=False,
     )
     runtime.layer_start(3)
-    assert calls == [("QKV", 3)]
+    assert calls == [("QKV", 5)]
     assert fake_cuda.stream_creations == 1
-    weight = runtime.acquire("QKV", 3)
-    assert calls == [("QKV", 3)]
+    runtime.layer_start(5)
+    weight = runtime.acquire("QKV", 5)
+    assert calls == [("QKV", 5)]
     assert weight.recorded_streams[-1] is fake_cuda.main_stream
     assert len(fake_cuda.main_stream.waited_events) == 1
-    candidate = runtime._candidates[(3, "QKV")]
+    candidate = runtime._candidates[(5, "QKV")]
     assert candidate.owner == "premat"
     assert candidate.state == CandidateState.CONSUMING
     assert candidate.critical_path_miss
@@ -437,21 +415,22 @@ def test_pending_premat_release_stays_charged_without_blocking_next_launch(monke
         stay_below_current_peak=False,
     )
     runtime.layer_start(3)
-    assert calls == [("QKV", 3)]
-    weight = runtime.acquire("QKV", 3)
+    assert calls == [("QKV", 5)]
+    runtime.layer_start(5)
+    weight = runtime.acquire("QKV", 5)
     fake_cuda.complete_main_on_record = False
     del weight
-    runtime.consumed("QKV", 3)
+    runtime.consumed("QKV", 5)
 
     assert runtime._pending_releases
     release = runtime._pending_releases[0]
     assert release.retained_bytes > 0
     assert release.tensor is not None
-    assert calls == [("QKV", 3), ("O", 3)]
+    assert calls == [("QKV", 5), ("QKV", 7)]
     retained_before_release = runtime._retained_bytes
 
     release.end_event.complete = True
-    runtime.event("after_qkv_complete", layer_index=3)
+    runtime.event("after_qkv_complete", layer_index=5)
     assert runtime._pending_releases == []
     assert runtime._retained_bytes == retained_before_release - release.retained_bytes
 
@@ -471,7 +450,7 @@ def test_main_fallback_creates_no_zero_byte_release_gate(monkeypatch) -> None:
     runtime.consumed("QKV", 3)
 
     assert runtime._pending_releases == []
-    assert calls == [("QKV", 3), ("O", 3)]
+    assert calls == [("QKV", 3), ("QKV", 5)]
 
 
 def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(monkeypatch) -> None:
@@ -483,6 +462,7 @@ def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(mo
     assert calls == []
     report = runtime.report()
     assert report["queue_head"]["family"] == "QKV"
+    assert report["queue_head"]["layer_index"] == 5
     assert report["queue_head"]["deferred"] is True
     assert {candidate["layer_index"] for candidate in report["candidates"]} == {3, 5}
     assert all(candidate["owner"] == "none" for candidate in report["candidates"])
@@ -494,7 +474,7 @@ def test_lifecycle_rejects_illegal_transition(monkeypatch) -> None:
         stay_below_current_peak=True,
     )
     runtime.layer_start(3)
-    candidate = runtime._candidates[(3, "QKV")]
+    candidate = runtime._candidates[(5, "QKV")]
     with pytest.raises(RuntimeError, match="UNAVAILABLE->CONSUMED"):
         runtime._transition(candidate, CandidateState.CONSUMED, "invalid")
 

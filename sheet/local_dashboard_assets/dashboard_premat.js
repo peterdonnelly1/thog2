@@ -52,6 +52,17 @@ function premat_ms(value) {
   return Number.isFinite(milliseconds) ? `${milliseconds.toFixed(3)} ms` : "—";
 }
 
+function premat_memory_rule(snapshot) {
+  if (snapshot?.headroom_mode === "stay_within_global_buffer") {
+    const bytes = Number(snapshot?.memory?.global_buffer_bytes);
+    const gib = Number.isFinite(bytes)
+      ? (bytes / 1024 ** 3).toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
+      : "—";
+    return `rule: do not cross global buffer - currently ${gib} GiB`;
+  }
+  return "rule: stay below current peak memory";
+}
+
 function premat_candidate_key(layer_index, family) {
   return `${Number(layer_index)}:${String(family)}`;
 }
@@ -411,7 +422,7 @@ function premat_start_snapshot(snapshot) {
   premat_view.frame_index = 0;
   premat_view.playback_running = true;
   by_id("premat_step").textContent = String(snapshot.optimizer_update ?? "—");
-  by_id("premat_mode").textContent = String(snapshot.headroom_mode || "").replaceAll("_", " ");
+  by_id("premat_mode").textContent = premat_memory_rule(snapshot);
   premat_render_layout(model);
   premat_render_summary(snapshot, model);
   premat_render_inspector(snapshot, model);
@@ -523,7 +534,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const duration = by_id("premat_state_duration");
   const duration_label = by_id("premat_state_duration_label");
   const update_duration = () => {
-    premat_view.state_duration_ms = Math.max(50, Number(duration?.value || 250));
+    premat_view.state_duration_ms = Math.max(25, Number(duration?.value || 250));
     if (duration_label) duration_label.textContent = `${(premat_view.state_duration_ms / 1000).toFixed(2)} s`;
     if (premat_view.playback_running && premat_view.playing) {
       premat_clear_timer();
@@ -548,6 +559,6 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = {premat_build_model, premat_families, premat_family_label, premat_snapshot_complete};
+  module.exports = {premat_build_model, premat_families, premat_family_label, premat_memory_rule, premat_snapshot_complete};
 }
 // ^^^ THOG

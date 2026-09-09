@@ -324,7 +324,6 @@ def build_parser() -> argparse.ArgumentParser:
     premat_headroom = parser.add_mutually_exclusive_group()
     premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
     premat_headroom.add_argument("--premat_headroom_stay_within_global_buffer", action="store_true")
-    parser.add_argument("--premat_allow_premat_of_immediate_next_matrix", action="store_true")
     parser.add_argument("--premat_gpu_memory_buffer_gb", type=float, default=1.0)
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
@@ -716,7 +715,6 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_attention_mode=arguments.premat_attention_mode,
         premat_headroom_stay_below_current_peak=arguments.premat_headroom_stay_below_current_peak,
         premat_headroom_stay_within_global_buffer=arguments.premat_headroom_stay_within_global_buffer,
-        premat_allow_premat_of_immediate_next_matrix=arguments.premat_allow_premat_of_immediate_next_matrix,
         premat_gpu_memory_buffer_gb=arguments.premat_gpu_memory_buffer_gb,
         premat_logging=arguments.premat_logging,
         premat_instra=arguments.premat_instra,
@@ -940,15 +938,9 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
-            f"allow_immediate_next={str(config.premat_allow_premat_of_immediate_next_matrix).lower()} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
-            "lookahead=l+1 matrix_target="
-            + (
-                "immediate_next_and_beyond"
-                if config.premat_allow_premat_of_immediate_next_matrix
-                else "next_plus_one_and_beyond"
-            ),
+            "lookahead=l+1 matrix_target=next_layer_only",
         )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics

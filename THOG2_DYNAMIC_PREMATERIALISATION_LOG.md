@@ -192,3 +192,11 @@
 - Added the opt-in `--premat_allow_premat_of_immediate_next_matrix` flag to restore zero-lead immediate-next targeting for comparison. The default is false.
 - The selected matrix-lead policy is propagated through CLI, wrapper, run/training/model configuration, checkpoint compatibility, artifact identity, canonical metadata, runtime telemetry and the startup `PREMAT:` row.
 - Added regression coverage showing the default starts with `O` while `QKV` supplies the single startup bubble, then advances to `UP` and `DOWN` as the preceding prepared matrix becomes consumable. A direct dependency-free scheduler harness passes for both lead policies.
+
+## 2026-09-09 - Original next-layer-only scheduling restored
+
+- Field runs at L32/P16, L12/P6, L6/P3 and L4/P2 showed that matrix-relative lead policies still spent most of their time waiting or falling back on the main path. Lighter runs were worse because their shorter foreground operations gave the auxiliary stream less time to get ahead.
+- Restored the original layer pipeline: while logical layer `l` executes, every early-discard/reconsideration point may launch only the next ordered unmaterialised matrix of layer `l+1`. Current-layer opportunities are deadlines, not Premat targets.
+- Removed the experimental immediate-next CLI/configuration option and matrix-lead metadata completely. Runtime and canonical telemetry now identify the fixed policy as `next_layer_only`.
+- Instra's state-duration slider now spans 0.025--2.000 seconds, its label is lowercase, and the header states the active memory rule explicitly, including the configured global buffer when applicable.
+- Python, shell and JavaScript syntax checks, whitespace validation, a dependency-free next-layer scheduler harness, and a direct memory-rule rendering harness pass. PyTorch/pytest remain unavailable in this container; scruffy remains the CUDA acceptance host.

@@ -188,3 +188,14 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Propagate the policy through wrapper, configuration, resume/artifact identity, startup reporting and telemetry.
 - [x] Add and run a dependency-free regression harness for default and opt-in scheduling.
 - [ ] On scruffy, compare tok/s, full hits, waited hits and main materialisations between the default and immediate-next option under matched steady-state headroom.
+
+## 2026-09-09 original next-layer-only scheduling
+
+- [x] Restrict Premat targets to the ordered matrices of logical layer `l+1`.
+- [x] Continue reconsidering that next-layer queue at every current-layer early-discard event.
+- [x] Remove the experimental immediate-next flag from the CLI, wrapper, runtime and persistent configuration identity.
+- [x] Report `next_layer_only` consistently in runtime telemetry, canonical metadata and startup diagnostics.
+- [x] Extend Instra state duration to 0.025--2.000 seconds and lowercase its label.
+- [x] Replace the terse headroom label with the explicit active memory rule and configured buffer.
+- [x] Pass all available static and dependency-free focused checks.
+- [ ] On scruffy, confirm layer 1 is the startup bubble and later layers become green when auxiliary compute throughput permits.

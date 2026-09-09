@@ -147,7 +147,6 @@ class SheetGPTConfig:
     premat_attention_mode: str = "fused"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
-    premat_allow_premat_of_immediate_next_matrix: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
@@ -312,7 +311,6 @@ class SheetGPTConfig:
             attention_mode=self.premat_attention_mode,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
-            allow_premat_of_immediate_next_matrix=self.premat_allow_premat_of_immediate_next_matrix,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
             logging=self.premat_logging,
             instra=self.premat_instra,
@@ -567,9 +565,6 @@ class SheetGPT(nn.Module):
                 stay_below_current_peak=(
                     config.premat_headroom_stay_below_current_peak
                     or not config.premat_headroom_stay_within_global_buffer
-                ),
-                allow_premat_of_immediate_next_matrix=(
-                    config.premat_allow_premat_of_immediate_next_matrix
                 ),
                 gpu_memory_buffer_gb=config.premat_gpu_memory_buffer_gb,
                 logging_enabled=(

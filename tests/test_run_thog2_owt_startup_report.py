@@ -49,7 +49,6 @@ def _config():
         premat_attention_mode="fused",
         premat_headroom_stay_below_current_peak=True,
         premat_headroom_stay_within_global_buffer=False,
-        premat_allow_premat_of_immediate_next_matrix=False,
         premat_logging="enabled",
         premat_instra="disabled",
         plastic__enabled=True,
@@ -106,8 +105,7 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "premat=enabled" in output
     assert "premat_attention_mode=fused" in output
     assert "headroom=stay_below_current_peak" in output
-    assert "allow_immediate_next=false" in output
-    assert "matrix_target=next_plus_one_and_beyond" in output
+    assert "matrix_target=next_layer_only" in output
     assert "effective_fast_discard=true" in output
     assert "checkpoint_recompute_segment=4" in output
     assert "cuda_allocator=" in output

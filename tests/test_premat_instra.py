@@ -240,7 +240,10 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "ATTN O", "MLP UP", "MLP DN",
     ):
         assert label in javascript
-    assert 'min="50" max="1000" step="50" value="250"' in index
+    assert 'min="25" max="2000" step="25" value="250"' in index
+    assert "state duration" in index
+    assert "rule: do not cross global buffer - currently" in javascript
+    assert "rule: stay below current peak memory" in javascript
     assert "PREMAT_FINAL_HOLD_MS = 1000" in javascript
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "&after=${after}" in javascript
