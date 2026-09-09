@@ -199,3 +199,11 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Replace the terse headroom label with the explicit active memory rule and configured buffer.
 - [x] Pass all available static and dependency-free focused checks.
 - [ ] On scruffy, confirm layer 1 is the startup bubble and later layers become green when auxiliary compute throughput permits.
+
+## 2026-09-09 global-buffer allocator-cache correction
+
+- [x] Diagnose the L12/P8 zero-admission capture as physical headroom consumed by unused PyTorch allocator cache.
+- [x] Preserve conservative full-envelope admission rather than again assuming aggregate cached bytes are contiguous and auxiliary-stream-reusable.
+- [x] Enable native allocator garbage collection at 80% capacity alongside expandable segments for default Premat launches.
+- [x] Preserve explicit user `PYTORCH_CUDA_ALLOC_CONF` overrides.
+- [ ] Confirm on scruffy that the startup row reports both allocator settings and later captured microsteps admit next-layer candidates.

@@ -200,3 +200,9 @@
 - Removed the experimental immediate-next CLI/configuration option and matrix-lead metadata completely. Runtime and canonical telemetry now identify the fixed policy as `next_layer_only`.
 - Instra's state-duration slider now spans 0.025--2.000 seconds, its label is lowercase, and the header states the active memory rule explicitly, including the configured global buffer when applicable.
 - Python, shell and JavaScript syntax checks, whitespace validation, a dependency-free next-layer scheduler harness, and a direct memory-rule rendering harness pass. PyTorch/pytest remain unavailable in this container; scruffy remains the CUDA acceptance host.
+
+## 2026-09-09 - Global-buffer allocator-cache correction
+
+- The first next-layer-only L12/P8 capture reported about 10.8 GiB tensor allocation but a -242.2 MiB buffer margin against a 0.25 GiB buffer. All 48 candidates therefore fell back to the main path.
+- The discrepancy was PyTorch's unused allocator cache: driver-reported free memory was almost exhausted even though several GiB were reserved but unallocated. Premat correctly refused to assume that fragmented, main-stream cache was reusable by its auxiliary stream, but the default allocator policy allowed that cache to consume all physical admission headroom.
+- Premat's default native allocator configuration now combines `expandable_segments:True` with `garbage_collection_threshold:0.8`. PyTorch therefore actively reclaims old unused blocks above 80% capacity rather than hoarding them, while the existing admission guard continues charging the complete candidate envelope against actual driver-reported free memory. Explicit user allocator settings remain authoritative.

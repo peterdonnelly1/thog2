@@ -1235,11 +1235,13 @@ export THOG2_BYPASS_SEMANTIC_QKV_ADAPTER="$BYPASS_SEMANTIC_QKV_ADAPTER"         
 export THOG2_DIRECT_FACTORISED_MLP="$DIRECT_FACTORISED_MLP"                                                                                              # <<< THOG pass renamed option
 export THOG2_DIRECT_FACTORISED_HYPERBLOCK_MLP="$DIRECT_FACTORISED_HYPERBLOCK_MLP"                                                                      # <<< THOG pass independent direct HYPERBLOCK MLP option
 export THOG2_VECTORISE_PER_HEAD_MATERIALISATION="$VECTORISE_PER_HEAD_MATERIALISATION"                                                                    # <<< THOG pass per-head option                                                                                    # <<< THOG pass wrapper-only exact MLP application switch into SheetGPTConfig
-# vvv THOG Premat changes allocation timing and stream ownership; expandable
-# segments prevent the large unusable cache slivers seen in scruffy field tests.
-# An explicit user allocator policy remains authoritative.
+# vvv THOG Premat changes allocation timing and stream ownership.  Expandable
+# segments limit unusable slivers, while active garbage collection stops the
+# ordinary stream's unused cache from consuming the physical headroom that the
+# conservative Premat admission guard requires.  An explicit user allocator
+# policy remains authoritative.
 if [[ "$PREMAT_EFFECTIVE" == enabled && -z "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
-  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8"
 fi
 # ^^^ THOG
 

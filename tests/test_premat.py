@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from pathlib import Path
 import warnings
 
 import pytest
@@ -256,6 +257,14 @@ def test_public_cli_exposes_exactly_the_seven_premat_options() -> None:
         for option in action.option_strings
         if option.startswith("--premat")
     }
+
+
+def test_wrapper_reclaims_unused_allocator_cache_for_premat_by_default() -> None:
+    wrapper = Path("train_OWT_core.sh").read_text(encoding="utf-8")
+    assert (
+        'PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,'
+        'garbage_collection_threshold:0.8"'
+    ) in wrapper
     assert option_strings == {
         "--premat",
         "--premat_attention_mode",
