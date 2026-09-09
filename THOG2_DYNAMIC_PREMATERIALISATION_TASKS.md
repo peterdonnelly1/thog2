@@ -207,3 +207,14 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Enable native allocator garbage collection at 80% capacity alongside expandable segments for default Premat launches.
 - [x] Preserve explicit user `PYTORCH_CUDA_ALLOC_CONF` overrides.
 - [ ] Confirm on scruffy that the startup row reports both allocator settings and later captured microsteps admit next-layer candidates.
+
+## 2026-09-09 Instra outcome vocabulary and matrix sizes
+
+- [x] Separate transient `PROCESSING` states from terminal `OUTCOMES` in the key.
+- [x] Distinguish out-of-scope compute stages from in-scope matrices that have not yet been reached.
+- [x] Remove `TOO LATE` as a normal outcome and retain pass-end release only as an incomplete-pass diagnostic.
+- [x] Use the agreed lifecycle labels consistently in the graphic and inspector.
+- [x] Show each retained materialised matrix size in MiB above its matrix column and in the inspector.
+- [x] Run all available dependency-free focused checks.
+- [ ] On scruffy, confirm size headings align with the matrix rectangles in both fused and unfused layouts.
+- [ ] Consider an isolated reverse-order next-layer scheduler experiment (`MLP DN`, `MLP UP`, `ATTN O`, attention input) after visual acceptance.

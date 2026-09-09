@@ -4,6 +4,7 @@
 const PREMAT_FINAL_HOLD_MS = 1000;
 const PREMAT_STATE_CLASSES = [
   "premat-neutral",
+  "premat-pending",
   "premat-state-materialising",
   "premat-state-available",
   "premat-state-consuming-full",
@@ -14,7 +15,6 @@ const PREMAT_STATE_CLASSES = [
   "premat-state-main-materialising",
   "premat-state-main-consuming",
   "premat-state-consumed-main",
-  "premat-state-too-late",
 ];
 
 const premat_view = {
@@ -50,6 +50,12 @@ function premat_bytes(value) {
 function premat_ms(value) {
   const milliseconds = Number(value);
   return Number.isFinite(milliseconds) ? `${milliseconds.toFixed(3)} ms` : "—";
+}
+
+function premat_matrix_size(value) {
+  const mebibytes = Number(value) / (1024 ** 2);
+  if (!Number.isFinite(mebibytes)) return "—";
+  return `${mebibytes >= 10 ? mebibytes.toFixed(0) : mebibytes.toFixed(1)} MiB`;
 }
 
 function premat_memory_rule(snapshot) {
@@ -109,12 +115,13 @@ function premat_new_record(layer_index, family, attention_mode) {
     family,
     label: premat_family_label(family, attention_mode),
     trace: [],
-    outcome: "NO PREMAT",
+    outcome: "NOT YET REACHED",
     path: "none",
     admission_reason: "not checked",
     wait_ms: null,
     materialisation_ms: null,
     main_materialisation_ms: null,
+    retained_bytes: null,
   };
 }
 
@@ -123,6 +130,11 @@ function premat_append_trace(record, state) {
 }
 
 function premat_update_from_event(record, event) {
+  if (event.predicted_retained_bytes !== null
+      && event.predicted_retained_bytes !== undefined
+      && Number.isFinite(Number(event.predicted_retained_bytes))) {
+    record.retained_bytes = Number(event.predicted_retained_bytes);
+  }
   if (event.admission_reason) record.admission_reason = String(event.admission_reason).replaceAll("_", " ");
   if (event.wait_ms !== null && event.wait_ms !== undefined && Number.isFinite(Number(event.wait_ms))) {
     record.wait_ms = Number(event.wait_ms);
@@ -181,9 +193,8 @@ function premat_build_model(snapshot) {
     // pass_end_release reports the candidate's last state, not a transition.
     // Handle it first so it cannot fabricate another timed state frame.
     if (event.event === "pass_end_release") {
-      record.outcome = "TOO LATE";
-      premat_append_trace(record, "TOO LATE");
-      add_zero_update({key, state: "too-late", outcome: record.outcome});
+      record.outcome = "INCOMPLETE PASS";
+      premat_append_trace(record, "INCOMPLETE PASS");
       continue;
     }
 
@@ -191,13 +202,13 @@ function premat_build_model(snapshot) {
         && (event_name === "materialising" || event_name === "materialising_on_critical_path")) {
       if (main_owned) {
         record.path = "main";
-        record.outcome = "MAIN MATERIALISED";
-        premat_append_trace(record, "MAIN MATERIALISING");
-        add_frame({key, state: "main-materialising", outcome: record.outcome}, event, "MAIN MATERIALISING");
+        record.outcome = "COMPLETE MISS";
+        premat_append_trace(record, "PREMAT NOT STARTED - MAIN CODE MATERIALISING");
+        add_frame({key, state: "main-materialising", outcome: record.outcome}, event, "PREMAT NOT STARTED - MAIN CODE MATERIALISING");
       } else {
         record.path = "premat";
-        premat_append_trace(record, "MATERIALISING");
-        add_frame({key, state: "materialising", outcome: record.outcome}, event, "MATERIALISING");
+        premat_append_trace(record, "PRE-MATERIALISING");
+        add_frame({key, state: "materialising", outcome: record.outcome}, event, "PRE-MATERIALISING");
       }
       continue;
     }
@@ -216,27 +227,26 @@ function premat_build_model(snapshot) {
         && (event_name === "consuming" || event_name === "critical_path_wait")) {
       if (main_owned) {
         record.path = "main";
-        record.outcome = "MAIN MATERIALISED";
-        premat_append_trace(record, "MAIN CONSUMING");
-        add_frame({key, state: "main-consuming", outcome: record.outcome}, event, "MAIN CONSUMING");
+        record.outcome = "COMPLETE MISS";
+        premat_append_trace(record, "MAIN CODE CONSUMING");
+        add_frame({key, state: "main-consuming", outcome: record.outcome}, event, "MAIN CODE CONSUMING");
       } else if (waited || event.critical_path_miss) {
         record.path = "waited";
-        record.outcome = "WAITED FOR PREMAT";
-        premat_append_trace(record, "WAITING FOR PREMAT");
-        add_frame({key, state: "waiting", outcome: record.outcome}, event, "WAITING FOR PREMAT");
-        premat_append_trace(record, "CONSUMING");
-        add_frame({key, state: "consuming-waited", outcome: record.outcome}, event, "CONSUMING");
+        record.outcome = "PARTIAL HIT";
+        premat_append_trace(record, "WAITING FOR PRE-MATERIALISATION");
+        add_frame({key, state: "waiting", outcome: record.outcome}, event, "WAITING FOR PRE-MATERIALISATION");
+        premat_append_trace(record, "CONSUMING AFTER WAIT");
+        add_frame({key, state: "consuming-waited", outcome: record.outcome}, event, "CONSUMING AFTER WAIT");
       } else {
         record.path = "full";
         record.outcome = "FULL HIT";
-        premat_append_trace(record, "CONSUMING");
-        add_frame({key, state: "consuming-full", outcome: record.outcome}, event, "CONSUMING");
+        premat_append_trace(record, "CONSUMING - NO WAITING");
+        add_frame({key, state: "consuming-full", outcome: record.outcome}, event, "CONSUMING - NO WAITING");
       }
       continue;
     }
 
     if (state === "CONSUMED" && event_name === "consumed") {
-      premat_append_trace(record, "CONSUMED");
       const terminal_state = record.path === "full"
         ? "consumed-full"
         : record.path === "waited"
@@ -244,8 +254,9 @@ function premat_build_model(snapshot) {
           : "consumed-main";
       if (record.path === "none") {
         record.path = "main";
-        record.outcome = "MAIN MATERIALISED";
+        record.outcome = "COMPLETE MISS";
       }
+      premat_append_trace(record, record.outcome);
       add_zero_update({key, state: terminal_state, outcome: record.outcome});
       continue;
     }
@@ -265,6 +276,7 @@ function premat_build_model(snapshot) {
 function premat_state_class(state) {
   const classes = {
     neutral: "premat-neutral",
+    pending: "premat-pending",
     materialising: "premat-state-materialising",
     available: "premat-state-available",
     "consuming-full": "premat-state-consuming-full",
@@ -275,7 +287,6 @@ function premat_state_class(state) {
     "main-materialising": "premat-state-main-materialising",
     "main-consuming": "premat-state-main-consuming",
     "consumed-main": "premat-state-consumed-main",
-    "too-late": "premat-state-too-late",
   };
   return classes[state] || classes.neutral;
 }
@@ -288,19 +299,28 @@ function premat_row_height(layer_count) {
 function premat_render_layout(model) {
   const stages = premat_stages(model.attention_mode);
   const row_height = premat_row_height(model.layers.length);
+  const first_layer = model.layers[0];
+  const size_markup = stages.map(([_label, family]) => {
+    if (!family) return '<span class="premat-matrix-size" aria-hidden="true"></span>';
+    const record = model.records.get(premat_candidate_key(first_layer, family));
+    const size = premat_matrix_size(record?.retained_bytes);
+    return `<span class="premat-matrix-size" title="Materialised ${premat_escape(record?.label || family)} matrix size">${premat_escape(size)}</span>`;
+  }).join("");
+  const size_row = `<div class="premat-matrix-size-row"><div></div><div class="premat-matrix-sizes" style="--premat-stage-count:${stages.length}">${size_markup}</div></div>`;
   const rows = [...model.layers].sort((left, right) => right - left).map(layer_index => {
     const stage_markup = stages.map(([label, family]) => {
       const key = family ? premat_candidate_key(layer_index, family) : "";
       const attributes = family
         ? ` data-premat-key="${premat_escape(key)}" data-premat-family="${premat_escape(family)}"`
         : "";
-      return `<span class="premat-stage premat-neutral"${attributes} title="${premat_escape(label)}">${premat_escape(label)}</span>`;
+      const state_class = family ? "premat-pending" : "premat-neutral";
+      return `<span class="premat-stage ${state_class}"${attributes} title="${premat_escape(label)}">${premat_escape(label)}</span>`;
     }).join("");
     return `<div class="premat-layer-row" data-premat-layer="${layer_index}"><div class="premat-layer-number">${layer_index + 1}</div><div class="premat-stage-row" style="--premat-stage-count:${stages.length}">${stage_markup}</div></div>`;
   }).join("");
   const container = by_id("premat_layers");
   container.style.setProperty("--premat-row-height", `${row_height}px`);
-  container.innerHTML = rows;
+  container.innerHTML = size_row + rows;
   premat_view.cell_elements = new Map();
   container.querySelectorAll("[data-premat-key]").forEach(element => {
     premat_view.cell_elements.set(element.dataset.prematKey, element);
@@ -317,7 +337,7 @@ function premat_summary_item(label, value) {
 }
 
 function premat_render_summary(snapshot, model) {
-  const outcomes = {"FULL HIT": 0, "WAITED FOR PREMAT": 0, "MAIN MATERIALISED": 0, "NO PREMAT": 0, "TOO LATE": 0};
+  const outcomes = {"FULL HIT": 0, "PARTIAL HIT": 0, "COMPLETE MISS": 0};
   for (const record of model.records.values()) outcomes[record.outcome] = (outcomes[record.outcome] || 0) + 1;
   const memory = snapshot.memory || {};
   const margin = Number(memory.device_free_bytes) - Number(memory.global_buffer_bytes);
@@ -328,11 +348,9 @@ function premat_render_summary(snapshot, model) {
     ["mode", model.attention_mode],
     ["buffer margin", margin_text],
     ["headroom", premat_bytes(memory.premat_headroom_bytes)],
-    ["full", String(outcomes["FULL HIT"])],
-    ["waited", String(outcomes["WAITED FOR PREMAT"])],
-    ["main", String(outcomes["MAIN MATERIALISED"])],
-    ["no Premat", String(outcomes["NO PREMAT"])],
-    ["too late", String(outcomes["TOO LATE"])],
+    ["full hits", String(outcomes["FULL HIT"])],
+    ["partial hits", String(outcomes["PARTIAL HIT"])],
+    ["complete misses", String(outcomes["COMPLETE MISS"])],
   ].map(([label, value]) => premat_summary_item(label, value)).join("");
 }
 
@@ -403,7 +421,7 @@ function premat_render_inspector(snapshot, model) {
   for (const layer_index of [...model.layers].sort((left, right) => right - left)) {
     for (const family of model.families) {
       const record = model.records.get(premat_candidate_key(layer_index, family));
-      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_escape(record.trace.join(" → ") || "—")}</td><td>${premat_escape(record.outcome)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td><td>${premat_escape(record.admission_reason)}</td></tr>`);
+      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_escape(record.trace.join(" → ") || "—")}</td><td>${premat_escape(record.outcome)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td><td>${premat_escape(record.admission_reason)}</td></tr>`);
     }
   }
   by_id("premat_inspector_step").textContent = String(snapshot.optimizer_update ?? "—");
@@ -559,6 +577,14 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = {premat_build_model, premat_families, premat_family_label, premat_memory_rule, premat_snapshot_complete};
+  module.exports = {
+    premat_build_model,
+    premat_families,
+    premat_family_label,
+    premat_matrix_size,
+    premat_memory_rule,
+    premat_render_layout,
+    premat_snapshot_complete,
+  };
 }
 // ^^^ THOG

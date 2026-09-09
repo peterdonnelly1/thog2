@@ -206,3 +206,11 @@
 - The first next-layer-only L12/P8 capture reported about 10.8 GiB tensor allocation but a -242.2 MiB buffer margin against a 0.25 GiB buffer. All 48 candidates therefore fell back to the main path.
 - The discrepancy was PyTorch's unused allocator cache: driver-reported free memory was almost exhausted even though several GiB were reserved but unallocated. Premat correctly refused to assume that fragmented, main-stream cache was reusable by its auxiliary stream, but the default allocator policy allowed that cache to consume all physical admission headroom.
 - Premat's default native allocator configuration now combines `expandable_segments:True` with `garbage_collection_threshold:0.8`. PyTorch therefore actively reclaims old unused blocks above 80% capacity rather than hoarding them, while the existing admission guard continues charging the complete candidate envelope against actual driver-reported free memory. Explicit user allocator settings remain authoritative.
+
+## 2026-09-09 - Instra outcome vocabulary and matrix sizes
+
+- Replaced the mixed lifecycle key with separate `PROCESSING` and `OUTCOMES` rows. In-scope matrices awaiting playback are now visually distinct from genuinely out-of-scope compute stages.
+- Normal terminal outcomes are exactly `FULL HIT`, `PARTIAL HIT`, and `COMPLETE MISS`. `TOO LATE` was removed from the normal graphic, key, and counters; a candidate released at pass end is retained only as an `INCOMPLETE PASS` diagnostic.
+- Processing labels now match the inspector trace: `PRE-MATERIALISING`, `AVAILABLE`, `CONSUMING - NO WAITING`, `WAITING FOR PRE-MATERIALISATION`, `CONSUMING AFTER WAIT`, `PREMAT NOT STARTED - MAIN CODE MATERIALISING`, and `MAIN CODE CONSUMING`.
+- Each materialisable column now displays its retained dense-matrix size in MiB above the layer grid. The same value is included in the inspector table; it is deliberately distinct from the larger admission envelope.
+- JavaScript syntax, whitespace validation, the direct reducer harness, and a mocked-DOM size/alignment harness pass. PyTorch and pytest are unavailable in this container.

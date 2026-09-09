@@ -38,7 +38,7 @@ def _playback_snapshot() -> dict:
             "sequence": 2, "event": "materialising", "layer_index": 0,
             "current_layer_index": 0, "family": "QKV", "new_state": "MATERIALISING",
             "owner": "premat", "decision": "admit", "admission_reason": "admitted",
-            "materialisation_ms": 0.4,
+            "materialisation_ms": 0.4, "predicted_retained_bytes": 12 * 1024**2,
         },
         {
             "sequence": 3, "event": "available", "layer_index": 0,
@@ -64,6 +64,7 @@ def _playback_snapshot() -> dict:
             "sequence": 7, "event": "materialising", "layer_index": 0,
             "current_layer_index": 0, "family": "O", "new_state": "MATERIALISING",
             "owner": "premat", "decision": "admit", "admission_reason": "admitted",
+            "predicted_retained_bytes": 4 * 1024**2,
         },
         {
             "sequence": 8, "event": "deadline_o", "layer_index": 0,
@@ -97,6 +98,7 @@ def _playback_snapshot() -> dict:
             "current_layer_index": 0, "family": "UP", "new_state": "MATERIALISING",
             "owner": "main", "decision": "main_claim", "admission_reason": "global_device_buffer",
             "main_stream_materialisation_ms": 0.55,
+            "predicted_retained_bytes": 16 * 1024**2,
         },
         {
             "sequence": 14, "event": "available_on_critical_path", "layer_index": 0,
@@ -190,26 +192,27 @@ def test_live_writer_replaces_the_active_update_without_growing_history(tmp_path
         store.close(final_state="finished")
 
 
-def test_playback_reducer_preserves_full_waited_main_and_too_late_paths() -> None:
+def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
     rendered = _javascript_model(_playback_snapshot())
     records = {(record["layer_index"], record["family"]): record for record in rendered["records"]}
     assert rendered["layers"] == [0, 1]
     assert len(records) == 8
-    assert records[(0, "QKV")]["trace"] == ["MATERIALISING", "AVAILABLE", "CONSUMING", "CONSUMED"]
+    assert records[(0, "QKV")]["trace"] == ["PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAITING", "FULL HIT"]
     assert records[(0, "QKV")]["outcome"] == "FULL HIT"
-    assert records[(0, "O")]["trace"] == ["MATERIALISING", "WAITING FOR PREMAT", "CONSUMING", "CONSUMED"]
-    assert records[(0, "O")]["outcome"] == "WAITED FOR PREMAT"
-    assert records[(0, "UP")]["trace"] == ["MAIN MATERIALISING", "MAIN CONSUMING", "CONSUMED"]
-    assert records[(0, "UP")]["outcome"] == "MAIN MATERIALISED"
-    assert records[(1, "DOWN")]["trace"] == ["MATERIALISING", "TOO LATE"]
-    assert records[(1, "DOWN")]["outcome"] == "TOO LATE"
+    assert records[(0, "QKV")]["retained_bytes"] == 12 * 1024**2
+    assert records[(0, "O")]["trace"] == ["PRE-MATERIALISING", "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT", "PARTIAL HIT"]
+    assert records[(0, "O")]["outcome"] == "PARTIAL HIT"
+    assert records[(0, "UP")]["trace"] == ["PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING", "COMPLETE MISS"]
+    assert records[(0, "UP")]["outcome"] == "COMPLETE MISS"
+    assert records[(1, "DOWN")]["trace"] == ["PRE-MATERIALISING", "INCOMPLETE PASS"]
+    assert records[(1, "DOWN")]["outcome"] == "INCOMPLETE PASS"
     frame_states = [frame["frame_state"] for frame in rendered["frames"]]
     assert frame_states == [
-        "MATERIALISING", "AVAILABLE", "CONSUMING", "MATERIALISING",
-        "WAITING FOR PREMAT", "CONSUMING", "MAIN MATERIALISING",
-        "MAIN CONSUMING", "MATERIALISING", "COMPLETE",
+        "PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAITING", "PRE-MATERIALISING",
+        "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT",
+        "PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING",
+        "PRE-MATERIALISING", "COMPLETE",
     ]
-    assert not any("CONSUMED" in state for state in frame_states[:-1])
     assert rendered["frames"][-1]["final"] is True
 
 
@@ -226,15 +229,25 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "Premat Recapitulation - Step" in index
     assert "flex: 0 0 210px" in css
     for state_class in (
-        "premat-neutral", "premat-state-materialising", "premat-state-available",
+        "premat-neutral", "premat-pending", "premat-state-materialising", "premat-state-available",
         "premat-state-consuming-full", "premat-state-consumed-full",
         "premat-state-waiting", "premat-state-consuming-waited",
         "premat-state-consumed-waited", "premat-state-main-materialising",
         "premat-state-main-consuming", "premat-state-consumed-main",
-        "premat-state-too-late",
     ):
         assert f".{state_class}" in css
         assert state_class in index
+    for label in (
+        "PROCESSING", "OUTCOMES", "OUT OF SCOPE", "NOT YET REACHED",
+        "PRE-MATERIALISING", "CONSUMING - NO WAITING",
+        "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT",
+        "PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING",
+        "FULL HIT", "PARTIAL HIT", "COMPLETE MISS",
+    ):
+        assert label in index
+    assert "TOO LATE" not in index
+    assert "premat-matrix-size-row" in javascript
+    assert "predicted_retained_bytes" in javascript
     for label in (
         "ATTN FUSED · QKV", "ATTN UNFUSED · QK", "ATTN UNFUSED · V",
         "ATTN O", "MLP UP", "MLP DN",

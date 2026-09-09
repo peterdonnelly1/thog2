@@ -169,19 +169,24 @@
           <div class="premat-summary" id="premat_summary"></div>
           <div class="premat-layers-scroll"><div class="premat-layers" id="premat_layers"></div></div>
           <div class="premat-key" aria-label="Premat pipeline key">
-            <strong>Key</strong>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-neutral"></span>neutral / NO PREMAT</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-materialising"></span>MATERIALISING</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-available"></span>AVAILABLE</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-full"></span>CONSUMING full hit</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-full"></span>full hit CONSUMED</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-waiting"></span>WAITING FOR PREMAT</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-waited"></span>CONSUMING after wait</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-waited"></span>waited hit CONSUMED</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-materialising"></span>MAIN MATERIALISING</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-consuming"></span>main-path CONSUMING</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-main"></span>main-path CONSUMED</span>
-            <span class="premat-key-item"><span class="premat-key-swatch premat-state-too-late"></span>TOO LATE</span>
+            <div class="premat-key-row">
+              <strong>PROCESSING</strong>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-neutral"></span>OUT OF SCOPE</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-pending"></span>NOT YET REACHED</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-materialising"></span>PRE-MATERIALISING</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-available"></span>AVAILABLE</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-full"></span>CONSUMING - NO WAITING</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-waiting"></span>WAITING FOR PRE-MATERIALISATION</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-consuming-waited"></span>CONSUMING AFTER WAIT</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-materialising"></span>PREMAT NOT STARTED - MAIN CODE MATERIALISING</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-main-consuming"></span>MAIN CODE CONSUMING</span>
+            </div>
+            <div class="premat-key-row">
+              <strong>OUTCOMES</strong>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-full"></span>FULL HIT</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-waited"></span>PARTIAL HIT</span>
+              <span class="premat-key-item"><span class="premat-key-swatch premat-state-consumed-main"></span>COMPLETE MISS</span>
+            </div>
           </div>
         </section>
         <dialog class="premat-inspector" id="premat_inspector">
@@ -191,7 +196,7 @@
           </header>
           <div class="premat-inspector-scroll">
             <table class="premat-inspector-table">
-              <thead><tr><th>Layer</th><th>Matrix</th><th>State trace</th><th>Outcome</th><th>Wait</th><th>Premat mat</th><th>Main mat</th><th>Admission</th></tr></thead>
+              <thead><tr><th>Layer</th><th>Matrix</th><th>Size</th><th>State trace</th><th>Outcome</th><th>Wait</th><th>Premat mat</th><th>Main mat</th><th>Admission</th></tr></thead>
               <tbody id="premat_inspector_body"></tbody>
             </table>
           </div>
