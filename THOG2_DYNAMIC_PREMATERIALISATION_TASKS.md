@@ -179,3 +179,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Keep each pending Premat tensor strongly referenced and memory-charged until its main-stream completion event resolves.
 - [x] Add regressions for non-blocking charged Premat release and main-fallback non-gating.
 - [ ] Confirm on scruffy that Premat continues attempting candidates beyond the first main-path fallback.
+
+## 2026-09-09 one-matrix-lead scheduling
+
+- [x] Make next-plus-one-and-beyond the default matrix candidate policy.
+- [x] Ensure this primes one continuous pipeline rather than alternating main and Premat materialisations.
+- [x] Add `--premat_allow_premat_of_immediate_next_matrix` as an opt-in restoration of the previous zero-lead policy.
+- [x] Propagate the policy through wrapper, configuration, resume/artifact identity, startup reporting and telemetry.
+- [x] Add and run a dependency-free regression harness for default and opt-in scheduling.
+- [ ] On scruffy, compare tok/s, full hits, waited hits and main materialisations between the default and immediate-next option under matched steady-state headroom.

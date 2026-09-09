@@ -165,6 +165,7 @@ PREMAT="disabled"
 PREMAT_ATTENTION_MODE="fused"
 PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=false
 PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
+PREMAT_ALLOW_PREMAT_OF_IMMEDIATE_NEXT_MATRIX=false
 PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
 PREMAT_LOGGING="disabled"
 PREMAT_INSTRA="disabled"
@@ -295,6 +296,7 @@ Dynamic pre-materialisation:
   --premat_attention_mode fused|unfused=${PREMAT_ATTENTION_MODE}
   --premat_headroom_stay_below_current_peak       default when neither headroom flag is supplied
   --premat_headroom_stay_within_global_buffer
+  --premat_allow_premat_of_immediate_next_matrix  opt in to immediate-next candidates; default targets next-plus-one and beyond
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
@@ -474,7 +476,7 @@ while (( $# > 0 )); do
       shift
       ;;
     # ^^^ THOG
-    # vvv THOG consume the seven premat controls before getopts; retired PLASTIC budget fails with its replacement
+    # vvv THOG consume the premat controls before getopts; retired PLASTIC budget fails with its replacement
     --plastic__layer_count__memory_budget_gib|--plastic__layer_count__memory_budget_gib=*)
       echo "--plastic__layer_count__memory_budget_gib is retired; use --premat_gpu_memory_buffer_gb" >&2
       exit 2
@@ -487,6 +489,10 @@ while (( $# > 0 )); do
     --premat_headroom_stay_within_global_buffer)
       [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == false ]] || { echo "premat headroom flags are mutually exclusive" >&2; exit 2; }
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
+      shift
+      ;;
+    --premat_allow_premat_of_immediate_next_matrix)
+      PREMAT_ALLOW_PREMAT_OF_IMMEDIATE_NEXT_MATRIX=true
       shift
       ;;
     --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_logging|--premat_instra)
@@ -993,6 +999,7 @@ case "$PREMAT_LOGGING" in enabled|disabled) ;; *) echo "PREMAT_LOGGING must be e
 case "$PREMAT_INSTRA" in enabled|disabled) ;; *) echo "PREMAT_INSTRA must be enabled or disabled." >&2; exit 2 ;; esac
 validate_true_false "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" "PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK"
 validate_true_false "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" "PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER"
+validate_true_false "$PREMAT_ALLOW_PREMAT_OF_IMMEDIATE_NEXT_MATRIX" "PREMAT_ALLOW_PREMAT_OF_IMMEDIATE_NEXT_MATRIX"
 validate_nonnegative_number "$PREMAT_GPU_MEMORY_BUFFER_GB" "PREMAT_GPU_MEMORY_BUFFER_GB"
 if [[ "$PREMAT" == enabled ]]; then
   [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false && "$HYPERBLOCK" == false ]] || { echo "--premat enabled currently requires every selected preset to be DEPTH." >&2; exit 2; }
@@ -1267,6 +1274,7 @@ run_grid_point() {
   optional_args+=(--premat_attention_mode "$PREMAT_ATTENTION_MODE")
   [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == true ]] && optional_args+=(--premat_headroom_stay_below_current_peak)
   [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == true ]] && optional_args+=(--premat_headroom_stay_within_global_buffer)
+  [[ "$PREMAT_ALLOW_PREMAT_OF_IMMEDIATE_NEXT_MATRIX" == true ]] && optional_args+=(--premat_allow_premat_of_immediate_next_matrix)
   optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
   optional_args+=(--premat_logging "$PREMAT_LOGGING")
   optional_args+=(--premat_instra "$PREMAT_INSTRA")

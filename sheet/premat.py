@@ -23,6 +23,7 @@ def validate_premat_configuration(
     attention_mode: str,
     stay_below_current_peak: bool,
     stay_within_global_buffer: bool,
+    allow_premat_of_immediate_next_matrix: bool,
     gpu_memory_buffer_gb: float,
     logging: str,
     instra: str,
@@ -39,6 +40,8 @@ def validate_premat_configuration(
         raise ValueError("premat_headroom_stay_below_current_peak must be bool")
     if not isinstance(stay_within_global_buffer, bool):
         raise ValueError("premat_headroom_stay_within_global_buffer must be bool")
+    if not isinstance(allow_premat_of_immediate_next_matrix, bool):
+        raise ValueError("premat_allow_premat_of_immediate_next_matrix must be bool")
     if stay_below_current_peak and stay_within_global_buffer:
         raise ValueError(
             "premat_headroom_stay_below_current_peak and "
@@ -222,6 +225,7 @@ class PrematRuntime:
         n_head: int,
         attention_mode: str,
         stay_below_current_peak: bool,
+        allow_premat_of_immediate_next_matrix: bool,
         gpu_memory_buffer_gb: float,
         logging_enabled: bool,
     ) -> None:
@@ -231,6 +235,9 @@ class PrematRuntime:
         self._n_head = int(n_head)
         self._attention_mode = attention_mode
         self._stay_below_current_peak = bool(stay_below_current_peak)
+        self._allow_premat_of_immediate_next_matrix = bool(
+            allow_premat_of_immediate_next_matrix
+        )
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
         self._logging_enabled = bool(logging_enabled)
         self._stream: Optional[torch.cuda.Stream] = None
@@ -622,6 +629,12 @@ class PrematRuntime:
             "current_layer_index": current_layer,
             "next_layer_index": next_layer,
             "lookahead_layer_limit": 1,
+            "allow_premat_of_immediate_next_matrix": (
+                self._allow_premat_of_immediate_next_matrix
+            ),
+            "minimum_matrix_lead": (
+                0 if self._allow_premat_of_immediate_next_matrix else 1
+            ),
             "effective_fast_discard": True,
             "pass_sequence": self._pass_sequence,
             "pass_complete": pass_complete,
@@ -740,15 +753,7 @@ class PrematRuntime:
             for item in self._candidates.values()
         ):
             return
-        ordered = sorted(self._candidates.values(), key=lambda item: item.sequence)
-        candidate = next(
-            (
-                item
-                for item in ordered
-                if item.state == CandidateState.UNAVAILABLE
-            ),
-            None,
-        )
+        candidate = self._next_premat_candidate()
         if candidate is None:
             return
         observation = self._observe_memory()
@@ -837,6 +842,31 @@ class PrematRuntime:
         )
         self._retained_bytes += candidate.envelope.retained_bytes
         candidate.retained_counted = True
+
+    def _next_premat_candidate(self) -> Optional[_Candidate]:
+        ordered = sorted(self._candidates.values(), key=lambda item: item.sequence)
+        immediate = next(
+            (
+                item
+                for item in ordered
+                if item.state != CandidateState.CONSUMED
+            ),
+            None,
+        )
+        if immediate is None:
+            return None
+        minimum_sequence = immediate.sequence + (
+            0 if self._allow_premat_of_immediate_next_matrix else 1
+        )
+        return next(
+            (
+                item
+                for item in ordered
+                if item.state == CandidateState.UNAVAILABLE
+                and item.sequence >= minimum_sequence
+            ),
+            None,
+        )
 
     def _resolve_pending_releases(self) -> None:
         remaining: List[_PendingRelease] = []
@@ -1018,18 +1048,15 @@ class PrematRuntime:
         }
 
     def _queue_head_payload(self) -> Optional[Dict[str, object]]:
-        head = next(
+        materialising = next(
             (
                 candidate
-                for candidate in sorted(
-                    self._candidates.values(),
-                    key=lambda item: item.sequence,
-                )
-                if candidate.state
-                in (CandidateState.UNAVAILABLE, CandidateState.MATERIALISING)
+                for candidate in self._candidates.values()
+                if candidate.state == CandidateState.MATERIALISING
             ),
             None,
         )
+        head = materialising or self._next_premat_candidate()
         if head is None:
             return None
         payload = self._candidate_payload(head)

@@ -184,3 +184,11 @@
 - Root cause: every consumed matrix created a pending-release record, including ordinary main-path tensors with zero Premat-retained bytes, and `_advance()` treated any such record as a global launch prohibition. Once CPU dispatch outran the main CUDA stream, each fallback left an incomplete event and forced the following fallback, making starvation self-sustaining.
 - Main-path consumption no longer creates a zero-byte pending release. An admitted Premat tensor remains strongly referenced and fully charged until its main-stream completion event resolves, but that pending allocation does not prevent another candidate being admitted against independently observed headroom.
 - Added regressions for both sides of the invariant: an incomplete Premat release remains charged while the next affordable candidate launches, and an ordinary fallback cannot create a zero-byte release gate.
+
+## 2026-09-09 - One-matrix-lead scheduling
+
+- The first post-starvation field capture at L16 reported 9 fully hidden hits, 55 waited hits, and zero main-path materialisations with 13.18 GiB of headroom. Premat was therefore live for every matrix, but immediate-next targeting exhausted its initial lead and became a synchronous wait convoy.
+- Default candidate selection now targets the matrix after the next matrix main will consume, then continues farther whenever prior results and the memory guards permit. This is a one-matrix pipeline lead: only an unprimed or drained pipeline uses main-path materialisation; it is not an alternating main/Premat policy.
+- Added the opt-in `--premat_allow_premat_of_immediate_next_matrix` flag to restore zero-lead immediate-next targeting for comparison. The default is false.
+- The selected matrix-lead policy is propagated through CLI, wrapper, run/training/model configuration, checkpoint compatibility, artifact identity, canonical metadata, runtime telemetry and the startup `PREMAT:` row.
+- Added regression coverage showing the default starts with `O` while `QKV` supplies the single startup bubble, then advances to `UP` and `DOWN` as the preceding prepared matrix becomes consumable. A direct dependency-free scheduler harness passes for both lead policies.

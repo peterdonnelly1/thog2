@@ -230,11 +230,12 @@ class OwtRunConfig:
     plastic__freeze_geometry_during_warmup: bool = True
     plastic__initial_active_layers: int = 0
     # ^^^ THOG
-    # vvv THOG seven dynamic pre-materialisation public controls
+    # vvv THOG dynamic pre-materialisation public controls
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
+    premat_allow_premat_of_immediate_next_matrix: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
@@ -551,6 +552,7 @@ class OwtRunConfig:
             attention_mode=self.premat_attention_mode,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            allow_premat_of_immediate_next_matrix=self.premat_allow_premat_of_immediate_next_matrix,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
             logging=self.premat_logging,
             instra=self.premat_instra,
@@ -1172,12 +1174,13 @@ class OwtRunConfig:
             or self.premat_attention_mode != "fused"
             or self.premat_headroom_stay_below_current_peak
             or self.premat_headroom_stay_within_global_buffer
+            or self.premat_allow_premat_of_immediate_next_matrix
             or float(self.premat_gpu_memory_buffer_gb) != 1.0
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
         ):
             headroom_code = "G" if self.premat_headroom_stay_within_global_buffer else "P"
-            sections.append(
+            premat_fragment = (
                 "PM__"
                 f"{self.premat[0].upper()}_"
                 f"{self.premat_attention_mode[0].upper()}_"
@@ -1186,6 +1189,9 @@ class OwtRunConfig:
                 f"L{self.premat_logging[0].upper()}_"
                 f"I{self.premat_instra[0].upper()}"
             )
+            if self.premat_allow_premat_of_immediate_next_matrix:
+                premat_fragment += "_AIN"
+            sections.append(premat_fragment)
         # ^^^ THOG
         if self.model_type == "sheet":
             if self.hyperblock_enabled:
@@ -1365,6 +1371,7 @@ class OwtRunConfig:
             premat_attention_mode=self.premat_attention_mode,
             premat_headroom_stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
+            premat_allow_premat_of_immediate_next_matrix=self.premat_allow_premat_of_immediate_next_matrix,
             premat_gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
@@ -1497,6 +1504,9 @@ class OwtRunConfig:
                 values["premat_effective_fast_discard"] = True
             values["premat_schema_version"] = PREMAT_TELEMETRY_VERSION
             values["premat_lookahead_layer_limit"] = 1
+            values["premat_minimum_matrix_lead"] = (
+                0 if self.premat_allow_premat_of_immediate_next_matrix else 1
+            )
             # ^^^ THOG
         values.update({
             "artifact_name": self.artifact_name,

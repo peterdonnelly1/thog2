@@ -115,6 +115,7 @@ def _runtime(
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
     attach=None,
+    allow_immediate_next: bool = True,
 ):
     fake_cuda = _FakeCuda()
     fake_cuda.install(monkeypatch)
@@ -131,6 +132,7 @@ def _runtime(
         n_head=2,
         attention_mode=attention_mode,
         stay_below_current_peak=stay_below_current_peak,
+        allow_premat_of_immediate_next_matrix=allow_immediate_next,
         gpu_memory_buffer_gb=0.0,
         logging_enabled=True,
     )
@@ -236,6 +238,7 @@ def test_premat_headroom_flags_are_mutually_exclusive() -> None:
             attention_mode="fused",
             stay_below_current_peak=True,
             stay_within_global_buffer=True,
+            allow_premat_of_immediate_next_matrix=False,
             gpu_memory_buffer_gb=1.0,
             logging="disabled",
             instra="disabled",
@@ -248,7 +251,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_seven_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_eight_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -261,6 +264,7 @@ def test_public_cli_exposes_exactly_the_seven_premat_options() -> None:
         "--premat_attention_mode",
         "--premat_headroom_stay_below_current_peak",
         "--premat_headroom_stay_within_global_buffer",
+        "--premat_allow_premat_of_immediate_next_matrix",
         "--premat_gpu_memory_buffer_gb",
         "--premat_logging",
         "--premat_instra",
@@ -273,6 +277,10 @@ def test_underscore_alias_normaliser_preserves_exact_premat_names() -> None:
     assert sitecustomize._normalise_long_option(  # noqa: SLF001 - public CLI compatibility contract
         "--premat_gpu_memory_buffer_gb=4"
     ) == "--premat_gpu_memory_buffer_gb=4"
+    arguments = build_parser().parse_args(
+        ["--premat_allow_premat_of_immediate_next_matrix"]
+    )
+    assert arguments.premat_allow_premat_of_immediate_next_matrix is True
 
 
 def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path) -> None:
@@ -283,11 +291,30 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
         out_dir=tmp_path,
     )
     assert training_config.premat_headroom_stay_below_current_peak is True
+    assert training_config.premat_allow_premat_of_immediate_next_matrix is False
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_resolved_headroom_mode"] == "stay_below_current_peak"
     assert canonical["premat_effective_fast_discard"] is True
     assert canonical["premat_schema_version"] == 2
     assert canonical["premat_lookahead_layer_limit"] == 1
+    assert canonical["premat_minimum_matrix_lead"] == 1
+
+
+def test_immediate_next_option_propagates_and_changes_run_identity(tmp_path) -> None:
+    run_config = OwtRunConfig(
+        model_type="sheet",
+        premat="enabled",
+        premat_allow_premat_of_immediate_next_matrix=True,
+        device="cuda",
+    )
+    training_config = run_config.to_training_config(
+        vocab_size=32,
+        world_size=1,
+        out_dir=tmp_path,
+    )
+    assert training_config.premat_allow_premat_of_immediate_next_matrix is True
+    assert run_config.canonical_dict(world_size=1)["premat_minimum_matrix_lead"] == 0
+    assert "_AIN" in run_config.parameter_artifact_fragment()
 
 
 def test_unfused_attention_matches_fused_math_on_cpu() -> None:
@@ -337,6 +364,29 @@ def test_deadline_unavailable_is_claimed_by_main_without_late_premat_launch(monk
         and event.get("reason") == "unavailable_at_deadline"
         for event in report["events"]
     )
+
+
+def test_next_plus_one_default_primes_once_then_maintains_matrix_lead(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        allow_immediate_next=False,
+    )
+    fake_cuda.complete_premat_on_record = True
+    runtime.layer_start(3)
+    assert calls == [("O", 3)]
+
+    first = runtime.acquire("QKV", 3)
+    assert runtime._candidates[(3, "QKV")].owner == "main"
+    del first
+    runtime.consumed("QKV", 3)
+    assert calls == [("O", 3), ("QKV", 3), ("UP", 3)]
+
+    second = runtime.acquire("O", 3)
+    assert runtime._candidates[(3, "O")].critical_path_miss is False
+    del second
+    runtime.consumed("O", 3)
+    assert calls == [("O", 3), ("QKV", 3), ("UP", 3), ("DOWN", 3)]
 
 
 def test_main_fallback_and_checkpoint_replay_keep_the_ordinary_autograd_path(monkeypatch) -> None:
