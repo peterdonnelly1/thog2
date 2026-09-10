@@ -467,6 +467,40 @@ def test_advance_queues_every_admissible_fused_candidate_without_completion_gate
     )
 
 
+def test_event_telemetry_exposes_raw_and_charged_allocator_memory(monkeypatch) -> None:
+    runtime, fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    runtime.layer_start(3)
+    report = runtime.report()
+
+    assert report["memory"]["reusable_allocator_bytes"] == 20
+    assert report["memory"]["device_free_minus_buffer_bytes"] == fake_cuda.free
+    considered = next(
+        event
+        for event in report["events"]
+        if event.get("event") == "admission_considered"
+    )
+    assert considered["reusable_allocator_bytes"] == 20
+    assert considered["device_free_minus_buffer_bytes"] == fake_cuda.free
+    assert considered["detail"]["raw_memory"] == {
+        "process_allocated_bytes": 100,
+        "process_reserved_bytes": 120,
+        "process_ordinary_peak_bytes": 100,
+        "device_free_bytes": fake_cuda.free,
+        "device_total_bytes": fake_cuda.total,
+        "reusable_allocator_bytes": 20,
+        "device_used_bytes": 100,
+        "device_free_minus_buffer_bytes": fake_cuda.free,
+    }
+    charged = considered["detail"]["charged_memory"]
+    assert charged["process_allocated_bytes"] == 100
+    assert charged["process_reserved_bytes"] == 120
+    assert charged["reusable_allocator_bytes"] == 20
+    assert charged["device_free_minus_buffer_bytes"] == fake_cuda.free
+
+
 def test_premat_submission_does_not_publish_auxiliary_stream_autocast_casts(monkeypatch) -> None:
     cache_enabled = [True]
     cache_transitions = []

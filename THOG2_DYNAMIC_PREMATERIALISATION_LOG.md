@@ -292,3 +292,11 @@
 - Added detailed per-step CSV downloads both beside each history summary row and in the inspector. Added one run-artifact-named detailed-history CSV containing every locally retained complete step, newest first, with `step` as the first column and one row per matrix opportunity (64 rows for fused L16, 80 for unfused L16).
 - Detailed exports include target/order, retained and headroom bytes, first-considered and first-observed-admissible observations, admission rejections, submission/completion/deadline/consumption timings, processing trace, outcome/progress, queue/charged values, and Premat/Main Stream timing.
 - This is an Instra presentation/export change only: it does not change Premat scheduling, telemetry capture, retention, or normal latest-only polling.
+
+## 2026-09-10 - Raw Premat event-history diagnostics
+
+- Added a second, download-only CSV in the Premat History toolbar. The existing detailed matrix-history view and CSV are unchanged.
+- The raw export emits one row per retained event, newest step first and event sequence first within each step. It includes target/order/priority context, lifecycle timings, queue and cumulative charges, admission decisions, `_advance()` invocation/trigger/return data, blocking candidates, and the original lossless event JSON.
+- Extended admission telemetry with both the actual allocator observation and the cumulatively charged observation used for the decision. Each includes allocated, reserved, reserved-but-unused allocator bytes, device use, and the signed free-memory margin above or below the global buffer.
+- Added top-level per-event `reusable_allocator_bytes` and `device_free_minus_buffer_bytes` fields. This makes cache reservation and a genuine global-buffer shortfall distinguishable without granting unverified allocator cache credit.
+- Kept local retention bounded and made no scheduler, admission-policy, garbage-collection, or cache-release change pending scruffy evidence.

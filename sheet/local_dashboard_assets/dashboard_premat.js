@@ -433,6 +433,224 @@ function premat_csv_cell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+function premat_csv_value(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined ? "" : encoded;
+  }
+  return value;
+}
+
+function premat_optional_number(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function premat_one_indexed(value) {
+  const number = premat_optional_number(value);
+  return number === null ? null : number + 1;
+}
+
+function premat_flatten_event_value(row, prefix, value) {
+  if (
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+  ) {
+    const entries = Object.entries(value);
+    if (entries.length) {
+      for (const [key, nested] of entries) {
+        premat_flatten_event_value(row, `${prefix}_${key}`, nested);
+      }
+      return;
+    }
+  }
+  row[prefix] = value;
+}
+
+function premat_raw_event_rows(snapshots) {
+  const rows = [];
+  const complete = [...(snapshots || [])]
+    .filter(premat_snapshot_complete)
+    .sort((left, right) => Number(right.optimizer_update ?? 0) - Number(left.optimizer_update ?? 0));
+  for (const snapshot of complete) {
+    const snapshot_memory = snapshot.memory || {};
+    const target_offset = snapshot.target_offset ?? snapshot.target_layer ?? null;
+    const matrix_order = snapshot.matrix_order
+      ?? snapshot.weight_matrix_target_order
+      ?? snapshot.target_order
+      ?? "";
+    const snapshot_events = [...(snapshot.events || [])]
+      .sort((left, right) => Number(left.sequence ?? 0) - Number(right.sequence ?? 0));
+    for (const event of snapshot_events) {
+      const process_allocated = premat_optional_number(event.process_allocated_bytes);
+      const process_reserved = premat_optional_number(event.process_reserved_bytes);
+      const device_free = premat_optional_number(event.device_free_bytes);
+      const global_buffer = premat_optional_number(
+        event.global_buffer_bytes ?? snapshot_memory.global_buffer_bytes,
+      );
+      const reusable_allocator = premat_optional_number(event.reusable_allocator_bytes);
+      const device_margin = premat_optional_number(event.device_free_minus_buffer_bytes);
+      const row = {
+        step: Number(snapshot.optimizer_update ?? 0),
+        snapshot_pass_sequence: snapshot.pass_sequence ?? null,
+        event_sequence: event.sequence ?? null,
+        event: event.event ?? "",
+        event_type: event.event_type ?? event.event ?? "",
+        host_time_ns: event.host_time_ns ?? null,
+        elapsed_ms: event.elapsed_ms ?? null,
+        layer: premat_one_indexed(event.layer_index),
+        layer_index: event.layer_index ?? null,
+        family: event.family ?? "",
+        current_layer: premat_one_indexed(event.current_layer_index),
+        current_layer_index: event.current_layer_index ?? null,
+        next_layer: premat_one_indexed(event.next_layer_index),
+        next_layer_index: event.next_layer_index ?? null,
+        target_layer: premat_one_indexed(event.target_layer_index),
+        target_layer_index: event.target_layer_index ?? null,
+        target_offset: event.target_offset ?? target_offset,
+        matrix_order: event.target_order ?? matrix_order,
+        matrix_order_position: premat_one_indexed(event.target_order_position),
+        attention_mode: snapshot.attention_mode ?? "",
+        cuda_stream_priority: snapshot.cuda_stream_priority ?? "",
+        headroom_mode: snapshot.headroom_mode ?? event.headroom_policy ?? "",
+        diagnostic_layer_delay_ms: snapshot.diagnostic_layer_delay_ms ?? null,
+        decision: event.decision ?? "",
+        outcome: event.outcome ?? event.final_outcome ?? "",
+        final_outcome: event.final_outcome ?? "",
+        reason: event.reason ?? event.admission_reason ?? "",
+        admission_reason: event.admission_reason ?? "",
+        owner: event.owner ?? "",
+        old_state: event.old_state ?? "",
+        new_state: event.new_state ?? "",
+        state: event.state ?? "",
+        critical_path_miss: event.critical_path_miss ?? null,
+        queue_depth: event.queue_depth ?? null,
+        cumulative_charged_bytes: event.cumulative_charged_bytes ?? null,
+        charged_retained_bytes: event.charged_retained_bytes ?? null,
+        charged_transient_bytes: event.charged_transient_bytes ?? null,
+        process_allocated_bytes: process_allocated,
+        process_reserved_bytes: process_reserved,
+        reusable_allocator_bytes: reusable_allocator ?? (
+          process_allocated !== null && process_reserved !== null
+            ? Math.max(0, process_reserved - process_allocated)
+            : null
+        ),
+        process_ordinary_peak_bytes: event.process_ordinary_peak_bytes ?? null,
+        device_free_bytes: device_free,
+        device_used_bytes: event.device_used_bytes ?? null,
+        device_total_bytes: event.device_total_bytes ?? null,
+        global_buffer_bytes: global_buffer,
+        device_ceiling_bytes: event.device_ceiling_bytes ?? null,
+        device_free_minus_buffer_bytes: device_margin ?? (
+          device_free !== null && global_buffer !== null
+            ? device_free - global_buffer
+            : null
+        ),
+        process_headroom_bytes: event.process_headroom_bytes ?? null,
+        device_headroom_bytes: event.device_headroom_bytes ?? null,
+        premat_headroom_bytes: event.premat_headroom_bytes ?? null,
+        predicted_retained_bytes: event.predicted_retained_bytes ?? null,
+        predicted_materialisation_peak_bytes: event.predicted_materialisation_peak_bytes ?? null,
+        predicted_foreground_overlap_bytes: event.predicted_foreground_overlap_bytes ?? null,
+        predicted_envelope_bytes: event.predicted_envelope_bytes ?? null,
+        first_considered_ns: event.first_considered_ns ?? null,
+        first_observed_admissible_ns: event.first_observed_admissible_ns ?? null,
+        submission_ns: event.submission_ns ?? null,
+        cuda_completion_observed_ns: event.cuda_completion_observed_ns ?? null,
+        deadline_ns: event.deadline_ns ?? null,
+        consumption_ns: event.consumption_ns ?? null,
+        observed_admission_lag_ms: event.observed_admission_lag_ms ?? null,
+        materialisation_ms: event.materialisation_ms ?? null,
+        main_stream_materialisation_ms: event.main_stream_materialisation_ms ?? null,
+        wait_ms: event.wait_ms ?? null,
+      };
+      for (const [key, value] of Object.entries(event)) {
+        if (key === "detail" || Object.prototype.hasOwnProperty.call(row, key)) continue;
+        row[`event_${key}`] = value;
+      }
+      if (event.detail && typeof event.detail === "object") {
+        for (const [key, value] of Object.entries(event.detail)) {
+          premat_flatten_event_value(row, `detail_${key}`, value);
+        }
+      }
+      row.raw_event_json = JSON.stringify(event);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+function premat_raw_event_history_csv(snapshots) {
+  const rows = premat_raw_event_rows(snapshots);
+  const preferred = [
+    "step", "snapshot_pass_sequence", "event_sequence", "event", "event_type",
+    "host_time_ns", "elapsed_ms", "layer", "layer_index", "family",
+    "current_layer", "current_layer_index", "next_layer", "next_layer_index",
+    "target_layer", "target_layer_index", "target_offset", "matrix_order",
+    "matrix_order_position", "attention_mode", "cuda_stream_priority",
+    "headroom_mode", "diagnostic_layer_delay_ms", "decision", "outcome",
+    "final_outcome", "reason", "admission_reason", "owner", "old_state",
+    "new_state", "state", "critical_path_miss", "queue_depth",
+    "cumulative_charged_bytes", "charged_retained_bytes",
+    "charged_transient_bytes", "process_allocated_bytes",
+    "process_reserved_bytes", "reusable_allocator_bytes",
+    "process_ordinary_peak_bytes", "device_free_bytes", "device_used_bytes",
+    "device_total_bytes", "global_buffer_bytes", "device_ceiling_bytes",
+    "device_free_minus_buffer_bytes", "process_headroom_bytes",
+    "device_headroom_bytes", "premat_headroom_bytes", "predicted_retained_bytes",
+    "predicted_materialisation_peak_bytes", "predicted_foreground_overlap_bytes",
+    "predicted_envelope_bytes", "first_considered_ns",
+    "first_observed_admissible_ns", "submission_ns",
+    "cuda_completion_observed_ns", "deadline_ns", "consumption_ns",
+    "observed_admission_lag_ms", "materialisation_ms",
+    "main_stream_materialisation_ms", "wait_ms",
+    "detail_invocation", "detail_trigger", "detail_return_reason",
+    "detail_submitted_count", "detail_submitted",
+    "detail_blocking_candidate_layer_index",
+    "detail_blocking_candidate_family",
+    "detail_blocking_candidate_order_position", "detail_blocking_reason",
+    "detail_admitted", "detail_process_guard_passed",
+    "detail_device_guard_passed", "detail_predicted_process_bytes",
+    "detail_predicted_device_used_bytes", "detail_device_ceiling_bytes",
+    "detail_predicted_physical_growth_bytes", "detail_process_headroom_bytes",
+    "detail_device_headroom_bytes",
+    "detail_raw_memory_process_allocated_bytes",
+    "detail_raw_memory_process_reserved_bytes",
+    "detail_raw_memory_reusable_allocator_bytes",
+    "detail_raw_memory_process_ordinary_peak_bytes",
+    "detail_raw_memory_device_free_bytes",
+    "detail_raw_memory_device_used_bytes",
+    "detail_raw_memory_device_total_bytes",
+    "detail_raw_memory_device_free_minus_buffer_bytes",
+    "detail_charged_memory_process_allocated_bytes",
+    "detail_charged_memory_process_reserved_bytes",
+    "detail_charged_memory_reusable_allocator_bytes",
+    "detail_charged_memory_process_ordinary_peak_bytes",
+    "detail_charged_memory_device_free_bytes",
+    "detail_charged_memory_device_used_bytes",
+    "detail_charged_memory_device_total_bytes",
+    "detail_charged_memory_device_free_minus_buffer_bytes",
+  ];
+  const preferred_set = new Set(preferred);
+  const extras = new Set();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (!preferred_set.has(key) && key !== "raw_event_json") extras.add(key);
+    }
+  }
+  const header = [...preferred, ...[...extras].sort(), "raw_event_json"];
+  const lines = [header.map(premat_csv_cell).join(",")];
+  for (const row of rows) {
+    lines.push(
+      header.map(key => premat_csv_cell(premat_csv_value(row[key]))).join(","),
+    );
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+
 function premat_inspector_rows(snapshot, model) {
   const rows = [];
   const memory = snapshot.memory || {};
@@ -793,6 +1011,7 @@ function premat_render_history(snapshots) {
   });
   by_id("premat_history_detail").textContent = `${model.rows.length} retained steps · ${model.layers.length} layers · select a row for matrix detail`;
   by_id("premat_history_download").disabled = model.rows.length === 0;
+  by_id("premat_history_raw_download").disabled = model.rows.length === 0;
 }
 function premat_artifact_name() {
   const run_id = String(app.current_run_id || "");
@@ -842,6 +1061,16 @@ function premat_download_history() {
     `${premat_artifact_file_stem()}.csv`,
   );
 }
+
+function premat_download_raw_event_history() {
+  const snapshots = premat_view.history_snapshots.filter(premat_snapshot_complete);
+  if (!snapshots.length) return;
+  premat_download_csv(
+    premat_raw_event_history_csv(snapshots),
+    `${premat_artifact_file_stem()}_premat_raw_events.csv`,
+  );
+}
+
 async function premat_load_history(force = false) {
   const run_id = app.current_run_id;
   if (!run_id || premat_view.active_panel !== "history") return;
@@ -861,6 +1090,7 @@ async function premat_load_history(force = false) {
     if (serial !== premat_view.history_request_serial) return;
     by_id("premat_history_detail").textContent = "Premat history unavailable";
     by_id("premat_history_download").disabled = true;
+    by_id("premat_history_raw_download").disabled = true;
   }
 }
 
@@ -954,6 +1184,7 @@ function premat_reset() {
   by_id("premat_inspect_button").disabled = true;
   by_id("premat_history_button").disabled = true;
   by_id("premat_history_download").disabled = true;
+  by_id("premat_history_raw_download").disabled = true;
   by_id("premat_inspector_download").disabled = true;
   premat_show_panel("recap");
 }
@@ -1031,6 +1262,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   by_id("premat_history_close")?.addEventListener("click", () => premat_show_panel("recap"));
   by_id("premat_history_download")?.addEventListener("click", premat_download_history);
+  by_id("premat_history_raw_download")?.addEventListener("click", premat_download_raw_event_history);
   update_duration();
   premat_sync_play_button();
   premat_sync_tab();
@@ -1045,6 +1277,8 @@ if (typeof module !== "undefined" && module.exports) {
     premat_family_label,
     premat_detailed_history_csv,
     premat_history_csv,
+    premat_raw_event_history_csv,
+    premat_raw_event_rows,
     premat_inspector_rows,
     premat_history_model,
     premat_matrix_size,

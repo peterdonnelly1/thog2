@@ -979,6 +979,22 @@ class PrematRuntime:
                 gpu_memory_buffer_bytes=self._buffer_bytes,
             )
             candidate.admission_reason = decision.reason
+            raw_memory = {
+                **asdict(raw_observation),
+                "reusable_allocator_bytes": raw_observation.reusable_allocator_bytes,
+                "device_used_bytes": raw_observation.device_used_bytes,
+                "device_free_minus_buffer_bytes": (
+                    raw_observation.device_free_bytes - self._buffer_bytes
+                ),
+            }
+            charged_memory = {
+                **asdict(observation),
+                "reusable_allocator_bytes": observation.reusable_allocator_bytes,
+                "device_used_bytes": observation.device_used_bytes,
+                "device_free_minus_buffer_bytes": (
+                    observation.device_free_bytes - self._buffer_bytes
+                ),
+            }
             decision_detail = {
                 **asdict(decision),
                 "invocation": invocation,
@@ -989,7 +1005,8 @@ class PrematRuntime:
                 "order_position": candidate.order_position,
                 "queue_depth": self._queue_depth(),
                 "cumulative_charged_bytes": self._cumulative_charged_bytes(),
-                "raw_memory": asdict(raw_observation),
+                "raw_memory": raw_memory,
+                "charged_memory": charged_memory,
             }
             if decision.admitted:
                 candidate.first_observed_admissible_ns = considered_ns
@@ -1435,12 +1452,14 @@ class PrematRuntime:
             for name in (
                 "process_allocated_bytes",
                 "process_reserved_bytes",
+                "reusable_allocator_bytes",
                 "process_ordinary_peak_bytes",
                 "device_free_bytes",
                 "device_used_bytes",
                 "device_total_bytes",
                 "global_buffer_bytes",
                 "device_ceiling_bytes",
+                "device_free_minus_buffer_bytes",
                 "process_headroom_bytes",
                 "device_headroom_bytes",
                 "premat_headroom_bytes",
@@ -1574,6 +1593,9 @@ class PrematRuntime:
             "device_used_bytes": resolved.device_used_bytes,
             "reusable_allocator_bytes": resolved.reusable_allocator_bytes,
             "global_buffer_bytes": self._buffer_bytes,
+            "device_free_minus_buffer_bytes": (
+                resolved.device_free_bytes - self._buffer_bytes
+            ),
             "device_ceiling_bytes": max(
                 0,
                 resolved.device_total_bytes - self._buffer_bytes,

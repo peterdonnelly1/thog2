@@ -313,3 +313,13 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Preserve bounded local retention and leave runtime scheduling/telemetry capture unchanged.
 - [x] Add focused detailed-row-count, ordering, diagnostics-field, markup and interaction-contract regressions.
 - [ ] On scruffy, verify L16 fused exports contain 64 data rows per selected step, all-history export contains every retained step, and Back returns to history.
+
+## 2026-09-10 Raw Premat event-history diagnostics
+
+- [x] Add a second, download-only retained raw-event CSV to the Premat History toolbar.
+- [x] Export one lossless row per retained event with scheduler, lifecycle, queue, charge, timing, and memory fields.
+- [x] Record actual and cumulatively charged allocator observations for each admission decision.
+- [x] Expose reserved-but-unused allocator bytes and signed free-minus-buffer margin without changing admission behaviour.
+- [x] Preserve the existing detailed history view/export and bounded local-only retention.
+- [x] Add focused runtime telemetry, CSV-content, and UI-contract regressions.
+- [ ] On scruffy, capture neighbouring all-red and normal steps with the raw-event download before considering allocator cache credit or a conditional cache release.

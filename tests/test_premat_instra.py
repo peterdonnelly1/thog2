@@ -1,6 +1,8 @@
 # vvv THOG Premat Instra completed-microstep persistence and playback regression tests
 from __future__ import annotations
 
+import csv
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -167,6 +169,7 @@ console.log(JSON.stringify({{
   model,
   csv: view.premat_history_csv(model),
   detailed_csv: view.premat_detailed_history_csv(snapshots),
+  raw_event_csv: view.premat_raw_event_history_csv(snapshots),
 }}));
 """
     completed = subprocess.run(
@@ -294,6 +297,86 @@ def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() 
     assert any("global device buffer" in line for line in detailed_lines[1:])
 
 
+def test_raw_event_history_export_preserves_scheduler_and_allocator_evidence() -> None:
+    snapshot = _snapshot(12)
+    snapshot["cuda_stream_priority"] = "high"
+    snapshot["memory"] = {
+        "global_buffer_bytes": 256,
+    }
+    snapshot["events"] = [
+        {
+            "sequence": 1,
+            "event": "advance_begin",
+            "event_type": "advance_begin",
+            "elapsed_ms": 1.25,
+            "process_allocated_bytes": 100,
+            "process_reserved_bytes": 180,
+            "device_free_bytes": 400,
+            "global_buffer_bytes": 256,
+            "detail": {
+                "invocation": 7,
+                "trigger": "layer_early_discard",
+                "submitted": [],
+            },
+        },
+        {
+            "sequence": 2,
+            "event": "advance_return",
+            "event_type": "advance_return",
+            "elapsed_ms": 1.5,
+            "reason": "admission_rejected",
+            "detail": {
+                "invocation": 7,
+                "trigger": "layer_early_discard",
+                "return_reason": "admission_rejected",
+                "submitted_count": 0,
+                "blocking_candidate": {
+                    "layer_index": 1,
+                    "family": "DOWN",
+                    "order_position": 0,
+                },
+                "blocking_reason": "global_device_buffer",
+                "predicted_physical_growth_bytes": 136,
+                "device_guard_passed": False,
+                "raw_memory": {
+                    "process_allocated_bytes": 100,
+                    "process_reserved_bytes": 180,
+                    "reusable_allocator_bytes": 80,
+                    "device_free_bytes": 400,
+                    "device_free_minus_buffer_bytes": 144,
+                },
+                "charged_memory": {
+                    "process_allocated_bytes": 164,
+                    "process_reserved_bytes": 244,
+                    "reusable_allocator_bytes": 80,
+                    "device_free_bytes": 336,
+                    "device_free_minus_buffer_bytes": 80,
+                },
+            },
+        },
+        {"sequence": 3, "event": "pass_end", "event_type": "pass_end"},
+    ]
+    rendered = _javascript_history([snapshot])
+    rows = list(csv.DictReader(io.StringIO(rendered["raw_event_csv"])))
+
+    assert [row["event"] for row in rows] == [
+        "advance_begin",
+        "advance_return",
+        "pass_end",
+    ]
+    assert rows[0]["step"] == "12"
+    assert rows[0]["cuda_stream_priority"] == "high"
+    assert rows[0]["reusable_allocator_bytes"] == "80"
+    assert rows[0]["device_free_minus_buffer_bytes"] == "144"
+    assert rows[1]["detail_invocation"] == "7"
+    assert rows[1]["detail_return_reason"] == "admission_rejected"
+    assert rows[1]["detail_blocking_candidate_family"] == "DOWN"
+    assert rows[1]["detail_blocking_reason"] == "global_device_buffer"
+    assert rows[1]["detail_raw_memory_reusable_allocator_bytes"] == "80"
+    assert rows[1]["detail_charged_memory_process_allocated_bytes"] == "164"
+    assert json.loads(rows[1]["raw_event_json"])["event"] == "advance_return"
+
+
 def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector() -> None:
     index = (ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     normalized_index = index.replace("<br>", " ")
@@ -304,7 +387,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "premat_inspect_button", "premat_layers", "premat_inspector",
         "premat_inspector_body", "premat_history_button", "premat_history",
         "premat_history_body", "premat_history_download",
-        "premat_inspector_download",
+        "premat_history_raw_download", "premat_inspector_download",
     ):
         assert f'id="{element_id}"' in index
     assert "Premat Recapitulation - Step" in index
@@ -370,7 +453,11 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "premat_detailed_history_csv(snapshots)" in javascript
     assert "inspector_return_panel" in javascript
     assert "${premat_artifact_file_stem()}_step_${step}.csv" in javascript
-    assert "Download all detailed Premat history as CSV" in index
+    assert "Download retained detailed Premat history as CSV" in index
+    assert "Download retained raw Premat event history as CSV" in index
+    assert "premat_download_raw_event_history" in javascript
+    assert "premat_raw_event_history_csv(snapshots)" in javascript
+    assert "${premat_artifact_file_stem()}_premat_raw_events.csv" in javascript
     assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
 
