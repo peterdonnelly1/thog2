@@ -512,7 +512,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "should_follow_recommendation" in javascript
     assert "set_workspace_view" not in javascript
     assert "set_file_source" in javascript
-    assert 'const local_detail_tabs = Object.freeze(["charts", "overview", "logs", "files", "artifacts"]);' in heatmap_patch
+    assert 'const local_detail_tabs = Object.freeze(["charts", "premat", "overview", "logs", "files", "artifacts"]);' in heatmap_patch
     assert 'by_id("files_workspace").hidden = !has_run || !files;' in heatmap_patch
     assert 'if (tab_name === "files") refresh_files();' in heatmap_patch
     assert "actions.insertBefore(control, maximize);" in heatmap_patch
