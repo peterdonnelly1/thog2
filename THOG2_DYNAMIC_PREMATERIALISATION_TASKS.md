@@ -24,6 +24,7 @@ Correction base: remote branch commit `8b22e9e6914d1e9368bf910285fc80786bdfb898`
 - [x] Extend local aggregate metadata, Premat summary and inspector with exact target/order and scheduler evidence.
 - [x] Preserve all-layer playback, established processing/outcome states and bounded local retention.
 - [x] Add focused offset/order, multi-submit, no-completion-gate, cumulative-charge, no-bypass and metadata regressions.
+- [x] Keep the foreground safety envelope in every admission decision without multiplying that shared Main Stream allowance into every queued candidate's cumulative charge.
 - [ ] Run CUDA/PyTorch acceptance on scruffy.
 
 ## v0.2 as-built baseline before the v0.3 correction

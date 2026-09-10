@@ -123,6 +123,17 @@ class CandidateEnvelope:
             self.retained_bytes + self.foreground_overlap_bytes,
         )
 
+    @property
+    def candidate_transient_bytes(self) -> int:
+        """Candidate-owned workspace above the retained output size.
+
+        ``foreground_overlap_bytes`` is a shared Main Stream safety envelope,
+        not storage owned by each queued candidate.  It belongs in every
+        admission decision, but must not be multiplied into the cumulative
+        charge once per candidate.
+        """
+        return max(0, self.materialisation_peak_bytes - self.retained_bytes)
+
 
 @dataclass(frozen=True)
 class AdmissionDecision:
@@ -1102,11 +1113,7 @@ class PrematRuntime:
         )
 
     def _candidate_transient_bytes(self, candidate: _Candidate) -> int:
-        return max(
-            0,
-            candidate.envelope.process_envelope_bytes
-            - candidate.envelope.retained_bytes,
-        )
+        return candidate.envelope.candidate_transient_bytes
 
     def _cumulative_charged_bytes(self) -> int:
         return self._retained_bytes + self._transient_bytes

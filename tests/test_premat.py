@@ -451,6 +451,10 @@ def test_advance_queues_every_admissible_fused_candidate_without_completion_gate
     report = runtime.report()
     assert report["target_order"] == "r_to_l"
     assert report["aggregate"]["queue_depth_high_water"] == 4
+    # All four retained outputs and QKV's intrinsic concatenation workspace
+    # are charged.  The shared foreground safety envelope is applied by each
+    # admission decision, but is not multiplied once per queued matrix.
+    assert report["memory"]["premat_cumulative_charged_bytes"] == 3_840
     assert any(
         event.get("event") == "advance_return"
         and event.get("detail", {}).get("submitted_count") == 4
@@ -642,12 +646,12 @@ def test_cumulative_charge_blocks_second_candidate_without_bypass(monkeypatch) -
     assert calls == [("DOWN", 5)]
     report = runtime.report()
     assert report["queue_head"]["family"] == "DOWN"
-    assert report["memory"]["premat_cumulative_charged_bytes"] == 1_536
+    assert report["memory"]["premat_cumulative_charged_bytes"] == 1_024
     assert any(
         event.get("event") == "advance_return"
         and event.get("detail", {}).get("blocking_candidate", {}).get("family") == "UP"
         and event.get("detail", {}).get("submitted_count") == 1
-        and event.get("detail", {}).get("cumulative_charged_bytes") == 1_536
+        and event.get("detail", {}).get("cumulative_charged_bytes") == 1_024
         for event in report["events"]
     )
 
