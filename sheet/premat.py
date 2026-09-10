@@ -13,10 +13,12 @@ from torch import Tensor
 
 PREMAT_SWITCHES = ("enabled", "disabled")
 PREMAT_ATTENTION_MODES = ("fused", "unfused")
+PREMAT_TARGET_LAYERS = (0, 1, 2)
+PREMAT_WEIGHT_MATRIX_TARGET_ORDERS = ("l_to_r", "r_to_l")
 PREMAT_CUDA_STREAM_PRIORITIES = ("normal", "high")
 PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST = -(2 ** 31)
 PREMAT_DEFAULT_GPU_MEMORY_BUFFER_GB = 1.0
-PREMAT_TELEMETRY_VERSION = 2
+PREMAT_TELEMETRY_VERSION = 3
 
 
 def validate_premat_configuration(
@@ -26,6 +28,8 @@ def validate_premat_configuration(
     stay_below_current_peak: bool,
     stay_within_global_buffer: bool,
     gpu_memory_buffer_gb: float,
+    target_layer: int,
+    weight_matrix_target_order: str,
     cuda_stream_priority: str,
     diagnostic_layer_delay_ms: float,
     logging: str,
@@ -38,6 +42,16 @@ def validate_premat_configuration(
         raise ValueError(
             f"premat_attention_mode must be one of {PREMAT_ATTENTION_MODES}; "
             f"got {attention_mode!r}"
+        )
+    if isinstance(target_layer, bool) or target_layer not in PREMAT_TARGET_LAYERS:
+        raise ValueError(
+            f"premat_target_layer must be one of {PREMAT_TARGET_LAYERS}; "
+            f"got {target_layer!r}"
+        )
+    if weight_matrix_target_order not in PREMAT_WEIGHT_MATRIX_TARGET_ORDERS:
+        raise ValueError(
+            "premat_weight_matrix_target_order must be one of "
+            f"{PREMAT_WEIGHT_MATRIX_TARGET_ORDERS}; got {weight_matrix_target_order!r}"
         )
     if cuda_stream_priority not in PREMAT_CUDA_STREAM_PRIORITIES:
         raise ValueError(
@@ -176,6 +190,7 @@ class _Candidate:
     layer_index: int
     family: str
     sequence: int
+    order_position: int
     envelope: CandidateEnvelope
     state: CandidateState = CandidateState.UNAVAILABLE
     owner: str = "none"
@@ -185,9 +200,14 @@ class _Candidate:
     launch_ns: Optional[int] = None
     available_ns: Optional[int] = None
     deadline_ns: Optional[int] = None
+    consumed_ns: Optional[int] = None
+    first_considered_ns: Optional[int] = None
+    first_observed_admissible_ns: Optional[int] = None
+    final_outcome: Optional[str] = None
     critical_path_miss: bool = False
     admission_reason: str = "not_checked"
     retained_counted: bool = False
+    transient_counted: bool = False
 
 
 @dataclass
@@ -202,6 +222,7 @@ class _PendingCudaTiming:
 class _PendingRelease:
     end_event: torch.cuda.Event
     retained_bytes: int
+    transient_bytes: int
     tensor: Tensor
 
 
@@ -212,16 +233,20 @@ PrematLiveCapturePredicate = Callable[[int], bool]
 
 
 class PrematRuntime:
-    """One-model, one-stream dynamic pre-materialisation runtime.
+    """One-model Main Stream/Premat Stream materialisation runtime.
 
-    Only the current and immediately following logical layer are represented.
-    Candidate launch is strictly ordered, and admission always precedes launch.
+    The current layer and configured exact target are represented. Candidate
+    submission is strictly ordered, cumulatively charged, and admission-gated.
     """
 
-    # The sole scheduling order is the reverse of execution order within l+1.
-    # This gives the latest-deadline, largest matrices the longest useful lead.
-    _FUSED_FAMILIES = ("DOWN", "UP", "O", "QKV")
-    _UNFUSED_FAMILIES = ("DOWN", "UP", "O", "V", "QK")
+    _FUSED_FAMILIES = {
+        "l_to_r": ("QKV", "O", "UP", "DOWN"),
+        "r_to_l": ("DOWN", "UP", "O", "QKV"),
+    }
+    _UNFUSED_FAMILIES = {
+        "l_to_r": ("QK", "V", "O", "UP", "DOWN"),
+        "r_to_l": ("DOWN", "UP", "O", "V", "QK"),
+    }
     _LEGAL_TRANSITIONS = {
         CandidateState.UNAVAILABLE: (CandidateState.MATERIALISING,),
         CandidateState.MATERIALISING: (
@@ -243,6 +268,8 @@ class PrematRuntime:
         attention_mode: str,
         stay_below_current_peak: bool,
         gpu_memory_buffer_gb: float,
+        target_layer: int,
+        weight_matrix_target_order: str,
         cuda_stream_priority: str,
         diagnostic_layer_delay_ms: float,
         logging_enabled: bool,
@@ -254,6 +281,8 @@ class PrematRuntime:
         self._attention_mode = attention_mode
         self._stay_below_current_peak = bool(stay_below_current_peak)
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
+        self._target_layer = int(target_layer)
+        self._weight_matrix_target_order = weight_matrix_target_order
         self._cuda_stream_priority = cuda_stream_priority
         self._diagnostic_layer_delay_ms = float(diagnostic_layer_delay_ms)
         self._logging_enabled = bool(logging_enabled)
@@ -264,6 +293,7 @@ class PrematRuntime:
         self._candidates: Dict[Tuple[int, str], _Candidate] = {}
         self._sequence = 0
         self._event_sequence = 0
+        self._advance_sequence = 0
         self._pass_sequence = 0
         self._events: List[Dict[str, object]] = []
         # vvv THOG Instra receives bounded transition snapshots on the training
@@ -278,6 +308,7 @@ class PrematRuntime:
         self._display_candidates: List[Dict[str, object]] = []
         self._ordinary_peak_bytes = 0
         self._retained_bytes = 0
+        self._transient_bytes = 0
         self._activation_bytes = 0
         self._dtype_bytes = 0
         self._batch_size = 0
@@ -287,6 +318,11 @@ class PrematRuntime:
         self._aggregate = {
             "admitted": 0,
             "deferred": 0,
+            "admission_rejections_by_reason": {},
+            "queue_depth_high_water": 0,
+            "cumulative_charged_bytes_high_water": 0,
+            "observed_admission_lag_ms_total": 0.0,
+            "observed_admission_lag_ms_max": 0.0,
             "available_hits": 0,
             "fully_hidden_hits": 0,
             "waited_hits": 0,
@@ -361,6 +397,7 @@ class PrematRuntime:
         self._display_layer_pair = None
         self._display_candidates = []
         self._retained_bytes = 0
+        self._transient_bytes = 0
         self._activation_bytes = int(reference.numel() * reference.element_size())
         self._dtype_bytes = max(4, int(reference.element_size()))
         self._batch_size = int(reference.shape[0]) if reference.ndim >= 1 else 1
@@ -399,6 +436,7 @@ class PrematRuntime:
             candidate.materialisation_start_event = None
             candidate.completion_event = None
         self._retained_bytes = 0
+        self._transient_bytes = 0
         self._pending_releases.clear()
         self._active = False
 
@@ -411,7 +449,8 @@ class PrematRuntime:
         if position < self._position:
             raise RuntimeError("premat logical layers must execute in pass order")
         self._position = position
-        permitted = set(self._layer_indices[position : position + 2])
+        window_width = max(2, self._target_layer + 1)
+        permitted = set(self._layer_indices[position : position + window_width])
         stale = [key for key in self._candidates if key[0] not in permitted]
         for key in stale:
             candidate = self._candidates.pop(key)
@@ -419,19 +458,20 @@ class PrematRuntime:
                 raise RuntimeError(
                     f"premat candidate left layer window before consumption: {key}={candidate.state.value}"
                 )
-        for permitted_layer in self._layer_indices[position : position + 2]:
+        for permitted_layer in self._layer_indices[position : position + window_width]:
             self._ensure_layer(permitted_layer)
         self._update_ordinary_peak()
         self._record("layer_start", layer=layer_index, outcome="reconsider")
-        self._advance()
+        self._advance(trigger="layer_start")
 
     def layer_complete(self, layer_index: int) -> None:
         """Apply the optional diagnostic host-dispatch delay after a layer.
 
         This deliberately does not synchronize the main CUDA stream: all work
         for the layer has been submitted, and pausing the host prevents the next
-        layer from being submitted while Premat continues to advance.  Polling
-        permits several l+1 candidates to chain within one controlled interval.
+        layer from being submitted while the Premat Stream continues. The fixed
+        reconsideration loop may retry a memory-blocked candidate; ordinary
+        candidate-to-candidate submission never waits for completion polling.
         """
         self._require_active()
         if self._diagnostic_layer_delay_ms <= 0.0:
@@ -454,12 +494,12 @@ class PrematRuntime:
             detail={"requested_ms": requested_ms},
         )
         while True:
-            self._advance(record_defer=False)
+            self._advance(trigger="diagnostic_layer_delay_poll")
             remaining_ns = deadline_ns - time.perf_counter_ns()
             if remaining_ns <= 0:
                 break
             time.sleep(min(0.00025, remaining_ns / 1_000_000_000.0))
-        self._advance(record_defer=False)
+        self._advance(trigger="diagnostic_layer_delay_final")
         actual_ms = max(0.0, (time.perf_counter_ns() - start_ns) / 1_000_000.0)
         self._aggregate["diagnostic_layer_delay_ms_actual_total"] += actual_ms
         self._record(
@@ -474,7 +514,7 @@ class PrematRuntime:
         self._refresh_available()
         self._update_ordinary_peak()
         self._record(name, layer=layer_index, outcome="reconsider")
-        self._advance()
+        self._advance(trigger=name)
 
     def acquire(self, family: str, layer_index: int) -> Tensor:
         self._require_active()
@@ -482,7 +522,8 @@ class PrematRuntime:
         candidate = self._candidates.get(key)
         if candidate is None:
             raise RuntimeError(f"premat candidate is outside the two-layer window: {key}")
-        # vvv THOG a deadline observes completion but cannot launch an UNAVAILABLE head on the premat stream
+        # vvv THOG a deadline observes completion but cannot launch an UNAVAILABLE head on the Premat Stream
+        candidate.deadline_ns = time.perf_counter_ns()
         self._refresh_available()
         self._update_ordinary_peak()
         self._record(
@@ -491,7 +532,6 @@ class PrematRuntime:
             outcome="deadline",
         )
         # ^^^ THOG
-        candidate.deadline_ns = time.perf_counter_ns()
         current_stream = torch.cuda.current_stream(device=self._device)
         if (
             candidate.state
@@ -502,6 +542,7 @@ class PrematRuntime:
         if candidate.state == CandidateState.AVAILABLE:
             self._aggregate["available_hits"] += 1
             self._aggregate["fully_hidden_hits"] += 1
+            candidate.final_outcome = "FULL HIT"
             candidate.tensor.record_stream(current_stream)
             self._transition(
                 candidate,
@@ -518,6 +559,7 @@ class PrematRuntime:
             current_stream.wait_event(candidate.completion_event)
             wait_end.record(current_stream)
             candidate.critical_path_miss = True
+            candidate.final_outcome = "PARTIAL HIT"
             self._aggregate["waited_hits"] += 1
             candidate.tensor.record_stream(current_stream)
             wait_payload = self._transition(
@@ -538,6 +580,7 @@ class PrematRuntime:
         elif candidate.state == CandidateState.UNAVAILABLE:
             candidate.owner = "main"
             candidate.critical_path_miss = True
+            candidate.final_outcome = "COMPLETE MISS"
             candidate.launch_ns = time.perf_counter_ns()
             fallback_payload = self._transition(
                 candidate,
@@ -553,7 +596,7 @@ class PrematRuntime:
             try:
                 # The admission miss is the ordinary critical-path operation.
                 # Keep its native autograd graph instead of routing it through
-                # the no-grad Premat binding used only by auxiliary-stream hits.
+                # the no-grad Premat binding used only by Premat Stream hits.
                 candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
             except BaseException as error:
                 self._record(
@@ -564,7 +607,7 @@ class PrematRuntime:
                     detail={"error": str(error)},
                 )
                 raise RuntimeError(
-                    "premat main-stream fallback materialisation failed; "
+                    "Premat Main Stream fallback materialisation failed; "
                     f"layer={candidate.layer_index}, family={candidate.family}, "
                     f"mode={self._attention_mode}, memory={self._memory_summary()}"
                 ) from error
@@ -613,7 +656,7 @@ class PrematRuntime:
             raise RuntimeError(f"premat candidate {key} was not consuming")
         # vvv THOG callers discard their final Python weight reference before
         # entering here.  Keep an admitted Premat tensor charged and strongly
-        # referenced until a main-stream event proves its consuming kernel has
+        # referenced until a Main Stream event proves its consuming kernel has
         # finished.  This pending storage participates in the ordinary memory
         # guards, but does not globally block a later independently affordable
         # candidate.  Main-path materialisations have no Premat storage to
@@ -628,11 +671,18 @@ class PrematRuntime:
                 _PendingRelease(
                     end_event=release_event,
                     retained_bytes=candidate.envelope.retained_bytes,
+                    transient_bytes=(
+                        self._candidate_transient_bytes(candidate)
+                        if candidate.transient_counted
+                        else 0
+                    ),
                     tensor=candidate.tensor,
                 )
             )
         candidate.retained_counted = False
+        candidate.transient_counted = False
         # ^^^ THOG
+        candidate.consumed_ns = time.perf_counter_ns()
         candidate.tensor = None
         candidate.materialisation_start_event = None
         candidate.completion_event = None
@@ -644,7 +694,7 @@ class PrematRuntime:
             outcome="consumption_complete",
         )
         self._resolve_pending_releases()
-        self._advance()
+        self._advance(trigger="consumed")
 
     def report(self) -> Dict[str, object]:
         self._resolve_pending_timings()
@@ -693,6 +743,10 @@ class PrematRuntime:
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "enabled": True,
             "attention_mode": self._attention_mode,
+            "target_offset": self._target_layer,
+            "target_layer": self._target_layer,
+            "matrix_order": self._weight_matrix_target_order,
+            "weight_matrix_target_order": self._weight_matrix_target_order,
             "cuda_stream_priority": self._cuda_stream_priority,
             "diagnostic_layer_delay_ms": self._diagnostic_layer_delay_ms,
             "headroom_mode": (
@@ -702,9 +756,9 @@ class PrematRuntime:
             ),
             "current_layer_index": current_layer,
             "next_layer_index": next_layer,
-            "lookahead_layer_limit": 1,
-            "target_scope": "next_layer_only",
-            "target_order": "reverse_execution",
+            "lookahead_layer_limit": self._target_layer,
+            "target_scope": f"relative_layer_{self._target_layer}",
+            "target_order": self._weight_matrix_target_order,
             "effective_fast_discard": True,
             "pass_sequence": self._pass_sequence,
             "pass_complete": pass_complete,
@@ -721,10 +775,15 @@ class PrematRuntime:
         }
 
     def _families(self) -> Tuple[str, ...]:
-        return self._FUSED_FAMILIES if self._attention_mode == "fused" else self._UNFUSED_FAMILIES
+        families = (
+            self._FUSED_FAMILIES
+            if self._attention_mode == "fused"
+            else self._UNFUSED_FAMILIES
+        )
+        return families[self._weight_matrix_target_order]
 
     def _ensure_layer(self, layer_index: int) -> None:
-        for family in self._families():
+        for order_position, family in enumerate(self._families()):
             key = (layer_index, family)
             if key in self._candidates:
                 continue
@@ -733,6 +792,7 @@ class PrematRuntime:
                 layer_index=layer_index,
                 family=family,
                 sequence=self._sequence,
+                order_position=order_position,
                 envelope=self._candidate_envelope(family),
             )
 
@@ -809,6 +869,7 @@ class PrematRuntime:
                 and candidate.completion_event.query()
             ):
                 candidate.available_ns = time.perf_counter_ns()
+                self._release_candidate_transient_charge(candidate)
                 self._transition(
                     candidate,
                     CandidateState.AVAILABLE,
@@ -816,109 +877,217 @@ class PrematRuntime:
                     outcome="premat_complete",
                 )
 
-    def _advance(self, *, record_defer: bool = True) -> None:
+    def _advance(self, *, trigger: str) -> None:
+        """Queue every consecutively admissible candidate for the exact target."""
         self._refresh_available()
-        if any(
-            item.state == CandidateState.MATERIALISING
-            for item in self._candidates.values()
-        ):
-            return
-        candidate = self._next_premat_candidate()
-        if candidate is None:
-            return
-        observation = self._observe_memory()
-        self._update_memory_aggregates(observation)
-        decision = decide_candidate_admission(
-            observation=observation,
-            envelope=candidate.envelope,
-            stay_below_current_peak=self._stay_below_current_peak,
-            gpu_memory_buffer_bytes=self._buffer_bytes,
+        self._advance_sequence += 1
+        invocation = self._advance_sequence
+        submitted: List[Dict[str, object]] = []
+        target_position = self._position + self._target_layer
+        target_layer_index = (
+            self._layer_indices[target_position]
+            if 0 <= target_position < len(self._layer_indices)
+            else None
         )
-        candidate.admission_reason = decision.reason
-        if not decision.admitted:
-            if record_defer:
+        first_candidate = self._next_premat_candidate()
+        self._record(
+            "advance_begin",
+            layer=(
+                self._layer_indices[self._position]
+                if 0 <= self._position < len(self._layer_indices)
+                else None
+            ),
+            reason=trigger,
+            detail={
+                "invocation": invocation,
+                "trigger": trigger,
+                "target_offset": self._target_layer,
+                "target_layer_index": target_layer_index,
+                "matrix_order": self._weight_matrix_target_order,
+                "candidate_start_index": (
+                    first_candidate.order_position
+                    if first_candidate is not None
+                    else None
+                ),
+            },
+        )
+        if target_layer_index is None:
+            self._record_advance_return(
+                invocation=invocation,
+                trigger=trigger,
+                submitted=submitted,
+                reason="target_out_of_range",
+            )
+            return
+        if self._stream is None or self._device is None:
+            raise RuntimeError("Premat Stream is not initialized")
+
+        while True:
+            candidate = self._next_premat_candidate()
+            if candidate is None:
+                self._record_advance_return(
+                    invocation=invocation,
+                    trigger=trigger,
+                    submitted=submitted,
+                    reason="target_exhausted",
+                )
+                return
+            considered_ns = time.perf_counter_ns()
+            if candidate.first_considered_ns is None:
+                candidate.first_considered_ns = considered_ns
+            raw_observation = self._observe_memory()
+            observation = self._observation_with_cumulative_charge(raw_observation)
+            self._update_memory_aggregates(raw_observation)
+            decision = decide_candidate_admission(
+                observation=observation,
+                envelope=candidate.envelope,
+                stay_below_current_peak=self._stay_below_current_peak,
+                gpu_memory_buffer_bytes=self._buffer_bytes,
+            )
+            candidate.admission_reason = decision.reason
+            decision_detail = {
+                **asdict(decision),
+                "invocation": invocation,
+                "trigger": trigger,
+                "target_offset": self._target_layer,
+                "target_layer_index": target_layer_index,
+                "matrix_order": self._weight_matrix_target_order,
+                "order_position": candidate.order_position,
+                "queue_depth": self._queue_depth(),
+                "cumulative_charged_bytes": self._cumulative_charged_bytes(),
+                "raw_memory": asdict(raw_observation),
+            }
+            if decision.admitted:
+                candidate.first_observed_admissible_ns = considered_ns
+            self._record(
+                "admission_considered",
+                candidate=candidate,
+                decision="admit" if decision.admitted else "defer",
+                outcome="first_observed_admissible" if decision.admitted else "rejected",
+                reason=decision.reason,
+                detail=decision_detail,
+            )
+            if not decision.admitted:
                 self._aggregate["deferred"] += 1
+                rejection_counts = self._aggregate["admission_rejections_by_reason"]
+                rejection_counts[decision.reason] = int(
+                    rejection_counts.get(decision.reason, 0)
+                ) + 1
                 self._record(
                     "admission_deferred",
                     candidate=candidate,
                     decision="defer",
-                    outcome="not_launched",
+                    outcome="not_submitted",
                     reason=decision.reason,
-                    detail=asdict(decision),
+                    detail=decision_detail,
                 )
-            return
-        if self._stream is None or self._device is None:
-            raise RuntimeError("premat stream is not initialized")
-        candidate.owner = "premat"
-        candidate.launch_ns = time.perf_counter_ns()
-        self._aggregate["admitted"] += 1
-        launch_payload = self._transition(
-            candidate,
-            CandidateState.MATERIALISING,
-            "materialising",
-            decision="admit",
-            outcome="premat_launched",
-            reason=decision.reason,
-            detail=asdict(decision),
-        )
-        current_stream = torch.cuda.current_stream(device=self._device)
-        self._stream.wait_stream(current_stream)
-        try:
-            with torch.cuda.stream(self._stream):
-                candidate.materialisation_start_event = torch.cuda.Event(
-                    enable_timing=True
+                self._record_advance_return(
+                    invocation=invocation,
+                    trigger=trigger,
+                    submitted=submitted,
+                    reason="admission_rejected",
+                    blocking_candidate=candidate,
+                    blocking_reason=decision.reason,
                 )
-                candidate.completion_event = torch.cuda.Event(enable_timing=True)
-                candidate.materialisation_start_event.record(self._stream)
-                with torch.no_grad():
-                    candidate.tensor = self._materialize(
-                        candidate.family,
-                        candidate.layer_index,
+                return
+
+            candidate.owner = "premat"
+            candidate.launch_ns = time.perf_counter_ns()
+            self._charge_candidate(candidate)
+            current_stream = torch.cuda.current_stream(device=self._device)
+            self._stream.wait_stream(current_stream)
+            try:
+                with torch.cuda.stream(self._stream):
+                    candidate.materialisation_start_event = torch.cuda.Event(
+                        enable_timing=True
                     )
-                actual_retained_bytes = int(
-                    candidate.tensor.numel() * candidate.tensor.element_size()
-                )
-                if actual_retained_bytes > candidate.envelope.retained_bytes:
-                    raise RuntimeError(
-                        "materialised tensor exceeds its pre-admission retained estimate: "
-                        f"actual={actual_retained_bytes}, "
-                        f"predicted={candidate.envelope.retained_bytes}"
+                    candidate.completion_event = torch.cuda.Event(enable_timing=True)
+                    candidate.materialisation_start_event.record(self._stream)
+                    with torch.no_grad():
+                        candidate.tensor = self._materialize(
+                            candidate.family,
+                            candidate.layer_index,
+                        )
+                    actual_retained_bytes = int(
+                        candidate.tensor.numel() * candidate.tensor.element_size()
                     )
-                candidate.tensor.record_stream(self._stream)
-                candidate.completion_event.record(self._stream)
-        except BaseException as error:
-            candidate.tensor = None
-            candidate.materialisation_start_event = None
-            candidate.completion_event = None
-            self._record(
-                "materialisation_failed",
-                candidate=candidate,
-                outcome="failure",
-                reason=type(error).__name__,
-                detail={"error": str(error), "admission": asdict(decision)},
+                    if actual_retained_bytes > candidate.envelope.retained_bytes:
+                        raise RuntimeError(
+                            "materialised tensor exceeds its pre-admission retained estimate: "
+                            f"actual={actual_retained_bytes}, "
+                            f"predicted={candidate.envelope.retained_bytes}"
+                        )
+                    candidate.tensor.record_stream(self._stream)
+                    candidate.completion_event.record(self._stream)
+            except BaseException as error:
+                self._rollback_candidate_charge(candidate)
+                candidate.owner = "none"
+                candidate.tensor = None
+                candidate.materialisation_start_event = None
+                candidate.completion_event = None
+                self._record(
+                    "materialisation_failed",
+                    candidate=candidate,
+                    outcome="failure",
+                    reason=type(error).__name__,
+                    detail={"error": str(error), "admission": decision_detail},
+                )
+                raise RuntimeError(
+                    "Premat Stream candidate materialisation failed after admission; "
+                    f"layer={candidate.layer_index}, family={candidate.family}, "
+                    f"mode={self._attention_mode}, envelope={asdict(candidate.envelope)}, "
+                    f"admission={asdict(decision)}, memory={self._memory_summary()}"
+                ) from error
+            self._aggregate["admitted"] += 1
+            observed_admission_lag_ms = max(
+                0.0,
+                (candidate.launch_ns - candidate.first_observed_admissible_ns)
+                / 1_000_000.0,
             )
-            raise RuntimeError(
-                "premat candidate materialisation failed after admission; "
-                f"layer={candidate.layer_index}, family={candidate.family}, "
-                f"mode={self._attention_mode}, envelope={asdict(candidate.envelope)}, "
-                f"admission={asdict(decision)}, memory={self._memory_summary()}"
-            ) from error
-        self._pending_timings.append(
-            _PendingCudaTiming(
-                kind="premat_materialisation",
-                start_event=candidate.materialisation_start_event,
-                end_event=candidate.completion_event,
-                event_payload=launch_payload,
+            self._aggregate["observed_admission_lag_ms_total"] += observed_admission_lag_ms
+            self._aggregate["observed_admission_lag_ms_max"] = max(
+                float(self._aggregate["observed_admission_lag_ms_max"]),
+                observed_admission_lag_ms,
             )
-        )
-        self._retained_bytes += candidate.envelope.retained_bytes
-        candidate.retained_counted = True
+            launch_detail = {
+                **decision_detail,
+                "queue_depth_after_submission": self._queue_depth(),
+                "cumulative_charged_bytes_after_submission": (
+                    self._cumulative_charged_bytes()
+                ),
+                "observed_admission_lag_ms": observed_admission_lag_ms,
+            }
+            launch_payload = self._transition(
+                candidate,
+                CandidateState.MATERIALISING,
+                "materialising",
+                decision="admit",
+                outcome="submitted_to_premat_stream",
+                reason=decision.reason,
+                detail=launch_detail,
+            )
+            self._pending_timings.append(
+                _PendingCudaTiming(
+                    kind="premat_materialisation",
+                    start_event=candidate.materialisation_start_event,
+                    end_event=candidate.completion_event,
+                    event_payload=launch_payload,
+                )
+            )
+            self._update_queue_aggregates()
+            submitted.append(
+                {
+                    "layer_index": candidate.layer_index,
+                    "family": candidate.family,
+                    "order_position": candidate.order_position,
+                }
+            )
 
     def _next_premat_candidate(self) -> Optional[_Candidate]:
-        next_position = self._position + 1
-        if self._position < 0 or next_position >= len(self._layer_indices):
+        target_position = self._position + self._target_layer
+        if self._position < 0 or target_position >= len(self._layer_indices):
             return None
-        target_layer_index = self._layer_indices[next_position]
+        target_layer_index = self._layer_indices[target_position]
         return next(
             (
                 item
@@ -930,6 +1099,139 @@ class PrematRuntime:
                 and item.layer_index == target_layer_index
             ),
             None,
+        )
+
+    def _candidate_transient_bytes(self, candidate: _Candidate) -> int:
+        return max(
+            0,
+            candidate.envelope.process_envelope_bytes
+            - candidate.envelope.retained_bytes,
+        )
+
+    def _cumulative_charged_bytes(self) -> int:
+        return self._retained_bytes + self._transient_bytes
+
+    def _queue_depth(self) -> int:
+        return sum(
+            1
+            for candidate in self._candidates.values()
+            if candidate.owner == "premat"
+            and candidate.state != CandidateState.CONSUMED
+        )
+
+    def _charge_candidate(self, candidate: _Candidate) -> None:
+        if candidate.retained_counted or candidate.transient_counted:
+            raise RuntimeError(
+                "Premat candidate received a duplicate admission charge: "
+                f"layer={candidate.layer_index}, family={candidate.family}"
+            )
+        self._retained_bytes += candidate.envelope.retained_bytes
+        self._transient_bytes += self._candidate_transient_bytes(candidate)
+        candidate.retained_counted = True
+        candidate.transient_counted = True
+
+    def _rollback_candidate_charge(self, candidate: _Candidate) -> None:
+        if candidate.retained_counted:
+            self._retained_bytes = max(
+                0,
+                self._retained_bytes - candidate.envelope.retained_bytes,
+            )
+            candidate.retained_counted = False
+        if candidate.transient_counted:
+            self._transient_bytes = max(
+                0,
+                self._transient_bytes - self._candidate_transient_bytes(candidate),
+            )
+            candidate.transient_counted = False
+
+    def _release_candidate_transient_charge(self, candidate: _Candidate) -> None:
+        if not candidate.transient_counted:
+            return
+        self._transient_bytes = max(
+            0,
+            self._transient_bytes - self._candidate_transient_bytes(candidate),
+        )
+        candidate.transient_counted = False
+
+    def _observation_with_cumulative_charge(
+        self,
+        observation: PrematMemoryObservation,
+    ) -> PrematMemoryObservation:
+        ordinary_process_bytes = max(
+            0,
+            observation.process_allocated_bytes - self._retained_bytes,
+        )
+        charged_process_bytes = max(
+            observation.process_allocated_bytes,
+            ordinary_process_bytes + self._cumulative_charged_bytes(),
+        )
+        ordinary_device_bytes = max(
+            0,
+            observation.device_used_bytes - self._retained_bytes,
+        )
+        charged_device_bytes = max(
+            observation.device_used_bytes,
+            ordinary_device_bytes + self._cumulative_charged_bytes(),
+        )
+        return PrematMemoryObservation(
+            process_allocated_bytes=charged_process_bytes,
+            process_reserved_bytes=max(
+                observation.process_reserved_bytes,
+                charged_process_bytes,
+            ),
+            process_ordinary_peak_bytes=observation.process_ordinary_peak_bytes,
+            device_free_bytes=max(
+                0,
+                observation.device_total_bytes - charged_device_bytes,
+            ),
+            device_total_bytes=observation.device_total_bytes,
+        )
+
+    def _update_queue_aggregates(self) -> None:
+        self._aggregate["queue_depth_high_water"] = max(
+            int(self._aggregate["queue_depth_high_water"]),
+            self._queue_depth(),
+        )
+        self._aggregate["cumulative_charged_bytes_high_water"] = max(
+            int(self._aggregate["cumulative_charged_bytes_high_water"]),
+            self._cumulative_charged_bytes(),
+        )
+
+    def _record_advance_return(
+        self,
+        *,
+        invocation: int,
+        trigger: str,
+        submitted: Sequence[Mapping[str, object]],
+        reason: str,
+        blocking_candidate: Optional[_Candidate] = None,
+        blocking_reason: Optional[str] = None,
+    ) -> None:
+        self._record(
+            "advance_return",
+            candidate=blocking_candidate,
+            reason=reason,
+            detail={
+                "invocation": invocation,
+                "trigger": trigger,
+                "return_reason": reason,
+                "target_offset": self._target_layer,
+                "matrix_order": self._weight_matrix_target_order,
+                "submitted": [dict(item) for item in submitted],
+                "submitted_count": len(submitted),
+                "blocking_candidate": (
+                    {
+                        "layer_index": blocking_candidate.layer_index,
+                        "family": blocking_candidate.family,
+                        "order_position": blocking_candidate.order_position,
+                    }
+                    if blocking_candidate is not None
+                    else None
+                ),
+                "blocking_reason": blocking_reason,
+                "queue_depth": self._queue_depth(),
+                "cumulative_charged_bytes": self._cumulative_charged_bytes(),
+            },
         )
 
     def _resolve_pending_releases(self) -> None:
@@ -945,6 +1247,10 @@ class PrematRuntime:
             self._retained_bytes = max(
                 0,
                 self._retained_bytes - release.retained_bytes,
+            )
+            self._transient_bytes = max(
+                0,
+                self._transient_bytes - release.transient_bytes,
             )
         self._pending_releases = remaining
 
@@ -1011,6 +1317,12 @@ class PrematRuntime:
                 if self._stay_below_current_peak
                 else "stay_within_global_buffer"
             ),
+            "target_offset": self._target_layer,
+            "target_order": self._weight_matrix_target_order,
+            "queue_depth": self._queue_depth(),
+            "cumulative_charged_bytes": self._cumulative_charged_bytes(),
+            "charged_retained_bytes": self._retained_bytes,
+            "charged_transient_bytes": self._transient_bytes,
         }
         # Every retained event carries its exact display window.  The browser
         # can therefore replay a sampled update layer by layer even when the
@@ -1030,6 +1342,7 @@ class PrematRuntime:
                 {
                     "layer_index": candidate.layer_index,
                     "family": candidate.family,
+                    "target_order_position": candidate.order_position,
                     "old_state": (
                         previous_state.value
                         if previous_state is not None
@@ -1040,6 +1353,28 @@ class PrematRuntime:
                     "owner": candidate.owner,
                     "admission_reason": candidate.admission_reason,
                     "critical_path_miss": candidate.critical_path_miss,
+                    "first_considered_ns": candidate.first_considered_ns,
+                    "first_observed_admissible_ns": (
+                        candidate.first_observed_admissible_ns
+                    ),
+                    "submission_ns": candidate.launch_ns,
+                    "cuda_completion_observed_ns": candidate.available_ns,
+                    "deadline_ns": candidate.deadline_ns,
+                    "consumption_ns": candidate.consumed_ns,
+                    "final_outcome": candidate.final_outcome,
+                    "observed_admission_lag_ms": (
+                        max(
+                            0.0,
+                            (
+                                candidate.launch_ns
+                                - candidate.first_observed_admissible_ns
+                            )
+                            / 1_000_000.0,
+                        )
+                        if candidate.launch_ns is not None
+                        and candidate.first_observed_admissible_ns is not None
+                        else None
+                    ),
                     "predicted_retained_bytes": candidate.envelope.retained_bytes,
                     "predicted_materialisation_peak_bytes": (
                         candidate.envelope.materialisation_peak_bytes
@@ -1104,9 +1439,27 @@ class PrematRuntime:
             "sequence": candidate.sequence,
             "layer_index": candidate.layer_index,
             "family": candidate.family,
+            "target_order_position": candidate.order_position,
             "state": candidate.state.value,
             "owner": candidate.owner,
             "critical_path_miss": candidate.critical_path_miss,
+            "first_considered_ns": candidate.first_considered_ns,
+            "first_observed_admissible_ns": candidate.first_observed_admissible_ns,
+            "submission_ns": candidate.launch_ns,
+            "cuda_completion_observed_ns": candidate.available_ns,
+            "deadline_ns": candidate.deadline_ns,
+            "consumption_ns": candidate.consumed_ns,
+            "final_outcome": candidate.final_outcome,
+            "observed_admission_lag_ms": (
+                max(
+                    0.0,
+                    (candidate.launch_ns - candidate.first_observed_admissible_ns)
+                    / 1_000_000.0,
+                )
+                if candidate.launch_ns is not None
+                and candidate.first_observed_admissible_ns is not None
+                else None
+            ),
             "admission_reason": candidate.admission_reason,
             "envelope": asdict(candidate.envelope),
         }
@@ -1201,6 +1554,9 @@ class PrematRuntime:
             "device_headroom_bytes": device_headroom,
             "premat_headroom_bytes": premat_headroom,
             "premat_retained_bytes": self._retained_bytes,
+            "premat_transient_bytes": self._transient_bytes,
+            "premat_cumulative_charged_bytes": self._cumulative_charged_bytes(),
+            "premat_queue_depth": self._queue_depth(),
             "next_candidate": queue_head,
             "next_candidate_defer_reason": (
                 queue_head.get("admission_reason")
@@ -1273,6 +1629,7 @@ class PrematRuntime:
             self._aggregate[aggregate_name] += elapsed_ms
             if timing.event_payload is not None:
                 timing.event_payload[payload_name] = elapsed_ms
+                timing.event_payload["cuda_elapsed_ms"] = elapsed_ms
         self._pending_timings = remaining
 
     def _require_active(self) -> None:
@@ -1294,3 +1651,4 @@ def plastic_memory_budget_gib(*, device: torch.device, gpu_memory_buffer_gb: flo
         raise RuntimeError("premat_gpu_memory_buffer_gb leaves no usable CUDA capacity")
     return usable_bytes / float(1024 ** 3)
 # ^^^ THOG
+

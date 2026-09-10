@@ -4,17 +4,35 @@ Branch: `THOG2_Dynamic_Prematerialisation_Enhancement`
 
 Base: `master` at `38763e41f31ae3f16f1f9a5609a0a7a63a686fe8`
 
-Authoritative requirements: `THOG2_Dynamic_Prematerialisation_Enhancement_v0.2.docx`
+Authoritative requirements: `THOG2_Dynamic_Prematerialisation_Enhancement_v0.3.docx` (`libfile_838dee95a4dc8191b6b485209b365c2a`)
 
-Authoritative plan: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation_Plans_v0.1.docx`
+Background plan only: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation_Plans_v0.1.docx`
 
-## Implementation
+Correction base: remote branch commit `8b22e9e6914d1e9368bf910285fc80786bdfb898`
+
+## v0.3 scheduler correction
+
+- [x] Add exact `--premat_target_layer 0|1|2`, default 1, through wrapper, CLI, persistent configuration, runtime, startup and metadata.
+- [x] Add `--premat_weight_matrix_target_order l_to_r|r_to_l`, default `r_to_l`, with the specified fused and unfused orders.
+- [x] Remove the global `MATERIALISING` return and submit every consecutively admissible target candidate in one `_advance()` invocation.
+- [x] Preserve strict no-bypass: stop at the first admission rejection.
+- [x] Charge retained and transient bytes before later admission decisions; retain the charge until CUDA completion/consumer release makes it safe to reduce.
+- [x] Keep one completion event per candidate; FULL HIT consumes directly, PARTIAL HIT inserts a Main Stream `wait_event`, and COMPLETE MISS materialises only never-submitted work.
+- [x] Keep periodic scheduler polling exclusive to the fixed approximately 0.25 ms diagnostic-delay loop.
+- [x] Preserve original-forward-only Premat, non-reentrant checkpoint boundaries, ordinary-point autograd identity, and consumer-stream gradient anchoring.
+- [x] Record `_advance()` trigger/return, submitted candidates, queue depth, cumulative charge, rejection memory, first observed admissibility, lifecycle timing and final outcome.
+- [x] Extend local aggregate metadata, Premat summary and inspector with exact target/order and scheduler evidence.
+- [x] Preserve all-layer playback, established processing/outcome states and bounded local retention.
+- [x] Add focused offset/order, multi-submit, no-completion-gate, cumulative-charge, no-bypass and metadata regressions.
+- [ ] Run CUDA/PyTorch acceptance on scruffy.
+
+## v0.2 as-built baseline before the v0.3 correction
 
 - [x] Add and validate exactly the seven specified `--premat*` public options.
 - [x] Preserve disabled-by-default behaviour and force fast discard only when premat is enabled.
 - [x] Retire the PLASTIC-only memory threshold and use the shared global GPU buffer.
 - [x] Implement lifecycle states and validate legal transitions.
-- [x] Implement strict next-use order, no bypass, one in-flight candidate, and the l+1 limit.
+- [x] Implement the former strict next-use/no-bypass, one-in-flight, l+1 scheduler superseded by v0.3.
 - [x] Implement retained, transient, foreground, and combined candidate envelopes.
 - [x] Keep process-peak and global-device-buffer admission guards separate.
 - [x] Implement one persistent premat CUDA stream per active model device.
@@ -259,3 +277,4 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Move the Instra `OUTCOMES` key group farther right.
 - [x] Pass Python, JavaScript, shell and whitespace validation; executable pytest is unavailable on this host.
 - [ ] On scruffy, compare matched 0 ms and delayed runs to distinguish insufficient lead time from another scheduler bottleneck.
+

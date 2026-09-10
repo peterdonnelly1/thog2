@@ -133,6 +133,8 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("LW", "--plastic__layer_count_cost_weight VALUE", "layer-cost penalty weight"),
             # ("LMB", "--plastic__layer_count__memory_budget_gib VALUE", "memory_budget objective limit"),                                               # <<< THOG retired fixed budget
             ("—", "--premat_gpu_memory_buffer_gb VALUE", "global CUDA reserve shared with memory_budget"),
+            ("—", "--premat_target_layer 0|1|2", "exact relative target layer; default 1"),
+            ("—", "--premat_weight_matrix_target_order l_to_r|r_to_l", "matrix submission order; default r_to_l"),
             ("—", "--premat_cuda_stream_priority normal|high", "Premat CUDA dispatch priority; default normal"),
             ("—", "--premat_diagnostic_layer_delay_ms FLOAT", "Diagnostic host-dispatch delay after each non-final layer; default 0"),
             ("—", "--plastic__layer_count__cuda_allocator_reserve_gib VALUE", "upward-probe free-memory reserve"),
@@ -312,3 +314,4 @@ def _format_help_with_descriptor_registry(parser: argparse.ArgumentParser) -> st
 
 argparse.ArgumentParser.format_help = _format_help_with_descriptor_registry
 # ^^^ THOG
+

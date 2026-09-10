@@ -163,6 +163,8 @@ FAST_DISCARD="${THOG2_FAST_DISCARD:-true}"
 # vvv THOG dynamic pre-materialisation wrapper defaults
 PREMAT="disabled"
 PREMAT_ATTENTION_MODE="fused"
+PREMAT_TARGET_LAYER="1"
+PREMAT_WEIGHT_MATRIX_TARGET_ORDER="r_to_l"
 PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK=false
 PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
 PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
@@ -297,6 +299,8 @@ PLASTIC DEPTH:
 Dynamic pre-materialisation:
   --premat enabled|disabled=${PREMAT}
   --premat_attention_mode fused|unfused=${PREMAT_ATTENTION_MODE}
+  --premat_target_layer 0|1|2=${PREMAT_TARGET_LAYER}
+  --premat_weight_matrix_target_order l_to_r|r_to_l=${PREMAT_WEIGHT_MATRIX_TARGET_ORDER}
   --premat_headroom_stay_below_current_peak       default when neither headroom flag is supplied
   --premat_headroom_stay_within_global_buffer
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
@@ -495,11 +499,13 @@ while (( $# > 0 )); do
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
       shift
       ;;
-    --premat|--premat_attention_mode|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_logging|--premat_instra)
+    --premat|--premat_attention_mode|--premat_target_layer|--premat_weight_matrix_target_order|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_logging|--premat_instra)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --premat) PREMAT="$2" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$2" ;;
+        --premat_target_layer) PREMAT_TARGET_LAYER="$2" ;;
+        --premat_weight_matrix_target_order) PREMAT_WEIGHT_MATRIX_TARGET_ORDER="$2" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$2" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$2" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$2" ;;
@@ -508,11 +514,13 @@ while (( $# > 0 )); do
       esac
       shift 2
       ;;
-    --premat=*|--premat_attention_mode=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_logging=*|--premat_instra=*)
+    --premat=*|--premat_attention_mode=*|--premat_target_layer=*|--premat_weight_matrix_target_order=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_logging=*|--premat_instra=*)
       premat_name="${1%%=*}"; premat_value="${1#*=}"
       case "$premat_name" in
         --premat) PREMAT="$premat_value" ;;
         --premat_attention_mode) PREMAT_ATTENTION_MODE="$premat_value" ;;
+        --premat_target_layer) PREMAT_TARGET_LAYER="$premat_value" ;;
+        --premat_weight_matrix_target_order) PREMAT_WEIGHT_MATRIX_TARGET_ORDER="$premat_value" ;;
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$premat_value" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$premat_value" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$premat_value" ;;
@@ -999,6 +1007,8 @@ validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_S
 # vvv THOG validate premat independently of PLASTIC and make its early-discard ownership explicit
 case "$PREMAT" in enabled|disabled) ;; *) echo "PREMAT must be enabled or disabled." >&2; exit 2 ;; esac
 case "$PREMAT_ATTENTION_MODE" in fused|unfused) ;; *) echo "PREMAT_ATTENTION_MODE must be fused or unfused." >&2; exit 2 ;; esac
+case "$PREMAT_TARGET_LAYER" in 0|1|2) ;; *) echo "PREMAT_TARGET_LAYER must be 0, 1 or 2." >&2; exit 2 ;; esac
+case "$PREMAT_WEIGHT_MATRIX_TARGET_ORDER" in l_to_r|r_to_l) ;; *) echo "PREMAT_WEIGHT_MATRIX_TARGET_ORDER must be l_to_r or r_to_l." >&2; exit 2 ;; esac
 case "$PREMAT_CUDA_STREAM_PRIORITY" in normal|high) ;; *) echo "PREMAT_CUDA_STREAM_PRIORITY must be normal or high." >&2; exit 2 ;; esac
 case "$PREMAT_LOGGING" in enabled|disabled) ;; *) echo "PREMAT_LOGGING must be enabled or disabled." >&2; exit 2 ;; esac
 case "$PREMAT_INSTRA" in enabled|disabled) ;; *) echo "PREMAT_INSTRA must be enabled or disabled." >&2; exit 2 ;; esac
@@ -1279,6 +1289,8 @@ run_grid_point() {
   # vvv THOG every run receives the global memory buffer and explicit premat topology/policy identity
   optional_args+=(--premat "$PREMAT")
   optional_args+=(--premat_attention_mode "$PREMAT_ATTENTION_MODE")
+  optional_args+=(--premat_target_layer "$PREMAT_TARGET_LAYER")
+  optional_args+=(--premat_weight_matrix_target_order "$PREMAT_WEIGHT_MATRIX_TARGET_ORDER")
   [[ "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" == true ]] && optional_args+=(--premat_headroom_stay_below_current_peak)
   [[ "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" == true ]] && optional_args+=(--premat_headroom_stay_within_global_buffer)
   optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
@@ -1574,3 +1586,4 @@ done
 # validate_positive_uint "$PLASTIC_LAYER_COUNT_HOLD_UPDATES" "PLASTIC_LAYER_COUNT_HOLD_UPDATES"
 # optional_args+=(--plastic-layer-count-hold-updates "$PLASTIC_LAYER_COUNT_HOLD_UPDATES")
 # ^^^ THOG
+

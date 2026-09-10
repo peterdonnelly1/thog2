@@ -321,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     # vvv THOG dynamic pre-materialisation public surface and mutually-exclusive headroom policies
     parser.add_argument("--premat", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_attention_mode", choices=("fused", "unfused"), default="fused")
+    parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2), default=1)
+    parser.add_argument("--premat_weight_matrix_target_order", choices=("l_to_r", "r_to_l"), default="r_to_l")
     premat_headroom = parser.add_mutually_exclusive_group()
     premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
     premat_headroom.add_argument("--premat_headroom_stay_within_global_buffer", action="store_true")
@@ -715,6 +717,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         premat=arguments.premat,
         premat_attention_mode=arguments.premat_attention_mode,
+        premat_target_layer=arguments.premat_target_layer,
+        premat_weight_matrix_target_order=arguments.premat_weight_matrix_target_order,
         premat_headroom_stay_below_current_peak=arguments.premat_headroom_stay_below_current_peak,
         premat_headroom_stay_within_global_buffer=arguments.premat_headroom_stay_within_global_buffer,
         premat_gpu_memory_buffer_gb=arguments.premat_gpu_memory_buffer_gb,
@@ -938,6 +942,8 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             "PREMAT:",
             f"premat={config.premat} "
             f"premat_attention_mode={config.premat_attention_mode} "
+            f"premat_target_layer={config.premat_target_layer} "
+            f"premat_weight_matrix_target_order={config.premat_weight_matrix_target_order} "
             f"headroom={headroom_mode} "
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
             f"premat_cuda_stream_priority={config.premat_cuda_stream_priority} "
@@ -946,7 +952,9 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
-            "lookahead=l+1 matrix_target=next_layer_only target_order=reverse_execution",
+            f"lookahead=l+{config.premat_target_layer} "
+            f"matrix_target=relative_layer_{config.premat_target_layer} "
+            f"target_order={config.premat_weight_matrix_target_order}",
         )
         # ^^^ THOG
         # vvv THOG HYPERBLOCK field identity and coefficient budget are first-class console diagnostics
@@ -1063,3 +1071,4 @@ if __name__ == "__main__":
 # plastic__layer_count_hold_updates=arguments.plastic__layer_count_hold_updates,
 # f"{config.plastic__layer_count_objective}  hold_updates={config.plastic__layer_count_hold_updates}",
 # ^^^ THOG
+

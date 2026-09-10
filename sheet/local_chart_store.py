@@ -513,6 +513,8 @@ class LocalChartStore:
             ("premat_schema_version", str(snapshot.get("schema_version", snapshot.get("version", "")))),
             ("premat_last_update", str(update)),
             ("premat_attention_mode", str(snapshot.get("attention_mode", ""))),
+            ("premat_target_layer", str(snapshot.get("target_offset", 1))),
+            ("premat_weight_matrix_target_order", str(snapshot.get("matrix_order", "r_to_l"))),
             ("premat_headroom_mode", str(snapshot.get("headroom_mode", ""))),
             ("premat_cuda_stream_priority", str(snapshot.get("cuda_stream_priority", "normal"))),
             ("premat_diagnostic_layer_delay_ms", str(snapshot.get("diagnostic_layer_delay_ms", 0.0))),
@@ -890,3 +892,4 @@ __all__ = [
     "normalize_chart_destination",
 ]
 # ^^^ THOG
+

@@ -577,6 +577,8 @@ def _run_config_from_training_config(
         plastic__layer_count_cost_weight=training_config.plastic__layer_count_cost_weight,
         premat=training_config.premat,
         premat_attention_mode=training_config.premat_attention_mode,
+        premat_target_layer=training_config.premat_target_layer,
+        premat_weight_matrix_target_order=training_config.premat_weight_matrix_target_order,
         premat_headroom_stay_below_current_peak=training_config.premat_headroom_stay_below_current_peak,
         premat_headroom_stay_within_global_buffer=training_config.premat_headroom_stay_within_global_buffer,
         premat_gpu_memory_buffer_gb=training_config.premat_gpu_memory_buffer_gb,
@@ -1741,3 +1743,4 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 # ^^^ THOG
+

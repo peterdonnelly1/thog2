@@ -47,6 +47,8 @@ def _config():
         checkpoint_segment_size=4,
         premat="enabled",
         premat_attention_mode="fused",
+        premat_target_layer=2,
+        premat_weight_matrix_target_order="l_to_r",
         premat_headroom_stay_below_current_peak=True,
         premat_headroom_stay_within_global_buffer=False,
         premat_cuda_stream_priority="high",
@@ -106,11 +108,13 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert "PREMAT:" in output
     assert "premat=enabled" in output
     assert "premat_attention_mode=fused" in output
+    assert "premat_target_layer=2" in output
+    assert "premat_weight_matrix_target_order=l_to_r" in output
     assert "headroom=stay_below_current_peak" in output
     assert "premat_cuda_stream_priority=high" in output
     assert "premat_diagnostic_layer_delay_ms=12.5" in output
-    assert "matrix_target=next_layer_only" in output
-    assert "target_order=reverse_execution" in output
+    assert "matrix_target=relative_layer_2" in output
+    assert "target_order=l_to_r" in output
     assert "effective_fast_discard=true" in output
     assert "checkpoint_recompute_segment=4" in output
     assert "cuda_allocator=" in output
@@ -144,3 +148,4 @@ def test_startup_report_restores_full_rows_and_plastic_section(capsys):
     assert capacity_row.endswith("1.0,  15.1,  29.3,  43.4,  57.6")
     assert initial_row.index("1.0") == capacity_row.index("1.0")
 # ^^^ THOG
+

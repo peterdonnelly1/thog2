@@ -4,9 +4,24 @@
 
 - Branch: `THOG2_Dynamic_Prematerialisation_Enhancement`.
 - Base: `master` commit `38763e41f31ae3f16f1f9a5609a0a7a63a686fe8`.
-- Requirements: `THOG2_Dynamic_Prematerialisation_Enhancement_v0.2.docx`.
-- Implementation plan: `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation_Plans_v0.1.docx`.
-- The requirements document governs any conflict with the implementation plan.
+- Authoritative requirements: `THOG2_Dynamic_Prematerialisation_Enhancement_v0.3.docx` (Library ID `libfile_838dee95a4dc8191b6b485209b365c2a`).
+- Remote correction base: `8b22e9e6914d1e9368bf910285fc80786bdfb898`.
+- `THOG2_Dynamic_Prematerialisation_Enhancement_Implementation_Plans_v0.1.docx` and v0.2 are background only where v0.3 differs.
+
+## v0.3 implementation boundary
+
+- Already built before v0.3: Main Stream/Premat Stream execution, checkpoint-transparent binding, reverse next-layer scheduling, stream priority, diagnostic delay, complete-microstep local telemetry, and all-layer Instra replay.
+- v0.3 correction: exact target offsets 0/1/2, selectable matrix order, multi-candidate ordered submission without a completion gate, cumulative queued-memory charging, and enough scheduler/Instra metadata to verify those semantics.
+- Deferred deliberately: CPU event worker, additional Premat Streams, size-aware bypass, and unrelated Instra redesign.
+
+## 2026-09-10 - v0.3 scheduler correction
+
+- Added the exact target-layer and weight-matrix-order controls through the shell wrapper, CLI, persistent configuration, startup report, artifact identity, runtime report, local metadata, and Instra summary.
+- Reworked `_advance()` to queue every consecutively admissible candidate on the Premat Stream in configured order, charge retained and transient bytes before considering the next candidate, and return at the first rejection without bypass.
+- Kept per-candidate CUDA completion events and the established FULL HIT, PARTIAL HIT, and COMPLETE MISS deadline paths; later submissions no longer depend on Host observation of earlier CUDA completion.
+- Added invocation-level trigger/return telemetry, submitted-candidate lists, queue/charge high-water marks, rejection history and memory, explicitly observational admissibility timing, lifecycle timestamps, and final outcomes.
+- Preserved checkpoint transparency, the ordinary Main Stream autograd attachment point, consumer-stream gradient anchoring, complete-microstep Instra publication, all-layer playback, and bounded local retention.
+- Focused dependency-free scheduler, Instra reducer/store, and configuration propagation harnesses pass. Python compilation, JavaScript syntax, shell syntax, and `git diff --check` pass. This host has neither PyTorch nor pytest, so the retained CUDA forward/backward and checkpoint regressions require scruffy validation.
 
 ## 2026-09-08 - Baseline and design audit
 
@@ -248,3 +263,4 @@
 - Requested and actual delay totals plus invocation count are included in aggregate telemetry; the configured delay appears in startup, local metadata and the Instra summary.
 - Increased the left separation before the `OUTCOMES` key section from 28 px to 72 px.
 - Python compilation, JavaScript syntax, shell syntax and whitespace checks pass. This host has no pytest executable; CUDA acceptance remains the matched scruffy experiment.
+

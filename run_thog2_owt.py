@@ -441,6 +441,8 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             "PREMAT:",
             f"premat={config.premat} "
             f"premat_attention_mode={config.premat_attention_mode} "
+            f"premat_target_layer={config.premat_target_layer} "
+            f"premat_weight_matrix_target_order={config.premat_weight_matrix_target_order} "
             f"headroom={headroom_mode} "
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
             f"premat_cuda_stream_priority={config.premat_cuda_stream_priority} "
@@ -450,7 +452,9 @@ def _print_model_parameters_and_optimisations(config: Any, trainer: Any) -> None
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
             f"checkpoint_recompute_segment={config.checkpoint_segment_size} "
             f"cuda_allocator={os.environ.get('PYTORCH_CUDA_ALLOC_CONF', 'default')} "
-            "lookahead=l+1 matrix_target=next_layer_only target_order=reverse_execution",
+            f"lookahead=l+{config.premat_target_layer} "
+            f"matrix_target=relative_layer_{config.premat_target_layer} "
+            f"target_order={config.premat_weight_matrix_target_order}",
         )
         # ^^^ THOG
         hyperblock = report.get("hyperblock")
@@ -810,3 +814,4 @@ if __name__ == "__main__":
 # _print_plastic_option("initial layer indices:", _startup_public_indices(public_coordinates))                                                                 # <<< THOG preserve old relative-ruler startup label before absolute sample-layer ruler
 # _print_plastic_option("capacity layer indices:", _startup_public_indices(full_coordinates))                                                                  # <<< THOG preserve old relative-ruler startup label before absolute sample-layer ruler
 # ^^^ THOG
+

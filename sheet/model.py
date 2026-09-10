@@ -145,6 +145,8 @@ class SheetGPTConfig:
     # vvv THOG dynamic pre-materialisation is disabled by default and shares one global GPU reserve with PLASTIC
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
+    premat_target_layer: int = 1
+    premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
@@ -311,6 +313,8 @@ class SheetGPTConfig:
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
+            target_layer=self.premat_target_layer,
+            weight_matrix_target_order=self.premat_weight_matrix_target_order,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
@@ -566,6 +570,8 @@ class SheetGPT(nn.Module):
                 n_embd=config.n_embd,
                 n_head=config.n_head,
                 attention_mode=config.premat_attention_mode,
+                target_layer=config.premat_target_layer,
+                weight_matrix_target_order=config.premat_weight_matrix_target_order,
                 stay_below_current_peak=(
                     config.premat_headroom_stay_below_current_peak
                     or not config.premat_headroom_stay_within_global_buffer
@@ -1250,3 +1256,4 @@ __all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
 # "plastic__layer_count_hold_updates must be a positive integer; "
 # f"got {self.plastic__layer_count_hold_updates!r}"
 # ^^^ THOG
+

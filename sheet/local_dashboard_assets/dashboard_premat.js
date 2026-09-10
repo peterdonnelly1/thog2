@@ -41,6 +41,7 @@ function premat_escape(value) {
 }
 
 function premat_bytes(value) {
+  if (value === null || value === undefined) return "—";
   const bytes = Number(value);
   if (!Number.isFinite(bytes)) return "—";
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
@@ -49,6 +50,7 @@ function premat_bytes(value) {
 }
 
 function premat_ms(value) {
+  if (value === null || value === undefined) return "—";
   const milliseconds = Number(value);
   return Number.isFinite(milliseconds) ? `${milliseconds.toFixed(3)} ms` : "—";
 }
@@ -82,7 +84,7 @@ function premat_families(attention_mode) {
 
 function premat_family_label(family, attention_mode) {
   const labels = attention_mode === "unfused"
-    ? {QK: "ATTN UNFUSED · QK", V: "ATTN UNFUSED · V", O: "ATTN O", UP: "MLP UP", DOWN: "MLP DN"}
+    ? {QK: "ATTN QK", V: "ATTN V", O: "ATTN O", UP: "MLP UP", DOWN: "MLP DN"}
     : {QKV: "ATTN FUSED · QKV", O: "ATTN O", UP: "MLP UP", DOWN: "MLP DN"};
   return labels[family] || String(family);
 }
@@ -90,8 +92,8 @@ function premat_family_label(family, attention_mode) {
 function premat_stages(attention_mode) {
   return attention_mode === "unfused"
     ? [
-        ["LN1", null], ["ATTN UNFUSED · QK", "QK"], ["score", null],
-        ["scale / mask", null], ["softmax", null], ["ATTN UNFUSED · V", "V"],
+        ["LN1", null], ["ATTN QK", "QK"], ["score", null],
+        ["scale / mask", null], ["softmax", null], ["ATTN V", "V"],
         ["attention", null], ["ATTN O", "O"], ["resid", null], ["LN2", null],
         ["MLP UP", "UP"], ["GELU", null], ["MLP DN", "DOWN"], ["resid", null],
       ]
@@ -109,16 +111,37 @@ function premat_layer_indices(snapshot) {
     .sort((left, right) => left - right);
 }
 
-function premat_new_record(layer_index, family, attention_mode) {
+function premat_new_record(layer_index, family, attention_mode, snapshot) {
+  const target_offset = Number(snapshot?.target_offset ?? snapshot?.target_layer ?? 1);
+  const target_order = String(snapshot?.matrix_order ?? snapshot?.weight_matrix_target_order ?? snapshot?.target_order ?? "r_to_l");
+  const ordered_families = target_order === "r_to_l"
+    ? [...premat_families(attention_mode)].reverse()
+    : premat_families(attention_mode);
   return {
     key: premat_candidate_key(layer_index, family),
     layer_index,
     family,
     label: premat_family_label(family, attention_mode),
+    target_offset,
+    target_order,
+    target_order_position: ordered_families.indexOf(family),
     trace: [],
     outcome: "NOT YET REACHED",
     path: "none",
     admission_reason: "not checked",
+    admission_history: [],
+    first_considered_ms: null,
+    first_observed_admissible_ms: null,
+    first_observed_admissible_headroom_bytes: null,
+    first_observed_admissible_charged_bytes: null,
+    submission_ms: null,
+    completion_observed_ms: null,
+    deadline_ms: null,
+    consumption_ms: null,
+    queue_depth: null,
+    cumulative_charged_bytes: null,
+    submission_queue_depth: null,
+    submission_charged_bytes: null,
     wait_ms: null,
     materialisation_ms: null,
     main_materialisation_ms: null,
@@ -138,6 +161,40 @@ function premat_update_from_event(record, event) {
     record.retained_bytes = Number(event.predicted_retained_bytes);
   }
   if (event.admission_reason) record.admission_reason = String(event.admission_reason).replaceAll("_", " ");
+  if (Number.isFinite(Number(event.target_offset))) record.target_offset = Number(event.target_offset);
+  if (event.target_order) record.target_order = String(event.target_order);
+  if (Number.isFinite(Number(event.target_order_position))) {
+    record.target_order_position = Number(event.target_order_position);
+  }
+  if (Number.isFinite(Number(event.queue_depth))) record.queue_depth = Number(event.queue_depth);
+  if (Number.isFinite(Number(event.cumulative_charged_bytes))) {
+    record.cumulative_charged_bytes = Number(event.cumulative_charged_bytes);
+  }
+  const elapsed_ms = Number(event.elapsed_ms);
+  if (event.event === "admission_considered" && record.first_considered_ms === null && Number.isFinite(elapsed_ms)) {
+    record.first_considered_ms = elapsed_ms;
+  }
+  if (event.event === "admission_considered" && event.outcome === "first_observed_admissible" && Number.isFinite(elapsed_ms)) {
+    record.first_observed_admissible_ms = elapsed_ms;
+    record.first_observed_admissible_headroom_bytes = Number.isFinite(Number(event.premat_headroom_bytes)) ? Number(event.premat_headroom_bytes) : null;
+    record.first_observed_admissible_charged_bytes = Number.isFinite(Number(event.cumulative_charged_bytes)) ? Number(event.cumulative_charged_bytes) : null;
+  }
+  if (event.event === "admission_deferred") {
+    record.admission_history.push({
+      elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : null,
+      reason: String(event.reason || event.admission_reason || "rejected").replaceAll("_", " "),
+      headroom_bytes: Number.isFinite(Number(event.premat_headroom_bytes)) ? Number(event.premat_headroom_bytes) : null,
+      charged_bytes: Number.isFinite(Number(event.cumulative_charged_bytes)) ? Number(event.cumulative_charged_bytes) : null,
+    });
+  }
+  if (event.event === "materialising" && event.owner === "premat") {
+    if (Number.isFinite(elapsed_ms)) record.submission_ms = elapsed_ms;
+    record.submission_queue_depth = Number.isFinite(Number(event.queue_depth)) ? Number(event.queue_depth) : null;
+    record.submission_charged_bytes = Number.isFinite(Number(event.cumulative_charged_bytes)) ? Number(event.cumulative_charged_bytes) : null;
+  }
+  if (event.event === "available" && Number.isFinite(elapsed_ms)) record.completion_observed_ms = elapsed_ms;
+  if (String(event.event || "").startsWith("deadline_") && Number.isFinite(elapsed_ms)) record.deadline_ms = elapsed_ms;
+  if ((event.event === "consuming" || event.event === "critical_path_wait") && Number.isFinite(elapsed_ms)) record.consumption_ms = elapsed_ms;
   if (event.wait_ms !== null && event.wait_ms !== undefined && Number.isFinite(Number(event.wait_ms))) {
     record.wait_ms = Number(event.wait_ms);
   }
@@ -175,7 +232,7 @@ function premat_build_model(snapshot) {
   const records = new Map();
   for (const layer_index of layers) {
     for (const family of families) {
-      const record = premat_new_record(layer_index, family, attention_mode);
+      const record = premat_new_record(layer_index, family, attention_mode, snapshot);
       records.set(record.key, record);
     }
   }
@@ -376,7 +433,8 @@ function premat_render_summary(snapshot, model) {
     : "—";
   by_id("premat_summary").innerHTML = [
     ["mode", model.attention_mode],
-    ["order", snapshot.target_order === "reverse_execution" ? "reverse l+1" : "—"],
+    ["target", `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],
+    ["matrix order", String(snapshot.matrix_order ?? snapshot.weight_matrix_target_order ?? snapshot.target_order ?? "r_to_l")],
     ["priority", snapshot.cuda_stream_priority || "normal"],
     ["layer delay", `${Number(snapshot.diagnostic_layer_delay_ms || 0)} ms`],
     ["buffer margin", margin_text],
@@ -476,7 +534,18 @@ function premat_render_inspector(snapshot, model) {
           && Number.isFinite(progress)
         ? `PARTIAL HIT · ~${progress}% TIME-PROGRESS`
         : record.outcome;
-      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_escape(record.trace.join(" → ") || "—")}</td><td>${premat_escape(outcome)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td><td>${premat_escape(record.admission_reason)}</td></tr>`);
+      const target = `l+${record.target_offset} · ${record.target_order} #${record.target_order_position + 1}`;
+      const admission_history = record.admission_history.length
+        ? record.admission_history.map(item => `${premat_ms(item.elapsed_ms)} ${item.reason}; headroom ${premat_bytes(item.headroom_bytes)}; charged ${premat_bytes(item.charged_bytes)}`).join(" | ")
+        : "—";
+      const submitted_completed = `${premat_ms(record.submission_ms)} / ${premat_ms(record.completion_observed_ms)}`;
+      const first_observed = record.first_observed_admissible_ms === null
+        ? "—"
+        : `${premat_ms(record.first_observed_admissible_ms)}; headroom ${premat_bytes(record.first_observed_admissible_headroom_bytes)}; prior charged ${premat_bytes(record.first_observed_admissible_charged_bytes)}`;
+      const processing = record.trace.length > 1 ? record.trace[record.trace.length - 2] : (record.trace[0] || "—");
+      const progress_text = record.completion_at_deadline_percent === null ? "—" : `~${record.completion_at_deadline_percent}%`;
+      const queue_charge = `${record.submission_queue_depth ?? "—"} / ${premat_bytes(record.submission_charged_bytes)}`;
+      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_escape(target)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_ms(record.first_considered_ms)}</td><td>${first_observed}</td><td>${premat_escape(admission_history)}</td><td>${submitted_completed}</td><td>${premat_ms(record.deadline_ms)}</td><td>${premat_ms(record.consumption_ms)}</td><td>${premat_escape(processing)}</td><td>${premat_escape(outcome)}</td><td>${premat_escape(progress_text)}</td><td>${premat_escape(queue_charge)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td></tr>`);
     }
   }
   by_id("premat_inspector_step").textContent = String(snapshot.optimizer_update ?? "—");
@@ -644,3 +713,4 @@ if (typeof module !== "undefined" && module.exports) {
   };
 }
 // ^^^ THOG
+

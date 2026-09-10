@@ -183,6 +183,8 @@ MODEL_COMPATIBILITY_FIELDS = (
     # vvv THOG premat topology and memory policy are persistent resume compatibility identity
     "premat",
     "premat_attention_mode",
+    "premat_target_layer",
+    "premat_weight_matrix_target_order",
     "premat_headroom_stay_below_current_peak",
     "premat_headroom_stay_within_global_buffer",
     "premat_gpu_memory_buffer_gb",
@@ -289,6 +291,8 @@ class TrainingConfig:
     # vvv THOG dynamic pre-materialisation persistent execution identity
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
+    premat_target_layer: int = 1
+    premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
@@ -561,6 +565,8 @@ class TrainingConfig:
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
+            target_layer=self.premat_target_layer,
+            weight_matrix_target_order=self.premat_weight_matrix_target_order,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
@@ -1025,6 +1031,8 @@ class TrainingConfig:
                     # vvv THOG pass all premat topology and policy controls into SheetGPTConfig; disabled remains allocation-free
                     "premat": self.premat,
                     "premat_attention_mode": self.premat_attention_mode,
+                    "premat_target_layer": self.premat_target_layer,
+                    "premat_weight_matrix_target_order": self.premat_weight_matrix_target_order,
                     "premat_headroom_stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                     "premat_headroom_stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
                     "premat_gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
@@ -1167,10 +1175,12 @@ class TrainingConfig:
             identity["premat"] = {
                 "enabled": self.premat,
                 "attention_mode": self.premat_attention_mode,
+                "target_layer": self.premat_target_layer,
+                "weight_matrix_target_order": self.premat_weight_matrix_target_order,
                 "stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                 "stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
-                "target_scope": "next_layer_only",
-                "target_order": "reverse_execution",
+                "target_scope": f"relative_layer_{self.premat_target_layer}",
+                "target_order": self.premat_weight_matrix_target_order,
                 "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
                 "cuda_stream_priority": self.premat_cuda_stream_priority,
                 "diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
@@ -1227,3 +1237,4 @@ class TrainingConfig:
 # "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
 # "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
 # ^^^ THOG
+

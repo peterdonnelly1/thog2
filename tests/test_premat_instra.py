@@ -20,7 +20,8 @@ def _snapshot(update: int) -> dict:
         "pass_complete": True,
         "attention_mode": "fused",
         "headroom_mode": "stay_below_current_peak",
-        "target_order": "reverse_execution",
+        "target_offset": 1,
+        "matrix_order": "r_to_l",
         "layer_indices": [0, 1],
         "events": [
             {"sequence": update, "event": "pass_end", "pass_sequence": update}
@@ -263,7 +264,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "premat-matrix-size-row" in javascript
     assert "predicted_retained_bytes" in javascript
     for label in (
-        "ATTN FUSED · QKV", "ATTN UNFUSED · QK", "ATTN UNFUSED · V",
+        "ATTN FUSED · QKV", "ATTN QK", "ATTN V",
         "ATTN O", "MLP UP", "MLP DN",
     ):
         assert label in javascript
@@ -278,6 +279,11 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert ".premat-key-outcomes" in css
     assert ".premat-key-outcomes { margin-left: 72px; }" in css
     assert '"layer delay"' in javascript
+    assert '"target"' in javascript
+    assert '"matrix order"' in javascript
+    assert "First observed admissible" in index
+    assert "Admission history" in index
+    assert "Queue / charged" in index
     assert "PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5" in javascript
     assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
@@ -314,3 +320,4 @@ def test_premat_aggregate_persists_without_detailed_snapshot(tmp_path: Path) -> 
     finally:
         store.close(final_state="finished")
 # ^^^ THOG
+
