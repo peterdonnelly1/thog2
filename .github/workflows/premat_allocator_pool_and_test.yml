@@ -1,6 +1,7 @@
 name: Temporary Premat allocator-aware pool/test
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - THOG2_Dynamic_Prematerialisation_Enhancement
