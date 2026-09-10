@@ -122,6 +122,7 @@ def _runtime(
     weight_matrix_target_order: str = "r_to_l",
     cuda_stream_priority: str = "normal",
     diagnostic_layer_delay_ms: float = 0.0,
+    reference_element_bytes: int = 2,
     attach=None,
 ):
     fake_cuda = _FakeCuda()
@@ -146,7 +147,10 @@ def _runtime(
         diagnostic_layer_delay_ms=diagnostic_layer_delay_ms,
         logging_enabled=True,
     )
-    runtime.begin((3, 5, 7), reference=_FakeTensor())
+    runtime.begin(
+        (3, 5, 7),
+        reference=_FakeTensor(element_bytes=reference_element_bytes),
+    )
     return runtime, fake_cuda, calls
 
 
@@ -454,7 +458,7 @@ def test_advance_queues_every_admissible_fused_candidate_without_completion_gate
     # All four retained outputs and QKV's intrinsic concatenation workspace
     # are charged.  The shared foreground safety envelope is applied by each
     # admission decision, but is not multiplied once per queued matrix.
-    assert report["memory"]["premat_cumulative_charged_bytes"] == 3_840
+    assert report["memory"]["premat_cumulative_charged_bytes"] == 1_920
     assert any(
         event.get("event") == "advance_return"
         and event.get("detail", {}).get("submitted_count") == 4
@@ -665,19 +669,19 @@ def test_cumulative_charge_blocks_second_candidate_without_bypass(monkeypatch) -
         monkeypatch,
         stay_below_current_peak=False,
     )
-    fake_cuda.free = 2_000
-    fake_cuda.total = 2_100
+    fake_cuda.free = 1_300
+    fake_cuda.total = 1_400
     runtime.layer_start(3)
 
     assert calls == [("DOWN", 5)]
     report = runtime.report()
     assert report["queue_head"]["family"] == "DOWN"
-    assert report["memory"]["premat_cumulative_charged_bytes"] == 1_024
+    assert report["memory"]["premat_cumulative_charged_bytes"] == 512
     assert any(
         event.get("event") == "advance_return"
         and event.get("detail", {}).get("blocking_candidate", {}).get("family") == "UP"
         and event.get("detail", {}).get("submitted_count") == 1
-        and event.get("detail", {}).get("cumulative_charged_bytes") == 1_024
+        and event.get("detail", {}).get("cumulative_charged_bytes") == 512
         for event in report["events"]
     )
 
@@ -702,7 +706,7 @@ def test_unfused_envelope_includes_score_probability_and_mask_tensors(monkeypatc
     runtime.layer_start(3)
     qk = runtime._candidates[(3, "QK")]
     activation_bytes = 2 * 4 * 8 * 2
-    score_bytes = 2 * 2 * 4 * 4 * 4
+    score_bytes = 2 * 2 * 4 * 4 * 2
     mask_bytes = 4 * 4
     assert qk.envelope.foreground_overlap_bytes >= (
         4 * activation_bytes + 2 * score_bytes + mask_bytes
@@ -721,16 +725,44 @@ def test_fused_envelope_does_not_charge_quadratic_attention_tensors(monkeypatch)
     assert qkv.envelope.foreground_overlap_bytes == 4 * activation_bytes
 
 
-def test_retained_matrix_sizes_are_fp32_dense_tensor_sizes(monkeypatch) -> None:
+def test_retained_matrix_sizes_follow_effective_materialisation_dtype(monkeypatch) -> None:
     runtime, _fake_cuda, _calls = _runtime(
         monkeypatch,
         stay_below_current_peak=True,
     )
     runtime.layer_start(3)
-    assert runtime._candidates[(3, "QKV")].envelope.retained_bytes == 3 * 8 * 8 * 4
-    assert runtime._candidates[(3, "O")].envelope.retained_bytes == 8 * 8 * 4
-    assert runtime._candidates[(3, "UP")].envelope.retained_bytes == 4 * 8 * 8 * 4
-    assert runtime._candidates[(3, "DOWN")].envelope.retained_bytes == 4 * 8 * 8 * 4
+    assert runtime._candidates[(3, "QKV")].envelope.retained_bytes == 3 * 8 * 8 * 2
+    assert runtime._candidates[(3, "O")].envelope.retained_bytes == 8 * 8 * 2
+    assert runtime._candidates[(3, "UP")].envelope.retained_bytes == 4 * 8 * 8 * 2
+    assert runtime._candidates[(3, "DOWN")].envelope.retained_bytes == 4 * 8 * 8 * 2
+
+
+def test_cuda_autocast_dtype_overrides_fp32_pass_reference_for_envelopes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        torch,
+        "is_autocast_enabled",
+        lambda device_type=None: device_type == "cuda",
+    )
+    monkeypatch.setattr(
+        torch,
+        "get_autocast_dtype",
+        lambda device_type: torch.bfloat16,
+    )
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=True,
+        reference_element_bytes=4,
+    )
+    runtime.layer_start(3)
+
+    report = runtime.report()
+    assert report["materialisation_element_bytes"] == 2
+    assert report["memory"]["materialisation_element_bytes"] == 2
+    assert report["memory"]["foreground_activation_bytes"] == 2 * 4 * 8 * 2
+    assert runtime._candidates[(3, "DOWN")].envelope.retained_bytes == 4 * 8 * 8 * 2
+    assert runtime._candidates[(3, "DOWN")].envelope.foreground_overlap_bytes == (
+        4 * 2 * 4 * 8 * 2
+    )
 
 
 def test_plastic_budget_accounts_for_other_gpu_users(monkeypatch) -> None:
@@ -1007,12 +1039,20 @@ def test_cuda_premat_forward_backward_matches_same_mode_disabled(
     torch.testing.assert_close(enabled_logits, disabled_logits, rtol=1.0e-5, atol=1.0e-6)
     torch.testing.assert_close(enabled_loss, disabled_loss, rtol=1.0e-6, atol=1.0e-7)
     assert enabled_gradients.keys() == disabled_gradients.keys()
+    gradient_rtol, gradient_atol = (
+        (1.0e-5, 1.0e-6)
+        if autocast_dtype is None
+        else (2.0e-2, 2.0e-4)
+    )
     for name in enabled_gradients:
+        # The attached analytic backward and ordinary BF16 einsum backward are
+        # mathematically identical but use different contraction order.  Keep
+        # FP32 strict and bound only the observed BF16 rounding difference.
         torch.testing.assert_close(
             enabled_gradients[name],
             disabled_gradients[name],
-            rtol=1.0e-5,
-            atol=1.0e-6,
+            rtol=gradient_rtol,
+            atol=gradient_atol,
         )
     report = enabled.premat_report()
     assert report is not None
