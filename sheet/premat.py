@@ -34,7 +34,7 @@ def validate_premat_configuration(
     stay_below_current_peak: bool,
     stay_within_global_buffer: bool,
     gpu_memory_buffer_gb: float,
-    allocator_aware_admission: str,
+    allocator_aware_admission: str = "disabled",
     target_layer: int,
     weight_matrix_target_order: str,
     cuda_stream_priority: str,
@@ -347,7 +347,7 @@ class PrematRuntime:
         attention_mode: str,
         stay_below_current_peak: bool,
         gpu_memory_buffer_gb: float,
-        allocator_aware_admission: str,
+        allocator_aware_admission: str = "disabled",
         target_layer: int,
         weight_matrix_target_order: str,
         cuda_stream_priority: str,
@@ -1018,7 +1018,7 @@ class PrematRuntime:
         stream_id = int(self._stream.cuda_stream)
         detail["premat_stream_id"] = stream_id
         try:
-            allocator_backend = torch.cuda.get_allocator_backend()
+            allocator_backend = torch.cuda.memory.get_allocator_backend()
             detail["allocator_backend"] = allocator_backend
             if allocator_backend != "native":
                 detail["snapshot_error"] = (

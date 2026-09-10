@@ -238,6 +238,7 @@ class OwtRunConfig:
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
+    premat_allocator_aware_admission: str = "disabled"
     premat_cuda_stream_priority: str = "normal"
     premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
@@ -558,6 +559,7 @@ class OwtRunConfig:
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            allocator_aware_admission=self.premat_allocator_aware_admission,
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             logging=self.premat_logging,
@@ -1183,12 +1185,18 @@ class OwtRunConfig:
             or self.premat_headroom_stay_below_current_peak
             or self.premat_headroom_stay_within_global_buffer
             or float(self.premat_gpu_memory_buffer_gb) != 1.0
+            or self.premat_allocator_aware_admission != "disabled"
             or self.premat_cuda_stream_priority != "normal"
             or float(self.premat_diagnostic_layer_delay_ms) != 0.0
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
         ):
             headroom_code = "G" if self.premat_headroom_stay_within_global_buffer else "P"
+            allocator_fragment = (
+                f"AA{self.premat_allocator_aware_admission[0].upper()}_"
+                if self.premat_allocator_aware_admission != "disabled"
+                else ""
+            )
             delay_fragment = (
                 f"LD{self._artifact_float(self.premat_diagnostic_layer_delay_ms)}_"
                 if float(self.premat_diagnostic_layer_delay_ms) != 0.0
@@ -1202,6 +1210,7 @@ class OwtRunConfig:
                 f"O{self.premat_weight_matrix_target_order[0].upper()}_"
                 f"H{headroom_code}_"
                 f"B{self._artifact_float(self.premat_gpu_memory_buffer_gb)}_"
+                f"{allocator_fragment}"
                 f"S{self.premat_cuda_stream_priority[0].upper()}_"
                 f"{delay_fragment}"
                 f"L{self.premat_logging[0].upper()}_"
@@ -1390,6 +1399,7 @@ class OwtRunConfig:
             premat_headroom_stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             premat_gpu_memory_buffer_gb=float(self.premat_gpu_memory_buffer_gb),
+            premat_allocator_aware_admission=self.premat_allocator_aware_admission,
             premat_cuda_stream_priority=self.premat_cuda_stream_priority,
             premat_diagnostic_layer_delay_ms=float(self.premat_diagnostic_layer_delay_ms),
             premat_logging=self.premat_logging,

@@ -327,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
     premat_headroom.add_argument("--premat_headroom_stay_within_global_buffer", action="store_true")
     parser.add_argument("--premat_gpu_memory_buffer_gb", type=float, default=1.0)
+    parser.add_argument("--premat_allocator_aware_admission", choices=("disabled", "cautious", "normal", "aggressive"), default="disabled")
     parser.add_argument("--premat_cuda_stream_priority", choices=("normal", "high"), default="normal")
     parser.add_argument("--premat_diagnostic_layer_delay_ms", type=float, default=0.0)
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
@@ -722,6 +723,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_headroom_stay_below_current_peak=arguments.premat_headroom_stay_below_current_peak,
         premat_headroom_stay_within_global_buffer=arguments.premat_headroom_stay_within_global_buffer,
         premat_gpu_memory_buffer_gb=arguments.premat_gpu_memory_buffer_gb,
+        premat_allocator_aware_admission=arguments.premat_allocator_aware_admission,
         premat_cuda_stream_priority=arguments.premat_cuda_stream_priority,
         premat_diagnostic_layer_delay_ms=arguments.premat_diagnostic_layer_delay_ms,
         premat_logging=arguments.premat_logging,

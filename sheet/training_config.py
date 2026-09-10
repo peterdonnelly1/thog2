@@ -188,6 +188,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "premat_headroom_stay_below_current_peak",
     "premat_headroom_stay_within_global_buffer",
     "premat_gpu_memory_buffer_gb",
+    "premat_allocator_aware_admission",
     "premat_cuda_stream_priority",
     "premat_diagnostic_layer_delay_ms",
     "premat_logging",
@@ -296,6 +297,7 @@ class TrainingConfig:
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
     premat_gpu_memory_buffer_gb: float = 1.0
+    premat_allocator_aware_admission: str = "disabled"
     premat_cuda_stream_priority: str = "normal"
     premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
@@ -570,6 +572,7 @@ class TrainingConfig:
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
             gpu_memory_buffer_gb=self.premat_gpu_memory_buffer_gb,
+            allocator_aware_admission=self.premat_allocator_aware_admission,
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             logging=self.premat_logging,
@@ -1036,6 +1039,7 @@ class TrainingConfig:
                     "premat_headroom_stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                     "premat_headroom_stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
                     "premat_gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
+                    "premat_allocator_aware_admission": self.premat_allocator_aware_admission,
                     "premat_cuda_stream_priority": self.premat_cuda_stream_priority,
                     "premat_diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
                     "premat_logging": self.premat_logging,
@@ -1182,6 +1186,7 @@ class TrainingConfig:
                 "target_scope": f"relative_layer_{self.premat_target_layer}",
                 "target_order": self.premat_weight_matrix_target_order,
                 "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
+                "allocator_aware_admission": self.premat_allocator_aware_admission,
                 "cuda_stream_priority": self.premat_cuda_stream_priority,
                 "diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
                 "logging": self.premat_logging,
