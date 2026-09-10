@@ -1014,11 +1014,24 @@ class PrematRuntime:
                     )
                     candidate.completion_event = torch.cuda.Event(enable_timing=True)
                     candidate.materialisation_start_event.record(self._stream)
-                    with torch.no_grad():
-                        candidate.tensor = self._materialize(
-                            candidate.family,
-                            candidate.layer_index,
-                        )
+                    # Autocast caches lower-precision casts of FP32 parameter
+                    # leaves for the enclosing forward.  A cast produced here
+                    # belongs to the Premat Stream and, under PyTorch 2.8
+                    # no_grad(), is detached.  Publishing it through the shared
+                    # autocast cache lets ordinary Main Stream materialisation
+                    # reuse storage with neither a dependency nor a gradient
+                    # edge.  Keep autocast's dtype policy, but make Premat casts
+                    # private to this submission.
+                    autocast_cache_enabled = torch.is_autocast_cache_enabled()
+                    torch.set_autocast_cache_enabled(False)
+                    try:
+                        with torch.no_grad():
+                            candidate.tensor = self._materialize(
+                                candidate.family,
+                                candidate.layer_index,
+                            )
+                    finally:
+                        torch.set_autocast_cache_enabled(autocast_cache_enabled)
                     actual_retained_bytes = int(
                         candidate.tensor.numel() * candidate.tensor.element_size()
                     )

@@ -24,6 +24,7 @@
 - Focused dependency-free scheduler, Instra reducer/store, and configuration propagation harnesses pass. Python compilation, JavaScript syntax, shell syntax, and `git diff --check` pass. This host has neither PyTorch nor pytest, so the retained CUDA forward/backward and checkpoint regressions require scruffy validation.
 - Corrected final PARTIAL HIT rendering so supported matrices never appear neutral grey, and forced all supported-matrix labels to white throughout playback.
 - Corrected queued-memory arithmetic so each candidate charges its retained output and intrinsic materialisation workspace, while the shared Main Stream foreground safety envelope is applied once per admission decision rather than multiplied by the number of queued matrices. The physical device-buffer guard remains conservative and does not assume fragmented allocator cache is reusable.
+- Isolated Premat Stream materialisation from PyTorch's autocast weight cache while preserving the active autocast dtype. Under PyTorch 2.8, a cached BF16 parameter cast created inside Premat's `no_grad()` block is detached and can be reused immediately by ordinary Main Stream materialisation without a cross-stream dependency; multi-submit made that latent correctness fault systematic. Added direct cache-boundary coverage and BF16 CUDA forward/gradient equivalence coverage.
 
 ## 2026-09-08 - Baseline and design audit
 

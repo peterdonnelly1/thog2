@@ -463,6 +463,32 @@ def test_advance_queues_every_admissible_fused_candidate_without_completion_gate
     )
 
 
+def test_premat_submission_does_not_publish_auxiliary_stream_autocast_casts(monkeypatch) -> None:
+    cache_enabled = [True]
+    cache_transitions = []
+
+    monkeypatch.setattr(
+        torch,
+        "is_autocast_cache_enabled",
+        lambda: cache_enabled[0],
+    )
+
+    def set_cache_enabled(enabled: bool) -> None:
+        cache_enabled[0] = bool(enabled)
+        cache_transitions.append(bool(enabled))
+
+    monkeypatch.setattr(torch, "set_autocast_cache_enabled", set_cache_enabled)
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    runtime.layer_start(3)
+
+    assert calls == [("DOWN", 5), ("UP", 5), ("O", 5), ("QKV", 5)]
+    assert cache_transitions == [False, True] * 4
+    assert cache_enabled[0] is True
+
+
 @pytest.mark.parametrize(
     ("attention_mode", "target_order", "expected_families"),
     (
@@ -910,10 +936,14 @@ def test_prematerialized_depth_binding_matches_ordinary_autograd_on_cpu(
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA acceptance host required")
 @pytest.mark.parametrize("attention_mode", ("fused", "unfused"))
 @pytest.mark.parametrize("checkpoint_segment_size", (0, 2))
+@pytest.mark.parametrize("autocast_dtype", (None, torch.bfloat16))
 def test_cuda_premat_forward_backward_matches_same_mode_disabled(
     attention_mode: str,
     checkpoint_segment_size: int,
+    autocast_dtype,
 ) -> None:
+    if autocast_dtype is torch.bfloat16 and not torch.cuda.is_bf16_supported():
+        pytest.skip("CUDA device does not support bfloat16 autocast")
     common = dict(
         block_size=8,
         vocab_size=32,
@@ -950,7 +980,13 @@ def test_cuda_premat_forward_backward_matches_same_mode_disabled(
 
     def run(model):
         model.zero_grad(set_to_none=True)
-        logits, loss = model(tokens, targets)
+        forward_context = (
+            nullcontext()
+            if autocast_dtype is None
+            else torch.autocast(device_type="cuda", dtype=autocast_dtype)
+        )
+        with forward_context:
+            logits, loss = model(tokens, targets)
         assert loss is not None
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
