@@ -218,11 +218,11 @@ def decide_candidate_admission(
     stay_below_current_peak: bool,
     gpu_memory_buffer_bytes: int,
 ) -> AdmissionDecision:
-    # A CUDA allocator's reserved-but-unused total is not a promise that a
-    # suitably sized block is reusable, especially across streams.  The
-    # ordinary path therefore charges the complete envelope to physical device
-    # use.  Optional allocator-aware admission may later rescue only a rejected
-    # device-headroom decision using stronger evidence about one reusable block.
+    # A CUDA allocator's reserved-but-unused total is not a promise that its
+    # storage is actually reusable.  The ordinary path therefore charges the
+    # complete envelope against driver-visible free memory.  Optional cautious
+    # admission may rescue a rejected device-headroom decision only from native
+    # allocator blocks explicitly reported inactive by a live snapshot.
     return _decide_candidate_admission_with_physical_growth(
         observation=observation,
         envelope=envelope,
@@ -242,6 +242,7 @@ def _allocator_pool_for_request(size_bytes: int) -> str:
 def _largest_same_stream_inactive_block_bytes(
     snapshot: Sequence[Mapping[str, object]],
     *,
+    device_index: int,
     stream_id: int,
     request_bytes: int,
 ) -> int:
@@ -257,6 +258,11 @@ def _largest_same_stream_inactive_block_bytes(
     for segment in snapshot:
         if not isinstance(segment, Mapping):
             raise ValueError("CUDA allocator snapshot contains a non-mapping segment")
+        segment_device = segment.get("device")
+        if isinstance(segment_device, bool) or not isinstance(segment_device, int):
+            raise ValueError("CUDA allocator snapshot contains an invalid device index")
+        if int(segment_device) != int(device_index):
+            continue
         if int(segment.get("stream", -1)) != int(stream_id):
             continue
         if segment.get("segment_type") != required_pool:
@@ -274,6 +280,41 @@ def _largest_same_stream_inactive_block_bytes(
                 raise ValueError("CUDA allocator snapshot contains an invalid block size")
             largest = max(largest, int(size))
     return largest
+
+
+def _total_inactive_allocator_bytes(
+    snapshot: Sequence[Mapping[str, object]],
+    *,
+    device_index: int,
+) -> int:
+    """Return allocator bytes that the native allocator explicitly marks inactive.
+
+    This is intentionally stronger evidence than ``reserved - allocated``:
+    active and active-awaiting-free blocks receive no cautious-mode credit, and
+    blocks belonging to another CUDA device are ignored.
+    """
+    total = 0
+    for segment in snapshot:
+        if not isinstance(segment, Mapping):
+            raise ValueError("CUDA allocator snapshot contains a non-mapping segment")
+        segment_device = segment.get("device")
+        if isinstance(segment_device, bool) or not isinstance(segment_device, int):
+            raise ValueError("CUDA allocator snapshot contains an invalid device index")
+        if int(segment_device) != int(device_index):
+            continue
+        blocks = segment.get("blocks")
+        if not isinstance(blocks, Sequence):
+            raise ValueError("CUDA allocator snapshot segment has no block sequence")
+        for block in blocks:
+            if not isinstance(block, Mapping):
+                raise ValueError("CUDA allocator snapshot contains a non-mapping block")
+            if block.get("state") != "inactive":
+                continue
+            size = block.get("size")
+            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                raise ValueError("CUDA allocator snapshot contains an invalid block size")
+            total += int(size)
+    return total
 
 
 @dataclass
@@ -1012,10 +1053,15 @@ class PrematRuntime:
             "predicted_envelope_bytes": envelope.process_envelope_bytes,
             "premat_materialisation_peak_bytes": envelope.materialisation_peak_bytes,
             "foreground_overlap_bytes": envelope.foreground_overlap_bytes,
+            "device_index": None,
             "premat_stream_id": None,
             "largest_eligible_inactive_block_bytes": 0,
             "reuse_qualified": False,
+            "inactive_allocator_bytes": 0,
+            "required_allocator_headroom_credit_bytes": 0,
+            "allocator_headroom_credit_bytes": 0,
             "allocator_credit_bytes": 0,
+            "effective_device_free_bytes": observation.device_free_bytes,
             "revised_predicted_physical_growth_bytes": (
                 original_decision.predicted_physical_growth_bytes
             ),
@@ -1023,11 +1069,15 @@ class PrematRuntime:
             "final_reason": original_decision.reason,
             "snapshot_error": None,
         }
-        if self._stream is None:
-            detail["snapshot_error"] = "Premat Stream is not initialized"
+        if self._stream is None or self._device is None:
+            detail["snapshot_error"] = "Premat Stream or CUDA device is not initialized"
             return original_decision, detail
 
+        device_index = self._device.index
+        if device_index is None:
+            device_index = int(torch.cuda.current_device())
         stream_id = int(self._stream.cuda_stream)
+        detail["device_index"] = int(device_index)
         detail["premat_stream_id"] = stream_id
         try:
             allocator_backend = torch.cuda.memory.get_allocator_backend()
@@ -1040,35 +1090,62 @@ class PrematRuntime:
             snapshot = torch.cuda.memory_snapshot()
             largest_inactive_block = _largest_same_stream_inactive_block_bytes(
                 snapshot,
+                device_index=int(device_index),
                 stream_id=stream_id,
                 request_bytes=envelope.materialisation_peak_bytes,
+            )
+            inactive_allocator_bytes = _total_inactive_allocator_bytes(
+                snapshot,
+                device_index=int(device_index),
             )
         except Exception as error:
             detail["snapshot_error"] = f"{type(error).__name__}: {error}"
             return original_decision, detail
 
         detail["largest_eligible_inactive_block_bytes"] = largest_inactive_block
+        detail["inactive_allocator_bytes"] = inactive_allocator_bytes
         reuse_qualified = largest_inactive_block >= envelope.materialisation_peak_bytes
         detail["reuse_qualified"] = reuse_qualified
         if not reuse_qualified:
             return original_decision, detail
 
-        # The allocator evidence covers only candidate-owned materialisation.
-        # Keep the foreground Main Stream safety allowance fully charged as
-        # possible physical growth.  This preserves the existing protection for
-        # ordinary memory consumed between prematerialisation and its GEMM.
-        revised_physical_growth = envelope.foreground_overlap_bytes
-        revised_decision = _decide_candidate_admission_with_physical_growth(
-            observation=observation,
+        # Cautious v2 treats allocator blocks explicitly marked inactive as
+        # effective free headroom.  The complete existing candidate envelope is
+        # still charged, so cached bytes are not counted twice: consuming cache
+        # reduces this effective reserve exactly as consuming driver-free memory
+        # would.  Credit only the amount required to satisfy the unchanged
+        # global buffer; never expose the full cache merely because it exists.
+        required_credit = max(
+            0,
+            self._buffer_bytes
+            + envelope.process_envelope_bytes
+            - observation.device_free_bytes,
+        )
+        headroom_credit = min(inactive_allocator_bytes, required_credit)
+        effective_device_free = min(
+            observation.device_total_bytes,
+            observation.device_free_bytes + headroom_credit,
+        )
+        detail["required_allocator_headroom_credit_bytes"] = required_credit
+        detail["allocator_headroom_credit_bytes"] = headroom_credit
+        # Retain the old telemetry key as an alias while the experimental mode
+        # evolves; its meaning is now allocator headroom credit, not a reduction
+        # of the candidate envelope.
+        detail["allocator_credit_bytes"] = headroom_credit
+        detail["effective_device_free_bytes"] = effective_device_free
+
+        adjusted_observation = PrematMemoryObservation(
+            process_allocated_bytes=observation.process_allocated_bytes,
+            process_reserved_bytes=observation.process_reserved_bytes,
+            process_ordinary_peak_bytes=observation.process_ordinary_peak_bytes,
+            device_free_bytes=effective_device_free,
+            device_total_bytes=observation.device_total_bytes,
+        )
+        revised_decision = decide_candidate_admission(
+            observation=adjusted_observation,
             envelope=envelope,
             stay_below_current_peak=self._stay_below_current_peak,
             gpu_memory_buffer_bytes=self._buffer_bytes,
-            physical_growth_bytes=revised_physical_growth,
-        )
-        detail["allocator_credit_bytes"] = max(
-            0,
-            original_decision.predicted_physical_growth_bytes
-            - revised_decision.predicted_physical_growth_bytes,
         )
         detail["revised_predicted_physical_growth_bytes"] = (
             revised_decision.predicted_physical_growth_bytes
