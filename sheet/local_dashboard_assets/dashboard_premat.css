@@ -144,13 +144,14 @@
   background: linear-gradient(
     90deg,
     #238451 0 var(--premat-partial-progress),
-    #e2e7eb var(--premat-partial-progress) 100%
+    #4f8f68 var(--premat-partial-progress) 100%
   );
-  color: #173326;
+  color: #fff;
 }
 .premat-state-main-materialising { background: repeating-linear-gradient(135deg, #ef3340 0 7px, #fff 7px 14px); color: #4b090e; }
 .premat-state-main-consuming { background: repeating-linear-gradient(135deg, #ed3945 0 7px, #9ca5af 7px 14px); color: #27080b; }
 .premat-state-consumed-main { background: #b94149; color: #fff; }
+.premat-stage[data-premat-family] { color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.7); }
 .premat-matrix-size-row {
   display: grid;
   grid-template-columns: 42px minmax(940px, 1fr);

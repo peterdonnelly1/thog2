@@ -22,6 +22,7 @@
 - Added invocation-level trigger/return telemetry, submitted-candidate lists, queue/charge high-water marks, rejection history and memory, explicitly observational admissibility timing, lifecycle timestamps, and final outcomes.
 - Preserved checkpoint transparency, the ordinary Main Stream autograd attachment point, consumer-stream gradient anchoring, complete-microstep Instra publication, all-layer playback, and bounded local retention.
 - Focused dependency-free scheduler, Instra reducer/store, and configuration propagation harnesses pass. Python compilation, JavaScript syntax, shell syntax, and `git diff --check` pass. This host has neither PyTorch nor pytest, so the retained CUDA forward/backward and checkpoint regressions require scruffy validation.
+- Corrected final PARTIAL HIT rendering so supported matrices never appear neutral grey, and forced all supported-matrix labels to white throughout playback.
 
 ## 2026-09-08 - Baseline and design audit
 

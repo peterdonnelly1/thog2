@@ -278,6 +278,9 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "--premat-partial-progress" in css
     assert ".premat-key-outcomes" in css
     assert ".premat-key-outcomes { margin-left: 72px; }" in css
+    assert ".premat-stage[data-premat-family] { color: #fff;" in css
+    assert "#4f8f68 var(--premat-partial-progress) 100%" in css
+    assert "#e2e7eb var(--premat-partial-progress) 100%" not in css
     assert '"layer delay"' in javascript
     assert '"target"' in javascript
     assert '"matrix order"' in javascript
