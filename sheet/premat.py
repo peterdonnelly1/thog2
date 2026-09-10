@@ -282,39 +282,43 @@ def _largest_same_stream_inactive_block_bytes(
     return largest
 
 
-def _total_inactive_allocator_bytes(
-    snapshot: Sequence[Mapping[str, object]],
-    *,
-    device_index: int,
+def _memory_stat_nonnegative_int(
+    stats: Mapping[str, object],
+    key: str,
 ) -> int:
-    """Return allocator bytes that the native allocator explicitly marks inactive.
+    value = stats.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"CUDA allocator memory_stats has invalid {key!r}: {value!r}")
+    return int(value)
 
-    This is intentionally stronger evidence than ``reserved - allocated``:
-    active and active-awaiting-free blocks receive no cautious-mode credit, and
-    blocks belonging to another CUDA device are ignored.
+
+def _inactive_allocator_bytes_from_stats(stats: Mapping[str, object]) -> int:
+    """Return currently cached bytes that are no longer allocator-active.
+
+    ``active_bytes`` includes allocations awaiting completion on another stream,
+    so ``reserved - active`` deliberately gives those blocks no cautious credit.
     """
-    total = 0
-    for segment in snapshot:
-        if not isinstance(segment, Mapping):
-            raise ValueError("CUDA allocator snapshot contains a non-mapping segment")
-        segment_device = segment.get("device")
-        if isinstance(segment_device, bool) or not isinstance(segment_device, int):
-            raise ValueError("CUDA allocator snapshot contains an invalid device index")
-        if int(segment_device) != int(device_index):
-            continue
-        blocks = segment.get("blocks")
-        if not isinstance(blocks, Sequence):
-            raise ValueError("CUDA allocator snapshot segment has no block sequence")
-        for block in blocks:
-            if not isinstance(block, Mapping):
-                raise ValueError("CUDA allocator snapshot contains a non-mapping block")
-            if block.get("state") != "inactive":
-                continue
-            size = block.get("size")
-            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-                raise ValueError("CUDA allocator snapshot contains an invalid block size")
-            total += int(size)
-    return total
+    reserved = _memory_stat_nonnegative_int(stats, "reserved_bytes.all.current")
+    active = _memory_stat_nonnegative_int(stats, "active_bytes.all.current")
+    if active > reserved:
+        raise ValueError(
+            "CUDA allocator memory_stats reports active bytes above reserved bytes"
+        )
+    return reserved - active
+
+
+def _conservative_certificate_charge_bytes(request_bytes: int) -> int:
+    """Upper-bound native allocator rounding for one cached-block request.
+
+    PyTorch's configurable native rounding cannot round a request beyond the
+    next power of two.  Using that bound intentionally depletes a cached
+    contiguous-space certificate faster than the normal allocator would.
+    """
+    size = max(0, int(request_bytes))
+    if size == 0:
+        return 0
+    rounded = 1 << (size - 1).bit_length()
+    return max(512, rounded)
 
 
 @dataclass
@@ -449,6 +453,12 @@ class PrematRuntime:
         self._sequence_length = 0
         self._pass_start_ns: Optional[int] = None
         self._active = False
+        # Cautious allocator admission snapshots only to certify contiguous
+        # Premat-stream cache.  The certificate is conservatively consumed by
+        # every Premat launch and invalidated whenever CUDA backing is freed.
+        self._allocator_certificate_bytes = {"small": 0, "large": 0}
+        self._allocator_certificate_num_device_free: Optional[int] = None
+        self._allocator_snapshot_count = 0
         self._aggregate = {
             "admitted": 0,
             "deferred": 0,
@@ -472,6 +482,7 @@ class PrematRuntime:
             "observed_peak_allocated_bytes": 0,
             "observed_peak_reserved_bytes": 0,
             "minimum_headroom_bytes": None,
+            "allocator_snapshot_count": 0,
         }
 
     @property
@@ -1035,6 +1046,32 @@ class PrematRuntime:
                     outcome="premat_complete",
                 )
 
+    def _invalidate_allocator_certificate_if_device_freed(
+        self,
+        *,
+        num_device_free: int,
+    ) -> bool:
+        baseline = self._allocator_certificate_num_device_free
+        if baseline is None or int(num_device_free) == int(baseline):
+            return False
+        self._allocator_certificate_bytes["small"] = 0
+        self._allocator_certificate_bytes["large"] = 0
+        self._allocator_certificate_num_device_free = None
+        return True
+
+    def _consume_allocator_certificate(self, request_bytes: int) -> Dict[str, object]:
+        pool = _allocator_pool_for_request(request_bytes)
+        before = int(self._allocator_certificate_bytes.get(pool, 0))
+        charge = _conservative_certificate_charge_bytes(request_bytes)
+        after = max(0, before - charge)
+        self._allocator_certificate_bytes[pool] = after
+        return {
+            "pool": pool,
+            "before_bytes": before,
+            "charge_bytes": charge,
+            "after_bytes": after,
+        }
+
     def _cautious_allocator_aware_rescue(
         self,
         *,
@@ -1055,13 +1092,24 @@ class PrematRuntime:
             "foreground_overlap_bytes": envelope.foreground_overlap_bytes,
             "device_index": None,
             "premat_stream_id": None,
+            "allocator_pool": _allocator_pool_for_request(
+                envelope.materialisation_peak_bytes
+            ),
             "largest_eligible_inactive_block_bytes": 0,
+            "certified_premat_stream_cache_bytes": 0,
+            "certificate_invalidated_by_device_free": False,
             "reuse_qualified": False,
             "inactive_allocator_bytes": 0,
+            "inactive_allocator_bytes_source": "memory_stats_reserved_minus_active",
+            "memory_stats_reserved_bytes": 0,
+            "memory_stats_active_bytes": 0,
+            "memory_stats_num_device_free": 0,
             "required_allocator_headroom_credit_bytes": 0,
             "allocator_headroom_credit_bytes": 0,
             "allocator_credit_bytes": 0,
             "effective_device_free_bytes": observation.device_free_bytes,
+            "snapshot_performed": False,
+            "allocator_snapshot_count": self._allocator_snapshot_count,
             "revised_predicted_physical_growth_bytes": (
                 original_decision.predicted_physical_growth_bytes
             ),
@@ -1077,8 +1125,10 @@ class PrematRuntime:
         if device_index is None:
             device_index = int(torch.cuda.current_device())
         stream_id = int(self._stream.cuda_stream)
+        pool = str(detail["allocator_pool"])
         detail["device_index"] = int(device_index)
         detail["premat_stream_id"] = stream_id
+
         try:
             allocator_backend = torch.cuda.memory.get_allocator_backend()
             detail["allocator_backend"] = allocator_backend
@@ -1087,34 +1137,55 @@ class PrematRuntime:
                     "cautious allocator-aware admission requires the native CUDA allocator"
                 )
                 return original_decision, detail
-            snapshot = torch.cuda.memory_snapshot()
-            largest_inactive_block = _largest_same_stream_inactive_block_bytes(
-                snapshot,
-                device_index=int(device_index),
-                stream_id=stream_id,
-                request_bytes=envelope.materialisation_peak_bytes,
+
+            stats = torch.cuda.memory_stats(self._device)
+            reserved_bytes = _memory_stat_nonnegative_int(
+                stats, "reserved_bytes.all.current"
             )
-            inactive_allocator_bytes = _total_inactive_allocator_bytes(
-                snapshot,
-                device_index=int(device_index),
+            active_bytes = _memory_stat_nonnegative_int(
+                stats, "active_bytes.all.current"
             )
+            inactive_allocator_bytes = _inactive_allocator_bytes_from_stats(stats)
+            num_device_free = _memory_stat_nonnegative_int(stats, "num_device_free")
+            invalidated = self._invalidate_allocator_certificate_if_device_freed(
+                num_device_free=num_device_free
+            )
+            detail["certificate_invalidated_by_device_free"] = invalidated
+            detail["memory_stats_reserved_bytes"] = reserved_bytes
+            detail["memory_stats_active_bytes"] = active_bytes
+            detail["memory_stats_num_device_free"] = num_device_free
+            detail["inactive_allocator_bytes"] = inactive_allocator_bytes
+
+            certificate = int(self._allocator_certificate_bytes.get(pool, 0))
+            if certificate < envelope.materialisation_peak_bytes:
+                snapshot = torch.cuda.memory_snapshot()
+                detail["snapshot_performed"] = True
+                self._allocator_snapshot_count += 1
+                self._aggregate["allocator_snapshot_count"] = self._allocator_snapshot_count
+                certificate = _largest_same_stream_inactive_block_bytes(
+                    snapshot,
+                    device_index=int(device_index),
+                    stream_id=stream_id,
+                    request_bytes=envelope.materialisation_peak_bytes,
+                )
+                self._allocator_certificate_bytes[pool] = certificate
+                self._allocator_certificate_num_device_free = num_device_free
+            detail["allocator_snapshot_count"] = self._allocator_snapshot_count
+            detail["largest_eligible_inactive_block_bytes"] = certificate
+            detail["certified_premat_stream_cache_bytes"] = certificate
         except Exception as error:
             detail["snapshot_error"] = f"{type(error).__name__}: {error}"
             return original_decision, detail
 
-        detail["largest_eligible_inactive_block_bytes"] = largest_inactive_block
-        detail["inactive_allocator_bytes"] = inactive_allocator_bytes
-        reuse_qualified = largest_inactive_block >= envelope.materialisation_peak_bytes
+        reuse_qualified = certificate >= envelope.materialisation_peak_bytes
         detail["reuse_qualified"] = reuse_qualified
         if not reuse_qualified:
             return original_decision, detail
 
-        # Cautious v2 treats allocator blocks explicitly marked inactive as
-        # effective free headroom.  The complete existing candidate envelope is
-        # still charged, so cached bytes are not counted twice: consuming cache
-        # reduces this effective reserve exactly as consuming driver-free memory
-        # would.  Credit only the amount required to satisfy the unchanged
-        # global buffer; never expose the full cache merely because it exists.
+        # Current global headroom comes from cheap allocator counters.  Only
+        # reserved bytes no longer classed active are credited, which excludes
+        # active-awaiting-free blocks.  The complete existing candidate envelope
+        # remains charged, so allocator cache is not double-counted.
         required_credit = max(
             0,
             self._buffer_bytes
@@ -1128,9 +1199,6 @@ class PrematRuntime:
         )
         detail["required_allocator_headroom_credit_bytes"] = required_credit
         detail["allocator_headroom_credit_bytes"] = headroom_credit
-        # Retain the old telemetry key as an alias while the experimental mode
-        # evolves; its meaning is now allocator headroom credit, not a reduction
-        # of the candidate envelope.
         detail["allocator_credit_bytes"] = headroom_credit
         detail["effective_device_free_bytes"] = effective_device_free
 
@@ -1263,6 +1331,15 @@ class PrematRuntime:
                 "raw_memory": raw_memory,
                 "charged_memory": charged_memory,
             }
+            if decision.admitted and self._allocator_aware_admission == "cautious":
+                certificate_consumption = self._consume_allocator_certificate(
+                    candidate.envelope.materialisation_peak_bytes
+                )
+                if allocator_aware_detail is not None:
+                    allocator_aware_detail["certificate_consumption"] = certificate_consumption
+                    allocator_aware_detail["certified_premat_stream_cache_bytes_after_admission"] = (
+                        certificate_consumption["after_bytes"]
+                    )
             if allocator_aware_detail is not None:
                 decision_detail["allocator_aware_admission"] = allocator_aware_detail
             if decision.admitted:

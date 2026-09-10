@@ -7,11 +7,14 @@ from sheet.premat import (
     CandidateEnvelope,
     PrematMemoryObservation,
     PrematRuntime,
+    _conservative_certificate_charge_bytes,
+    _inactive_allocator_bytes_from_stats,
     _largest_same_stream_inactive_block_bytes,
-    _total_inactive_allocator_bytes,
     decide_candidate_admission,
     validate_premat_configuration,
 )
+
+MIB = 1024 ** 2
 
 
 def _validation_kwargs(mode: str) -> dict[str, object]:
@@ -32,19 +35,20 @@ def _validation_kwargs(mode: str) -> dict[str, object]:
 
 
 def _blocked_case() -> tuple[PrematMemoryObservation, CandidateEnvelope]:
-    observation = PrematMemoryObservation(
-        process_allocated_bytes=500,
-        process_reserved_bytes=800,
-        process_ordinary_peak_bytes=1000,
-        device_free_bytes=100,
-        device_total_bytes=1000,
+    return (
+        PrematMemoryObservation(
+            process_allocated_bytes=500 * MIB,
+            process_reserved_bytes=800 * MIB,
+            process_ordinary_peak_bytes=1000 * MIB,
+            device_free_bytes=100 * MIB,
+            device_total_bytes=1000 * MIB,
+        ),
+        CandidateEnvelope(
+            retained_bytes=8 * MIB,
+            materialisation_peak_bytes=8 * MIB,
+            foreground_overlap_bytes=128 * MIB,
+        ),
     )
-    envelope = CandidateEnvelope(
-        retained_bytes=8,
-        materialisation_peak_bytes=8,
-        foreground_overlap_bytes=128,
-    )
-    return observation, envelope
 
 
 def _runtime() -> PrematRuntime:
@@ -54,7 +58,7 @@ def _runtime() -> PrematRuntime:
         n_head=1,
         attention_mode="fused",
         stay_below_current_peak=False,
-        gpu_memory_buffer_gb=200 / (1024 ** 3),
+        gpu_memory_buffer_gb=200 * MIB / (1024 ** 3),
         allocator_aware_admission="cautious",
         target_layer=1,
         weight_matrix_target_order="r_to_l",
@@ -62,120 +66,152 @@ def _runtime() -> PrematRuntime:
         diagnostic_layer_delay_ms=0.0,
         logging_enabled=False,
     )
-
     class FakeStream:
         cuda_stream = 11
-
     runtime._stream = FakeStream()
     runtime._device = torch.device("cuda:0")
     return runtime
 
 
-def test_largest_same_stream_inactive_block_filters_device_pool_stream_and_state() -> None:
-    snapshot = [
+def _stats(*, reserved=500, active=100, num_device_free=7):
+    return {
+        "reserved_bytes.all.current": reserved * MIB,
+        "active_bytes.all.current": active * MIB,
+        "num_device_free": num_device_free,
+    }
+
+
+def _snapshot(block_mib=368):
+    return [
         {
             "device": 0,
             "stream": 11,
-            "segment_type": "small",
-            "blocks": [
-                {"state": "inactive", "size": 8},
-                {"state": "inactive", "size": 16},
-                {"state": "active_allocated", "size": 100},
-                {"state": "active_awaiting_free", "size": 200},
-            ],
-        },
-        {"device": 0, "stream": 11, "segment_type": "large", "blocks": [{"state": "inactive", "size": 1000}]},
-        {"device": 0, "stream": 12, "segment_type": "small", "blocks": [{"state": "inactive", "size": 300}]},
-        {"device": 1, "stream": 11, "segment_type": "small", "blocks": [{"state": "inactive", "size": 400}]},
+            "segment_type": "large",
+            "blocks": [{"state": "inactive", "size": block_mib * MIB}],
+        }
+    ]
+
+
+def test_inactive_allocator_bytes_uses_reserved_minus_active() -> None:
+    assert _inactive_allocator_bytes_from_stats(_stats(reserved=500, active=180)) == 320 * MIB
+    with pytest.raises(ValueError):
+        _inactive_allocator_bytes_from_stats(_stats(reserved=100, active=101))
+
+
+def test_largest_block_filters_device_pool_stream_and_state() -> None:
+    snapshot = [
+        {"device": 0, "stream": 11, "segment_type": "large", "blocks": [
+            {"state": "inactive", "size": 64 * MIB},
+            {"state": "active_awaiting_free", "size": 700 * MIB},
+        ]},
+        {"device": 0, "stream": 12, "segment_type": "large", "blocks": [{"state": "inactive", "size": 800 * MIB}]},
+        {"device": 1, "stream": 11, "segment_type": "large", "blocks": [{"state": "inactive", "size": 900 * MIB}]},
     ]
     assert _largest_same_stream_inactive_block_bytes(
-        snapshot, device_index=0, stream_id=11, request_bytes=8
-    ) == 16
+        snapshot, device_index=0, stream_id=11, request_bytes=8 * MIB
+    ) == 64 * MIB
 
 
-def test_total_inactive_allocator_bytes_counts_only_inactive_current_device() -> None:
-    snapshot = [
-        {
-            "device": 0,
-            "stream": 11,
-            "segment_type": "small",
-            "blocks": [
-                {"state": "inactive", "size": 200},
-                {"state": "active_allocated", "size": 700},
-                {"state": "active_awaiting_free", "size": 800},
-            ],
-        },
-        {"device": 0, "stream": 12, "segment_type": "large", "blocks": [{"state": "inactive", "size": 100}]},
-        {"device": 1, "stream": 11, "segment_type": "small", "blocks": [{"state": "inactive", "size": 900}]},
-    ]
-    assert _total_inactive_allocator_bytes(snapshot, device_index=0) == 300
+def test_certificate_charge_is_conservative_power_of_two_bound() -> None:
+    assert _conservative_certificate_charge_bytes(0) == 0
+    assert _conservative_certificate_charge_bytes(8 * MIB) == 8 * MIB
+    assert _conservative_certificate_charge_bytes(12 * MIB) == 16 * MIB
+    assert _conservative_certificate_charge_bytes(513) == 1024
 
 
-def test_cautious_rescue_uses_inactive_cache_as_effective_headroom(monkeypatch) -> None:
+def test_cautious_uses_stats_headroom_and_reuses_snapshot_certificate(monkeypatch) -> None:
     observation, envelope = _blocked_case()
     original = decide_candidate_admission(
-        observation=observation,
-        envelope=envelope,
-        stay_below_current_peak=False,
-        gpu_memory_buffer_bytes=200,
+        observation=observation, envelope=envelope,
+        stay_below_current_peak=False, gpu_memory_buffer_bytes=200 * MIB,
     )
-    assert original.admitted is False
-    assert original.reason == "global_device_buffer"
+    assert not original.admitted
+    runtime = _runtime()
+    calls = {"snapshot": 0}
+    monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda _device=None: _stats())
+    def snapshot():
+        calls["snapshot"] += 1
+        return _snapshot()
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", snapshot)
+
+    revised1, detail1 = runtime._cautious_allocator_aware_rescue(
+        observation=observation, envelope=envelope, original_decision=original
+    )
+    assert revised1.admitted
+    assert detail1["snapshot_performed"] is True
+    assert detail1["inactive_allocator_bytes"] == 400 * MIB
+    runtime._consume_allocator_certificate(envelope.materialisation_peak_bytes)
+
+    revised2, detail2 = runtime._cautious_allocator_aware_rescue(
+        observation=observation, envelope=envelope, original_decision=original
+    )
+    assert revised2.admitted
+    assert detail2["snapshot_performed"] is False
+    assert calls["snapshot"] == 1
+
+
+def test_device_free_event_invalidates_certificate_and_forces_refresh(monkeypatch) -> None:
+    observation, envelope = _blocked_case()
+    original = decide_candidate_admission(
+        observation=observation, envelope=envelope,
+        stay_below_current_peak=False, gpu_memory_buffer_bytes=200 * MIB,
+    )
+    runtime = _runtime()
+    state = {"free": 7, "snapshot": 0}
+    monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda _device=None: _stats(num_device_free=state["free"]))
+    def snapshot():
+        state["snapshot"] += 1
+        return _snapshot()
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", snapshot)
+    runtime._cautious_allocator_aware_rescue(
+        observation=observation, envelope=envelope, original_decision=original
+    )
+    assert state["snapshot"] == 1
+    state["free"] = 8
+    _, detail = runtime._cautious_allocator_aware_rescue(
+        observation=observation, envelope=envelope, original_decision=original
+    )
+    assert detail["certificate_invalidated_by_device_free"] is True
+    assert detail["snapshot_performed"] is True
+    assert state["snapshot"] == 2
+
+
+def test_insufficient_current_inactive_headroom_still_rejects(monkeypatch) -> None:
+    observation, envelope = _blocked_case()
+    original = decide_candidate_admission(
+        observation=observation, envelope=envelope,
+        stay_below_current_peak=False, gpu_memory_buffer_bytes=200 * MIB,
+    )
     runtime = _runtime()
     monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
-    monkeypatch.setattr(
-        torch.cuda,
-        "memory_snapshot",
-        lambda: [
-            {"device": 0, "stream": 11, "segment_type": "small", "blocks": [{"state": "inactive", "size": 250}]},
-            {"device": 0, "stream": 12, "segment_type": "large", "blocks": [{"state": "inactive", "size": 50}]},
-        ],
-    )
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda _device=None: _stats(reserved=180, active=100))
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", lambda: _snapshot())
     revised, detail = runtime._cautious_allocator_aware_rescue(
-        observation=observation,
-        envelope=envelope,
-        original_decision=original,
+        observation=observation, envelope=envelope, original_decision=original
     )
     assert detail["reuse_qualified"] is True
-    assert detail["inactive_allocator_bytes"] == 300
-    assert detail["required_allocator_headroom_credit_bytes"] == 236
-    assert detail["allocator_headroom_credit_bytes"] == 236
-    assert detail["effective_device_free_bytes"] == 336
-    assert revised.admitted is True
-    assert revised.reason == "admitted"
-    # The full 136-byte envelope is still charged; allocator cache increases
-    # effective headroom rather than being double-counted as zero growth.
-    assert revised.predicted_physical_growth_bytes == 136
-    assert revised.predicted_device_used_bytes == 800
+    assert detail["inactive_allocator_bytes"] == 80 * MIB
+    assert revised.admitted is False
+    assert revised.reason == "global_device_buffer"
 
 
-def test_cautious_rescue_remains_rejected_when_inactive_headroom_is_insufficient(monkeypatch) -> None:
+def test_snapshot_failure_fails_closed_when_certificate_missing(monkeypatch) -> None:
     observation, envelope = _blocked_case()
     original = decide_candidate_admission(
-        observation=observation,
-        envelope=envelope,
-        stay_below_current_peak=False,
-        gpu_memory_buffer_bytes=200,
+        observation=observation, envelope=envelope,
+        stay_below_current_peak=False, gpu_memory_buffer_bytes=200 * MIB,
     )
     runtime = _runtime()
     monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
-    monkeypatch.setattr(
-        torch.cuda,
-        "memory_snapshot",
-        lambda: [
-            {"device": 0, "stream": 11, "segment_type": "small", "blocks": [{"state": "inactive", "size": 150}]},
-            {"device": 0, "stream": 12, "segment_type": "large", "blocks": [{"state": "inactive", "size": 50}]},
-        ],
-    )
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda _device=None: _stats())
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", lambda: (_ for _ in ()).throw(RuntimeError("snapshot failed")))
     revised, detail = runtime._cautious_allocator_aware_rescue(
-        observation=observation,
-        envelope=envelope,
-        original_decision=original,
+        observation=observation, envelope=envelope, original_decision=original
     )
-    assert detail["inactive_allocator_bytes"] == 200
-    assert detail["allocator_headroom_credit_bytes"] == 200
-    assert revised.admitted is False
-    assert revised.reason == "global_device_buffer"
+    assert revised == original
+    assert "snapshot failed" in str(detail["snapshot_error"])
 
 
 def test_allocator_aware_mode_validation() -> None:
@@ -184,28 +220,3 @@ def test_allocator_aware_mode_validation() -> None:
     for mode in ("normal", "aggressive"):
         with pytest.raises(ValueError, match="not implemented yet"):
             validate_premat_configuration(**_validation_kwargs(mode))
-
-
-def test_cautious_rescue_fails_closed_on_snapshot_error(monkeypatch) -> None:
-    observation, envelope = _blocked_case()
-    original = decide_candidate_admission(
-        observation=observation,
-        envelope=envelope,
-        stay_below_current_peak=False,
-        gpu_memory_buffer_bytes=200,
-    )
-    runtime = _runtime()
-    monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
-
-    def fail_snapshot():
-        raise RuntimeError("snapshot failed")
-
-    monkeypatch.setattr(torch.cuda, "memory_snapshot", fail_snapshot)
-    revised, detail = runtime._cautious_allocator_aware_rescue(
-        observation=observation,
-        envelope=envelope,
-        original_decision=original,
-    )
-    assert revised == original
-    assert detail["reuse_qualified"] is False
-    assert "RuntimeError: snapshot failed" in str(detail["snapshot_error"])
