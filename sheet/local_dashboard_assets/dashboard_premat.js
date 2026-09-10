@@ -368,7 +368,7 @@ function premat_build_model(snapshot) {
 function premat_history_model(snapshots) {
   const complete = [...(snapshots || [])]
     .filter(premat_snapshot_complete)
-    .sort((left, right) => Number(left.optimizer_update ?? 0) - Number(right.optimizer_update ?? 0));
+    .sort((left, right) => Number(right.optimizer_update ?? 0) - Number(left.optimizer_update ?? 0));
   const layers = [...new Set(complete.flatMap(premat_layer_indices))]
     .sort((left, right) => left - right);
   const rows = complete.map(snapshot => {

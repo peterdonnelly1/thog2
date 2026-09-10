@@ -278,3 +278,10 @@
 - Reordered and restyled the Instra run table as requested: STEPS beside visibility, warmup after EQUIV, bold dense presets, wider C/D/C_e values, maroon L/P columns, and the shorter Delete run label.
 - Regularised Premat key spacing and contrast, and changed the uncompleted portion of PARTIAL HIT to the NOT YET REACHED background grey.
 - Added focused API/history reducer/CSV, time-axis preservation, table-order and presentation contract regressions. Python compilation, JavaScript execution/syntax, direct reducer/time-axis harnesses, and whitespace/conflict-marker validation pass in the connector workspace; scruffy remains the authoritative browser/CUDA acceptance host.
+
+
+## 2026-09-10 - Premat history field feedback
+
+- Scruffy's first 53-row CSV export confirms 42 normal steps with 60 PARTIAL HITs plus the expected four layer-1 COMPLETE MISSes, nine all-miss steps, one mixed-miss step, and one terminal mixed full/partial step.
+- The nine all-miss steps each retained approximately 1.98--2.08 GiB of buffer margin, while seven steps at -44--116 MiB margin still achieved the normal 60 partial hits. The intermittent all-miss pattern therefore does not track memory admission pressure and needs event-level submission/capture evidence before another scheduler change.
+- Kept the 35 px Premat title bar single-row, moved the magnifier before and well left of pause, aligned the three OUTCOMES entries under the first three PROCESSING entries, and reversed history display/export to newest step first.

@@ -263,20 +263,22 @@ def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() 
     rendered = _javascript_history([second, first])
     model = rendered["model"]
     assert model["layers"] == [0, 1]
-    assert [row["optimizer_update"] for row in model["rows"]] == [10, 11]
-    assert model["rows"][0]["buffer_margin_bytes"] == 2 * 1024**3
-    assert model["rows"][0]["headroom_bytes"] == 2 * 1024**3
-    assert model["rows"][0]["outcomes"]["0"] == {
+    assert [row["optimizer_update"] for row in model["rows"]] == [11, 10]
+    assert model["rows"][1]["buffer_margin_bytes"] == 2 * 1024**3
+    assert model["rows"][1]["headroom_bytes"] == 2 * 1024**3
+    assert model["rows"][1]["outcomes"]["0"] == {
         "full_hits": 1,
         "partial_hits": 1,
         "complete_misses": 1,
     }
-    assert model["rows"][0]["outcomes"]["1"] == {
+    assert model["rows"][1]["outcomes"]["1"] == {
         "full_hits": 0,
         "partial_hits": 0,
         "complete_misses": 0,
     }
     assert "layer_1_full_hits" in rendered["csv"]
+    assert rendered["csv"].splitlines()[1].startswith("11,")
+    assert rendered["csv"].splitlines()[2].startswith("10,")
     assert "2147483648,2147483648,1,1,1,0,0,0" in rendered["csv"]
 
 
@@ -328,7 +330,11 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "&after=${after}" in javascript
     assert "--premat-partial-progress" in css
-    assert "grid-template-columns: repeat(auto-fit, minmax(132px, 1fr))" in css
+    assert "grid-template-columns: repeat(9, minmax(100px, 1fr))" in css
+    assert ".premat-inspect-button { margin-right: 28px; }" in css
+    assert "padding: 0 2px" in css
+    assert index.index('id="premat_inspect_button"') < index.index('id="premat_play_toggle"')
+    assert index.index('id="premat_play_toggle"') < index.index('id="premat_state_duration"')
     assert "color: #4b5563" in css
     assert ".premat-stage[data-premat-family] { color: #fff;" in css
     assert "#f7f9fa var(--premat-partial-progress) 100%" in css

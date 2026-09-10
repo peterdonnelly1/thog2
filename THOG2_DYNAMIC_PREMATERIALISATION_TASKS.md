@@ -294,3 +294,12 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Equalise Premat key spacing, darken key copy and use NOT YET REACHED grey for the partial-hit remainder.
 - [x] Add focused regression coverage and pass the available connector-safe static/direct checks.
 - [ ] On scruffy, verify time-axis selection against a live run, docked history/inspector layout, CSV filename/content, and narrow-window behaviour.
+
+
+## 2026-09-10 Premat history field feedback
+
+- [x] Analyse the first exported 53-step history and separate intermittent all-miss steps from memory-margin collapses.
+- [x] Keep Premat toolbar controls inside the title bar and move the magnifier well left of pause.
+- [x] Left-align OUTCOMES and align its three icons with the first three PROCESSING icons.
+- [x] Present and export retained Premat history newest-first.
+- [ ] Capture event-level admission/submission rows for an all-miss step and a neighbouring normal step before changing scheduler behaviour.
