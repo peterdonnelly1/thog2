@@ -232,22 +232,34 @@ def decide_candidate_admission(
     )
 
 
+def _allocator_pool_for_request(size_bytes: int) -> str:
+    # PyTorch's native CUDA allocator defines the largest small allocation as
+    # 1 MiB (kSmallSize).  Derive the pool from the actual candidate size so
+    # model width/dtype changes cannot invalidate cautious admission.
+    return "small" if int(size_bytes) <= 1024 ** 2 else "large"
+
+
 def _largest_same_stream_inactive_block_bytes(
     snapshot: Sequence[Mapping[str, object]],
     *,
     stream_id: int,
+    request_bytes: int,
 ) -> int:
-    """Return the largest single inactive allocator block for one CUDA stream.
+    """Return the largest compatible inactive block for one CUDA stream.
 
     Cautious admission deliberately does not sum fragmented blocks.  A block
-    must individually cover the complete premat materialisation peak before we
-    claim that candidate-owned allocation need not grow physical device usage.
+    must be in the allocator pool used by the request and individually cover
+    the complete premat materialisation peak before we claim that
+    candidate-owned allocation need not grow physical device usage.
     """
     largest = 0
+    required_pool = _allocator_pool_for_request(request_bytes)
     for segment in snapshot:
         if not isinstance(segment, Mapping):
             raise ValueError("CUDA allocator snapshot contains a non-mapping segment")
         if int(segment.get("stream", -1)) != int(stream_id):
+            continue
+        if segment.get("segment_type") != required_pool:
             continue
         blocks = segment.get("blocks")
         if not isinstance(blocks, Sequence):
@@ -1029,6 +1041,7 @@ class PrematRuntime:
             largest_inactive_block = _largest_same_stream_inactive_block_bytes(
                 snapshot,
                 stream_id=stream_id,
+                request_bytes=envelope.materialisation_peak_bytes,
             )
         except Exception as error:
             detail["snapshot_error"] = f"{type(error).__name__}: {error}"

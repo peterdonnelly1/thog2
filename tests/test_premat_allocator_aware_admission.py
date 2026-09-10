@@ -51,6 +51,7 @@ def test_largest_same_stream_inactive_block_ignores_other_states_and_streams() -
     snapshot = [
         {
             "stream": 11,
+            "segment_type": "small",
             "blocks": [
                 {"state": "inactive", "size": 8},
                 {"state": "inactive", "size": 16},
@@ -58,9 +59,12 @@ def test_largest_same_stream_inactive_block_ignores_other_states_and_streams() -
                 {"state": "active_awaiting_free", "size": 200},
             ],
         },
-        {"stream": 12, "blocks": [{"state": "inactive", "size": 300}]},
+        {"stream": 11, "segment_type": "large", "blocks": [{"state": "inactive", "size": 1000}]},
+        {"stream": 12, "segment_type": "small", "blocks": [{"state": "inactive", "size": 300}]},
     ]
-    assert _largest_same_stream_inactive_block_bytes(snapshot, stream_id=11) == 16
+    assert _largest_same_stream_inactive_block_bytes(
+        snapshot, stream_id=11, request_bytes=8
+    ) == 16
 
 
 def test_allocator_credit_changes_only_physical_growth_not_process_envelope() -> None:
@@ -126,8 +130,9 @@ def test_cautious_rescue_uses_one_same_stream_inactive_block(monkeypatch) -> Non
         torch.cuda,
         "memory_snapshot",
         lambda: [
-            {"stream": 11, "blocks": [{"state": "inactive", "size": 8}]},
-            {"stream": 12, "blocks": [{"state": "inactive", "size": 1000}]},
+            {"stream": 11, "segment_type": "small", "blocks": [{"state": "inactive", "size": 8}]},
+            {"stream": 11, "segment_type": "large", "blocks": [{"state": "inactive", "size": 1000}]},
+            {"stream": 12, "segment_type": "small", "blocks": [{"state": "inactive", "size": 1000}]},
         ],
     )
     revised, detail = runtime._cautious_allocator_aware_rescue(
