@@ -198,7 +198,8 @@
           <section class="premat-docked-panel premat-inspector" id="premat_inspector" aria-label="Premat data inspector" hidden>
             <header class="premat-panel-toolbar">
               <button class="premat-panel-back" id="premat_inspector_close" type="button" aria-label="Back to Premat recapitulation" title="Back to Premat recapitulation">←</button>
-              <div><strong>Premat data · Step <span id="premat_inspector_step">—</span></strong><span id="premat_inspector_detail"></span></div>
+              <div class="premat-panel-heading"><strong>Premat data · Step <span id="premat_inspector_step">—</span></strong><span id="premat_inspector_detail"></span></div>
+              <button class="premat-icon-button" id="premat_inspector_download" type="button" aria-label="Download this Premat step as CSV" title="Download this Premat step as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></button>
             </header>
             <div class="premat-inspector-scroll">
               <table class="premat-inspector-table">
@@ -211,7 +212,7 @@
             <header class="premat-panel-toolbar">
               <button class="premat-panel-back" id="premat_history_close" type="button" aria-label="Back to Premat recapitulation" title="Back to Premat recapitulation">←</button>
               <div class="premat-panel-heading"><strong>Premat history</strong><span id="premat_history_detail">Loading retained steps…</span></div>
-              <button class="premat-icon-button" id="premat_history_download" type="button" aria-label="Download Premat history as CSV" title="Download Premat history as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></button>
+              <button class="premat-icon-button" id="premat_history_download" type="button" aria-label="Download all detailed Premat history as CSV" title="Download all detailed Premat history as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></button>
             </header>
             <div class="premat-history-hint">F = full hit · P = partial hit · M = complete miss · one cell summarises every supported matrix in that layer</div>
             <div class="premat-history-scroll">

@@ -161,8 +161,13 @@ def _javascript_history(snapshots: list[dict]) -> dict:
     harness = f"""
 global.window = {{addEventListener() {{}}, innerHeight: 900}};
 const view = require({json.dumps(str(asset))});
-const model = view.premat_history_model({json.dumps(snapshots)});
-console.log(JSON.stringify({{model, csv: view.premat_history_csv(model)}}));
+const snapshots = {json.dumps(snapshots)};
+const model = view.premat_history_model(snapshots);
+console.log(JSON.stringify({{
+  model,
+  csv: view.premat_history_csv(model),
+  detailed_csv: view.premat_detailed_history_csv(snapshots),
+}}));
 """
     completed = subprocess.run(
         ("node", "-e", harness),
@@ -281,6 +286,13 @@ def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() 
     assert rendered["csv"].splitlines()[2].startswith("10,")
     assert "2147483648,2147483648,1,1,1,0,0,0" in rendered["csv"]
 
+    detailed_lines = rendered["detailed_csv"].splitlines()
+    assert detailed_lines[0].startswith("step,layer,matrix,target,target_offset,matrix_order")
+    assert len(detailed_lines) == 17
+    assert detailed_lines[1].startswith("11,2,ATTN FUSED · QKV,")
+    assert detailed_lines[9].startswith("10,2,ATTN FUSED · QKV,")
+    assert any("global device buffer" in line for line in detailed_lines[1:])
+
 
 def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector() -> None:
     index = (ASSET_ROOT / "index.html").read_text(encoding="utf-8")
@@ -292,6 +304,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "premat_inspect_button", "premat_layers", "premat_inspector",
         "premat_inspector_body", "premat_history_button", "premat_history",
         "premat_history_body", "premat_history_download",
+        "premat_inspector_download",
     ):
         assert f'id="{element_id}"' in index
     assert "Premat Recapitulation - Step" in index
@@ -350,6 +363,14 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "history=1" in javascript
     assert "link.download =" in javascript
     assert ".premat-docked-panel" in css
+    assert ".premat-history-row" in css
+    assert "data-premat-history-step" in javascript
+    assert "data-premat-history-download" in javascript
+    assert "premat_open_history_step" in javascript
+    assert "premat_detailed_history_csv(snapshots)" in javascript
+    assert "inspector_return_panel" in javascript
+    assert "${premat_artifact_file_stem()}_step_${step}.csv" in javascript
+    assert "Download all detailed Premat history as CSV" in index
     assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
 

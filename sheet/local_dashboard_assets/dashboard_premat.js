@@ -39,6 +39,9 @@ const premat_view = {
   history_latest_update: 0,
   history_snapshots: [],
   history_model: null,
+  inspector_return_panel: "recap",
+  inspector_snapshot: null,
+  inspector_model: null,
 };
 
 function premat_escape(value) {
@@ -424,6 +427,117 @@ function premat_history_csv(model) {
   return lines.join("\r\n") + "\r\n";
 }
 
+function premat_csv_cell(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function premat_inspector_rows(snapshot, model) {
+  const rows = [];
+  const memory = snapshot.memory || {};
+  const device_free = Number(memory.device_free_bytes);
+  const global_buffer = Number(memory.global_buffer_bytes);
+  const buffer_margin_bytes = Number.isFinite(device_free) && Number.isFinite(global_buffer)
+    ? device_free - global_buffer
+    : null;
+  const headroom = Number(memory.premat_headroom_bytes);
+  const headroom_bytes = Number.isFinite(headroom) ? headroom : null;
+  for (const layer_index of [...model.layers].sort((left, right) => right - left)) {
+    for (const family of model.families) {
+      const record = model.records.get(premat_candidate_key(layer_index, family));
+      const progress_value = record.completion_at_deadline_percent;
+      const progress = Number(progress_value);
+      const outcome_text = record.outcome === "PARTIAL HIT"
+          && progress_value !== null
+          && progress_value !== undefined
+          && Number.isFinite(progress)
+        ? `PARTIAL HIT · ~${progress}% TIME-PROGRESS`
+        : record.outcome;
+      const target_text = `l+${record.target_offset} · ${record.target_order} #${record.target_order_position + 1}`;
+      const admission_history = record.admission_history.length
+        ? record.admission_history.map(item => `${premat_ms(item.elapsed_ms)} ${item.reason}; headroom ${premat_bytes(item.headroom_bytes)}; charged ${premat_bytes(item.charged_bytes)}`).join(" | ")
+        : "—";
+      const first_observed_text = record.first_observed_admissible_ms === null
+        ? "—"
+        : `${premat_ms(record.first_observed_admissible_ms)}; headroom ${premat_bytes(record.first_observed_admissible_headroom_bytes)}; prior charged ${premat_bytes(record.first_observed_admissible_charged_bytes)}`;
+      const processing = record.trace.length > 1
+        ? record.trace[record.trace.length - 2]
+        : (record.trace[0] || "—");
+      rows.push({
+        step: Number(snapshot.optimizer_update ?? 0),
+        layer: layer_index + 1,
+        matrix: record.label,
+        target_text,
+        target_offset: record.target_offset,
+        target_order: record.target_order,
+        target_order_position: record.target_order_position + 1,
+        retained_bytes: record.retained_bytes,
+        buffer_margin_bytes,
+        headroom_bytes,
+        first_considered_ms: record.first_considered_ms,
+        first_observed_admissible_ms: record.first_observed_admissible_ms,
+        first_observed_admissible_headroom_bytes: record.first_observed_admissible_headroom_bytes,
+        first_observed_admissible_charged_bytes: record.first_observed_admissible_charged_bytes,
+        first_observed_text,
+        admission_history,
+        submission_ms: record.submission_ms,
+        completion_observed_ms: record.completion_observed_ms,
+        deadline_ms: record.deadline_ms,
+        consumption_ms: record.consumption_ms,
+        processing,
+        processing_trace: record.trace.join(" -> "),
+        outcome: record.outcome,
+        outcome_text,
+        progress_percent: record.completion_at_deadline_percent,
+        submission_queue_depth: record.submission_queue_depth,
+        submission_charged_bytes: record.submission_charged_bytes,
+        wait_ms: record.wait_ms,
+        materialisation_ms: record.materialisation_ms,
+        main_materialisation_ms: record.main_materialisation_ms,
+      });
+    }
+  }
+  return rows;
+}
+
+function premat_detailed_history_csv(snapshots) {
+  const header = [
+    "step", "layer", "matrix", "target", "target_offset", "matrix_order",
+    "matrix_order_position", "size_bytes", "buffer_margin_bytes", "headroom_bytes",
+    "first_considered_ms", "first_observed_admissible_ms",
+    "first_observed_admissible_headroom_bytes",
+    "first_observed_admissible_prior_charged_bytes", "admission_history",
+    "submission_ms", "completion_observed_ms", "deadline_ms", "consumption_ms",
+    "processing", "processing_trace", "outcome", "progress_percent",
+    "submission_queue_depth", "submission_charged_bytes", "wait_ms",
+    "premat_materialisation_ms", "main_materialisation_ms",
+  ];
+  const complete = [...(snapshots || [])]
+    .filter(premat_snapshot_complete)
+    .sort((left, right) => Number(right.optimizer_update ?? 0) - Number(left.optimizer_update ?? 0));
+  const lines = [header.map(premat_csv_cell).join(",")];
+  for (const snapshot of complete) {
+    const model = premat_build_model(snapshot);
+    for (const row of premat_inspector_rows(snapshot, model)) {
+      lines.push([
+        row.step, row.layer, row.matrix, row.target_text, row.target_offset,
+        row.target_order, row.target_order_position, row.retained_bytes,
+        row.buffer_margin_bytes, row.headroom_bytes, row.first_considered_ms,
+        row.first_observed_admissible_ms,
+        row.first_observed_admissible_headroom_bytes,
+        row.first_observed_admissible_charged_bytes, row.admission_history,
+        row.submission_ms, row.completion_observed_ms, row.deadline_ms,
+        row.consumption_ms, row.processing, row.processing_trace, row.outcome,
+        row.progress_percent, row.submission_queue_depth,
+        row.submission_charged_bytes, row.wait_ms, row.materialisation_ms,
+        row.main_materialisation_ms,
+      ].map(premat_csv_cell).join(","));
+    }
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+
 function premat_state_class(state) {
   const classes = {
     neutral: "premat-neutral",
@@ -586,38 +700,21 @@ function premat_snapshot_complete(snapshot) {
 }
 
 function premat_render_inspector(snapshot, model) {
-  const rows = [];
-  for (const layer_index of [...model.layers].sort((left, right) => right - left)) {
-    for (const family of model.families) {
-      const record = model.records.get(premat_candidate_key(layer_index, family));
-      const progress_value = record.completion_at_deadline_percent;
-      const progress = Number(progress_value);
-      const outcome = record.outcome === "PARTIAL HIT"
-          && progress_value !== null
-          && progress_value !== undefined
-          && Number.isFinite(progress)
-        ? `PARTIAL HIT · ~${progress}% TIME-PROGRESS`
-        : record.outcome;
-      const target = `l+${record.target_offset} · ${record.target_order} #${record.target_order_position + 1}`;
-      const admission_history = record.admission_history.length
-        ? record.admission_history.map(item => `${premat_ms(item.elapsed_ms)} ${item.reason}; headroom ${premat_bytes(item.headroom_bytes)}; charged ${premat_bytes(item.charged_bytes)}`).join(" | ")
-        : "—";
-      const submitted_completed = `${premat_ms(record.submission_ms)} / ${premat_ms(record.completion_observed_ms)}`;
-      const first_observed = record.first_observed_admissible_ms === null
-        ? "—"
-        : `${premat_ms(record.first_observed_admissible_ms)}; headroom ${premat_bytes(record.first_observed_admissible_headroom_bytes)}; prior charged ${premat_bytes(record.first_observed_admissible_charged_bytes)}`;
-      const processing = record.trace.length > 1 ? record.trace[record.trace.length - 2] : (record.trace[0] || "—");
-      const progress_text = record.completion_at_deadline_percent === null ? "—" : `~${record.completion_at_deadline_percent}%`;
-      const queue_charge = `${record.submission_queue_depth ?? "—"} / ${premat_bytes(record.submission_charged_bytes)}`;
-      rows.push(`<tr><td>${layer_index + 1}</td><td>${premat_escape(record.label)}</td><td>${premat_escape(target)}</td><td>${premat_matrix_size(record.retained_bytes)}</td><td>${premat_ms(record.first_considered_ms)}</td><td>${first_observed}</td><td>${premat_escape(admission_history)}</td><td>${submitted_completed}</td><td>${premat_ms(record.deadline_ms)}</td><td>${premat_ms(record.consumption_ms)}</td><td>${premat_escape(processing)}</td><td>${premat_escape(outcome)}</td><td>${premat_escape(progress_text)}</td><td>${premat_escape(queue_charge)}</td><td>${premat_ms(record.wait_ms)}</td><td>${premat_ms(record.materialisation_ms)}</td><td>${premat_ms(record.main_materialisation_ms)}</td></tr>`);
-    }
-  }
+  const rows = premat_inspector_rows(snapshot, model);
+  const markup = rows.map(row => {
+    const submitted_completed = `${premat_ms(row.submission_ms)} / ${premat_ms(row.completion_observed_ms)}`;
+    const progress_text = row.progress_percent === null ? "—" : `~${row.progress_percent}%`;
+    const queue_charge = `${row.submission_queue_depth ?? "—"} / ${premat_bytes(row.submission_charged_bytes)}`;
+    return `<tr><td>${row.layer}</td><td>${premat_escape(row.matrix)}</td><td>${premat_escape(row.target_text)}</td><td>${premat_matrix_size(row.retained_bytes)}</td><td>${premat_ms(row.first_considered_ms)}</td><td>${row.first_observed_text}</td><td>${premat_escape(row.admission_history)}</td><td>${submitted_completed}</td><td>${premat_ms(row.deadline_ms)}</td><td>${premat_ms(row.consumption_ms)}</td><td>${premat_escape(row.processing)}</td><td>${premat_escape(row.outcome_text)}</td><td>${premat_escape(progress_text)}</td><td>${premat_escape(queue_charge)}</td><td>${premat_ms(row.wait_ms)}</td><td>${premat_ms(row.materialisation_ms)}</td><td>${premat_ms(row.main_materialisation_ms)}</td></tr>`;
+  });
+  premat_view.inspector_snapshot = snapshot;
+  premat_view.inspector_model = model;
   by_id("premat_inspector_step").textContent = String(snapshot.optimizer_update ?? "—");
   by_id("premat_inspector_detail").textContent = `${model.layers.length} layers · ${rows.length} matrix opportunities`;
-  by_id("premat_inspector_body").innerHTML = rows.join("");
+  by_id("premat_inspector_body").innerHTML = markup.join("");
+  by_id("premat_inspector_download").disabled = rows.length === 0;
   by_id("premat_inspect_button").disabled = false;
 }
-
 function premat_show_panel(panel_name) {
   const panel = ["inspector", "history"].includes(panel_name) ? panel_name : "recap";
   premat_view.active_panel = panel;
@@ -628,30 +725,75 @@ function premat_show_panel(panel_name) {
   by_id("premat_history_button")?.setAttribute("aria-pressed", String(panel === "history"));
 }
 
+function premat_find_history_snapshot(step) {
+  const update = Number(step);
+  return premat_view.history_snapshots.find(
+    snapshot => Number(snapshot.optimizer_update ?? 0) === update,
+  ) || null;
+}
+
+function premat_open_history_step(step) {
+  const snapshot = premat_find_history_snapshot(step);
+  if (!snapshot) return;
+  premat_view.inspector_return_panel = "history";
+  premat_render_inspector(snapshot, premat_build_model(snapshot));
+  premat_show_panel("inspector");
+}
+
+function premat_close_inspector() {
+  const return_panel = premat_view.inspector_return_panel === "history" ? "history" : "recap";
+  premat_view.inspector_return_panel = "recap";
+  premat_show_panel(return_panel);
+}
+
 function premat_render_history(snapshots) {
   const model = premat_history_model(snapshots);
   premat_view.history_model = model;
   const header = [
     "<tr><th>Step</th><th>Buffer margin</th><th>Headroom</th>",
     ...model.layers.map(layer_index => `<th>Layer ${layer_index + 1}<br>F / P / M</th>`),
-    "</tr>",
+    "<th>Download</th></tr>",
   ].join("");
+  const download_icon = '<svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>';
   const rows = model.rows.map(row => {
+    const step = Number(row.optimizer_update);
     const layer_cells = model.layers.map(layer_index => {
       const counts = row.outcomes[layer_index] || {};
       const text = `F ${counts.full_hits ?? 0} · P ${counts.partial_hits ?? 0} · M ${counts.complete_misses ?? 0}`;
       return `<td class="premat-history-outcomes" title="Layer ${layer_index + 1}: ${premat_escape(text)}">${premat_escape(text)}</td>`;
     }).join("");
-    return `<tr><td>${row.optimizer_update}</td><td>${premat_escape(premat_bytes(row.buffer_margin_bytes))}</td><td>${premat_escape(premat_bytes(row.headroom_bytes))}</td>${layer_cells}</tr>`;
+    const download = `<td class="premat-history-download-cell"><button class="premat-history-download-button" type="button" data-premat-history-download="${step}" aria-label="Download detailed Premat data for step ${step}" title="Download step ${step}">${download_icon}</button></td>`;
+    return `<tr class="premat-history-row" data-premat-history-step="${step}" tabindex="0" role="button" aria-label="Open detailed Premat data for step ${step}"><td><strong>${step}</strong></td><td>${premat_escape(premat_bytes(row.buffer_margin_bytes))}</td><td>${premat_escape(premat_bytes(row.headroom_bytes))}</td>${layer_cells}${download}</tr>`;
   });
   by_id("premat_history_head").innerHTML = header;
-  by_id("premat_history_body").innerHTML = rows.length
+  const body = by_id("premat_history_body");
+  body.innerHTML = rows.length
     ? rows.join("")
-    : `<tr><td class="premat-history-empty" colspan="${Math.max(3, model.layers.length + 3)}">No retained Premat history for this run.</td></tr>`;
-  by_id("premat_history_detail").textContent = `${model.rows.length} retained steps · ${model.layers.length} layers`;
+    : `<tr><td class="premat-history-empty" colspan="${Math.max(4, model.layers.length + 4)}">No retained Premat history for this run.</td></tr>`;
+  body.querySelectorAll("[data-premat-history-step]").forEach(element => {
+    const open = () => premat_open_history_step(element.dataset.prematHistoryStep);
+    element.addEventListener("click", event => {
+      if (event.target.closest("[data-premat-history-download]")) return;
+      open();
+    });
+    element.addEventListener("keydown", event => {
+      if (event.target.closest("[data-premat-history-download]")) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
+  body.querySelectorAll("[data-premat-history-download]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      const snapshot = premat_find_history_snapshot(button.dataset.prematHistoryDownload);
+      if (snapshot) premat_download_step(snapshot);
+    });
+  });
+  by_id("premat_history_detail").textContent = `${model.rows.length} retained steps · ${model.layers.length} layers · select a row for matrix detail`;
   by_id("premat_history_download").disabled = model.rows.length === 0;
 }
-
 function premat_artifact_name() {
   const run_id = String(app.current_run_id || "");
   const run = (app.runs || []).find(candidate => {
@@ -663,20 +805,43 @@ function premat_artifact_name() {
   return String(run?.artifact_name || run?.run_name || run_id || "premat");
 }
 
-function premat_download_history() {
-  if (!premat_view.history_model?.rows?.length) return;
-  const blob = new Blob(["\ufeff", premat_history_csv(premat_view.history_model)], {type: "text/csv;charset=utf-8"});
+function premat_download_csv(csv, filename) {
+  const blob = new Blob(["\ufeff", csv], {type: "text/csv;charset=utf-8"});
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  const file_stem = premat_artifact_name().replace(/[^A-Za-z0-9._-]+/g, "_") || "premat";
   link.href = url;
-  link.download = `${file_stem}.csv`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function premat_artifact_file_stem() {
+  return premat_artifact_name().replace(/[^A-Za-z0-9._-]+/g, "_") || "premat";
+}
+
+function premat_download_step(snapshot) {
+  if (!premat_snapshot_complete(snapshot)) return;
+  const step = Number(snapshot.optimizer_update ?? 0);
+  premat_download_csv(
+    premat_detailed_history_csv([snapshot]),
+    `${premat_artifact_file_stem()}_step_${step}.csv`,
+  );
+}
+
+function premat_download_visible_step() {
+  if (premat_view.inspector_snapshot) premat_download_step(premat_view.inspector_snapshot);
+}
+
+function premat_download_history() {
+  const snapshots = premat_view.history_snapshots.filter(premat_snapshot_complete);
+  if (!snapshots.length) return;
+  premat_download_csv(
+    premat_detailed_history_csv(snapshots),
+    `${premat_artifact_file_stem()}.csv`,
+  );
+}
 async function premat_load_history(force = false) {
   const run_id = app.current_run_id;
   if (!run_id || premat_view.active_panel !== "history") return;
@@ -712,7 +877,9 @@ function premat_start_snapshot(snapshot) {
   by_id("premat_mode").textContent = premat_memory_rule(snapshot);
   premat_render_layout(model);
   premat_render_summary(snapshot, model);
-  premat_render_inspector(snapshot, model);
+  if (!(premat_view.active_panel === "inspector" && premat_view.inspector_return_panel === "history")) {
+    premat_render_inspector(snapshot, model);
+  }
   by_id("premat_history_button").disabled = false;
   premat_advance_playback();
 }
@@ -774,6 +941,9 @@ function premat_reset() {
   premat_view.history_latest_update = 0;
   premat_view.history_snapshots = [];
   premat_view.history_model = null;
+  premat_view.inspector_return_panel = "recap";
+  premat_view.inspector_snapshot = null;
+  premat_view.inspector_model = null;
   by_id("premat_step").textContent = "—";
   by_id("premat_update").textContent = "No complete microstep";
   by_id("premat_summary").innerHTML = "";
@@ -784,6 +954,7 @@ function premat_reset() {
   by_id("premat_inspect_button").disabled = true;
   by_id("premat_history_button").disabled = true;
   by_id("premat_history_download").disabled = true;
+  by_id("premat_inspector_download").disabled = true;
   premat_show_panel("recap");
 }
 
@@ -847,9 +1018,13 @@ window.addEventListener("DOMContentLoaded", () => {
   duration?.addEventListener("input", update_duration);
   by_id("premat_play_toggle")?.addEventListener("click", premat_toggle_playback);
   by_id("premat_inspect_button")?.addEventListener("click", () => {
-    if (premat_view.active_model) premat_show_panel("inspector");
+    if (!premat_view.active_snapshot || !premat_view.active_model) return;
+    premat_view.inspector_return_panel = "recap";
+    premat_render_inspector(premat_view.active_snapshot, premat_view.active_model);
+    premat_show_panel("inspector");
   });
-  by_id("premat_inspector_close")?.addEventListener("click", () => premat_show_panel("recap"));
+  by_id("premat_inspector_close")?.addEventListener("click", premat_close_inspector);
+  by_id("premat_inspector_download")?.addEventListener("click", premat_download_visible_step);
   by_id("premat_history_button")?.addEventListener("click", () => {
     premat_show_panel("history");
     void premat_load_history(true);
@@ -868,7 +1043,9 @@ if (typeof module !== "undefined" && module.exports) {
     premat_build_model,
     premat_families,
     premat_family_label,
+    premat_detailed_history_csv,
     premat_history_csv,
+    premat_inspector_rows,
     premat_history_model,
     premat_matrix_size,
     premat_memory_rule,

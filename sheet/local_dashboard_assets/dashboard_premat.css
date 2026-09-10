@@ -284,6 +284,25 @@
 .premat-history-table th:not(:first-child),
 .premat-history-table td:not(:first-child) { text-align: center; }
 .premat-history-outcomes { min-width: 92px; }
+.premat-history-row { cursor: pointer; }
+.premat-history-row:hover td,
+.premat-history-row:focus td { background: #eef3f7; }
+.premat-history-row:focus { outline: none; }
+.premat-history-download-cell { width: 54px; text-align: center !important; }
+.premat-history-download-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 25px;
+  padding: 0;
+  border: 1px solid var(--border, #dfe2e7);
+  border-radius: 4px;
+  background: #fff;
+  color: #4f5967;
+  cursor: pointer;
+}
+.premat-history-download-button:hover { background: #e5ebf0; }
 .premat-history-empty { color: #6b7480; text-align: left !important; }
 @media (max-width: 1050px) {
   .premat-mode,

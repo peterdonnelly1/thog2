@@ -285,3 +285,10 @@
 - Scruffy's first 53-row CSV export confirms 42 normal steps with 60 PARTIAL HITs plus the expected four layer-1 COMPLETE MISSes, nine all-miss steps, one mixed-miss step, and one terminal mixed full/partial step.
 - The nine all-miss steps each retained approximately 1.98--2.08 GiB of buffer margin, while seven steps at -44--116 MiB margin still achieved the normal 60 partial hits. The intermittent all-miss pattern therefore does not track memory admission pressure and needs event-level submission/capture evidence before another scheduler change.
 - Kept the 35 px Premat title bar single-row, moved the magnifier before and well left of pause, aligned the three OUTCOMES entries under the first three PROCESSING entries, and reversed history display/export to newest step first.
+
+## 2026-09-10 - Premat historical drill-down and detailed exports
+
+- Made each Premat History summary row selectable. It opens the existing docked all-layer matrix inspector for that historical step; Back returns to Premat History, while the title-bar magnifier continues to open the current playback step.
+- Added detailed per-step CSV downloads both beside each history summary row and in the inspector. Added one run-artifact-named detailed-history CSV containing every locally retained complete step, newest first, with `step` as the first column and one row per matrix opportunity (64 rows for fused L16, 80 for unfused L16).
+- Detailed exports include target/order, retained and headroom bytes, first-considered and first-observed-admissible observations, admission rejections, submission/completion/deadline/consumption timings, processing trace, outcome/progress, queue/charged values, and Premat/Main Stream timing.
+- This is an Instra presentation/export change only: it does not change Premat scheduling, telemetry capture, retention, or normal latest-only polling.

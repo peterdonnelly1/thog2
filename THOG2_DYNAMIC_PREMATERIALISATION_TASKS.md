@@ -303,3 +303,13 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Left-align OUTCOMES and align its three icons with the first three PROCESSING icons.
 - [x] Present and export retained Premat history newest-first.
 - [ ] Capture event-level admission/submission rows for an all-miss step and a neighbouring normal step before changing scheduler behaviour.
+
+## 2026-09-10 Premat historical drill-down and detailed exports
+
+- [x] Make each retained-step summary row open the existing docked all-layer matrix inspector for that step.
+- [x] Return Back to Premat History after a historical drill-down while preserving current-step magnifier behaviour.
+- [x] Add detailed per-step CSV downloads from both the summary row and inspector.
+- [x] Export all locally retained detailed history in one run-artifact-named CSV with newest step first and `step` as the first column.
+- [x] Preserve bounded local retention and leave runtime scheduling/telemetry capture unchanged.
+- [x] Add focused detailed-row-count, ordering, diagnostics-field, markup and interaction-contract regressions.
+- [ ] On scruffy, verify L16 fused exports contain 64 data rows per selected step, all-history export contains every retained step, and Back returns to history.
