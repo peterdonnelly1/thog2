@@ -409,8 +409,22 @@ class PrematRuntime:
         self._display_candidates = []
         self._retained_bytes = 0
         self._transient_bytes = 0
-        self._activation_bytes = int(reference.numel() * reference.element_size())
-        self._dtype_bytes = max(4, int(reference.element_size()))
+        # Price the tensors that Premat will actually allocate.  The pass
+        # reference can remain FP32 under CUDA autocast even though matrix
+        # materialisation and its overlapping Main Stream activations are
+        # BF16/FP16.  Charging the reference dtype therefore doubles the
+        # admission envelope for mixed-precision training.
+        if torch.is_autocast_enabled("cuda"):
+            autocast_dtype = torch.get_autocast_dtype("cuda")
+            if autocast_dtype not in (torch.float16, torch.bfloat16):
+                raise RuntimeError(
+                    "Premat CUDA autocast requires float16 or bfloat16; "
+                    f"got {autocast_dtype}"
+                )
+            self._dtype_bytes = 2
+        else:
+            self._dtype_bytes = int(reference.element_size())
+        self._activation_bytes = int(reference.numel() * self._dtype_bytes)
         self._batch_size = int(reference.shape[0]) if reference.ndim >= 1 else 1
         self._sequence_length = int(reference.shape[1]) if reference.ndim >= 2 else 1
         self._pass_start_ns = time.perf_counter_ns()
@@ -421,7 +435,15 @@ class PrematRuntime:
             observation.process_allocated_bytes,
         )
         self._update_memory_aggregates(observation)
-        self._record("pass_begin", layer=resolved[0], detail={"layer_count": len(resolved)})
+        self._record(
+            "pass_begin",
+            layer=resolved[0],
+            detail={
+                "layer_count": len(resolved),
+                "materialisation_element_bytes": self._dtype_bytes,
+                "foreground_activation_bytes": self._activation_bytes,
+            },
+        )
 
     def end(self) -> None:
         if not self._active:
@@ -754,6 +776,7 @@ class PrematRuntime:
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "enabled": True,
             "attention_mode": self._attention_mode,
+            "materialisation_element_bytes": self._dtype_bytes,
             "target_offset": self._target_layer,
             "target_layer": self._target_layer,
             "matrix_order": self._weight_matrix_target_order,
@@ -1577,6 +1600,8 @@ class PrematRuntime:
             "premat_transient_bytes": self._transient_bytes,
             "premat_cumulative_charged_bytes": self._cumulative_charged_bytes(),
             "premat_queue_depth": self._queue_depth(),
+            "materialisation_element_bytes": self._dtype_bytes,
+            "foreground_activation_bytes": self._activation_bytes,
             "next_candidate": queue_head,
             "next_candidate_defer_reason": (
                 queue_head.get("admission_reason")
