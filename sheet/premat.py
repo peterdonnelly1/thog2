@@ -16,6 +16,12 @@ PREMAT_ATTENTION_MODES = ("fused", "unfused")
 PREMAT_TARGET_LAYERS = (0, 1, 2)
 PREMAT_WEIGHT_MATRIX_TARGET_ORDERS = ("l_to_r", "r_to_l")
 PREMAT_CUDA_STREAM_PRIORITIES = ("normal", "high")
+PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES = (
+    "disabled",
+    "cautious",
+    "normal",
+    "aggressive",
+)
 PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST = -(2 ** 31)
 PREMAT_DEFAULT_GPU_MEMORY_BUFFER_GB = 1.0
 PREMAT_TELEMETRY_VERSION = 3
@@ -28,6 +34,7 @@ def validate_premat_configuration(
     stay_below_current_peak: bool,
     stay_within_global_buffer: bool,
     gpu_memory_buffer_gb: float,
+    allocator_aware_admission: str,
     target_layer: int,
     weight_matrix_target_order: str,
     cuda_stream_priority: str,
@@ -42,6 +49,17 @@ def validate_premat_configuration(
         raise ValueError(
             f"premat_attention_mode must be one of {PREMAT_ATTENTION_MODES}; "
             f"got {attention_mode!r}"
+        )
+    if allocator_aware_admission not in PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES:
+        raise ValueError(
+            "premat_allocator_aware_admission must be one of "
+            f"{PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES}; "
+            f"got {allocator_aware_admission!r}"
+        )
+    if allocator_aware_admission in ("normal", "aggressive"):
+        raise ValueError(
+            "premat_allocator_aware_admission mode "
+            f"{allocator_aware_admission!r} is not implemented yet"
         )
     if isinstance(target_layer, bool) or target_layer not in PREMAT_TARGET_LAYERS:
         raise ValueError(
@@ -149,19 +167,16 @@ class AdmissionDecision:
     device_headroom_bytes: int
 
 
-def decide_candidate_admission(
+def _decide_candidate_admission_with_physical_growth(
     *,
     observation: PrematMemoryObservation,
     envelope: CandidateEnvelope,
     stay_below_current_peak: bool,
     gpu_memory_buffer_bytes: int,
+    physical_growth_bytes: int,
 ) -> AdmissionDecision:
     predicted_process = observation.process_allocated_bytes + envelope.process_envelope_bytes
-    # A CUDA allocator's reserved-but-unused total is not a promise that a
-    # suitably sized block is reusable, especially across streams.  Charge the
-    # complete envelope to physical device use so fragmentation cannot turn an
-    # admitted prefetch into an OOM.
-    physical_growth = envelope.process_envelope_bytes
+    physical_growth = max(0, int(physical_growth_bytes))
     predicted_device_used = observation.device_used_bytes + physical_growth
     device_ceiling = max(0, observation.device_total_bytes - gpu_memory_buffer_bytes)
     process_ok = (
@@ -194,6 +209,59 @@ def decide_candidate_admission(
             observation.device_free_bytes - gpu_memory_buffer_bytes,
         ),
     )
+
+
+def decide_candidate_admission(
+    *,
+    observation: PrematMemoryObservation,
+    envelope: CandidateEnvelope,
+    stay_below_current_peak: bool,
+    gpu_memory_buffer_bytes: int,
+) -> AdmissionDecision:
+    # A CUDA allocator's reserved-but-unused total is not a promise that a
+    # suitably sized block is reusable, especially across streams.  The
+    # ordinary path therefore charges the complete envelope to physical device
+    # use.  Optional allocator-aware admission may later rescue only a rejected
+    # device-headroom decision using stronger evidence about one reusable block.
+    return _decide_candidate_admission_with_physical_growth(
+        observation=observation,
+        envelope=envelope,
+        stay_below_current_peak=stay_below_current_peak,
+        gpu_memory_buffer_bytes=gpu_memory_buffer_bytes,
+        physical_growth_bytes=envelope.process_envelope_bytes,
+    )
+
+
+def _largest_same_stream_inactive_block_bytes(
+    snapshot: Sequence[Mapping[str, object]],
+    *,
+    stream_id: int,
+) -> int:
+    """Return the largest single inactive allocator block for one CUDA stream.
+
+    Cautious admission deliberately does not sum fragmented blocks.  A block
+    must individually cover the complete premat materialisation peak before we
+    claim that candidate-owned allocation need not grow physical device usage.
+    """
+    largest = 0
+    for segment in snapshot:
+        if not isinstance(segment, Mapping):
+            raise ValueError("CUDA allocator snapshot contains a non-mapping segment")
+        if int(segment.get("stream", -1)) != int(stream_id):
+            continue
+        blocks = segment.get("blocks")
+        if not isinstance(blocks, Sequence):
+            raise ValueError("CUDA allocator snapshot segment has no block sequence")
+        for block in blocks:
+            if not isinstance(block, Mapping):
+                raise ValueError("CUDA allocator snapshot contains a non-mapping block")
+            if block.get("state") != "inactive":
+                continue
+            size = block.get("size")
+            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                raise ValueError("CUDA allocator snapshot contains an invalid block size")
+            largest = max(largest, int(size))
+    return largest
 
 
 @dataclass
@@ -279,6 +347,7 @@ class PrematRuntime:
         attention_mode: str,
         stay_below_current_peak: bool,
         gpu_memory_buffer_gb: float,
+        allocator_aware_admission: str,
         target_layer: int,
         weight_matrix_target_order: str,
         cuda_stream_priority: str,
@@ -292,6 +361,7 @@ class PrematRuntime:
         self._attention_mode = attention_mode
         self._stay_below_current_peak = bool(stay_below_current_peak)
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
+        self._allocator_aware_admission = allocator_aware_admission
         self._target_layer = int(target_layer)
         self._weight_matrix_target_order = weight_matrix_target_order
         self._cuda_stream_priority = cuda_stream_priority
@@ -782,6 +852,7 @@ class PrematRuntime:
             "matrix_order": self._weight_matrix_target_order,
             "weight_matrix_target_order": self._weight_matrix_target_order,
             "cuda_stream_priority": self._cuda_stream_priority,
+            "allocator_aware_admission": self._allocator_aware_admission,
             "diagnostic_layer_delay_ms": self._diagnostic_layer_delay_ms,
             "headroom_mode": (
                 "stay_below_current_peak"
@@ -911,6 +982,88 @@ class PrematRuntime:
                     outcome="premat_complete",
                 )
 
+    def _cautious_allocator_aware_rescue(
+        self,
+        *,
+        observation: PrematMemoryObservation,
+        envelope: CandidateEnvelope,
+        original_decision: AdmissionDecision,
+    ) -> Tuple[AdmissionDecision, Dict[str, object]]:
+        detail: Dict[str, object] = {
+            "mode": "cautious",
+            "attempted": True,
+            "original_admitted": original_decision.admitted,
+            "original_reason": original_decision.reason,
+            "original_predicted_physical_growth_bytes": (
+                original_decision.predicted_physical_growth_bytes
+            ),
+            "predicted_envelope_bytes": envelope.process_envelope_bytes,
+            "premat_materialisation_peak_bytes": envelope.materialisation_peak_bytes,
+            "foreground_overlap_bytes": envelope.foreground_overlap_bytes,
+            "premat_stream_id": None,
+            "largest_eligible_inactive_block_bytes": 0,
+            "reuse_qualified": False,
+            "allocator_credit_bytes": 0,
+            "revised_predicted_physical_growth_bytes": (
+                original_decision.predicted_physical_growth_bytes
+            ),
+            "final_admitted": original_decision.admitted,
+            "final_reason": original_decision.reason,
+            "snapshot_error": None,
+        }
+        if self._stream is None:
+            detail["snapshot_error"] = "Premat Stream is not initialized"
+            return original_decision, detail
+
+        stream_id = int(self._stream.cuda_stream)
+        detail["premat_stream_id"] = stream_id
+        try:
+            allocator_backend = torch.cuda.get_allocator_backend()
+            detail["allocator_backend"] = allocator_backend
+            if allocator_backend != "native":
+                detail["snapshot_error"] = (
+                    "cautious allocator-aware admission requires the native CUDA allocator"
+                )
+                return original_decision, detail
+            snapshot = torch.cuda.memory_snapshot()
+            largest_inactive_block = _largest_same_stream_inactive_block_bytes(
+                snapshot,
+                stream_id=stream_id,
+            )
+        except Exception as error:
+            detail["snapshot_error"] = f"{type(error).__name__}: {error}"
+            return original_decision, detail
+
+        detail["largest_eligible_inactive_block_bytes"] = largest_inactive_block
+        reuse_qualified = largest_inactive_block >= envelope.materialisation_peak_bytes
+        detail["reuse_qualified"] = reuse_qualified
+        if not reuse_qualified:
+            return original_decision, detail
+
+        # The allocator evidence covers only candidate-owned materialisation.
+        # Keep the foreground Main Stream safety allowance fully charged as
+        # possible physical growth.  This preserves the existing protection for
+        # ordinary memory consumed between prematerialisation and its GEMM.
+        revised_physical_growth = envelope.foreground_overlap_bytes
+        revised_decision = _decide_candidate_admission_with_physical_growth(
+            observation=observation,
+            envelope=envelope,
+            stay_below_current_peak=self._stay_below_current_peak,
+            gpu_memory_buffer_bytes=self._buffer_bytes,
+            physical_growth_bytes=revised_physical_growth,
+        )
+        detail["allocator_credit_bytes"] = max(
+            0,
+            original_decision.predicted_physical_growth_bytes
+            - revised_decision.predicted_physical_growth_bytes,
+        )
+        detail["revised_predicted_physical_growth_bytes"] = (
+            revised_decision.predicted_physical_growth_bytes
+        )
+        detail["final_admitted"] = revised_decision.admitted
+        detail["final_reason"] = revised_decision.reason
+        return revised_decision, detail
+
     def _advance(self, *, trigger: str) -> None:
         """Queue every consecutively admissible candidate for the exact target."""
         self._refresh_available()
@@ -972,12 +1125,24 @@ class PrematRuntime:
             raw_observation = self._observe_memory()
             observation = self._observation_with_cumulative_charge(raw_observation)
             self._update_memory_aggregates(raw_observation)
-            decision = decide_candidate_admission(
+            original_decision = decide_candidate_admission(
                 observation=observation,
                 envelope=candidate.envelope,
                 stay_below_current_peak=self._stay_below_current_peak,
                 gpu_memory_buffer_bytes=self._buffer_bytes,
             )
+            decision = original_decision
+            allocator_aware_detail: Optional[Dict[str, object]] = None
+            if (
+                self._allocator_aware_admission == "cautious"
+                and not original_decision.admitted
+                and original_decision.reason == "global_device_buffer"
+            ):
+                decision, allocator_aware_detail = self._cautious_allocator_aware_rescue(
+                    observation=observation,
+                    envelope=candidate.envelope,
+                    original_decision=original_decision,
+                )
             candidate.admission_reason = decision.reason
             raw_memory = {
                 **asdict(raw_observation),
@@ -1008,6 +1173,8 @@ class PrematRuntime:
                 "raw_memory": raw_memory,
                 "charged_memory": charged_memory,
             }
+            if allocator_aware_detail is not None:
+                decision_detail["allocator_aware_admission"] = allocator_aware_detail
             if decision.admitted:
                 candidate.first_observed_admissible_ns = considered_ns
             self._record(
@@ -1718,4 +1885,3 @@ def plastic_memory_budget_gib(*, device: torch.device, gpu_memory_buffer_gb: flo
         raise RuntimeError("premat_gpu_memory_buffer_gb leaves no usable CUDA capacity")
     return usable_bytes / float(1024 ** 3)
 # ^^^ THOG
-
