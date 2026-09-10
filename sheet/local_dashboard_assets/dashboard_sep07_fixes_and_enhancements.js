@@ -222,8 +222,8 @@ window.addEventListener("load", () => {
       },
     });
     const table_column_order = Object.freeze([
-      "select", "visibility", "state", "duration", "name", "wandb", "host", "gpu",
-      "preset", "optimizer", "steps", "gb", "warmup", "layers", "depth_order", "parms", "equiv",
+      "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
+      "preset", "optimizer", "gb", "layers", "depth_order", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated", "menu",
@@ -231,9 +231,9 @@ window.addEventListener("load", () => {
     const table_column_widths = Object.freeze({
       select: 34, visibility: 34, state: 88, duration: 72, wandb: 0, host: 84, gpu: 42,
       preset: 64, optimizer: 70, steps: 62, gb: 52, warmup: 42, layers: 42, depth_order: 42,
-      parms: 58, equiv: 58, context: 46, d_model: 46, heads: 42, grad_accum: 46,
+      parms: 58, equiv: 58, context: 64, d_model: 64, heads: 42, grad_accum: 46,
       activation_checkpointing: 42, learning_rate: 42, min_learning_rate: 42,
-      probe_start: 50, probe_end: 50, curve_start: 50, curve_end: 50, capture_period: 50,
+      probe_start: 50, probe_end: 50, curve_start: 50, curve_end: 64, capture_period: 50,
       updated: 92, menu: 36,
     });
     const tag_column = (element, key) => {
@@ -443,6 +443,11 @@ window.addEventListener("load", () => {
         ensure_row_cell(row, run, "equiv", parms_cell);
         ensure_row_cell(row, run, "capture_period", curve_end_cell);
         tag_generated_columns(row);
+        const preset_cell = row.querySelector('[data-instra-column-key="preset"]');
+        preset_cell?.classList.toggle(
+          "instra-dense-preset",
+          String(preset_cell.textContent || "").trim().toLowerCase() === "dense",
+        );
         reorder_columns(row);
       }
       reorder_columns(header_row);
@@ -649,6 +654,11 @@ window.addEventListener("load", () => {
         position: relative; width: auto !important; min-width: 0 !important; max-width: none !important;
       }
       .runs-table [data-instra-column-key="wandb"] { display: none !important; }
+      .runs-table .instra-dense-preset { font-weight: 750 !important; }
+      .runs-table [data-instra-column-key="layers"],
+      .runs-table [data-instra-column-key="depth_order"] {
+        color: #7a1f3d !important; font-weight: 700;
+      }
       .local-metric-group[data-metric-group="memory"]:not(.maximized) > .local-metric-grid:not(.is-maximized) {
         display: grid !important;
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;

@@ -281,3 +281,16 @@ These CUDA items cannot run on the current host (`torch.cuda.is_available()` is 
 - [x] Pass Python, JavaScript, shell and whitespace validation; executable pytest is unavailable on this host.
 - [ ] On scruffy, compare matched 0 ms and delayed runs to distinguish insufficient lead time from another scheduler bottleneck.
 
+
+
+## 2026-09-10 Instra Premat history and presentation follow-up
+
+- [x] Add a centered Premat history control and a bounded all-step/all-layer outcome and memory view.
+- [x] Add run-artifact-named CSV export without adding full-history traffic to ordinary polling.
+- [x] Dock both the history and magnifying-glass Premat views inside the Premat tab.
+- [x] Move the magnifier left of the state-duration slider with visible separation.
+- [x] Preserve W&B wall/process-time axes while appending untimed train-log tail points as null-X values.
+- [x] Reorder, widen and restyle the requested Instra run-table columns and labels.
+- [x] Equalise Premat key spacing, darken key copy and use NOT YET REACHED grey for the partial-hit remainder.
+- [x] Add focused regression coverage and pass the available connector-safe static/direct checks.
+- [ ] On scruffy, verify time-axis selection against a live run, docked history/inspector layout, CSV filename/content, and narrow-window behaviour.

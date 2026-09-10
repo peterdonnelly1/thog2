@@ -268,3 +268,13 @@
 - Increased the left separation before the `OUTCOMES` key section from 28 px to 72 px.
 - Python compilation, JavaScript syntax, shell syntax and whitespace checks pass. This host has no pytest executable; CUDA acceptance remains the matched scruffy experiment.
 
+
+
+## 2026-09-10 - Instra Premat history and presentation follow-up
+
+- Added an explicitly requested, bounded all-step/all-layer Premat history matrix with per-layer full-hit, partial-hit, and complete-miss counts plus step memory margin/headroom. History is fetched only while its docked view is open; ordinary live playback remains latest-only and incremental.
+- Added CSV export named from the run artifact, centered the history control in the Premat title bar, moved the magnifier left of the state-duration slider, and converted both Premat detail views from floating dialogs to in-tab docked panels.
+- Restored W&B-provided wall-time and process-time chart axes when printed train-log tail points are appended. Tail-only points retain null timestamps and therefore do not fabricate timing data.
+- Reordered and restyled the Instra run table as requested: STEPS beside visibility, warmup after EQUIV, bold dense presets, wider C/D/C_e values, maroon L/P columns, and the shorter Delete run label.
+- Regularised Premat key spacing and contrast, and changed the uncompleted portion of PARTIAL HIT to the NOT YET REACHED background grey.
+- Added focused API/history reducer/CSV, time-axis preservation, table-order and presentation contract regressions. Python compilation, JavaScript execution/syntax, direct reducer/time-axis harnesses, and whitespace/conflict-marker validation pass in the connector workspace; scruffy remains the authoritative browser/CUDA acceptance host.

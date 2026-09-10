@@ -34,6 +34,11 @@ const premat_view = {
   cell_elements: new Map(),
   row_elements: new Map(),
   active_layer_index: null,
+  active_panel: "recap",
+  history_request_serial: 0,
+  history_latest_update: 0,
+  history_snapshots: [],
+  history_model: null,
 };
 
 function premat_escape(value) {
@@ -360,6 +365,65 @@ function premat_build_model(snapshot) {
   return {attention_mode, layers, families, records, frames};
 }
 
+function premat_history_model(snapshots) {
+  const complete = [...(snapshots || [])]
+    .filter(premat_snapshot_complete)
+    .sort((left, right) => Number(left.optimizer_update ?? 0) - Number(right.optimizer_update ?? 0));
+  const layers = [...new Set(complete.flatMap(premat_layer_indices))]
+    .sort((left, right) => left - right);
+  const rows = complete.map(snapshot => {
+    const model = premat_build_model(snapshot);
+    const outcomes = {};
+    for (const layer_index of layers) {
+      const counts = {full_hits: 0, partial_hits: 0, complete_misses: 0};
+      for (const family of model.families) {
+        const outcome = model.records.get(premat_candidate_key(layer_index, family))?.outcome;
+        if (outcome === "FULL HIT") counts.full_hits += 1;
+        else if (outcome === "PARTIAL HIT") counts.partial_hits += 1;
+        else if (outcome === "COMPLETE MISS") counts.complete_misses += 1;
+      }
+      outcomes[layer_index] = counts;
+    }
+    const memory = snapshot.memory || {};
+    const device_free = Number(memory.device_free_bytes);
+    const global_buffer = Number(memory.global_buffer_bytes);
+    const buffer_margin_bytes = Number.isFinite(device_free) && Number.isFinite(global_buffer)
+      ? device_free - global_buffer
+      : null;
+    const headroom = Number(memory.premat_headroom_bytes);
+    return {
+      optimizer_update: Number(snapshot.optimizer_update ?? 0),
+      buffer_margin_bytes,
+      headroom_bytes: Number.isFinite(headroom) ? headroom : null,
+      outcomes,
+    };
+  });
+  return {layers, rows};
+}
+
+function premat_history_csv(model) {
+  const quote = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const header = ["step", "buffer_margin_bytes", "headroom_bytes"];
+  for (const layer_index of model.layers) {
+    const layer = layer_index + 1;
+    header.push(
+      `layer_${layer}_full_hits`,
+      `layer_${layer}_partial_hits`,
+      `layer_${layer}_complete_misses`,
+    );
+  }
+  const lines = [header.map(quote).join(",")];
+  for (const row of model.rows) {
+    const values = [row.optimizer_update, row.buffer_margin_bytes, row.headroom_bytes];
+    for (const layer_index of model.layers) {
+      const counts = row.outcomes[layer_index] || {};
+      values.push(counts.full_hits ?? 0, counts.partial_hits ?? 0, counts.complete_misses ?? 0);
+    }
+    lines.push(values.map(value => value === null || value === undefined ? "" : String(value)).join(","));
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+
 function premat_state_class(state) {
   const classes = {
     neutral: "premat-neutral",
@@ -554,6 +618,87 @@ function premat_render_inspector(snapshot, model) {
   by_id("premat_inspect_button").disabled = false;
 }
 
+function premat_show_panel(panel_name) {
+  const panel = ["inspector", "history"].includes(panel_name) ? panel_name : "recap";
+  premat_view.active_panel = panel;
+  by_id("premat_recap_view").hidden = panel !== "recap";
+  by_id("premat_inspector").hidden = panel !== "inspector";
+  by_id("premat_history").hidden = panel !== "history";
+  by_id("premat_inspect_button")?.setAttribute("aria-pressed", String(panel === "inspector"));
+  by_id("premat_history_button")?.setAttribute("aria-pressed", String(panel === "history"));
+}
+
+function premat_render_history(snapshots) {
+  const model = premat_history_model(snapshots);
+  premat_view.history_model = model;
+  const header = [
+    "<tr><th>Step</th><th>Buffer margin</th><th>Headroom</th>",
+    ...model.layers.map(layer_index => `<th>Layer ${layer_index + 1}<br>F / P / M</th>`),
+    "</tr>",
+  ].join("");
+  const rows = model.rows.map(row => {
+    const layer_cells = model.layers.map(layer_index => {
+      const counts = row.outcomes[layer_index] || {};
+      const text = `F ${counts.full_hits ?? 0} · P ${counts.partial_hits ?? 0} · M ${counts.complete_misses ?? 0}`;
+      return `<td class="premat-history-outcomes" title="Layer ${layer_index + 1}: ${premat_escape(text)}">${premat_escape(text)}</td>`;
+    }).join("");
+    return `<tr><td>${row.optimizer_update}</td><td>${premat_escape(premat_bytes(row.buffer_margin_bytes))}</td><td>${premat_escape(premat_bytes(row.headroom_bytes))}</td>${layer_cells}</tr>`;
+  });
+  by_id("premat_history_head").innerHTML = header;
+  by_id("premat_history_body").innerHTML = rows.length
+    ? rows.join("")
+    : `<tr><td class="premat-history-empty" colspan="${Math.max(3, model.layers.length + 3)}">No retained Premat history for this run.</td></tr>`;
+  by_id("premat_history_detail").textContent = `${model.rows.length} retained steps · ${model.layers.length} layers`;
+  by_id("premat_history_download").disabled = model.rows.length === 0;
+}
+
+function premat_artifact_name() {
+  const run_id = String(app.current_run_id || "");
+  const run = (app.runs || []).find(candidate => {
+    const identifier = typeof run_identifier === "function"
+      ? run_identifier(candidate)
+      : (candidate.dashboard_run_id ?? candidate.local_run_id ?? candidate.id);
+    return String(identifier ?? "") === run_id;
+  });
+  return String(run?.artifact_name || run?.run_name || run_id || "premat");
+}
+
+function premat_download_history() {
+  if (!premat_view.history_model?.rows?.length) return;
+  const blob = new Blob(["\ufeff", premat_history_csv(premat_view.history_model)], {type: "text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const file_stem = premat_artifact_name().replace(/[^A-Za-z0-9._-]+/g, "_") || "premat";
+  link.href = url;
+  link.download = `${file_stem}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function premat_load_history(force = false) {
+  const run_id = app.current_run_id;
+  if (!run_id || premat_view.active_panel !== "history") return;
+  if (!force && premat_view.history_model && premat_view.history_latest_update >= premat_view.latest_received_update) {
+    premat_render_history(premat_view.history_snapshots);
+    return;
+  }
+  const serial = ++premat_view.history_request_serial;
+  by_id("premat_history_detail").textContent = "Loading retained steps…";
+  try {
+    const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}&history=1`);
+    if (serial !== premat_view.history_request_serial || run_id !== app.current_run_id) return;
+    premat_view.history_snapshots = Array.isArray(payload?.history) ? payload.history : [];
+    premat_view.history_latest_update = Number(payload?.latest_update ?? 0);
+    premat_render_history(premat_view.history_snapshots);
+  } catch (_error) {
+    if (serial !== premat_view.history_request_serial) return;
+    by_id("premat_history_detail").textContent = "Premat history unavailable";
+    by_id("premat_history_download").disabled = true;
+  }
+}
+
 function premat_start_snapshot(snapshot) {
   if (!premat_snapshot_complete(snapshot)) return;
   premat_clear_timer();
@@ -568,6 +713,7 @@ function premat_start_snapshot(snapshot) {
   premat_render_layout(model);
   premat_render_summary(snapshot, model);
   premat_render_inspector(snapshot, model);
+  by_id("premat_history_button").disabled = false;
   premat_advance_playback();
 }
 
@@ -624,11 +770,21 @@ function premat_reset() {
   premat_view.cell_elements.clear();
   premat_view.row_elements.clear();
   premat_view.active_layer_index = null;
+  premat_view.history_request_serial += 1;
+  premat_view.history_latest_update = 0;
+  premat_view.history_snapshots = [];
+  premat_view.history_model = null;
   by_id("premat_step").textContent = "—";
   by_id("premat_update").textContent = "No complete microstep";
   by_id("premat_summary").innerHTML = "";
   by_id("premat_layers").innerHTML = "";
+  by_id("premat_history_head").innerHTML = "";
+  by_id("premat_history_body").innerHTML = "";
+  by_id("premat_history_detail").textContent = "Loading retained steps…";
   by_id("premat_inspect_button").disabled = true;
+  by_id("premat_history_button").disabled = true;
+  by_id("premat_history_download").disabled = true;
+  premat_show_panel("recap");
 }
 
 function premat_sync_tab(premat_selected = null) {
@@ -662,7 +818,10 @@ async function refresh_premat() {
     const after = premat_view.latest_received_update;
     const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}&after=${after}`);
     if (serial !== premat_view.request_serial || run_id !== app.current_run_id) return;
-    if (payload?.latest) premat_receive_snapshot(payload.latest);
+    if (payload?.latest) {
+      premat_receive_snapshot(payload.latest);
+      if (premat_view.active_panel === "history") void premat_load_history();
+    }
   } catch (_error) {
     if (serial === premat_view.request_serial && !premat_view.active_snapshot) {
       by_id("premat_mode").textContent = "Premat telemetry unavailable";
@@ -688,11 +847,15 @@ window.addEventListener("DOMContentLoaded", () => {
   duration?.addEventListener("input", update_duration);
   by_id("premat_play_toggle")?.addEventListener("click", premat_toggle_playback);
   by_id("premat_inspect_button")?.addEventListener("click", () => {
-    const dialog = by_id("premat_inspector");
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.setAttribute("open", "");
+    if (premat_view.active_model) premat_show_panel("inspector");
   });
-  by_id("premat_inspector_close")?.addEventListener("click", () => by_id("premat_inspector").close());
+  by_id("premat_inspector_close")?.addEventListener("click", () => premat_show_panel("recap"));
+  by_id("premat_history_button")?.addEventListener("click", () => {
+    premat_show_panel("history");
+    void premat_load_history(true);
+  });
+  by_id("premat_history_close")?.addEventListener("click", () => premat_show_panel("recap"));
+  by_id("premat_history_download")?.addEventListener("click", premat_download_history);
   update_duration();
   premat_sync_play_button();
   premat_sync_tab();
@@ -705,6 +868,8 @@ if (typeof module !== "undefined" && module.exports) {
     premat_build_model,
     premat_families,
     premat_family_label,
+    premat_history_csv,
+    premat_history_model,
     premat_matrix_size,
     premat_memory_rule,
     premat_partial_hit_progress,

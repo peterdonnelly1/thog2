@@ -29,20 +29,41 @@ def test_first_point_partial_append_and_no_validation_contamination(tmp_path):
     assert reader.values["train"] == {10: 7.1234, 20: 6.9876}
 
 
-def test_exact_wandb_replaces_printed_values_and_disables_incomplete_time_axes(tmp_path):
+def test_exact_wandb_replaces_printed_values_and_preserves_time_axes(tmp_path):
     reader, *_ = reader_for(tmp_path, "T 10 loss=7.1234\nT 20 loss=6.9876\nT 30 loss=6.5432\n")
-    exact = {"name": "train", "revision": 4, "charts": [{"id": "train/loss", "series": [{
-        "name": "train/loss", "x": [10, 20], "y": [7.12345678, 6.98765432],
-        "x_variants": {"step": [10, 20], "relative_wall": [1, 2]}}]}]}
-    merged = reader.merge(exact)["charts"][0]["series"][0]
+    exact = {"name": "train", "revision": 4, "charts": [{
+        "id": "train/loss",
+        "default_x_axis_mode": "step",
+        "available_x_axis_modes": ["step", "relative_wall", "relative_process", "wall_time"],
+        "series": [{
+            "name": "train/loss",
+            "x": [10, 20],
+            "y": [7.12345678, 6.98765432],
+            "x_variants": {
+                "step": [10, 20],
+                "relative_wall": [1, 2],
+                "relative_process": [0.5, 1.5],
+                "wall_time": [100, 101],
+            },
+        }],
+    }]}
+    chart = reader.merge(exact)["charts"][0]
+    merged = chart["series"][0]
     assert merged["x"] == [10, 20, 30]
     assert merged["y"] == [7.12345678, 6.98765432, 6.5432]
     assert merged["point_sources"][-1] == "train.log (printed precision)"
     assert merged["x_variants"]["relative_wall"] == [1, 2, None]
-    assert merged["available_x_axis_modes"] == ["step"]
-    assert merged["default_x_axis_mode"] == "step"
+    assert merged["x_variants"]["relative_process"] == [0.5, 1.5, None]
+    assert merged["x_variants"]["wall_time"] == [100, 101, None]
+    assert chart["available_x_axis_modes"] == [
+        "step", "relative_wall", "relative_process", "wall_time",
+    ]
+    assert chart["default_x_axis_mode"] == "step"
     assert exact["charts"][0]["series"][0]["x"] == [10, 20]
-    exact["charts"][0]["series"][0].update(x=[10, 20, 30], y=[7.12345678, 6.98765432, 6.54321987])
+    exact["charts"][0]["series"][0].update(
+        x=[10, 20, 30],
+        y=[7.12345678, 6.98765432, 6.54321987],
+    )
     assert reader.merge(exact)["charts"][0]["series"][0]["y"][-1] == 6.54321987
 
 

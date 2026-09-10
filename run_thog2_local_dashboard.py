@@ -278,17 +278,28 @@ class RunDashboardState:
             "revision": revision,
         }
 
-    # vvv THOG the Premat player needs only the newest complete microstep; an
-    # incremental response avoids retransmitting its full trace every poll.
-    def premat(self, *, after_update: Optional[int] = None) -> Dict[str, Any]:
-        snapshot = self.reader.latest_premat_snapshot()
+    # vvv THOG normal playback is incremental; the docked history view requests
+    # the existing bounded snapshot set explicitly and never adds it to polling.
+    def premat(
+        self,
+        *,
+        after_update: Optional[int] = None,
+        include_history: bool = False,
+    ) -> Dict[str, Any]:
+        snapshots = self.reader.premat_snapshots() if include_history else ()
+        snapshot = (
+            snapshots[-1]
+            if snapshots
+            else self.reader.latest_premat_snapshot()
+        )
         latest_update = (
             None
             if snapshot is None
             else int(snapshot.get("optimizer_update", 0))
         )
         unchanged = (
-            latest_update is not None
+            not include_history
+            and latest_update is not None
             and after_update is not None
             and latest_update <= int(after_update)
         )
@@ -298,6 +309,7 @@ class RunDashboardState:
             "latest_update": latest_update,
             "unchanged": unchanged,
             "snapshot_count": int(status["premat_snapshot_count"]),
+            "history": list(snapshots) if include_history else None,
         }
     # ^^^ THOG
 
@@ -942,7 +954,11 @@ def _handler_for(catalog: DashboardCatalog):
                     else:
                         raw_after = query.get("after", [""])[0]
                         after_update = int(raw_after) if raw_after else None
-                        value = state.premat(after_update=after_update)
+                        include_history = query.get("history", ["0"])[0] == "1"
+                        value = state.premat(
+                            after_update=after_update,
+                            include_history=include_history,
+                        )
                     self._send_json(value)
                     return
                 self._send(

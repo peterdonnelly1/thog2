@@ -66,8 +66,8 @@ def test_feedback_table_layout_and_lockup_guards_are_present() -> None:
     assert order_source is not None
     order = json.loads(f"[{order_source.group(1).rstrip().rstrip(',')}]")
     assert order == [
-        "select", "visibility", "state", "duration", "name", "wandb", "host", "gpu",
-        "preset", "optimizer", "steps", "gb", "warmup", "layers", "depth_order", "parms", "equiv",
+        "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
+        "preset", "optimizer", "gb", "layers", "depth_order", "parms", "equiv", "warmup",
         "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
         "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
         "updated", "menu",
@@ -75,9 +75,17 @@ def test_feedback_table_layout_and_lockup_guards_are_present() -> None:
     assert "run-name-column-resizer" in source
     assert 'set_runs_pane_width((workspace_width - divider_width) / 2)' in source
     assert 'grid-template-columns: repeat(2, minmax(0, 1fr))' in source
+    assert "context: 64" in source
+    assert "d_model: 64" in source
+    assert "curve_end: 64" in source
+    assert "instra-dense-preset" in source
+    assert "color: #7a1f3d" in source
     assert "instra-just-now-flash" not in source
     assert "updated_text_by_run" not in source
     assert '.observe(runs_table, {childList: true, subtree: true})' not in source
     assert '.observe(chart_root, {childList: true, subtree: true})' not in source
     assert 'run-name-column-resizer[data-instra-owner="sep07-feedback"]' in legacy_source
+    index = (ROOT / "sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    assert "Delete local run" not in index
+    assert "Delete run…" in index
 # ^^^ THOG

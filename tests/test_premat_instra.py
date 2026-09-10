@@ -156,6 +156,23 @@ console.log(JSON.stringify({{
     return json.loads(completed.stdout)
 
 
+def _javascript_history(snapshots: list[dict]) -> dict:
+    asset = ASSET_ROOT / "dashboard_premat.js"
+    harness = f"""
+global.window = {{addEventListener() {{}}, innerHeight: 900}};
+const view = require({json.dumps(str(asset))});
+const model = view.premat_history_model({json.dumps(snapshots)});
+console.log(JSON.stringify({{model, csv: view.premat_history_csv(model)}}));
+"""
+    completed = subprocess.run(
+        ("node", "-e", harness),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
 def test_premat_snapshot_history_is_bounded_and_served_incrementally(tmp_path: Path) -> None:
     database = tmp_path / "charts.sqlite3"
     store = LocalChartStore(database, run_name="premat-test", config={"max_updates": 140})
@@ -175,6 +192,11 @@ def test_premat_snapshot_history_is_bounded_and_served_incrementally(tmp_path: P
         assert unchanged["latest"] is None
         assert unchanged["latest_update"] == 140
         assert unchanged["unchanged"] is True
+        history = state.premat(after_update=140, include_history=True)
+        assert history["unchanged"] is False
+        assert len(history["history"]) == 128
+        assert history["history"][0]["optimizer_update"] == 13
+        assert history["history"][-1]["optimizer_update"] == 140
     finally:
         store.close(final_state="finished")
 
@@ -229,6 +251,35 @@ def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
     assert waited_final["completion_at_deadline_percent"] == 75
 
 
+def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() -> None:
+    first = _playback_snapshot()
+    first["memory"] = {
+        "device_free_bytes": 3 * 1024**3,
+        "global_buffer_bytes": 1024**3,
+        "premat_headroom_bytes": 2 * 1024**3,
+    }
+    second = _snapshot(11)
+    second["memory"] = first["memory"]
+    rendered = _javascript_history([second, first])
+    model = rendered["model"]
+    assert model["layers"] == [0, 1]
+    assert [row["optimizer_update"] for row in model["rows"]] == [10, 11]
+    assert model["rows"][0]["buffer_margin_bytes"] == 2 * 1024**3
+    assert model["rows"][0]["headroom_bytes"] == 2 * 1024**3
+    assert model["rows"][0]["outcomes"]["0"] == {
+        "full_hits": 1,
+        "partial_hits": 1,
+        "complete_misses": 1,
+    }
+    assert model["rows"][0]["outcomes"]["1"] == {
+        "full_hits": 0,
+        "partial_hits": 0,
+        "complete_misses": 0,
+    }
+    assert "layer_1_full_hits" in rendered["csv"]
+    assert "2147483648,2147483648,1,1,1,0,0,0" in rendered["csv"]
+
+
 def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector() -> None:
     index = (ASSET_ROOT / "index.html").read_text(encoding="utf-8")
     normalized_index = index.replace("<br>", " ")
@@ -237,7 +288,8 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     for element_id in (
         "premat_step", "premat_play_toggle", "premat_state_duration",
         "premat_inspect_button", "premat_layers", "premat_inspector",
-        "premat_inspector_body",
+        "premat_inspector_body", "premat_history_button", "premat_history",
+        "premat_history_body", "premat_history_download",
     ):
         assert f'id="{element_id}"' in index
     assert "Premat Recapitulation - Step" in index
@@ -276,11 +328,10 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "&after=${after}" in javascript
     assert "--premat-partial-progress" in css
-    assert ".premat-key-outcomes" in css
-    assert ".premat-key-outcomes { margin-left: 72px; }" in css
+    assert "grid-template-columns: repeat(auto-fit, minmax(132px, 1fr))" in css
+    assert "color: #4b5563" in css
     assert ".premat-stage[data-premat-family] { color: #fff;" in css
-    assert "#4f8f68 var(--premat-partial-progress) 100%" in css
-    assert "#e2e7eb var(--premat-partial-progress) 100%" not in css
+    assert "#f7f9fa var(--premat-partial-progress) 100%" in css
     assert '"layer delay"' in javascript
     assert '"target"' in javascript
     assert '"matrix order"' in javascript
@@ -288,6 +339,11 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "Admission history" in index
     assert "Queue / charged" in index
     assert "PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5" in javascript
+    assert "<dialog" not in index
+    assert 'id="premat_recap_view"' in index
+    assert "history=1" in javascript
+    assert "link.download =" in javascript
+    assert ".premat-docked-panel" in css
     assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
 
