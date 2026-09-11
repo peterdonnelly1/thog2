@@ -1,0 +1,39 @@
+name: Temporary PREMAT certificate pool and history fix
+
+on:
+  push:
+    branches:
+      - THOG2_Dynamic_Prematerialisation_Enhancement
+    paths:
+      - .github/workflows/premat_certificate_pool_patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: THOG2_Dynamic_Prematerialisation_Enhancement
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply patch
+        run: python tmp_premat_certificate_pool_patch.py
+      - name: Install test dependencies
+        run: python -m pip install -q pytest torch matplotlib
+      - name: Run checks
+        run: |
+          python -m compileall -q sheet tests/test_premat_allocator_aware_admission.py tests/test_premat_history_immutability.py
+          git diff --check
+          python -m pytest -q tests/test_premat_allocator_aware_admission.py tests/test_premat_history_immutability.py
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sheet/premat.py sheet/local_chart_store.py tests/test_premat_allocator_aware_admission.py tests/test_premat_history_immutability.py
+          git commit -m "Track PREMAT allocator blocks and freeze history rows"
+          git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement
