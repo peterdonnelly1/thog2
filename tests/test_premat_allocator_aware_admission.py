@@ -11,6 +11,7 @@ from sheet.premat import (
     _conservative_certificate_charge_bytes,
     _inactive_allocator_bytes_from_stats,
     _largest_same_stream_inactive_block_bytes,
+    _same_stream_inactive_block_summary,
     decide_candidate_admission,
     validate_premat_configuration,
 )
@@ -310,3 +311,77 @@ def test_allocator_aware_mode_validation() -> None:
     for mode in ("normal", "aggressive"):
         with pytest.raises(ValueError, match="not implemented yet"):
             validate_premat_configuration(**_validation_kwargs(mode))
+
+
+
+def test_snapshot_summary_reports_multiple_compatible_blocks() -> None:
+    snapshot = [
+        {"device": 0, "stream": 11, "segment_type": "large", "blocks": [
+            {"state": "inactive", "size": 64 * MIB},
+            {"state": "inactive", "size": 32 * MIB},
+            {"state": "inactive", "size": 16 * MIB},
+            {"state": "inactive", "size": 4 * MIB},
+            {"state": "active_allocated", "size": 999 * MIB},
+        ]},
+        {"device": 0, "stream": 12, "segment_type": "large", "blocks": [
+            {"state": "inactive", "size": 800 * MIB},
+        ]},
+    ]
+    summary = _same_stream_inactive_block_summary(
+        snapshot, device_index=0, stream_id=11, request_bytes=8 * MIB
+    )
+    assert summary == {
+        "block_count": 4,
+        "sufficient_block_count": 3,
+        "total_bytes": 116 * MIB,
+        "largest_block_bytes": 64 * MIB,
+        "second_largest_block_bytes": 32 * MIB,
+        "third_largest_block_bytes": 16 * MIB,
+    }
+
+
+def test_advance_rejection_does_not_head_of_line_block_later_matrices(monkeypatch) -> None:
+    runtime = _runtime()
+    runtime._allocator_aware_admission = "disabled"
+    runtime._layer_indices = (0, 1)
+    runtime._position = 0
+    runtime._ensure_layer(1)
+    observation, _ = _blocked_case()
+    monkeypatch.setattr(runtime, "_refresh_available", lambda: None)
+    monkeypatch.setattr(runtime, "_observe_memory", lambda: observation)
+    monkeypatch.setattr(runtime, "_update_memory_aggregates", lambda _observation: None)
+    monkeypatch.setattr(runtime, "_record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runtime, "_record_advance_return", lambda **kwargs: None)
+    runtime._advance(trigger="test")
+    layer_candidates = [
+        candidate
+        for candidate in runtime._candidates.values()
+        if candidate.layer_index == 1
+    ]
+    assert len(layer_candidates) == 4
+    assert all(candidate.first_considered_ns is not None for candidate in layer_candidates)
+    assert runtime._aggregate["deferred"] == 4
+
+
+def test_cautious_detail_includes_pending_release_diagnostics(monkeypatch) -> None:
+    observation, envelope = _blocked_case()
+    original = _original_decision(observation, envelope)
+    runtime = _runtime()
+
+    class Pending:
+        retained_bytes = 8 * MIB
+        transient_bytes = 2 * MIB
+        allocator_certificate_charge_bytes = 16 * MIB
+
+    runtime._pending_releases = [Pending()]
+    monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda _device=None: _stats())
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", lambda: _snapshot())
+    _, detail = runtime._cautious_allocator_aware_rescue(
+        observation=observation,
+        envelope=envelope,
+        original_decision=original,
+    )
+    assert detail["pending_release_count"] == 1
+    assert detail["pending_release_bytes"] == 10 * MIB
+    assert detail["certificate_bytes_waiting_for_release"] == 16 * MIB
