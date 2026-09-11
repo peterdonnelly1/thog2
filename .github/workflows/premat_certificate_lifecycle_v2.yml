@@ -1,0 +1,57 @@
+name: Temporary Premat certificate lifecycle v2
+
+on:
+  push:
+    branches:
+      - THOG2_Dynamic_Prematerialisation_Enhancement
+    paths:
+      - .github/workflows/premat_certificate_lifecycle_v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: THOG2_Dynamic_Prematerialisation_Enhancement
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply corrected certificate lifecycle update
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow_path = Path('.github/workflows/premat_certificate_lifecycle.yml')
+          workflow = workflow_path.read_text()
+          needle = "def _conservative_certificate_charge_bytes(\\n'''"
+          replacement = "def _conservative_certificate_charge_bytes(request_bytes: int) -> int:\\n'''"
+          count = workflow.count(needle)
+          if count != 2:
+              raise RuntimeError(f'unexpected signature marker count: {count}')
+          workflow = workflow.replace(needle, replacement)
+          begin = workflow.index("          python - <<'PY'\n") + len("          python - <<'PY'\n")
+          end = workflow.index("\n          PY\n", begin)
+          script = textwrap.dedent(workflow[begin:end])
+          exec(compile(script, str(workflow_path), 'exec'), {'__name__': '__main__'})
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -q pytest torch matplotlib
+      - name: Run checks
+        run: |
+          python -m compileall -q sheet run_thog2_owt_core.py tests/test_premat_allocator_aware_admission.py
+          git diff --check
+          python -m pytest -q tests/test_premat_allocator_aware_admission.py
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sheet/premat.py tests/test_premat_allocator_aware_admission.py
+          git commit -m "Reuse Premat allocator certificate by live lifetime"
+          git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement
