@@ -153,6 +153,9 @@ class SheetGPTConfig:
     premat_allocator_aware_admission: str = "disabled"
     premat_cuda_stream_priority: str = "normal"
     premat_diagnostic_layer_delay_ms: float = 0.0
+    # vvv THOG expensive GPU timestamp diagnostics are opt-in and separate from PREMAT correctness events
+    premat_enable_gpu_timing_diagnostic: bool = False
+    # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     # ^^^ THOG
@@ -324,6 +327,7 @@ class SheetGPTConfig:
             allocator_aware_admission=self.premat_allocator_aware_admission,
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
+            enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -584,6 +588,7 @@ class SheetGPT(nn.Module):
                 allocator_aware_admission=config.premat_allocator_aware_admission,
                 cuda_stream_priority=config.premat_cuda_stream_priority,
                 diagnostic_layer_delay_ms=config.premat_diagnostic_layer_delay_ms,
+                enable_gpu_timing_diagnostic=config.premat_enable_gpu_timing_diagnostic,
                 logging_enabled=(
                     config.premat_logging == "enabled"
                     or config.premat_instra == "enabled"

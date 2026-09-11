@@ -170,6 +170,9 @@ PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=false
 PREMAT_GPU_MEMORY_BUFFER_GB="1.0"
 PREMAT_CUDA_STREAM_PRIORITY="normal"
 PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="0"
+# vvv THOG CUDA timestamp diagnostics are deliberately conspicuous and default-off
+PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC=false
+# ^^^ THOG
 PREMAT_LOGGING="disabled"
 PREMAT_INSTRA="disabled"
 FAST_DISCARD_EXPLICIT=false
@@ -299,13 +302,14 @@ PLASTIC DEPTH:
 Dynamic pre-materialisation:
   --premat enabled|disabled=${PREMAT}
   --premat_attention_mode fused|unfused=${PREMAT_ATTENTION_MODE}
-  --premat_target_layer 0|1|2=${PREMAT_TARGET_LAYER}
+  --premat_target_layer 0|1|2|10=${PREMAT_TARGET_LAYER}  10 means ordered +1 then +0
   --premat_weight_matrix_target_order l_to_r|r_to_l=${PREMAT_WEIGHT_MATRIX_TARGET_ORDER}
   --premat_headroom_stay_below_current_peak       default when neither headroom flag is supplied
   --premat_headroom_stay_within_global_buffer
   --premat_gpu_memory_buffer_gb VALUE=${PREMAT_GPU_MEMORY_BUFFER_GB}
   --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
   --premat_diagnostic_layer_delay_ms VALUE=${PREMAT_DIAGNOSTIC_LAYER_DELAY_MS}  diagnostic host-dispatch delay after each non-final layer
+  --premat_enable_gpu_timing_diagnostic true|false=${PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC}  CUDA timestamp/classification diagnostic; default false
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
 
@@ -499,7 +503,7 @@ while (( $# > 0 )); do
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
       shift
       ;;
-    --premat|--premat_attention_mode|--premat_target_layer|--premat_weight_matrix_target_order|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_logging|--premat_instra)
+    --premat|--premat_attention_mode|--premat_target_layer|--premat_weight_matrix_target_order|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_enable_gpu_timing_diagnostic|--premat_logging|--premat_instra)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --premat) PREMAT="$2" ;;
@@ -509,12 +513,13 @@ while (( $# > 0 )); do
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$2" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$2" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$2" ;;
+        --premat_enable_gpu_timing_diagnostic) PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC="$2" ;;
         --premat_logging) PREMAT_LOGGING="$2" ;;
         --premat_instra) PREMAT_INSTRA="$2" ;;
       esac
       shift 2
       ;;
-    --premat=*|--premat_attention_mode=*|--premat_target_layer=*|--premat_weight_matrix_target_order=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_logging=*|--premat_instra=*)
+    --premat=*|--premat_attention_mode=*|--premat_target_layer=*|--premat_weight_matrix_target_order=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_enable_gpu_timing_diagnostic=*|--premat_logging=*|--premat_instra=*)
       premat_name="${1%%=*}"; premat_value="${1#*=}"
       case "$premat_name" in
         --premat) PREMAT="$premat_value" ;;
@@ -524,6 +529,7 @@ while (( $# > 0 )); do
         --premat_gpu_memory_buffer_gb) PREMAT_GPU_MEMORY_BUFFER_GB="$premat_value" ;;
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$premat_value" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$premat_value" ;;
+        --premat_enable_gpu_timing_diagnostic) PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC="$premat_value" ;;
         --premat_logging) PREMAT_LOGGING="$premat_value" ;;
         --premat_instra) PREMAT_INSTRA="$premat_value" ;;
       esac
@@ -1007,7 +1013,7 @@ validate_positive_uint "$LAYER_DROPOUT_RESAMPLE_STEPS" "LAYER_DROPOUT_RESAMPLE_S
 # vvv THOG validate premat independently of PLASTIC and make its early-discard ownership explicit
 case "$PREMAT" in enabled|disabled) ;; *) echo "PREMAT must be enabled or disabled." >&2; exit 2 ;; esac
 case "$PREMAT_ATTENTION_MODE" in fused|unfused) ;; *) echo "PREMAT_ATTENTION_MODE must be fused or unfused." >&2; exit 2 ;; esac
-case "$PREMAT_TARGET_LAYER" in 0|1|2) ;; *) echo "PREMAT_TARGET_LAYER must be 0, 1 or 2." >&2; exit 2 ;; esac
+case "$PREMAT_TARGET_LAYER" in 0|1|2|10) ;; *) echo "PREMAT_TARGET_LAYER must be 0, 1, 2 or 10 (10 means +1 then +0)." >&2; exit 2 ;; esac
 case "$PREMAT_WEIGHT_MATRIX_TARGET_ORDER" in l_to_r|r_to_l) ;; *) echo "PREMAT_WEIGHT_MATRIX_TARGET_ORDER must be l_to_r or r_to_l." >&2; exit 2 ;; esac
 case "$PREMAT_CUDA_STREAM_PRIORITY" in normal|high) ;; *) echo "PREMAT_CUDA_STREAM_PRIORITY must be normal or high." >&2; exit 2 ;; esac
 case "$PREMAT_LOGGING" in enabled|disabled) ;; *) echo "PREMAT_LOGGING must be enabled or disabled." >&2; exit 2 ;; esac
@@ -1016,6 +1022,7 @@ validate_true_false "$PREMAT_HEADROOM_STAY_BELOW_CURRENT_PEAK" "PREMAT_HEADROOM_
 validate_true_false "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" "PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER"
 validate_nonnegative_number "$PREMAT_GPU_MEMORY_BUFFER_GB" "PREMAT_GPU_MEMORY_BUFFER_GB"
 validate_nonnegative_number "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS" "PREMAT_DIAGNOSTIC_LAYER_DELAY_MS"
+validate_true_false "$PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC" "PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC"
 if [[ "$PREMAT" == enabled ]]; then
   [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false && "$HYPERBLOCK" == false ]] || { echo "--premat enabled currently requires every selected preset to be DEPTH." >&2; exit 2; }
   if [[ "$FAST_DISCARD_EXPLICIT" == true ]]; then
@@ -1296,6 +1303,7 @@ run_grid_point() {
   optional_args+=(--premat_gpu_memory_buffer_gb "$PREMAT_GPU_MEMORY_BUFFER_GB")
   optional_args+=(--premat_cuda_stream_priority "$PREMAT_CUDA_STREAM_PRIORITY")
   optional_args+=(--premat_diagnostic_layer_delay_ms "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS")
+  optional_args+=(--premat_enable_gpu_timing_diagnostic "$PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC")
   optional_args+=(--premat_logging "$PREMAT_LOGGING")
   optional_args+=(--premat_instra "$PREMAT_INSTRA")
   # ^^^ THOG

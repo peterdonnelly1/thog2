@@ -39,6 +39,7 @@ def validate_premat_configuration(
     weight_matrix_target_order: str,
     cuda_stream_priority: str,
     diagnostic_layer_delay_ms: float,
+    enable_gpu_timing_diagnostic: bool = False,
     logging: str,
     instra: str,
 ) -> None:
@@ -101,6 +102,10 @@ def validate_premat_configuration(
         raise ValueError(
             "premat_diagnostic_layer_delay_ms must be finite and non-negative"
         )
+    # vvv THOG PREMAT CUDA timestamping is an explicit diagnostic, never a default execution cost
+    if not isinstance(enable_gpu_timing_diagnostic, bool):
+        raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
+    # ^^^ THOG
 
 
 class CandidateState(str, Enum):
@@ -469,6 +474,7 @@ class PrematRuntime:
         weight_matrix_target_order: str,
         cuda_stream_priority: str,
         diagnostic_layer_delay_ms: float,
+        enable_gpu_timing_diagnostic: bool = False,
         logging_enabled: bool,
     ) -> None:
         self._materialize = materialize
@@ -483,6 +489,11 @@ class PrematRuntime:
         self._weight_matrix_target_order = weight_matrix_target_order
         self._cuda_stream_priority = cuda_stream_priority
         self._diagnostic_layer_delay_ms = float(diagnostic_layer_delay_ms)
+        # vvv THOG keep correctness/synchronisation events but make timestamp diagnostics opt-in
+        if not isinstance(enable_gpu_timing_diagnostic, bool):
+            raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
+        self._enable_gpu_timing_diagnostic = enable_gpu_timing_diagnostic
+        # ^^^ THOG
         self._logging_enabled = bool(logging_enabled)
         self._stream: Optional[torch.cuda.Stream] = None
         self._device: Optional[torch.device] = None
@@ -813,38 +824,63 @@ class PrematRuntime:
         elif candidate.state == CandidateState.MATERIALISING:
             if candidate.completion_event is None:
                 raise RuntimeError(f"materialising candidate {key} has no completion event")
-            wait_start = torch.cuda.Event(enable_timing=True)
-            wait_end = torch.cuda.Event(enable_timing=True)
-            wait_start.record(current_stream)
-            current_stream.wait_event(candidate.completion_event)
-            wait_end.record(current_stream)
-            # Host submission has reached the dependency, but this does NOT tell
-            # us whether the GPU Main Stream will actually wait there. Keep the
-            # result provisional until CUDA has timestamped both streams.
-            candidate.critical_path_miss = False
-            candidate.final_outcome = "PENDING"
-            # candidate.tensor remains strongly referenced through consumed().
-            wait_payload = self._transition(
-                candidate,
-                CandidateState.CONSUMING,
-                "critical_path_wait",
-                outcome="gpu_wait_pending",
-                reason="classification_pending_until_main_stream_dependency",
-                detail={"gpu_wait_classification_pending": True},
-            )
-            self._pending_timings.append(
-                _PendingCudaTiming(
-                    kind="main_stream_wait",
-                    start_event=wait_start,
-                    end_event=wait_end,
-                    event_payload=wait_payload,
-                    pass_sequence=self._pass_sequence,
-                    layer_index=candidate.layer_index,
-                    family=candidate.family,
-                    dependency_event=candidate.completion_event,
-                    candidate=candidate,
+            # vvv THOG the Main Stream dependency is required; timestamp/classification events are diagnostic only
+            if self._enable_gpu_timing_diagnostic:
+                wait_start = torch.cuda.Event(enable_timing=True)
+                wait_end = torch.cuda.Event(enable_timing=True)
+                wait_start.record(current_stream)
+                current_stream.wait_event(candidate.completion_event)
+                wait_end.record(current_stream)
+                # Host submission has reached the dependency, but this does NOT tell
+                # us whether the GPU Main Stream will actually wait there. Keep the
+                # result provisional until CUDA has timestamped both streams.
+                candidate.critical_path_miss = False
+                candidate.final_outcome = "PENDING"
+                wait_payload = self._transition(
+                    candidate,
+                    CandidateState.CONSUMING,
+                    "critical_path_wait",
+                    outcome="gpu_wait_pending",
+                    reason="classification_pending_until_main_stream_dependency",
+                    detail={
+                        "gpu_wait_classification_pending": True,
+                        "gpu_timing_diagnostic_enabled": True,
+                    },
                 )
-            )
+                self._pending_timings.append(
+                    _PendingCudaTiming(
+                        kind="main_stream_wait",
+                        start_event=wait_start,
+                        end_event=wait_end,
+                        event_payload=wait_payload,
+                        pass_sequence=self._pass_sequence,
+                        layer_index=candidate.layer_index,
+                        family=candidate.family,
+                        dependency_event=candidate.completion_event,
+                        candidate=candidate,
+                    )
+                )
+            else:
+                current_stream.wait_event(candidate.completion_event)
+                # Without GPU timestamps, MATERIALISING at host submission is only
+                # a conservative host-observed partial classification.  This is
+                # telemetry only and does not alter the dependency or materialisation.
+                candidate.critical_path_miss = True
+                candidate.final_outcome = "PARTIAL HIT"
+                self._aggregate["waited_hits"] += 1
+                self._transition(
+                    candidate,
+                    CandidateState.CONSUMING,
+                    "critical_path_wait",
+                    outcome="host_observed_materialising",
+                    reason="gpu_timing_diagnostic_disabled",
+                    detail={
+                        "gpu_wait_classification_pending": False,
+                        "gpu_timing_diagnostic_enabled": False,
+                    },
+                )
+            # candidate.tensor remains strongly referenced through consumed().
+            # ^^^ THOG
         elif candidate.state == CandidateState.UNAVAILABLE:
             candidate.owner = "main"
             candidate.critical_path_miss = True
@@ -858,9 +894,20 @@ class PrematRuntime:
                 outcome="ordinary_deadline_materialisation",
                 reason="unavailable_at_deadline",
             )
-            materialise_start = torch.cuda.Event(enable_timing=True)
-            materialise_end = torch.cuda.Event(enable_timing=True)
-            materialise_start.record(current_stream)
+            # vvv THOG main-stream fallback timestamps are diagnostic; fallback materialisation itself is unchanged
+            materialise_start = (
+                torch.cuda.Event(enable_timing=True)
+                if self._enable_gpu_timing_diagnostic
+                else None
+            )
+            materialise_end = (
+                torch.cuda.Event(enable_timing=True)
+                if self._enable_gpu_timing_diagnostic
+                else None
+            )
+            if materialise_start is not None:
+                materialise_start.record(current_stream)
+            # ^^^ THOG
             try:
                 # The admission miss is the ordinary critical-path operation.
                 # Keep its native autograd graph instead of routing it through
@@ -879,19 +926,22 @@ class PrematRuntime:
                     f"layer={candidate.layer_index}, family={candidate.family}, "
                     f"mode={self._attention_mode}, memory={self._memory_summary()}"
                 ) from error
-            materialise_end.record(current_stream)
-            self._pending_timings.append(
-                _PendingCudaTiming(
-                    kind="main_stream_materialisation",
-                    start_event=materialise_start,
-                    end_event=materialise_end,
-                    event_payload=fallback_payload,
-                    pass_sequence=self._pass_sequence,
-                    layer_index=candidate.layer_index,
-                    family=candidate.family,
-                    candidate=candidate,
+            # vvv THOG retain no CUDA timing objects when the diagnostic is disabled
+            if materialise_start is not None and materialise_end is not None:
+                materialise_end.record(current_stream)
+                self._pending_timings.append(
+                    _PendingCudaTiming(
+                        kind="main_stream_materialisation",
+                        start_event=materialise_start,
+                        end_event=materialise_end,
+                        event_payload=fallback_payload,
+                        pass_sequence=self._pass_sequence,
+                        layer_index=candidate.layer_index,
+                        family=candidate.family,
+                        candidate=candidate,
+                    )
                 )
-            )
+            # ^^^ THOG
             candidate.available_ns = time.perf_counter_ns()
             self._transition(
                 candidate,
@@ -1037,6 +1087,9 @@ class PrematRuntime:
             "cuda_stream_priority": self._cuda_stream_priority,
             "allocator_aware_admission": self._allocator_aware_admission,
             "diagnostic_layer_delay_ms": self._diagnostic_layer_delay_ms,
+            # vvv THOG expose whether expensive CUDA timestamp diagnostics are part of this run
+            "enable_gpu_timing_diagnostic": self._enable_gpu_timing_diagnostic,
+            # ^^^ THOG
             "headroom_mode": (
                 "stay_below_current_peak"
                 if self._stay_below_current_peak
@@ -1850,11 +1903,18 @@ class PrematRuntime:
             self._stream.wait_stream(current_stream)
             try:
                 with torch.cuda.stream(self._stream):
-                    candidate.materialisation_start_event = torch.cuda.Event(
-                        enable_timing=True
+                    # vvv THOG completion is required for dependency/query semantics; the start timestamp is diagnostic only
+                    candidate.materialisation_start_event = (
+                        torch.cuda.Event(enable_timing=True)
+                        if self._enable_gpu_timing_diagnostic
+                        else None
                     )
-                    candidate.completion_event = torch.cuda.Event(enable_timing=True)
-                    candidate.materialisation_start_event.record(self._stream)
+                    candidate.completion_event = torch.cuda.Event(
+                        enable_timing=self._enable_gpu_timing_diagnostic
+                    )
+                    if candidate.materialisation_start_event is not None:
+                        candidate.materialisation_start_event.record(self._stream)
+                    # ^^^ THOG
                     # Autocast caches lower-precision casts of FP32 parameter
                     # leaves for the enclosing forward.  A cast produced here
                     # belongs to the Premat Stream and, under PyTorch 2.8
@@ -1932,18 +1992,25 @@ class PrematRuntime:
                 reason=decision.reason,
                 detail=launch_detail,
             )
-            self._pending_timings.append(
-                _PendingCudaTiming(
-                    kind="premat_materialisation",
-                    start_event=candidate.materialisation_start_event,
-                    end_event=candidate.completion_event,
-                    event_payload=launch_payload,
-                    pass_sequence=self._pass_sequence,
-                    layer_index=candidate.layer_index,
-                    family=candidate.family,
-                    candidate=candidate,
+            # vvv THOG no materialisation timestamp bookkeeping exists in normal/default PREMAT execution
+            if (
+                self._enable_gpu_timing_diagnostic
+                and candidate.materialisation_start_event is not None
+                and candidate.completion_event is not None
+            ):
+                self._pending_timings.append(
+                    _PendingCudaTiming(
+                        kind="premat_materialisation",
+                        start_event=candidate.materialisation_start_event,
+                        end_event=candidate.completion_event,
+                        event_payload=launch_payload,
+                        pass_sequence=self._pass_sequence,
+                        layer_index=candidate.layer_index,
+                        family=candidate.family,
+                        candidate=candidate,
+                    )
                 )
-            )
+            # ^^^ THOG
             self._update_queue_aggregates()
             submitted.append(
                 {

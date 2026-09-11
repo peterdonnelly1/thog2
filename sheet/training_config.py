@@ -68,7 +68,7 @@ from .premat import validate_premat_configuration
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips"}
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
@@ -300,6 +300,9 @@ class TrainingConfig:
     premat_allocator_aware_admission: str = "disabled"
     premat_cuda_stream_priority: str = "normal"
     premat_diagnostic_layer_delay_ms: float = 0.0
+    # vvv THOG diagnostic timestamps default off so ordinary PREMAT carries no measurement cost
+    premat_enable_gpu_timing_diagnostic: bool = False
+    # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
     premat_retain_detailed_premat_history: bool = False
@@ -569,6 +572,8 @@ class TrainingConfig:
             self.premat_weight_matrix_target_order = "r_to_l"
         if not isinstance(self.premat_retain_detailed_premat_history, bool):
             raise ValueError("premat_retain_detailed_premat_history must be bool")
+        if not isinstance(self.premat_enable_gpu_timing_diagnostic, bool):
+            raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -580,6 +585,7 @@ class TrainingConfig:
             allocator_aware_admission=self.premat_allocator_aware_admission,
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
+            enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -979,6 +985,10 @@ class TrainingConfig:
                 values.pop(name, None)
         if not self.premat_retain_detailed_premat_history:
             values.pop("premat_retain_detailed_premat_history", None)
+        # vvv THOG default-off diagnostic does not perturb established checkpoint identity
+        if not self.premat_enable_gpu_timing_diagnostic:
+            values.pop("premat_enable_gpu_timing_diagnostic", None)
+        # ^^^ THOG
         return values
     # ^^^ THOG
 
@@ -1049,6 +1059,7 @@ class TrainingConfig:
                     "premat_allocator_aware_admission": self.premat_allocator_aware_admission,
                     "premat_cuda_stream_priority": self.premat_cuda_stream_priority,
                     "premat_diagnostic_layer_delay_ms": float(self.premat_diagnostic_layer_delay_ms),
+                    "premat_enable_gpu_timing_diagnostic": self.premat_enable_gpu_timing_diagnostic,
                     "premat_logging": self.premat_logging,
                     "premat_instra": self.premat_instra,
                     # ^^^ THOG

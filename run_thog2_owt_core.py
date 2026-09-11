@@ -339,6 +339,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--premat_allocator_aware_admission", choices=("disabled", "cautious", "normal", "aggressive"), default="disabled")
     parser.add_argument("--premat_cuda_stream_priority", choices=("normal", "high"), default="normal")
     parser.add_argument("--premat_diagnostic_layer_delay_ms", type=float, default=0.0)
+    # vvv THOG expensive CUDA timestamp/classification diagnostic is explicit and default-off
+    parser.add_argument(
+        "--premat_enable_gpu_timing_diagnostic",
+        type=_true_false,
+        default=False,
+        metavar="true|false",
+        help="enable PREMAT CUDA timestamp/classification diagnostics; default false",
+    )
+    # ^^^ THOG
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_retain_detailed_premat_history", type=_true_false, default=False, metavar="true|false")
@@ -747,6 +756,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_allocator_aware_admission=arguments.premat_allocator_aware_admission,
         premat_cuda_stream_priority=arguments.premat_cuda_stream_priority,
         premat_diagnostic_layer_delay_ms=arguments.premat_diagnostic_layer_delay_ms,
+        premat_enable_gpu_timing_diagnostic=arguments.premat_enable_gpu_timing_diagnostic,
         premat_logging=arguments.premat_logging,
         premat_instra=arguments.premat_instra,
         premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
@@ -972,6 +982,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
             f"premat_cuda_stream_priority={config.premat_cuda_stream_priority} "
             f"premat_diagnostic_layer_delay_ms={config.premat_diagnostic_layer_delay_ms:g} "
+            f"premat_enable_gpu_timing_diagnostic={str(config.premat_enable_gpu_timing_diagnostic).lower()} "
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
@@ -1033,7 +1044,7 @@ def main() -> int:
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
     if config.run_mode == "resume":
-        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "max_wall_minutes": training_config.max_wall_minutes, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips})
+        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "max_wall_minutes": training_config.max_wall_minutes, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips, "premat_enable_gpu_timing_diagnostic": training_config.premat_enable_gpu_timing_diagnostic})
     else:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)

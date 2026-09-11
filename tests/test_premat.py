@@ -127,6 +127,7 @@ def _runtime(
     diagnostic_layer_delay_ms: float = 0.0,
     reference_element_bytes: int = 2,
     attach=None,
+    enable_gpu_timing_diagnostic: bool = True,
 ):
     fake_cuda = _FakeCuda()
     fake_cuda.install(monkeypatch)
@@ -148,6 +149,7 @@ def _runtime(
         gpu_memory_buffer_gb=0.0,
         cuda_stream_priority=cuda_stream_priority,
         diagnostic_layer_delay_ms=diagnostic_layer_delay_ms,
+        enable_gpu_timing_diagnostic=enable_gpu_timing_diagnostic,
         logging_enabled=True,
     )
     runtime.begin(
@@ -271,7 +273,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_thirteen_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_fourteen_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -290,6 +292,7 @@ def test_public_cli_exposes_exactly_the_thirteen_premat_options() -> None:
         "--premat_gpu_memory_buffer_gb",
         "--premat_cuda_stream_priority",
         "--premat_diagnostic_layer_delay_ms",
+        "--premat_enable_gpu_timing_diagnostic",
         "--premat_logging",
         "--premat_instra",
         "--premat_retain_detailed_premat_history",
@@ -698,6 +701,53 @@ def test_gpu_wait_classification_survives_disabled_premat_logging(monkeypatch) -
     assert runtime._aggregate["fully_hidden_hits"] == 1
     assert runtime._aggregate["waited_hits"] == 0
     assert runtime._aggregate["main_stream_wait_ms_total"] == pytest.approx(0.0)
+# ^^^ THOG
+
+
+# vvv THOG PREMAT GPU timing is a default-off diagnostic rather than ordinary scheduler work
+def test_gpu_timing_diagnostic_cli_defaults_false_and_accepts_explicit_true() -> None:
+    parser = build_parser()
+    default_arguments = parser.parse_args(["--model-type", "sheet"])
+    assert default_arguments.premat_enable_gpu_timing_diagnostic is False
+
+    enabled_arguments = parser.parse_args([
+        "--model-type",
+        "sheet",
+        "--premat_enable_gpu_timing_diagnostic",
+        "true",
+    ])
+    enabled_config = config_from_arguments(enabled_arguments)
+    assert enabled_config.premat_enable_gpu_timing_diagnostic is True
+    assert enabled_config.to_training_config(
+        vocab_size=32,
+        world_size=1,
+        out_dir=Path("out-test"),
+    ).premat_enable_gpu_timing_diagnostic is True
+
+
+def test_gpu_timing_diagnostic_disabled_keeps_dependency_without_timestamp_events(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        enable_gpu_timing_diagnostic=False,
+    )
+    runtime.layer_start(3)
+    first_candidate = runtime._candidates[(5, "DOWN")]
+    assert first_candidate.materialisation_start_event is None
+    assert first_candidate.completion_event is not None
+    assert first_candidate.completion_event.enable_timing is False
+    assert runtime._pending_timings == []
+
+    runtime.layer_start(5)
+    runtime.acquire("DOWN", 5)
+    candidate = runtime._candidates[(5, "DOWN")]
+    assert len(fake_cuda.main_stream.waited_events) == 1
+    assert runtime._pending_timings == []
+    assert candidate.final_outcome == "PARTIAL HIT"
+    assert runtime._aggregate["waited_hits"] == 1
+    assert runtime._aggregate["main_stream_wait_ms_total"] == pytest.approx(0.0)
+    assert runtime.report()["enable_gpu_timing_diagnostic"] is False
+    assert calls.count(("DOWN", 5)) == 1
 # ^^^ THOG
 
 
