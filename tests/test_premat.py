@@ -8,7 +8,7 @@ import warnings
 import pytest
 import torch
 
-from run_thog2_owt_core import build_parser
+from run_thog2_owt_core import build_parser, config_from_arguments
 from sheet.model import SheetGPT, SheetGPTConfig
 from sheet.run_config import OwtRunConfig
 from sheet.training_model import TrainingSheetGPT
@@ -268,7 +268,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_eleven_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_thirteen_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -278,6 +278,7 @@ def test_public_cli_exposes_exactly_the_eleven_premat_options() -> None:
     }
     assert option_strings == {
         "--premat",
+        "--premat_allocator_aware_admission",
         "--premat_attention_mode",
         "--premat_target_layer",
         "--premat_weight_matrix_target_order",
@@ -288,6 +289,7 @@ def test_public_cli_exposes_exactly_the_eleven_premat_options() -> None:
         "--premat_diagnostic_layer_delay_ms",
         "--premat_logging",
         "--premat_instra",
+        "--premat_retain_detailed_premat_history",
     }
 
 
@@ -621,7 +623,7 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
     weight = runtime.acquire("DOWN", 5)
     assert calls.count(("DOWN", 5)) == 1
     assert calls[:4] == first_target_calls
-    assert weight.recorded_streams[-1] is fake_cuda.main_stream
+    assert weight.recorded_streams[-1] is runtime._stream
     assert len(fake_cuda.main_stream.waited_events) == 1
     candidate = runtime._candidates[(5, "DOWN")]
     assert candidate.owner == "premat"
@@ -698,7 +700,7 @@ def test_strict_head_defer_does_not_bypass_and_window_never_contains_l_plus_2(mo
     assert all(candidate["owner"] == "none" for candidate in report["candidates"])
 
 
-def test_cumulative_charge_blocks_second_candidate_without_bypass(monkeypatch) -> None:
+def test_cumulative_charge_blocks_unaffordable_candidates_without_head_of_line_blocking(monkeypatch) -> None:
     runtime, fake_cuda, calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
@@ -707,17 +709,18 @@ def test_cumulative_charge_blocks_second_candidate_without_bypass(monkeypatch) -
     fake_cuda.total = 1_400
     runtime.layer_start(3)
 
-    assert calls == [("DOWN", 5)]
+    # DOWN fits, UP is blocked, O still gets its own admission test and fits,
+    # while QKV remains blocked. A blocked matrix must not head-of-line block
+    # a later independently affordable candidate.
+    assert calls == [("DOWN", 5), ("O", 5)]
     report = runtime.report()
-    assert report["queue_head"]["family"] == "DOWN"
-    assert report["memory"]["premat_cumulative_charged_bytes"] == 512
-    assert any(
-        event.get("event") == "advance_return"
-        and event.get("detail", {}).get("blocking_candidate", {}).get("family") == "UP"
-        and event.get("detail", {}).get("submitted_count") == 1
-        and event.get("detail", {}).get("cumulative_charged_bytes") == 512
+    deferred_families = {
+        event.get("family")
         for event in report["events"]
-    )
+        if event.get("event") == "admission_deferred"
+    }
+    assert {"UP", "QKV"} <= deferred_families
+    assert report["memory"]["premat_cumulative_charged_bytes"] > 512
 
 
 def test_lifecycle_rejects_illegal_transition(monkeypatch) -> None:
@@ -1093,3 +1096,113 @@ def test_cuda_premat_forward_backward_matches_same_mode_disabled(
     assert report["aggregate"]["admitted"] > 0
 # ^^^ THOG
 
+
+
+# vvv THOG target 10 and recap-only Instra history regression coverage
+
+def test_target_layer_10_sweeps_next_then_current_right_to_left(monkeypatch) -> None:
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        target_layer=10,
+        weight_matrix_target_order="r_to_l",
+    )
+    runtime.layer_start(3)
+    assert calls == [
+        ("DOWN", 5), ("UP", 5), ("O", 5), ("QKV", 5),
+        ("DOWN", 3), ("UP", 3), ("O", 3), ("QKV", 3),
+    ]
+    report = runtime.report()
+    assert report["target_layer"] == 10
+    assert report["lookahead_layer_limit"] == 1
+    assert report["target_scope"] == "relative_layer_1_then_0"
+    materialising_offsets = [
+        event["target_offset"]
+        for event in report["events"]
+        if event.get("event") == "materialising"
+    ]
+    assert materialising_offsets[:4] == [1, 1, 1, 1]
+    assert materialising_offsets[4:8] == [0, 0, 0, 0]
+
+
+def test_target_layer_10_forces_r_to_l_in_run_config() -> None:
+    config = OwtRunConfig(
+        model_type="sheet",
+        premat="enabled",
+        premat_target_layer=10,
+        premat_weight_matrix_target_order="l_to_r",
+        device="cuda",
+    )
+    assert config.premat_weight_matrix_target_order == "r_to_l"
+    canonical = config.canonical_dict(world_size=1)
+    assert canonical["premat_lookahead_layer_limit"] == 1
+    assert canonical["premat_target_scope"] == "relative_layer_1_then_0"
+
+
+def test_target_layer_10_cli_warns_in_bright_orange_and_overrides(capsys) -> None:
+    arguments = build_parser().parse_args([
+        "--model-type", "sheet",
+        "--premat", "enabled",
+        "--premat_target_layer", "10",
+        "--premat_weight_matrix_target_order", "l_to_r",
+    ])
+    config = config_from_arguments(arguments)
+    captured = capsys.readouterr().out
+    assert "\x1b[1;38;5;208m" in captured
+    assert "overriding" in captured
+    assert config.premat_weight_matrix_target_order == "r_to_l"
+
+
+def test_premat_retain_detailed_history_cli_defaults_false_and_accepts_true() -> None:
+    parser = build_parser()
+    assert parser.parse_args([]).premat_retain_detailed_premat_history is False
+    assert parser.parse_args([
+        "--premat_retain_detailed_premat_history", "true"
+    ]).premat_retain_detailed_premat_history is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--premat_retain_detailed_premat_history", "maybe"])
+
+
+def test_compact_premat_storage_retains_recap_transitions_only() -> None:
+    from sheet.wandb_telemetry import _premat_snapshot_for_storage
+
+    snapshot = {
+        "pass_complete": True,
+        "events": [
+            {"sequence": 1, "event": "admission_considered", "family": "DOWN", "layer_index": 1, "detail": {"huge": "payload"}},
+            {"sequence": 2, "event": "materialising", "family": "DOWN", "layer_index": 1, "owner": "premat", "new_state": "MATERIALISING", "detail": {"huge": "payload"}},
+            {"sequence": 3, "event": "consuming", "family": "DOWN", "layer_index": 1, "owner": "premat", "new_state": "CONSUMING"},
+            {"sequence": 4, "event": "consumed", "family": "DOWN", "layer_index": 1, "owner": "premat", "new_state": "CONSUMED"},
+            {"sequence": 5, "event": "pass_end"},
+        ],
+        "candidates": [{"large": "candidate payload"}],
+        "memory": {"device_free_bytes": 1},
+    }
+    compact = _premat_snapshot_for_storage(snapshot, retain_detailed_history=False)
+    assert compact["detailed_history_retained"] is False
+    assert compact["history_detail_level"] == "recap_only"
+    assert "candidates" not in compact
+    assert [event["event"] for event in compact["events"]] == [
+        "materialising", "consuming", "consumed", "pass_end"
+    ]
+    assert all("detail" not in event for event in compact["events"])
+    detailed = _premat_snapshot_for_storage(snapshot, retain_detailed_history=True)
+    assert detailed["detailed_history_retained"] is True
+    assert len(detailed["events"]) == 5
+
+
+def test_premat_instra_source_contains_requested_interactions() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    javascript = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
+    assert 'min="1" max="1000" step="1"' in html
+    assert "FULL SUCCESS" in html and "PART SUCCESS" in html
+    assert "MAIN STREAM CONSUMING" in html
+    assert "MAIN STREAM MATERIALISING" in html
+    assert "CONSUMING - NO WAIT" in html
+    assert "OUT OF SCOPE" not in html
+    assert "NOT YET REACHED</span><span" not in html
+    assert "showSaveFilePicker" in javascript
+    assert 'event.key === "Escape"' in javascript
+    assert 'premat-tab-active' in javascript
+    assert 'detailed_history_retained' in javascript
+# ^^^ THOG

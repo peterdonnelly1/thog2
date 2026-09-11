@@ -302,6 +302,7 @@ class TrainingConfig:
     premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
+    premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls; disabled is the exact established path
     chaos_bump__sampling__enabled: bool = False
@@ -564,6 +565,10 @@ class TrainingConfig:
                 f"got {self.plastic__layer_count_cost_weight!r}"
             )
         # vvv THOG the global reserve replaces the fixed PLASTIC memory budget and configures premat even while scheduling is disabled
+        if self.premat_target_layer == 10:
+            self.premat_weight_matrix_target_order = "r_to_l"
+        if not isinstance(self.premat_retain_detailed_premat_history, bool):
+            raise ValueError("premat_retain_detailed_premat_history must be bool")
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -972,6 +977,8 @@ class TrainingConfig:
         if not self.plastic__enabled:
             for name in PLASTIC_TRAINING_CONFIG_FIELDS:
                 values.pop(name, None)
+        if not self.premat_retain_detailed_premat_history:
+            values.pop("premat_retain_detailed_premat_history", None)
         return values
     # ^^^ THOG
 

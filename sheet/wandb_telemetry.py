@@ -46,13 +46,85 @@ _NORMAL_WANDB_SCALARS = frozenset((
 # ^^^ THOG
 
 
+
+_PREMAT_RECAP_EVENT_NAMES = frozenset((
+    "materialising",
+    "available",
+    "critical_path_wait",
+    "materialising_on_critical_path",
+    "available_on_critical_path",
+    "consuming",
+    "consumed",
+    "pass_end_release",
+    "pass_end",
+))
+_PREMAT_RECAP_EVENT_FIELDS = frozenset((
+    "sequence",
+    "event",
+    "layer_index",
+    "family",
+    "current_layer_index",
+    "owner",
+    "decision",
+    "outcome",
+    "reason",
+    "admission_reason",
+    "new_state",
+    "state",
+    "critical_path_miss",
+    "elapsed_ms",
+    "materialisation_ms",
+    "main_stream_materialisation_ms",
+    "wait_ms",
+    "predicted_retained_bytes",
+    "target_offset",
+    "target_order",
+    "target_order_position",
+))
+
+
+def _premat_snapshot_for_storage(
+    snapshot: Mapping[str, Any],
+    *,
+    retain_detailed_history: bool,
+) -> Dict[str, Any]:
+    payload = dict(snapshot)
+    payload["detailed_history_retained"] = bool(retain_detailed_history)
+    payload["history_detail_level"] = (
+        "detailed" if retain_detailed_history else "recap_only"
+    )
+    if retain_detailed_history:
+        return payload
+    payload.pop("candidates", None)
+    compact_events = []
+    for event in snapshot.get("events", ()):
+        if not isinstance(event, Mapping):
+            continue
+        event_name = str(event.get("event", ""))
+        if event_name not in _PREMAT_RECAP_EVENT_NAMES:
+            continue
+        compact_events.append({
+            key: event[key]
+            for key in _PREMAT_RECAP_EVENT_FIELDS
+            if key in event
+        })
+    payload["events"] = compact_events
+    payload["event_count"] = len(compact_events)
+    return payload
+
 # vvv THOG latest-only asynchronous live feed: a bounded queue prevents Instra
 # disk latency from changing scheduler timing or accumulating host memory.
 class _PrematLiveSink:
     _STOP = object()
 
-    def __init__(self, database_path: Path) -> None:
+    def __init__(
+        self,
+        database_path: Path,
+        *,
+        retain_detailed_history: bool = False,
+    ) -> None:
         self._database_path = Path(database_path)
+        self._retain_detailed_history = bool(retain_detailed_history)
         self._queue: queue.Queue[object] = queue.Queue(maxsize=1)
         self._closed = False
         self._error: Optional[BaseException] = None
@@ -66,7 +138,11 @@ class _PrematLiveSink:
     def publish(self, optimizer_update: int, snapshot: Mapping[str, Any]) -> None:
         if self._closed or self._error is not None:
             return
-        item = (int(optimizer_update), snapshot)
+        stored_snapshot = _premat_snapshot_for_storage(
+            snapshot,
+            retain_detailed_history=self._retain_detailed_history,
+        )
+        item = (int(optimizer_update), stored_snapshot)
         try:
             self._queue.put_nowait(item)
             return
@@ -839,7 +915,12 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         and premat_instra_enabled
     ):
         local_store = ensure_local_chart_store(telemetry)
-        live_sink = _PrematLiveSink(local_store.path)
+        live_sink = _PrematLiveSink(
+            local_store.path,
+            retain_detailed_history=bool(
+                getattr(trainer.config, "premat_retain_detailed_premat_history", False)
+            ),
+        )
         telemetry._thog_premat_live_sink = live_sink
         captured_update: Optional[int] = None
         captured_pass_sequence: Optional[int] = None

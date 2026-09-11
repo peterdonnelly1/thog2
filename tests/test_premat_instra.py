@@ -209,7 +209,7 @@ def test_premat_snapshot_history_is_bounded_and_served_incrementally(tmp_path: P
         store.close(final_state="finished")
 
 
-def test_live_writer_replaces_the_active_update_without_growing_history(tmp_path: Path) -> None:
+def test_live_writer_freezes_first_completed_update_without_growing_history(tmp_path: Path) -> None:
     database = tmp_path / "charts.sqlite3"
     store = LocalChartStore(database, run_name="premat-live", config={})
     writer = LocalPrematLiveWriter(database)
@@ -219,7 +219,7 @@ def test_live_writer_replaces_the_active_update_without_growing_history(tmp_path
         snapshots = LocalChartReader(database).premat_snapshots()
         assert len(snapshots) == 1
         assert snapshots[0]["optimizer_update"] == 3
-        assert snapshots[0]["pass_sequence"] == 2
+        assert snapshots[0]["pass_sequence"] == 1
     finally:
         writer.close()
         store.close(final_state="finished")
@@ -230,21 +230,21 @@ def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
     records = {(record["layer_index"], record["family"]): record for record in rendered["records"]}
     assert rendered["layers"] == [0, 1]
     assert len(records) == 8
-    assert records[(0, "QKV")]["trace"] == ["PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAITING", "FULL HIT"]
+    assert records[(0, "QKV")]["trace"] == ["PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAIT", "FULL HIT"]
     assert records[(0, "QKV")]["outcome"] == "FULL HIT"
     assert records[(0, "QKV")]["retained_bytes"] == 12 * 1024**2
     assert records[(0, "O")]["trace"] == ["PRE-MATERIALISING", "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT", "PARTIAL HIT"]
     assert records[(0, "O")]["outcome"] == "PARTIAL HIT"
     assert records[(0, "O")]["completion_at_deadline_percent"] == 75
-    assert records[(0, "UP")]["trace"] == ["PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING", "COMPLETE MISS"]
+    assert records[(0, "UP")]["trace"] == ["PREMAT NOT STARTED - MAIN STREAM MATERIALISING", "MAIN STREAM CONSUMING", "COMPLETE MISS"]
     assert records[(0, "UP")]["outcome"] == "COMPLETE MISS"
     assert records[(1, "DOWN")]["trace"] == ["PRE-MATERIALISING", "INCOMPLETE PASS"]
     assert records[(1, "DOWN")]["outcome"] == "INCOMPLETE PASS"
     frame_states = [frame["frame_state"] for frame in rendered["frames"]]
     assert frame_states == [
-        "PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAITING", "PRE-MATERIALISING",
+        "PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAIT", "PRE-MATERIALISING",
         "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT",
-        "PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING",
+        "PREMAT NOT STARTED - MAIN STREAM MATERIALISING", "MAIN STREAM CONSUMING",
         "PRE-MATERIALISING", "COMPLETE",
     ]
     assert rendered["frames"][-1]["final"] is True
@@ -400,15 +400,18 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "premat-state-main-consuming", "premat-state-consumed-main",
     ):
         assert f".{state_class}" in css
-        assert state_class in index
+        if state_class not in {"premat-neutral", "premat-pending"}:
+            assert state_class in index
     for label in (
-        "PROCESSING", "OUTCOMES", "OUT OF SCOPE", "NOT YET REACHED",
-        "PRE-MATERIALISING", "CONSUMING - NO WAITING",
+        "FULL SUCCESS", "PART SUCCESS", "MISS",
+        "PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAIT",
         "WAITING FOR PRE-MATERIALISATION", "CONSUMING AFTER WAIT",
-        "PREMAT NOT STARTED - MAIN CODE MATERIALISING", "MAIN CODE CONSUMING",
+        "PREMAT NOT STARTED - MAIN STREAM MATERIALISING", "MAIN STREAM CONSUMING",
         "FULL HIT", "PARTIAL HIT", "COMPLETE MISS",
     ):
         assert label in normalized_index
+    assert "OUT OF SCOPE" not in normalized_index
+    assert "NOT YET REACHED" not in normalized_index
     assert "TOO LATE" not in index
     assert "premat-key-row" not in index
     assert "premat-matrix-size-row" in javascript
@@ -418,15 +421,16 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
         "ATTN O", "MLP UP", "MLP DN",
     ):
         assert label in javascript
-    assert 'min="10" max="2000" step="10" value="250"' in index
+    assert 'min="1" max="1000" step="1" value="100"' in index
     assert "state duration" in index
     assert "rule: do not cross global buffer - currently" in javascript
     assert "rule: stay below current peak memory" in javascript
-    assert "PREMAT_FINAL_HOLD_MS = 1000" in javascript
+    assert "PREMAT_FINAL_HOLD_MS = 250" in javascript
     assert "setInterval(refresh_premat, 750)" in javascript
     assert "&after=${after}" in javascript
     assert "--premat-partial-progress" in css
-    assert "grid-template-columns: repeat(9, minmax(100px, 1fr))" in css
+    assert ".premat-key-flow" in css
+    assert ".premat-key-arrow" in css
     assert ".premat-inspect-button { margin-right: 28px; }" in css
     assert "padding: 0 2px" in css
     assert index.index('id="premat_inspect_button"') < index.index('id="premat_play_toggle"')
@@ -458,7 +462,6 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "premat_download_raw_event_history" in javascript
     assert "premat_raw_event_history_csv(snapshots)" in javascript
     assert "${premat_artifact_file_stem()}_premat_raw_events.csv" in javascript
-    assert normalized_index.index("OUT OF SCOPE</span><span class=\"premat-key-swatch") > 0
 
 
 def test_premat_layer_rows_are_one_indexed_descending_and_shrink_with_a_floor() -> None:

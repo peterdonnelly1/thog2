@@ -154,6 +154,7 @@
             <div class="premat-header-title">
               <strong>Premat Recapitulation - Step <span id="premat_step">—</span></strong>
               <span class="premat-mode" id="premat_mode">waiting</span>
+              <span class="premat-step-totals" id="premat_step_totals">F — · P — · M —</span>
             </div>
             <button class="premat-icon-button premat-history-button" id="premat_history_button" type="button" aria-label="Show Premat history" title="Show Premat history" aria-pressed="false" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l3 2"></path></svg></button>
             <div class="premat-header-controls">
@@ -161,38 +162,20 @@
               <button class="premat-icon-button" id="premat_play_toggle" type="button" aria-label="Pause Premat playback" title="Pause Premat playback">Ⅱ</button>
               <label class="premat-playback-control" for="premat_state_duration">
                 state duration
-                <input id="premat_state_duration" type="range" min="10" max="2000" step="10" value="250">
-                <output id="premat_state_duration_label" for="premat_state_duration">0.25 s</output>
+                <input id="premat_state_duration" type="range" min="1" max="1000" step="1" value="100">
+                <output id="premat_state_duration_label" for="premat_state_duration">0.10 s</output>
               </label>
               <span class="premat-update" id="premat_update">No complete microstep</span>
             </div>
           </header>
           <div class="premat-recap-view" id="premat_recap_view">
+            <div class="premat-selected-step-summary" id="premat_selected_step_summary" hidden></div>
             <div class="premat-summary" id="premat_summary"></div>
             <div class="premat-layers-scroll"><div class="premat-layers" id="premat_layers"></div></div>
             <div class="premat-key" aria-label="Premat pipeline key">
-              <div class="premat-key-section">
-                <strong>PROCESSING</strong>
-                <div class="premat-key-items">
-                  <span class="premat-key-item"><span>OUT OF SCOPE</span><span class="premat-key-swatch premat-neutral"></span></span>
-                  <span class="premat-key-item"><span>NOT YET REACHED</span><span class="premat-key-swatch premat-pending"></span></span>
-                  <span class="premat-key-item"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span>
-                  <span class="premat-key-item"><span>AVAILABLE</span><span class="premat-key-swatch premat-state-available"></span></span>
-                  <span class="premat-key-item"><span>CONSUMING -<br>NO WAITING</span><span class="premat-key-swatch premat-state-consuming-full"></span></span>
-                  <span class="premat-key-item"><span>WAITING FOR<br>PRE-MATERIALISATION</span><span class="premat-key-swatch premat-state-waiting"></span></span>
-                  <span class="premat-key-item"><span>CONSUMING AFTER WAIT</span><span class="premat-key-swatch premat-state-consuming-waited"></span></span>
-                  <span class="premat-key-item"><span>PREMAT NOT STARTED -<br>MAIN CODE MATERIALISING</span><span class="premat-key-swatch premat-state-main-materialising"></span></span>
-                  <span class="premat-key-item"><span>MAIN CODE CONSUMING</span><span class="premat-key-swatch premat-state-main-consuming"></span></span>
-                </div>
-              </div>
-              <div class="premat-key-section">
-                <strong>OUTCOMES</strong>
-                <div class="premat-key-items premat-key-outcome-items">
-                  <span class="premat-key-item"><span>FULL HIT</span><span class="premat-key-swatch premat-state-consumed-full"></span></span>
-                  <span class="premat-key-item"><span>PARTIAL HIT</span><span class="premat-key-swatch premat-state-consumed-waited"></span></span>
-                  <span class="premat-key-item"><span>COMPLETE MISS</span><span class="premat-key-swatch premat-state-consumed-main"></span></span>
-                </div>
-              </div>
+              <div class="premat-key-flow"><strong>FULL SUCCESS</strong><span class="premat-key-flow-step"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>AVAILABLE</span><span class="premat-key-swatch premat-state-available"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>CONSUMING - NO WAIT</span><span class="premat-key-swatch premat-state-consuming-full"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>FULL HIT</span><span class="premat-key-swatch premat-state-consumed-full"></span></span></div>
+              <div class="premat-key-flow"><strong>PART SUCCESS</strong><span class="premat-key-flow-step"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>WAITING FOR PRE-MATERIALISATION</span><span class="premat-key-swatch premat-state-waiting"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>CONSUMING AFTER WAIT</span><span class="premat-key-swatch premat-state-consuming-waited"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>PARTIAL HIT</span><span class="premat-key-swatch premat-state-consumed-waited"></span></span></div>
+              <div class="premat-key-flow"><strong>MISS</strong><span class="premat-key-flow-step"><span>PREMAT NOT STARTED - MAIN STREAM MATERIALISING</span><span class="premat-key-swatch premat-state-main-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>MAIN STREAM CONSUMING</span><span class="premat-key-swatch premat-state-main-consuming"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>COMPLETE MISS</span><span class="premat-key-swatch premat-state-consumed-main"></span></span></div>
             </div>
           </div>
           <section class="premat-docked-panel premat-inspector" id="premat_inspector" aria-label="Premat data inspector" hidden>
@@ -211,7 +194,7 @@
           <section class="premat-docked-panel premat-history" id="premat_history" aria-label="Premat history" hidden>
             <header class="premat-panel-toolbar">
               <button class="premat-panel-back" id="premat_history_close" type="button" aria-label="Back to Premat recapitulation" title="Back to Premat recapitulation">←</button>
-              <div class="premat-panel-heading"><strong>Premat history</strong><span id="premat_history_detail">Loading retained steps…</span></div>
+              <div class="premat-panel-heading premat-history-heading"><strong>Premat history</strong><span id="premat_history_detail">Loading retained steps…</span><span class="premat-history-grand-totals" id="premat_history_grand_totals">F — · P — · M —</span></div>
               <button class="premat-icon-button" id="premat_history_download" type="button" aria-label="Download retained detailed Premat history as CSV" title="Download retained detailed Premat history as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></button>
               <button class="premat-icon-button" id="premat_history_raw_download" type="button" aria-label="Download retained raw Premat event history as CSV" title="Download retained raw Premat event history as CSV" disabled><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h7"></path><path d="M4 10h7"></path><path d="M4 15h4"></path><path d="M16 3v13"></path><path d="m12 12 4 4 4-4"></path><path d="M11 21h10"></path></svg></button>
             </header>

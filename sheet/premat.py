@@ -13,7 +13,7 @@ from torch import Tensor
 
 PREMAT_SWITCHES = ("enabled", "disabled")
 PREMAT_ATTENTION_MODES = ("fused", "unfused")
-PREMAT_TARGET_LAYERS = (0, 1, 2)
+PREMAT_TARGET_LAYERS = (0, 1, 2, 10)
 PREMAT_WEIGHT_MATRIX_TARGET_ORDERS = ("l_to_r", "r_to_l")
 PREMAT_CUDA_STREAM_PRIORITIES = ("normal", "high")
 PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES = (
@@ -691,7 +691,8 @@ class PrematRuntime:
         if position < self._position:
             raise RuntimeError("premat logical layers must execute in pass order")
         self._position = position
-        window_width = max(2, self._target_layer + 1)
+        lookahead_limit = 1 if self._target_layer == 10 else self._target_layer
+        window_width = max(2, lookahead_limit + 1)
         permitted = set(self._layer_indices[position : position + window_width])
         stale = [key for key in self._candidates if key[0] not in permitted]
         for key in stale:
@@ -1017,8 +1018,12 @@ class PrematRuntime:
             ),
             "current_layer_index": current_layer,
             "next_layer_index": next_layer,
-            "lookahead_layer_limit": self._target_layer,
-            "target_scope": f"relative_layer_{self._target_layer}",
+            "lookahead_layer_limit": (1 if self._target_layer == 10 else self._target_layer),
+            "target_scope": (
+                "relative_layer_1_then_0"
+                if self._target_layer == 10
+                else f"relative_layer_{self._target_layer}"
+            ),
             "target_order": self._weight_matrix_target_order,
             "effective_fast_discard": True,
             "pass_sequence": self._pass_sequence,
@@ -1641,13 +1646,12 @@ class PrematRuntime:
         invocation = self._advance_sequence
         submitted: List[Dict[str, object]] = []
         deferred_sequences: set[int] = set()
-        target_position = self._position + self._target_layer
-        target_layer_index = (
-            self._layer_indices[target_position]
-            if 0 <= target_position < len(self._layer_indices)
-            else None
-        )
+        valid_target_layers = self._target_layer_indices()
         first_candidate = self._next_premat_candidate()
+        target_layer_index = (
+            first_candidate.layer_index if first_candidate is not None else None
+        )
+        target_offset = self._target_offset_for_candidate(first_candidate)
         self._record(
             "advance_begin",
             layer=(
@@ -1659,7 +1663,8 @@ class PrematRuntime:
             detail={
                 "invocation": invocation,
                 "trigger": trigger,
-                "target_offset": self._target_layer,
+                "configured_target_layer": self._target_layer,
+                "target_offset": target_offset,
                 "target_layer_index": target_layer_index,
                 "matrix_order": self._weight_matrix_target_order,
                 "candidate_start_index": (
@@ -1669,12 +1674,12 @@ class PrematRuntime:
                 ),
             },
         )
-        if target_layer_index is None:
+        if first_candidate is None:
             self._record_advance_return(
                 invocation=invocation,
                 trigger=trigger,
                 submitted=submitted,
-                reason="target_out_of_range",
+                reason=("target_exhausted" if valid_target_layers else "target_out_of_range"),
             )
             return
         if self._stream is None or self._device is None:
@@ -1692,6 +1697,10 @@ class PrematRuntime:
                     reason="target_exhausted",
                 )
                 return
+            target_layer_index = candidate.layer_index
+            target_offset = self._target_offset_for_candidate(candidate)
+            if target_offset is None:
+                raise RuntimeError("Premat selected a candidate outside its configured target sweep")
             considered_ns = time.perf_counter_ns()
             if candidate.first_considered_ns is None:
                 candidate.first_considered_ns = considered_ns
@@ -1737,7 +1746,8 @@ class PrematRuntime:
                 **asdict(decision),
                 "invocation": invocation,
                 "trigger": trigger,
-                "target_offset": self._target_layer,
+                "configured_target_layer": self._target_layer,
+                "target_offset": target_offset,
                 "target_layer_index": target_layer_index,
                 "matrix_order": self._weight_matrix_target_order,
                 "order_position": candidate.order_position,
@@ -1913,29 +1923,62 @@ class PrematRuntime:
                 }
             )
 
+    def _target_offsets(self) -> Tuple[int, ...]:
+        # Target 10 is a mnemonic for the ordered sweep +1 then +0, not ten
+        # layers of lookahead.  It is deliberately right-to-left only.
+        return (1, 0) if self._target_layer == 10 else (self._target_layer,)
+
+    def _target_layer_indices(self) -> Tuple[int, ...]:
+        if self._position < 0:
+            return ()
+        result: List[int] = []
+        for offset in self._target_offsets():
+            position = self._position + offset
+            if 0 <= position < len(self._layer_indices):
+                layer_index = int(self._layer_indices[position])
+                if layer_index not in result:
+                    result.append(layer_index)
+        return tuple(result)
+
+    def _target_offset_for_candidate(
+        self,
+        candidate: Optional[_Candidate],
+    ) -> Optional[int]:
+        if candidate is None or self._position < 0:
+            return None
+        for offset in self._target_offsets():
+            position = self._position + offset
+            if (
+                0 <= position < len(self._layer_indices)
+                and int(self._layer_indices[position]) == int(candidate.layer_index)
+            ):
+                return int(offset)
+        return None
+
     def _next_premat_candidate(
         self,
         *,
         excluded_sequences: Optional[set[int]] = None,
     ) -> Optional[_Candidate]:
-        target_position = self._position + self._target_layer
-        if self._position < 0 or target_position >= len(self._layer_indices):
-            return None
-        target_layer_index = self._layer_indices[target_position]
         excluded = excluded_sequences or set()
-        return next(
-            (
-                item
-                for item in sorted(
-                    self._candidates.values(),
-                    key=lambda candidate: candidate.sequence,
-                )
-                if item.state == CandidateState.UNAVAILABLE
-                and item.layer_index == target_layer_index
-                and item.sequence not in excluded
-            ),
-            None,
+        ordered = sorted(
+            self._candidates.values(),
+            key=lambda candidate: candidate.sequence,
         )
+        for target_layer_index in self._target_layer_indices():
+            candidate = next(
+                (
+                    item
+                    for item in ordered
+                    if item.state == CandidateState.UNAVAILABLE
+                    and item.layer_index == target_layer_index
+                    and item.sequence not in excluded
+                ),
+                None,
+            )
+            if candidate is not None:
+                return candidate
+        return None
 
     def _candidate_transient_bytes(self, candidate: _Candidate) -> int:
         return candidate.envelope.candidate_transient_bytes
@@ -2143,6 +2186,7 @@ class PrematRuntime:
             return None
         self._event_sequence += 1
         now_ns = time.perf_counter_ns()
+        candidate_target_offset = self._target_offset_for_candidate(candidate)
         payload: Dict[str, object] = {
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "sequence": self._event_sequence,
@@ -2160,7 +2204,11 @@ class PrematRuntime:
                 if self._stay_below_current_peak
                 else "stay_within_global_buffer"
             ),
-            "target_offset": self._target_layer,
+            "target_offset": (
+                self._target_layer
+                if candidate_target_offset is None
+                else candidate_target_offset
+            ),
             "target_order": self._weight_matrix_target_order,
             "queue_depth": self._queue_depth(),
             "cumulative_charged_bytes": self._cumulative_charged_bytes(),

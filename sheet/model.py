@@ -311,6 +311,8 @@ class SheetGPTConfig:
         if not isinstance(self.fast_discard, bool):
             raise ValueError(f"fast_discard must be bool; got {self.fast_discard!r}")
         # vvv THOG validate the public premat controls and force pass-local materialisation lifetimes when enabled
+        if self.premat_target_layer == 10:
+            self.premat_weight_matrix_target_order = "r_to_l"
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,

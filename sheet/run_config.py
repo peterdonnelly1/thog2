@@ -243,6 +243,7 @@ class OwtRunConfig:
     premat_diagnostic_layer_delay_ms: float = 0.0
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
+    premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls
     chaos_bump__sampling__enabled: bool = False
@@ -551,6 +552,10 @@ class OwtRunConfig:
             or float(self.plastic__layer_count_cost_weight) < 0.0
         ):
             raise ValueError("plastic__layer_count_cost_weight must be finite and non-negative")
+        if self.premat_target_layer == 10:
+            object.__setattr__(self, "premat_weight_matrix_target_order", "r_to_l")
+        if not isinstance(self.premat_retain_detailed_premat_history, bool):
+            raise ValueError("premat_retain_detailed_premat_history must be bool")
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -1404,6 +1409,7 @@ class OwtRunConfig:
             premat_diagnostic_layer_delay_ms=float(self.premat_diagnostic_layer_delay_ms),
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
+            premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
             plastic__freeze_geometry_during_warmup=self.plastic__freeze_geometry_during_warmup,
@@ -1469,6 +1475,8 @@ class OwtRunConfig:
         if not self.plastic__enabled:
             for name in PLASTIC_RUN_CONFIG_FIELDS:
                 values.pop(name, None)
+        if not self.premat_retain_detailed_premat_history:
+            values.pop("premat_retain_detailed_premat_history", None)
         return values
     # ^^^ THOG
 
@@ -1532,8 +1540,14 @@ class OwtRunConfig:
             if self.premat == "enabled":
                 values["premat_effective_fast_discard"] = True
             values["premat_schema_version"] = PREMAT_TELEMETRY_VERSION
-            values["premat_lookahead_layer_limit"] = self.premat_target_layer
-            values["premat_target_scope"] = f"relative_layer_{self.premat_target_layer}"
+            values["premat_lookahead_layer_limit"] = (
+                1 if self.premat_target_layer == 10 else self.premat_target_layer
+            )
+            values["premat_target_scope"] = (
+                "relative_layer_1_then_0"
+                if self.premat_target_layer == 10
+                else f"relative_layer_{self.premat_target_layer}"
+            )
             values["premat_target_order"] = self.premat_weight_matrix_target_order
             # ^^^ THOG
         values.update({

@@ -273,6 +273,15 @@ class _ThogArgumentParser(argparse.ArgumentParser):
     # ^^^ THOG
 
 
+def _true_false(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
     # vvv THOG independent polynomial history budgets; explicit counts retain more raw depth information
@@ -321,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     # vvv THOG dynamic pre-materialisation public surface and mutually-exclusive headroom policies
     parser.add_argument("--premat", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_attention_mode", choices=("fused", "unfused"), default="fused")
-    parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2), default=1)
+    parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2, 10), default=1, help="PREMAT relative target: 10 means ordered +1 then +0 sweep")
     parser.add_argument("--premat_weight_matrix_target_order", choices=("l_to_r", "r_to_l"), default="r_to_l")
     premat_headroom = parser.add_mutually_exclusive_group()
     premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
@@ -332,6 +341,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--premat_diagnostic_layer_delay_ms", type=float, default=0.0)
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
+    parser.add_argument("--premat_retain_detailed_premat_history", type=_true_false, default=False, metavar="true|false")
     # ^^^ THOG
     parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
@@ -596,6 +606,17 @@ def validate_dense_snapshot_cli(
 
 
 def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) -> OwtRunConfig:
+    if (
+        int(arguments.premat_target_layer) == 10
+        and arguments.premat_weight_matrix_target_order == "l_to_r"
+    ):
+        print(
+            "\033[1;38;5;208mTHOG2 WARNING: --premat_target_layer 10 means +1 then +0 "
+            "and requires right-to-left matrix targeting; overriding "
+            "--premat_weight_matrix_target_order l_to_r -> r_to_l.\033[0m",
+            flush=True,
+        )
+        arguments.premat_weight_matrix_target_order = "r_to_l"
     geometry_plan = geometry_plan if geometry_plan is not None else geometry_plan_from_arguments(arguments)
     validate_dense_snapshot_cli(arguments)
     snapshot_order, snapshot_version = _dense_snapshot_mapping_from_plan(arguments, geometry_plan)
@@ -728,6 +749,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_diagnostic_layer_delay_ms=arguments.premat_diagnostic_layer_delay_ms,
         premat_logging=arguments.premat_logging,
         premat_instra=arguments.premat_instra,
+        premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,
         plastic__freeze_geometry_during_warmup=arguments.plastic__freeze_geometry_during_warmup,
