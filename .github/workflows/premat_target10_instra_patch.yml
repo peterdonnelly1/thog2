@@ -1,5 +1,6 @@
 name: Temporary PREMAT target10 and Instra changes
 
+# retry after tightening the patch guard
 on:
   push:
     branches:
