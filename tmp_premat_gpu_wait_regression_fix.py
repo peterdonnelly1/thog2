@@ -22,6 +22,22 @@ new = '''    assert candidate.owner == "premat"
 if text.count(old) != 1:
     raise RuntimeError(f"expected one provisional-outcome assertion block, found {text.count(old)}")
 text = text.replace(old, new, 1)
+old = '''    wait_timing.start_event.elapsed_time_override = (
+        lambda other: -0.050 if other is wait_timing.dependency_event else 0.008
+    )
+    runtime.end()
+'''
+new = '''    wait_timing.start_event.elapsed_time_override = (
+        lambda other: -0.050 if other is wait_timing.dependency_event else 0.008
+    )
+    # Match the real model sequence: the consuming GEMM is submitted and then
+    # the model tells PREMAT that the matrix has been consumed.
+    runtime.consumed("DOWN", 5)
+    runtime.end()
+'''
+if text.count(old) != 1:
+    raise RuntimeError(f"expected one delayed-report acquire block, found {text.count(old)}")
+text = text.replace(old, new, 1)
 old = '''    wait_timing.end_event.complete = True
     runtime.begin((3, 5, 7), reference=_FakeTensor())
 '''
