@@ -6,7 +6,6 @@ on:
       - THOG2_Dynamic_Prematerialisation_Enhancement
     paths:
       - .github/workflows/premat_shadow_mode_patch.yml
-      - tmp_premat_shadow_mode_patch.py
 
 permissions:
   contents: write
@@ -22,55 +21,35 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Repair helper replacement cardinality
+      - name: Wire shadow mode through public run validation
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path("tmp_premat_shadow_mode_patch.py")
+
+          p = Path("sheet/run_config.py")
           text = p.read_text(encoding="utf-8")
-          old = '''text = replace_once(
-              text,
-              "            observation.process_allocated_bytes - self._retained_bytes,\\n",
-              "            observation.process_allocated_bytes - self._physical_retained_bytes(),\\n",
-              "charged process physical retained",
-          )'''
-          new = '''needle = "            observation.process_allocated_bytes - self._retained_bytes,\\n"
-          if text.count(needle) != 2:
-              raise RuntimeError(f"charged process physical retained: expected exactly two matches, found {text.count(needle)}")
-          text = text.replace(
-              needle,
-              "            observation.process_allocated_bytes - self._physical_retained_bytes(),\\n",
-          )'''
-          if old not in text:
-              raise RuntimeError("temporary helper repair target not found")
+          old = '''            enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            logging=self.premat_logging,
+            instra=self.premat_instra,
+'''
+          new = '''            enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            shadow_mode=self.premat_enable_shadow_mode,
+            logging=self.premat_logging,
+            instra=self.premat_instra,
+'''
+          if text.count(old) != 1:
+              raise RuntimeError(f"run-config shadow validation insertion expected once, found {text.count(old)}")
           p.write_text(text.replace(old, new, 1), encoding="utf-8")
-          PY
-      - name: Apply patch
-        run: python tmp_premat_shadow_mode_patch.py
-      - name: Update public PREMAT CLI contract test
-        run: |
-          python - <<'PY'
-          from pathlib import Path
+
           p = Path("tests/test_premat.py")
           text = p.read_text(encoding="utf-8")
-          start_marker = "def test_public_cli_exposes_exactly_the_fourteen_premat_options() -> None:"
-          start = text.find(start_marker)
-          if start < 0:
-              raise RuntimeError("public PREMAT option-count test not found")
-          end = text.find("\n\ndef test_wrapper_reclaims_unused_allocator_cache_for_premat_by_default", start)
-          if end < 0:
-              raise RuntimeError("public PREMAT option-count test end not found")
-          segment = text[start:end].replace("exactly_the_fourteen", "exactly_the_fifteen", 1)
-          insertion = '        "--premat_enable_gpu_timing_diagnostic",\n'
-          if insertion not in segment:
-              raise RuntimeError("GPU timing option not found in PREMAT option contract")
-          if '        "--premat_enable_shadow_mode",\n' not in segment:
-              segment = segment.replace(
-                  insertion,
-                  insertion + '        "--premat_enable_shadow_mode",\n',
-                  1,
-              )
-          p.write_text(text[:start] + segment + text[end:], encoding="utf-8")
+          marker = "\ndef test_premat_cuda_stream_priority_is_opt_in(monkeypatch) -> None:\n"
+          test = '''\n\ndef test_run_config_rejects_shadow_mode_without_premat() -> None:\n    with pytest.raises(ValueError, match="premat_enable_shadow_mode requires premat enabled"):\n        OwtRunConfig(\n            model_type="sheet",\n            premat="disabled",\n            premat_enable_shadow_mode=True,\n        )\n'''
+          if "test_run_config_rejects_shadow_mode_without_premat" not in text:
+              if text.count(marker) != 1:
+                  raise RuntimeError("run-config shadow test insertion marker not found exactly once")
+              text = text.replace(marker, test + marker, 1)
+          p.write_text(text, encoding="utf-8")
           PY
       - name: Install test dependencies
         run: python -m pip install -q pytest torch matplotlib plotly
@@ -84,6 +63,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sheet/premat.py sheet/model.py sheet/training_config.py sheet/run_config.py run_thog2_owt_core.py train_OWT_core.sh tests/test_premat.py
-          git commit -m "Add PREMAT shadow-mode diagnostic"
+          git add sheet/run_config.py tests/test_premat.py
+          git commit -m "Wire PREMAT shadow validation through run config"
           git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement
