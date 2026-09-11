@@ -239,14 +239,14 @@ def _allocator_pool_for_request(size_bytes: int) -> str:
     return "small" if int(size_bytes) <= 1024 ** 2 else "large"
 
 
-def _same_stream_inactive_block_summary(
+def _same_stream_inactive_block_sizes(
     snapshot: Sequence[Mapping[str, object]],
     *,
     device_index: int,
     stream_id: int,
     request_bytes: int,
-) -> Dict[str, int]:
-    """Summarise compatible inactive blocks for one CUDA stream/pool."""
+) -> Tuple[int, ...]:
+    """Return every certified inactive block for one CUDA stream/pool."""
     required_pool = _allocator_pool_for_request(request_bytes)
     sizes: List[int] = []
     for segment in snapshot:
@@ -273,8 +273,24 @@ def _same_stream_inactive_block_summary(
             if isinstance(size, bool) or not isinstance(size, int) or size < 0:
                 raise ValueError("CUDA allocator snapshot contains an invalid block size")
             sizes.append(int(size))
-    sizes.sort(reverse=True)
-    padded = sizes[:3] + [0] * max(0, 3 - len(sizes))
+    return tuple(sorted(sizes, reverse=True))
+
+
+def _same_stream_inactive_block_summary(
+    snapshot: Sequence[Mapping[str, object]],
+    *,
+    device_index: int,
+    stream_id: int,
+    request_bytes: int,
+) -> Dict[str, int]:
+    """Summarise compatible inactive blocks for one CUDA stream/pool."""
+    sizes = _same_stream_inactive_block_sizes(
+        snapshot,
+        device_index=device_index,
+        stream_id=stream_id,
+        request_bytes=request_bytes,
+    )
+    padded = list(sizes[:3]) + [0] * max(0, 3 - len(sizes))
     return {
         "block_count": len(sizes),
         "sufficient_block_count": sum(
@@ -377,6 +393,7 @@ class _Candidate:
     transient_counted: bool = False
     allocator_certificate_generation: Optional[int] = None
     allocator_certificate_pool: Optional[str] = None
+    allocator_certificate_block_id: Optional[int] = None
     allocator_certificate_charge_bytes: int = 0
 
 
@@ -396,6 +413,7 @@ class _PendingRelease:
     tensor: Optional[Tensor]
     allocator_certificate_generation: Optional[int] = None
     allocator_certificate_pool: Optional[str] = None
+    allocator_certificate_block_id: Optional[int] = None
     allocator_certificate_charge_bytes: int = 0
 
 
@@ -490,13 +508,18 @@ class PrematRuntime:
         self._sequence_length = 0
         self._pass_start_ns: Optional[int] = None
         self._active = False
-        # Cautious allocator admission snapshots only to certify one contiguous
-        # inactive block in each Premat-stream allocator pool.  The certificate
-        # models a reusable working reserve: live Premat allocations consume it
-        # and safe final release returns the charge.  It never grows above the
-        # block actually observed by memory_snapshot().
+        # Cautious allocator admission certifies the complete set of inactive
+        # blocks observed in each exact Premat-stream allocator pool.  The native
+        # allocator is best-fit, so reservations mirror that policy against the
+        # smallest certified block that can satisfy each conservatively rounded
+        # request.  Per-block live charges prevent fragmented cache from being
+        # treated as one fictitious contiguous allocation and prevent double use.
         self._allocator_certificate_valid = {"small": False, "large": False}
         self._allocator_certificate_generation = {"small": 0, "large": 0}
+        self._allocator_certificate_blocks: Dict[str, List[Dict[str, int]]] = {
+            "small": [],
+            "large": [],
+        }
         self._allocator_certificate_capacity_bytes = {"small": 0, "large": 0}
         self._allocator_certificate_live_charge_bytes = {"small": 0, "large": 0}
         self._allocator_certificate_pool_reserved_floor_bytes: Dict[str, Optional[int]] = {
@@ -903,6 +926,9 @@ class PrematRuntime:
                         candidate.allocator_certificate_generation
                     ),
                     allocator_certificate_pool=candidate.allocator_certificate_pool,
+                    allocator_certificate_block_id=(
+                        candidate.allocator_certificate_block_id
+                    ),
                     allocator_certificate_charge_bytes=(
                         candidate.allocator_certificate_charge_bytes
                     ),
@@ -910,6 +936,7 @@ class PrematRuntime:
             )
             candidate.allocator_certificate_generation = None
             candidate.allocator_certificate_pool = None
+            candidate.allocator_certificate_block_id = None
             candidate.allocator_certificate_charge_bytes = 0
         candidate.retained_counted = False
         candidate.transient_counted = False
@@ -1124,13 +1151,70 @@ class PrematRuntime:
             ),
         }
 
+    def _sync_allocator_certificate_totals(self, pool: str) -> None:
+        blocks = self._allocator_certificate_blocks.get(pool, ())
+        self._allocator_certificate_capacity_bytes[pool] = sum(
+            int(block["capacity_bytes"]) for block in blocks
+        )
+        self._allocator_certificate_live_charge_bytes[pool] = sum(
+            int(block["live_charge_bytes"]) for block in blocks
+        )
+
     def _allocator_certificate_available_bytes(self, pool: str) -> int:
         if not self._allocator_certificate_valid.get(pool, False):
             return 0
+        return sum(
+            max(0, int(block["capacity_bytes"]) - int(block["live_charge_bytes"]))
+            for block in self._allocator_certificate_blocks.get(pool, ())
+        )
+
+    def _allocator_certificate_largest_available_block_bytes(self, pool: str) -> int:
+        if not self._allocator_certificate_valid.get(pool, False):
+            return 0
         return max(
-            0,
-            int(self._allocator_certificate_capacity_bytes.get(pool, 0))
-            - int(self._allocator_certificate_live_charge_bytes.get(pool, 0)),
+            (
+                max(0, int(block["capacity_bytes"]) - int(block["live_charge_bytes"]))
+                for block in self._allocator_certificate_blocks.get(pool, ())
+            ),
+            default=0,
+        )
+
+    def _allocator_certificate_sufficient_block_count(
+        self,
+        pool: str,
+        charge_bytes: int,
+    ) -> int:
+        if not self._allocator_certificate_valid.get(pool, False):
+            return 0
+        charge = max(0, int(charge_bytes))
+        return sum(
+            1
+            for block in self._allocator_certificate_blocks.get(pool, ())
+            if int(block["capacity_bytes"]) - int(block["live_charge_bytes"]) >= charge
+        )
+
+    def _allocator_certificate_best_fit_block(
+        self,
+        pool: str,
+        charge_bytes: int,
+    ) -> Optional[Dict[str, int]]:
+        if not self._allocator_certificate_valid.get(pool, False):
+            return None
+        charge = max(0, int(charge_bytes))
+        eligible = [
+            block
+            for block in self._allocator_certificate_blocks.get(pool, ())
+            if int(block["capacity_bytes"]) - int(block["live_charge_bytes"]) >= charge
+        ]
+        if not eligible:
+            return None
+        return min(
+            eligible,
+            key=lambda block: (
+                int(block["capacity_bytes"]) - int(block["live_charge_bytes"]),
+                int(block["capacity_bytes"]),
+                int(block["block_id"]),
+            ),
         )
 
     def _debit_allocator_certificate_for_pool_shrink(
@@ -1139,12 +1223,13 @@ class PrematRuntime:
         pool: str,
         current_reserved_bytes: int,
     ) -> int:
-        """Conservatively debit a certificate only for its allocator pool shrinking.
+        """Invalidate future use if the certified allocator pool has shrunk.
 
-        ``num_device_free`` is device-wide and changed frequently in the measured
-        workload even when the Premat block was unaffected.  Pool reserved bytes
-        are a tighter signal.  Growth never increases a certificate; shrinkage is
-        pessimistically charged entirely against the certified Premat reserve.
+        A pool-level shrink does not identify which certified block disappeared.
+        Guessing would make per-block accounting unsafe, so retain the old block
+        records only until outstanding charges can be released and fail closed
+        for new admissions.  With no live charge the caller may immediately take
+        a fresh snapshot and build a new generation.
         """
         floor = self._allocator_certificate_pool_reserved_floor_bytes.get(pool)
         if floor is None:
@@ -1153,12 +1238,9 @@ class PrematRuntime:
         if current >= int(floor):
             return 0
         shrink = int(floor) - current
-        before = int(self._allocator_certificate_capacity_bytes.get(pool, 0))
-        live = int(self._allocator_certificate_live_charge_bytes.get(pool, 0))
-        after = max(live, before - shrink)
-        self._allocator_certificate_capacity_bytes[pool] = after
+        self._allocator_certificate_valid[pool] = False
         self._allocator_certificate_pool_reserved_floor_bytes[pool] = current
-        return max(0, before - after)
+        return shrink
 
     def _reserve_allocator_certificate(
         self,
@@ -1171,31 +1253,45 @@ class PrematRuntime:
         generation = int(self._allocator_certificate_generation.get(pool, 0))
         before_live = int(self._allocator_certificate_live_charge_bytes.get(pool, 0))
         before_available = self._allocator_certificate_available_bytes(pool)
-        tracked = (
-            self._allocator_certificate_valid.get(pool, False)
-            and before_available >= charge
-        )
+        block = self._allocator_certificate_best_fit_block(pool, charge)
+        tracked = block is not None
+        block_id: Optional[int] = None
+        block_capacity = 0
+        block_available_before = 0
+        block_available_after = 0
         if required and not tracked:
             raise RuntimeError(
                 "allocator-aware admission lost its certified Premat-stream reserve "
                 "between decision and launch"
             )
         if tracked:
-            self._allocator_certificate_live_charge_bytes[pool] = before_live + charge
+            block_id = int(block["block_id"])
+            block_capacity = int(block["capacity_bytes"])
+            block_available_before = max(
+                0, block_capacity - int(block["live_charge_bytes"])
+            )
+            block["live_charge_bytes"] = int(block["live_charge_bytes"]) + charge
+            block_available_after = max(
+                0, block_capacity - int(block["live_charge_bytes"])
+            )
+            self._sync_allocator_certificate_totals(pool)
             after_available = self._allocator_certificate_available_bytes(pool)
         else:
             after_available = 0
             # An ordinary admission does not need allocator evidence, but it may
-            # consume the same Premat-stream cache.  If it cannot be represented
-            # inside the certificate, stop using that certificate until every
-            # previously tracked charge has drained and a fresh snapshot proves
-            # the allocator state again.
+            # consume the same Premat-stream cache.  If the request cannot be
+            # represented by one certified block, stop using the certificate
+            # until all tracked charges drain and a fresh snapshot proves state.
             if self._allocator_certificate_valid.get(pool, False):
                 self._allocator_certificate_valid[pool] = False
         return {
             "tracked": tracked,
             "pool": pool,
             "generation": generation if tracked else None,
+            "block_id": block_id,
+            "block_capacity_bytes": block_capacity,
+            "block_available_before_bytes": block_available_before,
+            "block_available_after_bytes": block_available_after,
             "charge_bytes": charge if tracked else 0,
             "before_live_charge_bytes": before_live,
             "after_live_charge_bytes": int(
@@ -1203,6 +1299,9 @@ class PrematRuntime:
             ),
             "before_available_bytes": before_available,
             "after_available_bytes": after_available,
+            "largest_available_block_bytes": (
+                self._allocator_certificate_largest_available_block_bytes(pool)
+            ),
         }
 
     def _release_allocator_certificate_charge(
@@ -1210,26 +1309,43 @@ class PrematRuntime:
         *,
         generation: Optional[int],
         pool: Optional[str],
+        block_id: Optional[int],
         charge_bytes: int,
     ) -> bool:
-        if generation is None or pool not in ("small", "large") or charge_bytes <= 0:
+        if (
+            generation is None
+            or pool not in ("small", "large")
+            or block_id is None
+            or charge_bytes <= 0
+        ):
             return False
         if int(generation) != int(self._allocator_certificate_generation.get(pool, -1)):
             return False
-        before = int(self._allocator_certificate_live_charge_bytes.get(pool, 0))
-        self._allocator_certificate_live_charge_bytes[pool] = max(
-            0, before - int(charge_bytes)
+        block = next(
+            (
+                item
+                for item in self._allocator_certificate_blocks.get(pool, ())
+                if int(item["block_id"]) == int(block_id)
+            ),
+            None,
         )
+        if block is None:
+            return False
+        before = int(block["live_charge_bytes"])
+        block["live_charge_bytes"] = max(0, before - int(charge_bytes))
+        self._sync_allocator_certificate_totals(pool)
         return True
 
     def _release_allocator_certificate_candidate(self, candidate: _Candidate) -> bool:
         released = self._release_allocator_certificate_charge(
             generation=candidate.allocator_certificate_generation,
             pool=candidate.allocator_certificate_pool,
+            block_id=candidate.allocator_certificate_block_id,
             charge_bytes=candidate.allocator_certificate_charge_bytes,
         )
         candidate.allocator_certificate_generation = None
         candidate.allocator_certificate_pool = None
+        candidate.allocator_certificate_block_id = None
         candidate.allocator_certificate_charge_bytes = 0
         return released
 
@@ -1268,6 +1384,13 @@ class PrematRuntime:
             "certificate_capacity_bytes": int(
                 self._allocator_certificate_capacity_bytes.get(pool, 0)
             ),
+            "certificate_block_count": len(
+                self._allocator_certificate_blocks.get(pool, ())
+            ),
+            "certificate_sufficient_block_count": self._allocator_certificate_sufficient_block_count(
+                pool, required_certificate_charge
+            ),
+            "certificate_largest_available_block_bytes": self._allocator_certificate_largest_available_block_bytes(pool),
             "certificate_live_charge_bytes": int(
                 self._allocator_certificate_live_charge_bytes.get(pool, 0)
             ),
@@ -1352,8 +1475,11 @@ class PrematRuntime:
 
             certificate_available = self._allocator_certificate_available_bytes(pool)
             certificate_valid = bool(self._allocator_certificate_valid.get(pool, False))
+            certificate_sufficient = self._allocator_certificate_sufficient_block_count(
+                pool, required_certificate_charge
+            )
             live_charge = int(self._allocator_certificate_live_charge_bytes.get(pool, 0))
-            if (not certificate_valid) or certificate_available < required_certificate_charge:
+            if (not certificate_valid) or certificate_sufficient == 0:
                 if live_charge > 0:
                     # Never take a new snapshot while allocations charged to the
                     # current certificate are still live: the new inactive block
@@ -1372,13 +1498,18 @@ class PrematRuntime:
                         detail["snapshot_performed"] = True
                         self._allocator_snapshot_count += 1
                         self._aggregate["allocator_snapshot_count"] = self._allocator_snapshot_count
+                        block_sizes = _same_stream_inactive_block_sizes(
+                            snapshot,
+                            device_index=int(device_index),
+                            stream_id=stream_id,
+                            request_bytes=envelope.materialisation_peak_bytes,
+                        )
                         block_summary = _same_stream_inactive_block_summary(
                             snapshot,
                             device_index=int(device_index),
                             stream_id=stream_id,
                             request_bytes=envelope.materialisation_peak_bytes,
                         )
-                        largest = int(block_summary["largest_block_bytes"])
                         detail["snapshot_eligible_inactive_block_count"] = int(
                             block_summary["block_count"]
                         )
@@ -1400,8 +1531,15 @@ class PrematRuntime:
                         self._allocator_certificate_generation[pool] = (
                             int(self._allocator_certificate_generation.get(pool, 0)) + 1
                         )
-                        self._allocator_certificate_capacity_bytes[pool] = largest
-                        self._allocator_certificate_live_charge_bytes[pool] = 0
+                        self._allocator_certificate_blocks[pool] = [
+                            {
+                                "block_id": index,
+                                "capacity_bytes": int(size),
+                                "live_charge_bytes": 0,
+                            }
+                            for index, size in enumerate(block_sizes, start=1)
+                        ]
+                        self._sync_allocator_certificate_totals(pool)
                         self._allocator_certificate_pool_reserved_floor_bytes[pool] = (
                             pool_reserved_bytes
                         )
@@ -1419,6 +1557,17 @@ class PrematRuntime:
                 self._allocator_certificate_valid.get(pool, False)
             )
             detail["certificate_capacity_bytes"] = certificate_capacity
+            detail["certificate_block_count"] = len(
+                self._allocator_certificate_blocks.get(pool, ())
+            )
+            detail["certificate_sufficient_block_count"] = (
+                self._allocator_certificate_sufficient_block_count(
+                    pool, required_certificate_charge
+                )
+            )
+            detail["certificate_largest_available_block_bytes"] = (
+                self._allocator_certificate_largest_available_block_bytes(pool)
+            )
             detail["certificate_live_charge_bytes"] = int(
                 self._allocator_certificate_live_charge_bytes.get(pool, 0)
             )
@@ -1426,7 +1575,9 @@ class PrematRuntime:
             detail["certificate_pool_reserved_floor_bytes"] = (
                 self._allocator_certificate_pool_reserved_floor_bytes.get(pool)
             )
-            detail["largest_eligible_inactive_block_bytes"] = certificate_capacity
+            detail["largest_eligible_inactive_block_bytes"] = (
+                self._allocator_certificate_largest_available_block_bytes(pool)
+            )
             detail["certified_premat_stream_cache_bytes"] = certificate_capacity
             detail["certified_premat_stream_available_bytes"] = certificate_available
         except Exception as error:
@@ -1435,7 +1586,9 @@ class PrematRuntime:
 
         reuse_qualified = (
             bool(self._allocator_certificate_valid.get(pool, False))
-            and certificate_available >= required_certificate_charge
+            and self._allocator_certificate_sufficient_block_count(
+                pool, required_certificate_charge
+            ) > 0
         )
         detail["reuse_qualified"] = reuse_qualified
         if not reuse_qualified:
@@ -1605,6 +1758,9 @@ class PrematRuntime:
                     )
                     candidate.allocator_certificate_pool = str(
                         certificate_consumption["pool"]
+                    )
+                    candidate.allocator_certificate_block_id = int(
+                        certificate_consumption["block_id"]
                     )
                     candidate.allocator_certificate_charge_bytes = int(
                         certificate_consumption["charge_bytes"]
@@ -1936,6 +2092,7 @@ class PrematRuntime:
             self._release_allocator_certificate_charge(
                 generation=release.allocator_certificate_generation,
                 pool=release.allocator_certificate_pool,
+                block_id=release.allocator_certificate_block_id,
                 charge_bytes=release.allocator_certificate_charge_bytes,
             )
         self._pending_releases = remaining

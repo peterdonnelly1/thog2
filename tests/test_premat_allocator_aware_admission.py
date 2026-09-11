@@ -11,6 +11,7 @@ from sheet.premat import (
     _conservative_certificate_charge_bytes,
     _inactive_allocator_bytes_from_stats,
     _largest_same_stream_inactive_block_bytes,
+    _same_stream_inactive_block_sizes,
     _same_stream_inactive_block_summary,
     decide_candidate_admission,
     validate_premat_configuration,
@@ -166,7 +167,7 @@ def test_cautious_certificate_is_live_reserve_not_historical_spend(monkeypatch) 
 
     runtime._release_allocator_certificate_charge(
         generation=reserve["generation"], pool=reserve["pool"],
-        charge_bytes=reserve["charge_bytes"],
+        block_id=reserve["block_id"], charge_bytes=reserve["charge_bytes"],
     )
     assert runtime._allocator_certificate_available_bytes("large") == 368 * MIB
     revised3, detail3 = runtime._cautious_allocator_aware_rescue(
@@ -203,33 +204,47 @@ def test_device_free_counter_change_does_not_invalidate_stream_certificate(monke
     assert state["snapshot"] == 1
 
 
-def test_pool_reserved_shrink_debits_certificate_without_false_growth(monkeypatch) -> None:
+def test_pool_reserved_shrink_invalidates_pool_until_live_charge_drains(monkeypatch) -> None:
     observation, envelope = _blocked_case()
     original = _original_decision(observation, envelope)
     runtime = _runtime()
-    state = {"pool_reserved": 480}
+    state = {"pool_reserved": 480, "snapshot": 0}
     monkeypatch.setattr(torch.cuda.memory, "get_allocator_backend", lambda: "native")
     monkeypatch.setattr(
         torch.cuda, "memory_stats",
         lambda _device=None: _stats(pool_reserved=state["pool_reserved"]),
     )
-    monkeypatch.setattr(torch.cuda, "memory_snapshot", lambda: _snapshot())
-    runtime._cautious_allocator_aware_rescue(
+    def snapshot():
+        state["snapshot"] += 1
+        return _snapshot()
+    monkeypatch.setattr(torch.cuda, "memory_snapshot", snapshot)
+    admitted, _ = runtime._cautious_allocator_aware_rescue(
         observation=observation, envelope=envelope, original_decision=original
     )
-    assert runtime._allocator_certificate_available_bytes("large") == 368 * MIB
+    assert admitted.admitted
+    reserve = runtime._reserve_allocator_certificate(
+        request_bytes=envelope.materialisation_peak_bytes, required=True
+    )
     state["pool_reserved"] = 380
-    _, detail = runtime._cautious_allocator_aware_rescue(
+    blocked, detail = runtime._cautious_allocator_aware_rescue(
         observation=observation, envelope=envelope, original_decision=original
     )
+    assert blocked == original
     assert detail["certificate_pool_reserved_shrink_debit_bytes"] == 100 * MIB
-    assert runtime._allocator_certificate_available_bytes("large") == 268 * MIB
-    state["pool_reserved"] = 480
-    runtime._cautious_allocator_aware_rescue(
+    assert detail["certificate_refresh_deferred_live_charge"] is True
+    assert runtime._allocator_certificate_valid["large"] is False
+    assert runtime._allocator_certificate_available_bytes("large") == 0
+    assert state["snapshot"] == 1
+    runtime._release_allocator_certificate_charge(
+        generation=reserve["generation"], pool=reserve["pool"],
+        block_id=reserve["block_id"], charge_bytes=reserve["charge_bytes"],
+    )
+    refreshed, detail2 = runtime._cautious_allocator_aware_rescue(
         observation=observation, envelope=envelope, original_decision=original
     )
-    # Later pool growth must never inflate the old certificate.
-    assert runtime._allocator_certificate_available_bytes("large") == 268 * MIB
+    assert refreshed.admitted
+    assert detail2["snapshot_performed"] is True
+    assert state["snapshot"] == 2
 
 
 def test_no_overlapping_snapshot_while_certificate_charge_live(monkeypatch) -> None:
@@ -259,7 +274,7 @@ def test_no_overlapping_snapshot_while_certificate_charge_live(monkeypatch) -> N
     assert calls["snapshot"] == 1
     runtime._release_allocator_certificate_charge(
         generation=reserve["generation"], pool=reserve["pool"],
-        charge_bytes=reserve["charge_bytes"],
+        block_id=reserve["block_id"], charge_bytes=reserve["charge_bytes"],
     )
     admitted, detail2 = runtime._cautious_allocator_aware_rescue(
         observation=observation, envelope=envelope, original_decision=original
@@ -338,6 +353,60 @@ def test_snapshot_summary_reports_multiple_compatible_blocks() -> None:
         "second_largest_block_bytes": 32 * MIB,
         "third_largest_block_bytes": 16 * MIB,
     }
+
+
+def test_snapshot_sizes_expose_full_certified_pool() -> None:
+    snapshot = [
+        {"device": 0, "stream": 11, "segment_type": "large", "blocks": [
+            {"state": "inactive", "size": 64 * MIB},
+            {"state": "inactive", "size": 32 * MIB},
+            {"state": "inactive", "size": 16 * MIB},
+            {"state": "inactive", "size": 4 * MIB},
+        ]},
+    ]
+    assert _same_stream_inactive_block_sizes(
+        snapshot, device_index=0, stream_id=11, request_bytes=8 * MIB
+    ) == (64 * MIB, 32 * MIB, 16 * MIB, 4 * MIB)
+
+
+def test_certificate_pool_uses_individual_best_fit_blocks() -> None:
+    runtime = _runtime()
+    runtime._allocator_certificate_valid["large"] = True
+    runtime._allocator_certificate_generation["large"] = 3
+    runtime._allocator_certificate_blocks["large"] = [
+        {"block_id": 1, "capacity_bytes": 64 * MIB, "live_charge_bytes": 0},
+        {"block_id": 2, "capacity_bytes": 32 * MIB, "live_charge_bytes": 0},
+        {"block_id": 3, "capacity_bytes": 16 * MIB, "live_charge_bytes": 0},
+    ]
+    runtime._sync_allocator_certificate_totals("large")
+    first = runtime._reserve_allocator_certificate(request_bytes=20 * MIB, required=True)
+    assert first["charge_bytes"] == 32 * MIB
+    assert first["block_id"] == 2
+    second = runtime._reserve_allocator_certificate(request_bytes=12 * MIB, required=True)
+    assert second["charge_bytes"] == 16 * MIB
+    assert second["block_id"] == 3
+    assert runtime._allocator_certificate_available_bytes("large") == 64 * MIB
+    assert runtime._allocator_certificate_largest_available_block_bytes("large") == 64 * MIB
+    runtime._release_allocator_certificate_charge(
+        generation=first["generation"], pool=first["pool"], block_id=first["block_id"],
+        charge_bytes=first["charge_bytes"],
+    )
+    assert runtime._allocator_certificate_available_bytes("large") == 96 * MIB
+
+
+def test_certificate_pool_never_treats_fragmented_total_as_one_block() -> None:
+    runtime = _runtime()
+    runtime._allocator_certificate_valid["large"] = True
+    runtime._allocator_certificate_generation["large"] = 4
+    runtime._allocator_certificate_blocks["large"] = [
+        {"block_id": 1, "capacity_bytes": 16 * MIB, "live_charge_bytes": 0},
+        {"block_id": 2, "capacity_bytes": 16 * MIB, "live_charge_bytes": 0},
+    ]
+    runtime._sync_allocator_certificate_totals("large")
+    assert runtime._allocator_certificate_available_bytes("large") == 32 * MIB
+    assert runtime._allocator_certificate_sufficient_block_count("large", 32 * MIB) == 0
+    with pytest.raises(RuntimeError, match="lost its certified"):
+        runtime._reserve_allocator_certificate(request_bytes=20 * MIB, required=True)
 
 
 def test_advance_rejection_does_not_head_of_line_block_later_matrices(monkeypatch) -> None:

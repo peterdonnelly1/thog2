@@ -136,6 +136,40 @@ def _json_compatible(value: Any) -> Any:
     return str(value)
 
 
+def _premat_snapshot_complete(snapshot: Mapping[str, Any]) -> bool:
+    if snapshot.get("pass_complete") is True:
+        return True
+    events = snapshot.get("events")
+    return bool(
+        isinstance(events, list)
+        and events
+        and isinstance(events[-1], Mapping)
+        and events[-1].get("event") == "pass_end"
+    )
+
+
+def _store_premat_snapshot_if_mutable(
+    connection: sqlite3.Connection,
+    optimizer_update: int,
+    payload: Mapping[str, Any],
+) -> bool:
+    """Store until the first complete pass for an optimizer update, then freeze it."""
+    connection.execute("BEGIN IMMEDIATE")
+    existing_row = connection.execute(
+        "SELECT payload FROM premat_snapshots WHERE optimizer_update = ?",
+        (int(optimizer_update),),
+    ).fetchone()
+    if existing_row is not None:
+        existing = _decode_payload(existing_row["payload"])
+        if _premat_snapshot_complete(existing):
+            return False
+    connection.execute(
+        "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
+        (int(optimizer_update), _encode_payload(payload)),
+    )
+    return True
+
+
 # vvv THOG runtime resource metadata accepts only finite nonnegative scalar values
 def _safe_runtime_metric(value: Any) -> Optional[float]:
     try:
@@ -479,10 +513,12 @@ class LocalChartStore:
         update = int(optimizer_update)
         payload = dict(_json_compatible(snapshot))
         payload["optimizer_update"] = update
-        self.connection.execute(
-            "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
-            (update, _encode_payload(payload)),
+        stored = _store_premat_snapshot_if_mutable(
+            self.connection, update, payload
         )
+        if not stored:
+            self.connection.commit()
+            return
         self.connection.execute(
             """
             DELETE FROM premat_snapshots
@@ -587,14 +623,17 @@ class LocalPrematLiveWriter:
                 )
                 """
             )
+            self.connection.commit()
         update = int(optimizer_update)
         payload = dict(_json_compatible(snapshot))
         payload["optimizer_update"] = update
         now = _utc_timestamp()
-        self.connection.execute(
-            "INSERT OR REPLACE INTO premat_snapshots(optimizer_update, payload) VALUES (?, ?)",
-            (update, _encode_payload(payload)),
+        stored = _store_premat_snapshot_if_mutable(
+            self.connection, update, payload
         )
+        if not stored:
+            self.connection.commit()
+            return
         self.connection.execute(
             """
             DELETE FROM premat_snapshots
