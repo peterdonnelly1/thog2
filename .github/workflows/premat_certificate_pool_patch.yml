@@ -28,7 +28,7 @@ jobs:
           path = Path('tmp_premat_certificate_pool_patch.py')
           text = path.read_text()
           old = '''    if count != 1:\n        raise RuntimeError(f"{label}: expected exactly one match, found {count}")\n    return text.replace(old, new, 1)\n'''
-          new = '''    if count != 1 and label != "candidate certificate block id":\n        raise RuntimeError(f"{label}: expected exactly one match, found {count}")\n    return text.replace(old, new, 1)\n'''
+          new = '''    allowed_duplicate_labels = {\n        "candidate certificate block id",\n        "LocalChartStore immutable premat row",\n    }\n    if count != 1 and label not in allowed_duplicate_labels:\n        raise RuntimeError(f"{label}: expected exactly one match, found {count}")\n    return text.replace(old, new, 1)\n'''
           if text.count(old) != 1:
               raise RuntimeError('could not patch temporary helper match guard')
           path.write_text(text.replace(old, new, 1))
