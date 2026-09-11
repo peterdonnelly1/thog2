@@ -673,6 +673,34 @@ def test_materialising_at_host_acquire_can_resolve_to_gpu_full_hit(monkeypatch) 
     assert calls.count(("DOWN", 5)) == 1
 
 
+# vvv THOG regression: CUDA wait classification must not depend on event-history logging
+def test_gpu_wait_classification_survives_disabled_premat_logging(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    runtime._logging_enabled = False
+    runtime.layer_start(3)
+    runtime.layer_start(5)
+    runtime.acquire("DOWN", 5)
+    timing = next(item for item in runtime._pending_timings if item.kind == "main_stream_wait")
+    assert timing.event_payload is None
+    timing.start_event.elapsed_time_override = (
+        lambda other: -0.125 if other is timing.dependency_event else 0.010
+    )
+
+    runtime._resolve_pending_timings()
+
+    candidate = timing.candidate
+    assert candidate is not None
+    assert candidate.final_outcome == "FULL HIT"
+    assert candidate.critical_path_miss is False
+    assert runtime._aggregate["fully_hidden_hits"] == 1
+    assert runtime._aggregate["waited_hits"] == 0
+    assert runtime._aggregate["main_stream_wait_ms_total"] == pytest.approx(0.0)
+# ^^^ THOG
+
+
 def test_sampled_live_report_waits_for_gpu_classification_without_sync(monkeypatch) -> None:
     runtime, fake_cuda, _calls = _runtime(
         monkeypatch,

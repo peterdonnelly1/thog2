@@ -2615,8 +2615,12 @@ class PrematRuntime:
         marker_elapsed_ms: float,
     ) -> Dict[str, float | int]:
         payload = timing.event_payload
+        # vvv THOG keep GPU hit classification operational when PREMAT telemetry is disabled
+        # if payload is None:
+        #     raise RuntimeError("main-stream wait timing lost its event payload")
         if payload is None:
-            raise RuntimeError("main-stream wait timing lost its event payload")
+            payload = {}
+        # ^^^ THOG
         candidate = timing.candidate
         gpu_wait_required = dependency_delta_ms > 0.0
         effective_wait_ms = max(0.0, dependency_delta_ms)
