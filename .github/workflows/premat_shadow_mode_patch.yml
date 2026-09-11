@@ -47,6 +47,23 @@ jobs:
           PY
       - name: Apply patch
         run: python tmp_premat_shadow_mode_patch.py
+      - name: Update public PREMAT CLI contract test
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tests/test_premat.py")
+          text = p.read_text(encoding="utf-8")
+          old_name = "def test_public_cli_exposes_exactly_the_fourteen_premat_options() -> None:"
+          new_name = "def test_public_cli_exposes_exactly_the_fifteen_premat_options() -> None:"
+          if text.count(old_name) != 1:
+              raise RuntimeError("public PREMAT option-count test name not found exactly once")
+          text = text.replace(old_name, new_name, 1)
+          old_option = '            "--premat_enable_gpu_timing_diagnostic",\n            "--premat_logging",\n'
+          new_option = '            "--premat_enable_gpu_timing_diagnostic",\n            "--premat_enable_shadow_mode",\n            "--premat_logging",\n'
+          if text.count(old_option) != 1:
+              raise RuntimeError("public PREMAT option set insertion point not found exactly once")
+          p.write_text(text.replace(old_option, new_option, 1), encoding="utf-8")
+          PY
       - name: Install test dependencies
         run: python -m pip install -q pytest torch matplotlib plotly
       - name: Run focused verification
