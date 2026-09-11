@@ -310,6 +310,15 @@ def test_wrapper_reclaims_unused_allocator_cache_for_premat_by_default() -> None
     ) in wrapper
 
 
+
+def test_run_config_rejects_shadow_mode_without_premat() -> None:
+    with pytest.raises(ValueError, match="premat_enable_shadow_mode requires premat enabled"):
+        OwtRunConfig(
+            model_type="sheet",
+            premat="disabled",
+            premat_enable_shadow_mode=True,
+        )
+
 def test_premat_cuda_stream_priority_is_opt_in(monkeypatch) -> None:
     normal_runtime, normal_cuda, _calls = _runtime(
         monkeypatch,

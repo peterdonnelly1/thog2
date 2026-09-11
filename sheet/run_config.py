@@ -576,6 +576,7 @@ class OwtRunConfig:
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            shadow_mode=self.premat_enable_shadow_mode,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
