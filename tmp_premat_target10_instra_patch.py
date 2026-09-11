@@ -6,8 +6,11 @@ import re
 
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     count = text.count(old)
-    if count != 1:
+    allowed_first_match_labels = {"advance begin target detail"}
+    if count != 1 and label not in allowed_first_match_labels:
         raise RuntimeError(f"{label}: expected exactly one match, found {count}")
+    if count < 1:
+        raise RuntimeError(f"{label}: expected at least one match, found {count}")
     return text.replace(old, new, 1)
 
 
