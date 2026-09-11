@@ -243,6 +243,7 @@ class OwtRunConfig:
     premat_diagnostic_layer_delay_ms: float = 0.0
     # vvv THOG CUDA timing/classification is a conspicuous opt-in diagnostic
     premat_enable_gpu_timing_diagnostic: bool = False
+    premat_enable_shadow_mode: bool = False
     # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
@@ -561,6 +562,8 @@ class OwtRunConfig:
             raise ValueError("premat_retain_detailed_premat_history must be bool")
         if not isinstance(self.premat_enable_gpu_timing_diagnostic, bool):
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
+        if not isinstance(self.premat_enable_shadow_mode, bool):
+            raise ValueError("premat_enable_shadow_mode must be bool")
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -1200,6 +1203,7 @@ class OwtRunConfig:
             or self.premat_cuda_stream_priority != "normal"
             or float(self.premat_diagnostic_layer_delay_ms) != 0.0
             or self.premat_enable_gpu_timing_diagnostic
+            or self.premat_enable_shadow_mode
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
         ):
@@ -1217,6 +1221,7 @@ class OwtRunConfig:
             timing_diagnostic_fragment = (
                 "GTD_" if self.premat_enable_gpu_timing_diagnostic else ""
             )
+            shadow_fragment = "SHADOW_" if self.premat_enable_shadow_mode else ""
             premat_fragment = (
                 "PM__"
                 f"{self.premat[0].upper()}_"
@@ -1229,6 +1234,7 @@ class OwtRunConfig:
                 f"S{self.premat_cuda_stream_priority[0].upper()}_"
                 f"{delay_fragment}"
                 f"{timing_diagnostic_fragment}"
+                f"{shadow_fragment}"
                 f"L{self.premat_logging[0].upper()}_"
                 f"I{self.premat_instra[0].upper()}"
             )
@@ -1419,6 +1425,7 @@ class OwtRunConfig:
             premat_cuda_stream_priority=self.premat_cuda_stream_priority,
             premat_diagnostic_layer_delay_ms=float(self.premat_diagnostic_layer_delay_ms),
             premat_enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            premat_enable_shadow_mode=self.premat_enable_shadow_mode,
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
             premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
@@ -1492,6 +1499,8 @@ class OwtRunConfig:
         # vvv THOG default-off diagnostic does not perturb established run identity
         if not self.premat_enable_gpu_timing_diagnostic:
             values.pop("premat_enable_gpu_timing_diagnostic", None)
+        if not self.premat_enable_shadow_mode:
+            values.pop("premat_enable_shadow_mode", None)
         # ^^^ THOG
         return values
     # ^^^ THOG

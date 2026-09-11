@@ -40,6 +40,7 @@ def validate_premat_configuration(
     cuda_stream_priority: str,
     diagnostic_layer_delay_ms: float,
     enable_gpu_timing_diagnostic: bool = False,
+    shadow_mode: bool = False,
     logging: str,
     instra: str,
 ) -> None:
@@ -105,6 +106,12 @@ def validate_premat_configuration(
     # vvv THOG PREMAT CUDA timestamping is an explicit diagnostic, never a default execution cost
     if not isinstance(enable_gpu_timing_diagnostic, bool):
         raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
+    # ^^^ THOG
+    # vvv THOG shadow PREMAT is an explicit diagnostic and never a default execution path
+    if not isinstance(shadow_mode, bool):
+        raise ValueError("premat_enable_shadow_mode must be bool")
+    if shadow_mode and premat != "enabled":
+        raise ValueError("premat_enable_shadow_mode requires premat enabled")
     # ^^^ THOG
 
 
@@ -475,6 +482,7 @@ class PrematRuntime:
         cuda_stream_priority: str,
         diagnostic_layer_delay_ms: float,
         enable_gpu_timing_diagnostic: bool = False,
+        shadow_mode: bool = False,
         logging_enabled: bool,
     ) -> None:
         self._materialize = materialize
@@ -493,6 +501,11 @@ class PrematRuntime:
         if not isinstance(enable_gpu_timing_diagnostic, bool):
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
         self._enable_gpu_timing_diagnostic = enable_gpu_timing_diagnostic
+        # ^^^ THOG
+        # vvv THOG shadow mode runs admission/scheduling but suppresses side-stream weight materialisation
+        if not isinstance(shadow_mode, bool):
+            raise ValueError("premat_enable_shadow_mode must be bool")
+        self._shadow_mode = shadow_mode
         # ^^^ THOG
         self._logging_enabled = bool(logging_enabled)
         self._stream: Optional[torch.cuda.Stream] = None
@@ -560,6 +573,7 @@ class PrematRuntime:
             "waited_hits": 0,
             "main_stream_misses": 0,
             "ordinary_deadline_materialisations": 0,
+            "shadow_main_materialisations": 0,
             "premat_materialisation_ms_total": 0.0,
             "main_stream_wait_ms_total": 0.0,
             "main_stream_materialisation_ms_total": 0.0,
@@ -801,6 +815,10 @@ class PrematRuntime:
         )
         # ^^^ THOG
         current_stream = torch.cuda.current_stream(device=self._device)
+        # vvv THOG shadow PREMAT preserves scheduler/admission/event overhead but Main Stream still materialises the real weight
+        if self._shadow_mode:
+            return self._acquire_shadow(candidate, current_stream)
+        # ^^^ THOG
         if (
             candidate.state
             in (CandidateState.AVAILABLE, CandidateState.MATERIALISING)
@@ -966,6 +984,120 @@ class PrematRuntime:
             return candidate.tensor
         return self._attach(candidate.family, candidate.layer_index, candidate.tensor)
 
+
+    # vvv THOG shadow-mode deadline path: no side-stream weight exists; ordinary differentiable materialisation remains on Main Stream
+    def _acquire_shadow(self, candidate: _Candidate, current_stream) -> Tensor:
+        if candidate.state == CandidateState.MATERIALISING:
+            if candidate.completion_event is None:
+                raise RuntimeError(
+                    f"shadow premat candidate {(candidate.layer_index, candidate.family)} has no completion event"
+                )
+            # Retain the normal PREMAT dependency/event-management overhead even
+            # though the side stream deliberately performed no weight work.
+            current_stream.wait_event(candidate.completion_event)
+        elif candidate.state not in (CandidateState.AVAILABLE, CandidateState.UNAVAILABLE):
+            raise RuntimeError(
+                "shadow premat candidate cannot be acquired from "
+                f"{candidate.state.value}"
+            )
+
+        # The scheduler carried theoretical PREMAT memory/certificate charges up
+        # to the deadline. Release those before the ordinary Main Stream weight
+        # replaces the hypothetical side-stream resident tensor.
+        if candidate.retained_counted or candidate.transient_counted:
+            self._rollback_candidate_charge(candidate)
+        self._release_allocator_certificate_candidate(candidate)
+        candidate.owner = "main"
+        candidate.critical_path_miss = False
+        candidate.final_outcome = "SHADOW MAIN MATERIALISATION"
+        candidate.launch_ns = candidate.launch_ns or time.perf_counter_ns()
+
+        if candidate.state == CandidateState.UNAVAILABLE:
+            self._transition(
+                candidate,
+                CandidateState.MATERIALISING,
+                "shadow_materialising_on_critical_path",
+                decision="shadow_main_claim",
+                outcome="shadow_main_materialisation",
+                reason="shadow_mode",
+            )
+
+        shadow_payload = self._record(
+            "shadow_main_materialising",
+            candidate=candidate,
+            decision="shadow_main_claim",
+            outcome="ordinary_deadline_materialisation",
+            reason="shadow_mode",
+            detail={"shadow_mode": True},
+        )
+        materialise_start = (
+            torch.cuda.Event(enable_timing=True)
+            if self._enable_gpu_timing_diagnostic
+            else None
+        )
+        materialise_end = (
+            torch.cuda.Event(enable_timing=True)
+            if self._enable_gpu_timing_diagnostic
+            else None
+        )
+        if materialise_start is not None:
+            materialise_start.record(current_stream)
+        try:
+            candidate.tensor = self._materialize(
+                candidate.family,
+                candidate.layer_index,
+            )
+        except BaseException as error:
+            self._record(
+                "shadow_main_materialisation_failed",
+                candidate=candidate,
+                outcome="failure",
+                reason=type(error).__name__,
+                detail={"error": str(error)},
+            )
+            raise RuntimeError(
+                "Shadow PREMAT Main Stream materialisation failed; "
+                f"layer={candidate.layer_index}, family={candidate.family}, "
+                f"mode={self._attention_mode}, memory={self._memory_summary()}"
+            ) from error
+        if materialise_start is not None and materialise_end is not None:
+            materialise_end.record(current_stream)
+            self._pending_timings.append(
+                _PendingCudaTiming(
+                    kind="main_stream_materialisation",
+                    start_event=materialise_start,
+                    end_event=materialise_end,
+                    event_payload=shadow_payload,
+                    pass_sequence=self._pass_sequence,
+                    layer_index=candidate.layer_index,
+                    family=candidate.family,
+                    candidate=candidate,
+                )
+            )
+        candidate.available_ns = time.perf_counter_ns()
+        if candidate.state == CandidateState.MATERIALISING:
+            self._transition(
+                candidate,
+                CandidateState.AVAILABLE,
+                "shadow_main_available",
+                outcome="ordinary_deadline_materialisation",
+                reason="shadow_mode",
+            )
+        self._transition(
+            candidate,
+            CandidateState.CONSUMING,
+            "shadow_main_consuming",
+            outcome="shadow_main_materialisation",
+            reason="shadow_mode",
+        )
+        self._aggregate["ordinary_deadline_materialisations"] += 1
+        self._aggregate["shadow_main_materialisations"] += 1
+        if candidate.tensor is None:
+            raise RuntimeError("shadow PREMAT Main Stream materialisation produced no tensor")
+        candidate.tensor.record_stream(current_stream)
+        return candidate.tensor
+    # ^^^ THOG
+
     def materialize_for_consumption(self, family: str, layer_index: int) -> Tensor:
         # Checkpoint replay has no schedulable lookahead lifetime.  Recreate the
         # exact ordinary differentiable materialisation on its execution stream.
@@ -1089,6 +1221,7 @@ class PrematRuntime:
             "diagnostic_layer_delay_ms": self._diagnostic_layer_delay_ms,
             # vvv THOG expose whether expensive CUDA timestamp diagnostics are part of this run
             "enable_gpu_timing_diagnostic": self._enable_gpu_timing_diagnostic,
+            "shadow_mode": self._shadow_mode,
             # ^^^ THOG
             "headroom_mode": (
                 "stay_below_current_peak"
@@ -1177,6 +1310,11 @@ class PrematRuntime:
             foreground_overlap_bytes=foreground_overlap,
         )
 
+    # vvv THOG shadow charges are theoretical scheduler state and must not be subtracted from real CUDA allocation counters
+    def _physical_retained_bytes(self) -> int:
+        return 0 if self._shadow_mode else self._retained_bytes
+    # ^^^ THOG
+
     def _observe_memory(self) -> PrematMemoryObservation:
         if self._device is None:
             raise RuntimeError("premat CUDA device is not initialized")
@@ -1186,7 +1324,7 @@ class PrematRuntime:
         return PrematMemoryObservation(
             process_allocated_bytes=allocated,
             process_reserved_bytes=reserved,
-            process_ordinary_peak_bytes=max(self._ordinary_peak_bytes, allocated - self._retained_bytes),
+            process_ordinary_peak_bytes=max(self._ordinary_peak_bytes, allocated - self._physical_retained_bytes()),
             device_free_bytes=int(free),
             device_total_bytes=int(total),
         )
@@ -1195,7 +1333,7 @@ class PrematRuntime:
         observation = self._observe_memory()
         ordinary_allocated = max(
             0,
-            observation.process_allocated_bytes - self._retained_bytes,
+            observation.process_allocated_bytes - self._physical_retained_bytes(),
         )
         self._ordinary_peak_bytes = max(self._ordinary_peak_bytes, ordinary_allocated)
         self._update_memory_aggregates(observation)
@@ -1915,35 +2053,41 @@ class PrematRuntime:
                     if candidate.materialisation_start_event is not None:
                         candidate.materialisation_start_event.record(self._stream)
                     # ^^^ THOG
-                    # Autocast caches lower-precision casts of FP32 parameter
-                    # leaves for the enclosing forward.  A cast produced here
-                    # belongs to the Premat Stream and, under PyTorch 2.8
-                    # no_grad(), is detached.  Publishing it through the shared
-                    # autocast cache lets ordinary Main Stream materialisation
-                    # reuse storage with neither a dependency nor a gradient
-                    # edge.  Keep autocast's dtype policy, but make Premat casts
-                    # private to this submission.
-                    autocast_cache_enabled = torch.is_autocast_cache_enabled()
-                    torch.set_autocast_cache_enabled(False)
-                    try:
-                        with torch.no_grad():
-                            candidate.tensor = self._materialize(
-                                candidate.family,
-                                candidate.layer_index,
-                            )
-                    finally:
-                        torch.set_autocast_cache_enabled(autocast_cache_enabled)
-                    actual_retained_bytes = int(
-                        candidate.tensor.numel() * candidate.tensor.element_size()
-                    )
-                    if actual_retained_bytes > candidate.envelope.retained_bytes:
-                        raise RuntimeError(
-                            "materialised tensor exceeds its pre-admission retained estimate: "
-                            f"actual={actual_retained_bytes}, "
-                            f"predicted={candidate.envelope.retained_bytes}"
+                    # vvv THOG shadow mode records the normal side-stream completion event but deliberately launches no weight materialisation
+                    if self._shadow_mode:
+                        candidate.tensor = None
+                        candidate.completion_event.record(self._stream)
+                    else:
+                        # Autocast caches lower-precision casts of FP32 parameter
+                        # leaves for the enclosing forward.  A cast produced here
+                        # belongs to the Premat Stream and, under PyTorch 2.8
+                        # no_grad(), is detached.  Publishing it through the shared
+                        # autocast cache lets ordinary Main Stream materialisation
+                        # reuse storage with neither a dependency nor a gradient
+                        # edge.  Keep autocast's dtype policy, but make Premat casts
+                        # private to this submission.
+                        autocast_cache_enabled = torch.is_autocast_cache_enabled()
+                        torch.set_autocast_cache_enabled(False)
+                        try:
+                            with torch.no_grad():
+                                candidate.tensor = self._materialize(
+                                    candidate.family,
+                                    candidate.layer_index,
+                                )
+                        finally:
+                            torch.set_autocast_cache_enabled(autocast_cache_enabled)
+                        actual_retained_bytes = int(
+                            candidate.tensor.numel() * candidate.tensor.element_size()
                         )
-                    candidate.tensor.record_stream(self._stream)
-                    candidate.completion_event.record(self._stream)
+                        if actual_retained_bytes > candidate.envelope.retained_bytes:
+                            raise RuntimeError(
+                                "materialised tensor exceeds its pre-admission retained estimate: "
+                                f"actual={actual_retained_bytes}, "
+                                f"predicted={candidate.envelope.retained_bytes}"
+                            )
+                        candidate.tensor.record_stream(self._stream)
+                        candidate.completion_event.record(self._stream)
+                    # ^^^ THOG
             except BaseException as error:
                 self._rollback_candidate_charge(candidate)
                 self._release_allocator_certificate_candidate(candidate)
@@ -1988,7 +2132,11 @@ class PrematRuntime:
                 CandidateState.MATERIALISING,
                 "materialising",
                 decision="admit",
-                outcome="submitted_to_premat_stream",
+                outcome=(
+                    "submitted_to_shadow_premat_stream"
+                    if self._shadow_mode
+                    else "submitted_to_premat_stream"
+                ),
                 reason=decision.reason,
                 detail=launch_detail,
             )
@@ -2131,7 +2279,7 @@ class PrematRuntime:
     ) -> PrematMemoryObservation:
         ordinary_process_bytes = max(
             0,
-            observation.process_allocated_bytes - self._retained_bytes,
+            observation.process_allocated_bytes - self._physical_retained_bytes(),
         )
         charged_process_bytes = max(
             observation.process_allocated_bytes,
@@ -2139,7 +2287,7 @@ class PrematRuntime:
         )
         ordinary_device_bytes = max(
             0,
-            observation.device_used_bytes - self._retained_bytes,
+            observation.device_used_bytes - self._physical_retained_bytes(),
         )
         charged_device_bytes = max(
             observation.device_used_bytes,

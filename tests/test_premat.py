@@ -128,6 +128,7 @@ def _runtime(
     reference_element_bytes: int = 2,
     attach=None,
     enable_gpu_timing_diagnostic: bool = True,
+    shadow_mode: bool = False,
 ):
     fake_cuda = _FakeCuda()
     fake_cuda.install(monkeypatch)
@@ -150,6 +151,7 @@ def _runtime(
         cuda_stream_priority=cuda_stream_priority,
         diagnostic_layer_delay_ms=diagnostic_layer_delay_ms,
         enable_gpu_timing_diagnostic=enable_gpu_timing_diagnostic,
+        shadow_mode=shadow_mode,
         logging_enabled=True,
     )
     runtime.begin(
@@ -273,7 +275,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_fourteen_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_fifteen_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -293,6 +295,7 @@ def test_public_cli_exposes_exactly_the_fourteen_premat_options() -> None:
         "--premat_cuda_stream_priority",
         "--premat_diagnostic_layer_delay_ms",
         "--premat_enable_gpu_timing_diagnostic",
+        "--premat_enable_shadow_mode",
         "--premat_logging",
         "--premat_instra",
         "--premat_retain_detailed_premat_history",
@@ -1375,4 +1378,59 @@ def test_premat_instra_source_contains_requested_interactions() -> None:
     assert 'event.key === "Escape"' in javascript
     assert 'premat-tab-active' in javascript
     assert 'detailed_history_retained' in javascript
+# ^^^ THOG
+
+
+# vvv THOG shadow PREMAT regression coverage
+def test_shadow_mode_schedules_without_side_stream_weight_materialisation(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        enable_gpu_timing_diagnostic=False,
+        shadow_mode=True,
+    )
+    runtime.layer_start(3)
+    # Scheduling/admission ran, but the shadow side stream launched no materialiser.
+    assert calls == []
+    report = runtime.report()
+    assert report["shadow_mode"] is True
+    assert report["aggregate"]["admitted"] > 0
+
+    tensor = runtime.acquire("DOWN", 5)
+    assert isinstance(tensor, _FakeTensor)
+    assert calls == [("DOWN", 5)]
+    assert fake_cuda.main_stream.waited_events
+    report = runtime.report()
+    assert report["aggregate"]["shadow_main_materialisations"] == 1
+    assert report["aggregate"]["ordinary_deadline_materialisations"] == 1
+    runtime.consumed("DOWN", 5)
+    runtime.end()
+
+
+def test_shadow_mode_cli_defaults_false_and_accepts_true() -> None:
+    parser = build_parser()
+    assert parser.parse_args([]).premat_enable_shadow_mode is False
+    assert parser.parse_args(["--premat_enable_shadow_mode", "true"]).premat_enable_shadow_mode is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--premat_enable_shadow_mode", "maybe"])
+
+
+def test_shadow_mode_requires_premat_enabled() -> None:
+    with pytest.raises(ValueError, match="requires premat enabled"):
+        validate_premat_configuration(
+            premat="disabled",
+            attention_mode="fused",
+            target_layer=1,
+            weight_matrix_target_order="r_to_l",
+            stay_below_current_peak=True,
+            stay_within_global_buffer=False,
+            gpu_memory_buffer_gb=0.0,
+            allocator_aware_admission="disabled",
+            cuda_stream_priority="normal",
+            diagnostic_layer_delay_ms=0.0,
+            enable_gpu_timing_diagnostic=False,
+            shadow_mode=True,
+            logging="disabled",
+            instra="disabled",
+        )
 # ^^^ THOG

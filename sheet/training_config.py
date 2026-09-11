@@ -302,6 +302,7 @@ class TrainingConfig:
     premat_diagnostic_layer_delay_ms: float = 0.0
     # vvv THOG diagnostic timestamps default off so ordinary PREMAT carries no measurement cost
     premat_enable_gpu_timing_diagnostic: bool = False
+    premat_enable_shadow_mode: bool = False
     # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
@@ -574,6 +575,8 @@ class TrainingConfig:
             raise ValueError("premat_retain_detailed_premat_history must be bool")
         if not isinstance(self.premat_enable_gpu_timing_diagnostic, bool):
             raise ValueError("premat_enable_gpu_timing_diagnostic must be bool")
+        if not isinstance(self.premat_enable_shadow_mode, bool):
+            raise ValueError("premat_enable_shadow_mode must be bool")
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
@@ -586,6 +589,7 @@ class TrainingConfig:
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            shadow_mode=self.premat_enable_shadow_mode,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )

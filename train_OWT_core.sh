@@ -172,6 +172,7 @@ PREMAT_CUDA_STREAM_PRIORITY="normal"
 PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="0"
 # vvv THOG CUDA timestamp diagnostics are deliberately conspicuous and default-off
 PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC=false
+PREMAT_ENABLE_SHADOW_MODE=false
 # ^^^ THOG
 PREMAT_LOGGING="disabled"
 PREMAT_INSTRA="disabled"
@@ -310,6 +311,7 @@ Dynamic pre-materialisation:
   --premat_cuda_stream_priority normal|high=${PREMAT_CUDA_STREAM_PRIORITY}
   --premat_diagnostic_layer_delay_ms VALUE=${PREMAT_DIAGNOSTIC_LAYER_DELAY_MS}  diagnostic host-dispatch delay after each non-final layer
   --premat_enable_gpu_timing_diagnostic true|false=${PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC}  CUDA timestamp/classification diagnostic; default false
+  --premat_enable_shadow_mode true|false=${PREMAT_ENABLE_SHADOW_MODE}  schedule/admit normally but suppress side-stream weight materialisation; default false
   --premat_logging enabled|disabled=${PREMAT_LOGGING}
   --premat_instra enabled|disabled=${PREMAT_INSTRA}
 
@@ -503,7 +505,7 @@ while (( $# > 0 )); do
       PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER=true
       shift
       ;;
-    --premat|--premat_attention_mode|--premat_target_layer|--premat_weight_matrix_target_order|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_enable_gpu_timing_diagnostic|--premat_logging|--premat_instra)
+    --premat|--premat_attention_mode|--premat_target_layer|--premat_weight_matrix_target_order|--premat_gpu_memory_buffer_gb|--premat_cuda_stream_priority|--premat_diagnostic_layer_delay_ms|--premat_enable_gpu_timing_diagnostic|--premat_enable_shadow_mode|--premat_logging|--premat_instra)
       (( $# >= 2 )) || { echo "$1 requires a value" >&2; exit 2; }
       case "$1" in
         --premat) PREMAT="$2" ;;
@@ -514,12 +516,13 @@ while (( $# > 0 )); do
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$2" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$2" ;;
         --premat_enable_gpu_timing_diagnostic) PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC="$2" ;;
+        --premat_enable_shadow_mode) PREMAT_ENABLE_SHADOW_MODE="$2" ;;
         --premat_logging) PREMAT_LOGGING="$2" ;;
         --premat_instra) PREMAT_INSTRA="$2" ;;
       esac
       shift 2
       ;;
-    --premat=*|--premat_attention_mode=*|--premat_target_layer=*|--premat_weight_matrix_target_order=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_enable_gpu_timing_diagnostic=*|--premat_logging=*|--premat_instra=*)
+    --premat=*|--premat_attention_mode=*|--premat_target_layer=*|--premat_weight_matrix_target_order=*|--premat_gpu_memory_buffer_gb=*|--premat_cuda_stream_priority=*|--premat_diagnostic_layer_delay_ms=*|--premat_enable_gpu_timing_diagnostic=*|--premat_enable_shadow_mode=*|--premat_logging=*|--premat_instra=*)
       premat_name="${1%%=*}"; premat_value="${1#*=}"
       case "$premat_name" in
         --premat) PREMAT="$premat_value" ;;
@@ -530,6 +533,7 @@ while (( $# > 0 )); do
         --premat_cuda_stream_priority) PREMAT_CUDA_STREAM_PRIORITY="$premat_value" ;;
         --premat_diagnostic_layer_delay_ms) PREMAT_DIAGNOSTIC_LAYER_DELAY_MS="$premat_value" ;;
         --premat_enable_gpu_timing_diagnostic) PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC="$premat_value" ;;
+        --premat_enable_shadow_mode) PREMAT_ENABLE_SHADOW_MODE="$premat_value" ;;
         --premat_logging) PREMAT_LOGGING="$premat_value" ;;
         --premat_instra) PREMAT_INSTRA="$premat_value" ;;
       esac
@@ -1023,6 +1027,7 @@ validate_true_false "$PREMAT_HEADROOM_STAY_WITHIN_GLOBAL_BUFFER" "PREMAT_HEADROO
 validate_nonnegative_number "$PREMAT_GPU_MEMORY_BUFFER_GB" "PREMAT_GPU_MEMORY_BUFFER_GB"
 validate_nonnegative_number "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS" "PREMAT_DIAGNOSTIC_LAYER_DELAY_MS"
 validate_true_false "$PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC" "PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC"
+validate_true_false "$PREMAT_ENABLE_SHADOW_MODE" "PREMAT_ENABLE_SHADOW_MODE"
 if [[ "$PREMAT" == enabled ]]; then
   [[ "$HAS_NON_DEPTH_COMPACT_PRESET" == false && "$HAS_DENSE_PRESET" == false && "$HYPERBLOCK" == false ]] || { echo "--premat enabled currently requires every selected preset to be DEPTH." >&2; exit 2; }
   if [[ "$FAST_DISCARD_EXPLICIT" == true ]]; then
@@ -1304,6 +1309,7 @@ run_grid_point() {
   optional_args+=(--premat_cuda_stream_priority "$PREMAT_CUDA_STREAM_PRIORITY")
   optional_args+=(--premat_diagnostic_layer_delay_ms "$PREMAT_DIAGNOSTIC_LAYER_DELAY_MS")
   optional_args+=(--premat_enable_gpu_timing_diagnostic "$PREMAT_ENABLE_GPU_TIMING_DIAGNOSTIC")
+  optional_args+=(--premat_enable_shadow_mode "$PREMAT_ENABLE_SHADOW_MODE")
   optional_args+=(--premat_logging "$PREMAT_LOGGING")
   optional_args+=(--premat_instra "$PREMAT_INSTRA")
   # ^^^ THOG

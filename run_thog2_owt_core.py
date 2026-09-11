@@ -347,6 +347,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="true|false",
         help="enable PREMAT CUDA timestamp/classification diagnostics; default false",
     )
+    parser.add_argument(
+        "--premat_enable_shadow_mode",
+        type=_true_false,
+        default=False,
+        metavar="true|false",
+        help="run PREMAT scheduling/admission without side-stream weight materialisation; default false",
+    )
     # ^^^ THOG
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
@@ -757,6 +764,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_cuda_stream_priority=arguments.premat_cuda_stream_priority,
         premat_diagnostic_layer_delay_ms=arguments.premat_diagnostic_layer_delay_ms,
         premat_enable_gpu_timing_diagnostic=arguments.premat_enable_gpu_timing_diagnostic,
+        premat_enable_shadow_mode=arguments.premat_enable_shadow_mode,
         premat_logging=arguments.premat_logging,
         premat_instra=arguments.premat_instra,
         premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
@@ -983,6 +991,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             f"premat_cuda_stream_priority={config.premat_cuda_stream_priority} "
             f"premat_diagnostic_layer_delay_ms={config.premat_diagnostic_layer_delay_ms:g} "
             f"premat_enable_gpu_timing_diagnostic={str(config.premat_enable_gpu_timing_diagnostic).lower()} "
+            f"premat_enable_shadow_mode={str(config.premat_enable_shadow_mode).lower()} "
             f"premat_logging={config.premat_logging} "
             f"premat_instra={config.premat_instra} "
             f"effective_fast_discard={str(effective_fast_discard).lower()} "
@@ -1023,6 +1032,20 @@ def main() -> int:
     if arguments.print_resolved_json or arguments.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
+    # vvv THOG diagnostic execution switches print one conspicuous warning each before CUDA/model/data startup
+    if config.premat_enable_gpu_timing_diagnostic:
+        print(
+            "\033[1;91mWARNING: PREMAT GPU TIMING DIAGNOSTIC ENABLED -- extra CUDA timing/classification instrumentation is active.\033[0m",
+            file=sys.stderr,
+            flush=True,
+        )
+    if config.premat_enable_shadow_mode:
+        print(
+            "\033[1;91mWARNING: PREMAT SHADOW MODE ENABLED -- side-stream weight materialisation is suppressed; Main Stream materialises normally.\033[0m",
+            file=sys.stderr,
+            flush=True,
+        )
+    # ^^^ THOG
     # vvv THOG an actual premat run fails before model construction/first forward when CUDA is unavailable
     if config.premat == "enabled" and not torch.cuda.is_available():
         raise RuntimeError("--premat enabled requires CUDA, but CUDA is unavailable")
@@ -1044,7 +1067,7 @@ def main() -> int:
     train_tokens = load_tokens(dataset_dir / "train.bin")
     validation_tokens = load_tokens(dataset_dir / "val.bin")
     if config.run_mode == "resume":
-        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "max_wall_minutes": training_config.max_wall_minutes, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips, "premat_enable_gpu_timing_diagnostic": training_config.premat_enable_gpu_timing_diagnostic})
+        trainer = OwtTrainer.from_checkpoint(checkpoint_path, train_tokens, validation_tokens, expected_config=training_config, overrides={"device": training_config.device, "dtype": training_config.dtype, "max_updates": training_config.max_updates, "max_wall_minutes": training_config.max_wall_minutes, "eval_interval": training_config.eval_interval, "eval_batches": training_config.eval_batches, "checkpoint_interval": training_config.checkpoint_interval, "checkpoint_segment_size": training_config.checkpoint_segment_size, "out_dir": training_config.out_dir, "log_interval": training_config.log_interval, "nonfinite_update_policy": training_config.nonfinite_update_policy, "max_nonfinite_update_skips": training_config.max_nonfinite_update_skips, "premat_enable_gpu_timing_diagnostic": training_config.premat_enable_gpu_timing_diagnostic, "premat_enable_shadow_mode": training_config.premat_enable_shadow_mode})
     else:
         trainer = OwtTrainer(training_config, train_tokens, validation_tokens)
     canonical = config.canonical_dict(world_size=world_size)

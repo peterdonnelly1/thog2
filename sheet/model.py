@@ -155,6 +155,7 @@ class SheetGPTConfig:
     premat_diagnostic_layer_delay_ms: float = 0.0
     # vvv THOG expensive GPU timestamp diagnostics are opt-in and separate from PREMAT correctness events
     premat_enable_gpu_timing_diagnostic: bool = False
+    premat_enable_shadow_mode: bool = False
     # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
@@ -328,6 +329,7 @@ class SheetGPTConfig:
             cuda_stream_priority=self.premat_cuda_stream_priority,
             diagnostic_layer_delay_ms=self.premat_diagnostic_layer_delay_ms,
             enable_gpu_timing_diagnostic=self.premat_enable_gpu_timing_diagnostic,
+            shadow_mode=self.premat_enable_shadow_mode,
             logging=self.premat_logging,
             instra=self.premat_instra,
         )
@@ -589,6 +591,7 @@ class SheetGPT(nn.Module):
                 cuda_stream_priority=config.premat_cuda_stream_priority,
                 diagnostic_layer_delay_ms=config.premat_diagnostic_layer_delay_ms,
                 enable_gpu_timing_diagnostic=config.premat_enable_gpu_timing_diagnostic,
+                shadow_mode=config.premat_enable_shadow_mode,
                 logging_enabled=(
                     config.premat_logging == "enabled"
                     or config.premat_instra == "enabled"
