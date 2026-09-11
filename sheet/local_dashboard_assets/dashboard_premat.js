@@ -151,6 +151,9 @@ function premat_new_record(layer_index, family, attention_mode, snapshot) {
     submission_queue_depth: null,
     submission_charged_bytes: null,
     wait_ms: null,
+    wait_marker_elapsed_ms: null,
+    gpu_dependency_delta_ms: null,
+    gpu_wait_required: null,
     materialisation_ms: null,
     main_materialisation_ms: null,
     completion_at_deadline_percent: null,
@@ -205,6 +208,17 @@ function premat_update_from_event(record, event) {
   if ((event.event === "consuming" || event.event === "critical_path_wait") && Number.isFinite(elapsed_ms)) record.consumption_ms = elapsed_ms;
   if (event.wait_ms !== null && event.wait_ms !== undefined && Number.isFinite(Number(event.wait_ms))) {
     record.wait_ms = Number(event.wait_ms);
+  }
+  if (event.wait_marker_elapsed_ms !== null && event.wait_marker_elapsed_ms !== undefined
+      && Number.isFinite(Number(event.wait_marker_elapsed_ms))) {
+    record.wait_marker_elapsed_ms = Number(event.wait_marker_elapsed_ms);
+  }
+  if (event.gpu_dependency_delta_ms !== null && event.gpu_dependency_delta_ms !== undefined
+      && Number.isFinite(Number(event.gpu_dependency_delta_ms))) {
+    record.gpu_dependency_delta_ms = Number(event.gpu_dependency_delta_ms);
+  }
+  if (typeof event.gpu_wait_required === "boolean") {
+    record.gpu_wait_required = event.gpu_wait_required;
   }
   if (event.materialisation_ms !== null && event.materialisation_ms !== undefined && Number.isFinite(Number(event.materialisation_ms))) {
     record.materialisation_ms = Number(event.materialisation_ms);
@@ -273,7 +287,8 @@ function premat_build_model(snapshot) {
     const event_name = String(event.event || "");
     const owner = String(event.owner || "none");
     const state = String(event.new_state || event.state || "");
-    const waited = event.outcome === "waited_for_premat"
+    const waited = event.gpu_wait_required === true
+      || event.outcome === "waited_for_premat"
       || event.reason === "materialising_at_deadline";
     const main_owned = owner === "main" || event.decision === "main_claim";
 
@@ -327,6 +342,14 @@ function premat_build_model(snapshot) {
       } else {
         record.path = "full";
         record.outcome = "FULL HIT";
+        if (event_name === "critical_path_wait" && event.gpu_wait_required === false) {
+          // The host reached acquire() while PREMAT was still running, but CUDA
+          // proves PREMAT completed before the Main Stream reached the wait.
+          // Render the effective AVAILABLE state so the recapitulation follows
+          // the same Full Success path as a host-observed AVAILABLE candidate.
+          premat_append_trace(record, "AVAILABLE");
+          add_frame({key, state: "available", outcome: record.outcome}, event, "AVAILABLE");
+        }
         premat_append_trace(record, "CONSUMING - NO WAIT");
         add_frame({key, state: "consuming-full", outcome: record.outcome}, event, "CONSUMING - NO WAIT");
       }

@@ -62,6 +62,7 @@ class _FakeEvent:
         self.cuda = cuda
         self.enable_timing = enable_timing
         self.complete = False
+        self.elapsed_time_override = None
 
     def record(self, stream) -> None:
         self.complete = (
@@ -72,7 +73,9 @@ class _FakeEvent:
     def query(self) -> bool:
         return self.complete
 
-    def elapsed_time(self, _other) -> float:
+    def elapsed_time(self, other) -> float:
+        if self.elapsed_time_override is not None:
+            return float(self.elapsed_time_override(other))
         return 0.25
 
 
@@ -628,10 +631,99 @@ def test_materialising_deadline_waits_once_and_never_duplicates(monkeypatch) -> 
     candidate = runtime._candidates[(5, "DOWN")]
     assert candidate.owner == "premat"
     assert candidate.state == CandidateState.CONSUMING
-    assert candidate.critical_path_miss
+    # Host acquire() only knows that PREMAT is still MATERIALISING. The hit
+    # outcome remains provisional until the GPU reaches the dependency marker.
+    assert candidate.critical_path_miss is False
+    assert candidate.final_outcome == "PENDING"
     report = runtime.report()
+    assert candidate.critical_path_miss is True
+    assert candidate.final_outcome == "PARTIAL HIT"
     assert report["aggregate"]["waited_hits"] == 1
     assert report["aggregate"]["main_stream_wait_ms_total"] == pytest.approx(0.25)
+
+
+def test_materialising_at_host_acquire_can_resolve_to_gpu_full_hit(monkeypatch) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    runtime.layer_start(3)
+    runtime.layer_start(5)
+    runtime.acquire("DOWN", 5)
+    timing = next(item for item in runtime._pending_timings if item.kind == "main_stream_wait")
+    timing.start_event.elapsed_time_override = (
+        lambda other: -0.125 if other is timing.dependency_event else 0.010
+    )
+    runtime._resolve_pending_timings()
+
+    candidate = timing.candidate
+    assert candidate is not None
+    assert candidate.final_outcome == "FULL HIT"
+    assert candidate.critical_path_miss is False
+    report = runtime.report()
+    assert report["aggregate"]["fully_hidden_hits"] == 1
+    assert report["aggregate"]["waited_hits"] == 0
+    assert report["aggregate"]["main_stream_wait_ms_total"] == pytest.approx(0.0)
+    resolved = timing.event_payload
+    assert resolved is not None
+    assert resolved["gpu_wait_required"] is False
+    assert resolved["gpu_dependency_delta_ms"] == pytest.approx(-0.125)
+    assert resolved["wait_marker_elapsed_ms"] == pytest.approx(0.010)
+    assert resolved["wait_ms"] == pytest.approx(0.0)
+    assert calls.count(("DOWN", 5)) == 1
+
+
+def test_sampled_live_report_waits_for_gpu_classification_without_sync(monkeypatch) -> None:
+    runtime, fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+    )
+    snapshots = []
+    runtime.set_live_reporter(snapshots.append, lambda pass_sequence: pass_sequence == 1)
+    runtime.layer_start(3)
+    runtime.layer_start(5)
+    fake_cuda.complete_main_on_record = False
+    runtime.acquire("DOWN", 5)
+    wait_timing = next(item for item in runtime._pending_timings if item.kind == "main_stream_wait")
+    wait_timing.start_event.elapsed_time_override = (
+        lambda other: -0.050 if other is wait_timing.dependency_event else 0.008
+    )
+    # Match the real model sequence: the consuming GEMM is submitted and then
+    # the model tells PREMAT that the matrix has been consumed.
+    runtime.consumed("DOWN", 5)
+    runtime.end()
+
+    # Host pass completion must not publish a provisional PARTIAL/FULL result.
+    assert snapshots == []
+    assert 1 in runtime._pending_completed_live_reports
+
+    # The fake Premat stream has no autonomous progress. Mark every CUDA timing
+    # from pass 1 complete, exactly as the real device eventually would; the
+    # Main Stream wait timing keeps its explicit signed dependency override.
+    for timing in runtime._pending_timings:
+        timing.end_event.complete = True
+    runtime.begin((3, 5, 7), reference=_FakeTensor())
+
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot["pass_sequence"] == 1
+    resolved = next(
+        event
+        for event in snapshot["events"]
+        if event.get("event") == "critical_path_wait"
+        and event.get("family") == "DOWN"
+    )
+    assert resolved["final_outcome"] == "FULL HIT"
+    assert resolved["gpu_wait_required"] is False
+    assert resolved["wait_ms"] == pytest.approx(0.0)
+    consumed = next(
+        event
+        for event in snapshot["events"]
+        if event.get("event") == "consumed"
+        and event.get("family") == "DOWN"
+    )
+    assert consumed["final_outcome"] == "FULL HIT"
+    assert consumed["critical_path_miss"] is False
 
 
 def test_pending_premat_release_stays_charged_without_blocking_next_launch(monkeypatch) -> None:

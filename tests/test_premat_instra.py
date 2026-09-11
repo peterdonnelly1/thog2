@@ -259,6 +259,33 @@ def test_playback_reducer_preserves_processing_and_outcome_paths() -> None:
     assert waited_final["completion_at_deadline_percent"] == 75
 
 
+def test_gpu_effective_full_hit_uses_full_success_recap_path() -> None:
+    snapshot = _playback_snapshot()
+    for event in snapshot["events"]:
+        if event.get("event") == "critical_path_wait" and event.get("family") == "O":
+            event.update({
+                "outcome": "fully_hidden",
+                "reason": "premat_complete_before_main_stream_dependency",
+                "critical_path_miss": False,
+                "gpu_wait_required": False,
+                "gpu_dependency_delta_ms": -0.075,
+                "wait_marker_elapsed_ms": 0.009,
+                "wait_ms": 0.0,
+                "final_outcome": "FULL HIT",
+            })
+        if event.get("event") == "consumed" and event.get("family") == "O":
+            event["critical_path_miss"] = False
+            event["final_outcome"] = "FULL HIT"
+    rendered = _javascript_model(snapshot)
+    records = {(record["layer_index"], record["family"]): record for record in rendered["records"]}
+    assert records[(0, "O")]["outcome"] == "FULL HIT"
+    assert records[(0, "O")]["trace"] == [
+        "PRE-MATERIALISING", "AVAILABLE", "CONSUMING - NO WAIT", "FULL HIT"
+    ]
+    assert records[(0, "O")]["wait_ms"] == 0.0
+    assert records[(0, "O")]["gpu_wait_required"] is False
+
+
 def test_history_reducer_covers_all_retained_steps_and_layers_and_exports_csv() -> None:
     first = _playback_snapshot()
     first["memory"] = {

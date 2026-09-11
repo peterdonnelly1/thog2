@@ -403,6 +403,11 @@ class _PendingCudaTiming:
     start_event: torch.cuda.Event
     end_event: torch.cuda.Event
     event_payload: Optional[Dict[str, object]]
+    pass_sequence: int = 0
+    layer_index: Optional[int] = None
+    family: Optional[str] = None
+    dependency_event: Optional[torch.cuda.Event] = None
+    candidate: Optional[_Candidate] = None
 
 
 @dataclass
@@ -496,6 +501,10 @@ class PrematRuntime:
         self._live_publish_error: Optional[str] = None
         # ^^^ THOG
         self._pending_timings: List[_PendingCudaTiming] = []
+        # Completed sampled passes are retained only until all CUDA timings for
+        # that pass have actually resolved. This lets Instra receive a final
+        # GPU-timeline classification without synchronising the training stream.
+        self._pending_completed_live_reports: Dict[int, Dict[str, object]] = {}
         self._pending_releases: List[_PendingRelease] = []
         self._display_layer_pair: Optional[Tuple[int, Optional[int]]] = None
         self._display_candidates: List[Dict[str, object]] = []
@@ -601,6 +610,10 @@ class PrematRuntime:
             )
         self._layer_indices = resolved
         self._position = -1
+        # A prior sampled pass may have had GPU wait timings still outstanding
+        # when its host forward ended. Resolve/publish those non-blockingly before
+        # replacing the current event window.
+        self._resolve_pending_timings()
         # One forward pass is one accumulation microstep's complete Premat
         # timeline.  Never carry event fragments across microsteps.
         self._events.clear()
@@ -667,6 +680,7 @@ class PrematRuntime:
                 0.0,
                 (time.perf_counter_ns() - self._pass_start_ns) / 1_000_000.0,
             )
+        self._capture_completed_live_report()
         for candidate in tuple(self._candidates.values()):
             # Anything not transferred to _PendingRelease has no Main Stream
             # lifetime left at pass end.  Remove both scheduler and allocator
@@ -804,16 +818,19 @@ class PrematRuntime:
             wait_start.record(current_stream)
             current_stream.wait_event(candidate.completion_event)
             wait_end.record(current_stream)
-            candidate.critical_path_miss = True
-            candidate.final_outcome = "PARTIAL HIT"
-            self._aggregate["waited_hits"] += 1
+            # Host submission has reached the dependency, but this does NOT tell
+            # us whether the GPU Main Stream will actually wait there. Keep the
+            # result provisional until CUDA has timestamped both streams.
+            candidate.critical_path_miss = False
+            candidate.final_outcome = "PENDING"
             # candidate.tensor remains strongly referenced through consumed().
             wait_payload = self._transition(
                 candidate,
                 CandidateState.CONSUMING,
                 "critical_path_wait",
-                outcome="waited_for_premat",
-                reason="materialising_at_deadline",
+                outcome="gpu_wait_pending",
+                reason="classification_pending_until_main_stream_dependency",
+                detail={"gpu_wait_classification_pending": True},
             )
             self._pending_timings.append(
                 _PendingCudaTiming(
@@ -821,6 +838,11 @@ class PrematRuntime:
                     start_event=wait_start,
                     end_event=wait_end,
                     event_payload=wait_payload,
+                    pass_sequence=self._pass_sequence,
+                    layer_index=candidate.layer_index,
+                    family=candidate.family,
+                    dependency_event=candidate.completion_event,
+                    candidate=candidate,
                 )
             )
         elif candidate.state == CandidateState.UNAVAILABLE:
@@ -864,6 +886,10 @@ class PrematRuntime:
                     start_event=materialise_start,
                     end_event=materialise_end,
                     event_payload=fallback_payload,
+                    pass_sequence=self._pass_sequence,
+                    layer_index=candidate.layer_index,
+                    family=candidate.family,
+                    candidate=candidate,
                 )
             )
             candidate.available_ns = time.perf_counter_ns()
@@ -1912,6 +1938,10 @@ class PrematRuntime:
                     start_event=candidate.materialisation_start_event,
                     end_event=candidate.completion_event,
                     event_payload=launch_payload,
+                    pass_sequence=self._pass_sequence,
+                    layer_index=candidate.layer_index,
+                    family=candidate.family,
+                    candidate=candidate,
                 )
             )
             self._update_queue_aggregates()
@@ -2305,26 +2335,9 @@ class PrematRuntime:
         if detail:
             payload["detail"] = detail
         self._events.append(payload)
-        # vvv THOG publish only the completed sampled microstep.  Partial live
-        # rows cannot be mistaken for coherent snapshots, and the browser owns
-        # all deliberately slowed playback.
-        reporter = self._live_reporter
-        capture_enabled = self._live_capture_enabled
-        publish_due = (
-            reporter is not None
-            and event == "pass_end"
-            and (
-                capture_enabled is None
-                or capture_enabled(self._pass_sequence)
-            )
-        )
-        if publish_due:
-            try:
-                reporter(self.report())
-            except Exception as error:  # pragma: no cover - sink failures are environment-specific
-                self._live_publish_error = f"{type(error).__name__}: {error}"
-                self._live_reporter = None
-        # ^^^ THOG
+        # Completed sampled passes are published by _capture_completed_live_report
+        # only after all CUDA timings for that pass have resolved.  _record stays
+        # purely observational and never introduces a host/GPU synchronisation.
         return payload
 
     def _candidate_payload(self, candidate: _Candidate) -> Dict[str, object]:
@@ -2499,6 +2512,159 @@ class PrematRuntime:
             else min(int(prior), int(headroom_bytes))
         )
 
+    def _capture_completed_live_report(self) -> None:
+        reporter = self._live_reporter
+        if reporter is None:
+            return
+        capture_enabled = self._live_capture_enabled
+        if capture_enabled is not None and not capture_enabled(self._pass_sequence):
+            return
+        # report() is non-blocking; unresolved CUDA timings remain in
+        # _pending_timings and this snapshot is held privately until they resolve.
+        snapshot = self.report()
+        self._pending_completed_live_reports[self._pass_sequence] = snapshot
+        self._publish_completed_live_reports_if_ready()
+
+    @staticmethod
+    def _refresh_report_derived_aggregates(snapshot: Dict[str, object]) -> None:
+        aggregate = snapshot.get("aggregate")
+        if not isinstance(aggregate, dict):
+            return
+        materialisation_ms = float(aggregate.get("premat_materialisation_ms_total", 0.0))
+        wait_ms = float(aggregate.get("main_stream_wait_ms_total", 0.0))
+        aggregate["premat_hidden_ms_estimate"] = max(0.0, materialisation_ms - wait_ms)
+        pass_ms = float(aggregate.get("captured_pass_host_ms_total", 0.0))
+        aggregate["premat_stream_busy_fraction_estimate"] = (
+            min(1.0, materialisation_ms / pass_ms) if pass_ms > 0.0 else None
+        )
+
+    def _update_pending_live_report(
+        self,
+        timing: _PendingCudaTiming,
+        aggregate_deltas: Mapping[str, float | int],
+    ) -> None:
+        snapshot = self._pending_completed_live_reports.get(int(timing.pass_sequence))
+        if snapshot is None:
+            return
+        aggregate = snapshot.get("aggregate")
+        if isinstance(aggregate, dict):
+            for name, delta in aggregate_deltas.items():
+                aggregate[name] = aggregate.get(name, 0) + delta
+        payload = timing.event_payload
+        payload_sequence = (
+            int(payload.get("sequence"))
+            if isinstance(payload, Mapping) and payload.get("sequence") is not None
+            else None
+        )
+        events = snapshot.get("events")
+        if isinstance(events, list):
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                if payload_sequence is not None and int(event.get("sequence", -1)) == payload_sequence:
+                    event.update(dict(payload))
+                if (
+                    timing.kind == "main_stream_wait"
+                    and int(event.get("layer_index", -1)) == int(timing.layer_index or -1)
+                    and str(event.get("family", "")) == str(timing.family or "")
+                    and str(event.get("event", "")) == "consumed"
+                    and isinstance(payload, Mapping)
+                ):
+                    event["critical_path_miss"] = bool(payload.get("critical_path_miss", False))
+                    event["final_outcome"] = payload.get("final_outcome")
+        candidates = snapshot.get("candidates")
+        if timing.kind == "main_stream_wait" and isinstance(candidates, list) and isinstance(payload, Mapping):
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                if (
+                    int(candidate.get("layer_index", -1)) == int(timing.layer_index or -1)
+                    and str(candidate.get("family", "")) == str(timing.family or "")
+                ):
+                    candidate["critical_path_miss"] = bool(payload.get("critical_path_miss", False))
+                    candidate["final_outcome"] = payload.get("final_outcome")
+        self._refresh_report_derived_aggregates(snapshot)
+
+    def _publish_completed_live_reports_if_ready(self) -> None:
+        reporter = self._live_reporter
+        if reporter is None or not self._pending_completed_live_reports:
+            return
+        pending_passes = {
+            int(timing.pass_sequence)
+            for timing in self._pending_timings
+            if int(timing.pass_sequence) > 0
+        }
+        for pass_sequence in sorted(tuple(self._pending_completed_live_reports)):
+            if pass_sequence in pending_passes:
+                continue
+            snapshot = self._pending_completed_live_reports.pop(pass_sequence)
+            self._refresh_report_derived_aggregates(snapshot)
+            try:
+                reporter(snapshot)
+            except Exception as error:  # pragma: no cover - sink failures are environment-specific
+                self._live_publish_error = f"{type(error).__name__}: {error}"
+                self._live_reporter = None
+                self._pending_completed_live_reports.clear()
+                return
+
+    def _apply_gpu_wait_classification(
+        self,
+        timing: _PendingCudaTiming,
+        *,
+        dependency_delta_ms: float,
+        marker_elapsed_ms: float,
+    ) -> Dict[str, float | int]:
+        payload = timing.event_payload
+        if payload is None:
+            raise RuntimeError("main-stream wait timing lost its event payload")
+        candidate = timing.candidate
+        gpu_wait_required = dependency_delta_ms > 0.0
+        effective_wait_ms = max(0.0, dependency_delta_ms)
+        final_outcome = "PARTIAL HIT" if gpu_wait_required else "FULL HIT"
+        payload.update(
+            {
+                "outcome": "waited_for_premat" if gpu_wait_required else "fully_hidden",
+                "reason": (
+                    "premat_incomplete_at_main_stream_dependency"
+                    if gpu_wait_required
+                    else "premat_complete_before_main_stream_dependency"
+                ),
+                "critical_path_miss": gpu_wait_required,
+                "final_outcome": final_outcome,
+                "gpu_wait_classification_pending": False,
+                "gpu_wait_required": gpu_wait_required,
+                "gpu_dependency_delta_ms": dependency_delta_ms,
+                "premat_lead_ms_at_main_stream_dependency": max(0.0, -dependency_delta_ms),
+                "wait_marker_elapsed_ms": marker_elapsed_ms,
+                "wait_ms": effective_wait_ms,
+                "cuda_elapsed_ms": effective_wait_ms,
+            }
+        )
+        if candidate is not None:
+            candidate.critical_path_miss = gpu_wait_required
+            candidate.final_outcome = final_outcome
+        # consumed() normally runs on the host before the GPU reaches this wait.
+        # Correct that already-recorded event once the GPU timeline is known.
+        for event in self._events:
+            if (
+                int(event.get("pass_sequence", -1)) == int(timing.pass_sequence)
+                and int(event.get("layer_index", -1)) == int(timing.layer_index or -1)
+                and str(event.get("family", "")) == str(timing.family or "")
+                and str(event.get("event", "")) == "consumed"
+            ):
+                event["critical_path_miss"] = gpu_wait_required
+                event["final_outcome"] = final_outcome
+        deltas: Dict[str, float | int] = {
+            "main_stream_wait_ms_total": effective_wait_ms,
+        }
+        if gpu_wait_required:
+            deltas["waited_hits"] = 1
+        else:
+            # available_hits intentionally remains the stricter host-observed
+            # counter. fully_hidden_hits is the corrected GPU-effective FULL count.
+            deltas["fully_hidden_hits"] = 1
+        return deltas
+
     def _resolve_pending_timings(self) -> None:
         remaining: List[_PendingCudaTiming] = []
         for timing in self._pending_timings:
@@ -2506,29 +2672,47 @@ class PrematRuntime:
                 if not timing.end_event.query():
                     remaining.append(timing)
                     continue
-                elapsed_ms = max(
+                marker_elapsed_ms = max(
                     0.0,
                     float(timing.start_event.elapsed_time(timing.end_event)),
                 )
+                if timing.kind == "main_stream_wait":
+                    if timing.dependency_event is None:
+                        raise RuntimeError("main-stream wait timing has no Premat dependency event")
+                    # GPU timestamp ordering answers the question that host-time
+                    # completion_event.query() cannot: had PREMAT completed by the
+                    # instant the Main Stream actually reached its dependency?
+                    dependency_delta_ms = float(
+                        timing.start_event.elapsed_time(timing.dependency_event)
+                    )
             except RuntimeError:
                 remaining.append(timing)
                 continue
+
+            aggregate_deltas: Dict[str, float | int]
             if timing.kind == "premat_materialisation":
-                aggregate_name = "premat_materialisation_ms_total"
-                payload_name = "materialisation_ms"
+                aggregate_deltas = {"premat_materialisation_ms_total": marker_elapsed_ms}
+                if timing.event_payload is not None:
+                    timing.event_payload["materialisation_ms"] = marker_elapsed_ms
+                    timing.event_payload["cuda_elapsed_ms"] = marker_elapsed_ms
             elif timing.kind == "main_stream_wait":
-                aggregate_name = "main_stream_wait_ms_total"
-                payload_name = "wait_ms"
+                aggregate_deltas = self._apply_gpu_wait_classification(
+                    timing,
+                    dependency_delta_ms=dependency_delta_ms,
+                    marker_elapsed_ms=marker_elapsed_ms,
+                )
             elif timing.kind == "main_stream_materialisation":
-                aggregate_name = "main_stream_materialisation_ms_total"
-                payload_name = "main_stream_materialisation_ms"
+                aggregate_deltas = {"main_stream_materialisation_ms_total": marker_elapsed_ms}
+                if timing.event_payload is not None:
+                    timing.event_payload["main_stream_materialisation_ms"] = marker_elapsed_ms
+                    timing.event_payload["cuda_elapsed_ms"] = marker_elapsed_ms
             else:
                 raise RuntimeError(f"unknown premat CUDA timing kind: {timing.kind}")
-            self._aggregate[aggregate_name] += elapsed_ms
-            if timing.event_payload is not None:
-                timing.event_payload[payload_name] = elapsed_ms
-                timing.event_payload["cuda_elapsed_ms"] = elapsed_ms
+            for name, delta in aggregate_deltas.items():
+                self._aggregate[name] += delta
+            self._update_pending_live_report(timing, aggregate_deltas)
         self._pending_timings = remaining
+        self._publish_completed_live_reports_if_ready()
 
     def _require_active(self) -> None:
         if not self._active:

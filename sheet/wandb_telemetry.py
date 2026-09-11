@@ -76,6 +76,12 @@ _PREMAT_RECAP_EVENT_FIELDS = frozenset((
     "materialisation_ms",
     "main_stream_materialisation_ms",
     "wait_ms",
+    "wait_marker_elapsed_ms",
+    "gpu_dependency_delta_ms",
+    "premat_lead_ms_at_main_stream_dependency",
+    "gpu_wait_required",
+    "gpu_wait_classification_pending",
+    "final_outcome",
     "predicted_retained_bytes",
     "target_offset",
     "target_order",
@@ -924,12 +930,15 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
         telemetry._thog_premat_live_sink = live_sink
         captured_update: Optional[int] = None
         captured_pass_sequence: Optional[int] = None
+        captured_pass_updates: Dict[int, int] = {}
 
         def publish_premat(snapshot: Mapping[str, Any]) -> None:
-            live_sink.publish(
+            pass_sequence = int(snapshot.get("pass_sequence", 0))
+            update = captured_pass_updates.pop(
+                pass_sequence,
                 max(1, int(trainer.state.completed_updates) + 1),
-                snapshot,
             )
+            live_sink.publish(update, snapshot)
 
         def capture_premat_update(pass_sequence: int) -> bool:
             nonlocal captured_update, captured_pass_sequence
@@ -945,7 +954,10 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
             if captured_update != update:
                 captured_update = update
                 captured_pass_sequence = int(pass_sequence)
-            return int(pass_sequence) == captured_pass_sequence
+            selected = int(pass_sequence) == captured_pass_sequence
+            if selected:
+                captured_pass_updates[int(pass_sequence)] = update
+            return selected
 
         premat_reporter_setter(publish_premat, capture_premat_update)
     # ^^^ THOG
