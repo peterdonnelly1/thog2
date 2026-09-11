@@ -22,6 +22,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Repair helper replacement cardinality
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tmp_premat_shadow_mode_patch.py")
+          text = p.read_text(encoding="utf-8")
+          old = '''text = replace_once(
+              text,
+              "            observation.process_allocated_bytes - self._retained_bytes,\\n",
+              "            observation.process_allocated_bytes - self._physical_retained_bytes(),\\n",
+              "charged process physical retained",
+          )'''
+          new = '''needle = "            observation.process_allocated_bytes - self._retained_bytes,\\n"
+          if text.count(needle) != 2:
+              raise RuntimeError(f"charged process physical retained: expected exactly two matches, found {text.count(needle)}")
+          text = text.replace(
+              needle,
+              "            observation.process_allocated_bytes - self._physical_retained_bytes(),\\n",
+          )'''
+          if old not in text:
+              raise RuntimeError("temporary helper repair target not found")
+          p.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Apply patch
         run: python tmp_premat_shadow_mode_patch.py
       - name: Install test dependencies
