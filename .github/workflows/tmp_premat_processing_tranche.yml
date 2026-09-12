@@ -9,6 +9,7 @@ on:
       - tmp_premat_processing_tranche.py
       - tmp_premat_processing_helper_repair.py
       - tmp_premat_processing_helper_repair2.py
+      - tmp_premat_processing_internal_cli_repair.py
       - .github/workflows/tmp_premat_processing_tranche.yml
   workflow_dispatch:
 
@@ -33,6 +34,7 @@ jobs:
         run: |
           python tmp_premat_processing_helper_repair.py
           python tmp_premat_processing_helper_repair2.py
+          python tmp_premat_processing_internal_cli_repair.py
       - name: Apply processing tranche
         run: python tmp_premat_processing_tranche.py
       - name: Syntax checks
