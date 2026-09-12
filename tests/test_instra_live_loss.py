@@ -29,8 +29,11 @@ def test_first_point_partial_append_and_no_validation_contamination(tmp_path):
     assert reader.values["train"] == {10: 7.1234, 20: 6.9876}
 
 
-def test_exact_wandb_replaces_printed_values_and_preserves_time_axes(tmp_path):
+def test_exact_wandb_replaces_printed_values_and_anchors_live_time_axes(tmp_path):
     reader, *_ = reader_for(tmp_path, "T 10 loss=7.1234\nT 20 loss=6.9876\nT 30 loss=6.5432\n")
+    # vvv THOG make the provisional console-tail clock deterministic relative to the exact W&B anchor
+    reader.wall_times["train"][30] = 103.0
+    # ^^^ THOG
     exact = {"name": "train", "revision": 4, "charts": [{
         "id": "train/loss",
         "default_x_axis_mode": "step",
@@ -52,9 +55,9 @@ def test_exact_wandb_replaces_printed_values_and_preserves_time_axes(tmp_path):
     assert merged["x"] == [10, 20, 30]
     assert merged["y"] == [7.12345678, 6.98765432, 6.5432]
     assert merged["point_sources"][-1] == "train.log (printed precision)"
-    assert merged["x_variants"]["relative_wall"] == [1, 2, None]
-    assert merged["x_variants"]["relative_process"] == [0.5, 1.5, None]
-    assert merged["x_variants"]["wall_time"] == [100, 101, None]
+    assert merged["x_variants"]["relative_wall"] == [1, 2, 4.0]
+    assert merged["x_variants"]["relative_process"] == [0.5, 1.5, 3.5]
+    assert merged["x_variants"]["wall_time"] == [100, 101, 103.0]
     assert chart["available_x_axis_modes"] == [
         "step", "relative_wall", "relative_process", "wall_time",
     ]
@@ -65,6 +68,45 @@ def test_exact_wandb_replaces_printed_values_and_preserves_time_axes(tmp_path):
         y=[7.12345678, 6.98765432, 6.54321987],
     )
     assert reader.merge(exact)["charts"][0]["series"][0]["y"][-1] == 6.54321987
+
+
+def test_live_only_chart_exposes_all_three_time_modes(tmp_path):
+    reader, *_ = reader_for(tmp_path, "T 10 loss=7.1\nT 20 loss=6.9\n")
+    # vvv THOG deterministic provisional timestamps prove relative, relative-process and wall-time live tails all advance
+    reader.wall_times["train"] = {10: 100.0, 20: 105.0}
+    reader.first_wall_time = 100.0
+    # ^^^ THOG
+    chart = reader.merge({"name": "train", "charts": [], "revision": 0})["charts"][0]
+    series = chart["series"][0]
+    assert chart["available_x_axis_modes"] == [
+        "step", "relative_wall", "relative_process", "wall_time",
+    ]
+    assert series["x_variants"]["step"] == [10, 20]
+    assert series["x_variants"]["relative_wall"] == [0.0, 5.0]
+    assert series["x_variants"]["relative_process"] == [0.0, 5.0]
+    assert series["x_variants"]["wall_time"] == [100.0, 105.0]
+
+
+def test_refresh_backfills_batch_wall_times_from_step_duration(tmp_path, monkeypatch):
+    path = tmp_path / "artifact" / "train.log"
+    path.parent.mkdir()
+    path.write_text(
+        "T 10 120926-1310 0010 Δstep=4.0s loss=7.1\n"
+        "V 10 120926-1310 0010 Δstep=4.0s training loss=7.1 validation loss=7.2\n"
+        "T 20 120926-1310 0020 Δstep=6.0s loss=6.9\n"
+    )
+    # vvv THOG hold train.log mtime fixed so the live-tail wall-time reconstruction is exact in this regression
+    monkeypatch.setattr(type(path.stat()), "st_mtime", 110.0, raising=False)
+    # ^^^ THOG
+    state = SimpleNamespace(status=lambda: {"artifact_name": "artifact"}, database_path=tmp_path / "charts.sqlite3")
+    catalog = SimpleNamespace(root=tmp_path)
+    dashboard = SimpleNamespace(_modified_time=lambda value: 0)
+    reader = LiveLossReader()
+    # pathlib stat_result attributes cannot be patched portably; use the real newest mtime as the anchor and test deltas instead.
+    reader.refresh(catalog, state, dashboard)
+    newest = reader.wall_times["train"][20]
+    assert reader.wall_times["val"][10] == newest - 6.0
+    assert reader.wall_times["train"][10] == newest - 6.0
 
 
 def test_rotation_summary_and_bounded_memory(tmp_path):
@@ -78,6 +120,7 @@ def test_rotation_summary_and_bounded_memory(tmp_path):
             handle.write(f"T {step} loss=5\n")
     reader.refresh(catalog, state, dashboard)
     assert len(reader.values["train"]) == 3200
+    assert len(reader.wall_times["train"]) == 3200
     assert max(reader.values["train"]) == 3999
 
 
