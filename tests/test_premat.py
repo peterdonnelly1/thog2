@@ -395,7 +395,7 @@ def test_enabled_default_headroom_and_canonical_provenance_are_resolved(tmp_path
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_resolved_headroom_mode"] == "stay_below_current_peak"
     assert canonical["premat_effective_fast_discard"] is True
-    assert canonical["premat_schema_version"] == 3
+    assert canonical["premat_schema_version"] == 4
     assert canonical["premat_lookahead_layer_limit"] == 1
     assert canonical["premat_target_scope"] == "relative_layer_1"
     assert canonical["premat_target_order"] == "r_to_l"
@@ -792,6 +792,25 @@ def test_sampled_live_report_waits_for_gpu_classification_without_sync(monkeypat
     # Main Stream wait timing keeps its explicit signed dependency override.
     for timing in runtime._pending_timings:
         timing.end_event.complete = True
+    # vvv THOG the sampled pass now waits for both legacy hit classification and the non-blocking overlap-forensic event set
+    for pending in runtime._pending_forensic_passes:
+        pending.origin_event.complete = True
+        for interval in pending.layer_intervals:
+            interval.start_event.complete = True
+            if interval.end_event is not None:
+                interval.end_event.complete = True
+        for interval in pending.main_work_intervals:
+            interval.start_event.complete = True
+            if interval.end_event is not None:
+                interval.end_event.complete = True
+        for interval in pending.candidate_intervals:
+            interval.start_event.complete = True
+            interval.end_event.complete = True
+            if interval.dependency_event is not None:
+                interval.dependency_event.complete = True
+            if interval.wait_end_event is not None:
+                interval.wait_end_event.complete = True
+    # ^^^ THOG
     runtime.begin((3, 5, 7), reference=_FakeTensor())
 
     assert len(snapshots) == 1
@@ -1387,6 +1406,146 @@ def test_premat_instra_source_contains_requested_interactions() -> None:
     assert 'event.key === "Escape"' in javascript
     assert 'premat-tab-active' in javascript
     assert 'detailed_history_retained' in javascript
+# ^^^ THOG
+
+
+# vvv THOG first-tranche GPU forensic regression coverage
+
+def test_real_premat_launch_use_and_unused_counters_are_unambiguous(monkeypatch) -> None:
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        enable_gpu_timing_diagnostic=False,
+    )
+    runtime.layer_start(3)
+    assert calls == [("DOWN", 5), ("UP", 5), ("O", 5), ("QKV", 5)]
+    runtime.layer_start(5)
+    runtime.acquire("DOWN", 5)
+    runtime.consumed("DOWN", 5)
+    runtime.end()
+    aggregate = runtime.report()["aggregate"]
+    # layer_start(5) correctly schedules the next target layer before DOWN(5) is consumed.
+    assert aggregate["real_premat_materialisations_launched"] == 8
+    assert aggregate["real_premat_materialisations_consumed"] == 1
+    assert aggregate["real_premat_materialisations_unused"] == 7
+    assert aggregate["duplicate_main_materialisations_after_premat"] == 0
+
+
+def test_forensic_pass_separates_useful_overlap_wait_and_slack(monkeypatch) -> None:
+    from sheet.premat import (
+        _ForensicCandidateInterval,
+        _ForensicLayerInterval,
+        _ForensicMainWorkInterval,
+        _PendingForensicPass,
+    )
+
+    runtime, fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        enable_gpu_timing_diagnostic=True,
+    )
+    origin = _FakeEvent(fake_cuda, enable_timing=True)
+    origin.complete = True
+
+    def event(timestamp_ms: float):
+        item = _FakeEvent(fake_cuda, enable_timing=True)
+        item.complete = True
+        item.forensic_timestamp_ms = timestamp_ms
+        return item
+
+    origin.elapsed_time_override = lambda other: float(other.forensic_timestamp_ms)
+    layer = _ForensicLayerInterval(
+        pass_sequence=1,
+        layer_index=3,
+        start_event=event(1.0),
+        end_event=event(11.0),
+    )
+    candidate = _ForensicCandidateInterval(
+        pass_sequence=1,
+        layer_index=5,
+        family="DOWN",
+        start_event=event(2.0),
+        end_event=event(9.0),
+        dependency_event=event(8.0),
+        wait_end_event=event(9.0),
+        consumed=True,
+    )
+    runtime._pending_forensic_passes = [
+        _PendingForensicPass(
+            pass_sequence=1,
+            origin_event=origin,
+            layer_intervals=(layer,),
+            candidate_intervals=(candidate,),
+            main_work_intervals=(
+                _ForensicMainWorkInterval(
+                    pass_sequence=1,
+                    layer_index=3,
+                    family="QKV",
+                    start_event=event(3.0),
+                    end_event=event(7.0),
+                ),
+            ),
+        )
+    ]
+    runtime._resolve_pending_forensic_passes()
+    report = runtime.report()
+    forensic = report["forensic"]
+    assert forensic["resolved_passes"] == 1
+    assert forensic["main_layer_gpu_ms_total"] == pytest.approx(10.0)
+    assert forensic["main_wait_marker_ms_total"] == pytest.approx(1.0)
+    assert forensic["main_nonwait_gpu_ms_total"] == pytest.approx(9.0)
+    assert forensic["main_consume_count"] == 1
+    assert forensic["main_consume_gpu_ms_total"] == pytest.approx(4.0)
+    assert forensic["premat_overlap_during_main_consume_ms_total"] == pytest.approx(4.0)
+    assert forensic["premat_gpu_ms_total"] == pytest.approx(7.0)
+    assert forensic["premat_temporal_overlap_ms_total"] == pytest.approx(7.0)
+    assert forensic["premat_wait_overlap_ms_total"] == pytest.approx(1.0)
+    assert forensic["premat_useful_overlap_ms_total"] == pytest.approx(6.0)
+    assert forensic["premat_outside_main_layer_ms_total"] == pytest.approx(0.0)
+    assert forensic["dependency_count"] == 1
+    assert forensic["dependency_shortfall_count"] == 1
+    assert forensic["dependency_shortfall_ms_total"] == pytest.approx(1.0)
+    assert forensic["dependency_lead_window_ms_total"] == pytest.approx(6.0)
+    assert forensic["dependency_before_premat_start_count"] == 0
+    latest = report["forensic_pass"]["summary"]
+    assert latest["main_consume_gpu_ms_mean"] == pytest.approx(4.0)
+    assert latest["main_consume_covered_by_premat_fraction"] == pytest.approx(1.0)
+    assert latest["premat_useful_overlap_fraction"] == pytest.approx(6.0 / 7.0)
+    assert latest["dependency_shortfall_rate"] == pytest.approx(1.0)
+
+
+def test_compact_storage_preserves_forensic_pass_without_detailed_history() -> None:
+    from sheet.wandb_telemetry import _premat_snapshot_for_storage
+
+    forensic_pass = {
+        "pass_sequence": 7,
+        "summary": {"premat_useful_overlap_fraction": 0.75},
+        "candidates": [{"family": "DOWN", "useful_overlap_ms": 2.5}],
+    }
+    stored = _premat_snapshot_for_storage(
+        {
+            "pass_complete": True,
+            "events": [{"sequence": 1, "event": "pass_end"}],
+            "candidates": [{"large": "ordinary detailed candidate"}],
+            "forensic_pass": forensic_pass,
+        },
+        retain_detailed_history=False,
+    )
+    assert stored["forensic_pass"] == forensic_pass
+    assert "candidates" not in stored
+
+
+def test_premat_instra_surfaces_first_tranche_forensic_discriminators() -> None:
+    javascript = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
+    assert "MAIN non-wait / layer" in javascript
+    assert "MAIN consume GEMM mean" in javascript
+    assert "MAIN GEMM covered by PREMAT" in javascript
+    assert "MAIN GEMM ms by family" in javascript
+    assert "useful PREMAT overlap" in javascript
+    assert "PREMAT outside MAIN" in javascript
+    assert "dependency shortfall" in javascript
+    assert "PREMAT launched / used / unused" in javascript
+    assert "duplicate materialisations" in javascript
 # ^^^ THOG
 
 

@@ -24,7 +24,7 @@ PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES = (
 )
 PREMAT_HIGHEST_CUDA_STREAM_PRIORITY_REQUEST = -(2 ** 31)
 PREMAT_DEFAULT_GPU_MEMORY_BUFFER_GB = 1.0
-PREMAT_TELEMETRY_VERSION = 3
+PREMAT_TELEMETRY_VERSION = 4
 
 
 def validate_premat_configuration(
@@ -380,6 +380,46 @@ def _conservative_certificate_charge_bytes(request_bytes: int) -> int:
     return max(512, rounded)
 
 
+# vvv THOG GPU-forensic intervals are retained only while the explicit timing diagnostic is enabled
+@dataclass
+class _ForensicLayerInterval:
+    pass_sequence: int
+    layer_index: int
+    start_event: torch.cuda.Event
+    end_event: Optional[torch.cuda.Event] = None
+
+
+@dataclass
+class _ForensicCandidateInterval:
+    pass_sequence: int
+    layer_index: int
+    family: str
+    start_event: torch.cuda.Event
+    end_event: torch.cuda.Event
+    dependency_event: Optional[torch.cuda.Event] = None
+    wait_end_event: Optional[torch.cuda.Event] = None
+    consumed: bool = False
+
+
+@dataclass
+class _ForensicMainWorkInterval:
+    pass_sequence: int
+    layer_index: int
+    family: str
+    start_event: torch.cuda.Event
+    end_event: Optional[torch.cuda.Event] = None
+
+
+@dataclass
+class _PendingForensicPass:
+    pass_sequence: int
+    origin_event: torch.cuda.Event
+    layer_intervals: Tuple[_ForensicLayerInterval, ...]
+    candidate_intervals: Tuple[_ForensicCandidateInterval, ...]
+    main_work_intervals: Tuple[_ForensicMainWorkInterval, ...] = ()
+# ^^^ THOG
+
+
 @dataclass
 class _Candidate:
     layer_index: int
@@ -407,6 +447,11 @@ class _Candidate:
     allocator_certificate_pool: Optional[str] = None
     allocator_certificate_block_id: Optional[int] = None
     allocator_certificate_charge_bytes: int = 0
+    # vvv THOG zero-cost host counters remain available even when CUDA forensic timing is disabled
+    real_premat_launched: bool = False
+    real_premat_consumed: bool = False
+    forensic_interval: Optional[_ForensicCandidateInterval] = None
+    # ^^^ THOG
 
 
 @dataclass
@@ -525,6 +570,14 @@ class PrematRuntime:
         self._live_publish_error: Optional[str] = None
         # ^^^ THOG
         self._pending_timings: List[_PendingCudaTiming] = []
+        # vvv THOG explicit GPU timing diagnostic also captures Main/PREMAT overlap without synchronising training
+        self._forensic_pass_origin_event: Optional[torch.cuda.Event] = None
+        self._forensic_current_layers: List[_ForensicLayerInterval] = []
+        self._forensic_current_candidates: List[_ForensicCandidateInterval] = []
+        self._forensic_current_main_work: List[_ForensicMainWorkInterval] = []
+        self._pending_forensic_passes: List[_PendingForensicPass] = []
+        self._latest_forensic_pass: Optional[Dict[str, object]] = None
+        # ^^^ THOG
         # Completed sampled passes are retained only until all CUDA timings for
         # that pass have actually resolved. This lets Instra receive a final
         # GPU-timeline classification without synchronising the training stream.
@@ -585,7 +638,38 @@ class PrematRuntime:
             "observed_peak_reserved_bytes": 0,
             "minimum_headroom_bytes": None,
             "allocator_snapshot_count": 0,
+            # vvv THOG forensic counters separate real side work, Main work, overlap and dependency shortfall
+            "real_premat_materialisations_launched": 0,
+            "real_premat_materialisations_consumed": 0,
+            "real_premat_materialisations_unused": 0,
+            "duplicate_main_materialisations_after_premat": 0,
+            "forensic_resolved_passes": 0,
+            "forensic_main_layer_count": 0,
+            "forensic_main_layer_gpu_ms_total": 0.0,
+            "forensic_main_wait_marker_ms_total": 0.0,
+            "forensic_main_nonwait_gpu_ms_total": 0.0,
+            "forensic_main_consume_count": 0,
+            "forensic_main_consume_gpu_ms_total": 0.0,
+            "forensic_premat_overlap_during_main_consume_ms_total": 0.0,
+            "forensic_premat_gpu_ms_total": 0.0,
+            "forensic_premat_temporal_overlap_ms_total": 0.0,
+            "forensic_premat_wait_overlap_ms_total": 0.0,
+            "forensic_premat_useful_overlap_ms_total": 0.0,
+            "forensic_premat_outside_main_layer_ms_total": 0.0,
+            "forensic_dependency_count": 0,
+            "forensic_dependency_shortfall_count": 0,
+            "forensic_dependency_shortfall_ms_total": 0.0,
+            "forensic_dependency_slack_ms_total": 0.0,
+            "forensic_dependency_lead_window_ms_total": 0.0,
+            "forensic_dependency_before_premat_start_count": 0,
+            # ^^^ THOG
         }
+        # vvv THOG per-family forensic totals identify whether one matrix family is poisoning overlap
+        self._forensic_by_family: Dict[str, Dict[str, float | int]] = {
+            family: self._new_forensic_family_row()
+            for family in self._families()
+        }
+        # ^^^ THOG
 
     @property
     def active(self) -> bool:
@@ -601,6 +685,606 @@ class PrematRuntime:
         self._live_reporter = reporter
         self._live_capture_enabled = capture_enabled
         self._live_publish_error = None
+    # ^^^ THOG
+
+    # vvv THOG first-tranche GPU forensics: six independent observables, all gated by the existing timing diagnostic
+    @staticmethod
+    def _new_forensic_family_row() -> Dict[str, float | int]:
+        return {
+            "launched": 0,
+            "consumed": 0,
+            "unused": 0,
+            "duplicates": 0,
+            "main_consume_count": 0,
+            "main_consume_gpu_ms_total": 0.0,
+            "premat_overlap_during_main_consume_ms_total": 0.0,
+            "premat_gpu_ms_total": 0.0,
+            "temporal_overlap_ms_total": 0.0,
+            "wait_overlap_ms_total": 0.0,
+            "useful_overlap_ms_total": 0.0,
+            "outside_main_layer_ms_total": 0.0,
+            "dependency_count": 0,
+            "dependency_shortfall_count": 0,
+            "dependency_shortfall_ms_total": 0.0,
+            "dependency_slack_ms_total": 0.0,
+            "dependency_lead_window_ms_total": 0.0,
+            "dependency_before_premat_start_count": 0,
+        }
+
+    @staticmethod
+    def _forensic_overlap_ms(
+        left_start: float,
+        left_end: float,
+        right_start: float,
+        right_end: float,
+    ) -> float:
+        return max(0.0, min(left_end, right_end) - max(left_start, right_start))
+
+    def forensic_layer_start(self, layer_index: int) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        self._require_active()
+        if self._device is None:
+            raise RuntimeError("PREMAT forensic layer timing has no CUDA device")
+        event = torch.cuda.Event(enable_timing=True)
+        event.record(torch.cuda.current_stream(device=self._device))
+        self._forensic_current_layers.append(
+            _ForensicLayerInterval(
+                pass_sequence=self._pass_sequence,
+                layer_index=int(layer_index),
+                start_event=event,
+            )
+        )
+
+    def forensic_layer_end(self, layer_index: int) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        self._require_active()
+        if self._device is None:
+            raise RuntimeError("PREMAT forensic layer timing has no CUDA device")
+        interval = next(
+            (
+                item
+                for item in reversed(self._forensic_current_layers)
+                if item.layer_index == int(layer_index) and item.end_event is None
+            ),
+            None,
+        )
+        if interval is None:
+            raise RuntimeError(f"PREMAT forensic layer {layer_index} has no open interval")
+        event = torch.cuda.Event(enable_timing=True)
+        event.record(torch.cuda.current_stream(device=self._device))
+        interval.end_event = event
+
+    def forensic_main_work_start(self, family: str, layer_index: int) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        self._require_active()
+        if self._device is None:
+            raise RuntimeError("PREMAT forensic Main work timing has no CUDA device")
+        event = torch.cuda.Event(enable_timing=True)
+        event.record(torch.cuda.current_stream(device=self._device))
+        self._forensic_current_main_work.append(
+            _ForensicMainWorkInterval(
+                pass_sequence=self._pass_sequence,
+                layer_index=int(layer_index),
+                family=str(family),
+                start_event=event,
+            )
+        )
+
+    def forensic_main_work_end(self, family: str, layer_index: int) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        self._require_active()
+        if self._device is None:
+            raise RuntimeError("PREMAT forensic Main work timing has no CUDA device")
+        interval = next(
+            (
+                item
+                for item in reversed(self._forensic_current_main_work)
+                if item.layer_index == int(layer_index)
+                and item.family == str(family)
+                and item.end_event is None
+            ),
+            None,
+        )
+        if interval is None:
+            raise RuntimeError(
+                "PREMAT forensic Main work interval was not opened: "
+                f"layer={layer_index}, family={family}"
+            )
+        event = torch.cuda.Event(enable_timing=True)
+        event.record(torch.cuda.current_stream(device=self._device))
+        interval.end_event = event
+
+    def _record_forensic_dependency(
+        self,
+        candidate: _Candidate,
+        current_stream,
+        *,
+        dependency_event: Optional[torch.cuda.Event] = None,
+        wait_end_event: Optional[torch.cuda.Event] = None,
+    ) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        interval = candidate.forensic_interval
+        if interval is None:
+            return
+        if interval.dependency_event is not None:
+            raise RuntimeError(
+                "PREMAT forensic candidate reached its Main Stream dependency twice: "
+                f"layer={candidate.layer_index}, family={candidate.family}"
+            )
+        if dependency_event is None:
+            dependency_event = torch.cuda.Event(enable_timing=True)
+            dependency_event.record(current_stream)
+        interval.dependency_event = dependency_event
+        interval.wait_end_event = wait_end_event
+
+    def _queue_forensic_pass(self) -> None:
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        origin = self._forensic_pass_origin_event
+        if origin is None:
+            raise RuntimeError("PREMAT forensic timing pass has no origin event")
+        if any(interval.end_event is None for interval in self._forensic_current_layers):
+            raise RuntimeError("PREMAT forensic timing pass ended with an open Main Stream layer interval")
+        if any(interval.end_event is None for interval in self._forensic_current_main_work):
+            raise RuntimeError("PREMAT forensic timing pass ended with an open Main Stream work interval")
+        self._pending_forensic_passes.append(
+            _PendingForensicPass(
+                pass_sequence=self._pass_sequence,
+                origin_event=origin,
+                layer_intervals=tuple(self._forensic_current_layers),
+                candidate_intervals=tuple(self._forensic_current_candidates),
+                main_work_intervals=tuple(self._forensic_current_main_work),
+            )
+        )
+        self._forensic_pass_origin_event = None
+        self._forensic_current_layers = []
+        self._forensic_current_candidates = []
+        self._forensic_current_main_work = []
+
+    @staticmethod
+    def _forensic_derived_summary(values: Mapping[str, float | int]) -> Dict[str, object]:
+        layer_count = int(values.get("main_layer_count", 0))
+        premat_ms = float(values.get("premat_gpu_ms_total", 0.0))
+        dependency_count = int(values.get("dependency_count", 0))
+        launched = int(values.get("premat_launched", 0))
+        main_consume_count = int(values.get("main_consume_count", 0))
+        main_consume_ms = float(values.get("main_consume_gpu_ms_total", 0.0))
+        return {
+            **dict(values),
+            "main_layer_gpu_ms_mean": (
+                float(values.get("main_layer_gpu_ms_total", 0.0)) / layer_count
+                if layer_count > 0
+                else None
+            ),
+            "main_nonwait_gpu_ms_mean": (
+                float(values.get("main_nonwait_gpu_ms_total", 0.0)) / layer_count
+                if layer_count > 0
+                else None
+            ),
+            "main_consume_gpu_ms_mean": (
+                main_consume_ms / main_consume_count
+                if main_consume_count > 0
+                else None
+            ),
+            "main_consume_covered_by_premat_fraction": (
+                min(
+                    1.0,
+                    float(values.get("premat_overlap_during_main_consume_ms_total", 0.0))
+                    / main_consume_ms,
+                )
+                if main_consume_ms > 0.0
+                else None
+            ),
+            "premat_useful_overlap_fraction": (
+                min(1.0, float(values.get("premat_useful_overlap_ms_total", 0.0)) / premat_ms)
+                if premat_ms > 0.0
+                else None
+            ),
+            "premat_outside_main_layer_fraction": (
+                min(1.0, float(values.get("premat_outside_main_layer_ms_total", 0.0)) / premat_ms)
+                if premat_ms > 0.0
+                else None
+            ),
+            "dependency_shortfall_rate": (
+                int(values.get("dependency_shortfall_count", 0)) / dependency_count
+                if dependency_count > 0
+                else None
+            ),
+            "premat_consumption_fraction": (
+                int(values.get("premat_consumed", 0)) / launched
+                if launched > 0
+                else None
+            ),
+        }
+
+    def _forensic_report(self) -> Dict[str, object]:
+        aggregate = self._aggregate
+        values: Dict[str, float | int] = {
+            "resolved_passes": int(aggregate["forensic_resolved_passes"]),
+            "pending_passes": len(self._pending_forensic_passes),
+            "premat_launched": int(aggregate["real_premat_materialisations_launched"]),
+            "premat_consumed": int(aggregate["real_premat_materialisations_consumed"]),
+            "premat_unused": int(aggregate["real_premat_materialisations_unused"]),
+            "duplicate_main_materialisations": int(aggregate["duplicate_main_materialisations_after_premat"]),
+            "main_layer_count": int(aggregate["forensic_main_layer_count"]),
+            "main_layer_gpu_ms_total": float(aggregate["forensic_main_layer_gpu_ms_total"]),
+            "main_wait_marker_ms_total": float(aggregate["forensic_main_wait_marker_ms_total"]),
+            "main_nonwait_gpu_ms_total": float(aggregate["forensic_main_nonwait_gpu_ms_total"]),
+            "main_consume_count": int(aggregate["forensic_main_consume_count"]),
+            "main_consume_gpu_ms_total": float(aggregate["forensic_main_consume_gpu_ms_total"]),
+            "premat_overlap_during_main_consume_ms_total": float(
+                aggregate["forensic_premat_overlap_during_main_consume_ms_total"]
+            ),
+            "premat_gpu_ms_total": float(aggregate["forensic_premat_gpu_ms_total"]),
+            "premat_temporal_overlap_ms_total": float(aggregate["forensic_premat_temporal_overlap_ms_total"]),
+            "premat_wait_overlap_ms_total": float(aggregate["forensic_premat_wait_overlap_ms_total"]),
+            "premat_useful_overlap_ms_total": float(aggregate["forensic_premat_useful_overlap_ms_total"]),
+            "premat_outside_main_layer_ms_total": float(aggregate["forensic_premat_outside_main_layer_ms_total"]),
+            "dependency_count": int(aggregate["forensic_dependency_count"]),
+            "dependency_shortfall_count": int(aggregate["forensic_dependency_shortfall_count"]),
+            "dependency_shortfall_ms_total": float(aggregate["forensic_dependency_shortfall_ms_total"]),
+            "dependency_slack_ms_total": float(aggregate["forensic_dependency_slack_ms_total"]),
+            "dependency_lead_window_ms_total": float(aggregate["forensic_dependency_lead_window_ms_total"]),
+            "dependency_before_premat_start_count": int(aggregate["forensic_dependency_before_premat_start_count"]),
+        }
+        by_family: Dict[str, object] = {}
+        for family, row in self._forensic_by_family.items():
+            family_values = {
+                "premat_launched": int(row["launched"]),
+                "premat_consumed": int(row["consumed"]),
+                "premat_unused": int(row["unused"]),
+                "duplicate_main_materialisations": int(row["duplicates"]),
+                "main_layer_count": 0,
+                "main_layer_gpu_ms_total": 0.0,
+                "main_wait_marker_ms_total": 0.0,
+                "main_nonwait_gpu_ms_total": 0.0,
+                "main_consume_count": int(row["main_consume_count"]),
+                "main_consume_gpu_ms_total": float(row["main_consume_gpu_ms_total"]),
+                "premat_overlap_during_main_consume_ms_total": float(
+                    row["premat_overlap_during_main_consume_ms_total"]
+                ),
+                "premat_gpu_ms_total": float(row["premat_gpu_ms_total"]),
+                "premat_temporal_overlap_ms_total": float(row["temporal_overlap_ms_total"]),
+                "premat_wait_overlap_ms_total": float(row["wait_overlap_ms_total"]),
+                "premat_useful_overlap_ms_total": float(row["useful_overlap_ms_total"]),
+                "premat_outside_main_layer_ms_total": float(row["outside_main_layer_ms_total"]),
+                "dependency_count": int(row["dependency_count"]),
+                "dependency_shortfall_count": int(row["dependency_shortfall_count"]),
+                "dependency_shortfall_ms_total": float(row["dependency_shortfall_ms_total"]),
+                "dependency_slack_ms_total": float(row["dependency_slack_ms_total"]),
+                "dependency_lead_window_ms_total": float(row["dependency_lead_window_ms_total"]),
+                "dependency_before_premat_start_count": int(row["dependency_before_premat_start_count"]),
+            }
+            by_family[family] = self._forensic_derived_summary(family_values)
+        result = self._forensic_derived_summary(values)
+        result["enabled"] = self._enable_gpu_timing_diagnostic
+        result["by_family"] = by_family
+        return result
+
+    def _update_pending_live_report_forensic(
+        self,
+        pass_sequence: int,
+        aggregate_deltas: Mapping[str, float | int],
+        pass_report: Mapping[str, object],
+    ) -> None:
+        snapshot = self._pending_completed_live_reports.get(int(pass_sequence))
+        if snapshot is None:
+            return
+        aggregate = snapshot.get("aggregate")
+        if isinstance(aggregate, dict):
+            for name, delta in aggregate_deltas.items():
+                aggregate[name] = aggregate.get(name, 0) + delta
+        snapshot["forensic_pass"] = dict(pass_report)
+        self._refresh_report_derived_aggregates(snapshot)
+
+    def _resolve_pending_forensic_passes(self) -> None:
+        if not self._pending_forensic_passes:
+            return
+        remaining: List[_PendingForensicPass] = []
+        for pending in self._pending_forensic_passes:
+            required_events: List[torch.cuda.Event] = [pending.origin_event]
+            for layer in pending.layer_intervals:
+                if layer.end_event is None:
+                    raise RuntimeError("PREMAT forensic pass retained an open layer interval")
+                required_events.extend((layer.start_event, layer.end_event))
+            for candidate in pending.candidate_intervals:
+                required_events.extend((candidate.start_event, candidate.end_event))
+                if candidate.dependency_event is not None:
+                    required_events.append(candidate.dependency_event)
+                if candidate.wait_end_event is not None:
+                    required_events.append(candidate.wait_end_event)
+            for main_work in pending.main_work_intervals:
+                if main_work.end_event is None:
+                    raise RuntimeError("PREMAT forensic pass retained an open Main Stream work interval")
+                required_events.extend((main_work.start_event, main_work.end_event))
+            try:
+                if not all(event.query() for event in required_events):
+                    remaining.append(pending)
+                    continue
+
+                def at_ms(event: torch.cuda.Event) -> float:
+                    return float(pending.origin_event.elapsed_time(event))
+
+                layer_rows: List[Dict[str, object]] = []
+                for layer in pending.layer_intervals:
+                    assert layer.end_event is not None
+                    start_ms = at_ms(layer.start_event)
+                    end_ms = at_ms(layer.end_event)
+                    layer_rows.append({
+                        "layer_index": layer.layer_index,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "gpu_ms": max(0.0, end_ms - start_ms),
+                    })
+
+                # vvv THOG exact foreground GEMM intervals are directly comparable between REAL and SHADOW PREMAT
+                main_work_rows: List[Dict[str, object]] = []
+                for main_work in pending.main_work_intervals:
+                    assert main_work.end_event is not None
+                    start_ms = at_ms(main_work.start_event)
+                    end_ms = at_ms(main_work.end_event)
+                    main_work_rows.append({
+                        "layer_index": main_work.layer_index,
+                        "family": main_work.family,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "gpu_ms": max(0.0, end_ms - start_ms),
+                    })
+                # ^^^ THOG
+
+                wait_intervals: List[Tuple[float, float]] = []
+                for candidate in pending.candidate_intervals:
+                    if candidate.dependency_event is None or candidate.wait_end_event is None:
+                        continue
+                    wait_start_ms = at_ms(candidate.dependency_event)
+                    wait_end_ms = at_ms(candidate.wait_end_event)
+                    wait_intervals.append((wait_start_ms, max(wait_start_ms, wait_end_ms)))
+
+                candidate_rows: List[Dict[str, object]] = []
+                pass_family_rows: Dict[str, Dict[str, float | int]] = {}
+                main_consume_ms_total = sum(float(row["gpu_ms"]) for row in main_work_rows)
+                premat_overlap_during_main_consume_total = 0.0
+                for main_work in main_work_rows:
+                    family_row = pass_family_rows.setdefault(
+                        str(main_work["family"]), self._new_forensic_family_row()
+                    )
+                    family_row["main_consume_count"] += 1
+                    family_row["main_consume_gpu_ms_total"] += float(main_work["gpu_ms"])
+                premat_ms_total = 0.0
+                temporal_overlap_total = 0.0
+                wait_overlap_total = 0.0
+                useful_overlap_total = 0.0
+                outside_main_total = 0.0
+                dependency_count = 0
+                shortfall_count = 0
+                shortfall_ms_total = 0.0
+                slack_ms_total = 0.0
+                lead_window_ms_total = 0.0
+                dependency_before_start_count = 0
+
+                for candidate in pending.candidate_intervals:
+                    start_ms = at_ms(candidate.start_event)
+                    end_ms = at_ms(candidate.end_event)
+                    materialisation_ms = max(0.0, end_ms - start_ms)
+                    temporal_overlap_ms = min(
+                        materialisation_ms,
+                        sum(
+                            self._forensic_overlap_ms(
+                                start_ms, end_ms,
+                                float(layer["start_ms"]), float(layer["end_ms"]),
+                            )
+                            for layer in layer_rows
+                        ),
+                    )
+                    wait_overlap_ms = min(
+                        temporal_overlap_ms,
+                        sum(
+                            self._forensic_overlap_ms(start_ms, end_ms, wait_start, wait_end)
+                            for wait_start, wait_end in wait_intervals
+                        ),
+                    )
+                    useful_overlap_ms = max(0.0, temporal_overlap_ms - wait_overlap_ms)
+                    outside_main_ms = max(0.0, materialisation_ms - temporal_overlap_ms)
+                    main_consume_overlap_ms = min(
+                        materialisation_ms,
+                        sum(
+                            self._forensic_overlap_ms(
+                                start_ms, end_ms,
+                                float(main_work["start_ms"]), float(main_work["end_ms"]),
+                            )
+                            for main_work in main_work_rows
+                        ),
+                    )
+                    premat_overlap_during_main_consume_total += main_consume_overlap_ms
+                    dependency_ms = None
+                    lead_window_ms = None
+                    shortfall_ms = None
+                    slack_ms = None
+                    dependency_before_start = False
+                    if candidate.dependency_event is not None:
+                        dependency_count += 1
+                        dependency_ms = at_ms(candidate.dependency_event)
+                        lead_window_ms = max(0.0, dependency_ms - start_ms)
+                        lead_window_ms_total += lead_window_ms
+                        dependency_before_start = dependency_ms < start_ms
+                        if dependency_before_start:
+                            dependency_before_start_count += 1
+                        completion_delta_ms = end_ms - dependency_ms
+                        shortfall_ms = max(0.0, completion_delta_ms)
+                        slack_ms = max(0.0, -completion_delta_ms)
+                        shortfall_ms_total += shortfall_ms
+                        slack_ms_total += slack_ms
+                        if shortfall_ms > 0.0:
+                            shortfall_count += 1
+
+                    row = {
+                        "layer_index": candidate.layer_index,
+                        "family": candidate.family,
+                        "start_ms": start_ms,
+                        "end_ms": end_ms,
+                        "materialisation_ms": materialisation_ms,
+                        "dependency_ms": dependency_ms,
+                        "lead_window_ms": lead_window_ms,
+                        "shortfall_ms": shortfall_ms,
+                        "slack_ms": slack_ms,
+                        "dependency_before_premat_start": dependency_before_start,
+                        "temporal_overlap_ms": temporal_overlap_ms,
+                        "wait_overlap_ms": wait_overlap_ms,
+                        "useful_overlap_ms": useful_overlap_ms,
+                        "outside_main_layer_ms": outside_main_ms,
+                        "main_consume_overlap_ms": main_consume_overlap_ms,
+                        "consumed": bool(candidate.consumed),
+                    }
+                    candidate_rows.append(row)
+                    family_row = pass_family_rows.setdefault(
+                        candidate.family, self._new_forensic_family_row()
+                    )
+                    family_row["launched"] += 1
+                    family_row["consumed"] += int(candidate.consumed)
+                    family_row["unused"] += int(not candidate.consumed)
+                    family_row["premat_gpu_ms_total"] += materialisation_ms
+                    family_row["temporal_overlap_ms_total"] += temporal_overlap_ms
+                    family_row["wait_overlap_ms_total"] += wait_overlap_ms
+                    family_row["useful_overlap_ms_total"] += useful_overlap_ms
+                    family_row["outside_main_layer_ms_total"] += outside_main_ms
+                    family_row["premat_overlap_during_main_consume_ms_total"] += main_consume_overlap_ms
+                    if candidate.dependency_event is not None:
+                        family_row["dependency_count"] += 1
+                        family_row["dependency_shortfall_count"] += int((shortfall_ms or 0.0) > 0.0)
+                        family_row["dependency_shortfall_ms_total"] += float(shortfall_ms or 0.0)
+                        family_row["dependency_slack_ms_total"] += float(slack_ms or 0.0)
+                        family_row["dependency_lead_window_ms_total"] += float(lead_window_ms or 0.0)
+                        family_row["dependency_before_premat_start_count"] += int(dependency_before_start)
+
+                    premat_ms_total += materialisation_ms
+                    temporal_overlap_total += temporal_overlap_ms
+                    wait_overlap_total += wait_overlap_ms
+                    useful_overlap_total += useful_overlap_ms
+                    outside_main_total += outside_main_ms
+
+                main_layer_ms_total = sum(float(row["gpu_ms"]) for row in layer_rows)
+                main_wait_marker_ms_total = sum(max(0.0, end - start) for start, end in wait_intervals)
+                main_nonwait_ms_total = max(0.0, main_layer_ms_total - main_wait_marker_ms_total)
+                summary_values: Dict[str, float | int] = {
+                    "premat_launched": len(pending.candidate_intervals),
+                    "premat_consumed": sum(int(item.consumed) for item in pending.candidate_intervals),
+                    "premat_unused": sum(int(not item.consumed) for item in pending.candidate_intervals),
+                    "duplicate_main_materialisations": 0,
+                    "main_layer_count": len(layer_rows),
+                    "main_layer_gpu_ms_total": main_layer_ms_total,
+                    "main_wait_marker_ms_total": main_wait_marker_ms_total,
+                    "main_nonwait_gpu_ms_total": main_nonwait_ms_total,
+                    "main_consume_count": len(main_work_rows),
+                    "main_consume_gpu_ms_total": main_consume_ms_total,
+                    "premat_overlap_during_main_consume_ms_total": premat_overlap_during_main_consume_total,
+                    "premat_gpu_ms_total": premat_ms_total,
+                    "premat_temporal_overlap_ms_total": temporal_overlap_total,
+                    "premat_wait_overlap_ms_total": wait_overlap_total,
+                    "premat_useful_overlap_ms_total": useful_overlap_total,
+                    "premat_outside_main_layer_ms_total": outside_main_total,
+                    "dependency_count": dependency_count,
+                    "dependency_shortfall_count": shortfall_count,
+                    "dependency_shortfall_ms_total": shortfall_ms_total,
+                    "dependency_slack_ms_total": slack_ms_total,
+                    "dependency_lead_window_ms_total": lead_window_ms_total,
+                    "dependency_before_premat_start_count": dependency_before_start_count,
+                }
+                summary = self._forensic_derived_summary(summary_values)
+                pass_report: Dict[str, object] = {
+                    "pass_sequence": pending.pass_sequence,
+                    "summary": summary,
+                    "layers": layer_rows,
+                    "main_work": main_work_rows,
+                    "candidates": candidate_rows,
+                    "by_family": {
+                        family: self._forensic_derived_summary({
+                            "premat_launched": int(row["launched"]),
+                            "premat_consumed": int(row["consumed"]),
+                            "premat_unused": int(row["unused"]),
+                            "duplicate_main_materialisations": int(row["duplicates"]),
+                            "main_layer_count": 0,
+                            "main_layer_gpu_ms_total": 0.0,
+                            "main_wait_marker_ms_total": 0.0,
+                            "main_nonwait_gpu_ms_total": 0.0,
+                            "main_consume_count": int(row["main_consume_count"]),
+                            "main_consume_gpu_ms_total": float(row["main_consume_gpu_ms_total"]),
+                            "premat_overlap_during_main_consume_ms_total": float(
+                                row["premat_overlap_during_main_consume_ms_total"]
+                            ),
+                            "premat_gpu_ms_total": float(row["premat_gpu_ms_total"]),
+                            "premat_temporal_overlap_ms_total": float(row["temporal_overlap_ms_total"]),
+                            "premat_wait_overlap_ms_total": float(row["wait_overlap_ms_total"]),
+                            "premat_useful_overlap_ms_total": float(row["useful_overlap_ms_total"]),
+                            "premat_outside_main_layer_ms_total": float(row["outside_main_layer_ms_total"]),
+                            "dependency_count": int(row["dependency_count"]),
+                            "dependency_shortfall_count": int(row["dependency_shortfall_count"]),
+                            "dependency_shortfall_ms_total": float(row["dependency_shortfall_ms_total"]),
+                            "dependency_slack_ms_total": float(row["dependency_slack_ms_total"]),
+                            "dependency_lead_window_ms_total": float(row["dependency_lead_window_ms_total"]),
+                            "dependency_before_premat_start_count": int(row["dependency_before_premat_start_count"]),
+                        })
+                        for family, row in pass_family_rows.items()
+                    },
+                }
+            except RuntimeError:
+                remaining.append(pending)
+                continue
+
+            aggregate_deltas: Dict[str, float | int] = {
+                "forensic_resolved_passes": 1,
+                "forensic_main_layer_count": len(layer_rows),
+                "forensic_main_layer_gpu_ms_total": main_layer_ms_total,
+                "forensic_main_wait_marker_ms_total": main_wait_marker_ms_total,
+                "forensic_main_nonwait_gpu_ms_total": main_nonwait_ms_total,
+                "forensic_main_consume_count": len(main_work_rows),
+                "forensic_main_consume_gpu_ms_total": main_consume_ms_total,
+                "forensic_premat_overlap_during_main_consume_ms_total": premat_overlap_during_main_consume_total,
+                "forensic_premat_gpu_ms_total": premat_ms_total,
+                "forensic_premat_temporal_overlap_ms_total": temporal_overlap_total,
+                "forensic_premat_wait_overlap_ms_total": wait_overlap_total,
+                "forensic_premat_useful_overlap_ms_total": useful_overlap_total,
+                "forensic_premat_outside_main_layer_ms_total": outside_main_total,
+                "forensic_dependency_count": dependency_count,
+                "forensic_dependency_shortfall_count": shortfall_count,
+                "forensic_dependency_shortfall_ms_total": shortfall_ms_total,
+                "forensic_dependency_slack_ms_total": slack_ms_total,
+                "forensic_dependency_lead_window_ms_total": lead_window_ms_total,
+                "forensic_dependency_before_premat_start_count": dependency_before_start_count,
+            }
+            for name, delta in aggregate_deltas.items():
+                self._aggregate[name] += delta
+            for family, row in pass_family_rows.items():
+                cumulative = self._forensic_by_family.setdefault(
+                    family, self._new_forensic_family_row()
+                )
+                for name in (
+                    "main_consume_count",
+                    "main_consume_gpu_ms_total",
+                    "premat_overlap_during_main_consume_ms_total",
+                    "premat_gpu_ms_total",
+                    "temporal_overlap_ms_total",
+                    "wait_overlap_ms_total",
+                    "useful_overlap_ms_total",
+                    "outside_main_layer_ms_total",
+                    "dependency_count",
+                    "dependency_shortfall_count",
+                    "dependency_shortfall_ms_total",
+                    "dependency_slack_ms_total",
+                    "dependency_lead_window_ms_total",
+                    "dependency_before_premat_start_count",
+                ):
+                    cumulative[name] += row[name]
+            self._latest_forensic_pass = pass_report
+            self._update_pending_live_report_forensic(
+                pending.pass_sequence, aggregate_deltas, pass_report
+            )
+        self._pending_forensic_passes = remaining
+        self._publish_completed_live_reports_if_ready()
     # ^^^ THOG
 
     def begin(
@@ -639,6 +1323,7 @@ class PrematRuntime:
         # when its host forward ended. Resolve/publish those non-blockingly before
         # replacing the current event window.
         self._resolve_pending_timings()
+        self._resolve_pending_forensic_passes()                                                                          # <<< THOG resolve prior GPU-forensic pass without synchronising
         # One forward pass is one accumulation microstep's complete Premat
         # timeline.  Never carry event fragments across microsteps.
         self._events.clear()
@@ -670,6 +1355,17 @@ class PrematRuntime:
         self._sequence_length = int(reference.shape[1]) if reference.ndim >= 2 else 1
         self._pass_start_ns = time.perf_counter_ns()
         self._active = True
+        # vvv THOG one timing-enabled Main Stream origin makes cross-stream overlap arithmetic unambiguous
+        self._forensic_current_layers = []
+        self._forensic_current_candidates = []
+        self._forensic_current_main_work = []
+        self._forensic_pass_origin_event = None
+        if self._enable_gpu_timing_diagnostic:
+            self._forensic_pass_origin_event = torch.cuda.Event(enable_timing=True)
+            self._forensic_pass_origin_event.record(
+                torch.cuda.current_stream(device=self._device)
+            )
+        # ^^^ THOG
         observation = self._observe_memory()
         self._ordinary_peak_bytes = max(
             self._ordinary_peak_bytes,
@@ -690,6 +1386,13 @@ class PrematRuntime:
         if not self._active:
             return
         self._resolve_pending_timings()
+        self._resolve_pending_forensic_passes()                                                                          # <<< THOG opportunistically drain older forensic passes
+        # vvv THOG classify real side materialisations that reached pass end without a consumption callback
+        for candidate in tuple(self._candidates.values()):
+            if candidate.real_premat_launched and not candidate.real_premat_consumed:
+                self._aggregate["real_premat_materialisations_unused"] += 1
+                self._forensic_by_family[candidate.family]["unused"] += 1
+        # ^^^ THOG
         for candidate in tuple(self._candidates.values()):
             if candidate.state not in (CandidateState.CONSUMED, CandidateState.UNAVAILABLE):
                 self._record(
@@ -705,6 +1408,8 @@ class PrematRuntime:
                 0.0,
                 (time.perf_counter_ns() - self._pass_start_ns) / 1_000_000.0,
             )
+        self._queue_forensic_pass()                                                                                       # <<< THOG defer GPU-forensic arithmetic until all timing events complete
+        self._resolve_pending_forensic_passes()                                                                           # <<< THOG publish immediately when the GPU is already caught up
         self._capture_completed_live_report()
         for candidate in tuple(self._candidates.values()):
             # Anything not transferred to _PendingRelease has no Main Stream
@@ -826,6 +1531,7 @@ class PrematRuntime:
         ):
             raise RuntimeError(f"premat candidate {key} has no owned tensor")
         if candidate.state == CandidateState.AVAILABLE:
+            self._record_forensic_dependency(candidate, current_stream)                                                    # <<< THOG mark actual Main Stream matrix-use dependency even when PREMAT is already complete
             self._aggregate["available_hits"] += 1
             self._aggregate["fully_hidden_hits"] += 1
             candidate.final_outcome = "FULL HIT"
@@ -849,6 +1555,11 @@ class PrematRuntime:
                 wait_start.record(current_stream)
                 current_stream.wait_event(candidate.completion_event)
                 wait_end.record(current_stream)
+                self._record_forensic_dependency(
+                    candidate, current_stream,
+                    dependency_event=wait_start,
+                    wait_end_event=wait_end,
+                )                                                                                                         # <<< THOG retain the true dependency/wait interval for overlap forensics
                 # Host submission has reached the dependency, but this does NOT tell
                 # us whether the GPU Main Stream will actually wait there. Keep the
                 # result provisional until CUDA has timestamped both streams.
@@ -900,6 +1611,11 @@ class PrematRuntime:
             # candidate.tensor remains strongly referenced through consumed().
             # ^^^ THOG
         elif candidate.state == CandidateState.UNAVAILABLE:
+            # vvv THOG a Main fallback after a real side launch is a true duplicate and must be visible, not inferred
+            if candidate.real_premat_launched:
+                self._aggregate["duplicate_main_materialisations_after_premat"] += 1
+                self._forensic_by_family[candidate.family]["duplicates"] += 1
+            # ^^^ THOG
             candidate.owner = "main"
             candidate.critical_path_miss = True
             candidate.final_outcome = "COMPLETE MISS"
@@ -1101,6 +1817,13 @@ class PrematRuntime:
     def materialize_for_consumption(self, family: str, layer_index: int) -> Tensor:
         # Checkpoint replay has no schedulable lookahead lifetime.  Recreate the
         # exact ordinary differentiable materialisation on its execution stream.
+        # vvv THOG catch any unexpected in-pass bypass of an already-launched PREMAT candidate as duplicate work
+        if self._active:
+            candidate = self._candidates.get((int(layer_index), str(family)))
+            if candidate is not None and candidate.real_premat_launched:
+                self._aggregate["duplicate_main_materialisations_after_premat"] += 1
+                self._forensic_by_family[candidate.family]["duplicates"] += 1
+        # ^^^ THOG
         return self._materialize(family, layer_index)
 
     def consumed(self, family: str, layer_index: int) -> None:
@@ -1150,6 +1873,14 @@ class PrematRuntime:
         candidate.retained_counted = False
         candidate.transient_counted = False
         # ^^^ THOG
+        # vvv THOG distinguish useful real PREMAT work from launched-but-never-consumed work
+        if candidate.real_premat_launched and not candidate.real_premat_consumed:
+            candidate.real_premat_consumed = True
+            self._aggregate["real_premat_materialisations_consumed"] += 1
+            self._forensic_by_family[candidate.family]["consumed"] += 1
+            if candidate.forensic_interval is not None:
+                candidate.forensic_interval.consumed = True
+        # ^^^ THOG
         candidate.consumed_ns = time.perf_counter_ns()
         candidate.tensor = None
         candidate.materialisation_start_event = None
@@ -1166,6 +1897,7 @@ class PrematRuntime:
 
     def report(self) -> Dict[str, object]:
         self._resolve_pending_timings()
+        self._resolve_pending_forensic_passes()                                                                          # <<< THOG make synchronized progress/final reports carry resolved forensic evidence
         self._resolve_pending_releases()
         candidates = [
             self._candidate_payload(candidate)
@@ -1205,6 +1937,12 @@ class PrematRuntime:
         pass_complete = bool(
             self._events
             and self._events[-1].get("event") == "pass_end"
+        )
+        forensic_pass = (
+            dict(self._latest_forensic_pass)
+            if self._latest_forensic_pass is not None
+            and int(self._latest_forensic_pass.get("pass_sequence", -1)) == int(self._pass_sequence)
+            else None
         )
         return {
             "version": PREMAT_TELEMETRY_VERSION,
@@ -1249,6 +1987,10 @@ class PrematRuntime:
             "event_window_limit": "complete_pass",
             "memory": memory,
             "aggregate": aggregate,
+            # vvv THOG cumulative and per-pass evidence map directly onto the six first-tranche hypotheses
+            "forensic": self._forensic_report(),
+            "forensic_pass": forensic_pass,
+            # ^^^ THOG
             "live_publish_error": self._live_publish_error,
         }
 
@@ -2108,6 +2850,30 @@ class PrematRuntime:
                     f"mode={self._attention_mode}, envelope={asdict(candidate.envelope)}, "
                     f"admission={asdict(decision)}, memory={self._memory_summary()}"
                 ) from error
+            # vvv THOG count real side work independently of admission and retain its immutable CUDA interval for overlap analysis
+            if not self._shadow_mode:
+                if candidate.real_premat_launched:
+                    raise RuntimeError(
+                        "PREMAT candidate launched real side materialisation twice: "
+                        f"layer={candidate.layer_index}, family={candidate.family}"
+                    )
+                candidate.real_premat_launched = True
+                self._aggregate["real_premat_materialisations_launched"] += 1
+                self._forensic_by_family[candidate.family]["launched"] += 1
+                if (
+                    self._enable_gpu_timing_diagnostic
+                    and candidate.materialisation_start_event is not None
+                    and candidate.completion_event is not None
+                ):
+                    candidate.forensic_interval = _ForensicCandidateInterval(
+                        pass_sequence=self._pass_sequence,
+                        layer_index=candidate.layer_index,
+                        family=candidate.family,
+                        start_event=candidate.materialisation_start_event,
+                        end_event=candidate.completion_event,
+                    )
+                    self._forensic_current_candidates.append(candidate.forensic_interval)
+            # ^^^ THOG
             self._aggregate["admitted"] += 1
             observed_admission_lag_ms = max(
                 0.0,
@@ -2809,6 +3575,11 @@ class PrematRuntime:
             for timing in self._pending_timings
             if int(timing.pass_sequence) > 0
         }
+        pending_passes.update(                                                                                           # <<< THOG a sampled Instra pass waits for overlap forensics as well as legacy timing classification
+            int(pending.pass_sequence)
+            for pending in self._pending_forensic_passes
+            if int(pending.pass_sequence) > 0
+        )
         for pass_sequence in sorted(tuple(self._pending_completed_live_reports)):
             if pass_sequence in pending_passes:
                 continue

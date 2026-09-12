@@ -698,6 +698,34 @@ class SheetGPT(nn.Module):
     def _premat_event(self, name: str, layer_index: int) -> None:
         if self._premat_runtime is not None and self._premat_runtime.active:
             self._premat_runtime.event(name, layer_index=layer_index)
+
+    # vvv THOG optional forensic markers tolerate checkpoint/runtime doubles while the real PREMAT runtime exposes every marker
+    def _premat_forensic_layer_start(self, layer_index: int) -> None:
+        runtime = self._premat_runtime
+        marker = getattr(runtime, "forensic_layer_start", None)
+        if runtime is not None and runtime.active and callable(marker):
+            marker(layer_index)
+
+    def _premat_forensic_layer_end(self, layer_index: int) -> None:
+        runtime = self._premat_runtime
+        marker = getattr(runtime, "forensic_layer_end", None)
+        if runtime is not None and runtime.active and callable(marker):
+            marker(layer_index)
+
+    # ^^^ THOG
+    # vvv THOG bracket identical foreground matrix-use GEMMs so REAL/SHADOW comparison isolates side-stream contention
+    def _premat_forensic_main_work_start(self, family: str, layer_index: int) -> None:
+        runtime = self._premat_runtime
+        marker = getattr(runtime, "forensic_main_work_start", None)
+        if runtime is not None and runtime.active and callable(marker):
+            marker(family, layer_index)
+
+    def _premat_forensic_main_work_end(self, family: str, layer_index: int) -> None:
+        runtime = self._premat_runtime
+        marker = getattr(runtime, "forensic_main_work_end", None)
+        if runtime is not None and runtime.active and callable(marker):
+            marker(family, layer_index)
+    # ^^^ THOG
     # ^^^ THOG
 
     def _sheet_layer_norm(self, inputs: Tensor, weight_name: str, bias_name: str, layer_index: int) -> Tensor:
@@ -733,7 +761,9 @@ class SheetGPT(nn.Module):
                 packed_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
                 qk_bias = packed_bias[: 2 * self.config.n_embd]
                 value_bias = packed_bias[2 * self.config.n_embd :]
+            self._premat_forensic_main_work_start("QK", layer_index)
             query, key = F.linear(inputs, qk_weight, qk_bias).split(self.config.n_embd, dim=2)
+            self._premat_forensic_main_work_end("QK", layer_index)
             if self.config.fast_discard:
                 del qk_weight, qk_bias
             self._premat_consumed("QK", layer_index)
@@ -747,7 +777,9 @@ class SheetGPT(nn.Module):
             probabilities = F.dropout(probabilities, p=self.config.dropout, training=self.training)
             self._premat_event("after_attention_softmax", layer_index)
             value_weight = self._premat_weight("V", layer_index)
+            self._premat_forensic_main_work_start("V", layer_index)
             value = F.linear(inputs, value_weight, value_bias)
+            self._premat_forensic_main_work_end("V", layer_index)
             if self.config.fast_discard:
                 del value_weight
             self._premat_consumed("V", layer_index)
@@ -777,7 +809,9 @@ class SheetGPT(nn.Module):
                 attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
         # ^^^ THOG
         if not use_unfused_attention:
+            self._premat_forensic_main_work_start("QKV", layer_index)
             query, key, value = F.linear(inputs, attention_weight, attention_bias).split(self.config.n_embd, dim=2)
+            self._premat_forensic_main_work_end("QKV", layer_index)
             if self.config.fast_discard:
                 del attention_weight, attention_bias
             if layer_materializations is None:
@@ -816,7 +850,9 @@ class SheetGPT(nn.Module):
         )
         # ^^^ THOG
         output_bias = self._optional_bias("attention_output_bias", layer_index)
+        self._premat_forensic_main_work_start("O", layer_index)
         projected = F.linear(attended, output_weight, output_bias)
+        self._premat_forensic_main_work_end("O", layer_index)
         if self.config.fast_discard:
             del attended, output_weight, output_bias
         if layer_materializations is None:
@@ -899,7 +935,9 @@ class SheetGPT(nn.Module):
                 else layer_materializations["mlp_expansion_weight"]
             )
             # ^^^ THOG
+            self._premat_forensic_main_work_start("UP", layer_index)
             hidden = F.linear(inputs, expansion_weight, expansion_bias)
+            self._premat_forensic_main_work_end("UP", layer_index)
             if self.config.fast_discard:
                 del expansion_weight
             if layer_materializations is None:
@@ -936,7 +974,9 @@ class SheetGPT(nn.Module):
                 else layer_materializations["mlp_contraction_weight"]
             )
             # ^^^ THOG
+            self._premat_forensic_main_work_start("DOWN", layer_index)
             output = F.linear(hidden, contraction_weight, contraction_bias)
+            self._premat_forensic_main_work_end("DOWN", layer_index)
             if self.config.fast_discard:
                 del contraction_weight
             if layer_materializations is None:
@@ -986,6 +1026,7 @@ class SheetGPT(nn.Module):
     def _logical_block(self, inputs: Tensor, layer_index: int) -> Tensor:
         if self._premat_runtime is not None and self._premat_runtime.active:
             self._premat_runtime.layer_start(layer_index)
+            self._premat_forensic_layer_start(layer_index)                                                             # <<< THOG time Main Stream layer body only when explicit GPU diagnostic is enabled
         layer_materializations = None
         hyperblock_mlp_factors = None
         is_hyperblock = isinstance(self.trajectory, CoupledFieldTrajectory)
@@ -1026,6 +1067,7 @@ class SheetGPT(nn.Module):
         if self.config.fast_discard:
             del layer_materializations, hyperblock_mlp_factors
         if self._premat_runtime is not None and self._premat_runtime.active:
+            self._premat_forensic_layer_end(layer_index)                                                               # <<< THOG close Main Stream layer interval before optional host-only delay
             self._premat_runtime.layer_complete(layer_index)
         return inputs
     # ^^^ THOG

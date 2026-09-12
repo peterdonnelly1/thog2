@@ -883,7 +883,8 @@ function premat_render_summary(snapshot, model) {
   const margin_text = Number.isFinite(margin)
     ? `${margin >= 0 ? "+" : "−"}${premat_bytes(Math.abs(margin))}`
     : "—";
-  by_id("premat_summary").innerHTML = [
+  // vvv THOG timing-diagnostic snapshots expose six forensic discriminators without requiring detailed history retention
+  const summary_items = [
     ["mode", model.attention_mode],
     ["target", Number(snapshot.target_layer ?? snapshot.target_offset ?? 1) === 10 ? "l+1 → l+0" : `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],
     ["matrix order", String(snapshot.matrix_order ?? snapshot.weight_matrix_target_order ?? snapshot.target_order ?? "r_to_l")],
@@ -894,7 +895,32 @@ function premat_render_summary(snapshot, model) {
     ["full hits", String(outcomes["FULL HIT"])],
     ["partial hits", String(outcomes["PARTIAL HIT"])],
     ["complete misses", String(outcomes["COMPLETE MISS"])],
-  ].map(([label, value]) => premat_summary_item(label, value)).join("");
+  ];
+  const forensic = snapshot?.forensic_pass?.summary || null;
+  if (snapshot?.enable_gpu_timing_diagnostic === true && forensic) {
+    const percent = value => Number.isFinite(Number(value)) ? `${(100 * Number(value)).toFixed(1)}%` : "—";
+    summary_items.push(
+      ["MAIN GPU / layer", premat_ms(forensic.main_layer_gpu_ms_mean)],
+      ["MAIN non-wait / layer", premat_ms(forensic.main_nonwait_gpu_ms_mean)],
+      ["MAIN consume GEMM mean", premat_ms(forensic.main_consume_gpu_ms_mean)],
+      ["MAIN GEMM covered by PREMAT", percent(forensic.main_consume_covered_by_premat_fraction)],
+      ["useful PREMAT overlap", percent(forensic.premat_useful_overlap_fraction)],
+      ["PREMAT outside MAIN", percent(forensic.premat_outside_main_layer_fraction)],
+      ["dependency shortfall", `${premat_ms(forensic.dependency_shortfall_ms_total)} · ${Number(forensic.dependency_shortfall_count || 0)}/${Number(forensic.dependency_count || 0)}`],
+      ["PREMAT launched / used / unused", `${Number(forensic.premat_launched || 0)} / ${Number(forensic.premat_consumed || 0)} / ${Number(forensic.premat_unused || 0)}`],
+      ["duplicate materialisations", String(Number(forensic.duplicate_main_materialisations || 0))],
+      ["dependency before PREMAT start", String(Number(forensic.dependency_before_premat_start_count || 0))],
+    );
+    const family_order = model.attention_mode === "unfused" ? ["QK", "V", "O", "UP", "DOWN"] : ["QKV", "O", "UP", "DOWN"];
+    const family_text = family_order.map(family => {
+      const row = snapshot?.forensic_pass?.by_family?.[family];
+      return `${family}:${row && Number.isFinite(Number(row.main_consume_gpu_ms_mean)) ? Number(row.main_consume_gpu_ms_mean).toFixed(3) : "—"}`;
+    }).join(" · ");
+    summary_items.push(["MAIN GEMM ms by family", family_text]);
+  }
+  by_id("premat_summary").innerHTML = summary_items
+    .map(([label, value]) => premat_summary_item(label, value)).join("");
+  // ^^^ THOG
 }
 
 function premat_apply_update(update) {
