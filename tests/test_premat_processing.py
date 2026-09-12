@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from sheet.premat_processing import (
+    _nsys_profile_command,
     normalize_nsys_sqlite,
     processing_requested_from_argv,
     rewrite_processing_cli_for_core,
@@ -34,6 +35,23 @@ def test_processing_public_cli_rewrites_to_hidden_core_aliases() -> None:
         "--processing_logging_capture_frequency_hz_internal=12345",
         "--model-type", "sheet",
     ]
+
+
+def test_nsys_profile_command_preserves_child_environment_and_waits(tmp_path: Path) -> None:
+    command = _nsys_profile_command(
+        "/usr/bin/nsys",
+        report_base=tmp_path / "trace",
+        frequency=10000,
+        entrypoint=tmp_path / "runner.py",
+        arguments=["--processing_logging_internal", "enabled"],
+    )
+    assert "--inherit-environment=true" in command
+    assert "--show-output=true" in command
+    assert "--wait=primary" in command
+    assert "--sample=none" in command
+    assert "--cpuctxsw=none" in command
+    assert "--capture-range-end=stop" in command
+    assert "--gpu-metrics-frequency=10000" in command
 
 
 def test_processing_configuration_is_cuda_but_not_premat_dependent() -> None:

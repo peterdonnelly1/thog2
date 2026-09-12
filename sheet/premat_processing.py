@@ -120,6 +120,38 @@ def _find_nsys() -> Optional[str]:
     return str(candidates[0]) if candidates else None
 
 
+# vvv THOG make the Nsight launch contract explicit: preserve THOG environment, show child output, wait for the child, and collect GPU-only diagnostics
+def _nsys_profile_command(
+    nsys: str,
+    *,
+    report_base: Path,
+    frequency: int,
+    entrypoint: Path,
+    arguments: Sequence[str],
+) -> list[str]:
+    return [
+        nsys,
+        "profile",
+        "--trace=cuda,nvtx",
+        "--sample=none",
+        "--cpuctxsw=none",
+        "--show-output=true",
+        "--inherit-environment=true",
+        "--wait=primary",
+        "--capture-range=nvtx",
+        "--capture-range-end=stop",
+        f"--nvtx-capture={PROCESSING_CAPTURE_RANGE}",
+        "--gpu-metrics-devices=cuda-visible",
+        f"--gpu-metrics-frequency={frequency}",
+        "--force-overwrite=true",
+        f"--output={report_base}",
+        sys.executable,
+        str(Path(entrypoint).resolve()),
+        *arguments,
+    ]
+# ^^^ THOG
+
+
 def register_processing_handoff(
     run_directory: Path,
     *,
@@ -753,21 +785,13 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
-    command = [
+    command = _nsys_profile_command(
         nsys,
-        "profile",
-        "--trace=cuda,nvtx",
-        "--capture-range=nvtx",
-        "--capture-range-end=stop",
-        f"--nvtx-capture={PROCESSING_CAPTURE_RANGE}",
-        "--gpu-metrics-devices=cuda-visible",
-        f"--gpu-metrics-frequency={frequency}",
-        "--force-overwrite=true",
-        f"--output={report_base}",
-        sys.executable,
-        str(Path(entrypoint).resolve()),
-        *rewritten_arguments,
-    ]
+        report_base=report_base,
+        frequency=frequency,
+        entrypoint=entrypoint,
+        arguments=rewritten_arguments,
+    )
     print(
         f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
         "capturing one forward microstep",
@@ -777,7 +801,10 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     if completed.returncode != 0:
         return int(completed.returncode)
     if not handoff_path.exists():
-        raise RuntimeError("PREMAT processing capture completed but no INSTRA run handoff was written")
+        raise RuntimeError(
+            "PREMAT processing capture completed but no INSTRA run handoff was written; "
+            "the profiled child did not reach telemetry attachment or did not inherit the THOG processing environment"
+        )
     handoff = json.loads(handoff_path.read_text())
     run_directory = Path(handoff["run_directory"])
     processing_directory = run_directory / "processing"
