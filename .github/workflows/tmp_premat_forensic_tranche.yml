@@ -1,12 +1,11 @@
-name: Temporary PREMAT forensic tranche
+name: Temporary PREMAT processing Nsight launch repair
 
 on:
   push:
     branches:
       - THOG2_Dynamic_Prematerialisation_Enhancement
     paths:
-      - .github/workflows/tmp_premat_forensic_tranche.yml
-      - tmp_finish_premat_forensic_tranche.py
+      - tmp_fix_premat_processing_nsys_launch.py
 
 permissions:
   contents: write
@@ -24,17 +23,18 @@ jobs:
           python-version: '3.11'
       - name: Install test dependencies
         run: python -m pip install -q pytest torch matplotlib plotly
-      - name: Apply final specificity
-        run: python tmp_finish_premat_forensic_tranche.py
+      - name: Apply repair
+        run: python tmp_fix_premat_processing_nsys_launch.py
       - name: Verify
         run: |
-          python -m compileall -q sheet tests/test_premat.py
+          python -m compileall -q sheet tests/test_premat_processing.py tests/test_premat.py
+          node --check sheet/local_dashboard_assets/dashboard_processing.js
           git diff --check
-          python -m pytest -q tests/test_premat.py tests/test_local_chart_dashboard.py tests/test_instra_live_loss.py
+          python -m pytest -q tests/test_premat_processing.py tests/test_premat.py
       - name: Commit implementation
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add sheet/premat.py sheet/local_dashboard_assets/dashboard_premat.js tests/test_premat.py
-          git commit -m 'Tighten PREMAT forensic discrimination'
+          git add sheet/premat_processing.py tests/test_premat_processing.py THOG2_DYNAMIC_PREMATERIALISATION_LOG.md
+          git commit -m 'Fix Nsight processing launch environment'
           git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement
