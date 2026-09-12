@@ -586,13 +586,23 @@ def _union_overlap(intervals: Iterable[tuple[float, float]], start: float, end: 
     return total
 
 
+# vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders
 def _mean_metric(samples: Sequence[Mapping[str, Any]], key: str, start_us: float, end_us: float) -> Optional[float]:
-    values = [
-        float(row[key])
-        for row in samples
-        if key in row and start_us <= float(row["time_us"]) <= end_us and math.isfinite(float(row[key]))
-    ]
+    values: list[float] = []
+    for row in samples:
+        if not start_us <= float(row["time_us"]) <= end_us:
+            continue
+        raw_value = row.get(key)
+        if raw_value in (None, ""):
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append(value)
     return sum(values) / len(values) if values else None
+# ^^^ THOG
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
@@ -809,6 +819,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
+    environment["NSYS_NVTX_PROFILER_REGISTER_ONLY"] = "0"  # <<< THOG PyTorch range_push uses unregistered NVTX strings; Nsight capture trigger must accept them
     command = _nsys_profile_command(
         nsys,
         report_base=report_base,

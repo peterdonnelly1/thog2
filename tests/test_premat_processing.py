@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from sheet.premat_processing import (
+    _mean_metric,
     _nsys_profile_command,
     normalize_nsys_sqlite,
     processing_invocation_is_non_training,
@@ -67,6 +68,17 @@ def test_nsys_profile_command_preserves_child_environment_and_waits(tmp_path: Pa
     assert "--cpuctxsw=none" in command
     assert "--capture-range-end=stop" in command
     assert "--gpu-metrics-frequency=10000" in command
+
+
+def test_processing_sparse_metric_samples_ignore_empty_cells() -> None:
+    samples = [
+        {"time_us": 1.0, "sm_active_pct": 80.0, "tensor_active_pct": ""},
+        {"time_us": 2.0, "sm_active_pct": "", "tensor_active_pct": 90.0},
+        {"time_us": 3.0, "sm_active_pct": None, "tensor_active_pct": "not-a-number"},
+    ]
+    assert _mean_metric(samples, "sm_active_pct", 0.0, 4.0) == 80.0
+    assert _mean_metric(samples, "tensor_active_pct", 0.0, 4.0) == 90.0
+    assert _mean_metric(samples, "sm_issue_pct", 0.0, 4.0) is None
 
 
 def test_processing_configuration_is_cuda_but_not_premat_dependent() -> None:
