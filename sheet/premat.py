@@ -1647,8 +1647,11 @@ class PrematRuntime:
                 # The admission miss is the ordinary critical-path operation.
                 # Keep its native autograd graph instead of routing it through
                 # the no-grad Premat binding used only by Premat Stream hits.
+                # vvv THOG preserve the ordinary Main materialisation statement; the active copy is only wrapped for profiling attribution
+                # candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
                 with processing_operation_range("MAIN", "materialize", family=candidate.family, layer_index=candidate.layer_index):
                     candidate.tensor = self._materialize(candidate.family, candidate.layer_index)
+                # ^^^ THOG
             except BaseException as error:
                 self._record(
                     "main_materialisation_failed",
@@ -1826,8 +1829,11 @@ class PrematRuntime:
                 self._aggregate["duplicate_main_materialisations_after_premat"] += 1
                 self._forensic_by_family[candidate.family]["duplicates"] += 1
         # ^^^ THOG
+        # vvv THOG preserve checkpoint/replay Main materialisation while adding profiling attribution
+        # return self._materialize(family, layer_index)
         with processing_operation_range("MAIN", "materialize", family=family, layer_index=layer_index):
             return self._materialize(family, layer_index)
+        # ^^^ THOG
 
     def consumed(self, family: str, layer_index: int) -> None:
         key = (int(layer_index), str(family))
@@ -2815,11 +2821,17 @@ class PrematRuntime:
                         torch.set_autocast_cache_enabled(False)
                         try:
                             with torch.no_grad():
+                                # vvv THOG preserve the original side-stream materialisation block while adding profiling attribution
+                                # candidate.tensor = self._materialize(
+                                #     candidate.family,
+                                #     candidate.layer_index,
+                                # )
                                 with processing_operation_range("PREMAT", "materialize", family=candidate.family, layer_index=candidate.layer_index):
                                     candidate.tensor = self._materialize(
                                         candidate.family,
                                         candidate.layer_index,
                                     )
+                                # ^^^ THOG
                         finally:
                             torch.set_autocast_cache_enabled(autocast_cache_enabled)
                         actual_retained_bytes = int(

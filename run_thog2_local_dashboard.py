@@ -953,7 +953,10 @@ def _handler_for(catalog: DashboardCatalog):
                         download=query.get("download", ["0"])[0] == "1",
                     )
                     return
+                # vvv THOG extend the existing local API without deleting the prior route declaration
+                # if path in {"/api/status", "/api/figures", "/api/premat"}:
                 if path in {"/api/status", "/api/figures", "/api/premat", "/api/processing"}:
+                # ^^^ THOG
                     run_name = query.get("run", [""])[0]
                     if not run_name:
                         self._send_json(

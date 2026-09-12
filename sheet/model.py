@@ -688,8 +688,11 @@ class SheetGPT(nn.Module):
     def _premat_weight(self, family: str, layer_index: int) -> Tensor:
         if self._premat_runtime is None or not self._premat_runtime.active:
             if self._premat_runtime is None:
+                # vvv THOG retain the ordinary materialisation statement while wrapping its CUDA launches in one semantic range
+                # return self._premat_materialize_candidate(family, layer_index)
                 with processing_operation_range("MAIN", "materialize", family=family, layer_index=layer_index):
                     return self._premat_materialize_candidate(family, layer_index)
+                # ^^^ THOG
             return self._premat_runtime.materialize_for_consumption(family, layer_index)
         return self._premat_runtime.acquire(family, layer_index)
 

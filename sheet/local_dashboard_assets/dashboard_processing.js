@@ -92,7 +92,7 @@ function processing_render_timeline(payload) {
     ["active_sm_unused_warp_slots_pct", "Unused warp slots"],
   ];
   for (const [key, label] of metric_specs) {
-    const rows = (payload.samples || []).filter(row => Number.isFinite(Number(row[key])));
+    const rows = (payload.samples || []).filter(row => row[key] !== "" && row[key] !== null && row[key] !== undefined && Number.isFinite(Number(row[key])));
     if (!rows.length) continue;
     traces.push({
       type: "scattergl",
@@ -150,7 +150,7 @@ function processing_render_contention(payload) {
 }
 
 function processing_mean(rows, key) {
-  const values = rows.map(row => Number(row[key])).filter(Number.isFinite);
+  const values = rows.filter(row => row[key] !== "" && row[key] !== null && row[key] !== undefined).map(row => Number(row[key])).filter(Number.isFinite);
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 

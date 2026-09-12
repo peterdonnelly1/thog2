@@ -284,6 +284,9 @@ def _true_false(value: str) -> bool:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = _ThogArgumentParser(description="Train or resume one canonical THOG2 OpenWebText run")
+    # vvv THOG wrapper consumes these before core argparse, but --help must still advertise the exact public names
+    parser.epilog = "Processing diagnostics: --premat_processing_logging enabled|disabled; --premat_processing_logging_capture_frequency_hz HZ (default 10000)"
+    # ^^^ THOG
     # vvv THOG independent polynomial history budgets; explicit counts retain more raw depth information
     from sheet.thogopt_config import add_thogopt_arguments
     add_thogopt_arguments(parser)
