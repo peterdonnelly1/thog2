@@ -21,6 +21,10 @@ _LOSS = re.compile(r"(?<![\w/])loss\s*=\s*" + _NUMBER + r"(?![\w.])")
 _VAL_LOSS = re.compile(r"validation\s+loss\s*=\s*" + _NUMBER + r"(?![\w.])")
 _STEP_SECONDS = re.compile(r"Δstep\s*=\s*" + _NUMBER + r"\s*s")
 _TIME_AXIS_MODES = ("relative_wall", "relative_process", "wall_time")
+# vvv THOG keep restart/backlog reconstruction anchored to the newest train.log tail rather than stale chunks
+_READ_CHUNK_BYTES = 1024 * 1024
+_LIVE_TAIL_BYTES = 4 * 1024 * 1024
+# ^^^ THOG
 
 
 class LiveLossReader:
@@ -44,7 +48,8 @@ class LiveLossReader:
                 return
             stat = path.stat()
             identity = (stat.st_dev, stat.st_ino)
-            if identity != self.identity or stat.st_size < self.offset:
+            reset_reader = identity != self.identity or stat.st_size < self.offset
+            if reset_reader:
                 self.offset = 0
                 self.pending = b""
                 self.values = {"train": {}, "val": {}}
@@ -54,10 +59,27 @@ class LiveLossReader:
                 # ^^^ THOG
                 self.revision += 1
             self.path, self.identity = path, identity
+            # vvv THOG restart from the newest bounded tail and drain any modest backlog to EOF before assigning mtime-derived timestamps
+            backlog_bytes = max(0, int(stat.st_size) - int(self.offset))
+            drain_to_eof = reset_reader or backlog_bytes > _READ_CHUNK_BYTES
+            discard_partial_prefix = False
+            if reset_reader:
+                self.offset = max(0, int(stat.st_size) - _LIVE_TAIL_BYTES)
+                discard_partial_prefix = self.offset > 0
+            elif drain_to_eof:
+                tail_offset = max(int(self.offset), int(stat.st_size) - _LIVE_TAIL_BYTES)
+                if tail_offset > self.offset:
+                    self.offset = tail_offset
+                    self.pending = b""
+                    discard_partial_prefix = True
             with path.open("rb") as handle:
                 handle.seek(self.offset)
-                content = handle.read(1024 * 1024)
+                content = handle.read() if drain_to_eof else handle.read(_READ_CHUNK_BYTES)
                 self.offset = handle.tell()
+            if discard_partial_prefix:
+                newline = content.find(b"\n")
+                content = content[newline + 1:] if newline >= 0 else b""
+            # ^^^ THOG
             lines = (self.pending + content).split(b"\n")
             self.pending = lines.pop()[-65536:]
             # vvv THOG train.log mtime anchors the newest live row; exact Δstep values backfill earlier rows in the same read
@@ -80,7 +102,9 @@ class LiveLossReader:
                 )
                 if math.isfinite(value) and self.values[group].get(step) != value:
                     accepted.append((group, step, value, step_seconds))
-            wall_cursor = float(stat.st_mtime)
+            # vvv THOG restat after the read so the anchor corresponds to the newest bytes actually consumed
+            wall_cursor = float(path.stat().st_mtime)
+            # ^^^ THOG
             for group, step, value, step_seconds in reversed(accepted):
                 self.values[group][step] = value
                 self.wall_times[group][step] = wall_cursor

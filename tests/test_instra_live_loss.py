@@ -101,6 +101,20 @@ def test_refresh_backfills_batch_wall_times_from_step_duration(tmp_path):
     # ^^^ THOG
 
 
+
+def test_restart_large_log_drains_to_newest_progress_rows_in_one_refresh(tmp_path):
+    # vvv THOG a restarted Instra must not timestamp an old 1-MiB prefix with the current train.log mtime
+    noise = "not a progress row\n" * 70000
+    reader, *_ = reader_for(
+        tmp_path,
+        noise
+        + "T 10 120926-1400 0010 Δstep=4.0s loss=7.1\n"
+        + "T 20 120926-1400 0020 Δstep=6.0s loss=6.9\n",
+    )
+    assert reader.values["train"] == {10: 7.1, 20: 6.9}
+    assert reader.wall_times["train"][10] == reader.wall_times["train"][20] - 6.0
+    # ^^^ THOG
+
 def test_rotation_summary_and_bounded_memory(tmp_path):
     reader, path, catalog, state, dashboard = reader_for(tmp_path, "T 10 loss=7\n")
     assert reader.summaries([], None)[0]["name"] == "train"
