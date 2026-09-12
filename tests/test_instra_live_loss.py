@@ -87,26 +87,18 @@ def test_live_only_chart_exposes_all_three_time_modes(tmp_path):
     assert series["x_variants"]["wall_time"] == [100.0, 105.0]
 
 
-def test_refresh_backfills_batch_wall_times_from_step_duration(tmp_path, monkeypatch):
-    path = tmp_path / "artifact" / "train.log"
-    path.parent.mkdir()
-    path.write_text(
+def test_refresh_backfills_batch_wall_times_from_step_duration(tmp_path):
+    reader, *_ = reader_for(
+        tmp_path,
         "T 10 120926-1310 0010 Δstep=4.0s loss=7.1\n"
         "V 10 120926-1310 0010 Δstep=4.0s training loss=7.1 validation loss=7.2\n"
-        "T 20 120926-1310 0020 Δstep=6.0s loss=6.9\n"
+        "T 20 120926-1310 0020 Δstep=6.0s loss=6.9\n",
     )
-    # vvv THOG hold train.log mtime fixed so the live-tail wall-time reconstruction is exact in this regression
-    monkeypatch.setattr(type(path.stat()), "st_mtime", 110.0, raising=False)
-    # ^^^ THOG
-    state = SimpleNamespace(status=lambda: {"artifact_name": "artifact"}, database_path=tmp_path / "charts.sqlite3")
-    catalog = SimpleNamespace(root=tmp_path)
-    dashboard = SimpleNamespace(_modified_time=lambda value: 0)
-    reader = LiveLossReader()
-    # pathlib stat_result attributes cannot be patched portably; use the real newest mtime as the anchor and test deltas instead.
-    reader.refresh(catalog, state, dashboard)
+    # vvv THOG newest file mtime is the anchor; only exact intra-batch Δstep differences are asserted
     newest = reader.wall_times["train"][20]
     assert reader.wall_times["val"][10] == newest - 6.0
     assert reader.wall_times["train"][10] == newest - 6.0
+    # ^^^ THOG
 
 
 def test_rotation_summary_and_bounded_memory(tmp_path):
