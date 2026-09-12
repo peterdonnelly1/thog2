@@ -15,6 +15,13 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+# vvv THOG opt-in processing capture re-execs this public runner under Nsight before torch/CUDA initialization
+from sheet.premat_processing import maybe_reexec_under_nsys
+_processing_exit_code = maybe_reexec_under_nsys(sys.argv[1:], entrypoint=Path(__file__))
+if _processing_exit_code is not None:
+    raise SystemExit(_processing_exit_code)
+# ^^^ THOG
+
 
 # vvv THOG make --print-geometry-registry the complete discoverability surface for registered geometry plus every Python runner option and wrapper-only execution control
 def _print_complete_registry_help_if_requested() -> None:

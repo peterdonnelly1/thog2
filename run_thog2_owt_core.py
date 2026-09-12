@@ -357,6 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
     # ^^^ THOG
     parser.add_argument("--premat_logging", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_instra", choices=("enabled", "disabled"), default="disabled")
+    # vvv THOG public processing controls are consumed by the wrapper before core parsing; hidden aliases preserve the 15-option PREMAT scheduler surface
+    parser.add_argument("--processing_logging_internal", dest="premat_processing_logging", choices=("enabled", "disabled"), default="disabled", help=argparse.SUPPRESS)
+    parser.add_argument("--processing_logging_capture_frequency_hz_internal", dest="premat_processing_logging_capture_frequency_hz", type=int, default=10000, help=argparse.SUPPRESS)
+    # ^^^ THOG
     parser.add_argument("--premat_retain_detailed_premat_history", type=_true_false, default=False, metavar="true|false")
     # ^^^ THOG
     parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
@@ -767,6 +771,8 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat_enable_shadow_mode=arguments.premat_enable_shadow_mode,
         premat_logging=arguments.premat_logging,
         premat_instra=arguments.premat_instra,
+        premat_processing_logging=arguments.premat_processing_logging,
+        premat_processing_logging_capture_frequency_hz=arguments.premat_processing_logging_capture_frequency_hz,
         premat_retain_detailed_premat_history=arguments.premat_retain_detailed_premat_history,
         plastic__layer_count__cuda_allocator_reserve_gib=arguments.plastic__layer_count__cuda_allocator_reserve_gib,
         plastic__geometry_learning_rate_multiplier=arguments.plastic__geometry_learning_rate_multiplier,

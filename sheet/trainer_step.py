@@ -18,6 +18,9 @@ from .plastic_depth import (
 from .plastic_depth_cuda import PlasticDepthCudaAllocatorReserve
 from .plastic_depth_inline import PlasticDepthInlineProbeRequest
 from .semantic_materializer import ATTENTION_QUERY_WEIGHT                                                                                                  # <<< THOG fixed generated scalar family for transition-only gauge visibility
+# vvv THOG opt-in bounded Nsight processing capture
+from .premat_processing import processing_capture_scope
+# ^^^ THOG
 # vvv THOG PLASTIC DEPTH robust paired-score gate separates evidence collection from post-step state commit
 from .plastic_depth_controller import choose_plastic_depth_count_with_mad
 # ^^^ THOG
@@ -882,57 +885,67 @@ class TrainerStepMixin:
                     self.model,
                     synchronize=synchronize,
                 ):
-                    with self.autocast_context():
-                        if plastic_inline_context is not None and micro_step == 0:
-                            probe_request = self._plastic_depth_inline_probe_request(
-                                batch.targets,
-                                plastic_inline_context,
+                    # vvv THOG capture exactly one first accumulation forward; backward/checkpoint replay remains outside the Nsight range
+                    with processing_capture_scope(
+                        enabled=(str(getattr(self.config, "premat_processing_logging", "disabled")) == "enabled"),
+                        completed_updates=self.state.completed_updates,
+                        max_updates=self.config.max_updates,
+                        log_interval=self.config.log_interval,
+                        micro_step=micro_step,
+                        device=self.device,
+                    ):
+                        with self.autocast_context():
+                            if plastic_inline_context is not None and micro_step == 0:
+                                probe_request = self._plastic_depth_inline_probe_request(
+                                    batch.targets,
+                                    plastic_inline_context,
+                                )
+                                _, loss = self.model(
+                                    batch.inputs,
+                                    batch.targets,
+                                    plastic_depth_probe_request=probe_request,
+                                )
+                            elif plastic_inline_context is not None:
+                                selected_count = plastic_inline_context.get("selected_count")
+                                if selected_count is None:
+                                    raise RuntimeError(
+                                        "PLASTIC DEPTH first microstep did not select a layer count"
+                                    )
+                                _, loss = self.model(
+                                    batch.inputs,
+                                    batch.targets,
+                                    plastic_depth_active_layers_override=int(selected_count),
+                                )
+                            else:
+                                _, loss = self.model(batch.inputs, batch.targets)
+                            local_finite = loss is not None and bool(
+                                torch.isfinite(loss).item()
                             )
-                            _, loss = self.model(
-                                batch.inputs,
-                                batch.targets,
-                                plastic_depth_probe_request=probe_request,
-                            )
-                        elif plastic_inline_context is not None:
-                            selected_count = plastic_inline_context.get("selected_count")
-                            if selected_count is None:
+                            if not self.distributed.all_true(local_finite):
+                                loss_value = (
+                                    float(
+                                        loss.detach()
+                                        .to(dtype=torch.float64)
+                                        .item()
+                                    )
+                                    if loss is not None
+                                    else None
+                                )
+                                return self._handle_nonfinite_update(
+                                    reason="loss",
+                                    learning_rate=learning_rate,
+                                    training_loss=loss_value,
+                                    gradient_norm=None,
+                                    micro_step=micro_step,
+                                    microbatch_starts=microbatch_starts,
+                                    scaler_unscaled=False,
+                                )
+                            if loss is None:
                                 raise RuntimeError(
-                                    "PLASTIC DEPTH first microstep did not select a layer count"
+                                    "model did not return a training loss"
                                 )
-                            _, loss = self.model(
-                                batch.inputs,
-                                batch.targets,
-                                plastic_depth_active_layers_override=int(selected_count),
-                            )
-                        else:
-                            _, loss = self.model(batch.inputs, batch.targets)
-                        local_finite = loss is not None and bool(
-                            torch.isfinite(loss).item()
-                        )
-                        if not self.distributed.all_true(local_finite):
-                            loss_value = (
-                                float(
-                                    loss.detach()
-                                    .to(dtype=torch.float64)
-                                    .item()
-                                )
-                                if loss is not None
-                                else None
-                            )
-                            return self._handle_nonfinite_update(
-                                reason="loss",
-                                learning_rate=learning_rate,
-                                training_loss=loss_value,
-                                gradient_norm=None,
-                                micro_step=micro_step,
-                                microbatch_starts=microbatch_starts,
-                                scaler_unscaled=False,
-                            )
-                        if loss is None:
-                            raise RuntimeError(
-                                "model did not return a training loss"
-                            )
-                        scaled_loss = loss / accumulation_steps
+                            scaled_loss = loss / accumulation_steps
+                    # ^^^ THOG
                     total_loss += self.distributed.mean_float(loss.detach())
                     self.scaler.scale(scaled_loss).backward()
             if retained_materializations_active:

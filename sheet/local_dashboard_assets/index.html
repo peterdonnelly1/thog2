@@ -7,11 +7,13 @@
   <title>instra · THOG2 instrumentation</title>
   <link rel="stylesheet" href="/assets/dashboard.css">
   <link rel="stylesheet" href="/assets/dashboard_premat.css">                                                                                           <!-- THOG dedicated Premat view -->
+  <link rel="stylesheet" href="/assets/dashboard_processing.css">                                                                                        <!-- THOG Processing view -->
   <script src="/plotly.min.js"></script>
   <script src="/assets/dashboard.js" defer></script>
   <!-- vvv THOG keep local heatmap coordinate/view-size behaviour isolated from the established dashboard script -->
   <script src="/assets/dashboard_heatmap_patch.js" defer></script>
   <script src="/assets/dashboard_premat.js" defer></script>                                                                                              <!-- THOG bounded live Premat polling -->
+  <script src="/assets/dashboard_processing.js" defer></script>                                                                                           <!-- THOG Nsight-normalized processing plots -->
   <!-- ^^^ THOG -->
 </head>
 <body>
@@ -206,6 +208,20 @@
               </table>
             </div>
           </section>
+        </section>
+        <!-- ^^^ THOG -->
+        <!-- vvv THOG whole-GPU processing diagnostics aligned to semantic MAIN/PREMAT kernel intervals -->
+        <section class="chart-group processing-group" id="processing_chart_group" data-chart-group="processing" hidden>
+          <header class="chart-group-header processing-header">
+            <div class="processing-header-copy"><strong>Processing - Step <span id="processing_step">—</span></strong><span class="processing-status" id="processing_status">Waiting for capture</span></div>
+            <div class="processing-downloads">
+              <a id="processing_download_bundle" hidden>Bundle ZIP</a><a id="processing_download_samples" hidden>Samples CSV</a><a id="processing_download_intervals" hidden>Intervals CSV</a><a id="processing_download_summary" hidden>Summary CSV</a><a id="processing_download_metadata" hidden>Metadata JSON</a><a id="processing_download_raw" hidden>Raw nsys</a>
+            </div>
+          </header>
+          <div class="processing-grid">
+            <article class="processing-card"><h2>GPU processing timeline</h2><div class="processing-plot" id="processing_timeline_plot"></div></article>
+            <article class="processing-card"><h2>Main duration vs PREMAT overlap</h2><div class="processing-plot processing-contention-plot" id="processing_contention_plot"></div><div class="processing-summary-wrap"><table class="processing-summary"><thead><tr><th>Matrix</th><th>N</th><th>Main mean</th><th>PREMAT overlap</th><th>SM active</th><th>SM issue</th><th>Tensor active</th><th>Unused warp slots</th></tr></thead><tbody id="processing_summary_body"></tbody></table></div></article>
+          </div>
         </section>
         <!-- ^^^ THOG -->
         <section class="chart-group" id="depth_chart_group" data-chart-group="depth">

@@ -50,6 +50,7 @@ from .plastic_depth import (
 # ^^^ THOG
 # vvv THOG dynamic pre-materialisation configuration and CUDA runtime
 from .premat import PrematRuntime, validate_premat_configuration
+from .premat_processing import processing_operation_pop, processing_operation_push, processing_operation_range                             # <<< THOG semantic NVTX labels for INSTRA Processing
 # ^^^ THOG
 from .semantic_materializer import LegacySheetColMaterializer
 from .trajectory import SheetTrajectory
@@ -687,7 +688,8 @@ class SheetGPT(nn.Module):
     def _premat_weight(self, family: str, layer_index: int) -> Tensor:
         if self._premat_runtime is None or not self._premat_runtime.active:
             if self._premat_runtime is None:
-                return self._premat_materialize_candidate(family, layer_index)
+                with processing_operation_range("MAIN", "materialize", family=family, layer_index=layer_index):
+                    return self._premat_materialize_candidate(family, layer_index)
             return self._premat_runtime.materialize_for_consumption(family, layer_index)
         return self._premat_runtime.acquire(family, layer_index)
 
@@ -715,12 +717,15 @@ class SheetGPT(nn.Module):
     # ^^^ THOG
     # vvv THOG bracket identical foreground matrix-use GEMMs so REAL/SHADOW comparison isolates side-stream contention
     def _premat_forensic_main_work_start(self, family: str, layer_index: int) -> None:
+        self._processing_main_work_marker = processing_operation_push("MAIN", "consume", family=family, layer_index=layer_index)
         runtime = self._premat_runtime
         marker = getattr(runtime, "forensic_main_work_start", None)
         if runtime is not None and runtime.active and callable(marker):
             marker(family, layer_index)
 
     def _premat_forensic_main_work_end(self, family: str, layer_index: int) -> None:
+        processing_operation_pop(bool(getattr(self, "_processing_main_work_marker", False)))
+        self._processing_main_work_marker = False
         runtime = self._premat_runtime
         marker = getattr(runtime, "forensic_main_work_end", None)
         if runtime is not None and runtime.active and callable(marker):

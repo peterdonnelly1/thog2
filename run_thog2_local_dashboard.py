@@ -39,6 +39,8 @@ _ASSET_NAMES = frozenset((
     "dashboard_ui_patch.css",
     "dashboard_premat.css",
     "dashboard_premat.js",
+    "dashboard_processing.css",
+    "dashboard_processing.js",
 ))                                                                                                                                                       # <<< THOG serve dedicated Premat view assets
 # ^^^ THOG
 _WANDB_FILE_CACHE_SECONDS = 30.0
@@ -310,6 +312,19 @@ class RunDashboardState:
             "unchanged": unchanged,
             "snapshot_count": int(status["premat_snapshot_count"]),
             "history": list(snapshots) if include_history else None,
+        }
+    # ^^^ THOG
+
+    # vvv THOG Nsight-normalized processing data lives beside charts.sqlite3 and is immutable after capture
+    def processing(self) -> Dict[str, Any]:
+        path = self.database_path.parent / "processing" / "processing_data.json"
+        if not path.is_file():
+            return {"available": False, "revision": None, "data": None}
+        stat_result = path.stat()
+        return {
+            "available": True,
+            "revision": f"{stat_result.st_mtime_ns}:{stat_result.st_size}",
+            "data": json.loads(path.read_text()),
         }
     # ^^^ THOG
 
@@ -938,7 +953,7 @@ def _handler_for(catalog: DashboardCatalog):
                         download=query.get("download", ["0"])[0] == "1",
                     )
                     return
-                if path in {"/api/status", "/api/figures", "/api/premat"}:
+                if path in {"/api/status", "/api/figures", "/api/premat", "/api/processing"}:
                     run_name = query.get("run", [""])[0]
                     if not run_name:
                         self._send_json(
@@ -951,6 +966,8 @@ def _handler_for(catalog: DashboardCatalog):
                         value = state.status()
                     elif path == "/api/figures":
                         value = state.figures()
+                    elif path == "/api/processing":
+                        value = state.processing()
                     else:
                         raw_after = query.get("after", [""])[0]
                         after_update = int(raw_after) if raw_after else None

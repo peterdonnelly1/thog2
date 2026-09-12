@@ -68,7 +68,7 @@ from .premat import validate_premat_configuration
 CHECKPOINT_SCHEMA_VERSION = 2
 ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz"}                         # <<< THOG processing capture is diagnostic execution state, never checkpoint model identity
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
     "plastic__enabled",
@@ -306,6 +306,10 @@ class TrainingConfig:
     # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
+    # vvv THOG Nsight-backed processing capture is execution instrumentation and works with NOMAT
+    premat_processing_logging: str = "disabled"
+    premat_processing_logging_capture_frequency_hz: int = 10000
+    # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls; disabled is the exact established path
@@ -595,6 +599,14 @@ class TrainingConfig:
         )
         if self.premat == "enabled" and not str(self.device).startswith("cuda"):
             raise ValueError("--premat enabled requires a CUDA device")
+        # vvv THOG validate processing capture independently of PREMAT scheduling
+        from .premat_processing import validate_processing_configuration
+        validate_processing_configuration(
+            self.premat_processing_logging,
+            self.premat_processing_logging_capture_frequency_hz,
+            self.device,
+        )
+        # ^^^ THOG
         if (
             self.premat == "enabled"
             and not self.premat_headroom_stay_below_current_peak

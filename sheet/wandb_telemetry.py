@@ -24,6 +24,7 @@ from .depth_curve_diagnostics import (
 # vvv THOG local chart WAL state closes and checkpoints with the established telemetry lifecycle
 from .local_chart_store import LocalPrematLiveWriter, close_local_chart_store, ensure_local_chart_store                                                   # <<< THOG premat Instra persists independently of scalar backend
 # ^^^ THOG
+from .premat_processing import register_processing_handoff                                             # <<< THOG parent nsys wrapper receives the concrete INSTRA run directory
 from .stage6_source import (
     evaluation_metric_payload,
     init_resilient_telemetry,
@@ -904,6 +905,19 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
             # ^^^ THOG
 
     trainer._print_progress = progress
+
+    # vvv THOG processing diagnostics need the local run directory regardless of Premat Recapitulation or scalar backend
+    if (
+        trainer.distributed.is_primary
+        and str(getattr(trainer.config, "premat_processing_logging", "disabled")) == "enabled"
+    ):
+        processing_store = ensure_local_chart_store(telemetry)
+        register_processing_handoff(
+            processing_store.path.parent,
+            run_name=telemetry.name,
+            config=telemetry.config,
+        )
+    # ^^^ THOG
 
     # vvv THOG detailed Premat Instra captures exactly the first accumulation
     # microstep's completed forward pass at each established update interval.

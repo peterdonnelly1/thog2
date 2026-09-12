@@ -247,6 +247,10 @@ class OwtRunConfig:
     # ^^^ THOG
     premat_logging: str = "disabled"
     premat_instra: str = "disabled"
+    # vvv THOG device-processing capture is execution instrumentation and remains independent of PREMAT scheduling
+    premat_processing_logging: str = "disabled"
+    premat_processing_logging_capture_frequency_hz: int = 10000
+    # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
     # vvv THOG v1.3 sampling-only chaos bump controls
@@ -341,6 +345,14 @@ class OwtRunConfig:
             raise ValueError("--premat enabled requires --model-type sheet")
         if self.premat == "enabled" and not str(self.device).startswith("cuda"):
             raise ValueError("--premat enabled requires a CUDA device")
+        # vvv THOG validate opt-in whole-GPU processing capture without requiring PREMAT itself
+        from .premat_processing import validate_processing_configuration
+        validate_processing_configuration(
+            self.premat_processing_logging,
+            self.premat_processing_logging_capture_frequency_hz,
+            self.device,
+        )
+        # ^^^ THOG
         if self.run_mode not in ("fresh", "resume"):
             raise ValueError("run_mode must be fresh or resume")
         if self.attention_backend not in ("auto", "flash2", "sdpa", "math"):
@@ -1207,6 +1219,7 @@ class OwtRunConfig:
             or self.premat_enable_shadow_mode
             or self.premat_logging != "disabled"
             or self.premat_instra != "disabled"
+            or self.premat_processing_logging != "disabled"
         ):
             headroom_code = "G" if self.premat_headroom_stay_within_global_buffer else "P"
             allocator_fragment = (
@@ -1223,6 +1236,11 @@ class OwtRunConfig:
                 "GTD_" if self.premat_enable_gpu_timing_diagnostic else ""
             )
             shadow_fragment = "SHADOW_" if self.premat_enable_shadow_mode else ""
+            processing_fragment = (
+                f"_PROC{self.premat_processing_logging_capture_frequency_hz}"
+                if self.premat_processing_logging == "enabled"
+                else ""
+            )
             premat_fragment = (
                 "PM__"
                 f"{self.premat[0].upper()}_"
@@ -1238,6 +1256,7 @@ class OwtRunConfig:
                 f"{shadow_fragment}"
                 f"L{self.premat_logging[0].upper()}_"
                 f"I{self.premat_instra[0].upper()}"
+                f"{processing_fragment}"
             )
             sections.append(premat_fragment)
         # ^^^ THOG
@@ -1429,6 +1448,8 @@ class OwtRunConfig:
             premat_enable_shadow_mode=self.premat_enable_shadow_mode,
             premat_logging=self.premat_logging,
             premat_instra=self.premat_instra,
+            premat_processing_logging=self.premat_processing_logging,
+            premat_processing_logging_capture_frequency_hz=self.premat_processing_logging_capture_frequency_hz,
             premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),
