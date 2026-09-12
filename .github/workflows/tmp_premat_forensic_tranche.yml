@@ -8,6 +8,7 @@ on:
       - .github/workflows/tmp_premat_forensic_tranche.yml
       - tmp_apply_premat_forensic_tranche.py
       - tmp_refine_premat_forensic_tranche.py
+      - tmp_fix_premat_forensic_regressions.py
 
 permissions:
   contents: write
@@ -29,6 +30,7 @@ jobs:
         run: |
           python tmp_apply_premat_forensic_tranche.py
           python tmp_refine_premat_forensic_tranche.py
+          python tmp_fix_premat_forensic_regressions.py
       - name: Verify
         run: |
           python -m compileall -q sheet tests/test_premat.py
