@@ -10,6 +10,7 @@ import pytest
 from sheet.premat_processing import (
     _nsys_profile_command,
     normalize_nsys_sqlite,
+    processing_invocation_is_non_training,
     processing_requested_from_argv,
     rewrite_processing_cli_for_core,
     validate_processing_configuration,
@@ -35,6 +36,20 @@ def test_processing_public_cli_rewrites_to_hidden_core_aliases() -> None:
         "--processing_logging_capture_frequency_hz_internal=12345",
         "--model-type", "sheet",
     ]
+
+
+def test_processing_metadata_probe_does_not_require_nsys() -> None:
+    assert processing_invocation_is_non_training([
+        "--premat_processing_logging", "enabled",
+        "--print-resolved-json",
+    ])
+    assert processing_invocation_is_non_training(["--dry-run"])
+    assert processing_invocation_is_non_training(["--print-artifact-name=true"])
+    assert processing_invocation_is_non_training(["--help"])
+    assert not processing_invocation_is_non_training([
+        "--premat_processing_logging", "enabled",
+        "--model-type", "sheet",
+    ])
 
 
 def test_nsys_profile_command_preserves_child_environment_and_waits(tmp_path: Path) -> None:

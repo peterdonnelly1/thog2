@@ -111,6 +111,28 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
     return rewritten
 
 
+# vvv THOG wrapper metadata/help probes must never start Nsight; only the actual training invocation is profiled
+_PROCESSING_NON_TRAINING_FLAGS = frozenset({
+    "-h",
+    "--help",
+    "--dry-run",
+    "--explain-geometry",
+    "--print-artifact-name",
+    "--print-geometry-registry",
+    "--print-resolved-json",
+})
+
+
+def processing_invocation_is_non_training(arguments: Sequence[str]) -> bool:
+    for raw_argument in arguments:
+        argument = str(raw_argument)
+        option_name = argument.split("=", 1)[0]
+        if option_name in _PROCESSING_NON_TRAINING_FLAGS:
+            return True
+    return False
+# ^^^ THOG
+
+
 def _find_nsys() -> Optional[str]:
     resolved = shutil.which("nsys")
     if resolved:
@@ -769,9 +791,11 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         return None
     requested, frequency = processing_requested_from_argv(arguments)
     rewritten_arguments = rewrite_processing_cli_for_core(arguments)
-    if not requested:
+    # vvv THOG train_OWT_core.sh first calls --print-resolved-json with the full processing CLI; keep that metadata probe outside Nsight
+    if not requested or processing_invocation_is_non_training(arguments):
         sys.argv[:] = [sys.argv[0], *rewritten_arguments]
         return None
+    # ^^^ THOG
     nsys = _find_nsys()
     if nsys is None:
         raise RuntimeError(
@@ -857,6 +881,7 @@ __all__ = [
     "processing_operation_pop",
     "processing_operation_push",
     "processing_operation_range",
+    "processing_invocation_is_non_training",
     "processing_requested_from_argv",
     "rewrite_processing_cli_for_core",
     "register_processing_handoff",
