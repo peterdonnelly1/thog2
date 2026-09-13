@@ -138,6 +138,7 @@
 }
 .premat-neutral { background: #edf1f4; color: #6b7480; font-weight: 500; }
 .premat-pending { background: #f7f9fa; color: #9ba3ad; font-weight: 500; }
+.premat-stage.premat-not-targeted { background: #edf1f4; color: #7b8490 !important; text-shadow: none; opacity: .55; } /* <<< THOG selector-excluded matrices are visible context, not PREMAT misses */
 .premat-state-materialising { background: repeating-linear-gradient(135deg, #3685bd 0 7px, #e6f2fa 7px 14px); color: #102c40; }
 .premat-state-available { background: #58bd7c; color: #102b19; }
 .premat-state-consuming-full { background: repeating-linear-gradient(135deg, #3fa66b 0 7px, #f7fffa 7px 14px); color: #143320; }

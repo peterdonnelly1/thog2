@@ -90,6 +90,14 @@ function premat_families(attention_mode) {
     : ["QKV", "O", "UP", "DOWN"];
 }
 
+// vvv THOG fixed matrix selector is a PREMAT eligibility filter; non-target matrices must not be rendered as PREMAT misses
+function premat_target_family(snapshot, attention_mode) {
+  if (attention_mode !== "fused") return null;
+  const mapping = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"};
+  return mapping[Number(snapshot?.target_matrix)] || null;
+}
+// ^^^ THOG
+
 function premat_family_label(family, attention_mode) {
   const labels = attention_mode === "unfused"
     ? {QK: "ATTN QK", V: "ATTN V", O: "ATTN O", UP: "MLP UP", DOWN: "MLP DN"}
@@ -251,10 +259,17 @@ function premat_build_model(snapshot) {
   const attention_mode = snapshot.attention_mode === "unfused" ? "unfused" : "fused";
   const layers = premat_layer_indices(snapshot);
   const families = premat_families(attention_mode);
+  const target_family = premat_target_family(snapshot, attention_mode);                                                                              // <<< THOG resolve optional matrix selector once per captured pass
   const records = new Map();
   for (const layer_index of layers) {
     for (const family of families) {
       const record = premat_new_record(layer_index, family, attention_mode, snapshot);
+      record.targeted = target_family === null || family === target_family;                                                                          // <<< THOG distinguish PREMAT eligibility from ordinary Main materialisation
+      if (!record.targeted) {
+        record.path = "not-targeted";
+        record.outcome = "NOT TARGETED";
+        record.trace = ["NOT TARGETED"];
+      }
       records.set(record.key, record);
     }
   }
@@ -283,6 +298,7 @@ function premat_build_model(snapshot) {
     const key = premat_candidate_key(event.layer_index, event.family);
     const record = records.get(key);
     if (!record) continue;
+    if (record.targeted === false) continue;                                                                                                          // <<< THOG ordinary Main events for selector-excluded matrices are not PREMAT failures
     premat_update_from_event(record, event);
     const event_name = String(event.event || "");
     const owner = String(event.owner || "none");
@@ -850,8 +866,10 @@ function premat_render_layout(model) {
       const attributes = family
         ? ` data-premat-key="${premat_escape(key)}" data-premat-family="${premat_escape(family)}"`
         : "";
-      const state_class = family ? "premat-pending" : "premat-neutral";
-      return `<span class="premat-stage ${state_class}"${attributes} title="${premat_escape(label)}">${premat_escape(label)}</span>`;
+      const record = family ? model.records.get(premat_candidate_key(layer_index, family)) : null;
+      const state_class = family ? (record?.targeted === false ? "premat-neutral premat-not-targeted" : "premat-pending") : "premat-neutral";
+      const title = record?.targeted === false ? `${label} · NOT TARGETED` : label;                                                                    // <<< THOG selector-excluded matrices remain visible but unmistakably neutral
+      return `<span class="premat-stage ${state_class}"${attributes} title="${premat_escape(title)}">${premat_escape(label)}</span>`;
     }).join("");
     return `<div class="premat-layer-row" data-premat-layer="${layer_index}"><div class="premat-layer-number">${layer_index + 1}</div><div class="premat-stage-row" style="--premat-stage-count:${stages.length}">${stage_markup}</div></div>`;
   }).join("");
@@ -887,6 +905,7 @@ function premat_render_summary(snapshot, model) {
   const summary_items = [
     ["mode", model.attention_mode],
     ["target", Number(snapshot.target_layer ?? snapshot.target_offset ?? 1) === 10 ? "l+1 → l+0" : `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],
+    ["matrix target", premat_target_family(snapshot, model.attention_mode) || "all"],                                                                  // <<< THOG make fixed-family isolation explicit in recap summary
     ["matrix order", String(snapshot.matrix_order ?? snapshot.weight_matrix_target_order ?? snapshot.target_order ?? "r_to_l")],
     ["priority", snapshot.cuda_stream_priority || "normal"],
     ["layer delay", `${Number(snapshot.diagnostic_layer_delay_ms || 0)} ms`],

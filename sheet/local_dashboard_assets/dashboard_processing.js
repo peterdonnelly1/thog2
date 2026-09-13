@@ -210,23 +210,39 @@ async function processing_render_contention(payload) {
   }, plot_config);
 }
 
-function processing_mean(rows, key) {
-  const values = rows.filter(row => row[key] !== "" && row[key] !== null && row[key] !== undefined).map(row => Number(row[key])).filter(Number.isFinite);
-  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-}
-
+// vvv THOG fixed four-column PREMAT matrix scoreboard; non-targeted families stay blank rather than looking like zero-valued experiments
 function processing_format(value, digits = 2, suffix = "") {
   return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "—";
 }
 
 function processing_render_summary(payload) {
-  const body = by_id("processing_summary_body");
-  const families = [...new Set((payload.summary || []).map(row => String(row.family || "?")))];
-  body.innerHTML = families.map(family => {
-    const rows = payload.summary.filter(row => String(row.family || "?") === family);
-    return `<tr><td><strong>${processing_escape(family)}</strong></td><td>${rows.length}</td><td>${processing_format(processing_mean(rows, "duration_ms"), 4, " ms")}</td><td>${processing_format(processing_mean(rows, "premat_overlap_pct"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "sm_active_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "sm_issue_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "tensor_active_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "active_sm_unused_warp_slots_pct_mean"), 1, "%")}</td></tr>`;
-  }).join("") || '<tr><td colspan="8">No labelled Main consuming operations in this capture.</td></tr>';
+  const body = by_id("processing_matrix_summary_body");
+  if (!body) return;
+  const families = ["QKV", "O", "UP", "DOWN"];
+  const summary = payload.matrix_summary || {};
+  const value_for = (family, key, formatter) => {
+    const row = summary[family];
+    if (!row) return "—";
+    return formatter(row[key], row);
+  };
+  const signed_ms = value => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    return `${number >= 0 ? "+" : ""}${number.toFixed(3)} ms`;
+  };
+  const rows = [
+    ["PREMAT materialisations / Main consumes", "premat_materialisations", (value, row) => `${Number(value) || 0}/${Number(row.main_consume_operations) || 0}`],
+    ["PREMAT GPU work", "premat_gpu_ms_total", value => processing_format(Number(value), 3, " ms")],
+    ["Mean reconstruction", "mean_reconstruction_ms", value => processing_format(Number(value), 3, " ms")],
+    ["Overlap with Main consume kernels", "main_consume_overlap_ms", value => processing_format(Number(value), 3, " ms")],
+    ["Overlap with any Main kernel", "any_main_overlap_ms", value => processing_format(Number(value), 3, " ms")],
+    ["PREMAT work concurrent with Main", "premat_concurrent_with_main_pct", value => processing_format(Number(value), 1, "%")],
+    ["Main busy time concurrent with PREMAT", "main_busy_concurrent_with_premat_pct", value => processing_format(Number(value), 2, "%")],
+    ["Mean ready-before-consumption lead", "mean_ready_lead_ms", value => signed_ms(value)],
+  ];
+  body.innerHTML = rows.map(([label, key, formatter]) => (`<tr><th>${processing_escape(label)}</th>${families.map(family => `<td>${processing_escape(value_for(family, key, formatter))}</td>`).join("")}</tr>`)).join("");
 }
+// ^^^ THOG
 
 // vvv THOG tok/s is live; Nsight cards are not instantiated until normalized trace data exists after the profiled child completes
 async function processing_render(payload, trace_available) {

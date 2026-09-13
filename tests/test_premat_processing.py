@@ -322,3 +322,46 @@ def test_processing_overlap_excludes_internal_main_kernel_gaps(tmp_path: Path) -
     assert summary["premat_overlap_ms"] == pytest.approx(0.0)
     assert summary["premat_overlap_pct"] == pytest.approx(0.0)
 # ^^^ THOG
+
+
+# vvv THOG regress parent post-processing handoff, four-family scoreboard, and selector-aware Premat rendering
+def test_processing_parent_retains_normalizer_payload_for_artifact_copy() -> None:
+    source = Path("sheet/premat_processing.py").read_text(encoding="utf-8")
+    assert "processing_data = normalize_nsys_sqlite(" in source
+    assert 'processing_files = processing_data["metadata"]["files"]' in source
+
+
+def test_processing_matrix_summary_reserves_all_four_families(tmp_path: Path) -> None:
+    database = tmp_path / "matrix_summary.sqlite"
+    output = tmp_path / "matrix_summary"
+    _synthetic_nsys_database(database)
+    payload = normalize_nsys_sqlite(database, output, capture_frequency_hz=10000, handoff={"run_name": "fixture"})
+    assert list(payload["matrix_summary"]) == ["QKV", "O", "UP", "DOWN"]
+    assert payload["matrix_summary"]["QKV"] is None
+    assert payload["matrix_summary"]["O"] is None
+    assert payload["matrix_summary"]["UP"] is None
+    down = payload["matrix_summary"]["DOWN"]
+    assert down is not None
+    assert down["premat_materialisations"] == 1
+    assert down["premat_gpu_ms_total"] == pytest.approx(0.0008)
+    assert down["main_consume_overlap_ms"] == pytest.approx(0.0008)
+
+
+def test_processing_dashboard_has_four_matrix_scoreboard() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert 'id="processing_matrix_summary_body"' in html
+    assert '<th>QKV</th><th>O</th><th>UP</th><th>DOWN</th>' in html
+    assert '"PREMAT GPU work"' in js
+    assert '"Mean ready-before-consumption lead"' in js
+
+
+def test_premat_matrix_selector_renders_non_targets_neutrally() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
+    css = Path("sheet/local_dashboard_assets/dashboard_premat.css").read_text(encoding="utf-8")
+    assert "function premat_target_family" in js
+    assert 'record.outcome = "NOT TARGETED"' in js
+    assert "if (record.targeted === false) continue;" in js
+    assert 'premat-not-targeted' in js
+    assert '.premat-stage.premat-not-targeted' in css
+# ^^^ THOG

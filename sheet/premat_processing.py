@@ -660,6 +660,89 @@ def _kernel_union_overlap(
 # ^^^ THOG
 
 
+# vvv THOG four-family Processing scoreboard; absent PREMAT families remain explicitly unpopulated for matrix-isolation experiments
+_PROCESSING_MATRIX_FAMILIES = ("QKV", "O", "UP", "DOWN")
+
+
+def _processing_matrix_summary(interval_rows: Sequence[Mapping[str, Any]]) -> Dict[str, Optional[Dict[str, float | int]]]:
+    main_intervals = [
+        (float(row["start_us"]), float(row["end_us"]))
+        for row in interval_rows
+        if row.get("owner") == "MAIN"
+    ]
+    main_consume_intervals = [
+        (float(row["start_us"]), float(row["end_us"]))
+        for row in interval_rows
+        if row.get("owner") == "MAIN" and row.get("operation") == "consume"
+    ]
+    main_busy_us = _interval_duration(main_intervals)
+    result: Dict[str, Optional[Dict[str, float | int]]] = {family: None for family in _PROCESSING_MATRIX_FAMILIES}
+    for family in _PROCESSING_MATRIX_FAMILIES:
+        premat_rows = [
+            row for row in interval_rows
+            if row.get("owner") == "PREMAT"
+            and row.get("operation") == "materialize"
+            and row.get("family") == family
+        ]
+        if not premat_rows:
+            continue
+        premat_intervals = [
+            (float(row["start_us"]), float(row["end_us"]))
+            for row in premat_rows
+        ]
+        premat_busy_us = _interval_duration(premat_intervals)
+        by_op: Dict[int, list[tuple[float, float]]] = {}
+        for row in premat_rows:
+            raw_op_id = row.get("op_id")
+            if raw_op_id in (None, ""):
+                continue
+            by_op.setdefault(int(raw_op_id), []).append(
+                (float(row["start_us"]), float(row["end_us"]))
+            )
+        op_durations_us = [_interval_duration(rows) for rows in by_op.values()]
+        family_consumes = [
+            row for row in interval_rows
+            if row.get("owner") == "MAIN"
+            and row.get("operation") == "consume"
+            and row.get("family") == family
+        ]
+        consume_op_ids = {
+            int(row["op_id"])
+            for row in family_consumes
+            if row.get("op_id") not in (None, "")
+        }
+        ready_leads_us: list[float] = []
+        premat_layers = {
+            int(row["layer"])
+            for row in premat_rows
+            if row.get("layer") not in (None, "")
+        }
+        for layer in sorted(premat_layers):
+            premat_layer = [row for row in premat_rows if row.get("layer") not in (None, "") and int(row["layer"]) == layer]
+            consume_layer = [row for row in family_consumes if row.get("layer") not in (None, "") and int(row["layer"]) == layer]
+            if not premat_layer or not consume_layer:
+                continue
+            ready_leads_us.append(
+                min(float(row["start_us"]) for row in consume_layer)
+                - max(float(row["end_us"]) for row in premat_layer)
+            )
+        consume_overlap_us = _kernel_union_overlap(premat_intervals, main_consume_intervals)
+        any_main_overlap_us = _kernel_union_overlap(premat_intervals, main_intervals)
+        result[family] = {
+            "premat_materialisations": len(by_op),
+            "main_consume_operations": len(consume_op_ids),
+            "premat_gpu_ms_total": premat_busy_us / 1000.0,
+            "mean_reconstruction_ms": (sum(op_durations_us) / len(op_durations_us) / 1000.0) if op_durations_us else 0.0,
+            "main_consume_overlap_ms": consume_overlap_us / 1000.0,
+            "any_main_overlap_ms": any_main_overlap_us / 1000.0,
+            "premat_concurrent_with_main_pct": (100.0 * any_main_overlap_us / premat_busy_us) if premat_busy_us > 0.0 else 0.0,
+            "main_busy_concurrent_with_premat_pct": (100.0 * any_main_overlap_us / main_busy_us) if main_busy_us > 0.0 else 0.0,
+            "mean_ready_lead_ms": (sum(ready_leads_us) / len(ready_leads_us) / 1000.0) if ready_leads_us else 0.0,
+        }
+    return result
+# ^^^ THOG
+
+
 # vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders
 def _mean_metric(samples: Sequence[Mapping[str, Any]], key: str, start_us: float, end_us: float) -> Optional[float]:
     values: list[float] = []
@@ -852,6 +935,7 @@ def normalize_nsys_sqlite(
             ),
         })
 
+    matrix_summary = _processing_matrix_summary(interval_rows)                                                                                      # <<< THOG matrix-isolation scoreboard derived from actual kernel intervals
     sample_fields = (
         "time_us", "sm_active_pct", "sm_issue_pct", "tensor_active_pct",
         "active_sm_unused_warp_slots_pct",
@@ -902,6 +986,7 @@ def normalize_nsys_sqlite(
         "samples": sample_rows,
         "intervals": interval_rows,
         "summary": summary_rows,
+        "matrix_summary": matrix_summary,                                                                                                                   # <<< THOG stable QKV/O/UP/DOWN scoreboard for INSTRA
     }
     (output_directory / "processing_data.json").write_text(
         json.dumps(processing_data, separators=(",", ":"), allow_nan=False)
@@ -990,7 +1075,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         if capture_metadata_path.exists()
         else {}
     )
-    normalize_nsys_sqlite(
+    processing_data = normalize_nsys_sqlite(                                                                                                         # <<< THOG retain normalized payload for artifact-prefixed raw-trace copy
         sqlite_path,
         processing_directory,
         capture_frequency_hz=frequency,
