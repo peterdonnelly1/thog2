@@ -51,6 +51,18 @@ jobs:
           PY
       - name: Apply target-matrix implementation
         run: python tmp_add_premat_target_matrix.py
+      - name: Correct generated propagation regression
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tests/test_premat.py")
+          text = path.read_text(encoding="utf-8")
+          old = '    assert training_config.model_arguments["premat_target_matrix"] == 2\n'
+          new = '    assert training_config.model_arguments()["premat_target_matrix"] == 2\n'
+          if text.count(old) != 1:
+              raise RuntimeError(f"expected one generated model_arguments assertion, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Verify
         run: |
           python -m compileall -q run_thog2_owt_core.py sheet tests/test_premat.py
