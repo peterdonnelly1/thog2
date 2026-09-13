@@ -365,3 +365,11 @@ def test_premat_matrix_selector_renders_non_targets_neutrally() -> None:
     assert 'premat-not-targeted' in js
     assert '.premat-stage.premat-not-targeted' in css
 # ^^^ THOG
+
+
+# vvv THOG existing Processing captures must populate the new matrix scoreboard without regeneration
+def test_processing_matrix_summary_has_legacy_interval_fallback() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert "function processing_matrix_summary_from_intervals" in js
+    assert "payload.matrix_summary || processing_matrix_summary_from_intervals(payload.intervals || [])" in js
+# ^^^ THOG

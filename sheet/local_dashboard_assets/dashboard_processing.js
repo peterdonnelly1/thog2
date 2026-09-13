@@ -215,11 +215,95 @@ function processing_format(value, digits = 2, suffix = "") {
   return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "—";
 }
 
+// vvv THOG legacy captures already contain sufficient kernel intervals; derive the new scoreboard client-side instead of forcing a rerun
+function processing_merge_intervals(intervals) {
+  const sorted = [...intervals]
+    .map(([start, end]) => [Number(start), Number(end)])
+    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+    .sort((left, right) => left[0] - right[0]);
+  const merged = [];
+  for (const [start, end] of sorted) {
+    const tail = merged[merged.length - 1];
+    if (!tail || start > tail[1]) merged.push([start, end]);
+    else tail[1] = Math.max(tail[1], end);
+  }
+  return merged;
+}
+
+function processing_interval_duration_us(intervals) {
+  return processing_merge_intervals(intervals).reduce((sum, [start, end]) => sum + end - start, 0);
+}
+
+function processing_interval_overlap_us(left_intervals, right_intervals) {
+  const left = processing_merge_intervals(left_intervals);
+  const right = processing_merge_intervals(right_intervals);
+  let i = 0;
+  let j = 0;
+  let total = 0;
+  while (i < left.length && j < right.length) {
+    total += Math.max(0, Math.min(left[i][1], right[j][1]) - Math.max(left[i][0], right[j][0]));
+    if (left[i][1] < right[j][1]) i += 1;
+    else j += 1;
+  }
+  return total;
+}
+
+function processing_matrix_summary_from_intervals(intervals) {
+  const families = ["QKV", "O", "UP", "DOWN"];
+  const rows = intervals || [];
+  const main_rows = rows.filter(row => row.owner === "MAIN");
+  const main_consume_rows = main_rows.filter(row => row.operation === "consume");
+  const as_intervals = selected => selected.map(row => [Number(row.start_us), Number(row.end_us)]);
+  const main_intervals = as_intervals(main_rows);
+  const main_consume_intervals = as_intervals(main_consume_rows);
+  const main_busy_us = processing_interval_duration_us(main_intervals);
+  const result = Object.fromEntries(families.map(family => [family, null]));
+  for (const family of families) {
+    const premat_rows = rows.filter(row => row.owner === "PREMAT" && row.operation === "materialize" && row.family === family);
+    if (!premat_rows.length) continue;
+    const premat_intervals = as_intervals(premat_rows);
+    const premat_busy_us = processing_interval_duration_us(premat_intervals);
+    const by_op = new Map();
+    for (const row of premat_rows) {
+      if (row.op_id === "" || row.op_id === null || row.op_id === undefined) continue;
+      const key = Number(row.op_id);
+      if (!by_op.has(key)) by_op.set(key, []);
+      by_op.get(key).push([Number(row.start_us), Number(row.end_us)]);
+    }
+    const op_durations = [...by_op.values()].map(processing_interval_duration_us);
+    const family_consumes = main_consume_rows.filter(row => row.family === family);
+    const consume_ops = new Set(family_consumes.filter(row => row.op_id !== "" && row.op_id !== null && row.op_id !== undefined).map(row => Number(row.op_id)));
+    const layers = [...new Set(premat_rows.filter(row => row.layer !== "" && row.layer !== null && row.layer !== undefined).map(row => Number(row.layer)))];
+    const ready_leads_us = [];
+    for (const layer of layers) {
+      const premat_layer = premat_rows.filter(row => Number(row.layer) === layer);
+      const consume_layer = family_consumes.filter(row => Number(row.layer) === layer);
+      if (!consume_layer.length) continue;
+      ready_leads_us.push(Math.min(...consume_layer.map(row => Number(row.start_us))) - Math.max(...premat_layer.map(row => Number(row.end_us))));
+    }
+    const consume_overlap_us = processing_interval_overlap_us(premat_intervals, main_consume_intervals);
+    const any_main_overlap_us = processing_interval_overlap_us(premat_intervals, main_intervals);
+    result[family] = {
+      premat_materialisations: by_op.size,
+      main_consume_operations: consume_ops.size,
+      premat_gpu_ms_total: premat_busy_us / 1000,
+      mean_reconstruction_ms: op_durations.length ? op_durations.reduce((sum, value) => sum + value, 0) / op_durations.length / 1000 : 0,
+      main_consume_overlap_ms: consume_overlap_us / 1000,
+      any_main_overlap_ms: any_main_overlap_us / 1000,
+      premat_concurrent_with_main_pct: premat_busy_us > 0 ? 100 * any_main_overlap_us / premat_busy_us : 0,
+      main_busy_concurrent_with_premat_pct: main_busy_us > 0 ? 100 * any_main_overlap_us / main_busy_us : 0,
+      mean_ready_lead_ms: ready_leads_us.length ? ready_leads_us.reduce((sum, value) => sum + value, 0) / ready_leads_us.length / 1000 : 0,
+    };
+  }
+  return result;
+}
+// ^^^ THOG
+
 function processing_render_summary(payload) {
   const body = by_id("processing_matrix_summary_body");
   if (!body) return;
   const families = ["QKV", "O", "UP", "DOWN"];
-  const summary = payload.matrix_summary || {};
+  const summary = payload.matrix_summary || processing_matrix_summary_from_intervals(payload.intervals || []);                                           // <<< THOG backfill scoreboard for already-captured Processing bundles
   const value_for = (family, key, formatter) => {
     const row = summary[family];
     if (!row) return "—";
