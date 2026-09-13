@@ -30,8 +30,10 @@ function processing_sync_visibility() {
   group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
   const timeline = by_id("processing_timeline_card");
   const contention = by_id("processing_contention_card");
+  const matrix_summary = by_id("processing_matrix_summary_card");                                                                                      // <<< THOG summary is a separate trace-backed Processing card
   if (timeline) timeline.hidden = !processing_view.trace_available;
   if (contention) contention.hidden = !processing_view.trace_available;
+  if (matrix_summary) matrix_summary.hidden = !processing_view.trace_available;
 }
 
 window.processing_apply_detail_tab = charts_selected => {
@@ -213,24 +215,32 @@ async function processing_render_throughput(payload) {
 // ^^^ THOG
 
 async function processing_render_contention(payload) {
-  const families = [...new Set((payload.summary || []).map(row => String(row.family || "?")))];
-  const traces = families.map(family => {
-    const rows = payload.summary.filter(row => String(row.family || "?") === family);
-    return {
-      type: "scatter",
-      mode: "markers",
-      name: family,
-      x: rows.map(row => Number(row.premat_overlap_pct)),
-      y: rows.map(row => Number(row.duration_ms)),
-      text: rows.map(row => `L${Number(row.layer) + 1}`),
-      hovertemplate: `${family} %{text}<br>PREMAT overlap of Main GPU kernels %{x:.1f}%<br>Main GPU kernel duration %{y:.4f} ms<extra></extra>`,
-    };
-  });
+  const family_order = ["QKV", "O", "UP", "DOWN"];
+  const summary = processing_resolved_matrix_summary(payload);                                                                                             // <<< THOG drive overlap graphic from true kernel-union summary rather than semantic-span scatter points
+  const families = family_order.filter(family => summary[family]);
+  const premat_pct = families.map(family => Number(summary[family].premat_concurrent_with_main_pct));
+  const main_pct = families.map(family => Number(summary[family].main_busy_concurrent_with_premat_pct));
+  const maximum = Math.max(0, ...premat_pct.filter(Number.isFinite), ...main_pct.filter(Number.isFinite));
+  const axis_maximum = Math.min(100, Math.max(5, maximum * 1.18));                                                                                         // <<< THOG keep isolated-matrix low-overlap runs readable instead of wasting a fixed 0..100 axis
+  const traces = families.length ? [
+    {
+      type: "bar", orientation: "h", name: "PREMAT work concurrent with Main",
+      y: families, x: premat_pct,
+      hovertemplate: "%{y}<br>%{x:.2f}% of PREMAT GPU work coincides with any Main kernel<extra></extra>",
+    },
+    {
+      type: "bar", orientation: "h", name: "Main busy time concurrent with PREMAT",
+      y: families, x: main_pct,
+      hovertemplate: "%{y}<br>%{x:.2f}% of Main GPU busy time coincides with PREMAT<extra></extra>",
+    },
+  ] : [];
   await processing_plot("processing_contention_plot", traces, {
-    margin: {l: 70, r: 24, t: 12, b: 58},
-    xaxis: {title: "Main GPU kernel time overlapped by PREMAT (%)", range: [0, 100]},
-    yaxis: {title: "Main GPU kernel duration (ms)"},
-    legend: {orientation: "h", y: 1.08},
+    margin: {l: 70, r: 24, t: 18, b: 58},
+    barmode: "group",
+    xaxis: {title: "temporal overlap (%)", range: [0, axis_maximum], rangemode: "tozero"},
+    yaxis: {categoryorder: "array", categoryarray: [...family_order].reverse()},
+    legend: {orientation: "h", y: 1.12},
+    annotations: families.length ? [] : [{text: "No PREMAT materialisation intervals in this capture", showarrow: false, xref: "paper", yref: "paper", x: 0.5, y: 0.5}],
   }, plot_config);
 }
 
@@ -323,11 +333,15 @@ function processing_matrix_summary_from_intervals(intervals) {
 }
 // ^^^ THOG
 
+function processing_resolved_matrix_summary(payload) {
+  return payload.matrix_summary || processing_matrix_summary_from_intervals(payload.intervals || []);                                                   // <<< THOG one canonical current-or-legacy summary feeds both the overlap graphic and table
+}
+
 function processing_render_summary(payload) {
   const body = by_id("processing_matrix_summary_body");
   if (!body) return;
   const families = ["QKV", "O", "UP", "DOWN"];
-  const summary = payload.matrix_summary || processing_matrix_summary_from_intervals(payload.intervals || []);                                           // <<< THOG backfill scoreboard for already-captured Processing bundles
+  const summary = processing_resolved_matrix_summary(payload);                                                                                          // <<< THOG backfill scoreboard for already-captured Processing bundles
   const value_for = (family, key, formatter) => {
     const row = summary[family];
     if (!row) return "—";

@@ -178,6 +178,7 @@
               <div class="premat-key-flow"><strong>FULL SUCCESS</strong><span class="premat-key-flow-step"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>AVAILABLE</span><span class="premat-key-swatch premat-state-available"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>CONSUMING - NO WAIT</span><span class="premat-key-swatch premat-state-consuming-full"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>FULL HIT</span><span class="premat-key-swatch premat-state-consumed-full"></span></span></div>
               <div class="premat-key-flow"><strong>PART SUCCESS</strong><span class="premat-key-flow-step"><span>PRE-MATERIALISING</span><span class="premat-key-swatch premat-state-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>WAITING FOR PRE-MATERIALISATION</span><span class="premat-key-swatch premat-state-waiting"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>CONSUMING AFTER WAIT</span><span class="premat-key-swatch premat-state-consuming-waited"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>PARTIAL HIT</span><span class="premat-key-swatch premat-state-consumed-waited"></span></span></div>
               <div class="premat-key-flow"><strong>MISS</strong><span class="premat-key-flow-step"><span>PREMAT NOT STARTED - MAIN STREAM MATERIALISING</span><span class="premat-key-swatch premat-state-main-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>MAIN STREAM CONSUMING</span><span class="premat-key-swatch premat-state-main-consuming"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>COMPLETE MISS</span><span class="premat-key-swatch premat-state-consumed-main"></span></span></div>
+              <div class="premat-key-flow"><strong>NOT TARGETED</strong><span class="premat-key-flow-step"><span>MAIN STREAM MATERIALISING</span><span class="premat-key-swatch premat-state-main-materialising"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>MAIN STREAM CONSUMING</span><span class="premat-key-swatch premat-state-main-consuming"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>ORDINARY MAIN PATH</span><span class="premat-key-swatch premat-state-consumed-main"></span></span><span class="premat-key-arrow">→</span><span class="premat-key-flow-step"><span>excluded from F/P/M totals</span><span class="premat-key-swatch premat-neutral"></span></span></div>
             </div>
           </div>
           <section class="premat-docked-panel premat-inspector" id="premat_inspector" aria-label="Premat data inspector" hidden>
@@ -213,13 +214,16 @@
         <!-- vvv THOG whole-GPU processing diagnostics aligned to semantic MAIN/PREMAT kernel intervals -->
         <section class="chart-group processing-group" id="processing_chart_group" data-chart-group="processing" hidden>
           <header class="chart-group-header processing-header">
-            <div class="processing-header-copy"><strong>Processing - Step <span id="processing_step">—</span></strong><span class="processing-status" id="processing_status">Waiting for capture</span></div>
+            <button class="chart-group-toggle" id="processing_group_toggle" type="button" aria-expanded="true" aria-controls="processing_grid">
+              <span class="group-caret" aria-hidden="true">⌄</span><strong>processing</strong><span class="group-count">4</span>
+            </button>
+            <div class="processing-header-copy"><span>Step <strong id="processing_step">—</strong></span><span class="processing-status" id="processing_status">Waiting for capture</span></div>
             <div class="processing-downloads">
               <a id="processing_download_bundle" hidden>Bundle ZIP</a><a id="processing_download_samples" hidden>Samples CSV</a><a id="processing_download_intervals" hidden>Intervals CSV</a><a id="processing_download_summary" hidden>Summary CSV</a><a id="processing_download_metadata" hidden>Metadata JSON</a><a id="processing_download_raw" hidden>Raw nsys</a>
             </div>
           </header>
           <!-- vvv THOG Processing plots use the established INSTRA chart-card contract so resize/maximize/reset/persistence work identically -->
-          <div class="processing-grid chart-grid">
+          <div class="processing-grid chart-grid" id="processing_grid">
             <article class="processing-card chart-card processing-timeline-card" id="processing_timeline_card" data-chart="processing_timeline" hidden>
               <header class="chart-card-header"><div class="chart-heading-copy"><h2>GPU processing timeline</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_timeline" type="button" aria-label="Maximize GPU processing timeline" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
               <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot" id="processing_timeline_plot"></div></div>
@@ -228,11 +232,8 @@
               <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
             </article>
             <article class="processing-card chart-card processing-contention-card" id="processing_contention_card" data-chart="processing_contention" hidden>
-              <header class="chart-card-header"><div class="chart-heading-copy"><h2>Main duration vs PREMAT overlap</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_contention" type="button" aria-label="Maximize Main duration vs PREMAT overlap" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+              <header class="chart-card-header"><div class="chart-heading-copy"><h2>PREMAT/Main temporal overlap</h2><p>Temporal coincidence only; not proof of resource contention.</p></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_contention" type="button" aria-label="Maximize PREMAT/Main temporal overlap" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
               <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot processing-contention-plot" id="processing_contention_plot"></div></div>
-              <!-- vvv THOG fixed four-family Processing scoreboard supports matrix-isolation comparisons as QKV/O/UP/DOWN diagnostics are accumulated -->
-              <div class="processing-summary-wrap"><table class="processing-summary processing-matrix-summary"><thead><tr><th>Metric</th><th>QKV</th><th>O</th><th>UP</th><th>DOWN</th></tr></thead><tbody id="processing_matrix_summary_body"></tbody></table></div>
-              <!-- ^^^ THOG -->
               <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
               <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
               <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
@@ -241,6 +242,15 @@
             <article class="processing-card chart-card processing-throughput-card" data-chart="processing_throughput">
               <header class="chart-card-header"><div class="chart-heading-copy"><h2>Training throughput (tok/s)</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_throughput" type="button" aria-label="Maximize training throughput" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
               <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot" id="processing_throughput_plot"></div></div>
+              <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+              <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+              <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
+            </article>
+            <!-- ^^^ THOG -->
+            <!-- vvv THOG visible four-family Processing scoreboard is a first-class INSTRA card rather than being hidden under an absolutely positioned Plotly shell -->
+            <article class="processing-card chart-card processing-summary-card" id="processing_matrix_summary_card" data-chart="processing_matrix_summary" hidden>
+              <header class="chart-card-header"><div class="chart-heading-copy"><h2>Matrix summary</h2><p>QKV / O / UP / DOWN; untargeted families remain blank.</p></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_matrix_summary" type="button" aria-label="Maximize matrix summary" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+              <div class="processing-summary-wrap"><table class="processing-summary processing-matrix-summary"><thead><tr><th>Metric</th><th>QKV</th><th>O</th><th>UP</th><th>DOWN</th></tr></thead><tbody id="processing_matrix_summary_body"></tbody></table></div>
               <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
               <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
               <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>

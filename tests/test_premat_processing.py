@@ -356,12 +356,13 @@ def test_processing_dashboard_has_four_matrix_scoreboard() -> None:
     assert '"Mean ready-before-consumption lead"' in js
 
 
-def test_premat_matrix_selector_renders_non_targets_neutrally() -> None:
+def test_premat_matrix_selector_renders_non_targets_as_main_without_counting_misses() -> None:
     js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
     css = Path("sheet/local_dashboard_assets/dashboard_premat.css").read_text(encoding="utf-8")
     assert "function premat_target_family" in js
-    assert 'record.outcome = "NOT TARGETED"' in js
-    assert "if (record.targeted === false) continue;" in js
+    assert 'record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED"' in js
+    assert 'record.path = targeted ? "main" : "not-targeted-main"' in js
+    assert "if (record.targeted === false) continue;" not in js
     assert 'premat-not-targeted' in js
     assert '.premat-stage.premat-not-targeted' in css
 # ^^^ THOG
@@ -383,4 +384,35 @@ def test_processing_charts_observe_card_geometry_for_plotly_resize() -> None:
     assert "observer.observe(card)" in js
     assert "Plotly.Plots.resize(mount)" in js
     assert "processing_install_resize_observers();" in js
+# ^^^ THOG
+
+
+# vvv THOG Processing group/navigation and selector-aware presentation regressions
+def test_processing_group_is_collapsible_and_summary_is_visible_card() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
+    assert 'id="processing_group_toggle"' in html
+    assert 'aria-controls="processing_grid"' in html
+    assert 'id="processing_grid"' in html
+    assert 'id="processing_matrix_summary_card"' in html
+    assert html.index('id="processing_contention_plot"') < html.index('id="processing_matrix_summary_card"')
+    assert ".processing-group.collapsed" in css
+    assert ".processing-summary-card" in css
+
+
+def test_processing_overlap_graph_uses_direct_two_denominator_profile() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert 'name: "PREMAT work concurrent with Main"' in js
+    assert 'name: "Main busy time concurrent with PREMAT"' in js
+    assert 'xaxis: {title: "temporal overlap (%)"' in js
+    assert 'type: "scatter"' not in js[js.index("async function processing_render_contention"):js.index("function processing_format")]
+
+
+def test_premat_selector_exclusions_keep_main_activity_without_becoming_misses() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
+    assert '"not-targeted-main"' in js
+    assert '"MAIN STREAM MATERIALISING · NOT TARGETED"' in js
+    assert '"MAIN STREAM CONSUMING · NOT TARGETED"' in js
+    assert 'record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED"' in js
+    assert "if (record.targeted === false) continue" not in js
 # ^^^ THOG

@@ -265,11 +265,6 @@ function premat_build_model(snapshot) {
     for (const family of families) {
       const record = premat_new_record(layer_index, family, attention_mode, snapshot);
       record.targeted = target_family === null || family === target_family;                                                                          // <<< THOG distinguish PREMAT eligibility from ordinary Main materialisation
-      if (!record.targeted) {
-        record.path = "not-targeted";
-        record.outcome = "NOT TARGETED";
-        record.trace = ["NOT TARGETED"];
-      }
       records.set(record.key, record);
     }
   }
@@ -298,7 +293,6 @@ function premat_build_model(snapshot) {
     const key = premat_candidate_key(event.layer_index, event.family);
     const record = records.get(key);
     if (!record) continue;
-    if (record.targeted === false) continue;                                                                                                          // <<< THOG ordinary Main events for selector-excluded matrices are not PREMAT failures
     premat_update_from_event(record, event);
     const event_name = String(event.event || "");
     const owner = String(event.owner || "none");
@@ -319,10 +313,12 @@ function premat_build_model(snapshot) {
     if (state === "MATERIALISING"
         && (event_name === "materialising" || event_name === "materialising_on_critical_path")) {
       if (main_owned) {
-        record.path = "main";
-        record.outcome = "COMPLETE MISS";
-        premat_append_trace(record, "PREMAT NOT STARTED - MAIN STREAM MATERIALISING");
-        add_frame({key, state: "main-materialising", outcome: record.outcome}, event, "PREMAT NOT STARTED - MAIN STREAM MATERIALISING");
+        const targeted = record.targeted !== false;                                                                                                     // <<< THOG selector-excluded matrices still show their real Main materialisation path
+        record.path = targeted ? "main" : "not-targeted-main";                                                                                         // <<< THOG keep PREMAT miss semantics separate from ordinary non-targeted Main work
+        record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED";                                                                                 // <<< THOG non-targeted Main work is excluded from PREMAT F/P/M totals
+        const main_state = targeted ? "PREMAT NOT STARTED - MAIN STREAM MATERIALISING" : "MAIN STREAM MATERIALISING · NOT TARGETED";                // <<< THOG make selector semantics explicit while preserving physical Main activity
+        premat_append_trace(record, main_state);
+        add_frame({key, state: "main-materialising", outcome: record.outcome}, event, main_state);
       } else {
         record.path = "premat";
         premat_append_trace(record, "PRE-MATERIALISING");
@@ -344,10 +340,12 @@ function premat_build_model(snapshot) {
     if (state === "CONSUMING"
         && (event_name === "consuming" || event_name === "critical_path_wait")) {
       if (main_owned) {
-        record.path = "main";
-        record.outcome = "COMPLETE MISS";
-        premat_append_trace(record, "MAIN STREAM CONSUMING");
-        add_frame({key, state: "main-consuming", outcome: record.outcome}, event, "MAIN STREAM CONSUMING");
+        const targeted = record.targeted !== false;                                                                                                     // <<< THOG selector-excluded matrices still show their real Main consumption path
+        record.path = targeted ? "main" : "not-targeted-main";                                                                                         // <<< THOG preserve NOT TARGETED classification through consumption
+        record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED";                                                                                 // <<< THOG only targeted ordinary Main fallback is a PREMAT miss
+        const main_state = targeted ? "MAIN STREAM CONSUMING" : "MAIN STREAM CONSUMING · NOT TARGETED";                                             // <<< THOG make ordinary Main work explicit in playback
+        premat_append_trace(record, main_state);
+        add_frame({key, state: "main-consuming", outcome: record.outcome}, event, main_state);
       } else if (waited || event.critical_path_miss) {
         record.path = "waited";
         record.outcome = "PARTIAL HIT";
@@ -379,8 +377,8 @@ function premat_build_model(snapshot) {
           ? "consumed-waited"
           : "consumed-main";
       if (record.path === "none") {
-        record.path = "main";
-        record.outcome = "COMPLETE MISS";
+        record.path = record.targeted === false ? "not-targeted-main" : "main";                                                                         // <<< THOG preserve selector semantics if only the terminal Main event was retained
+        record.outcome = record.targeted === false ? "NOT TARGETED" : "COMPLETE MISS";                                                                 // <<< THOG never fabricate a miss for a selector-excluded matrix
       }
       if (record.path === "waited") {
         record.completion_at_deadline_percent = premat_partial_hit_progress(record);
@@ -742,7 +740,9 @@ function premat_inspector_rows(snapshot, model) {
           && Number.isFinite(progress)
         ? `PARTIAL HIT · ~${progress}% TIME-PROGRESS`
         : record.outcome;
-      const target_text = `l+${record.target_offset} · ${record.target_order} #${record.target_order_position + 1}`;
+      const target_text = record.targeted === false
+        ? "NOT TARGETED · ordinary Main path"                                                                                                           // <<< THOG inspector distinguishes selector exclusion from PREMAT failure
+        : `l+${record.target_offset} · ${record.target_order} #${record.target_order_position + 1}`;
       const admission_history = record.admission_history.length
         ? record.admission_history.map(item => `${premat_ms(item.elapsed_ms)} ${item.reason}; headroom ${premat_bytes(item.headroom_bytes)}; charged ${premat_bytes(item.charged_bytes)}`).join(" | ")
         : "—";
