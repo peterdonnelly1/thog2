@@ -416,3 +416,21 @@ def test_premat_selector_exclusions_keep_main_activity_without_becoming_misses()
     assert 'record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED"' in js
     assert "if (record.targeted === false) continue" not in js
 # ^^^ THOG
+
+
+# vvv THOG Training throughput overlays visible Workspace runs while capture-specific Processing charts remain selected-run diagnostics
+def test_processing_throughput_workspace_multirun_contract() -> None:
+    processing_js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    server = Path("run_thog2_local_dashboard.py").read_text(encoding="utf-8")
+    assert "/api/processing-throughput" in server
+    assert "def processing_throughput(self)" in server
+    assert "processing_throughput_workspace_runs" in processing_js
+    assert "app.workspace_mode === true" in processing_js
+    assert "is_visible(run_identifier(run))" in processing_js
+    assert "colour_for_run(entry.run_id)" in processing_js
+    assert "/api/processing-throughput?run=" in processing_js
+    assert processing_js.count("/api/processing-throughput?run=") == 1
+    assert "processing_render_timeline(payload)" in processing_js
+    assert "processing_render_contention(payload)" in processing_js
+    assert "processing_render_summary(payload)" in processing_js
+# ^^^ THOG

@@ -186,27 +186,70 @@ async function processing_render_timeline(payload) {
   }, plot_config);
 }
 
-// vvv THOG convenience copy of the run-level net-throughput scoreboard
-async function processing_render_throughput(payload) {
-  const rows = (payload.throughput || []).filter(row => (
+// vvv THOG Training throughput alone has meaningful Workspace semantics; Nsight timeline/overlap/summary remain selected-run diagnostics
+function processing_throughput_workspace_runs() {
+  if (app.workspace_mode === true) {
+    return (app.runs || []).filter(run => is_visible(run_identifier(run)));
+  }
+  const selected = typeof current_run === "function" ? current_run() : null;
+  if (selected) return [selected];
+  const run_id = processing_current_run();
+  return run_id ? [{dashboard_run_id: run_id, artifact_name: run_id}] : [];
+}
+
+function processing_valid_throughput_rows(rows) {
+  return (rows || []).filter(row => (
     Number.isFinite(Number(row.optimizer_update))
     && Number.isFinite(Number(row.tokens_per_second))
   ));
-  const traces = rows.length ? [{
-    type: "scatter",
-    mode: rows.length === 1 ? "markers" : "lines+markers",
-    name: "tok/s",
-    x: rows.map(row => Number(row.optimizer_update)),
-    y: rows.map(row => Number(row.tokens_per_second)),
-    hovertemplate: "update %{x}<br>%{y:,.0f} tok/s<extra></extra>",
-  }] : [];
+}
+
+async function processing_throughput_rows_for_run(run, current_payload) {
+  const run_id = String(run_identifier(run));
+  if (run_id === processing_current_run()) {
+    return processing_valid_throughput_rows(current_payload.throughput);
+  }
+  try {
+    const response = await fetch_json(`/api/processing-throughput?run=${encodeURIComponent(run_id)}`);
+    return processing_valid_throughput_rows(response.throughput);
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function processing_render_throughput(payload) {
+  const runs = processing_throughput_workspace_runs();
+  const resolved = await Promise.all(runs.map(async run => ({
+    run,
+    run_id: String(run_identifier(run)),
+    rows: await processing_throughput_rows_for_run(run, payload),
+  })));
+  const populated = resolved.filter(entry => entry.rows.length);
+  const traces = populated.map(entry => {
+    const name = String(entry.run.artifact_name || entry.run.run_name || entry.run_id);
+    const colour = colour_for_run(entry.run_id);
+    return {
+      type: "scatter",
+      mode: entry.rows.length === 1 ? "markers" : "lines+markers",
+      name,
+      meta: {instra_workspace_run_id: entry.run_id},
+      x: entry.rows.map(row => Number(row.optimizer_update)),
+      y: entry.rows.map(row => Number(row.tokens_per_second)),
+      line: {color: colour, width: 2.4},
+      marker: {color: colour},
+      hovertemplate: "update %{x}<br>%{y:,.0f} tok/s<extra>%{fullData.name}</extra>",
+    };
+  });
+  const maximum_points = Math.max(0, ...populated.map(entry => entry.rows.length));
+  const workspace = app.workspace_mode === true;
   await processing_plot("processing_throughput_plot", traces, {
     margin: {l: 72, r: 24, t: 12, b: 54},
-    xaxis: {title: "optimizer update", dtick: rows.length <= 20 ? 1 : undefined},
+    xaxis: {title: "optimizer update", dtick: maximum_points <= 20 ? 1 : undefined},
     yaxis: {title: "tokens / second", rangemode: "tozero", separatethousands: true},
-    showlegend: false,
-    annotations: rows.length ? [] : [{
-      text: "No retained tok/s samples for this run",
+    showlegend: traces.length > 1,
+    legend: {orientation: "h", y: 1.10},
+    annotations: traces.length ? [] : [{
+      text: workspace ? "No retained tok/s samples for visible Workspace runs" : "No retained tok/s samples for this run",
       showarrow: false,
       xref: "paper", yref: "paper", x: 0.5, y: 0.5,
     }],

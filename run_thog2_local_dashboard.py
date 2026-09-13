@@ -344,6 +344,11 @@ class RunDashboardState:
         }
     # ^^^ THOG
 
+    # vvv THOG expose the lightweight retained tok/s series independently so Workspace multirun never fetches Nsight trace payloads
+    def processing_throughput(self) -> Dict[str, Any]:
+        return {"throughput": list(self.reader.processing_throughput())}
+    # ^^^ THOG
+
     def figures(self) -> Dict[str, Any]:
         status = self.status()
         revision = tuple(status["revision"])
@@ -971,7 +976,8 @@ def _handler_for(catalog: DashboardCatalog):
                     return
                 # vvv THOG extend the existing local API without deleting the prior route declaration
                 # if path in {"/api/status", "/api/figures", "/api/premat"}:
-                if path in {"/api/status", "/api/figures", "/api/premat", "/api/processing"}:
+                # if path in {"/api/status", "/api/figures", "/api/premat", "/api/processing"}:                                              # <<< THOG preserve the prior Processing API route set
+                if path in {"/api/status", "/api/figures", "/api/premat", "/api/processing", "/api/processing-throughput"}:                              # <<< THOG add lightweight throughput-only Workspace fetches
                 # ^^^ THOG
                     run_name = query.get("run", [""])[0]
                     if not run_name:
@@ -987,6 +993,8 @@ def _handler_for(catalog: DashboardCatalog):
                         value = state.figures()
                     elif path == "/api/processing":
                         value = state.processing()
+                    elif path == "/api/processing-throughput":                                                                                           # <<< THOG keep multirun tok/s fetches independent of the selected run's Nsight bundle
+                        value = state.processing_throughput()
                     else:
                         raw_after = query.get("after", [""])[0]
                         after_update = int(raw_after) if raw_after else None
