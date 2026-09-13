@@ -3,6 +3,81 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# vvv THOG make allocator-fragmentation protection a global, explicit wrapper policy
+THOG2_CUDA_EXPANDABLE_SEGMENT="enabled"
+THOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS=()
+THOG2_CUDA_EXPANDABLE_SEGMENT_HELP=false
+if [[ -n "${PYTORCH_CUDA_ALLOC_CONF:-}" ]]; then
+  THOG2_CUDA_ALLOC_CONF_USER_SUPPLIED=true
+else
+  THOG2_CUDA_ALLOC_CONF_USER_SUPPLIED=false
+fi
+while (( $# > 0 )); do
+  case "$1" in
+    --cuda-expandable-segment)
+      (( $# >= 2 )) || { echo "--cuda-expandable-segment requires enabled or disabled" >&2; exit 2; }
+      case "$2" in
+        enabled|disabled) THOG2_CUDA_EXPANDABLE_SEGMENT="$2" ;;
+        *) echo "--cuda-expandable-segment requires enabled or disabled; got: $2" >&2; exit 2 ;;
+      esac
+      shift 2
+      ;;
+    --cuda-expandable-segment=*)
+      THOG2_CUDA_EXPANDABLE_SEGMENT="${1#*=}"
+      case "$THOG2_CUDA_EXPANDABLE_SEGMENT" in
+        enabled|disabled) ;;
+        *) echo "--cuda-expandable-segment requires enabled or disabled; got: $THOG2_CUDA_EXPANDABLE_SEGMENT" >&2; exit 2 ;;
+      esac
+      shift
+      ;;
+    -h|--help)
+      THOG2_CUDA_EXPANDABLE_SEGMENT_HELP=true
+      THOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+    *)
+      THOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${THOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS[@]}"
+unset THOG2_CUDA_EXPANDABLE_SEGMENT_FILTERED_ARGS
+
+THOG2_CUDA_ALLOC_CONF_PARTS=()
+IFS=',' read -r -a THOG2_CUDA_ALLOC_CONF_INPUT <<< "${PYTORCH_CUDA_ALLOC_CONF:-}"
+for THOG2_CUDA_ALLOC_CONF_PART in "${THOG2_CUDA_ALLOC_CONF_INPUT[@]}"; do
+  THOG2_CUDA_ALLOC_CONF_PART="${THOG2_CUDA_ALLOC_CONF_PART#"${THOG2_CUDA_ALLOC_CONF_PART%%[![:space:]]*}"}"
+  THOG2_CUDA_ALLOC_CONF_PART="${THOG2_CUDA_ALLOC_CONF_PART%"${THOG2_CUDA_ALLOC_CONF_PART##*[![:space:]]}"}"
+  [[ -z "$THOG2_CUDA_ALLOC_CONF_PART" || "$THOG2_CUDA_ALLOC_CONF_PART" == expandable_segments:* ]] && continue
+  THOG2_CUDA_ALLOC_CONF_PARTS+=("$THOG2_CUDA_ALLOC_CONF_PART")
+done
+if [[ "$THOG2_CUDA_EXPANDABLE_SEGMENT" == enabled ]]; then
+  THOG2_CUDA_ALLOC_CONF_PARTS+=("expandable_segments:True")
+else
+  THOG2_CUDA_ALLOC_CONF_PARTS+=("expandable_segments:False")
+fi
+THOG2_CUDA_ALLOC_CONF_JOINED="$(IFS=,; printf '%s' "${THOG2_CUDA_ALLOC_CONF_PARTS[*]}")"
+export PYTORCH_CUDA_ALLOC_CONF="$THOG2_CUDA_ALLOC_CONF_JOINED"
+export THOG2_CUDA_EXPANDABLE_SEGMENT
+export THOG2_CUDA_ALLOC_CONF_USER_SUPPLIED
+unset THOG2_CUDA_ALLOC_CONF_INPUT THOG2_CUDA_ALLOC_CONF_PART THOG2_CUDA_ALLOC_CONF_PARTS THOG2_CUDA_ALLOC_CONF_JOINED
+
+if [[ "$THOG2_CUDA_EXPANDABLE_SEGMENT" == disabled ]]; then
+  printf '\033[1;31m%s\n%s\n%s\n\033[0m' \
+    '###############################################################################' \
+    'WARNING: CUDA EXPANDABLE SEGMENTS ARE DISABLED. FRAGMENTATION MAY CAUSE CUDA OOM.' \
+    '###############################################################################' >&2
+fi
+if [[ "$THOG2_CUDA_EXPANDABLE_SEGMENT_HELP" == true ]]; then
+  printf '%s\n' \
+    'CUDA allocator:' \
+    '  --cuda-expandable-segment enabled|disabled  fragmentation protection; default enabled' \
+    ''
+fi
+unset THOG2_CUDA_EXPANDABLE_SEGMENT_HELP
+# ^^^ THOG
+
 # vvv THOG reject non-canonical PLASTIC aliases before any wrapper parses them
 thog2_normalize_nonplastic_long_option() {
   local option_name="$1"
