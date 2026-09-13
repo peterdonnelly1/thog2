@@ -321,10 +321,21 @@ class RunDashboardState:
         if not path.is_file():
             return {"available": False, "revision": None, "data": None}
         stat_result = path.stat()
+        # vvv THOG combine immutable Nsight evidence with the lightweight optimizer-progress throughput history
+        throughput = self.reader.processing_throughput()
+        data = json.loads(path.read_text())
+        data["throughput"] = list(throughput)
+        throughput_tail = throughput[-1] if throughput else None
+        throughput_revision = (
+            "0"
+            if throughput_tail is None
+            else f"{len(throughput)}:{throughput_tail['optimizer_update']}:{throughput_tail['tokens_per_second']:.12g}"
+        )
+        # ^^^ THOG
         return {
             "available": True,
-            "revision": f"{stat_result.st_mtime_ns}:{stat_result.st_size}",
-            "data": json.loads(path.read_text()),
+            "revision": f"{stat_result.st_mtime_ns}:{stat_result.st_size}:{throughput_revision}",
+            "data": data,
         }
     # ^^^ THOG
 

@@ -10,6 +10,7 @@
 .processing-card.chart-card { min-width: 320px; height: 420px; min-height: 300px; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .processing-grid .processing-timeline-card { flex: 1.6 1 620px; }
 .processing-grid .processing-contention-card { flex: 1 1 420px; }
+.processing-grid .processing-throughput-card { flex: 1 1 420px; }                                           /* THOG net-throughput scoreboard */
 .processing-grid.chart-grid.is-maximized .processing-card.chart-card.maximized { display: flex; }
 .processing-plot { width: 100%; min-width: 0; min-height: 140px; height: auto; flex: 1 1 auto; overflow: hidden; }
 .processing-contention-plot { min-height: 140px; }

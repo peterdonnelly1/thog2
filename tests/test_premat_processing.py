@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from sheet.local_chart_store import LocalChartReader, LocalChartStore
 from sheet.premat_processing import (
     _mean_metric,
     _nsys_profile_command,
@@ -108,12 +109,24 @@ def test_processing_handoff_records_target_matrix(tmp_path: Path, monkeypatch) -
 def test_processing_charts_use_standard_instra_panel_contract() -> None:
     html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
     css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
-    for chart_name in ("processing_timeline", "processing_contention"):
+    for chart_name in ("processing_timeline", "processing_throughput", "processing_contention"):
         assert f'data-chart="{chart_name}"' in html
         assert f'data-maximize="{chart_name}"' in html
     assert html.count('class="panel-resizer panel-resizer-corner"') >= 3
     assert ".processing-card.chart-card" in css
     assert ".processing-grid.chart-grid" in css
+
+
+def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -> None:
+    database = tmp_path / "charts.sqlite3"
+    store = LocalChartStore(database, run_name="fixture", config={})
+    store.append_processing_throughput(1, 12345.5)
+    store.append_processing_throughput(2, 13001.25)
+    store.close()
+    assert LocalChartReader(database).processing_throughput() == (
+        {"optimizer_update": 1, "tokens_per_second": 12345.5},
+        {"optimizer_update": 2, "tokens_per_second": 13001.25},
+    )
 
 
 def _synthetic_nsys_database(path: Path) -> None:

@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 3                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
+LOCAL_CHART_SCHEMA_VERSION = 4                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
 LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
@@ -251,6 +251,10 @@ class LocalChartStore:
                 optimizer_update INTEGER PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS processing_throughput (
+                optimizer_update INTEGER PRIMARY KEY,
+                tokens_per_second REAL NOT NULL
+            );
             """
         )
         now = _utc_timestamp()
@@ -295,7 +299,17 @@ class LocalChartStore:
         self._has_premat_records = bool(
             self.connection.execute("SELECT EXISTS(SELECT 1 FROM premat_snapshots)").fetchone()[0]
         )
-        self._has_recorded_data = self._has_heatmap_records or self._has_depth_records or self._has_premat_records
+        # vvv THOG Processing throughput is ordinary retained chart evidence, not a new measurement path
+        self._has_processing_throughput_records = bool(
+            self.connection.execute("SELECT EXISTS(SELECT 1 FROM processing_throughput)").fetchone()[0]
+        )
+        self._has_recorded_data = (
+            self._has_heatmap_records
+            or self._has_depth_records
+            or self._has_premat_records
+            or self._has_processing_throughput_records
+        )
+        # ^^^ THOG
 
     def _touch(self) -> None:
         now = _utc_timestamp()
@@ -533,6 +547,26 @@ class LocalChartStore:
         self._touch()
         self._has_premat_records = True
         self.connection.commit()
+
+    # vvv THOG retain the console-equivalent net-throughput scoreboard for Processing runs
+    def append_processing_throughput(
+        self,
+        optimizer_update: int,
+        tokens_per_second: float,
+    ) -> None:
+        value = _safe_runtime_metric(tokens_per_second)
+        if value is None:
+            return
+        update = int(optimizer_update)
+        self.connection.execute(
+            "INSERT OR REPLACE INTO processing_throughput(optimizer_update, tokens_per_second) VALUES (?, ?)",
+            (update, value),
+        )
+        self._latest_observed_update = max(self._latest_observed_update, update)
+        self._touch()
+        self._has_processing_throughput_records = True
+        self.connection.commit()
+    # ^^^ THOG
 
     def update_premat_aggregate(
         self,
@@ -840,6 +874,27 @@ class LocalChartReader:
         finally:
             connection.close()
         return tuple(_decode_payload(row["payload"]) for row in rows)
+
+    # vvv THOG old databases remain readable; they simply have no Processing throughput history
+    def processing_throughput(self) -> Tuple[Dict[str, Any], ...]:
+        connection = self._connection()
+        try:
+            try:
+                rows = connection.execute(
+                    "SELECT optimizer_update, tokens_per_second FROM processing_throughput ORDER BY optimizer_update"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = ()
+        finally:
+            connection.close()
+        return tuple(
+            {
+                "optimizer_update": int(row["optimizer_update"]),
+                "tokens_per_second": float(row["tokens_per_second"]),
+            }
+            for row in rows
+        )
+    # ^^^ THOG
 
     def latest_premat_snapshot(self) -> Optional[Dict[str, Any]]:
         connection = self._connection()

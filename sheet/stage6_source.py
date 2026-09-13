@@ -150,6 +150,21 @@ def metric_common(payload: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+# vvv THOG console and Processing use one resumed-session throughput definition
+def progress_tokens_per_second(payload: Mapping[str, Any]) -> Optional[float]:
+    elapsed = payload.get("cumulative_training_seconds", payload.get("training_seconds"))
+    throughput_tokens = payload.get("session_consumed_tokens")
+    if throughput_tokens is None:
+        throughput_tokens = payload.get("consumed_tokens")
+    if elapsed is None or throughput_tokens is None:
+        return None
+    elapsed_value = float(elapsed)
+    if elapsed_value <= 0.0:
+        return None
+    return float(throughput_tokens) / elapsed_value
+# ^^^ THOG
+
+
 def training_metric_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         **metric_common(payload),

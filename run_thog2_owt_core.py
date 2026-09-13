@@ -51,6 +51,7 @@ from sheet.run_config import (
 from sheet.run_naming import compact_log_timestamp
 from sheet.dense_snapshot import print_dense_snapshot_completion                                                                                                                    # <<< THOG repeat the relative snapshot path at the actual end of every snapshot-baselined run
 from sheet.stage6_trainer import Stage6Trainer
+from sheet.stage6_source import progress_tokens_per_second                                                                                                 # <<< THOG share resumed-session tok/s definition with Processing instrumentation
 from sheet.training_config import TrainingConfig, normalize_plastic_v0541_config_fields
 from sheet.wandb_telemetry import WandbTelemetry, attach_telemetry, selected_gpu_index, verbose_wandb_console_enabled                                         # <<< THOG record physical GPU affinity in the run configuration and Instra table
 
@@ -119,16 +120,10 @@ _CONSOLE_SCIENTIFIC_FLOATS = {"learning_rate": (10, 3)}
 # Lifetime consumed_tokens remains available for progress and accounting.
 def add_console_tokens_per_second(payload: Dict[str, Any]) -> Dict[str, Any]:
     values = dict(payload)
-    elapsed = values.get("cumulative_training_seconds", values.get("training_seconds"))
-    throughput_tokens = values.pop("session_consumed_tokens", None)
-    if throughput_tokens is None:
-        throughput_tokens = values.get("consumed_tokens")
-    if elapsed is None or throughput_tokens is None:
-        return values
-    elapsed_value = float(elapsed)
-    if elapsed_value <= 0.0:
-        return values
-    values["tok/s"] = float(throughput_tokens) / elapsed_value
+    tokens_per_second = progress_tokens_per_second(values)
+    values.pop("session_consumed_tokens", None)
+    if tokens_per_second is not None:
+        values["tok/s"] = tokens_per_second
     return values
 # ^^^ THOG
 

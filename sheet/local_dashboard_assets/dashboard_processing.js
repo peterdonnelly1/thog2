@@ -127,6 +127,34 @@ function processing_render_timeline(payload) {
   }, plot_config);
 }
 
+// vvv THOG convenience copy of the run-level net-throughput scoreboard
+function processing_render_throughput(payload) {
+  const rows = (payload.throughput || []).filter(row => (
+    Number.isFinite(Number(row.optimizer_update))
+    && Number.isFinite(Number(row.tokens_per_second))
+  ));
+  const traces = rows.length ? [{
+    type: "scatter",
+    mode: rows.length === 1 ? "markers" : "lines+markers",
+    name: "tok/s",
+    x: rows.map(row => Number(row.optimizer_update)),
+    y: rows.map(row => Number(row.tokens_per_second)),
+    hovertemplate: "update %{x}<br>%{y:,.0f} tok/s<extra></extra>",
+  }] : [];
+  Plotly.react("processing_throughput_plot", traces, {
+    margin: {l: 72, r: 24, t: 12, b: 54},
+    xaxis: {title: "optimizer update", dtick: rows.length <= 20 ? 1 : undefined},
+    yaxis: {title: "tokens / second", rangemode: "tozero", separatethousands: true},
+    showlegend: false,
+    annotations: rows.length ? [] : [{
+      text: "No retained tok/s samples for this run",
+      showarrow: false,
+      xref: "paper", yref: "paper", x: 0.5, y: 0.5,
+    }],
+  }, plot_config);
+}
+// ^^^ THOG
+
 function processing_render_contention(payload) {
   const families = [...new Set((payload.summary || []).map(row => String(row.family || "?")))];
   const traces = families.map(family => {
@@ -179,11 +207,12 @@ function processing_render(payload) {
   by_id("processing_status").textContent = `${Number(payload.metadata?.capture_frequency_hz || 0).toLocaleString()} Hz · ${Number(payload.metadata?.capture_duration_ms || 0).toFixed(2)} ms capture${warning_count ? ` · ${warning_count} warning${warning_count === 1 ? "" : "s"}` : ""}`;
   processing_set_downloads(payload.metadata);
   processing_render_timeline(payload);
+  processing_render_throughput(payload);
   processing_render_contention(payload);
   processing_render_summary(payload);
   // vvv THOG Plotly must re-measure after the hidden Processing group becomes visible and after any restored panel geometry is applied
   requestAnimationFrame(() => {
-    for (const chart_name of ["processing_timeline", "processing_contention"]) {
+    for (const chart_name of ["processing_timeline", "processing_throughput", "processing_contention"]) {
       const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
       if (card && typeof resize_plot_in_card === "function") resize_plot_in_card(card);
     }

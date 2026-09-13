@@ -29,6 +29,7 @@ from .stage6_source import (
     evaluation_metric_payload,
     init_resilient_telemetry,
     training_metric_payload,
+    progress_tokens_per_second,
 )
 
 
@@ -631,6 +632,18 @@ class WandbTelemetry:
         )
 
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        # vvv THOG Processing duplicates the console tok/s scoreboard without adding another measurement
+        if (
+            event == "optimizer_progress"
+            and str(self.config.get("premat_processing_logging", "disabled")) == "enabled"
+        ):
+            tokens_per_second = progress_tokens_per_second(payload)
+            if tokens_per_second is not None:
+                ensure_local_chart_store(self).append_processing_throughput(
+                    int(payload.get("completed_updates", 0)),
+                    tokens_per_second,
+                )
+        # ^^^ THOG
         # vvv THOG persist bounded premat snapshots before scalar-backend early returns
         premat_snapshot = payload.get("premat")
         if event == "optimizer_progress" and isinstance(premat_snapshot, Mapping):
@@ -892,6 +905,12 @@ def attach_telemetry(trainer: Any, telemetry: WandbTelemetry) -> None:
                 telemetry_payload["consumed_tokens"] = (
                     int(telemetry_payload["consumed_tokens"]) * multiplier
                 )
+            # vvv THOG session tokens need the same global multiplier so Processing tok/s exactly matches console semantics under DDP
+            if "session_consumed_tokens" in telemetry_payload:
+                telemetry_payload["session_consumed_tokens"] = (
+                    int(telemetry_payload["session_consumed_tokens"]) * multiplier
+                )
+            # ^^^ THOG
             telemetry.log_event(event, telemetry_payload)
             # vvv THOG
             if event == "evaluation_completed":
