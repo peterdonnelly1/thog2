@@ -27,6 +27,28 @@ jobs:
           python-version: '3.11'
       - name: Install test dependencies
         run: python -m pip install -q pytest torch matplotlib plotly
+      - name: Normalize helper parser block
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tmp_add_premat_target_matrix.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    + thog_line('    parser.add_argument("--premat_target_matrix", type=int, choices=(1, 2, 3, 4), default=None, help="Optional fused-family PREMAT selector: 1=QKV, 2=O, 3=UP, 4=DOWN")', "add fixed fused-family PREMAT diagnostic selector")
+          '''
+          new = '''    + '# vvv THOG fixed fused-family PREMAT diagnostic selector\\n'
+              + '    parser.add_argument(\\n'
+              + '        "--premat_target_matrix",\\n'
+              + '        type=int,\\n'
+              + '        choices=(1, 2, 3, 4),\\n'
+              + '        default=None,\\n'
+              + '        help="Optional fused-family PREMAT selector: 1=QKV, 2=O, 3=UP, 4=DOWN",\\n'
+              + '    )\\n'
+              + '# ^^^ THOG\\n'
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError(f"expected one long parser helper line, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
       - name: Apply target-matrix implementation
         run: python tmp_add_premat_target_matrix.py
       - name: Verify
