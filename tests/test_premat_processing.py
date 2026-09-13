@@ -155,6 +155,17 @@ def test_processing_visibility_is_owned_by_processing_view() -> None:
     assert "Plotly.newPlot" in processing_js
     assert 'dataset.plotReady = "true"' in processing_js
 
+# vvv THOG Processing presentation keeps diagnostic evidence first and throughput last, with explicit pane-filling maximize geometry
+def test_processing_chart_order_and_maximize_geometry() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
+    assert html.index('data-chart="processing_timeline"') < html.index('data-chart="processing_contention"') < html.index('data-chart="processing_throughput"')
+    assert ".processing-group.maximized" in css
+    assert "height: auto !important" in css
+    assert "align-content: stretch" in css
+# ^^^ THOG
+
+
 def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -> None:
     database = tmp_path / "charts.sqlite3"
     store = LocalChartStore(database, run_name="fixture", config={})
