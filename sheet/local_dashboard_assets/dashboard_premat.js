@@ -1336,9 +1336,14 @@ function premat_sync_tab(premat_selected = null) {
   }
   by_id("premat_chart_group").hidden = !premat_selected;
   document.body.classList.toggle("premat-tab-active", Boolean(premat_selected));
-  document.querySelectorAll('[data-chart-group]:not(#premat_chart_group)').forEach(group => {
+  document.querySelectorAll('[data-chart-group]:not(#premat_chart_group):not(#processing_chart_group)').forEach(group => {
     group.hidden = Boolean(premat_selected);
   });
+  if (typeof window.processing_apply_detail_tab === "function") {
+    window.processing_apply_detail_tab(!premat_selected);                                                                                                  // THOG Processing alone owns its availability while Premat owns only tab selection
+  } else if (premat_selected) {
+    by_id("processing_chart_group").hidden = true;
+  }
   if (premat_selected && !premat_view.active_snapshot) {
     by_id("premat_mode").textContent = "waiting for a complete captured microstep";
   }

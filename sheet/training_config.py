@@ -70,7 +70,7 @@ ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 # vvv THOG processing capture is diagnostic execution state, never checkpoint model identity
 # EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz"}                         # <<< THOG processing capture is diagnostic execution state, never checkpoint model identity
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update"}                         # <<< THOG processing capture is diagnostic execution state, never checkpoint model identity
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
@@ -314,6 +314,7 @@ class TrainingConfig:
     # vvv THOG Nsight-backed processing capture is execution instrumentation and works with NOMAT
     premat_processing_logging: str = "disabled"
     premat_processing_logging_capture_frequency_hz: int = 10000
+    premat_processing_logging_capture_update: int = 1                                                                                                      # <<< THOG exact optimizer update selected for bounded Processing capture
     # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
@@ -611,6 +612,8 @@ class TrainingConfig:
             self.premat_processing_logging,
             self.premat_processing_logging_capture_frequency_hz,
             self.device,
+            self.premat_processing_logging_capture_update,
+            self.max_updates,
         )
         # ^^^ THOG
         if (

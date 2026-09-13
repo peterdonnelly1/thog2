@@ -892,6 +892,7 @@ class TrainerStepMixin:
                         completed_updates=self.state.completed_updates,
                         max_updates=self.config.max_updates,
                         log_interval=self.config.log_interval,
+                        capture_update=self.config.premat_processing_logging_capture_update,                                                               # <<< THOG decouple bounded Nsight capture timing from ordinary log cadence
                         micro_step=micro_step,
                         device=self.device,
                     ), self.autocast_context():

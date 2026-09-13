@@ -220,9 +220,9 @@
           </header>
           <!-- vvv THOG Processing plots use the established INSTRA chart-card contract so resize/maximize/reset/persistence work identically -->
           <div class="processing-grid chart-grid">
-            <article class="processing-card chart-card processing-timeline-card" data-chart="processing_timeline">
+            <article class="processing-card chart-card processing-timeline-card" id="processing_timeline_card" data-chart="processing_timeline" hidden>
               <header class="chart-card-header"><div class="chart-heading-copy"><h2>GPU processing timeline</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_timeline" type="button" aria-label="Maximize GPU processing timeline" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
-              <div class="processing-plot" id="processing_timeline_plot"></div>
+              <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot" id="processing_timeline_plot"></div></div>
               <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
               <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
               <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
@@ -230,15 +230,15 @@
             <!-- vvv THOG duplicate the run-level net-throughput scoreboard beside the Nsight diagnostics for convenience -->
             <article class="processing-card chart-card processing-throughput-card" data-chart="processing_throughput">
               <header class="chart-card-header"><div class="chart-heading-copy"><h2>Training throughput (tok/s)</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_throughput" type="button" aria-label="Maximize training throughput" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
-              <div class="processing-plot" id="processing_throughput_plot"></div>
+              <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot" id="processing_throughput_plot"></div></div>
               <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
               <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
               <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
             </article>
             <!-- ^^^ THOG -->
-            <article class="processing-card chart-card processing-contention-card" data-chart="processing_contention">
+            <article class="processing-card chart-card processing-contention-card" id="processing_contention_card" data-chart="processing_contention" hidden>
               <header class="chart-card-header"><div class="chart-heading-copy"><h2>Main duration vs PREMAT overlap</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_contention" type="button" aria-label="Maximize Main duration vs PREMAT overlap" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
-              <div class="processing-plot processing-contention-plot" id="processing_contention_plot"></div>
+              <div class="plot-shell processing-plot-shell"><div class="plot-mount processing-plot processing-contention-plot" id="processing_contention_plot"></div></div>
               <div class="processing-summary-wrap"><table class="processing-summary"><thead><tr><th>Matrix</th><th>N</th><th>Main mean</th><th>PREMAT overlap</th><th>SM active</th><th>SM issue</th><th>Tensor active</th><th>Unused warp slots</th></tr></thead><tbody id="processing_summary_body"></tbody></table></div>
               <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
               <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>

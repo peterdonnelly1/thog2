@@ -16,28 +16,33 @@ from sheet.premat_processing import (
     processing_invocation_is_non_training,
     processing_requested_from_argv,
     register_processing_handoff,
+    should_capture_processing_forward,
     rewrite_processing_cli_for_core,
     validate_processing_configuration,
 )
 
 
 def test_processing_cli_surface_exact_names() -> None:
-    enabled, frequency = processing_requested_from_argv([
+    enabled, frequency, capture_update = processing_requested_from_argv([
         "--premat_processing_logging", "enabled",
         "--premat_processing_logging_capture_frequency_hz", "12345",
+        "--premat_processing_logging_capture_update", "5",
     ])
     assert enabled is True
     assert frequency == 12345
+    assert capture_update == 5
 
 
 def test_processing_public_cli_rewrites_to_hidden_core_aliases() -> None:
     assert rewrite_processing_cli_for_core([
         "--premat_processing_logging", "enabled",
         "--premat_processing_logging_capture_frequency_hz=12345",
+        "--premat_processing_logging_capture_update", "5",
         "--model-type", "sheet",
     ]) == [
         "--processing_logging_internal", "enabled",
         "--processing_logging_capture_frequency_hz_internal=12345",
+        "--processing_logging_capture_update_internal", "5",
         "--model-type", "sheet",
     ]
 
@@ -91,7 +96,26 @@ def test_processing_configuration_is_cuda_but_not_premat_dependent() -> None:
         validate_processing_configuration("enabled", 10000, "cpu")
     with pytest.raises(ValueError, match="capture_frequency_hz"):
         validate_processing_configuration("enabled", 9, "cuda")
+    with pytest.raises(ValueError, match="capture_update"):
+        validate_processing_configuration("enabled", 10000, "cuda", 0)
+    with pytest.raises(ValueError, match="must not exceed"):
+        validate_processing_configuration("enabled", 10000, "cuda", 6, 5)
 
+
+
+
+def test_processing_capture_update_is_exact_and_log_interval_independent(monkeypatch) -> None:
+    import sheet.premat_processing as processing
+    monkeypatch.setattr(processing, "_capture_done", False)
+    assert not should_capture_processing_forward(
+        enabled=True, completed_updates=3, max_updates=5, log_interval=1, capture_update=5, micro_step=0
+    )
+    assert should_capture_processing_forward(
+        enabled=True, completed_updates=4, max_updates=5, log_interval=99, capture_update=5, micro_step=0
+    )
+    assert not should_capture_processing_forward(
+        enabled=True, completed_updates=4, max_updates=5, log_interval=1, capture_update=5, micro_step=1
+    )
 
 def test_processing_handoff_records_target_matrix(tmp_path: Path, monkeypatch) -> None:
     handoff_path = tmp_path / "handoff.json"
@@ -112,10 +136,24 @@ def test_processing_charts_use_standard_instra_panel_contract() -> None:
     for chart_name in ("processing_timeline", "processing_throughput", "processing_contention"):
         assert f'data-chart="{chart_name}"' in html
         assert f'data-maximize="{chart_name}"' in html
+        assert f'id="{chart_name}_plot"' in html
+    assert html.count('class="plot-mount processing-plot') >= 3
     assert html.count('class="panel-resizer panel-resizer-corner"') >= 3
     assert ".processing-card.chart-card" in css
     assert ".processing-grid.chart-grid" in css
 
+
+
+
+def test_processing_visibility_is_owned_by_processing_view() -> None:
+    premat_js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")
+    processing_js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert ":not(#processing_chart_group)" in premat_js
+    assert "processing_apply_detail_tab" in premat_js
+    assert "trace_available" in processing_js
+    assert "Nsight charts appear after run completion" in processing_js
+    assert "Plotly.newPlot" in processing_js
+    assert 'dataset.plotReady = "true"' in processing_js
 
 def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -> None:
     database = tmp_path / "charts.sqlite3"
@@ -164,7 +202,7 @@ def _synthetic_nsys_database(path: Path) -> None:
                 (1, "SMs Active %"),
                 (2, "SM Issue %"),
                 (3, "Tensor Active %"),
-                (4, "Active SM Unused Warp Slots %"),
+                (4, "Unallocated Warps in Active SMs [Throughput %]"),
             ],
         )
         for timestamp, values in ((3000, (80, 70, 90, 20)), (4000, (90, 75, 95, 15))):
@@ -188,6 +226,9 @@ def test_processing_normalizer_emits_graph_and_download_data(tmp_path: Path) -> 
     )
     assert payload["metadata"]["capture_frequency_hz"] == 10000
     assert payload["samples"][0]["sm_active_pct"] == 80.0
+    assert payload["samples"][0]["active_sm_unused_warp_slots_pct"] == 20.0
+    assert "active_sm_unused_warp_slots_pct" in payload["metadata"]["metric_mapping"]
+    assert "Unallocated Warps in Active SMs [Throughput %]" in payload["metadata"]["available_gpu_metric_names"]
     assert {row["owner"] for row in payload["intervals"]} == {"MAIN", "PREMAT"}
     assert len(payload["summary"]) == 1
     summary = payload["summary"][0]
@@ -207,4 +248,49 @@ def test_processing_normalizer_emits_graph_and_download_data(tmp_path: Path) -> 
     with (output / "processing_summary.csv").open() as source:
         rows = list(csv.DictReader(source))
     assert rows[0]["family"] == "QKV"
+# ^^^ THOG
+
+
+# vvv THOG PREMAT in a gap between Main kernels is not simultaneous Main/PREMAT execution
+def test_processing_overlap_excludes_internal_main_kernel_gaps(tmp_path: Path) -> None:
+    database = tmp_path / "gap.sqlite"
+    output = tmp_path / "processing_gap"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE StringIds (id INTEGER PRIMARY KEY, value TEXT);
+            CREATE TABLE NVTX_EVENTS (start INTEGER, end INTEGER, globalTid INTEGER, text TEXT);
+            CREATE TABLE CUPTI_ACTIVITY_KIND_RUNTIME (start INTEGER, end INTEGER, globalTid INTEGER, correlationId INTEGER);
+            CREATE TABLE CUPTI_ACTIVITY_KIND_KERNEL (start INTEGER, end INTEGER, streamId INTEGER, correlationId INTEGER, shortName INTEGER);
+            CREATE TABLE TARGET_INFO_GPU_METRICS (metricId INTEGER, metricName TEXT);
+            CREATE TABLE GPU_METRICS (timestamp INTEGER, metricId INTEGER, value REAL);
+            """
+        )
+        connection.executemany("INSERT INTO StringIds VALUES (?, ?)", [(1, "main_a"), (2, "main_b"), (3, "premat_gap")])
+        connection.executemany(
+            "INSERT INTO NVTX_EVENTS VALUES (?, ?, ?, ?)",
+            [
+                (1000, 10000, 7, "THOG2_PREMAT_PROCESSING_CAPTURE"),
+                (1500, 7500, 7, "THOG2_PROCESSING|owner=MAIN|operation=consume|family=QKV|layer=0"),
+                (3500, 5500, 7, "THOG2_PROCESSING|owner=PREMAT|operation=materialize|family=O|layer=1"),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO CUPTI_ACTIVITY_KIND_RUNTIME VALUES (?, ?, ?, ?)",
+            [(1600, 1650, 7, 11), (5600, 5650, 7, 12), (3600, 3650, 7, 13)],
+        )
+        connection.executemany(
+            "INSERT INTO CUPTI_ACTIVITY_KIND_KERNEL VALUES (?, ?, ?, ?, ?)",
+            [
+                (2000, 3000, 3, 11, 1),
+                (6000, 7000, 3, 12, 2),
+                (4000, 5000, 9, 13, 3),
+            ],
+        )
+        connection.commit()
+    payload = normalize_nsys_sqlite(database, output, capture_frequency_hz=10000)
+    summary = payload["summary"][0]
+    assert summary["duration_ms"] == pytest.approx(0.002)
+    assert summary["premat_overlap_ms"] == pytest.approx(0.0)
+    assert summary["premat_overlap_pct"] == pytest.approx(0.0)
 # ^^^ THOG

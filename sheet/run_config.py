@@ -251,6 +251,7 @@ class OwtRunConfig:
     # vvv THOG device-processing capture is execution instrumentation and remains independent of PREMAT scheduling
     premat_processing_logging: str = "disabled"
     premat_processing_logging_capture_frequency_hz: int = 10000
+    premat_processing_logging_capture_update: int = 1                                                                                                      # <<< THOG exact optimizer update selected for bounded Processing capture
     # ^^^ THOG
     premat_retain_detailed_premat_history: bool = False
     # ^^^ THOG
@@ -352,6 +353,8 @@ class OwtRunConfig:
             self.premat_processing_logging,
             self.premat_processing_logging_capture_frequency_hz,
             self.device,
+            self.premat_processing_logging_capture_update,
+            self.max_iters,
         )
         # ^^^ THOG
         if self.run_mode not in ("fresh", "resume"):
@@ -1240,6 +1243,7 @@ class OwtRunConfig:
             shadow_fragment = "SHADOW_" if self.premat_enable_shadow_mode else ""
             processing_fragment = (
                 f"_PROC{self.premat_processing_logging_capture_frequency_hz}"
+                + (f"U{self.premat_processing_logging_capture_update}" if self.premat_processing_logging_capture_update != 1 else "")
                 if self.premat_processing_logging == "enabled"
                 else ""
             )
@@ -1453,6 +1457,7 @@ class OwtRunConfig:
             premat_instra=self.premat_instra,
             premat_processing_logging=self.premat_processing_logging,
             premat_processing_logging_capture_frequency_hz=self.premat_processing_logging_capture_frequency_hz,
+            premat_processing_logging_capture_update=self.premat_processing_logging_capture_update,                                                       # <<< THOG propagate requested Processing capture update into TrainingConfig
             premat_retain_detailed_premat_history=self.premat_retain_detailed_premat_history,
             plastic__layer_count__cuda_allocator_reserve_gib=float(self.plastic__layer_count__cuda_allocator_reserve_gib),
             plastic__geometry_learning_rate_multiplier=float(self.plastic__geometry_learning_rate_multiplier),

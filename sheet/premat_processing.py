@@ -25,6 +25,7 @@ import zipfile
 
 PROCESSING_SWITCHES = ("enabled", "disabled")
 PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ = 10_000
+PROCESSING_DEFAULT_CAPTURE_UPDATE = 1                                                                                                                       # <<< THOG preserve update-one capture unless the user requests a settled update
 PROCESSING_MIN_CAPTURE_FREQUENCY_HZ = 10
 PROCESSING_MAX_CAPTURE_FREQUENCY_HZ = 200_000
 PROCESSING_SCHEMA_VERSION = 1
@@ -39,7 +40,14 @@ _capture_done = False
 _capture_stack_depth = 0
 
 
-def validate_processing_configuration(logging: str, capture_frequency_hz: int, device: str) -> None:
+# vvv THOG Processing capture-update is diagnostic execution state and independent of ordinary log cadence
+def validate_processing_configuration(
+    logging: str,
+    capture_frequency_hz: int,
+    device: str,
+    capture_update: int = PROCESSING_DEFAULT_CAPTURE_UPDATE,
+    max_updates: Optional[int] = None,
+) -> None:
     if logging not in PROCESSING_SWITCHES:
         raise ValueError(f"premat_processing_logging must be enabled or disabled; got {logging!r}")
     if isinstance(capture_frequency_hz, bool) or not isinstance(capture_frequency_hz, int):
@@ -49,8 +57,20 @@ def validate_processing_configuration(logging: str, capture_frequency_hz: int, d
             "premat_processing_logging_capture_frequency_hz must lie in "
             f"[{PROCESSING_MIN_CAPTURE_FREQUENCY_HZ}, {PROCESSING_MAX_CAPTURE_FREQUENCY_HZ}]"
         )
+    if isinstance(capture_update, bool) or not isinstance(capture_update, int) or capture_update < 1:
+        raise ValueError("premat_processing_logging_capture_update must be a positive integer")
+    if (
+        logging == "enabled"
+        and max_updates is not None
+        and capture_update > int(max_updates)
+    ):
+        raise ValueError(
+            "premat_processing_logging_capture_update must not exceed max_updates; "
+            f"got capture_update={capture_update}, max_updates={max_updates}"
+        )
     if logging == "enabled" and not str(device).startswith("cuda"):
         raise ValueError("--premat_processing_logging enabled requires a CUDA device")
+# ^^^ THOG
 
 
 def _argv_value(arguments: Sequence[str], name: str, default: Optional[str] = None) -> Optional[str]:
@@ -63,12 +83,18 @@ def _argv_value(arguments: Sequence[str], name: str, default: Optional[str] = No
     return default
 
 
-def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int]:
+# vvv THOG parse the wrapper-only capture update before torch/CUDA imports exactly like the existing Processing controls
+def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int, int]:
     logging = str(_argv_value(arguments, "--premat_processing_logging", "disabled"))
     raw_frequency = _argv_value(
         arguments,
         "--premat_processing_logging_capture_frequency_hz",
         str(PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ),
+    )
+    raw_capture_update = _argv_value(
+        arguments,
+        "--premat_processing_logging_capture_update",
+        str(PROCESSING_DEFAULT_CAPTURE_UPDATE),
     )
     try:
         frequency = int(str(raw_frequency))
@@ -76,8 +102,15 @@ def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int]
         raise ValueError(
             "--premat_processing_logging_capture_frequency_hz must be an integer"
         ) from error
-    validate_processing_configuration(logging, frequency, "cuda")
-    return logging == "enabled", frequency
+    try:
+        capture_update = int(str(raw_capture_update))
+    except ValueError as error:
+        raise ValueError(
+            "--premat_processing_logging_capture_update must be an integer"
+        ) from error
+    validate_processing_configuration(logging, frequency, "cuda", capture_update)
+    return logging == "enabled", frequency, capture_update
+# ^^^ THOG
 
 
 def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
@@ -86,6 +119,7 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
     replacements = {
         "--premat_processing_logging": "--processing_logging_internal",
         "--premat_processing_logging_capture_frequency_hz": "--processing_logging_capture_frequency_hz_internal",
+        "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",                                                    # <<< THOG wrapper-only exact optimizer update for the one bounded capture
     }
     while index < len(arguments):
         argument = str(arguments[index])
@@ -195,6 +229,9 @@ def register_processing_handoff(
             "premat_processing_logging_capture_frequency_hz": config.get(
                 "premat_processing_logging_capture_frequency_hz"
             ),
+            "premat_processing_logging_capture_update": config.get(
+                "premat_processing_logging_capture_update"
+            ),
             "n_layer": config.get("n_layer"),
             "n_embd": config.get("n_embd"),
             "n_head": config.get("n_head"),
@@ -210,23 +247,25 @@ def register_processing_handoff(
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
-def _capture_update_target(max_updates: int, log_interval: int) -> int:
-    return min(max(1, int(max_updates)), max(1, int(log_interval)))
-
-
+# vvv THOG capture exactly the requested optimizer update; ordinary log_interval no longer controls Nsight timing
 def should_capture_processing_forward(
     *,
     enabled: bool,
     completed_updates: int,
     max_updates: int,
     log_interval: int,
+    capture_update: int = PROCESSING_DEFAULT_CAPTURE_UPDATE,
     micro_step: int,
 ) -> bool:
     global _capture_done
+    del log_interval
     if not enabled or _capture_done or int(micro_step) != 0:
         return False
+    if int(capture_update) > int(max_updates):
+        return False
     prospective_update = int(completed_updates) + 1
-    return prospective_update >= _capture_update_target(max_updates, log_interval)
+    return prospective_update == int(capture_update)
+# ^^^ THOG
 
 
 def _nvtx_push(label: str) -> None:
@@ -300,6 +339,7 @@ def processing_capture_scope(
     completed_updates: int,
     max_updates: int,
     log_interval: int,
+    capture_update: int = PROCESSING_DEFAULT_CAPTURE_UPDATE,
     micro_step: int,
     device: Any,
 ) -> Iterator[None]:
@@ -309,6 +349,7 @@ def processing_capture_scope(
         completed_updates=completed_updates,
         max_updates=max_updates,
         log_interval=log_interval,
+        capture_update=capture_update,
         micro_step=micro_step,
     )
     if not selected:
@@ -326,6 +367,7 @@ def processing_capture_scope(
             "optimizer_update": int(completed_updates) + 1,
             "micro_step": int(micro_step) + 1,
             "log_interval": int(log_interval),
+            "requested_capture_update": int(capture_update),                                                                                              # <<< THOG make the requested settled capture point explicit in bundle metadata
             "max_updates": int(max_updates),
         }
         destination = Path(metadata_path)
@@ -504,10 +546,10 @@ def _metric_rows(
     tables: set[str],
     capture_start: int,
     capture_end: int,
-) -> tuple[list[Dict[str, Any]], Dict[str, str]]:
+) -> tuple[list[Dict[str, Any]], Dict[str, str], list[str]]:
     required = {"GPU_METRICS", "TARGET_INFO_GPU_METRICS"}
     if not required.issubset(tables):
-        return [], {}
+        return [], {}, []
     info_columns = _columns(connection, "TARGET_INFO_GPU_METRICS")
     metric_columns = _columns(connection, "GPU_METRICS")
     metric_id = _first_column(info_columns, "metricId", "id")
@@ -516,7 +558,7 @@ def _metric_rows(
     timestamp = _first_column(metric_columns, "timestamp", "start")
     value = _first_column(metric_columns, "value")
     if None in (metric_id, metric_name, gpu_metric_id, timestamp, value):
-        return [], {}
+        return [], {}, []
     names = {
         int(row[0]): str(row[1])
         for row in connection.execute(
@@ -527,7 +569,11 @@ def _metric_rows(
         "sm_active_pct": ("SMs Active", "sm__cycles_active"),
         "sm_issue_pct": ("SM Issue", "sm__inst_executed"),
         "tensor_active_pct": ("Tensor Active", "sm__pipe_tensor"),
-        "active_sm_unused_warp_slots_pct": ("Active SM Unused Warp Slots", "tpc__warps_inactive_sm_active"),
+        "active_sm_unused_warp_slots_pct": (
+            "Active SM Unused Warp Slots",
+            "Unallocated Warps in Active SM",                                                                                                             # <<< THOG AD10x General Metrics display name for unused active-SM warp slots
+            "tpc__warps_inactive_sm_active",
+        ),
     }
     selected: Dict[int, str] = {}
     mapping: Dict[str, str] = {}
@@ -540,8 +586,9 @@ def _metric_rows(
                 selected[identifier] = key
                 mapping[key] = name
                 break
+    available_metric_names = sorted(set(names.values()))                                                                                             # <<< THOG retain profiler-advertised metric names so missing aliases are diagnosable from the bundle
     if not selected:
-        return [], mapping
+        return [], mapping, available_metric_names
     placeholders = ",".join("?" for _ in selected)
     query = (
         f'SELECT "{timestamp}", "{gpu_metric_id}", "{value}" FROM "GPU_METRICS" '
@@ -559,7 +606,22 @@ def _metric_rows(
             row[key] = float(raw_value)
         except (TypeError, ValueError):
             continue
-    return list(samples_by_time.values()), mapping
+    return list(samples_by_time.values()), mapping, available_metric_names
+
+
+# vvv THOG Main/PREMAT overlap is measured only where actual CUDA kernels execute, never across semantic-span gaps
+def _merged_intervals(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
+    merged: list[tuple[float, float]] = []
+    for left, right in sorted((float(left), float(right)) for left, right in intervals if right > left):
+        if not merged or left > merged[-1][1]:
+            merged.append((left, right))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], right))
+    return merged
+
+
+def _interval_duration(intervals: Iterable[tuple[float, float]]) -> float:
+    return sum(right - left for left, right in _merged_intervals(intervals))
 
 
 def _union_overlap(intervals: Iterable[tuple[float, float]], start: float, end: float) -> float:
@@ -587,11 +649,47 @@ def _union_overlap(intervals: Iterable[tuple[float, float]], start: float, end: 
     return total
 
 
+def _kernel_union_overlap(
+    main_intervals: Iterable[tuple[float, float]],
+    premat_intervals: Iterable[tuple[float, float]],
+) -> float:
+    return sum(
+        _union_overlap(premat_intervals, left, right)
+        for left, right in _merged_intervals(main_intervals)
+    )
+# ^^^ THOG
+
+
 # vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders
 def _mean_metric(samples: Sequence[Mapping[str, Any]], key: str, start_us: float, end_us: float) -> Optional[float]:
     values: list[float] = []
     for row in samples:
         if not start_us <= float(row["time_us"]) <= end_us:
+            continue
+        raw_value = row.get(key)
+        if raw_value in (None, ""):
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append(value)
+    return sum(values) / len(values) if values else None
+# ^^^ THOG
+
+
+# vvv THOG summary counters sample only timestamps at which the labelled Main operation has a CUDA kernel in flight
+def _mean_metric_intervals(
+    samples: Sequence[Mapping[str, Any]],
+    key: str,
+    intervals: Iterable[tuple[float, float]],
+) -> Optional[float]:
+    merged = _merged_intervals(intervals)
+    values: list[float] = []
+    for row in samples:
+        timestamp = float(row["time_us"])
+        if not any(left <= timestamp <= right for left, right in merged):
             continue
         raw_value = row.get(key)
         if raw_value in (None, ""):
@@ -689,7 +787,7 @@ def normalize_nsys_sqlite(
             if op_id is not None:
                 operation_kernel_intervals.setdefault(op_id, []).append((start_us, end_us))
 
-        raw_samples, metric_mapping = _metric_rows(connection, tables, capture_start, capture_end)
+        raw_samples, metric_mapping, available_metric_names = _metric_rows(connection, tables, capture_start, capture_end)
         sample_rows = []
         for sample in raw_samples:
             sample_rows.append({
@@ -701,6 +799,20 @@ def normalize_nsys_sqlite(
             })
         if not sample_rows:
             warnings.append("No requested GPU Metrics samples were found in the Nsight export")
+        missing_metrics = [
+            key
+            for key in (
+                "sm_active_pct",
+                "sm_issue_pct",
+                "tensor_active_pct",
+                "active_sm_unused_warp_slots_pct",
+            )
+            if key not in metric_mapping
+        ]
+        if missing_metrics:
+            warnings.append(
+                "Requested GPU metrics not mapped: " + ", ".join(missing_metrics)
+            )
 
     premat_intervals = [
         (float(row["start_us"]), float(row["end_us"]))
@@ -718,10 +830,11 @@ def normalize_nsys_sqlite(
                 f"{operation.get('family', '')} L{operation.get('layer', '')}"
             )
             continue
-        start_us = min(left for left, _ in kernel_intervals)
-        end_us = max(right for _, right in kernel_intervals)
-        duration_us = end_us - start_us
-        overlap_us = _union_overlap(premat_intervals, start_us, end_us)
+        merged_main_intervals = _merged_intervals(kernel_intervals)                                                                                   # <<< THOG remove internal Main-kernel gaps from duration and PREMAT-overlap accounting
+        start_us = min(left for left, _ in merged_main_intervals)
+        end_us = max(right for _, right in merged_main_intervals)
+        duration_us = _interval_duration(merged_main_intervals)
+        overlap_us = _kernel_union_overlap(merged_main_intervals, premat_intervals)
         summary_rows.append({
             "op_id": int(operation["op_id"]),
             "layer": "" if operation["layer"] is None else int(operation["layer"]),
@@ -731,11 +844,11 @@ def normalize_nsys_sqlite(
             "duration_ms": duration_us / 1000.0,
             "premat_overlap_ms": overlap_us / 1000.0,
             "premat_overlap_pct": 100.0 * overlap_us / duration_us if duration_us > 0.0 else 0.0,
-            "sm_active_pct_mean": _mean_metric(sample_rows, "sm_active_pct", start_us, end_us),
-            "sm_issue_pct_mean": _mean_metric(sample_rows, "sm_issue_pct", start_us, end_us),
-            "tensor_active_pct_mean": _mean_metric(sample_rows, "tensor_active_pct", start_us, end_us),
-            "active_sm_unused_warp_slots_pct_mean": _mean_metric(
-                sample_rows, "active_sm_unused_warp_slots_pct", start_us, end_us
+            "sm_active_pct_mean": _mean_metric_intervals(sample_rows, "sm_active_pct", merged_main_intervals),
+            "sm_issue_pct_mean": _mean_metric_intervals(sample_rows, "sm_issue_pct", merged_main_intervals),
+            "tensor_active_pct_mean": _mean_metric_intervals(sample_rows, "tensor_active_pct", merged_main_intervals),
+            "active_sm_unused_warp_slots_pct_mean": _mean_metric_intervals(
+                sample_rows, "active_sm_unused_warp_slots_pct", merged_main_intervals
             ),
         })
 
@@ -761,6 +874,7 @@ def normalize_nsys_sqlite(
         "capture_frequency_hz": int(capture_frequency_hz),
         "capture_duration_ms": (capture_end - capture_start) / 1_000_000.0,
         "metric_mapping": metric_mapping,
+        "available_gpu_metric_names": available_metric_names,                                                                                             # <<< THOG expose Nsight metric vocabulary used for alias diagnosis
         "warnings": warnings,
         "capture": dict(capture_metadata or {}),
         "run": dict(handoff or {}),
@@ -800,7 +914,7 @@ def normalize_nsys_sqlite(
 def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Optional[int]:
     if os.environ.get(_PROCESSING_CHILD_ENV) == "1":
         return None
-    requested, frequency = processing_requested_from_argv(arguments)
+    requested, frequency, capture_update = processing_requested_from_argv(arguments)
     rewritten_arguments = rewrite_processing_cli_for_core(arguments)
     # vvv THOG train_OWT_core.sh first calls --print-resolved-json with the full processing CLI; keep that metadata probe outside Nsight
     if not requested or processing_invocation_is_non_training(arguments):
@@ -830,7 +944,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     )
     print(
         f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-        "capturing one forward microstep",
+        f"capturing update {capture_update}, first forward microstep",
         flush=True,
     )
     completed = subprocess.run(command, env=environment)
@@ -887,6 +1001,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
 
 __all__ = [
     "PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ",
+    "PROCESSING_DEFAULT_CAPTURE_UPDATE",                                                                                                                  # <<< THOG public default for explicit capture-update diagnostics
     "maybe_reexec_under_nsys",
     "normalize_nsys_sqlite",
     "processing_capture_scope",
