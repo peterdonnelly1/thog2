@@ -1,0 +1,107 @@
+# vvv THOG temporary exact-source transformer for Processing post-processing, matrix summary, and target-aware Premat UI
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    target = ROOT / path
+    text = target.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{path}: expected one occurrence, found {count}: {old[:180]!r}")
+    target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+# 1. Fix the parent-side NameError: retain the normalizer result before using its filename map.
+replace_once(
+    "sheet/premat_processing.py",
+    '''    normalize_nsys_sqlite(\n        sqlite_path,\n        processing_directory,\n        capture_frequency_hz=frequency,\n        handoff=handoff,\n        capture_metadata=capture_metadata,\n    )\n    processing_files = processing_data["metadata"]["files"]''',
+    '''    processing_data = normalize_nsys_sqlite(                                                                                                         # <<< THOG retain normalized payload for artifact-prefixed raw-trace copy\n        sqlite_path,\n        processing_directory,\n        capture_frequency_hz=frequency,\n        handoff=handoff,\n        capture_metadata=capture_metadata,\n    )\n    processing_files = processing_data["metadata"]["files"]''',
+)
+
+# 2. Add stable four-family PREMAT summary data to the normalized Processing payload.
+needle = '''def _kernel_union_overlap(\n    main_intervals: Iterable[tuple[float, float]],\n    premat_intervals: Iterable[tuple[float, float]],\n) -> float:\n    return sum(\n        _union_overlap(premat_intervals, left, right)\n        for left, right in _merged_intervals(main_intervals)\n    )\n# ^^^ THOG\n\n\n# vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders\n'''
+replacement = '''def _kernel_union_overlap(\n    main_intervals: Iterable[tuple[float, float]],\n    premat_intervals: Iterable[tuple[float, float]],\n) -> float:\n    return sum(\n        _union_overlap(premat_intervals, left, right)\n        for left, right in _merged_intervals(main_intervals)\n    )\n# ^^^ THOG\n\n\n# vvv THOG four-family Processing scoreboard; absent PREMAT families remain explicitly unpopulated for matrix-isolation experiments\n_PROCESSING_MATRIX_FAMILIES = ("QKV", "O", "UP", "DOWN")\n\n\ndef _processing_matrix_summary(interval_rows: Sequence[Mapping[str, Any]]) -> Dict[str, Optional[Dict[str, float | int]]]:\n    main_intervals = [\n        (float(row["start_us"]), float(row["end_us"]))\n        for row in interval_rows\n        if row.get("owner") == "MAIN"\n    ]\n    main_consume_intervals = [\n        (float(row["start_us"]), float(row["end_us"]))\n        for row in interval_rows\n        if row.get("owner") == "MAIN" and row.get("operation") == "consume"\n    ]\n    main_busy_us = _interval_duration(main_intervals)\n    result: Dict[str, Optional[Dict[str, float | int]]] = {family: None for family in _PROCESSING_MATRIX_FAMILIES}\n    for family in _PROCESSING_MATRIX_FAMILIES:\n        premat_rows = [\n            row for row in interval_rows\n            if row.get("owner") == "PREMAT"\n            and row.get("operation") == "materialize"\n            and row.get("family") == family\n        ]\n        if not premat_rows:\n            continue\n        premat_intervals = [\n            (float(row["start_us"]), float(row["end_us"]))\n            for row in premat_rows\n        ]\n        premat_busy_us = _interval_duration(premat_intervals)\n        by_op: Dict[int, list[tuple[float, float]]] = {}\n        for row in premat_rows:\n            raw_op_id = row.get("op_id")\n            if raw_op_id in (None, ""):\n                continue\n            by_op.setdefault(int(raw_op_id), []).append(\n                (float(row["start_us"]), float(row["end_us"]))\n            )\n        op_durations_us = [_interval_duration(rows) for rows in by_op.values()]\n        family_consumes = [\n            row for row in interval_rows\n            if row.get("owner") == "MAIN"\n            and row.get("operation") == "consume"\n            and row.get("family") == family\n        ]\n        consume_op_ids = {\n            int(row["op_id"])\n            for row in family_consumes\n            if row.get("op_id") not in (None, "")\n        }\n        ready_leads_us: list[float] = []\n        premat_layers = {\n            int(row["layer"])\n            for row in premat_rows\n            if row.get("layer") not in (None, "")\n        }\n        for layer in sorted(premat_layers):\n            premat_layer = [row for row in premat_rows if row.get("layer") not in (None, "") and int(row["layer"]) == layer]\n            consume_layer = [row for row in family_consumes if row.get("layer") not in (None, "") and int(row["layer"]) == layer]\n            if not premat_layer or not consume_layer:\n                continue\n            ready_leads_us.append(\n                min(float(row["start_us"]) for row in consume_layer)\n                - max(float(row["end_us"]) for row in premat_layer)\n            )\n        consume_overlap_us = _kernel_union_overlap(premat_intervals, main_consume_intervals)\n        any_main_overlap_us = _kernel_union_overlap(premat_intervals, main_intervals)\n        result[family] = {\n            "premat_materialisations": len(by_op),\n            "main_consume_operations": len(consume_op_ids),\n            "premat_gpu_ms_total": premat_busy_us / 1000.0,\n            "mean_reconstruction_ms": (sum(op_durations_us) / len(op_durations_us) / 1000.0) if op_durations_us else 0.0,\n            "main_consume_overlap_ms": consume_overlap_us / 1000.0,\n            "any_main_overlap_ms": any_main_overlap_us / 1000.0,\n            "premat_concurrent_with_main_pct": (100.0 * any_main_overlap_us / premat_busy_us) if premat_busy_us > 0.0 else 0.0,\n            "main_busy_concurrent_with_premat_pct": (100.0 * any_main_overlap_us / main_busy_us) if main_busy_us > 0.0 else 0.0,\n            "mean_ready_lead_ms": (sum(ready_leads_us) / len(ready_leads_us) / 1000.0) if ready_leads_us else 0.0,\n        }\n    return result\n# ^^^ THOG\n\n\n# vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders\n'''
+replace_once("sheet/premat_processing.py", needle, replacement)
+
+replace_once(
+    "sheet/premat_processing.py",
+    '''    sample_fields = (\n        "time_us", "sm_active_pct", "sm_issue_pct", "tensor_active_pct",\n        "active_sm_unused_warp_slots_pct",\n    )\n''',
+    '''    matrix_summary = _processing_matrix_summary(interval_rows)                                                                                      # <<< THOG matrix-isolation scoreboard derived from actual kernel intervals\n    sample_fields = (\n        "time_us", "sm_active_pct", "sm_issue_pct", "tensor_active_pct",\n        "active_sm_unused_warp_slots_pct",\n    )\n''',
+)
+
+replace_once(
+    "sheet/premat_processing.py",
+    '''    processing_data = {\n        "metadata": metadata,\n        "samples": sample_rows,\n        "intervals": interval_rows,\n        "summary": summary_rows,\n    }\n''',
+    '''    processing_data = {\n        "metadata": metadata,\n        "samples": sample_rows,\n        "intervals": interval_rows,\n        "summary": summary_rows,\n        "matrix_summary": matrix_summary,                                                                                                                   # <<< THOG stable QKV/O/UP/DOWN scoreboard for INSTRA\n    }\n''',
+)
+
+# 3. Replace the old row-per-family table with the four-column PREMAT matrix scoreboard.
+replace_once(
+    "sheet/local_dashboard_assets/index.html",
+    '''              <div class="processing-summary-wrap"><table class="processing-summary"><thead><tr><th>Matrix</th><th>N</th><th>Main mean</th><th>PREMAT overlap</th><th>SM active</th><th>SM issue</th><th>Tensor active</th><th>Unused warp slots</th></tr></thead><tbody id="processing_summary_body"></tbody></table></div>\n''',
+    '''              <!-- vvv THOG fixed four-family Processing scoreboard supports matrix-isolation comparisons as QKV/O/UP/DOWN diagnostics are accumulated -->\n              <div class="processing-summary-wrap"><table class="processing-summary processing-matrix-summary"><thead><tr><th>Metric</th><th>QKV</th><th>O</th><th>UP</th><th>DOWN</th></tr></thead><tbody id="processing_matrix_summary_body"></tbody></table></div>\n              <!-- ^^^ THOG -->\n''',
+)
+
+old_js = '''function processing_mean(rows, key) {\n  const values = rows.filter(row => row[key] !== "" && row[key] !== null && row[key] !== undefined).map(row => Number(row[key])).filter(Number.isFinite);\n  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;\n}\n\nfunction processing_format(value, digits = 2, suffix = "") {\n  return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "—";\n}\n\nfunction processing_render_summary(payload) {\n  const body = by_id("processing_summary_body");\n  const families = [...new Set((payload.summary || []).map(row => String(row.family || "?")))];\n  body.innerHTML = families.map(family => {\n    const rows = payload.summary.filter(row => String(row.family || "?") === family);\n    return `<tr><td><strong>${processing_escape(family)}</strong></td><td>${rows.length}</td><td>${processing_format(processing_mean(rows, "duration_ms"), 4, " ms")}</td><td>${processing_format(processing_mean(rows, "premat_overlap_pct"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "sm_active_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "sm_issue_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "tensor_active_pct_mean"), 1, "%")}</td><td>${processing_format(processing_mean(rows, "active_sm_unused_warp_slots_pct_mean"), 1, "%")}</td></tr>`;\n  }).join("") || '<tr><td colspan="8">No labelled Main consuming operations in this capture.</td></tr>';\n}\n'''
+new_js = '''// vvv THOG fixed four-column PREMAT matrix scoreboard; non-targeted families stay blank rather than looking like zero-valued experiments\nfunction processing_format(value, digits = 2, suffix = "") {\n  return Number.isFinite(value) ? `${value.toFixed(digits)}${suffix}` : "—";\n}\n\nfunction processing_render_summary(payload) {\n  const body = by_id("processing_matrix_summary_body");\n  if (!body) return;\n  const families = ["QKV", "O", "UP", "DOWN"];\n  const summary = payload.matrix_summary || {};\n  const value_for = (family, key, formatter) => {\n    const row = summary[family];\n    if (!row) return "—";\n    return formatter(row[key], row);\n  };\n  const signed_ms = value => {\n    const number = Number(value);\n    if (!Number.isFinite(number)) return "—";\n    return `${number >= 0 ? "+" : ""}${number.toFixed(3)} ms`;\n  };\n  const rows = [\n    ["PREMAT materialisations / Main consumes", "premat_materialisations", (value, row) => `${Number(value) || 0}/${Number(row.main_consume_operations) || 0}`],\n    ["PREMAT GPU work", "premat_gpu_ms_total", value => processing_format(Number(value), 3, " ms")],\n    ["Mean reconstruction", "mean_reconstruction_ms", value => processing_format(Number(value), 3, " ms")],\n    ["Overlap with Main consume kernels", "main_consume_overlap_ms", value => processing_format(Number(value), 3, " ms")],\n    ["Overlap with any Main kernel", "any_main_overlap_ms", value => processing_format(Number(value), 3, " ms")],\n    ["PREMAT work concurrent with Main", "premat_concurrent_with_main_pct", value => processing_format(Number(value), 1, "%")],\n    ["Main busy time concurrent with PREMAT", "main_busy_concurrent_with_premat_pct", value => processing_format(Number(value), 2, "%")],\n    ["Mean ready-before-consumption lead", "mean_ready_lead_ms", value => signed_ms(value)],\n  ];\n  body.innerHTML = rows.map(([label, key, formatter]) => (`<tr><th>${processing_escape(label)}</th>${families.map(family => `<td>${processing_escape(value_for(family, key, formatter))}</td>`).join("")}</tr>`)).join("");\n}\n// ^^^ THOG\n'''
+replace_once("sheet/local_dashboard_assets/dashboard_processing.js", old_js, new_js)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_processing.css",
+    '''.processing-summary-wrap { flex: 0 1 122px; max-height: 122px; min-height: 74px; overflow: auto; margin: 0 10px 10px; }\n''',
+    '''.processing-summary-wrap { flex: 0 1 210px; max-height: 210px; min-height: 160px; overflow: auto; margin: 0 10px 10px; } /* <<< THOG reserve enough room for the eight-row four-family Processing scoreboard */\n''',
+)
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_processing.css",
+    '''.processing-summary th:first-child, .processing-summary td:first-child { text-align: left; }\n''',
+    '''.processing-summary th:first-child, .processing-summary td:first-child { text-align: left; }\n.processing-matrix-summary tbody th { min-width: 235px; color: #4f5967; font-weight: 600; } /* <<< THOG keep metric labels readable while four matrix columns remain compact */\n''',
+)
+
+# 4. Make the Premat recap selector-aware: non-target matrices are ordinary Main work, not PREMAT misses.
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.js",
+    '''function premat_families(attention_mode) {\n  return attention_mode === "unfused"\n    ? ["QK", "V", "O", "UP", "DOWN"]\n    : ["QKV", "O", "UP", "DOWN"];\n}\n\nfunction premat_family_label''',
+    '''function premat_families(attention_mode) {\n  return attention_mode === "unfused"\n    ? ["QK", "V", "O", "UP", "DOWN"]\n    : ["QKV", "O", "UP", "DOWN"];\n}\n\n// vvv THOG fixed matrix selector is a PREMAT eligibility filter; non-target matrices must not be rendered as PREMAT misses\nfunction premat_target_family(snapshot, attention_mode) {\n  if (attention_mode !== "fused") return null;\n  const mapping = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"};\n  return mapping[Number(snapshot?.target_matrix)] || null;\n}\n// ^^^ THOG\n\nfunction premat_family_label''',
+)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.js",
+    '''  const families = premat_families(attention_mode);\n  const records = new Map();\n  for (const layer_index of layers) {\n    for (const family of families) {\n      const record = premat_new_record(layer_index, family, attention_mode, snapshot);\n      records.set(record.key, record);\n    }\n  }\n''',
+    '''  const families = premat_families(attention_mode);\n  const target_family = premat_target_family(snapshot, attention_mode);                                                                              // <<< THOG resolve optional matrix selector once per captured pass\n  const records = new Map();\n  for (const layer_index of layers) {\n    for (const family of families) {\n      const record = premat_new_record(layer_index, family, attention_mode, snapshot);\n      record.targeted = target_family === null || family === target_family;                                                                          // <<< THOG distinguish PREMAT eligibility from ordinary Main materialisation\n      if (!record.targeted) {\n        record.path = "not-targeted";\n        record.outcome = "NOT TARGETED";\n        record.trace = ["NOT TARGETED"];\n      }\n      records.set(record.key, record);\n    }\n  }\n''',
+)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.js",
+    '''    const record = records.get(key);\n    if (!record) continue;\n    premat_update_from_event(record, event);\n''',
+    '''    const record = records.get(key);\n    if (!record) continue;\n    if (record.targeted === false) continue;                                                                                                          // <<< THOG ordinary Main events for selector-excluded matrices are not PREMAT failures\n    premat_update_from_event(record, event);\n''',
+)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.js",
+    '''      const state_class = family ? "premat-pending" : "premat-neutral";\n      return `<span class="premat-stage ${state_class}"${attributes} title="${premat_escape(label)}">${premat_escape(label)}</span>`;\n''',
+    '''      const record = family ? model.records.get(premat_candidate_key(layer_index, family)) : null;\n      const state_class = family ? (record?.targeted === false ? "premat-neutral premat-not-targeted" : "premat-pending") : "premat-neutral";\n      const title = record?.targeted === false ? `${label} · NOT TARGETED` : label;                                                                    // <<< THOG selector-excluded matrices remain visible but unmistakably neutral\n      return `<span class="premat-stage ${state_class}"${attributes} title="${premat_escape(title)}">${premat_escape(label)}</span>`;\n''',
+)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.js",
+    '''    ["target", Number(snapshot.target_layer ?? snapshot.target_offset ?? 1) === 10 ? "l+1 → l+0" : `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],\n    ["matrix order", String(snapshot.matrix_order ?? snapshot.weight_matrix_target_order ?? snapshot.target_order ?? "r_to_l")],\n''',
+    '''    ["target", Number(snapshot.target_layer ?? snapshot.target_offset ?? 1) === 10 ? "l+1 → l+0" : `l+${Number(snapshot.target_offset ?? snapshot.target_layer ?? 1)}`],\n    ["matrix target", premat_target_family(snapshot, model.attention_mode) || "all"],                                                                  // <<< THOG make fixed-family isolation explicit in recap summary\n    ["matrix order", String(snapshot.matrix_order ?? snapshot.weight_matrix_target_order ?? snapshot.target_order ?? "r_to_l")],\n''',
+)
+
+replace_once(
+    "sheet/local_dashboard_assets/dashboard_premat.css",
+    '''.premat-pending { background: #f7f9fa; color: #9ba3ad; font-weight: 500; }\n''',
+    '''.premat-pending { background: #f7f9fa; color: #9ba3ad; font-weight: 500; }\n.premat-stage.premat-not-targeted { background: #edf1f4; color: #7b8490 !important; text-shadow: none; opacity: .55; } /* <<< THOG selector-excluded matrices are visible context, not PREMAT misses */\n''',
+)
+
+# 5. Regressions for all three failures/features.
+test_path = ROOT / "tests/test_premat_processing.py"
+with test_path.open("a", encoding="utf-8") as test:
+    test.write('''\n\n# vvv THOG regress parent post-processing handoff, four-family scoreboard, and selector-aware Premat rendering\ndef test_processing_parent_retains_normalizer_payload_for_artifact_copy() -> None:\n    source = Path("sheet/premat_processing.py").read_text(encoding="utf-8")\n    assert "processing_data = normalize_nsys_sqlite(" in source\n    assert 'processing_files = processing_data["metadata"]["files"]' in source\n\n\ndef test_processing_matrix_summary_reserves_all_four_families(tmp_path: Path) -> None:\n    database = tmp_path / "matrix_summary.sqlite"\n    output = tmp_path / "matrix_summary"\n    _synthetic_nsys_database(database)\n    payload = normalize_nsys_sqlite(database, output, capture_frequency_hz=10000, handoff={"run_name": "fixture"})\n    assert list(payload["matrix_summary"]) == ["QKV", "O", "UP", "DOWN"]\n    assert payload["matrix_summary"]["QKV"] is None\n    assert payload["matrix_summary"]["O"] is None\n    assert payload["matrix_summary"]["UP"] is None\n    down = payload["matrix_summary"]["DOWN"]\n    assert down is not None\n    assert down["premat_materialisations"] == 1\n    assert down["premat_gpu_ms_total"] == pytest.approx(0.0008)\n    assert down["main_consume_overlap_ms"] == pytest.approx(0.0008)\n\n\ndef test_processing_dashboard_has_four_matrix_scoreboard() -> None:\n    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")\n    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")\n    assert 'id="processing_matrix_summary_body"' in html\n    assert '<th>QKV</th><th>O</th><th>UP</th><th>DOWN</th>' in html\n    assert '"PREMAT GPU work"' in js\n    assert '"Mean ready-before-consumption lead"' in js\n\n\ndef test_premat_matrix_selector_renders_non_targets_neutrally() -> None:\n    js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")\n    css = Path("sheet/local_dashboard_assets/dashboard_premat.css").read_text(encoding="utf-8")\n    assert "function premat_target_family" in js\n    assert 'record.outcome = "NOT TARGETED"' in js\n    assert "if (record.targeted === false) continue;" in js\n    assert 'premat-not-targeted' in js\n    assert '.premat-stage.premat-not-targeted' in css\n# ^^^ THOG\n''')
+
+log_path = ROOT / "THOG2_DYNAMIC_PREMATERIALISATION_LOG.md"
+with log_path.open("a", encoding="utf-8") as log:
+    log.write("- Fixed artifact-prefixed Processing post-processing regression: the parent now retains `normalize_nsys_sqlite()` output before looking up the prefixed raw-trace filename, preventing the observed `NameError: processing_data is not defined`. Added a stable QKV/O/UP/DOWN Processing matrix scoreboard derived from actual CUDA kernel intervals. Premat Recapitulation now treats `premat_target_matrix` as an eligibility filter: selector-excluded families remain neutral `NOT TARGETED` context rather than being animated/counted as COMPLETE MISS.\\n")
+# ^^^ THOG
