@@ -334,6 +334,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--premat", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_attention_mode", choices=("fused", "unfused"), default="fused")
     parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2, 10), default=1, help="PREMAT relative target: 10 means ordered +1 then +0 sweep")
+# vvv THOG fixed fused-family PREMAT diagnostic selector
+    parser.add_argument(
+        "--premat_target_matrix",
+        type=int,
+        choices=(1, 2, 3, 4),
+        default=None,
+        help="Optional fused-family PREMAT selector: 1=QKV, 2=O, 3=UP, 4=DOWN",
+    )
+# ^^^ THOG
     parser.add_argument("--premat_weight_matrix_target_order", choices=("l_to_r", "r_to_l"), default="r_to_l")
     premat_headroom = parser.add_mutually_exclusive_group()
     premat_headroom.add_argument("--premat_headroom_stay_below_current_peak", action="store_true")
@@ -763,6 +772,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         premat=arguments.premat,
         premat_attention_mode=arguments.premat_attention_mode,
         premat_target_layer=arguments.premat_target_layer,
+        premat_target_matrix=arguments.premat_target_matrix,                                                                                               # <<< THOG carry selected PREMAT matrix into persistent run configuration
         premat_weight_matrix_target_order=arguments.premat_weight_matrix_target_order,
         premat_headroom_stay_below_current_peak=arguments.premat_headroom_stay_below_current_peak,
         premat_headroom_stay_within_global_buffer=arguments.premat_headroom_stay_within_global_buffer,

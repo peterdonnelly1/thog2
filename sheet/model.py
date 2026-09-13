@@ -147,6 +147,7 @@ class SheetGPTConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_target_layer: int = 1
+    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG carry optional fused-family PREMAT selector into model runtime
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
@@ -322,6 +323,7 @@ class SheetGPTConfig:
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
             target_layer=self.premat_target_layer,
+            target_matrix=self.premat_target_matrix,                                                                                                       # <<< THOG validate model-level PREMAT matrix selection
             weight_matrix_target_order=self.premat_weight_matrix_target_order,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
@@ -582,6 +584,7 @@ class SheetGPT(nn.Module):
                 n_head=config.n_head,
                 attention_mode=config.premat_attention_mode,
                 target_layer=config.premat_target_layer,
+                target_matrix=config.premat_target_matrix,                                                                                                 # <<< THOG give PREMAT runtime the selected fused matrix family
                 weight_matrix_target_order=config.premat_weight_matrix_target_order,
                 stay_below_current_peak=(
                     config.premat_headroom_stay_below_current_peak

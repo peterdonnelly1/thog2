@@ -187,6 +187,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     "premat",
     "premat_attention_mode",
     "premat_target_layer",
+    "premat_target_matrix",                                                                                                                                # <<< THOG make target-matrix selection resume compatibility identity
     "premat_weight_matrix_target_order",
     "premat_headroom_stay_below_current_peak",
     "premat_headroom_stay_within_global_buffer",
@@ -296,6 +297,7 @@ class TrainingConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_target_layer: int = 1
+    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector through training/checkpoint config
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
@@ -588,6 +590,7 @@ class TrainingConfig:
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
             target_layer=self.premat_target_layer,
+            target_matrix=self.premat_target_matrix,                                                                                                       # <<< THOG validate selected PREMAT matrix in TrainingConfig
             weight_matrix_target_order=self.premat_weight_matrix_target_order,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
@@ -1071,6 +1074,7 @@ class TrainingConfig:
                     "premat": self.premat,
                     "premat_attention_mode": self.premat_attention_mode,
                     "premat_target_layer": self.premat_target_layer,
+                    "premat_target_matrix": self.premat_target_matrix,                                                                                     # <<< THOG pass selected PREMAT matrix into SheetGPTConfig
                     "premat_weight_matrix_target_order": self.premat_weight_matrix_target_order,
                     "premat_headroom_stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                     "premat_headroom_stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
@@ -1217,6 +1221,7 @@ class TrainingConfig:
                 "enabled": self.premat,
                 "attention_mode": self.premat_attention_mode,
                 "target_layer": self.premat_target_layer,
+                "target_matrix": self.premat_target_matrix,                                                                                                # <<< THOG expose selected PREMAT matrix in compact training identity
                 "weight_matrix_target_order": self.premat_weight_matrix_target_order,
                 "stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                 "stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,

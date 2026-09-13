@@ -15,6 +15,10 @@ from torch import Tensor
 PREMAT_SWITCHES = ("enabled", "disabled")
 PREMAT_ATTENTION_MODES = ("fused", "unfused")
 PREMAT_TARGET_LAYERS = (0, 1, 2, 10)
+# vvv THOG fixed matrix numbering is deliberately independent of l_to_r/r_to_l scheduling order
+PREMAT_TARGET_MATRICES = (1, 2, 3, 4)
+PREMAT_FUSED_TARGET_MATRIX_FAMILIES = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"}
+# ^^^ THOG
 PREMAT_WEIGHT_MATRIX_TARGET_ORDERS = ("l_to_r", "r_to_l")
 PREMAT_CUDA_STREAM_PRIORITIES = ("normal", "high")
 PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES = (
@@ -44,6 +48,7 @@ def validate_premat_configuration(
     shadow_mode: bool = False,
     logging: str,
     instra: str,
+    target_matrix: Optional[int] = None,                                                                                                                   # <<< THOG optional fused-family PREMAT selector; omitted preserves all-matrix scheduling
 ) -> None:
     for name, value in (("premat", premat), ("premat_logging", logging), ("premat_instra", instra)):
         if value not in PREMAT_SWITCHES:
@@ -69,6 +74,13 @@ def validate_premat_configuration(
             f"premat_target_layer must be one of {PREMAT_TARGET_LAYERS}; "
             f"got {target_layer!r}"
         )
+    # vvv THOG matrix-specific targeting is intentionally fused-only until an unfused experiment is requested
+    if target_matrix is not None:
+        if isinstance(target_matrix, bool) or target_matrix not in PREMAT_TARGET_MATRICES:
+            raise ValueError(f"premat_target_matrix must be one of {PREMAT_TARGET_MATRICES} or None; got {target_matrix!r}")
+        if attention_mode != "fused":
+            raise ValueError("premat_target_matrix currently requires premat_attention_mode=fused")
+    # ^^^ THOG
     if weight_matrix_target_order not in PREMAT_WEIGHT_MATRIX_TARGET_ORDERS:
         raise ValueError(
             "premat_weight_matrix_target_order must be one of "
@@ -530,6 +542,7 @@ class PrematRuntime:
         enable_gpu_timing_diagnostic: bool = False,
         shadow_mode: bool = False,
         logging_enabled: bool,
+        target_matrix: Optional[int] = None,                                                                                                               # <<< THOG runtime filter for one fixed fused matrix family
     ) -> None:
         self._materialize = materialize
         self._attach = attach or (lambda _family, _layer_index, tensor: tensor)
@@ -540,6 +553,7 @@ class PrematRuntime:
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
         self._allocator_aware_admission = allocator_aware_admission
         self._target_layer = int(target_layer)
+        self._target_matrix = None if target_matrix is None else int(target_matrix)                                                                        # <<< THOG retain optional fixed matrix-family selector
         self._weight_matrix_target_order = weight_matrix_target_order
         self._cuda_stream_priority = cuda_stream_priority
         self._diagnostic_layer_delay_ms = float(diagnostic_layer_delay_ms)
@@ -1961,6 +1975,7 @@ class PrematRuntime:
             "materialisation_element_bytes": self._dtype_bytes,
             "target_offset": self._target_layer,
             "target_layer": self._target_layer,
+            "target_matrix": self._target_matrix,                                                                                                          # <<< THOG report active matrix-family selector in PREMAT telemetry
             "matrix_order": self._weight_matrix_target_order,
             "weight_matrix_target_order": self._weight_matrix_target_order,
             "cuda_stream_priority": self._cuda_stream_priority,
@@ -2999,6 +3014,12 @@ class PrematRuntime:
                     for item in ordered
                     if item.state == CandidateState.UNAVAILABLE
                     and item.layer_index == target_layer_index
+                    # vvv THOG target_matrix filters PREMAT launch eligibility only; MAIN fallback candidates remain intact
+                    and (
+                        self._target_matrix is None
+                        or item.family == PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                    )
+                    # ^^^ THOG
                     and item.sequence not in excluded
                 ),
                 None,
@@ -3236,6 +3257,7 @@ class PrematRuntime:
                 if candidate_target_offset is None
                 else candidate_target_offset
             ),
+            "target_matrix": self._target_matrix,                                                                                                          # <<< THOG retain matrix selector on every detailed PREMAT event
             "target_order": self._weight_matrix_target_order,
             "queue_depth": self._queue_depth(),
             "cumulative_charged_bytes": self._cumulative_charged_bytes(),

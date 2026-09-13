@@ -122,6 +122,7 @@ def _runtime(
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
     target_layer: int = 1,
+    target_matrix: int | None = None,                                                                                                                      # <<< THOG test helper can select one fixed fused PREMAT family
     weight_matrix_target_order: str = "r_to_l",
     cuda_stream_priority: str = "normal",
     diagnostic_layer_delay_ms: float = 0.0,
@@ -145,6 +146,7 @@ def _runtime(
         n_head=2,
         attention_mode=attention_mode,
         target_layer=target_layer,
+        target_matrix=target_matrix,                                                                                                                       # <<< THOG exercise matrix-specific PREMAT runtime filtering
         weight_matrix_target_order=weight_matrix_target_order,
         stay_below_current_peak=stay_below_current_peak,
         gpu_memory_buffer_gb=0.0,
@@ -275,7 +277,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_fifteen_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_sixteen_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -288,6 +290,7 @@ def test_public_cli_exposes_exactly_the_fifteen_premat_options() -> None:
         "--premat_allocator_aware_admission",
         "--premat_attention_mode",
         "--premat_target_layer",
+        "--premat_target_matrix",                                                                                                                          # <<< THOG new fused-family selector is an intentional core PREMAT option
         "--premat_weight_matrix_target_order",
         "--premat_headroom_stay_below_current_peak",
         "--premat_headroom_stay_within_global_buffer",
@@ -301,6 +304,65 @@ def test_public_cli_exposes_exactly_the_fifteen_premat_options() -> None:
         "--premat_retain_detailed_premat_history",
     }
 
+
+# vvv THOG matrix-specific targeting must isolate PREMAT work without removing ordinary MAIN candidates
+@pytest.mark.parametrize(
+    ("target_matrix", "expected_family"),
+    ((1, "QKV"), (2, "O"), (3, "UP"), (4, "DOWN")),
+)
+def test_target_matrix_launches_only_the_selected_fused_family(monkeypatch, target_matrix, expected_family) -> None:
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        target_layer=1,
+        target_matrix=target_matrix,
+        weight_matrix_target_order="r_to_l",
+    )
+    runtime.layer_start(3)
+    assert calls == [(expected_family, 5)]
+    report = runtime.report()
+    assert report["target_matrix"] == target_matrix
+    layer_candidates = [item for item in report["candidates"] if item["layer_index"] == 5]
+    assert {item["family"] for item in layer_candidates} == {"QKV", "O", "UP", "DOWN"}
+    assert [item["family"] for item in layer_candidates if item["owner"] == "premat"] == [expected_family]
+
+
+def test_target_matrix_is_rejected_for_unfused_attention() -> None:
+    with pytest.raises(ValueError, match="requires premat_attention_mode=fused"):
+        validate_premat_configuration(
+            premat="enabled",
+            attention_mode="unfused",
+            target_layer=1,
+            weight_matrix_target_order="r_to_l",
+            stay_below_current_peak=True,
+            stay_within_global_buffer=False,
+            gpu_memory_buffer_gb=1.0,
+            cuda_stream_priority="normal",
+            diagnostic_layer_delay_ms=0.0,
+            logging="disabled",
+            instra="disabled",
+            target_matrix=1,
+        )
+
+
+def test_target_matrix_cli_propagates_to_training_config(tmp_path) -> None:
+    parser = build_parser()
+    arguments = parser.parse_args([
+        "--model-type", "sheet",
+        "--premat", "enabled",
+        "--premat_attention_mode", "fused",
+        "--premat_target_layer", "0",
+        "--premat_target_matrix", "2",
+        "--device", "cuda",
+    ])
+    run_config = config_from_arguments(arguments)
+    assert run_config.premat_target_matrix == 2
+    training_config = run_config.to_training_config(vocab_size=32, world_size=1, out_dir=tmp_path)
+    assert training_config.premat_target_matrix == 2
+    assert training_config.model_arguments()["premat_target_matrix"] == 2
+
+
+# ^^^ THOG
 
 def test_wrapper_reclaims_unused_allocator_cache_for_premat_by_default() -> None:
     wrapper = Path("train_OWT_core.sh").read_text(encoding="utf-8")

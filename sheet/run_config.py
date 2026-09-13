@@ -234,6 +234,7 @@ class OwtRunConfig:
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
     premat_target_layer: int = 1
+    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector in run identity
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
@@ -580,6 +581,7 @@ class OwtRunConfig:
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
             target_layer=self.premat_target_layer,
+            target_matrix=self.premat_target_matrix,                                                                                                       # <<< THOG validate optional fused-family PREMAT selector
             weight_matrix_target_order=self.premat_weight_matrix_target_order,
             stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
@@ -1437,6 +1439,7 @@ class OwtRunConfig:
             premat=self.premat,
             premat_attention_mode=self.premat_attention_mode,
             premat_target_layer=self.premat_target_layer,
+            premat_target_matrix=self.premat_target_matrix,                                                                                                # <<< THOG propagate selected PREMAT matrix into TrainingConfig
             premat_weight_matrix_target_order=self.premat_weight_matrix_target_order,
             premat_headroom_stay_below_current_peak=self.premat_headroom_stay_below_current_peak,
             premat_headroom_stay_within_global_buffer=self.premat_headroom_stay_within_global_buffer,
