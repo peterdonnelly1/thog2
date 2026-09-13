@@ -38,6 +38,30 @@ window.processing_apply_detail_tab = charts_selected => {
   processing_view.charts_tab_visible = Boolean(charts_selected);
   processing_sync_visibility();
 };
+
+// vvv THOG Processing Plotly mounts follow actual card geometry; this closes the maximize/restore race left by one-shot layout resizing
+const processing_resize_observers = [];
+
+function processing_resize_ready_card(card) {
+  if (!card || card.offsetParent === null) return;
+  const mount = card.querySelector(".plot-mount");
+  if (!mount || mount.dataset.plotReady !== "true") return;
+  requestAnimationFrame(() => {
+    if (card.offsetParent !== null && mount.dataset.plotReady === "true") Plotly.Plots.resize(mount);
+  });
+}
+
+function processing_install_resize_observers() {
+  if (typeof ResizeObserver !== "function" || processing_resize_observers.length) return;
+  for (const chart_name of ["processing_timeline", "processing_contention", "processing_throughput"]) {
+    const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
+    if (!card) continue;
+    const observer = new ResizeObserver(() => processing_resize_ready_card(card));
+    observer.observe(card);
+    processing_resize_observers.push(observer);
+  }
+}
+// ^^^ THOG
 // ^^^ THOG
 
 function processing_escape(value) {
@@ -393,5 +417,8 @@ async function processing_refresh() {
 }
 
 processing_view.timer = window.setInterval(processing_refresh, 1500);
-window.addEventListener("load", processing_refresh);
+window.addEventListener("load", () => {
+  processing_install_resize_observers();                                                                                                                  // <<< THOG observe Processing card geometry before first completed-trace render
+  processing_refresh();
+});
 // ^^^ THOG

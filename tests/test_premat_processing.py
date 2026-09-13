@@ -373,3 +373,14 @@ def test_processing_matrix_summary_has_legacy_interval_fallback() -> None:
     assert "function processing_matrix_summary_from_intervals" in js
     assert "payload.matrix_summary || processing_matrix_summary_from_intervals(payload.intervals || [])" in js
 # ^^^ THOG
+
+
+# vvv THOG Processing maximize/restore must resize Plotly from observed final card geometry, not one timing-sensitive callback
+def test_processing_charts_observe_card_geometry_for_plotly_resize() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert "const processing_resize_observers = []" in js
+    assert "new ResizeObserver(() => processing_resize_ready_card(card))" in js
+    assert "observer.observe(card)" in js
+    assert "Plotly.Plots.resize(mount)" in js
+    assert "processing_install_resize_observers();" in js
+# ^^^ THOG
