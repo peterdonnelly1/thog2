@@ -5,7 +5,7 @@ on:
       - THOG2_Dynamic_Prematerialisation_Enhancement
 jobs:
   apply_and_verify:
-    if: github.event.head_commit.message == 'Add temporary Processing group overlap verification'
+    if: github.event.head_commit.message == 'Retry Processing group overlap verification'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -20,7 +20,18 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -q pytest torch matplotlib plotly
       - name: Apply update
-        run: python tmp_processing_group_overlap_summary_fix.py
+        run: |
+          python tmp_processing_group_overlap_summary_fix.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_premat_processing.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''def test_premat_matrix_selector_renders_non_targets_neutrally() -> None:\n    js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")\n    css = Path("sheet/local_dashboard_assets/dashboard_premat.css").read_text(encoding="utf-8")\n    assert "function premat_target_family" in js\n    assert 'record.outcome = "NOT TARGETED"' in js\n    assert "if (record.targeted === false) continue;" in js\n    assert 'premat-not-targeted' in js\n    assert '.premat-stage.premat-not-targeted' in css\n'''
+          new = '''def test_premat_matrix_selector_renders_non_targets_as_main_without_counting_misses() -> None:\n    js = Path("sheet/local_dashboard_assets/dashboard_premat.js").read_text(encoding="utf-8")\n    css = Path("sheet/local_dashboard_assets/dashboard_premat.css").read_text(encoding="utf-8")\n    assert "function premat_target_family" in js\n    assert 'record.outcome = targeted ? "COMPLETE MISS" : "NOT TARGETED"' in js\n    assert 'record.path = targeted ? "main" : "not-targeted-main"' in js\n    assert "if (record.targeted === false) continue;" not in js\n    assert 'premat-not-targeted' in js\n    assert '.premat-stage.premat-not-targeted' in css\n'''
+          if text.count(old) != 1:
+              raise RuntimeError(f'expected one stale selector test block, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Verify
         run: |
           python -m compileall -q tests/test_premat_processing.py
