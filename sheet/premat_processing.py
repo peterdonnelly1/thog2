@@ -189,6 +189,7 @@ def register_processing_handoff(
         "config": {
             "premat": config.get("premat"),
             "premat_target_layer": config.get("premat_target_layer"),
+            "premat_target_matrix": config.get("premat_target_matrix"),                                                                                    # <<< THOG record fixed PREMAT matrix selector in Processing bundle metadata
             "premat_attention_mode": config.get("premat_attention_mode"),
             "premat_processing_logging": config.get("premat_processing_logging"),
             "premat_processing_logging_capture_frequency_hz": config.get(

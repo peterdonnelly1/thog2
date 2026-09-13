@@ -170,6 +170,9 @@ function processing_render_summary(payload) {
 function processing_render(payload) {
   const group = by_id("processing_chart_group");
   group.hidden = false;
+  // vvv THOG static Processing cards participate in the same saved-size contract as ordinary INSTRA charts
+  if (typeof apply_saved_panel_sizes === "function") apply_saved_panel_sizes();
+  // ^^^ THOG
   const capture = payload.metadata?.capture || {};
   by_id("processing_step").textContent = String(capture.optimizer_update ?? "—");
   const warning_count = (payload.metadata?.warnings || []).length;
@@ -178,6 +181,14 @@ function processing_render(payload) {
   processing_render_timeline(payload);
   processing_render_contention(payload);
   processing_render_summary(payload);
+  // vvv THOG Plotly must re-measure after the hidden Processing group becomes visible and after any restored panel geometry is applied
+  requestAnimationFrame(() => {
+    for (const chart_name of ["processing_timeline", "processing_contention"]) {
+      const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
+      if (card && typeof resize_plot_in_card === "function") resize_plot_in_card(card);
+    }
+  });
+  // ^^^ THOG
 }
 
 async function processing_refresh() {

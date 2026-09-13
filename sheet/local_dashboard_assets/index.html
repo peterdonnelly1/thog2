@@ -218,10 +218,25 @@
               <a id="processing_download_bundle" hidden>Bundle ZIP</a><a id="processing_download_samples" hidden>Samples CSV</a><a id="processing_download_intervals" hidden>Intervals CSV</a><a id="processing_download_summary" hidden>Summary CSV</a><a id="processing_download_metadata" hidden>Metadata JSON</a><a id="processing_download_raw" hidden>Raw nsys</a>
             </div>
           </header>
-          <div class="processing-grid">
-            <article class="processing-card"><h2>GPU processing timeline</h2><div class="processing-plot" id="processing_timeline_plot"></div></article>
-            <article class="processing-card"><h2>Main duration vs PREMAT overlap</h2><div class="processing-plot processing-contention-plot" id="processing_contention_plot"></div><div class="processing-summary-wrap"><table class="processing-summary"><thead><tr><th>Matrix</th><th>N</th><th>Main mean</th><th>PREMAT overlap</th><th>SM active</th><th>SM issue</th><th>Tensor active</th><th>Unused warp slots</th></tr></thead><tbody id="processing_summary_body"></tbody></table></div></article>
+          <!-- vvv THOG Processing plots use the established INSTRA chart-card contract so resize/maximize/reset/persistence work identically -->
+          <div class="processing-grid chart-grid">
+            <article class="processing-card chart-card processing-timeline-card" data-chart="processing_timeline">
+              <header class="chart-card-header"><div class="chart-heading-copy"><h2>GPU processing timeline</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_timeline" type="button" aria-label="Maximize GPU processing timeline" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+              <div class="processing-plot" id="processing_timeline_plot"></div>
+              <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+              <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+              <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
+            </article>
+            <article class="processing-card chart-card processing-contention-card" data-chart="processing_contention">
+              <header class="chart-card-header"><div class="chart-heading-copy"><h2>Main duration vs PREMAT overlap</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="processing_contention" type="button" aria-label="Maximize Main duration vs PREMAT overlap" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+              <div class="processing-plot processing-contention-plot" id="processing_contention_plot"></div>
+              <div class="processing-summary-wrap"><table class="processing-summary"><thead><tr><th>Matrix</th><th>N</th><th>Main mean</th><th>PREMAT overlap</th><th>SM active</th><th>SM issue</th><th>Tensor active</th><th>Unused warp slots</th></tr></thead><tbody id="processing_summary_body"></tbody></table></div>
+              <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+              <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+              <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
+            </article>
           </div>
+          <!-- ^^^ THOG -->
         </section>
         <!-- ^^^ THOG -->
         <section class="chart-group" id="depth_chart_group" data-chart-group="depth">

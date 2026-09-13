@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from sheet.premat_processing import (
     normalize_nsys_sqlite,
     processing_invocation_is_non_training,
     processing_requested_from_argv,
+    register_processing_handoff,
     rewrite_processing_cli_for_core,
     validate_processing_configuration,
 )
@@ -88,6 +90,30 @@ def test_processing_configuration_is_cuda_but_not_premat_dependent() -> None:
         validate_processing_configuration("enabled", 10000, "cpu")
     with pytest.raises(ValueError, match="capture_frequency_hz"):
         validate_processing_configuration("enabled", 9, "cuda")
+
+
+def test_processing_handoff_records_target_matrix(tmp_path: Path, monkeypatch) -> None:
+    handoff_path = tmp_path / "handoff.json"
+    monkeypatch.setenv("THOG2_PREMAT_PROCESSING_HANDOFF", str(handoff_path))
+    register_processing_handoff(
+        tmp_path / "run",
+        run_name="fixture",
+        config={"premat": "enabled", "premat_target_layer": 1, "premat_target_matrix": 2, "premat_attention_mode": "fused"},
+    )
+    payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+    assert payload["config"]["premat_target_layer"] == 1
+    assert payload["config"]["premat_target_matrix"] == 2
+
+
+def test_processing_charts_use_standard_instra_panel_contract() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
+    for chart_name in ("processing_timeline", "processing_contention"):
+        assert f'data-chart="{chart_name}"' in html
+        assert f'data-maximize="{chart_name}"' in html
+    assert html.count('class="panel-resizer panel-resizer-corner"') >= 3
+    assert ".processing-card.chart-card" in css
+    assert ".processing-grid.chart-grid" in css
 
 
 def _synthetic_nsys_database(path: Path) -> None:
