@@ -30,11 +30,21 @@ jobs:
           from pathlib import Path
           path = Path('tmp_fix_processing_capture_ui_metrics.py')
           text = path.read_text()
-          insertion = '''\n\ndef append_end(path: str, addition: str) -> None:\n    target = ROOT / path\n    text = target.read_text(encoding="utf-8")\n    if addition in text:\n        raise RuntimeError(f"{path}: addition already present")\n    target.write_text(text.rstrip() + "\\n" + addition, encoding="utf-8")\n'''
+          insertion = '''\n\ndef append_end(path: str, addition: str) -> None:\n    target = ROOT / path\n    text = target.read_text(encoding="utf-8")\n    if addition in text:\n        raise RuntimeError(f"{path}: addition already present")\n    target.write_text(text.rstrip() + "\\n" + addition, encoding="utf-8")\n\n\ndef insert_before(path: str, marker: str, addition: str) -> None:\n    target = ROOT / path\n    text = target.read_text(encoding="utf-8")\n    if addition in text:\n        raise RuntimeError(f"{path}: addition already present")\n    count = text.count(marker)\n    if count != 1:\n        raise RuntimeError(f"{path}: expected one insert marker, found {count}")\n    target.write_text(text.replace(marker, addition + marker, 1), encoding="utf-8")\n'''
           needle = '''def append_once(path: str, marker: str, addition: str) -> None:\n    target = ROOT / path\n    text = target.read_text(encoding="utf-8")\n    if addition in text:\n        raise RuntimeError(f"{path}: addition already present")\n    count = text.count(marker)\n    if count != 1:\n        raise RuntimeError(f"{path}: expected one append marker, found {count}")\n    target.write_text(text.replace(marker, marker + addition, 1), encoding="utf-8")\n'''
           if needle not in text:
               raise SystemExit('append_once helper not found')
           text = text.replace(needle, needle + insertion, 1)
+          text = text.replace(
+              'append_once(\n    "tests/test_premat_processing.py",\n    \'\'\'def test_processing_handoff_records_target_matrix(tmp_path: Path, monkeypatch) -> None:\\n\'\'\',\n',
+              'insert_before(\n    "tests/test_premat_processing.py",\n    \'\'\'def test_processing_handoff_records_target_matrix(tmp_path: Path, monkeypatch) -> None:\\n\'\'\',\n',
+              1,
+          )
+          text = text.replace(
+              'append_once(\n    "tests/test_premat_processing.py",\n    \'\'\'def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -> None:\\n\'\'\',\n',
+              'insert_before(\n    "tests/test_premat_processing.py",\n    \'\'\'def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -> None:\\n\'\'\',\n',
+              1,
+          )
           start = text.index('# Add a focused gap-overlap regression')
           end = text.index('# Implementation log entry.', start)
           block = text[start:end]
