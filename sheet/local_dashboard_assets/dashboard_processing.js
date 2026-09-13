@@ -230,7 +230,7 @@ async function processing_render_throughput(payload) {
     const colour = colour_for_run(entry.run_id);
     return {
       type: "scatter",
-      mode: entry.rows.length === 1 ? "markers" : "lines+markers",
+      mode: entry.rows.length === 1 ? "markers" : "lines",                                                                                     // <<< THOG match ordinary INSTRA curves: no per-point markers on multi-point throughput lines
       name,
       meta: {instra_workspace_run_id: entry.run_id},
       x: entry.rows.map(row => Number(row.optimizer_update)),

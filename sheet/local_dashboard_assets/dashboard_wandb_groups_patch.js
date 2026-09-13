@@ -217,6 +217,11 @@ window.addEventListener("load", () => {
         const section = update_group_section(summary);
         parent.insertBefore(section, depth_group || null);
       }
+      // vvv THOG Processing is an ordinary chart group in the stack: after Val (or Train when Val is unavailable), before Memory/System
+      const processing_group = by_id("processing_chart_group");
+      const processing_anchor = group_section("val") || group_section("train");
+      if (processing_group && processing_anchor) processing_anchor.after(processing_group);
+      // ^^^ THOG
     };
 
     const ordered_metric_figure = (figure, chart_name) => {

@@ -434,3 +434,14 @@ def test_processing_throughput_workspace_multirun_contract() -> None:
     assert "processing_render_contention(payload)" in processing_js
     assert "processing_render_summary(payload)" in processing_js
 # ^^^ THOG
+
+
+# vvv THOG Processing participates in the ordinary group stack and throughput follows ordinary INSTRA line presentation
+def test_processing_group_sits_after_val_and_throughput_has_no_curve_markers() -> None:
+    group_js = Path("sheet/local_dashboard_assets/dashboard_wandb_groups_patch.js").read_text(encoding="utf-8")
+    processing_js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert 'const processing_anchor = group_section("val") || group_section("train");' in group_js
+    assert 'processing_anchor.after(processing_group)' in group_js
+    assert 'entry.rows.length === 1 ? "markers" : "lines"' in processing_js
+    assert 'entry.rows.length === 1 ? "markers" : "lines+markers"' not in processing_js
+# ^^^ THOG
