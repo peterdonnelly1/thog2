@@ -39,5 +39,9 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add sheet/premat_processing.py sheet/local_dashboard_assets/dashboard_processing.css tests/test_premat_processing.py THOG2_DYNAMIC_PREMATERIALISATION_LOG.md
           git commit -m 'Fix Processing maximize and prefix artifacts'
-          git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement
+          for attempt in 1 2 3; do
+            git push origin HEAD:THOG2_Dynamic_Prematerialisation_Enhancement && exit 0
+            sleep $((attempt * 5))
+          done
+          exit 1
 # ^^^ THOG
