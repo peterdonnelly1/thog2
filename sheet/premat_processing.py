@@ -865,9 +865,23 @@ def normalize_nsys_sqlite(
         "premat_overlap_ms", "premat_overlap_pct", "sm_active_pct_mean", "sm_issue_pct_mean",
         "tensor_active_pct_mean", "active_sm_unused_warp_slots_pct_mean",
     )
-    _write_csv(output_directory / "processing_samples.csv", sample_rows, sample_fields)
-    _write_csv(output_directory / "processing_intervals.csv", interval_rows, interval_fields)
-    _write_csv(output_directory / "processing_summary.csv", summary_rows, summary_fields)
+    # vvv THOG user-facing Processing artifacts carry the canonical run artifact as a filename prefix; processing_data.json remains a private fixed INSTRA lookup
+    run_artifact = str((handoff or {}).get("run_name", "")).strip()
+    if "/" in run_artifact or "\\" in run_artifact:
+        run_artifact = Path(run_artifact).name
+    prefix = f"{run_artifact}_" if run_artifact else ""
+    processing_files = {
+        "samples": f"{prefix}processing_samples.csv",
+        "intervals": f"{prefix}processing_intervals.csv",
+        "summary": f"{prefix}processing_summary.csv",
+        "metadata": f"{prefix}processing_metadata.json",
+        "bundle": f"{prefix}processing_bundle.zip",
+        "raw_trace": f"{prefix}processing_trace.nsys-rep",
+    }
+    _write_csv(output_directory / processing_files["samples"], sample_rows, sample_fields)
+    _write_csv(output_directory / processing_files["intervals"], interval_rows, interval_fields)
+    _write_csv(output_directory / processing_files["summary"], summary_rows, summary_fields)
+    # ^^^ THOG
 
     metadata = {
         "schema_version": PROCESSING_SCHEMA_VERSION,
@@ -878,16 +892,9 @@ def normalize_nsys_sqlite(
         "warnings": warnings,
         "capture": dict(capture_metadata or {}),
         "run": dict(handoff or {}),
-        "files": {
-            "samples": "processing_samples.csv",
-            "intervals": "processing_intervals.csv",
-            "summary": "processing_summary.csv",
-            "metadata": "processing_metadata.json",
-            "bundle": "processing_bundle.zip",
-            "raw_trace": "processing_trace.nsys-rep",
-        },
+        "files": dict(processing_files),                                                                                                                        # <<< THOG expose artifact-prefixed downloadable Processing filenames to INSTRA
     }
-    (output_directory / "processing_metadata.json").write_text(
+    (output_directory / processing_files["metadata"]).write_text(
         json.dumps(metadata, indent=2, sort_keys=True)
     )
     processing_data = {
@@ -899,12 +906,12 @@ def normalize_nsys_sqlite(
     (output_directory / "processing_data.json").write_text(
         json.dumps(processing_data, separators=(",", ":"), allow_nan=False)
     )
-    with zipfile.ZipFile(output_directory / "processing_bundle.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output_directory / processing_files["bundle"], "w", zipfile.ZIP_DEFLATED) as archive:
         for name in (
-            "processing_samples.csv",
-            "processing_intervals.csv",
-            "processing_summary.csv",
-            "processing_metadata.json",
+            processing_files["samples"],
+            processing_files["intervals"],
+            processing_files["summary"],
+            processing_files["metadata"],
             "processing_data.json",
         ):
             archive.write(output_directory / name, arcname=name)
@@ -990,10 +997,11 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         handoff=handoff,
         capture_metadata=capture_metadata,
     )
-    shutil.copy2(report_path, processing_directory / "processing_trace.nsys-rep")
+    processing_files = processing_data["metadata"]["files"]                                                                                                   # <<< THOG consume the normalizer's canonical artifact-prefixed filenames
+    shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])
     print(
         "THOG2 PREMAT processing data: "
-        f"{processing_directory / 'processing_bundle.zip'}",
+        f"{processing_directory / processing_files['bundle']}",
         flush=True,
     )
     return int(completed.returncode)

@@ -15,7 +15,7 @@
 /* vvv THOG Processing maximized cards consume the remaining INSTRA chart pane instead of retaining their normal 420px geometry */
 .processing-group.maximized { height: 100% !important; min-height: 0 !important; padding-bottom: 0; overflow: hidden; }
 .processing-group.maximized > .processing-grid.chart-grid.is-maximized { flex: 1 1 auto; height: auto; min-height: 0; align-content: stretch; }
-.processing-group.maximized > .processing-grid.chart-grid.is-maximized > .processing-card.chart-card.maximized { flex: 1 1 auto !important; width: 100% !important; height: auto !important; min-height: 0 !important; max-height: none !important; }
+.processing-group.maximized > .processing-grid.chart-grid.is-maximized > .processing-card.chart-card.maximized { flex: 1 1 auto !important; width: 100% !important; height: 100% !important; min-height: 0 !important; max-height: none !important; } /* <<< THOG preserve standard INSTRA full-pane maximize height instead of reverting to ordinary Processing card height */
 /* ^^^ THOG */
 .processing-plot-shell { min-width: 0; min-height: 140px; flex: 1 1 auto; }                                                      /* THOG standard INSTRA plot shell for Processing */
 .processing-plot { width: 100%; min-width: 0; min-height: 140px; height: 100%; overflow: hidden; }

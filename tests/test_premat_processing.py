@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -161,7 +162,8 @@ def test_processing_chart_order_and_maximize_geometry() -> None:
     css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
     assert html.index('data-chart="processing_timeline"') < html.index('data-chart="processing_contention"') < html.index('data-chart="processing_throughput"')
     assert ".processing-group.maximized" in css
-    assert "height: auto !important" in css
+    assert "height: 100% !important" in css
+    assert "height: auto !important" not in css
     assert "align-content: stretch" in css
 # ^^^ THOG
 
@@ -248,17 +250,32 @@ def test_processing_normalizer_emits_graph_and_download_data(tmp_path: Path) -> 
     assert summary["premat_overlap_ms"] == pytest.approx(0.0008)
     assert summary["premat_overlap_pct"] == pytest.approx(40.0)
     expected = {
-        "processing_samples.csv",
-        "processing_intervals.csv",
-        "processing_summary.csv",
-        "processing_metadata.json",
+        "fixture_processing_samples.csv",
+        "fixture_processing_intervals.csv",
+        "fixture_processing_summary.csv",
+        "fixture_processing_metadata.json",
         "processing_data.json",
-        "processing_bundle.zip",
+        "fixture_processing_bundle.zip",
     }
     assert expected.issubset({path.name for path in output.iterdir()})
-    with (output / "processing_summary.csv").open() as source:
+    assert payload["metadata"]["files"] == {
+        "samples": "fixture_processing_samples.csv",
+        "intervals": "fixture_processing_intervals.csv",
+        "summary": "fixture_processing_summary.csv",
+        "metadata": "fixture_processing_metadata.json",
+        "bundle": "fixture_processing_bundle.zip",
+        "raw_trace": "fixture_processing_trace.nsys-rep",
+    }
+    with (output / "fixture_processing_summary.csv").open() as source:
         rows = list(csv.DictReader(source))
     assert rows[0]["family"] == "QKV"
+    with zipfile.ZipFile(output / "fixture_processing_bundle.zip") as archive:
+        members = set(archive.namelist())
+    assert "fixture_processing_samples.csv" in members
+    assert "fixture_processing_intervals.csv" in members
+    assert "fixture_processing_summary.csv" in members
+    assert "fixture_processing_metadata.json" in members
+    assert "processing_data.json" in members
 # ^^^ THOG
 
 
