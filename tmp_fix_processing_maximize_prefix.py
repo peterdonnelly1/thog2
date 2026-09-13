@@ -35,7 +35,6 @@ old_copy = '''    shutil.copy2(report_path, processing_directory / "processing_t
 new_copy = '''    processing_files = processing_data["metadata"]["files"]                                                                                                   # <<< THOG consume the normalizer's canonical artifact-prefixed filenames\n    shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])\n    print(\n        "THOG2 PREMAT processing data: "\n        f"{processing_directory / processing_files['bundle']}",\n        flush=True,\n    )\n'''
 replace_once("sheet/premat_processing.py", old_copy, new_copy)
 
-# Update the regression that accidentally enshrined the broken auto-height override.
 replace_once(
     "tests/test_premat_processing.py",
     '    assert "height: auto !important" in css\n',
@@ -46,7 +45,6 @@ old_expected = '''    expected = {\n        "processing_samples.csv",\n        "
 new_expected = '''    expected = {\n        "fixture_processing_samples.csv",\n        "fixture_processing_intervals.csv",\n        "fixture_processing_summary.csv",\n        "fixture_processing_metadata.json",\n        "processing_data.json",\n        "fixture_processing_bundle.zip",\n    }\n    assert expected.issubset({path.name for path in output.iterdir()})\n    assert payload["metadata"]["files"] == {\n        "samples": "fixture_processing_samples.csv",\n        "intervals": "fixture_processing_intervals.csv",\n        "summary": "fixture_processing_summary.csv",\n        "metadata": "fixture_processing_metadata.json",\n        "bundle": "fixture_processing_bundle.zip",\n        "raw_trace": "fixture_processing_trace.nsys-rep",\n    }\n    with (output / "fixture_processing_summary.csv").open() as source:\n        rows = list(csv.DictReader(source))\n    assert rows[0]["family"] == "QKV"\n    with zipfile.ZipFile(output / "fixture_processing_bundle.zip") as archive:\n        members = set(archive.namelist())\n    assert "fixture_processing_samples.csv" in members\n    assert "fixture_processing_intervals.csv" in members\n    assert "fixture_processing_summary.csv" in members\n    assert "fixture_processing_metadata.json" in members\n    assert "processing_data.json" in members\n'''
 replace_once("tests/test_premat_processing.py", old_expected, new_expected)
 
-# zipfile is needed by the artifact-prefix regression.
 replace_once(
     "tests/test_premat_processing.py",
     "import sqlite3\nfrom pathlib import Path\n",
@@ -56,4 +54,5 @@ replace_once(
 log_path = ROOT / "THOG2_DYNAMIC_PREMATERIALISATION_LOG.md"
 with log_path.open("a", encoding="utf-8") as log:
     log.write('- Corrected Processing maximize after the previous Processing-specific CSS accidentally overrode the standard INSTRA `height: 100% !important` with `height: auto !important`; the selected Processing card now consumes the full chart grid while siblings are hidden. The six user-facing Processing artifacts now use the canonical run artifact as a filename prefix: bundle, samples, intervals, summary, metadata and raw Nsight trace. The private `processing_data.json` remains fixed-name for INSTRA lookup.\\n')
+# retry trigger after transient GitHub commit_refs rejection
 # ^^^ THOG
