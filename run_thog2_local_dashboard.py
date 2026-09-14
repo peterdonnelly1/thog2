@@ -319,6 +319,12 @@ class RunDashboardState:
     def processing(self) -> Dict[str, Any]:
         path = self.database_path.parent / "processing" / "processing_data.json"
         throughput = self.reader.processing_throughput()
+        metadata = self.reader.metadata()
+        configuration = json.loads(metadata.get("config_json", "{}"))
+        processing_expected = (
+            str(configuration.get("premat_processing_logging", "disabled"))
+            == "enabled"
+        )
         throughput_tail = throughput[-1] if throughput else None
         throughput_revision = (
             "0"
@@ -326,7 +332,7 @@ class RunDashboardState:
             else f"{len(throughput)}:{throughput_tail['optimizer_update']}:{throughput_tail['tokens_per_second']:.12g}"
         )
         trace_available = path.is_file()
-        if not trace_available and not throughput:
+        if not trace_available and not throughput and not processing_expected:
             return {"available": False, "trace_available": False, "revision": None, "data": None}
         if trace_available:
             stat_result = path.stat()

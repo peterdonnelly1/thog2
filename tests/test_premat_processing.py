@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from run_thog2_local_dashboard import RunDashboardState
 from sheet.local_chart_store import LocalChartReader, LocalChartStore
 from sheet.premat_processing import (
     _mean_metric,
@@ -153,6 +154,7 @@ def test_processing_visibility_is_owned_by_processing_view() -> None:
     assert "processing_apply_detail_tab" in premat_js
     assert "trace_available" in processing_js
     assert "Nsight charts appear after run completion" in processing_js
+    assert 'group_count.textContent = trace_available ? "4" : "1"' in processing_js
     assert "Plotly.newPlot" in processing_js
     assert 'dataset.plotReady = "true"' in processing_js
 
@@ -178,6 +180,38 @@ def test_processing_throughput_round_trips_through_local_store(tmp_path: Path) -
         {"optimizer_update": 1, "tokens_per_second": 12345.5},
         {"optimizer_update": 2, "tokens_per_second": 13001.25},
     )
+
+
+def test_processing_group_is_available_before_first_live_throughput_sample(tmp_path: Path) -> None:
+    database = tmp_path / "charts.sqlite3"
+    store = LocalChartStore(
+        database,
+        run_name="fixture",
+        config={"premat_processing_logging": "enabled"},
+    )
+    store.close()
+
+    payload = RunDashboardState(database).processing()
+
+    assert payload["available"] is True
+    assert payload["trace_available"] is False
+    assert payload["data"]["throughput"] == []
+
+
+def test_processing_group_remains_hidden_for_runs_without_processing_data(tmp_path: Path) -> None:
+    database = tmp_path / "charts.sqlite3"
+    store = LocalChartStore(
+        database,
+        run_name="fixture",
+        config={"premat_processing_logging": "disabled"},
+    )
+    store.close()
+
+    payload = RunDashboardState(database).processing()
+
+    assert payload["available"] is False
+    assert payload["trace_available"] is False
+    assert payload["data"] is None
 
 
 def _synthetic_nsys_database(path: Path) -> None:

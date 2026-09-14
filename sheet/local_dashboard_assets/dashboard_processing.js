@@ -435,6 +435,8 @@ function processing_render_summary(payload) {
 async function processing_render(payload, trace_available) {
   processing_view.available = true;
   processing_view.trace_available = Boolean(trace_available);
+  const group_count = by_id("processing_group_count");
+  if (group_count) group_count.textContent = trace_available ? "4" : "1";
   processing_sync_visibility();
   if (typeof apply_saved_panel_sizes === "function") apply_saved_panel_sizes();
   const capture = payload.metadata?.capture || {};
