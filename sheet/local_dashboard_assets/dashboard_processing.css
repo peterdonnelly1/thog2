@@ -85,4 +85,5 @@
 .processing-timing-download-button { border: 1px solid rgba(127,127,127,.28); border-radius: 6px; padding: 5px 8px; background: transparent; text-decoration: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
 .processing-timing-download-link:hover,
 .processing-timing-download-button:hover { background: rgba(127,127,127,.08); }
+#processing_update_timing_timeline_plot .ytick text { font-size: 11px !important; }                                             /* <<< THOG restore compact PREMAT/NOMAT lane labels after superseding the original hidden-artifact tick workaround */
 /* ^^^ THOG */
