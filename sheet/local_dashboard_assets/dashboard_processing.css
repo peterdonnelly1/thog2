@@ -13,6 +13,10 @@
 .processing-grid .processing-contention-card { flex: 1 1 420px; }
 .processing-grid .processing-throughput-card { flex: 1 1 420px; }                                           /* THOG net-throughput scoreboard */
 .processing-grid .processing-summary-card { flex: 1 1 100%; height: 300px; min-height: 240px; }                                                /* <<< THOG visible full-width four-family scoreboard */
+.processing-timeline-card .chart-card-header, .processing-contention-card .chart-card-header { height: 68px; align-items: flex-start; }
+.processing-timeline-card .plot-shell, .processing-contention-card .plot-shell { inset: 68px 0 0 0; }
+.processing-timeline-card .chart-heading-copy, .processing-contention-card .chart-heading-copy { flex: 1 1 auto; min-width: 0; }
+.processing-run-artifact { color: #424b57 !important; font-size: 9.5px !important; font-weight: 560; }
 .processing-grid.chart-grid.is-maximized .processing-card.chart-card.maximized { display: flex; }
 /* vvv THOG Processing maximized cards consume the remaining INSTRA chart pane instead of retaining their normal 420px geometry */
 .processing-group.maximized { height: 100% !important; min-height: 0 !important; padding-bottom: 0; overflow: hidden; }

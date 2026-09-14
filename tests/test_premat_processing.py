@@ -404,8 +404,21 @@ def test_processing_overlap_graph_uses_direct_two_denominator_profile() -> None:
     js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
     assert 'name: "PREMAT work concurrent with Main"' in js
     assert 'name: "Main busy time concurrent with PREMAT"' in js
-    assert 'xaxis: {title: "temporal overlap (%)"' in js
+    assert 'title: {text: "temporal overlap (%)", standoff: 12}' in js
+    assert "range: [0, 100]" in js
+    assert 'ticksuffix: "%"' in js
+    assert js.count('textposition: "outside"') >= 2
     assert 'type: "scatter"' not in js[js.index("async function processing_render_contention"):js.index("function processing_format")]
+
+
+def test_processing_gpu_charts_show_selected_run_artifact() -> None:
+    html = Path("sheet/local_dashboard_assets/index.html").read_text(encoding="utf-8")
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    assert 'id="processing_timeline_artifact"' in html
+    assert 'id="processing_contention_artifact"' in html
+    assert 'run.artifact_name || run.run_name || processing_current_run()' in js
+    assert 'element.textContent = `Run artifact: ${artifact}`' in js
+    assert "processing_set_chart_artifacts(payload);" in js
 
 
 def test_premat_selector_exclusions_keep_main_activity_without_becoming_misses() -> None:

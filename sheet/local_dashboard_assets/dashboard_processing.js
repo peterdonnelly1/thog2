@@ -74,6 +74,17 @@ function processing_current_run() {
   return String(app.current_run_id || "");
 }
 
+function processing_set_chart_artifacts(payload) {
+  const run = payload.metadata?.run || {};
+  const artifact = String(run.artifact_name || run.run_name || processing_current_run() || "—");
+  for (const id of ["processing_timeline_artifact", "processing_contention_artifact"]) {
+    const element = by_id(id);
+    if (!element) continue;
+    element.textContent = `Run artifact: ${artifact}`;
+    element.title = artifact;
+  }
+}
+
 function processing_download_url(path) {
   return `/api/local-file?run=${encodeURIComponent(processing_current_run())}&path=${encodeURIComponent(`processing/${path}`)}&download=1`;
 }
@@ -263,24 +274,35 @@ async function processing_render_contention(payload) {
   const families = family_order.filter(family => summary[family]);
   const premat_pct = families.map(family => Number(summary[family].premat_concurrent_with_main_pct));
   const main_pct = families.map(family => Number(summary[family].main_busy_concurrent_with_premat_pct));
-  const maximum = Math.max(0, ...premat_pct.filter(Number.isFinite), ...main_pct.filter(Number.isFinite));
-  const axis_maximum = Math.min(100, Math.max(5, maximum * 1.18));                                                                                         // <<< THOG keep isolated-matrix low-overlap runs readable instead of wasting a fixed 0..100 axis
   const traces = families.length ? [
     {
       type: "bar", orientation: "h", name: "PREMAT work concurrent with Main",
       y: families, x: premat_pct,
+      text: premat_pct.map(value => Number.isFinite(value) ? `${value.toFixed(2)}%` : ""),
+      textposition: "outside",
+      cliponaxis: false,
       hovertemplate: "%{y}<br>%{x:.2f}% of PREMAT GPU work coincides with any Main kernel<extra></extra>",
     },
     {
       type: "bar", orientation: "h", name: "Main busy time concurrent with PREMAT",
       y: families, x: main_pct,
+      text: main_pct.map(value => Number.isFinite(value) ? `${value.toFixed(2)}%` : ""),
+      textposition: "outside",
+      cliponaxis: false,
       hovertemplate: "%{y}<br>%{x:.2f}% of Main GPU busy time coincides with PREMAT<extra></extra>",
     },
   ] : [];
   await processing_plot("processing_contention_plot", traces, {
-    margin: {l: 70, r: 24, t: 18, b: 58},
+    margin: {l: 70, r: 24, t: 18, b: 76},
     barmode: "group",
-    xaxis: {title: "temporal overlap (%)", range: [0, axis_maximum], rangemode: "tozero"},
+    xaxis: {
+      title: {text: "temporal overlap (%)", standoff: 12},
+      range: [0, 100],
+      dtick: 20,
+      ticksuffix: "%",
+      automargin: true,
+      rangemode: "tozero",
+    },
     yaxis: {categoryorder: "array", categoryarray: [...family_order].reverse()},
     legend: {orientation: "h", y: 1.12},
     annotations: families.length ? [] : [{text: "No PREMAT materialisation intervals in this capture", showarrow: false, xref: "paper", yref: "paper", x: 0.5, y: 0.5}],
@@ -419,6 +441,7 @@ async function processing_render(payload, trace_available) {
   const throughput = payload.throughput || [];
   const latest_throughput = throughput.length ? throughput[throughput.length - 1] : null;
   by_id("processing_step").textContent = String(capture.optimizer_update ?? latest_throughput?.optimizer_update ?? "—");
+  processing_set_chart_artifacts(payload);
   if (trace_available) {
     const warning_count = (payload.metadata?.warnings || []).length;
     by_id("processing_status").textContent = `${Number(payload.metadata?.capture_frequency_hz || 0).toLocaleString()} Hz · ${Number(payload.metadata?.capture_duration_ms || 0).toFixed(2)} ms capture${warning_count ? ` · ${warning_count} warning${warning_count === 1 ? "" : "s"}` : ""}`;
