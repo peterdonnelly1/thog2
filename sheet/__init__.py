@@ -224,3 +224,7 @@ from . import dense_weight_curves_patch as _dense_weight_curves_patch
 # vvv THOG register local runs before their first chart record and keep model liveness independent of finite instrumentation windows
 from . import local_chart_lifecycle_patch as _local_chart_lifecycle_patch
 # ^^^ THOG
+
+# vvv THOG install opt-in full-update Processing timing after local lifecycle wrapping so the existing trainer path remains authoritative
+from . import processing_update_timing_patch as _processing_update_timing_patch
+# ^^^ THOG
