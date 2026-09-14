@@ -56,3 +56,33 @@
 /* ^^^ THOG */
 @media (max-width: 1180px) { .processing-update-timing-plots { grid-template-columns: 1fr; grid-template-rows: repeat(2, minmax(250px, 1fr)); } .processing-grid .processing-update-timing-card { height: 980px; } }
 /* ^^^ THOG */
+
+/* vvv THOG present the first performance-attribution tranche as four independent full-width rows */
+.processing-grid .processing-throughput-card,
+.processing-grid .processing-update-timing-timeline-card,
+.processing-grid .processing-update-timing-microsteps-card,
+.processing-grid .processing-update-timing-summary-card { flex: 0 0 100% !important; width: 100% !important; }
+.processing-grid .processing-throughput-card,
+.processing-grid .processing-update-timing-timeline-card,
+.processing-grid .processing-update-timing-microsteps-card { height: 430px; min-height: 330px; }
+.processing-grid .processing-update-timing-summary-card { height: 270px; min-height: 220px; }
+.processing-update-timing-timeline-card .chart-card-header,
+.processing-update-timing-microsteps-card .chart-card-header,
+.processing-update-timing-summary-card .chart-card-header { flex: 0 0 64px; height: 64px; }
+.processing-update-timing-timeline-card .processing-plot-shell,
+.processing-update-timing-microsteps-card .processing-plot-shell { min-height: 0; }
+.processing-update-timing-summary-card .processing-summary-wrap { flex: 1 1 auto; max-height: none; }
+.processing-update-timing-summary-card .processing-update-timing-summary th:first-child { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.processing-throughput-card .panel-resizer-east,
+.processing-throughput-card .panel-resizer-corner,
+.processing-update-timing-timeline-card .panel-resizer-east,
+.processing-update-timing-timeline-card .panel-resizer-corner,
+.processing-update-timing-microsteps-card .panel-resizer-east,
+.processing-update-timing-microsteps-card .panel-resizer-corner,
+.processing-update-timing-summary-card .panel-resizer-east,
+.processing-update-timing-summary-card .panel-resizer-corner { display: none !important; }
+.processing-timing-download-link,
+.processing-timing-download-button { border: 1px solid rgba(127,127,127,.28); border-radius: 6px; padding: 5px 8px; background: transparent; text-decoration: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.processing-timing-download-link:hover,
+.processing-timing-download-button:hover { background: rgba(127,127,127,.08); }
+/* ^^^ THOG */
