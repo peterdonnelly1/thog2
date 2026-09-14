@@ -504,3 +504,218 @@ window.addEventListener("load", () => {
   processing_refresh();
 });
 // ^^^ THOG
+
+// vvv THOG full-update timing comparison stays independent of Nsight and is inserted directly below Matrix summary
+processing_view.timing_available = false;
+const processing_update_timing_cache = new Map();
+
+function processing_ensure_update_timing_card() {
+  let card = by_id("processing_update_timing_card");
+  if (card) return card;
+  const matrix_summary = by_id("processing_matrix_summary_card");
+  const grid = matrix_summary?.parentElement || by_id("processing_chart_group")?.querySelector(".processing-grid");
+  if (!grid) return null;
+  card = document.createElement("article");
+  card.className = "processing-card chart-card processing-update-timing-card";
+  card.id = "processing_update_timing_card";
+  card.dataset.chart = "processing_update_timing";
+  card.hidden = true;
+  card.innerHTML = `
+    <header class="chart-card-header">
+      <div class="chart-heading-copy">
+        <h2>Complete update timing</h2>
+        <p>Whole optimizer update · host phase partition and MAIN-stream CUDA timing.</p>
+      </div>
+    </header>
+    <div class="processing-update-timing-plots">
+      <div class="processing-update-timing-panel">
+        <div class="processing-update-timing-label">Aligned host phase timeline</div>
+        <div class="processing-plot-shell"><div class="processing-plot plot-mount" id="processing_update_timing_timeline_plot"></div></div>
+      </div>
+      <div class="processing-update-timing-panel">
+        <div class="processing-update-timing-label">Microstep duration comparison</div>
+        <div class="processing-plot-shell"><div class="processing-plot plot-mount" id="processing_update_timing_microsteps_plot"></div></div>
+      </div>
+    </div>
+    <div class="processing-summary-wrap processing-update-timing-summary-wrap">
+      <table class="processing-summary processing-update-timing-summary">
+        <thead><tr><th>Run</th><th>Update</th><th>Host total</th><th>MAIN CUDA</th><th>Forward</th><th>Backward</th><th>Optimizer</th><th>Other</th><th>Residual</th></tr></thead>
+        <tbody id="processing_update_timing_summary_body"></tbody>
+      </table>
+    </div>
+    <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+    <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+    <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>`;
+  if (matrix_summary) matrix_summary.insertAdjacentElement("afterend", card);
+  else grid.appendChild(card);
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(() => {
+      if (card.offsetParent === null) return;
+      for (const mount of card.querySelectorAll(".plot-mount")) {
+        if (mount.dataset.plotReady === "true") requestAnimationFrame(() => Plotly.Plots.resize(mount));
+      }
+    });
+    observer.observe(card);
+    processing_resize_observers.push(observer);
+  }
+  return card;
+}
+
+async function processing_update_timing_for_run(run) {
+  const run_id = String(run_identifier(run));
+  if (!run_id) return null;
+  if (processing_update_timing_cache.has(run_id)) return processing_update_timing_cache.get(run_id);
+  try {
+    const response = await fetch(`/api/local-file?run=${encodeURIComponent(run_id)}&path=${encodeURIComponent("processing/update_timing.json")}`, {cache: "no-store"});
+    if (!response.ok) return null;
+    const timing = await response.json();
+    if (!timing || !Number.isFinite(Number(timing.host_update_ms))) return null;
+    processing_update_timing_cache.set(run_id, timing);
+    return timing;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function processing_update_timing_run_name(entry) {
+  return String(entry.run.artifact_name || entry.run.run_name || entry.run_id);
+}
+
+function processing_update_timing_phase_traces(entries) {
+  const phases = ["forward", "backward", "optimizer", "other"];
+  return phases.map(phase => {
+    const x = [];
+    const y = [];
+    const hover = [];
+    for (let lane = 0; lane < entries.length; lane += 1) {
+      const entry = entries[lane];
+      for (const row of entry.timing.timeline || []) {
+        if (String(row.phase) !== phase) continue;
+        const start = Number(row.host_start_ms);
+        const end = Number(row.host_end_ms);
+        const micro = row.micro_step === null || row.micro_step === undefined ? "" : ` · μ${Number(row.micro_step)}`;
+        const text = `${processing_escape(processing_update_timing_run_name(entry))}<br>${phase}${micro}<br>${(end - start).toFixed(3)} ms`;
+        x.push(start, end, null);
+        y.push(lane, lane, null);
+        hover.push(text, text, "");
+      }
+    }
+    return {
+      type: "scattergl",
+      mode: "lines",
+      name: phase,
+      x,
+      y,
+      hovertext: hover,
+      hoverinfo: "text",
+      line: {width: 13},
+    };
+  }).filter(trace => trace.x.length);
+}
+
+function processing_render_update_timing_summary(entries) {
+  const body = by_id("processing_update_timing_summary_body");
+  if (!body) return;
+  const ms = value => Number.isFinite(Number(value)) ? `${Number(value).toFixed(3)} ms` : "—";
+  body.innerHTML = entries.map(entry => {
+    const timing = entry.timing;
+    const totals = timing.phase_totals_host_ms || {};
+    return `<tr>
+      <th title="${processing_escape(processing_update_timing_run_name(entry))}">${processing_escape(processing_update_timing_run_name(entry))}</th>
+      <td>${processing_escape(timing.optimizer_update)}</td>
+      <td>${processing_escape(ms(timing.host_update_ms))}</td>
+      <td>${processing_escape(ms(timing.cuda_main_update_ms))}</td>
+      <td>${processing_escape(ms(totals.forward))}</td>
+      <td>${processing_escape(ms(totals.backward))}</td>
+      <td>${processing_escape(ms(totals.optimizer))}</td>
+      <td>${processing_escape(ms(totals.other))}</td>
+      <td>${processing_escape(ms(timing.host_partition_residual_ms))}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function processing_render_update_timing() {
+  const card = processing_ensure_update_timing_card();
+  if (!card) return;
+  const runs = processing_throughput_workspace_runs();
+  const resolved = await Promise.all(runs.map(async run => ({
+    run,
+    run_id: String(run_identifier(run)),
+    timing: await processing_update_timing_for_run(run),
+  })));
+  const entries = resolved.filter(entry => entry.timing);
+  processing_view.timing_available = entries.length > 0;
+  card.hidden = !(processing_view.charts_tab_visible && processing_view.timing_available);
+  const group_count = by_id("processing_group_count");
+  if (group_count) group_count.textContent = String((processing_view.trace_available ? 4 : 1) + (entries.length ? 1 : 0));
+  if (!entries.length) return;
+
+  const lane_names = entries.map(processing_update_timing_run_name);
+  const maximum_host_ms = Math.max(...entries.map(entry => Number(entry.timing.host_update_ms)));
+  await processing_plot("processing_update_timing_timeline_plot", processing_update_timing_phase_traces(entries), {
+    margin: {l: 160, r: 24, t: 16, b: 50},
+    hovermode: "closest",
+    legend: {orientation: "h", y: 1.10},
+    xaxis: {title: "elapsed host time from update entry (ms)", range: [0, maximum_host_ms * 1.01]},
+    yaxis: {
+      tickmode: "array",
+      tickvals: entries.map((_entry, index) => index),
+      ticktext: lane_names,
+      range: [-0.5, Math.max(0.5, entries.length - 0.5)],
+      fixedrange: true,
+      automargin: true,
+    },
+  });
+
+  const microstep_traces = entries.map(entry => {
+    const colour = colour_for_run(entry.run_id);
+    const rows = entry.timing.microsteps || [];
+    return {
+      type: "scatter",
+      mode: rows.length === 1 ? "markers" : "lines+markers",
+      name: processing_update_timing_run_name(entry),
+      x: rows.map(row => Number(row.micro_step)),
+      y: rows.map(row => Number(row.host_span_ms)),
+      line: {color: colour, width: 2.4},
+      marker: {color: colour},
+      hovertemplate: "microstep %{x}<br>%{y:.3f} ms<extra>%{fullData.name}</extra>",
+    };
+  });
+  await processing_plot("processing_update_timing_microsteps_plot", microstep_traces, {
+    margin: {l: 76, r: 24, t: 16, b: 50},
+    xaxis: {title: "microstep", dtick: 1},
+    yaxis: {title: "host span (ms)", rangemode: "tozero"},
+    showlegend: microstep_traces.length > 1,
+    legend: {orientation: "h", y: 1.10},
+  });
+  processing_render_update_timing_summary(entries);
+  if (!processing_view.trace_available) {
+    const nsight_count = entries.filter(entry => String(entry.timing.capture?.nsight_processing_logging || "disabled") === "enabled").length;
+    by_id("processing_status").textContent = nsight_count
+      ? `Whole-update timing · ${entries.length} visible run${entries.length === 1 ? "" : "s"} · ${nsight_count} captured in Nsight process`
+      : `Whole-update timing · ${entries.length} visible run${entries.length === 1 ? "" : "s"} · non-Nsight`;
+  }
+}
+
+const processing_sync_visibility_without_update_timing = processing_sync_visibility;
+processing_sync_visibility = function() {
+  processing_sync_visibility_without_update_timing();
+  const card = by_id("processing_update_timing_card");
+  if (card) card.hidden = !(processing_view.charts_tab_visible && processing_view.timing_available);
+};
+
+const processing_render_without_update_timing = processing_render;
+processing_render = async function(payload, trace_available) {
+  await processing_render_without_update_timing(payload, trace_available);
+  await processing_render_update_timing();
+  processing_sync_visibility();
+};
+
+window.setInterval(() => {
+  if (processing_view.available && processing_view.charts_tab_visible) processing_render_update_timing();
+}, 2000);
+window.addEventListener("load", () => {
+  processing_ensure_update_timing_card();
+  processing_render_update_timing();
+});
+// ^^^ THOG
