@@ -813,7 +813,8 @@ function processing_update_timing_summary_card() {
 }
 
 function processing_ensure_update_timing_stack() {
-  const throughput = by_id("processing_throughput_card");
+  // const throughput = by_id("processing_throughput_card");                                                                                               // <<< THOG superseded: the static throughput card has no such id
+  const throughput = document.querySelector('.chart-card[data-chart="processing_throughput"]');                                                         // <<< THOG anchor timing diagnostics to the actual static throughput card
   const grid = throughput?.parentElement || by_id("processing_chart_group")?.querySelector(".processing-grid");
   if (!grid || !throughput) return null;
   const legacy = by_id("processing_update_timing_card");
@@ -850,6 +851,14 @@ function processing_ensure_update_timing_stack() {
     summary = processing_update_timing_summary_card();
     microsteps.insertAdjacentElement("afterend", summary);
   }
+
+  // vvv THOG Persisted INSTRA panel geometry may carry inline !important widths; timing diagnostics are intentionally full-width rows.
+  for (const card of [throughput, timeline, microsteps, summary]) {
+    card.style.setProperty("flex", "0 0 100%", "important");
+    card.style.setProperty("width", "100%", "important");
+    card.style.setProperty("max-width", "100%", "important");
+  }
+  // ^^^ THOG
 
   if (typeof ResizeObserver === "function") {
     for (const card of [timeline, microsteps]) {
