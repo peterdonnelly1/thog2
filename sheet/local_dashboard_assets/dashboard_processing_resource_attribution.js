@@ -209,7 +209,7 @@ async function processing_resource_render(payload) {
     };
   });
   await processing_plot("processing_resource_plot", traces, layout);
-  processing_resource_link_time_axes(payload);
+  processing_resource_link_time_axes();
 }
 
 function processing_resource_extract_xrange(event) {
@@ -232,15 +232,19 @@ function processing_resource_link_one(source, target) {
   });
 }
 
-function processing_resource_link_time_axes(_payload) {
+function processing_resource_link_time_axes() {
   const timeline = by_id("processing_timeline_plot");
   const resource = by_id("processing_resource_plot");
   processing_resource_link_one(timeline, resource);
   processing_resource_link_one(resource, timeline);
 }
 
-// vvv THOG schema-v2 execution timeline is execution-only; device-wide resource metrics live in the attribution card.
+// vvv THOG schema-v2 execution timeline is execution-only; legacy schema-v1 captures keep the established composite timeline.
+const processing_render_timeline_before_resource_attribution = processing_render_timeline;
 processing_render_timeline = async function(payload) {
+  if (Number(payload.metadata?.schema_version || 1) < 2) {
+    return processing_render_timeline_before_resource_attribution(payload);
+  }
   const traces = [];
   const lane_order = ["UNKNOWN", "OTHER", "PREMAT", "MAIN"];
   const active_owners = new Set((payload.intervals || []).map(row => String(row.owner || "UNKNOWN")));
@@ -314,6 +318,11 @@ processing_render = async function(payload, trace_available) {
   await processing_render_before_resource_attribution(payload, trace_available);
   if (trace_available) await processing_resource_render(payload);
   else processing_view.resource_available = false;
+  const group_count = by_id("processing_group_count");
+  if (group_count && processing_view.resource_available) {
+    const count = Number(group_count.textContent);
+    if (Number.isFinite(count)) group_count.textContent = String(count + 1);
+  }
   processing_sync_visibility();
   requestAnimationFrame(() => processing_resize_ready_card(by_id("processing_resource_card")));
 };
