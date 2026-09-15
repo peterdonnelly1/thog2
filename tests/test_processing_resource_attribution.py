@@ -37,6 +37,17 @@ def test_unlabelled_kernel_is_inferred_only_from_unambiguous_context_stream():
     assert rows[2]["owner_source"] == "UNKNOWN"
 
 
+def test_stream_inference_requires_context_identity():
+    rows = infer_kernel_owners([
+        _kernel(0, 10, "MAIN", stream=7, context_id=""),
+        _kernel(10, 20, "", stream=7, context_id="", explicit=False),
+    ])
+    assert rows[0]["owner"] == "MAIN"
+    assert rows[0]["owner_source"] == "NVTX"
+    assert rows[1]["owner"] == "UNKNOWN"
+    assert rows[1]["owner_source"] == "UNKNOWN"
+
+
 def test_stream_inference_refuses_a_stream_with_conflicting_explicit_owners():
     rows = infer_kernel_owners([
         _kernel(0, 10, "MAIN", stream=9, context_id=1),
