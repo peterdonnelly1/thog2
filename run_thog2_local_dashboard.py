@@ -35,6 +35,12 @@ def _cleanup_overlay() -> None:
 atexit.register(_cleanup_overlay)
 
 
+# vvv THOG preserve private attributes/functions from the established dashboard module for tests and callers that import them directly
+def __getattr__(name: str):
+    return getattr(_base, name)
+# ^^^ THOG
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     return _base.main(argv)
 
