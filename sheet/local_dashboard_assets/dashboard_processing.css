@@ -73,6 +73,10 @@
 .processing-update-timing-microsteps-card .processing-plot-shell { min-height: 0; }
 .processing-update-timing-summary-card .processing-summary-wrap { flex: 1 1 auto; max-height: none; }
 .processing-update-timing-summary-card .processing-update-timing-summary th:first-child { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.processing-pair-warning { flex: 0 0 auto; margin: 8px 12px 0; padding: 7px 9px; border: 1px solid rgba(76,96,120,.28); border-radius: 5px; color: #435064; background: rgba(76,96,120,.07); font-size: 11px; }
+.processing-pair-warning[data-level="ok"] { border-color: rgba(35,125,76,.35); color: #17643b; background: rgba(35,125,76,.08); }
+.processing-pair-warning[data-level="warning"] { border-color: rgba(174,112,0,.40); color: #7a4d00; background: rgba(214,151,30,.10); }
+.processing-pair-warning[data-level="error"] { border-color: rgba(171,45,45,.42); color: #8b2222; background: rgba(190,55,55,.09); }
 .processing-throughput-card .panel-resizer-east,
 .processing-throughput-card .panel-resizer-corner,
 .processing-update-timing-timeline-card .panel-resizer-east,
@@ -86,4 +90,15 @@
 .processing-timing-download-link:hover,
 .processing-timing-download-button:hover { background: rgba(127,127,127,.08); }
 #processing_update_timing_timeline_plot .ytick text { font-size: 11px !important; }                                             /* <<< THOG restore compact PREMAT/NOMAT lane labels after superseding the original hidden-artifact tick workaround */
+/* Complete-update plots must inherit the maximized pane, not their ordinary 430px row geometry. */
+.processing-group.maximized > .processing-grid.chart-grid.is-maximized > .processing-update-timing-timeline-card.maximized,
+.processing-group.maximized > .processing-grid.chart-grid.is-maximized > .processing-update-timing-microsteps-card.maximized,
+.processing-group.maximized > .processing-grid.chart-grid.is-maximized > .processing-update-timing-summary-card.maximized {
+  display: flex !important;
+  flex: 1 1 100% !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
 /* ^^^ THOG */

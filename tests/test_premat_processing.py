@@ -22,6 +22,11 @@ from sheet.premat_processing import (
     rewrite_processing_cli_for_core,
     validate_processing_configuration,
 )
+from sheet.processing_update_timing_patch import (
+    _apply_official_elapsed,
+    _gap_phase,
+    _premat_is_enabled,
+)
 
 
 def test_processing_cli_surface_exact_names() -> None:
@@ -491,4 +496,73 @@ def test_processing_group_sits_after_val_and_throughput_has_no_curve_markers() -
     assert 'processing_anchor.after(processing_group)' in group_js
     assert 'entry.rows.length === 1 ? "markers" : "lines"' in processing_js
     assert 'entry.rows.length === 1 ? "markers" : "lines+markers"' not in processing_js
+# ^^^ THOG
+
+
+# vvv THOG complete-update accounting and paired Processing comparison regressions
+def test_processing_update_timing_parses_string_premat_mode_exactly() -> None:
+    assert _premat_is_enabled("enabled") is True
+    assert _premat_is_enabled("disabled") is False
+    assert _premat_is_enabled(False) is False
+
+
+def test_processing_update_timing_gap_classification_covers_complete_update() -> None:
+    forward = {"phase": "forward", "micro_step": 1}
+    backward = {"phase": "backward", "micro_step": 1}
+    optimizer = {"phase": "optimizer", "micro_step": None}
+    assert _gap_phase(None, forward) == "setup"
+    assert _gap_phase(forward, backward) == "forward"
+    assert _gap_phase(backward, optimizer) == "post_backward"
+    assert _gap_phase(optimizer, None) == "update_cleanup"
+
+
+def test_processing_update_timing_reconciles_to_official_synchronized_elapsed() -> None:
+    payload = {
+        "captured_update_host_ms": 99.5,
+        "timeline": [],
+        "phase_totals_host_ms": {
+            "setup": 4.0,
+            "forward": 20.0,
+            "backward": 50.0,
+            "post_backward": 5.0,
+            "optimizer": 10.0,
+            "update_cleanup": 2.0,
+            "gpu_completion_drain": 8.5,
+            "unexplained_residual": 0.0,
+        },
+    }
+    result = _apply_official_elapsed(payload, 100.0)
+    assert result["host_update_ms"] == 100.0
+    assert result["official_update_ms"] == 100.0
+    assert result["unexplained_residual_ms"] == 0.5
+    assert result["host_partition_sum_ms"] == 100.0
+    assert result["host_partition_residual_ms"] == 0.0
+    assert result["timeline"][-1]["phase"] == "unexplained_residual"
+
+
+def test_processing_update_timing_uses_device_drain_and_preserves_trainer_identity() -> None:
+    source = Path("sheet/processing_update_timing_patch.py").read_text(encoding="utf-8")
+    assert "torch.cuda.synchronize(self.device)" in source
+    assert "cuda_update_end.synchronize()" not in source
+    assert "@wraps(original_train_one_update)" in source
+    assert "result, elapsed = original_timed(function)" in source
+    assert source.index("result, elapsed = original_timed(function)") < source.index("_publish_payload(", source.index("def timed_complete_update"))
+
+
+def test_processing_update_timing_ui_uses_g_labels_pair_warning_and_fresh_workspace_data() -> None:
+    js = Path("sheet/local_dashboard_assets/dashboard_processing.js").read_text(encoding="utf-8")
+    css = Path("sheet/local_dashboard_assets/dashboard_processing.css").read_text(encoding="utf-8")
+    assert "processing_update_timing_experiment_label" in js
+    assert "capture?.run_label" in js
+    assert "processing_update_timing_pair_assessment" in js
+    assert "NOMAT followed by PREMAT" in js
+    assert "match_signature" in js
+    assert "timing_render_generation" in js
+    assert "cached.revision === revision" in js
+    assert "processing_update_timing_clear_plots" in js
+    assert 'type: "bar"' in js
+    assert "gpu_completion_drain" in js
+    assert "unexplained_residual" in js
+    assert ".processing-pair-warning" in css
+    assert ".processing-update-timing-timeline-card.maximized" in css
 # ^^^ THOG

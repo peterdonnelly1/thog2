@@ -507,6 +507,7 @@ window.addEventListener("load", () => {
 
 // vvv THOG full-update timing comparison stays independent of Nsight and is inserted directly below Matrix summary
 processing_view.timing_available = false;
+processing_view.timing_render_generation = 0;
 const processing_update_timing_cache = new Map();
 
 function processing_ensure_update_timing_card() {
@@ -564,15 +565,18 @@ function processing_ensure_update_timing_card() {
 async function processing_update_timing_for_run(run) {
   const run_id = String(run_identifier(run));
   if (!run_id) return null;
-  if (processing_update_timing_cache.has(run_id)) return processing_update_timing_cache.get(run_id);
+  const revision = JSON.stringify(run.revision || [run.data_updated_at || null, run.updated_at || null, run.run_state || null]);
+  const cached = processing_update_timing_cache.get(run_id);
+  if (cached && cached.revision === revision) return cached.timing;
   try {
     const response = await fetch(`/api/local-file?run=${encodeURIComponent(run_id)}&path=${encodeURIComponent("processing/update_timing.json")}`, {cache: "no-store"});
     if (!response.ok) return null;
     const timing = await response.json();
     if (!timing || !Number.isFinite(Number(timing.host_update_ms))) return null;
-    processing_update_timing_cache.set(run_id, timing);
+    processing_update_timing_cache.set(run_id, {revision, timing});
     return timing;
   } catch (_error) {
+    processing_update_timing_cache.delete(run_id);
     return null;
   }
 }
@@ -581,10 +585,52 @@ function processing_update_timing_run_name(entry) {
   return String(entry.run.artifact_name || entry.run.run_name || entry.run_id);
 }
 
+function processing_update_timing_experiment_label(entry) {
+  const captured = String(entry.timing.capture?.run_label || "").trim();
+  if (captured) return captured;
+  const artifact = processing_update_timing_run_name(entry);
+  const match = artifact.match(/^\d{6}-\d{4}_[^_]+_(.*?)___/);
+  return match && match[1] ? match[1] : artifact;
+}
+
+function processing_update_timing_premat_enabled(entry) {
+  const mode = String(entry.timing.capture?.premat_mode || "").trim().toLowerCase();
+  if (mode) return mode === "enabled";
+  const artifact = processing_update_timing_run_name(entry);
+  if (artifact.includes("__PM__D_") || /(^|_)NOMAT(_|$)/.test(artifact)) return false;
+  if (artifact.includes("__PM__E_")) return true;
+  return entry.timing.capture?.premat === true;
+}
+
+function processing_update_timing_phase_label(phase) {
+  return ({
+    setup: "setup / batch preparation",
+    forward: "forward",
+    backward: "backward",
+    post_backward: "post-backward",
+    optimizer: "optimizer",
+    update_cleanup: "update cleanup / telemetry",
+    gpu_completion_drain: "GPU completion / drain",
+    unexplained_residual: "unexplained residual",
+    other: "other (legacy capture)",
+  })[phase] || String(phase);
+}
+
 function processing_update_timing_phase_traces(entries) {
-  const phases = ["forward", "backward", "optimizer", "other"];
+  const phases = [
+    "setup",
+    "forward",
+    "backward",
+    "post_backward",
+    "optimizer",
+    "update_cleanup",
+    "gpu_completion_drain",
+    "unexplained_residual",
+    "other",
+  ];
   return phases.map(phase => {
     const x = [];
+    const base = [];
     const y = [];
     const hover = [];
     for (let lane = 0; lane < entries.length; lane += 1) {
@@ -594,21 +640,23 @@ function processing_update_timing_phase_traces(entries) {
         const start = Number(row.host_start_ms);
         const end = Number(row.host_end_ms);
         const micro = row.micro_step === null || row.micro_step === undefined ? "" : ` · μ${Number(row.micro_step)}`;
-        const text = `${processing_escape(processing_update_timing_run_name(entry))}<br>${phase}${micro}<br>${(end - start).toFixed(3)} ms`;
-        x.push(start, end, null);
-        y.push(lane, lane, null);
-        hover.push(text, text, "");
+        const text = `${processing_escape(processing_update_timing_run_name(entry))}<br>${processing_update_timing_phase_label(phase)}${micro}<br>${(end - start).toFixed(3)} ms`;
+        x.push(end - start);
+        base.push(start);
+        y.push(lane);
+        hover.push(text);
       }
     }
     return {
-      type: "scattergl",
-      mode: "lines",
-      name: phase,
+      type: "bar",
+      orientation: "h",
+      name: processing_update_timing_phase_label(phase),
       x,
+      base,
       y,
       hovertext: hover,
       hoverinfo: "text",
-      line: {width: 13},
+      width: 0.62,
     };
   }).filter(trace => trace.x.length);
 }
@@ -621,14 +669,18 @@ function processing_render_update_timing_summary(entries) {
     const timing = entry.timing;
     const totals = timing.phase_totals_host_ms || {};
     return `<tr>
-      <th title="${processing_escape(processing_update_timing_run_name(entry))}">${processing_escape(processing_update_timing_run_name(entry))}</th>
+      <th title="${processing_escape(processing_update_timing_run_name(entry))}">${processing_escape(processing_update_timing_experiment_label(entry))}</th>
       <td>${processing_escape(timing.optimizer_update)}</td>
-      <td>${processing_escape(ms(timing.host_update_ms))}</td>
+      <td>${processing_escape(ms(timing.official_update_ms ?? timing.host_update_ms))}</td>
       <td>${processing_escape(ms(timing.cuda_main_update_ms))}</td>
+      <td>${processing_escape(ms(totals.setup))}</td>
       <td>${processing_escape(ms(totals.forward))}</td>
       <td>${processing_escape(ms(totals.backward))}</td>
+      <td>${processing_escape(ms(totals.post_backward))}</td>
       <td>${processing_escape(ms(totals.optimizer))}</td>
-      <td>${processing_escape(ms(totals.other))}</td>
+      <td>${processing_escape(ms(totals.update_cleanup))}</td>
+      <td>${processing_escape(ms(timing.gpu_completion_drain_ms ?? totals.gpu_completion_drain))}</td>
+      <td>${processing_escape(ms(timing.unexplained_residual_ms ?? totals.unexplained_residual ?? totals.other))}</td>
       <td>${processing_escape(ms(timing.host_partition_residual_ms))}</td>
     </tr>`;
   }).join("");
@@ -724,13 +776,84 @@ window.addEventListener("load", () => {
 processing_view.timing_entries = [];
 
 function processing_update_timing_lane_labels(entries) {
-  const bases = entries.map(entry => entry.timing.capture?.premat ? "PREMAT" : "NOMAT");
+  const bases = entries.map(processing_update_timing_experiment_label);
   return bases.map((base, index) => {
     const duplicates = bases.filter(candidate => candidate === base).length;
     if (duplicates <= 1) return base;
     const ordinal = bases.slice(0, index + 1).filter(candidate => candidate === base).length;
     return `${base} ${ordinal}`;
   });
+}
+
+function processing_update_timing_ordered_runs() {
+  return processing_throughput_workspace_runs().slice().sort((left, right) => {
+    const left_time = Date.parse(left.created_at || "");
+    const right_time = Date.parse(right.created_at || "");
+    if (Number.isFinite(left_time) && Number.isFinite(right_time) && left_time !== right_time) return left_time - right_time;
+    return 0;
+  });
+}
+
+function processing_update_timing_match_signature(entry) {
+  const capture = entry.timing.capture || {};
+  return {
+    optimizer_update: entry.timing.optimizer_update,
+    gradient_accumulation_steps: capture.gradient_accumulation_steps,
+    batch_size: capture.batch_size,
+    block_size: capture.block_size,
+    ...(capture.match_signature || {}),
+  };
+}
+
+function processing_update_timing_pair_assessment(entries) {
+  if (app.workspace_mode !== true) {
+    return {level: "info", text: "A/B comparison: open Workspace and show exactly two captured runs."};
+  }
+  if (entries.length !== 2) {
+    return {level: "warning", text: `A/B comparison requires exactly two captured visible runs; found ${entries.length}.`};
+  }
+  const [first, second] = entries;
+  const first_signature = processing_update_timing_match_signature(first);
+  const second_signature = processing_update_timing_match_signature(second);
+  const shared_keys = Object.keys(first_signature).filter(key => (
+    first_signature[key] !== undefined
+    && second_signature[key] !== undefined
+    && Object.prototype.hasOwnProperty.call(second_signature, key)
+  ));
+  const mismatches = shared_keys.filter(key => JSON.stringify(first_signature[key]) !== JSON.stringify(second_signature[key]));
+  if (mismatches.length) {
+    return {level: "error", text: `Not a matched A/B pair: ${mismatches.join(", ")} differ.`};
+  }
+  const first_premat = processing_update_timing_premat_enabled(first);
+  const second_premat = processing_update_timing_premat_enabled(second);
+  if (first_premat && !second_premat) {
+    return {level: "warning", text: "Pair order is PREMAT then NOMAT; matched A/B use expects NOMAT followed by PREMAT."};
+  }
+  const mode = first_premat === second_premat
+    ? (first_premat ? "PREMAT/PREMAT" : "NOMAT/NOMAT")
+    : "NOMAT/PREMAT";
+  return {level: "ok", text: `Matched ${mode} pair · ${processing_update_timing_experiment_label(first)} → ${processing_update_timing_experiment_label(second)}.`};
+}
+
+function processing_update_timing_render_pair_assessment(entries) {
+  const element = by_id("processing_update_timing_pair_warning");
+  if (!element) return;
+  const assessment = processing_update_timing_pair_assessment(entries);
+  element.dataset.level = assessment.level;
+  element.textContent = assessment.text;
+  element.hidden = false;
+}
+
+function processing_update_timing_clear_plots() {
+  for (const id of ["processing_update_timing_timeline_plot", "processing_update_timing_microsteps_plot"]) {
+    const mount = by_id(id);
+    if (!mount) continue;
+    if (mount.dataset.plotReady === "true") Plotly.purge(mount);
+    mount.dataset.plotReady = "false";
+    mount.replaceChildren();
+  }
+  const body = by_id("processing_update_timing_summary_body");
+  if (body) body.replaceChildren();
 }
 
 function processing_update_timing_maximize_button(chart_name, title) {
@@ -770,7 +893,7 @@ function processing_update_timing_download_comparison() {
   const entries = processing_view.timing_entries || [];
   if (!entries.length) return;
   processing_update_timing_download_json("thog2_update_timing_comparison.json", {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: new Date().toISOString(),
     runs: entries.map(entry => ({
       run_id: entry.run_id,
@@ -792,7 +915,7 @@ function processing_update_timing_summary_card() {
     <header class="chart-card-header">
       <div class="chart-heading-copy">
         <h2>${processing_escape(title)}</h2>
-        <p>Host partition and MAIN-stream CUDA-event elapsed time; MAIN-stream elapsed includes gaps/waits and is not GPU-busy time.</p>
+        <p>Every component reconciles to the official synchronized training-update time; MAIN-stream elapsed includes gaps/waits and is not GPU-busy time.</p>
       </div>
       <div class="chart-card-actions">
         <a id="processing_update_timing_download_selected" class="processing-timing-download-link" href="#" download>Selected raw JSON</a>
@@ -800,9 +923,10 @@ function processing_update_timing_summary_card() {
         ${processing_update_timing_maximize_button(chart_name, title)}
       </div>
     </header>
+    <div class="processing-pair-warning" id="processing_update_timing_pair_warning" data-level="info" hidden></div>
     <div class="processing-summary-wrap">
       <table class="processing-summary processing-update-timing-summary">
-        <thead><tr><th>Run</th><th>Update</th><th>Host total</th><th>MAIN stream elapsed</th><th>Forward</th><th>Backward</th><th>Optimizer</th><th>Other</th><th>Residual</th></tr></thead>
+        <thead><tr><th>-g label</th><th>Update</th><th>Official total</th><th>MAIN stream elapsed</th><th>Setup</th><th>Forward</th><th>Backward</th><th>Post-backward</th><th>Optimizer</th><th>Cleanup/telemetry</th><th>GPU drain</th><th>Unexplained</th><th>Accounting error</th></tr></thead>
         <tbody id="processing_update_timing_summary_body"></tbody>
       </table>
     </div>
@@ -889,27 +1013,38 @@ function processing_update_timing_set_visibility(available) {
 }
 
 processing_render_update_timing = async function() {
+  const generation = ++processing_view.timing_render_generation;
   const cards = processing_ensure_update_timing_stack();
   if (!cards) return;
-  const runs = processing_throughput_workspace_runs();
+  const runs = processing_update_timing_ordered_runs();
+  const active_run_ids = new Set(runs.map(run => String(run_identifier(run))));
+  for (const run_id of processing_update_timing_cache.keys()) {
+    if (!active_run_ids.has(run_id)) processing_update_timing_cache.delete(run_id);
+  }
   const resolved = await Promise.all(runs.map(async run => ({
     run,
     run_id: String(run_identifier(run)),
     timing: await processing_update_timing_for_run(run),
   })));
+  if (generation !== processing_view.timing_render_generation) return;
   const entries = resolved.filter(entry => entry.timing);
   processing_view.timing_entries = entries;
   processing_view.timing_available = entries.length > 0;
   processing_update_timing_set_visibility(entries.length > 0);
   const group_count = by_id("processing_group_count");
   if (group_count) group_count.textContent = String((processing_view.trace_available ? 4 : 1) + (entries.length ? 3 : 0));
-  if (!entries.length) return;
+  processing_update_timing_render_pair_assessment(entries);
+  if (!entries.length) {
+    processing_update_timing_clear_plots();
+    return;
+  }
 
   const lane_names = processing_update_timing_lane_labels(entries);
-  const maximum_host_ms = Math.max(...entries.map(entry => Number(entry.timing.host_update_ms)));
+  const maximum_host_ms = Math.max(...entries.map(entry => Number(entry.timing.official_update_ms ?? entry.timing.host_update_ms)));
   await processing_plot("processing_update_timing_timeline_plot", processing_update_timing_phase_traces(entries), {
     margin: {l: 86, r: 24, t: 16, b: 50},
     hovermode: "closest",
+    barmode: "overlay",
     legend: {orientation: "h", y: 1.10},
     xaxis: {title: "elapsed host time from update entry (ms)", range: [0, maximum_host_ms * 1.01]},
     yaxis: {
@@ -946,6 +1081,7 @@ processing_render_update_timing = async function() {
   });
 
   processing_render_update_timing_summary(entries);
+  processing_update_timing_render_pair_assessment(entries);
   const selected_download = by_id("processing_update_timing_download_selected");
   if (selected_download) {
     selected_download.href = `/api/local-file?run=${encodeURIComponent(processing_current_run())}&path=${encodeURIComponent("processing/update_timing.json")}&download=1`;
