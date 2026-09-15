@@ -27,6 +27,9 @@ _FULL_STEP_TIMING_CAPTURE_OPTION = "--premat_instra__full_step_timing_capture_an
 _FULL_STEP_TIMING_ENABLED_ENVIRONMENT_KEY = "THOG2_INTERNAL_PREMAT_INSTRA_FULL_STEP_TIMING_CAPTURE_AND_CHART"
 _FULL_STEP_TIMING_CAPTURE_ENVIRONMENT_KEY = "THOG2_INTERNAL_PREMAT_INSTRA_FULL_STEP_TIMING_CAPTURE_AND_CHART_CAPTURE"
 _LEGACY_FULL_STEP_TIMING_ENVIRONMENT_KEY = "THOG2_PROCESSING_UPDATE_TIMING_UPDATE"
+os.environ.pop(_LEGACY_FULL_STEP_TIMING_ENVIRONMENT_KEY, None)
+os.environ.pop(_FULL_STEP_TIMING_ENABLED_ENVIRONMENT_KEY, None)
+os.environ.pop(_FULL_STEP_TIMING_CAPTURE_ENVIRONMENT_KEY, None)
 # ^^^ THOG
 
 
@@ -84,9 +87,6 @@ def _extract_probe_interval(arguments: Sequence[str]) -> List[str]:
 # vvv THOG consume the exact full-step timing CLI before core argparse; capture defaults to the trainer's final update when omitted
 
 def _extract_full_step_timing(arguments: Sequence[str]) -> List[str]:
-    os.environ.pop(_LEGACY_FULL_STEP_TIMING_ENVIRONMENT_KEY, None)
-    os.environ.pop(_FULL_STEP_TIMING_ENABLED_ENVIRONMENT_KEY, None)
-    os.environ.pop(_FULL_STEP_TIMING_CAPTURE_ENVIRONMENT_KEY, None)
     remaining: List[str] = []
     enabled: Optional[str] = None
     capture_update: Optional[int] = None

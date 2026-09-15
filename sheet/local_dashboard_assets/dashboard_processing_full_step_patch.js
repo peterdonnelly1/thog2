@@ -71,11 +71,11 @@ function processing_premat_outcome_traces(entries) {
     1,
     ...entries.map(entry => Number(entry.timing.official_update_ms ?? entry.timing.host_update_ms)).filter(Number.isFinite),
   );
-  const gap_ms = Math.max(18, maximum_host_ms * 0.006);
+  const gap_ms = Math.max(24, maximum_host_ms * 0.025);
   const specifications = [
     {key: "full_hits", name: "Full hit", colour: "#238451", offset: 2},
     {key: "partial_hits", name: "Partial hit", colour: "#ee9b31", offset: 1},
-    {key: "misses", name: "Miss", colour: "#b94149", offset: 0},
+    {key: "misses", name: "Miss", colour: "#ef3340", offset: 0},
   ];
   const traces = specifications.map(specification => ({
     type: "scatter",
