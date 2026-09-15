@@ -135,7 +135,8 @@ def infer_kernel_owners(rows: Sequence[Mapping[str, Any]]) -> list[Dict[str, Any
             owner = canonical_owner(row.get("owner"))
             row["owner"] = owner
             row["owner_source"] = "NVTX"
-            explicit_by_stream[(context, stream)].add(owner)
+            if context not in (None, ""):
+                explicit_by_stream[(context, stream)].add(owner)
         else:
             row["owner"] = "UNKNOWN"
             row["owner_source"] = "UNKNOWN"
@@ -144,7 +145,10 @@ def infer_kernel_owners(rows: Sequence[Mapping[str, Any]]) -> list[Dict[str, Any
     for row in normalized:
         if row["owner_source"] != "UNKNOWN":
             continue
-        key = (row.get("context_id", ""), int(row.get("stream", 0)))
+        context = row.get("context_id", "")
+        if context in (None, ""):
+            continue
+        key = (context, int(row.get("stream", 0)))
         owners = explicit_by_stream.get(key, set())
         if len(owners) == 1:
             row["owner"] = next(iter(owners))
