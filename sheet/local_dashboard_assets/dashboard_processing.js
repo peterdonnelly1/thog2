@@ -1112,3 +1112,136 @@ window.addEventListener("load", () => {
   processing_render_update_timing();
 });
 // ^^^ THOG
+
+// vvv THOG A/B/C complete-update comparison: A=DENSE, B=THOG NOMAT, C=THOG PREMAT; preserve the existing two-run path.
+const processing_update_timing_pair_assessment_before_abc = processing_update_timing_pair_assessment;
+
+function processing_update_timing_abc_role(entry) {
+  const signature = processing_update_timing_match_signature(entry);
+  const model_type = String(signature.model_type || "").trim().toLowerCase();
+  const identity = `${model_type} ${processing_update_timing_experiment_label(entry)} ${processing_update_timing_run_name(entry)}`.toLowerCase();
+  const dense = model_type.includes("dense") || /(^|[^a-z0-9])dense([^a-z0-9]|$)/.test(identity);
+  if (dense) return {key: "A", label: "DENSE"};
+  const thog = model_type.includes("thog") || /(^|[^a-z0-9])thog([^a-z0-9]|$)/.test(identity) || /(^|[^a-z0-9])(nomat|premat)([^a-z0-9]|$)/.test(identity);
+  if (!thog) return null;
+  return processing_update_timing_premat_enabled(entry)
+    ? {key: "C", label: "THOG PREMAT"}
+    : {key: "B", label: "THOG NOMAT"};
+}
+
+function processing_update_timing_abc_mismatches(left, right, keys = null) {
+  const left_signature = processing_update_timing_match_signature(left);
+  const right_signature = processing_update_timing_match_signature(right);
+  const candidates = keys || Object.keys(left_signature).filter(key => Object.prototype.hasOwnProperty.call(right_signature, key));
+  return candidates.filter(key => (
+    left_signature[key] !== undefined
+    && right_signature[key] !== undefined
+    && JSON.stringify(left_signature[key]) !== JSON.stringify(right_signature[key])
+  ));
+}
+
+function processing_update_timing_abc_value(entry) {
+  return Number(entry.timing.official_update_ms ?? entry.timing.host_update_ms);
+}
+
+function processing_update_timing_abc_delta(left, right, expression) {
+  const left_ms = processing_update_timing_abc_value(left);
+  const right_ms = processing_update_timing_abc_value(right);
+  const delta_ms = left_ms - right_ms;
+  const delta_percent = Number.isFinite(right_ms) && right_ms !== 0 ? 100 * delta_ms / right_ms : null;
+  return {expression, left_ms, right_ms, delta_ms, delta_percent};
+}
+
+function processing_update_timing_abc_signed(value, digits, suffix) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}${suffix}`;
+}
+
+function processing_update_timing_abc_assessment(entries) {
+  if (app.workspace_mode !== true) {
+    return {level: "info", text: "A/B/C comparison: open Workspace and show DENSE, THOG NOMAT and THOG PREMAT."};
+  }
+  if (entries.length !== 3) {
+    return {level: "warning", text: `A/B/C comparison requires exactly three captured visible runs; found ${entries.length}.`};
+  }
+  const classified = entries.map(entry => ({entry, role: processing_update_timing_abc_role(entry)}));
+  const unknown = classified.filter(item => !item.role);
+  if (unknown.length) {
+    return {level: "error", text: `Cannot assign A/B/C role to: ${unknown.map(item => processing_update_timing_experiment_label(item.entry)).join(", ")}.`};
+  }
+  const role_counts = Object.fromEntries(["A", "B", "C"].map(key => [key, classified.filter(item => item.role.key === key).length]));
+  if (Object.values(role_counts).some(count => count !== 1)) {
+    return {level: "error", text: `Need exactly one A=DENSE, one B=THOG NOMAT and one C=THOG PREMAT; found A=${role_counts.A}, B=${role_counts.B}, C=${role_counts.C}.`};
+  }
+  const roles = Object.fromEntries(classified.map(item => [item.role.key, item.entry]));
+  const shared_control_keys = ["optimizer_update", "gradient_accumulation_steps", "batch_size", "block_size", "device_type", "snapshot_stage", "target_update_index"];
+  const a_b_mismatches = processing_update_timing_abc_mismatches(roles.A, roles.B, shared_control_keys);
+  const a_c_mismatches = processing_update_timing_abc_mismatches(roles.A, roles.C, shared_control_keys);
+  const dense_mismatches = [...new Set([...a_b_mismatches, ...a_c_mismatches])];
+  if (dense_mismatches.length) {
+    return {level: "error", text: `DENSE/THOG controls are not matched: ${dense_mismatches.join(", ")} differ.`};
+  }
+  const b_c_mismatches = processing_update_timing_abc_mismatches(roles.B, roles.C);
+  if (b_c_mismatches.length) {
+    return {level: "error", text: `THOG NOMAT/PREMAT controls are not matched: ${b_c_mismatches.join(", ")} differ.`};
+  }
+  if ([roles.A, roles.B, roles.C].some(entry => !Number.isFinite(processing_update_timing_abc_value(entry)))) {
+    return {level: "error", text: "A/B/C roles are valid but at least one official update time is not finite."};
+  }
+  const deltas = [
+    processing_update_timing_abc_delta(roles.B, roles.A, "B-A"),
+    processing_update_timing_abc_delta(roles.C, roles.B, "C-B"),
+    processing_update_timing_abc_delta(roles.C, roles.A, "C-A"),
+  ];
+  const role_text = ["A", "B", "C"].map(key => `${key} ${key === "A" ? "DENSE" : (key === "B" ? "THOG NOMAT" : "THOG PREMAT")} ${processing_update_timing_abc_value(roles[key]).toFixed(3)} ms`).join(" · ");
+  const delta_text = deltas.map(delta => `${delta.expression} ${processing_update_timing_abc_signed(delta.delta_ms, 3, " ms")} (${processing_update_timing_abc_signed(delta.delta_percent, 2, "%")})`).join(" · ");
+  return {level: "ok", text: `Matched A/B/C · ${role_text} · ${delta_text}.`, roles, deltas};
+}
+
+processing_update_timing_pair_assessment = function(entries) {
+  if (entries.length === 3) return processing_update_timing_abc_assessment(entries);
+  return processing_update_timing_pair_assessment_before_abc(entries);
+};
+
+processing_update_timing_download_comparison = function() {
+  const entries = processing_view.timing_entries || [];
+  if (!entries.length) return;
+  const payload = {
+    schema_version: 3,
+    generated_at: new Date().toISOString(),
+    runs: entries.map(entry => ({
+      run_id: entry.run_id,
+      run_name: processing_update_timing_run_name(entry),
+      timing: entry.timing,
+    })),
+  };
+  if (entries.length === 3) {
+    const assessment = processing_update_timing_abc_assessment(entries);
+    payload.comparison = {
+      mode: "dense_thog_abc",
+      valid: assessment.level === "ok",
+      assessment: assessment.text,
+      dense_representation_fields_intentionally_not_matched: ["model_type", "model_scale_key"],
+    };
+    if (assessment.level === "ok") {
+      payload.comparison.roles = Object.fromEntries(["A", "B", "C"].map(key => {
+        const entry = assessment.roles[key];
+        return [key.toLowerCase(), {
+          role: key,
+          label: key === "A" ? "DENSE" : (key === "B" ? "THOG NOMAT" : "THOG PREMAT"),
+          run_id: entry.run_id,
+          run_name: processing_update_timing_run_name(entry),
+          official_update_ms: processing_update_timing_abc_value(entry),
+        }];
+      }));
+      payload.comparison.pairwise_deltas = assessment.deltas.map(delta => ({
+        expression: delta.expression,
+        delta_ms: delta.delta_ms,
+        delta_percent: delta.delta_percent,
+      }));
+    }
+  }
+  processing_update_timing_download_json("thog2_update_timing_comparison.json", payload);
+};
+// ^^^ THOG
