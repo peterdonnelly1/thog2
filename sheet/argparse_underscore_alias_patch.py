@@ -49,4 +49,8 @@ if argparse.ArgumentParser.add_argument is not _add_argument_with_strict_plastic
 # vvv THOG install Weights capture-window hyperparameters on every normal runner path without adding them to model/checkpoint identity
 from . import depth_weight_step_range_config_patch as _depth_weight_step_range_config_patch
 # ^^^ THOG
+
+# vvv THOG install full-step timing as real runner argparse controls while keeping it execution-only
+from . import full_step_timing_cli_patch as _full_step_timing_cli_patch
+# ^^^ THOG
 # ^^^ THOG
