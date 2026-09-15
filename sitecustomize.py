@@ -21,7 +21,7 @@ _ORIGINAL_PARSE_ARGS = argparse.ArgumentParser.parse_args
 _ORIGINAL_PARSE_KNOWN_ARGS = argparse.ArgumentParser.parse_known_args
 _ORIGINAL_FORMAT_HELP = argparse.ArgumentParser.format_help
 
-# vvv THOG full-step timing is a public CLI feature; the former environment variable is deliberately no longer a user control
+# vvv THOG full-step timing no longer uses sitecustomize; retain only legacy environment retirement for safety
 _FULL_STEP_TIMING_OPTION = "--premat_instra__full_step_timing_capture_and_chart"
 _FULL_STEP_TIMING_CAPTURE_OPTION = "--premat_instra__full_step_timing_capture_and_chart_capture"
 _FULL_STEP_TIMING_ENABLED_ENVIRONMENT_KEY = "THOG2_INTERNAL_PREMAT_INSTRA_FULL_STEP_TIMING_CAPTURE_AND_CHART"
@@ -84,8 +84,7 @@ def _extract_probe_interval(arguments: Sequence[str]) -> List[str]:
     return remaining
 
 
-# vvv THOG consume the exact full-step timing CLI before core argparse; capture defaults to the trainer's final update when omitted
-
+# vvv THOG preserved superseded sitecustomize full-step parser for source history; active ownership moved into sheet/full_step_timing_cli_patch.py
 def _extract_full_step_timing(arguments: Sequence[str]) -> List[str]:
     remaining: List[str] = []
     enabled: Optional[str] = None
@@ -136,9 +135,9 @@ def _extract_full_step_timing(arguments: Sequence[str]) -> List[str]:
 
 def _normalise_arguments(arguments: Optional[Sequence[str]]) -> List[str]:
     source = sys.argv[1:] if arguments is None else list(arguments)
-    # vvv THOG consume full-step timing controls after established underscore/PLASTIC handling
-    # return _extract_probe_interval(source)
-    return _extract_full_step_timing(_extract_probe_interval(source))
+    # vvv THOG full-step controls are now real THOG argparse actions and must remain in argv
+    # return _extract_full_step_timing(_extract_probe_interval(source))
+    return _extract_probe_interval(source)
     # ^^^ THOG
 
 
@@ -153,7 +152,7 @@ def _parse_known_args_with_underscore_aliases(self: argparse.ArgumentParser, arg
 argparse.ArgumentParser.parse_args = _parse_args_with_underscore_aliases
 argparse.ArgumentParser.parse_known_args = _parse_known_args_with_underscore_aliases
 
-# vvv THOG advertise the consumed full-step controls on the canonical OWT argparse help surface
+# vvv THOG preserved superseded help overlay; actual argparse actions now advertise themselves
 def _format_help_with_full_step_timing(self: argparse.ArgumentParser) -> str:
     text = _ORIGINAL_FORMAT_HELP(self)
     if str(getattr(self, "description", "")) != "Train or resume one canonical THOG2 OpenWebText run":
@@ -168,10 +167,10 @@ def _format_help_with_full_step_timing(self: argparse.ArgumentParser) -> str:
     )
 
 
-argparse.ArgumentParser.format_help = _format_help_with_full_step_timing
+# argparse.ArgumentParser.format_help = _format_help_with_full_step_timing
 # ^^^ THOG
 
-# vvv THOG install the full-step timing overlay only after the established processing patch has completely initialized
+# vvv THOG preserved superseded import-hook implementation; runtime overlay is now loaded by the THOG argparse path
 _ORIGINAL_IMPORT_FOR_FULL_STEP_TIMING = builtins.__import__
 _FULL_STEP_TIMING_PATCH_INSTALLED = False
 
@@ -197,6 +196,6 @@ def _import_with_full_step_timing_patch(name, globals=None, locals=None, fromlis
     return module
 
 
-builtins.__import__ = _import_with_full_step_timing_patch
+# builtins.__import__ = _import_with_full_step_timing_patch
 # ^^^ THOG
 # ^^^ THOG
