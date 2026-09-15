@@ -1,9 +1,9 @@
 # vvv THOG
 """Pure helpers for Processing stream/resource attribution.
 
-The Nsight Systems GPU metrics used by Processing are device-wide.  This module
+The Nsight Systems GPU metrics used by Processing are device-wide. This module
 therefore attributes a sample only when CUDA kernel ownership makes that
-attribution exact.  Samples containing real Main/PREMAT overlap remain combined
+attribution exact. Samples containing real Main/PREMAT overlap remain combined
 and are never numerically split between streams.
 """
 
@@ -117,9 +117,9 @@ def canonical_owner(value: Any) -> str:
     owner = str(value or "").strip().upper()
     if owner in {"MAIN", "PREMAT"}:
         return owner
-    if owner:
-        return "OTHER"
-    return "UNKNOWN"
+    if owner == "UNKNOWN" or not owner:
+        return "UNKNOWN"
+    return "OTHER"
 
 
 def infer_kernel_owners(rows: Sequence[Mapping[str, Any]]) -> list[Dict[str, Any]]:
@@ -361,7 +361,7 @@ def _semantic_context(
     return {
         f"{prefix}_stream_ids": _joined_values(row.get("stream") for row in rows),
         f"{prefix}_operations": _joined_values(row.get("operation") for row in rows),
-        f"{prefix}_layers": _joined_values(row.get("layer") for row in rows, numeric=True),
+        f"{prefix}_layers": _joined_values((row.get("layer") for row in rows), numeric=True),
         f"{prefix}_families": _joined_values(row.get("family") for row in rows),
     }
 
