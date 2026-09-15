@@ -1,10 +1,5 @@
 # vvv THOG
-"""Opt-in PREMAT processing capture and Nsight Systems normalization.
-
-Nsight owns device-wide hardware-counter collection. THOG contributes only a
-single bounded NVTX capture range plus semantic operation ranges, then converts
-the exported SQLite trace into stable INSTRA/download formats.
-"""
+"""Opt-in PREMAT Processing capture and Nsight Systems normalization."""
 
 from __future__ import annotations
 
@@ -22,13 +17,24 @@ import tempfile
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence
 import zipfile
 
+from sheet.processing_resource_attribution import (
+    PROCESSING_METRIC_FIELDS,
+    PROCESSING_METRIC_SPECS,
+    PROCESSING_STREAM_RESOURCE_FIELDS,
+    build_stream_resource_rows,
+    infer_kernel_owners,
+    main_idle_intervals,
+    merge_intervals,
+    metric_catalog,
+)
+
 
 PROCESSING_SWITCHES = ("enabled", "disabled")
 PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ = 10_000
-PROCESSING_DEFAULT_CAPTURE_UPDATE = 1                                                                                                                       # <<< THOG preserve update-one capture unless the user requests a settled update
+PROCESSING_DEFAULT_CAPTURE_UPDATE = 1
 PROCESSING_MIN_CAPTURE_FREQUENCY_HZ = 10
 PROCESSING_MAX_CAPTURE_FREQUENCY_HZ = 200_000
-PROCESSING_SCHEMA_VERSION = 1
+PROCESSING_SCHEMA_VERSION = 2
 PROCESSING_CAPTURE_RANGE = "THOG2_PREMAT_PROCESSING_CAPTURE"
 PROCESSING_OPERATION_PREFIX = "THOG2_PROCESSING"
 _PROCESSING_CHILD_ENV = "THOG2_PREMAT_PROCESSING_UNDER_NSYS"
@@ -40,7 +46,6 @@ _capture_done = False
 _capture_stack_depth = 0
 
 
-# vvv THOG Processing capture-update is diagnostic execution state and independent of ordinary log cadence
 def validate_processing_configuration(
     logging: str,
     capture_frequency_hz: int,
@@ -59,18 +64,13 @@ def validate_processing_configuration(
         )
     if isinstance(capture_update, bool) or not isinstance(capture_update, int) or capture_update < 1:
         raise ValueError("premat_processing_logging_capture_update must be a positive integer")
-    if (
-        logging == "enabled"
-        and max_updates is not None
-        and capture_update > int(max_updates)
-    ):
+    if logging == "enabled" and max_updates is not None and capture_update > int(max_updates):
         raise ValueError(
             "premat_processing_logging_capture_update must not exceed max_updates; "
             f"got capture_update={capture_update}, max_updates={max_updates}"
         )
     if logging == "enabled" and not str(device).startswith("cuda"):
         raise ValueError("--premat_processing_logging enabled requires a CUDA device")
-# ^^^ THOG
 
 
 def _argv_value(arguments: Sequence[str], name: str, default: Optional[str] = None) -> Optional[str]:
@@ -83,7 +83,6 @@ def _argv_value(arguments: Sequence[str], name: str, default: Optional[str] = No
     return default
 
 
-# vvv THOG parse the wrapper-only capture update before torch/CUDA imports exactly like the existing Processing controls
 def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int, int]:
     logging = str(_argv_value(arguments, "--premat_processing_logging", "disabled"))
     raw_frequency = _argv_value(
@@ -99,18 +98,13 @@ def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int,
     try:
         frequency = int(str(raw_frequency))
     except ValueError as error:
-        raise ValueError(
-            "--premat_processing_logging_capture_frequency_hz must be an integer"
-        ) from error
+        raise ValueError("--premat_processing_logging_capture_frequency_hz must be an integer") from error
     try:
         capture_update = int(str(raw_capture_update))
     except ValueError as error:
-        raise ValueError(
-            "--premat_processing_logging_capture_update must be an integer"
-        ) from error
+        raise ValueError("--premat_processing_logging_capture_update must be an integer") from error
     validate_processing_configuration(logging, frequency, "cuda", capture_update)
     return logging == "enabled", frequency, capture_update
-# ^^^ THOG
 
 
 def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
@@ -119,7 +113,7 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
     replacements = {
         "--premat_processing_logging": "--processing_logging_internal",
         "--premat_processing_logging_capture_frequency_hz": "--processing_logging_capture_frequency_hz_internal",
-        "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",                                                    # <<< THOG wrapper-only exact optimizer update for the one bounded capture
+        "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",
     }
     while index < len(arguments):
         argument = str(arguments[index])
@@ -145,26 +139,14 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
     return rewritten
 
 
-# vvv THOG wrapper metadata/help probes must never start Nsight; only the actual training invocation is profiled
 _PROCESSING_NON_TRAINING_FLAGS = frozenset({
-    "-h",
-    "--help",
-    "--dry-run",
-    "--explain-geometry",
-    "--print-artifact-name",
-    "--print-geometry-registry",
-    "--print-resolved-json",
+    "-h", "--help", "--dry-run", "--explain-geometry", "--print-artifact-name",
+    "--print-geometry-registry", "--print-resolved-json",
 })
 
 
 def processing_invocation_is_non_training(arguments: Sequence[str]) -> bool:
-    for raw_argument in arguments:
-        argument = str(raw_argument)
-        option_name = argument.split("=", 1)[0]
-        if option_name in _PROCESSING_NON_TRAINING_FLAGS:
-            return True
-    return False
-# ^^^ THOG
+    return any(str(argument).split("=", 1)[0] in _PROCESSING_NON_TRAINING_FLAGS for argument in arguments)
 
 
 def _find_nsys() -> Optional[str]:
@@ -176,7 +158,6 @@ def _find_nsys() -> Optional[str]:
     return str(candidates[0]) if candidates else None
 
 
-# vvv THOG make the Nsight launch contract explicit: preserve THOG environment, show child output, wait for the child, and collect GPU-only diagnostics
 def _nsys_profile_command(
     nsys: str,
     *,
@@ -186,26 +167,14 @@ def _nsys_profile_command(
     arguments: Sequence[str],
 ) -> list[str]:
     return [
-        nsys,
-        "profile",
-        "--trace=cuda,nvtx",
-        "--sample=none",
-        "--cpuctxsw=none",
-        "--show-output=true",
-        "--inherit-environment=true",
-        "--wait=primary",
-        "--capture-range=nvtx",
-        "--capture-range-end=stop",
+        nsys, "profile", "--trace=cuda,nvtx", "--sample=none", "--cpuctxsw=none",
+        "--show-output=true", "--inherit-environment=true", "--wait=primary",
+        "--capture-range=nvtx", "--capture-range-end=stop",
         f"--nvtx-capture={PROCESSING_CAPTURE_RANGE}",
-        "--gpu-metrics-devices=cuda-visible",
-        f"--gpu-metrics-frequency={frequency}",
-        "--force-overwrite=true",
-        f"--output={report_base}",
-        sys.executable,
-        str(Path(entrypoint).resolve()),
-        *arguments,
+        "--gpu-metrics-devices=cuda-visible", f"--gpu-metrics-frequency={frequency}",
+        "--force-overwrite=true", f"--output={report_base}", sys.executable,
+        str(Path(entrypoint).resolve()), *arguments,
     ]
-# ^^^ THOG
 
 
 def register_processing_handoff(
@@ -221,25 +190,13 @@ def register_processing_handoff(
         "run_directory": str(Path(run_directory).resolve()),
         "run_name": str(run_name),
         "config": {
-            "premat": config.get("premat"),
-            "premat_target_layer": config.get("premat_target_layer"),
-            "premat_target_matrix": config.get("premat_target_matrix"),                                                                                    # <<< THOG record fixed PREMAT matrix selector in Processing bundle metadata
-            "premat_attention_mode": config.get("premat_attention_mode"),
-            "premat_processing_logging": config.get("premat_processing_logging"),
-            "premat_processing_logging_capture_frequency_hz": config.get(
-                "premat_processing_logging_capture_frequency_hz"
-            ),
-            "premat_processing_logging_capture_update": config.get(
-                "premat_processing_logging_capture_update"
-            ),
-            "n_layer": config.get("n_layer"),
-            "n_embd": config.get("n_embd"),
-            "n_head": config.get("n_head"),
-            "batch_size": config.get("batch_size"),
-            "block_size": config.get("block_size"),
-            "gradient_accumulation_steps": config.get("gradient_accumulation_steps"),
-            "dtype": config.get("dtype"),
-            "device": config.get("device"),
+            key: config.get(key)
+            for key in (
+                "premat", "premat_target_layer", "premat_target_matrix", "premat_attention_mode",
+                "premat_processing_logging", "premat_processing_logging_capture_frequency_hz",
+                "premat_processing_logging_capture_update", "n_layer", "n_embd", "n_head",
+                "batch_size", "block_size", "gradient_accumulation_steps", "dtype", "device",
+            )
         },
     }
     destination = Path(target)
@@ -247,7 +204,6 @@ def register_processing_handoff(
     destination.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
 
-# vvv THOG capture exactly the requested optimizer update; ordinary log_interval no longer controls Nsight timing
 def should_capture_processing_forward(
     *,
     enabled: bool,
@@ -263,20 +219,16 @@ def should_capture_processing_forward(
         return False
     if int(capture_update) > int(max_updates):
         return False
-    prospective_update = int(completed_updates) + 1
-    return prospective_update == int(capture_update)
-# ^^^ THOG
+    return int(completed_updates) + 1 == int(capture_update)
 
 
 def _nvtx_push(label: str) -> None:
     import torch
-
     torch.cuda.nvtx.range_push(label)
 
 
 def _nvtx_pop() -> None:
     import torch
-
     torch.cuda.nvtx.range_pop()
 
 
@@ -306,10 +258,9 @@ def processing_operation_push(
 
 def processing_operation_pop(pushed: bool) -> None:
     global _capture_stack_depth
-    if not pushed:
-        return
-    _nvtx_pop()
-    _capture_stack_depth = max(0, _capture_stack_depth - 1)
+    if pushed:
+        _nvtx_pop()
+        _capture_stack_depth = max(0, _capture_stack_depth - 1)
 
 
 @contextmanager
@@ -320,12 +271,7 @@ def processing_operation_range(
     family: Optional[str] = None,
     layer_index: Optional[int] = None,
 ) -> Iterator[None]:
-    pushed = processing_operation_push(
-        owner,
-        operation,
-        family=family,
-        layer_index=layer_index,
-    )
+    pushed = processing_operation_push(owner, operation, family=family, layer_index=layer_index)
     try:
         yield
     finally:
@@ -355,9 +301,7 @@ def processing_capture_scope(
     if not selected:
         yield
         return
-
     import torch
-
     if not torch.cuda.is_available() or torch.device(device).type != "cuda":
         raise RuntimeError("PREMAT processing capture requires CUDA")
     torch.cuda.synchronize(device)
@@ -367,13 +311,12 @@ def processing_capture_scope(
             "optimizer_update": int(completed_updates) + 1,
             "micro_step": int(micro_step) + 1,
             "log_interval": int(log_interval),
-            "requested_capture_update": int(capture_update),                                                                                              # <<< THOG make the requested settled capture point explicit in bundle metadata
+            "requested_capture_update": int(capture_update),
             "max_updates": int(max_updates),
         }
         destination = Path(metadata_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
-
     _capture_active = True
     _capture_stack_depth = 0
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
@@ -390,10 +333,7 @@ def processing_capture_scope(
 
 
 def _table_names(connection: sqlite3.Connection) -> set[str]:
-    return {
-        str(row[0])
-        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
+    return {str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
@@ -401,10 +341,7 @@ def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
 
 
 def _first_column(columns: set[str], *names: str) -> Optional[str]:
-    for name in names:
-        if name in columns:
-            return name
-    return None
+    return next((name for name in names if name in columns), None)
 
 
 def _string_ids(connection: sqlite3.Connection, tables: set[str]) -> Dict[int, str]:
@@ -417,17 +354,13 @@ def _string_ids(connection: sqlite3.Connection, tables: set[str]) -> Dict[int, s
         return {}
     return {
         int(row[0]): str(row[1])
-        for row in connection.execute(
-            f'SELECT "{id_column}", "{value_column}" FROM "StringIds"'
-        )
+        for row in connection.execute(f'SELECT "{id_column}", "{value_column}" FROM "StringIds"')
     }
 
 
 def _resolved_string(value: Any, strings: Mapping[int, str]) -> str:
     if value is None:
         return ""
-    if isinstance(value, int) and value in strings:
-        return strings[value]
     try:
         integer = int(value)
     except (TypeError, ValueError):
@@ -448,14 +381,10 @@ def _nvtx_events(connection: sqlite3.Connection, tables: set[str], strings: Mapp
     text_id_column = _first_column(columns, "textId", "messageId")
     if start_column is None or end_column is None or (text_column is None and text_id_column is None):
         raise RuntimeError(f"unsupported NVTX_EVENTS schema: {sorted(columns)}")
-    selected = [start_column, end_column]
-    selected.append(thread_column or start_column)
-    selected.append(text_column or text_id_column)  # type: ignore[arg-type]
-    rows = connection.execute(
-        "SELECT " + ", ".join(f'"{column}"' for column in selected) + ' FROM "NVTX_EVENTS"'
-    )
+    selected = [start_column, end_column, thread_column or start_column, text_column or text_id_column]
     events = []
-    for start, end, thread, raw_text in rows:
+    query = "SELECT " + ", ".join(f'"{column}"' for column in selected) + ' FROM "NVTX_EVENTS"'
+    for start, end, thread, raw_text in connection.execute(query):
         if start is None or end is None:
             continue
         text = str(raw_text) if text_column is not None else _resolved_string(raw_text, strings)
@@ -498,16 +427,11 @@ def _runtime_rows(connection: sqlite3.Connection, tables: set[str]) -> list[Dict
     )
     return [
         {"start": int(row[0]), "end": int(row[1]), "thread": int(row[2]), "correlation": int(row[3])}
-        for row in connection.execute(query)
-        if None not in row
+        for row in connection.execute(query) if None not in row
     ]
 
 
-def _kernel_rows(
-    connection: sqlite3.Connection,
-    tables: set[str],
-    strings: Mapping[int, str],
-) -> list[Dict[str, Any]]:
+def _kernel_rows(connection: sqlite3.Connection, tables: set[str], strings: Mapping[int, str]) -> list[Dict[str, Any]]:
     table = next(
         (name for name in ("CUPTI_ACTIVITY_KIND_KERNEL", "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL") if name in tables),
         None,
@@ -519,10 +443,13 @@ def _kernel_rows(
     end_column = _first_column(columns, "end")
     stream_column = _first_column(columns, "streamId", "stream")
     correlation_column = _first_column(columns, "correlationId")
+    context_column = _first_column(columns, "contextId", "context", "context_id")
     name_column = _first_column(columns, "shortName", "demangledName", "name")
     if None in (start_column, end_column, stream_column, correlation_column):
         raise RuntimeError(f"unsupported CUDA kernel schema: {sorted(columns)}")
     selected = [start_column, end_column, stream_column, correlation_column]
+    if context_column is not None:
+        selected.append(context_column)
     if name_column is not None:
         selected.append(name_column)
     query = "SELECT " + ", ".join(f'"{column}"' for column in selected) + f' FROM "{table}"'
@@ -531,12 +458,15 @@ def _kernel_rows(
         start, end, stream, correlation = row[:4]
         if None in (start, end, stream, correlation):
             continue
+        offset = 4
+        context_id: Any = ""
+        if context_column is not None:
+            context_id = "" if row[offset] is None else int(row[offset])
+            offset += 1
+        kernel_name = _resolved_string(row[offset], strings) if name_column is not None else ""
         kernels.append({
-            "start": int(start),
-            "end": int(end),
-            "stream": int(stream),
-            "correlation": int(correlation),
-            "kernel_name": _resolved_string(row[4], strings) if name_column is not None else "",
+            "start": int(start), "end": int(end), "stream": int(stream),
+            "correlation": int(correlation), "context_id": context_id, "kernel_name": kernel_name,
         })
     return kernels
 
@@ -547,8 +477,7 @@ def _metric_rows(
     capture_start: int,
     capture_end: int,
 ) -> tuple[list[Dict[str, Any]], Dict[str, str], list[str]]:
-    required = {"GPU_METRICS", "TARGET_INFO_GPU_METRICS"}
-    if not required.issubset(tables):
+    if not {"GPU_METRICS", "TARGET_INFO_GPU_METRICS"}.issubset(tables):
         return [], {}, []
     info_columns = _columns(connection, "TARGET_INFO_GPU_METRICS")
     metric_columns = _columns(connection, "GPU_METRICS")
@@ -561,32 +490,20 @@ def _metric_rows(
         return [], {}, []
     names = {
         int(row[0]): str(row[1])
-        for row in connection.execute(
-            f'SELECT "{metric_id}", "{metric_name}" FROM "TARGET_INFO_GPU_METRICS"'
-        )
-    }
-    desired_patterns = {
-        "sm_active_pct": ("SMs Active", "sm__cycles_active"),
-        "sm_issue_pct": ("SM Issue", "sm__inst_executed"),
-        "tensor_active_pct": ("Tensor Active", "sm__pipe_tensor"),
-        "active_sm_unused_warp_slots_pct": (
-            "Active SM Unused Warp Slots",
-            "Unallocated Warps in Active SM",                                                                                                             # <<< THOG AD10x General Metrics display name for unused active-SM warp slots
-            "tpc__warps_inactive_sm_active",
-        ),
+        for row in connection.execute(f'SELECT "{metric_id}", "{metric_name}" FROM "TARGET_INFO_GPU_METRICS"')
     }
     selected: Dict[int, str] = {}
     mapping: Dict[str, str] = {}
     for identifier, name in names.items():
         lower = name.lower()
-        for key, patterns in desired_patterns.items():
+        for key, specification in PROCESSING_METRIC_SPECS.items():
             if key in mapping:
                 continue
-            if any(pattern.lower() in lower for pattern in patterns):
+            if any(str(pattern).lower() in lower for pattern in specification["patterns"]):
                 selected[identifier] = key
                 mapping[key] = name
                 break
-    available_metric_names = sorted(set(names.values()))                                                                                             # <<< THOG retain profiler-advertised metric names so missing aliases are diagnosable from the bundle
+    available_metric_names = sorted(set(names.values()))
     if not selected:
         return [], mapping, available_metric_names
     placeholders = ",".join("?" for _ in selected)
@@ -609,15 +526,8 @@ def _metric_rows(
     return list(samples_by_time.values()), mapping, available_metric_names
 
 
-# vvv THOG Main/PREMAT overlap is measured only where actual CUDA kernels execute, never across semantic-span gaps
 def _merged_intervals(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
-    merged: list[tuple[float, float]] = []
-    for left, right in sorted((float(left), float(right)) for left, right in intervals if right > left):
-        if not merged or left > merged[-1][1]:
-            merged.append((left, right))
-        else:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], right))
-    return merged
+    return merge_intervals(intervals)
 
 
 def _interval_duration(intervals: Iterable[tuple[float, float]]) -> float:
@@ -625,107 +535,65 @@ def _interval_duration(intervals: Iterable[tuple[float, float]]) -> float:
 
 
 def _union_overlap(intervals: Iterable[tuple[float, float]], start: float, end: float) -> float:
-    clipped = sorted(
+    return _interval_duration(
         (max(start, left), min(end, right))
         for left, right in intervals
         if right > start and left < end
     )
-    total = 0.0
-    cursor: Optional[float] = None
-    stop = 0.0
-    for left, right in clipped:
-        if right <= left:
-            continue
-        if cursor is None:
-            cursor, stop = left, right
-            continue
-        if left <= stop:
-            stop = max(stop, right)
-        else:
-            total += stop - cursor
-            cursor, stop = left, right
-    if cursor is not None:
-        total += stop - cursor
-    return total
 
 
 def _kernel_union_overlap(
     main_intervals: Iterable[tuple[float, float]],
     premat_intervals: Iterable[tuple[float, float]],
 ) -> float:
-    return sum(
-        _union_overlap(premat_intervals, left, right)
-        for left, right in _merged_intervals(main_intervals)
-    )
-# ^^^ THOG
+    premat = list(premat_intervals)
+    return sum(_union_overlap(premat, left, right) for left, right in _merged_intervals(main_intervals))
 
 
-# vvv THOG four-family Processing scoreboard; absent PREMAT families remain explicitly unpopulated for matrix-isolation experiments
 _PROCESSING_MATRIX_FAMILIES = ("QKV", "O", "UP", "DOWN")
 
 
 def _processing_matrix_summary(interval_rows: Sequence[Mapping[str, Any]]) -> Dict[str, Optional[Dict[str, float | int]]]:
     main_intervals = [
-        (float(row["start_us"]), float(row["end_us"]))
-        for row in interval_rows
-        if row.get("owner") == "MAIN"
+        (float(row["start_us"]), float(row["end_us"])) for row in interval_rows if row.get("owner") == "MAIN"
     ]
     main_consume_intervals = [
         (float(row["start_us"]), float(row["end_us"]))
-        for row in interval_rows
-        if row.get("owner") == "MAIN" and row.get("operation") == "consume"
+        for row in interval_rows if row.get("owner") == "MAIN" and row.get("operation") == "consume"
     ]
     main_busy_us = _interval_duration(main_intervals)
     result: Dict[str, Optional[Dict[str, float | int]]] = {family: None for family in _PROCESSING_MATRIX_FAMILIES}
     for family in _PROCESSING_MATRIX_FAMILIES:
         premat_rows = [
             row for row in interval_rows
-            if row.get("owner") == "PREMAT"
-            and row.get("operation") == "materialize"
-            and row.get("family") == family
+            if row.get("owner") == "PREMAT" and row.get("operation") == "materialize" and row.get("family") == family
         ]
         if not premat_rows:
             continue
-        premat_intervals = [
-            (float(row["start_us"]), float(row["end_us"]))
-            for row in premat_rows
-        ]
+        premat_intervals = [(float(row["start_us"]), float(row["end_us"])) for row in premat_rows]
         premat_busy_us = _interval_duration(premat_intervals)
         by_op: Dict[int, list[tuple[float, float]]] = {}
         for row in premat_rows:
             raw_op_id = row.get("op_id")
             if raw_op_id in (None, ""):
                 continue
-            by_op.setdefault(int(raw_op_id), []).append(
-                (float(row["start_us"]), float(row["end_us"]))
-            )
+            by_op.setdefault(int(raw_op_id), []).append((float(row["start_us"]), float(row["end_us"])))
         op_durations_us = [_interval_duration(rows) for rows in by_op.values()]
         family_consumes = [
             row for row in interval_rows
-            if row.get("owner") == "MAIN"
-            and row.get("operation") == "consume"
-            and row.get("family") == family
+            if row.get("owner") == "MAIN" and row.get("operation") == "consume" and row.get("family") == family
         ]
-        consume_op_ids = {
-            int(row["op_id"])
-            for row in family_consumes
-            if row.get("op_id") not in (None, "")
-        }
+        consume_op_ids = {int(row["op_id"]) for row in family_consumes if row.get("op_id") not in (None, "")}
         ready_leads_us: list[float] = []
-        premat_layers = {
-            int(row["layer"])
-            for row in premat_rows
-            if row.get("layer") not in (None, "")
-        }
+        premat_layers = {int(row["layer"]) for row in premat_rows if row.get("layer") not in (None, "")}
         for layer in sorted(premat_layers):
             premat_layer = [row for row in premat_rows if row.get("layer") not in (None, "") and int(row["layer"]) == layer]
             consume_layer = [row for row in family_consumes if row.get("layer") not in (None, "") and int(row["layer"]) == layer]
-            if not premat_layer or not consume_layer:
-                continue
-            ready_leads_us.append(
-                min(float(row["start_us"]) for row in consume_layer)
-                - max(float(row["end_us"]) for row in premat_layer)
-            )
+            if premat_layer and consume_layer:
+                ready_leads_us.append(
+                    min(float(row["start_us"]) for row in consume_layer)
+                    - max(float(row["end_us"]) for row in premat_layer)
+                )
         consume_overlap_us = _kernel_union_overlap(premat_intervals, main_consume_intervals)
         any_main_overlap_us = _kernel_union_overlap(premat_intervals, main_intervals)
         result[family] = {
@@ -735,34 +603,13 @@ def _processing_matrix_summary(interval_rows: Sequence[Mapping[str, Any]]) -> Di
             "mean_reconstruction_ms": (sum(op_durations_us) / len(op_durations_us) / 1000.0) if op_durations_us else 0.0,
             "main_consume_overlap_ms": consume_overlap_us / 1000.0,
             "any_main_overlap_ms": any_main_overlap_us / 1000.0,
-            "premat_concurrent_with_main_pct": (100.0 * any_main_overlap_us / premat_busy_us) if premat_busy_us > 0.0 else 0.0,
-            "main_busy_concurrent_with_premat_pct": (100.0 * any_main_overlap_us / main_busy_us) if main_busy_us > 0.0 else 0.0,
+            "premat_concurrent_with_main_pct": 100.0 * any_main_overlap_us / premat_busy_us if premat_busy_us > 0.0 else 0.0,
+            "main_busy_concurrent_with_premat_pct": 100.0 * any_main_overlap_us / main_busy_us if main_busy_us > 0.0 else 0.0,
             "mean_ready_lead_ms": (sum(ready_leads_us) / len(ready_leads_us) / 1000.0) if ready_leads_us else 0.0,
         }
     return result
-# ^^^ THOG
 
 
-# vvv THOG Nsight GPU_METRICS rows are sparse by timestamp; ignore absent/non-numeric metric cells rather than coercing empty placeholders
-def _mean_metric(samples: Sequence[Mapping[str, Any]], key: str, start_us: float, end_us: float) -> Optional[float]:
-    values: list[float] = []
-    for row in samples:
-        if not start_us <= float(row["time_us"]) <= end_us:
-            continue
-        raw_value = row.get(key)
-        if raw_value in (None, ""):
-            continue
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(value):
-            values.append(value)
-    return sum(values) / len(values) if values else None
-# ^^^ THOG
-
-
-# vvv THOG summary counters sample only timestamps at which the labelled Main operation has a CUDA kernel in flight
 def _mean_metric_intervals(
     samples: Sequence[Mapping[str, Any]],
     key: str,
@@ -784,7 +631,6 @@ def _mean_metric_intervals(
         if math.isfinite(value):
             values.append(value)
     return sum(values) / len(values) if values else None
-# ^^^ THOG
 
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
@@ -816,8 +662,9 @@ def normalize_nsys_sqlite(
         capture = captures[0]
         capture_start = int(capture["start"])
         capture_end = int(capture["end"])
+        capture_duration_us = (capture_end - capture_start) / 1000.0
         operations = []
-        for index, event in enumerate(nvtx):
+        for event in nvtx:
             parsed = _parse_operation_label(str(event["text"]))
             if parsed is None:
                 continue
@@ -829,78 +676,74 @@ def normalize_nsys_sqlite(
         kernels = _kernel_rows(connection, tables, strings)
         correlation_to_operation: Dict[int, Dict[str, Any]] = {}
         for operation in operations:
-            matching = [
-                runtime
-                for runtime in runtimes
-                if runtime["thread"] == operation["thread"]
-                and runtime["start"] >= operation["start"]
-                and runtime["end"] <= operation["end"]
-            ]
-            for runtime in matching:
-                correlation_to_operation[int(runtime["correlation"])] = operation
+            for runtime in runtimes:
+                if (
+                    runtime["thread"] == operation["thread"]
+                    and runtime["start"] >= operation["start"]
+                    and runtime["end"] <= operation["end"]
+                ):
+                    correlation_to_operation[int(runtime["correlation"])] = operation
 
-        interval_rows = []
+        candidates = []
         operation_kernel_intervals: Dict[int, list[tuple[float, float]]] = {}
         for kernel in kernels:
             if kernel["end"] < capture_start or kernel["start"] > capture_end:
                 continue
-            operation = correlation_to_operation.get(int(kernel["correlation"]))
             start_us = (max(kernel["start"], capture_start) - capture_start) / 1000.0
             end_us = (min(kernel["end"], capture_end) - capture_start) / 1000.0
             if end_us <= start_us:
                 continue
-            owner = str(operation["owner"]) if operation is not None else "MAIN"
-            op_name = str(operation["operation"]) if operation is not None else "other"
-            family = str(operation["family"]) if operation is not None else ""
-            layer = operation["layer"] if operation is not None else None
+            operation = correlation_to_operation.get(int(kernel["correlation"]))
             op_id = int(operation["op_id"]) if operation is not None else None
-            row = {
+            candidates.append({
                 "start_us": start_us,
                 "end_us": end_us,
                 "duration_us": end_us - start_us,
                 "stream": int(kernel["stream"]),
-                "owner": owner,
-                "layer": "" if layer is None else int(layer),
-                "family": family,
-                "operation": op_name,
+                "context_id": kernel.get("context_id", ""),
+                "owner": str(operation["owner"]) if operation is not None else "",
+                "_owner_explicit": operation is not None,
+                "layer": "" if operation is None or operation["layer"] is None else int(operation["layer"]),
+                "family": "" if operation is None else str(operation["family"]),
+                "operation": "other" if operation is None else str(operation["operation"]),
                 "kernel_name": str(kernel["kernel_name"]),
                 "op_id": "" if op_id is None else op_id,
-            }
-            interval_rows.append(row)
+            })
             if op_id is not None:
                 operation_kernel_intervals.setdefault(op_id, []).append((start_us, end_us))
+        interval_rows = infer_kernel_owners(candidates)
 
-        raw_samples, metric_mapping, available_metric_names = _metric_rows(connection, tables, capture_start, capture_end)
+        raw_samples, metric_mapping, available_metric_names = _metric_rows(
+            connection, tables, capture_start, capture_end
+        )
         sample_rows = []
         for sample in raw_samples:
-            sample_rows.append({
-                "time_us": (int(sample["timestamp"]) - capture_start) / 1000.0,
-                "sm_active_pct": sample.get("sm_active_pct", ""),
-                "sm_issue_pct": sample.get("sm_issue_pct", ""),
-                "tensor_active_pct": sample.get("tensor_active_pct", ""),
-                "active_sm_unused_warp_slots_pct": sample.get("active_sm_unused_warp_slots_pct", ""),
-            })
-        if not sample_rows:
-            warnings.append("No requested GPU Metrics samples were found in the Nsight export")
-        missing_metrics = [
-            key
-            for key in (
-                "sm_active_pct",
-                "sm_issue_pct",
-                "tensor_active_pct",
-                "active_sm_unused_warp_slots_pct",
-            )
-            if key not in metric_mapping
-        ]
-        if missing_metrics:
-            warnings.append(
-                "Requested GPU metrics not mapped: " + ", ".join(missing_metrics)
-            )
+            row = {"time_us": (int(sample["timestamp"]) - capture_start) / 1000.0}
+            for key in PROCESSING_METRIC_FIELDS:
+                row[key] = sample.get(key, "")
+            sample_rows.append(row)
 
+    if not sample_rows:
+        warnings.append("No requested GPU Metrics samples were found in the Nsight export")
+    missing_required = [
+        key for key, specification in PROCESSING_METRIC_SPECS.items()
+        if specification["required"] and key not in metric_mapping
+    ]
+    if missing_required:
+        warnings.append("Required GPU metrics not mapped: " + ", ".join(missing_required))
+
+    unknown_kernels = sum(1 for row in interval_rows if row["owner"] == "UNKNOWN")
+    other_kernels = sum(1 for row in interval_rows if row["owner"] == "OTHER")
+    if unknown_kernels:
+        warnings.append(f"{unknown_kernels} CUDA kernel(s) could not be attributed to a known stream owner")
+    if other_kernels:
+        warnings.append(f"{other_kernels} CUDA kernel(s) belong to explicitly non-Main/non-PREMAT work")
+
+    stream_resource_rows = build_stream_resource_rows(sample_rows, interval_rows, capture_duration_us)
+    idle_rows = main_idle_intervals(interval_rows, capture_duration_us)
     premat_intervals = [
         (float(row["start_us"]), float(row["end_us"]))
-        for row in interval_rows
-        if row["owner"] == "PREMAT" and row["operation"] == "materialize"
+        for row in interval_rows if row["owner"] == "PREMAT" and row["operation"] == "materialize"
     ]
     summary_rows = []
     for operation in operations:
@@ -913,7 +756,7 @@ def normalize_nsys_sqlite(
                 f"{operation.get('family', '')} L{operation.get('layer', '')}"
             )
             continue
-        merged_main_intervals = _merged_intervals(kernel_intervals)                                                                                   # <<< THOG remove internal Main-kernel gaps from duration and PREMAT-overlap accounting
+        merged_main_intervals = _merged_intervals(kernel_intervals)
         start_us = min(left for left, _ in merged_main_intervals)
         end_us = max(right for _, right in merged_main_intervals)
         duration_us = _interval_duration(merged_main_intervals)
@@ -935,21 +778,17 @@ def normalize_nsys_sqlite(
             ),
         })
 
-    matrix_summary = _processing_matrix_summary(interval_rows)                                                                                      # <<< THOG matrix-isolation scoreboard derived from actual kernel intervals
-    sample_fields = (
-        "time_us", "sm_active_pct", "sm_issue_pct", "tensor_active_pct",
-        "active_sm_unused_warp_slots_pct",
-    )
+    matrix_summary = _processing_matrix_summary(interval_rows)
+    sample_fields = ("time_us", *PROCESSING_METRIC_FIELDS)
     interval_fields = (
-        "start_us", "end_us", "duration_us", "stream", "owner", "layer", "family",
-        "operation", "kernel_name", "op_id",
+        "start_us", "end_us", "duration_us", "stream", "context_id", "owner", "owner_source",
+        "layer", "family", "operation", "kernel_name", "op_id",
     )
     summary_fields = (
         "op_id", "layer", "family", "start_us", "end_us", "duration_ms",
         "premat_overlap_ms", "premat_overlap_pct", "sm_active_pct_mean", "sm_issue_pct_mean",
         "tensor_active_pct_mean", "active_sm_unused_warp_slots_pct_mean",
     )
-    # vvv THOG user-facing Processing artifacts carry the canonical run artifact as a filename prefix; processing_data.json remains a private fixed INSTRA lookup
     run_artifact = str((handoff or {}).get("run_name", "")).strip()
     if "/" in run_artifact or "\\" in run_artifact:
         run_artifact = Path(run_artifact).name
@@ -957,6 +796,7 @@ def normalize_nsys_sqlite(
     processing_files = {
         "samples": f"{prefix}processing_samples.csv",
         "intervals": f"{prefix}processing_intervals.csv",
+        "stream_resources": f"{prefix}processing_stream_resources.csv",
         "summary": f"{prefix}processing_summary.csv",
         "metadata": f"{prefix}processing_metadata.json",
         "bundle": f"{prefix}processing_bundle.zip",
@@ -964,40 +804,52 @@ def normalize_nsys_sqlite(
     }
     _write_csv(output_directory / processing_files["samples"], sample_rows, sample_fields)
     _write_csv(output_directory / processing_files["intervals"], interval_rows, interval_fields)
+    _write_csv(
+        output_directory / processing_files["stream_resources"],
+        stream_resource_rows,
+        PROCESSING_STREAM_RESOURCE_FIELDS,
+    )
     _write_csv(output_directory / processing_files["summary"], summary_rows, summary_fields)
-    # ^^^ THOG
 
+    attribution_counts: Dict[str, int] = {}
+    for row in stream_resource_rows:
+        state = str(row["attribution_state"])
+        attribution_counts[state] = attribution_counts.get(state, 0) + 1
     metadata = {
         "schema_version": PROCESSING_SCHEMA_VERSION,
         "capture_frequency_hz": int(capture_frequency_hz),
         "capture_duration_ms": (capture_end - capture_start) / 1_000_000.0,
         "metric_mapping": metric_mapping,
-        "available_gpu_metric_names": available_metric_names,                                                                                             # <<< THOG expose Nsight metric vocabulary used for alias diagnosis
+        "metric_catalog": metric_catalog(metric_mapping),
+        "available_gpu_metric_names": available_metric_names,
+        "kernel_owner_counts": {
+            owner: sum(1 for row in interval_rows if row["owner"] == owner)
+            for owner in ("MAIN", "PREMAT", "OTHER", "UNKNOWN")
+        },
+        "attribution_counts": attribution_counts,
         "warnings": warnings,
         "capture": dict(capture_metadata or {}),
         "run": dict(handoff or {}),
-        "files": dict(processing_files),                                                                                                                        # <<< THOG expose artifact-prefixed downloadable Processing filenames to INSTRA
+        "files": dict(processing_files),
     }
-    (output_directory / processing_files["metadata"]).write_text(
-        json.dumps(metadata, indent=2, sort_keys=True)
-    )
+    (output_directory / processing_files["metadata"]).write_text(json.dumps(metadata, indent=2, sort_keys=True))
     processing_data = {
         "metadata": metadata,
         "samples": sample_rows,
         "intervals": interval_rows,
+        "stream_resources": stream_resource_rows,
+        "main_idle_intervals": idle_rows,
         "summary": summary_rows,
-        "matrix_summary": matrix_summary,                                                                                                                   # <<< THOG stable QKV/O/UP/DOWN scoreboard for INSTRA
+        "matrix_summary": matrix_summary,
     }
     (output_directory / "processing_data.json").write_text(
         json.dumps(processing_data, separators=(",", ":"), allow_nan=False)
     )
     with zipfile.ZipFile(output_directory / processing_files["bundle"], "w", zipfile.ZIP_DEFLATED) as archive:
         for name in (
-            processing_files["samples"],
-            processing_files["intervals"],
-            processing_files["summary"],
-            processing_files["metadata"],
-            "processing_data.json",
+            processing_files["samples"], processing_files["intervals"],
+            processing_files["stream_resources"], processing_files["summary"],
+            processing_files["metadata"], "processing_data.json",
         ):
             archive.write(output_directory / name, arcname=name)
     return processing_data
@@ -1008,16 +860,12 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         return None
     requested, frequency, capture_update = processing_requested_from_argv(arguments)
     rewritten_arguments = rewrite_processing_cli_for_core(arguments)
-    # vvv THOG train_OWT_core.sh first calls --print-resolved-json with the full processing CLI; keep that metadata probe outside Nsight
     if not requested or processing_invocation_is_non_training(arguments):
         sys.argv[:] = [sys.argv[0], *rewritten_arguments]
         return None
-    # ^^^ THOG
     nsys = _find_nsys()
     if nsys is None:
-        raise RuntimeError(
-            "--premat_processing_logging enabled requires NVIDIA Nsight Systems (nsys) on PATH"
-        )
+        raise RuntimeError("--premat_processing_logging enabled requires NVIDIA Nsight Systems (nsys) on PATH")
     temporary_root = Path(tempfile.mkdtemp(prefix="thog2-premat-processing-"))
     report_base = temporary_root / "processing_trace"
     handoff_path = temporary_root / "handoff.json"
@@ -1026,13 +874,9 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
-    environment["NSYS_NVTX_PROFILER_REGISTER_ONLY"] = "0"  # <<< THOG PyTorch range_push uses unregistered NVTX strings; Nsight capture trigger must accept them
+    environment["NSYS_NVTX_PROFILER_REGISTER_ONLY"] = "0"
     command = _nsys_profile_command(
-        nsys,
-        report_base=report_base,
-        frequency=frequency,
-        entrypoint=entrypoint,
-        arguments=rewritten_arguments,
+        nsys, report_base=report_base, frequency=frequency, entrypoint=entrypoint, arguments=rewritten_arguments
     )
     print(
         f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
@@ -1058,43 +902,29 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
             raise RuntimeError("Nsight Systems did not produce exactly one .nsys-rep trace")
         report_path = reports[0]
     sqlite_path = temporary_root / "processing_trace.sqlite"
-    export = subprocess.run(
-        [
-            nsys,
-            "export",
-            "--type=sqlite",
-            "--force-overwrite=true",
-            f"--output={sqlite_path}",
-            str(report_path),
-        ]
-    )
+    export = subprocess.run([
+        nsys, "export", "--type=sqlite", "--force-overwrite=true",
+        f"--output={sqlite_path}", str(report_path),
+    ])
     if export.returncode != 0 or not sqlite_path.exists():
         raise RuntimeError("Nsight Systems SQLite export failed for PREMAT processing capture")
-    capture_metadata = (
-        json.loads(capture_metadata_path.read_text())
-        if capture_metadata_path.exists()
-        else {}
-    )
-    processing_data = normalize_nsys_sqlite(                                                                                                         # <<< THOG retain normalized payload for artifact-prefixed raw-trace copy
+    capture_metadata = json.loads(capture_metadata_path.read_text()) if capture_metadata_path.exists() else {}
+    processing_data = normalize_nsys_sqlite(
         sqlite_path,
         processing_directory,
         capture_frequency_hz=frequency,
         handoff=handoff,
         capture_metadata=capture_metadata,
     )
-    processing_files = processing_data["metadata"]["files"]                                                                                                   # <<< THOG consume the normalizer's canonical artifact-prefixed filenames
+    processing_files = processing_data["metadata"]["files"]
     shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])
-    print(
-        "THOG2 PREMAT processing data: "
-        f"{processing_directory / processing_files['bundle']}",
-        flush=True,
-    )
+    print(f"THOG2 PREMAT processing data: {processing_directory / processing_files['bundle']}", flush=True)
     return int(completed.returncode)
 
 
 __all__ = [
     "PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ",
-    "PROCESSING_DEFAULT_CAPTURE_UPDATE",                                                                                                                  # <<< THOG public default for explicit capture-update diagnostics
+    "PROCESSING_DEFAULT_CAPTURE_UPDATE",
     "maybe_reexec_under_nsys",
     "normalize_nsys_sqlite",
     "processing_capture_scope",
