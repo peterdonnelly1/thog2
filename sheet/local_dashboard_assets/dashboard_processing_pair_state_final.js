@@ -25,8 +25,12 @@
     return snapshot;
   }
 
+  function run_for_id(run_id) {
+    return (app.runs || []).find(candidate => String(run_identifier(candidate)) === String(run_id)) || null;
+  }
+
   function is_nsys_run_id(run_id) {
-    const run = (app.runs || []).find(candidate => String(run_identifier(candidate)) === String(run_id));
+    const run = run_for_id(run_id);
     const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
     return artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
   }
@@ -250,11 +254,30 @@
     apply_pair_state(effective, Boolean(trace_available), before_visibility, render_run_id);
   };
 
-  window.addEventListener("popstate", () => {
-    queueMicrotask(() => {
-      ensure_navigation_matches_current();
-      processing_refresh(true);
-    });
+  function refresh_selected_nsys_now() {
+    const current = ensure_navigation_matches_current();
+    if (!current || !is_nsys_run_id(current)) return;
+    processing_refresh(true);
+  }
+
+  // Initial-route selection can occur before this overlay sees an explicit click.
+  // Treat an already-selected NSYS at startup exactly like a fresh navigation.
+  window.addEventListener("load", () => {
+    setTimeout(refresh_selected_nsys_now, 0);
   });
+
+  window.addEventListener("popstate", () => {
+    queueMicrotask(refresh_selected_nsys_now);
+  });
+
+  // Defensive navigation watcher: cheap string comparison only. This catches any
+  // future code path that changes app.current_run_id without going through
+  // select_run(), while avoiding periodic Processing fetches when nothing moved.
+  window.setInterval(() => {
+    const current = String(app.current_run_id || "");
+    if (current === observed_current_run_id) return;
+    begin_navigation(current);
+    if (current && is_nsys_run_id(current)) processing_refresh(true);
+  }, 250);
 })();
 // ^^^ THOG
