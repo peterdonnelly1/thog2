@@ -228,3 +228,7 @@ from . import local_chart_lifecycle_patch as _local_chart_lifecycle_patch
 # vvv THOG install opt-in full-update Processing timing after local lifecycle wrapping so the existing trainer path remains authoritative
 from . import processing_update_timing_patch as _processing_update_timing_patch
 # ^^^ THOG
+
+# vvv THOG final NCU 2024.3 Processing compatibility and visible post-run progress repair
+from . import processing_ncu_2024_instra_patch as _processing_ncu_2024_instra_patch
+# ^^^ THOG
