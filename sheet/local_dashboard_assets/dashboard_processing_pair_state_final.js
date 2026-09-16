@@ -10,7 +10,16 @@
     return true;
   }
 
-  function apply_pair_state(payload, trace_available) {
+  function visibility_snapshot() {
+    const snapshot = new Map();
+    for (const run of app.runs || []) {
+      const run_id = String(run_identifier(run));
+      snapshot.set(run_id, is_visible(run_id));
+    }
+    return snapshot;
+  }
+
+  function apply_pair_state(payload, trace_available, before_visibility) {
     const source = payload?.premat_compatibility_source;
     const selected_id = String(processing_current_run() || "");
     const companion_id = String(source?.dashboard_run_id || "");
@@ -27,8 +36,8 @@
     const previous_auto = new Set(app.processing_auto_opened_run_ids || []);
     const next_auto = new Set();
 
-    // Close only runs that this pairing mechanism opened itself. Manually opened
-    // ordinary comparison eyes remain untouched when the profiler pair changes.
+    // Close only companions that pairing opened itself. Ordinary comparison eyes
+    // that the user opened manually remain untouched when the profiler pair moves.
     for (const run_id of previous_auto) {
       if (next.has(run_id)) {
         next_auto.add(run_id);
@@ -41,11 +50,14 @@
     }
 
     for (const run_id of next) {
+      const was_visible_before_render = before_visibility.get(run_id) === true;
       if (!is_visible(run_id)) {
         app.visibility[run_id] = true;
         visibility_changed = true;
-        if (run_id !== selected_id) next_auto.add(run_id);
-      } else if (previous_auto.has(run_id)) {
+      }
+      if (run_id !== selected_id && (!was_visible_before_render || previous_auto.has(run_id))) {
+        // The older pairing layer may already have opened this eye during the
+        // inner render. The pre-render snapshot lets us still record ownership.
         next_auto.add(run_id);
       }
     }
@@ -63,9 +75,10 @@
 
   const processing_render_before_pair_state_final = processing_render;
   processing_render = async function(payload, trace_available) {
+    const before_visibility = visibility_snapshot();
     await processing_render_before_pair_state_final(payload, trace_available);
     const effective = processing_view.companion_enriched_payload || payload;
-    apply_pair_state(effective, Boolean(trace_available));
+    apply_pair_state(effective, Boolean(trace_available), before_visibility);
   };
 })();
 // ^^^ THOG
