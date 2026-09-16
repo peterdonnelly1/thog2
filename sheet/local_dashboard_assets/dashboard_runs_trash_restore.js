@@ -26,9 +26,47 @@
       }
       .runs-trash-button:not(:disabled) { color:#a12a2a; }
       .runs-trash-button:disabled { opacity:.38; cursor:default; }
+      .runs-table th.duration-column { text-transform:none !important; }
     `;
     document.head.appendChild(style);
   }
+
+  // The first catalogue read can legitimately take tens of seconds on a large
+  // local history. Make that work visible in the Runs title row without
+  // disabling any controls. dashboard.js replaces this text when the read ends.
+  const watch_status = by_id("watch_status");
+  const startup_status_text = "Reading run databases…";
+  let catalog_ready_emitted = false;
+
+  function catalog_status_is_ready() {
+    const text = String(watch_status?.textContent || "").trim();
+    return Boolean(
+      text
+      && text !== "Connecting…"
+      && text !== startup_status_text
+      && !text.startsWith("Viewer error:")
+    );
+  }
+
+  function emit_catalog_ready_once() {
+    if (catalog_ready_emitted || !catalog_status_is_ready()) return;
+    catalog_ready_emitted = true;
+    window.dispatchEvent(new CustomEvent("instra:catalog-ready"));
+  }
+
+  if (watch_status && String(watch_status.textContent || "").trim() === "Connecting…") {
+    watch_status.textContent = startup_status_text;
+    watch_status.title = "Instra is reading local run databases. Controls remain available.";
+  }
+
+  if (watch_status && typeof MutationObserver === "function") {
+    const observer = new MutationObserver(() => {
+      emit_catalog_ready_once();
+      if (catalog_ready_emitted) observer.disconnect();
+    });
+    observer.observe(watch_status, {childList:true, characterData:true, subtree:true});
+  }
+  queueMicrotask(emit_catalog_ready_once);
 
   function selected_existing_runs() {
     const ids = new Set((app.runs || []).map(run => String(run_identifier(run))));
