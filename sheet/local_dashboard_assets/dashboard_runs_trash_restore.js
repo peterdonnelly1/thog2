@@ -37,6 +37,8 @@
   const watch_status = by_id("watch_status");
   const startup_status_text = "Reading run databases…";
   let catalog_ready_emitted = false;
+  app.instra_catalog_ready = app.instra_catalog_ready === true;
+  app.instra_catalog_generation = Number(app.instra_catalog_generation || 0);
 
   function catalog_status_is_ready() {
     const text = String(watch_status?.textContent || "").trim();
@@ -51,7 +53,11 @@
   function emit_catalog_ready_once() {
     if (catalog_ready_emitted || !catalog_status_is_ready()) return;
     catalog_ready_emitted = true;
-    window.dispatchEvent(new CustomEvent("instra:catalog-ready"));
+    app.instra_catalog_ready = true;
+    app.instra_catalog_generation += 1;
+    window.dispatchEvent(new CustomEvent("instra:catalog-ready", {
+      detail:{generation:app.instra_catalog_generation},
+    }));
   }
 
   if (watch_status && String(watch_status.textContent || "").trim() === "Connecting…") {
