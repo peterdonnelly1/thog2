@@ -258,7 +258,6 @@ def _export_ncu_raw_csv(
         "--csv",
         "--page", "raw",
         "--print-units", "base",
-        "--print-metric-name", "name",
     ]
     if nvtx_rename:
         command.extend(("--print-nvtx-rename", "kernel"))
