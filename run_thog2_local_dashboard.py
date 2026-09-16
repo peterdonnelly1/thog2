@@ -316,6 +316,7 @@ _dashboard_patch_names = (
     "dashboard_workspace_only.js",
     "dashboard_runs_table_restore.js",
     "dashboard_sep16_workspace_ui_repair.js",
+    "dashboard_runs_trash_restore.js",
 )
 _processing_patch_names = (
     "dashboard_processing_resource_attribution.js",
@@ -325,6 +326,8 @@ _processing_patch_names = (
     "dashboard_processing_sep16_companion_fallback.js",
     "dashboard_processing_sep16_quiescence.js",
     "dashboard_processing_final_design.js",
+    "dashboard_processing_operations_final.js",
+    "dashboard_processing_pair_state_final.js",
 )
 
 # vvv THOG build one explicit dashboard asset overlay at server startup; this avoids hidden import/read hooks and guarantees the resource view follows Processing
