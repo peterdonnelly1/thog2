@@ -54,6 +54,15 @@
         border-color:#b8afea;
         color:#4732b7;
       }
+      #processing_contention_card:not(.maximized) {
+        min-height:220px !important;
+        height:220px !important;
+      }
+      #processing_contention_card:not(.maximized) .processing-plot-shell {
+        min-height:146px !important;
+        height:146px !important;
+        flex:0 0 146px !important;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -190,7 +199,6 @@
     const traces = [];
     for (const group of groups.values()) {
       const exemplar = group.rows[0] || {};
-      const operation = String(exemplar.operation || "misc").toLowerCase();
       traces.push({
         type:"bar",
         orientation:"h",
@@ -236,6 +244,61 @@
       bargap:0,
     });
     processing_gpu_link_time_axes();
+  };
+
+  processing_render_contention = async function(payload) {
+    const family_order = ["QKV", "O", "UP", "DOWN"];
+    const summary = processing_resolved_matrix_summary(payload);
+    const families = family_order.filter(family => summary[family]);
+    const premat_pct = families.map(family => Number(summary[family].premat_concurrent_with_main_pct));
+    const main_pct = families.map(family => Number(summary[family].main_busy_concurrent_with_premat_pct));
+    const traces = families.length ? [
+      {
+        type:"bar",
+        orientation:"v",
+        name:"PREMAT work concurrent with MAIN",
+        x:families,
+        y:premat_pct,
+        text:premat_pct.map(value => Number.isFinite(value) ? `${value.toFixed(2)}%` : ""),
+        textposition:"outside",
+        cliponaxis:false,
+        hovertemplate:"%{x}<br>%{y:.2f}% of PREMAT GPU work coincides with any MAIN kernel<extra></extra>",
+      },
+      {
+        type:"bar",
+        orientation:"v",
+        name:"MAIN busy time concurrent with PREMAT",
+        x:families,
+        y:main_pct,
+        text:main_pct.map(value => Number.isFinite(value) ? `${value.toFixed(2)}%` : ""),
+        textposition:"outside",
+        cliponaxis:false,
+        hovertemplate:"%{x}<br>%{y:.2f}% of MAIN GPU busy time coincides with PREMAT<extra></extra>",
+      },
+    ] : [];
+    await processing_plot("processing_contention_plot", traces, {
+      margin:{l:64, r:24, t:30, b:46},
+      barmode:"group",
+      xaxis:{
+        title:"matrix family",
+        categoryorder:"array",
+        categoryarray:family_order,
+        fixedrange:true,
+      },
+      yaxis:{
+        title:"temporal overlap (%)",
+        range:[0,100],
+        dtick:20,
+        ticksuffix:"%",
+        fixedrange:true,
+        zeroline:true,
+      },
+      legend:{orientation:"h", y:1.16, font:{size:9}},
+      annotations:families.length ? [] : [{
+        text:"No PREMAT materialisation intervals in this capture",
+        showarrow:false, xref:"paper", yref:"paper", x:0.5, y:0.5,
+      }],
+    });
   };
 
   document.addEventListener("click", event => {
