@@ -15,8 +15,28 @@
     return marker >= 0 ? artifact.slice(marker + 3) : "";
   }
 
-  function run_time(run) {
+  function artifact_time_ms(run) {
+    const artifact = String(run?.artifact_name || run?.run_name || "");
+    const match = artifact.match(/^(\d{2})(\d{2})(\d{2})-(\d{2})(\d{2})_/);
+    if (match) {
+      const [, yy, mm, dd, hh, min] = match;
+      return Date.UTC(2000 + Number(yy), Number(mm) - 1, Number(dd), Number(hh), Number(min));
+    }
     return Date.parse(run?.created_at || run?.updated_at || "") || 0;
+  }
+
+  function is_ncu_candidate(run) {
+    const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
+    return artifact.includes("_NCU_") || artifact.includes("NCU_PREMAT");
+  }
+
+  function strip_companion(payload) {
+    const cleaned = {...payload};
+    delete cleaned.premat_compatibility;
+    delete cleaned.premat_hard_constraints;
+    delete cleaned.premat_compatibility_files;
+    delete cleaned.premat_compatibility_source;
+    return cleaned;
   }
 
   function companion_candidates() {
@@ -25,34 +45,44 @@
     const selected_id = String(run_identifier(selected));
     const suffix = encoded_suffix(selected);
     const host = String(selected.host_label || "");
-    const selected_time = run_time(selected);
+    const selected_time = artifact_time_ms(selected);
     if (!suffix) return [];
     return (app.runs || [])
       .filter(run => (
         String(run_identifier(run)) !== selected_id
+        && is_ncu_candidate(run)
         && encoded_suffix(run) === suffix
         && String(run.host_label || "") === host
       ))
-      .sort((left, right) => {
-        const left_time = run_time(left);
-        const right_time = run_time(right);
-        const left_distance = Math.abs(left_time - selected_time);
-        const right_distance = Math.abs(right_time - selected_time);
-        if (left_distance !== right_distance) return left_distance - right_distance;
-        return right_time - left_time;
-      });
+      .map(run => ({
+        run,
+        time:artifact_time_ms(run),
+        distance:Math.abs(artifact_time_ms(run) - selected_time),
+      }))
+      .sort((left, right) => (
+        left.distance - right.distance
+        || right.time - left.time
+      ));
   }
 
   async function browser_discovered_companion(payload, trace_available) {
-    if (!trace_available || compatibility_rows(payload).length) return payload;
-    for (const run of companion_candidates()) {
+    const base = strip_companion(payload);
+    if (!trace_available) return base;
+
+    const candidates = companion_candidates();
+    const skipped = [];
+    for (const candidate of candidates) {
+      const run = candidate.run;
       const run_id = String(run_identifier(run));
       try {
         const response = await fetch_json(`/api/processing?run=${encodeURIComponent(run_id)}`);
         const data = response?.data;
-        if (!data || !compatibility_rows(data).length) continue;
+        if (!data || !compatibility_rows(data).length) {
+          skipped.push(String(run.artifact_name || run.run_name || run_id));
+          continue;
+        }
         return {
-          ...payload,
+          ...base,
           premat_compatibility:data.premat_compatibility,
           premat_hard_constraints:[...(data.premat_hard_constraints || [])],
           premat_compatibility_files:{...(data.premat_compatibility_files || {})},
@@ -62,14 +92,17 @@
             created_at:String(run.created_at || ""),
             host_label:String(run.host_label || ""),
             pair_key:`${run.host_label || ""}|${encoded_suffix(run)}`,
-            discovery:"browser_fallback_nearest_in_time",
+            discovery:"browser_authoritative_nearest_viable",
+            distance_minutes:candidate.distance / 60000.0,
+            skipped_closer_invalid_count:skipped.length,
+            skipped_closer_invalid_artifacts:[...skipped],
           },
         };
       } catch (_error) {
-        // Try the next nearest exact-config candidate.
+        skipped.push(String(run.artifact_name || run.run_name || run_id));
       }
     }
-    return payload;
+    return base;
   }
 
   const processing_render_before_companion_fallback = processing_render;
