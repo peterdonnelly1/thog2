@@ -232,3 +232,7 @@ from . import processing_update_timing_patch as _processing_update_timing_patch
 # vvv THOG final NCU 2024.3 Processing compatibility and visible post-run progress repair
 from . import processing_ncu_2024_instra_patch as _processing_ncu_2024_instra_patch
 # ^^^ THOG
+
+# vvv THOG accept NCU 2024.x suffixes appended to semantic NVTX labels after the wide-format overlay is installed
+from . import processing_ncu_semantic_suffix_patch as _processing_ncu_semantic_suffix_patch
+# ^^^ THOG
