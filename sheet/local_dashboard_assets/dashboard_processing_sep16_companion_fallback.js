@@ -67,6 +67,7 @@
   const processing_render_before_companion_fallback = processing_render;
   processing_render = async function(payload, trace_available) {
     const enriched = await browser_discovered_companion(payload, Boolean(trace_available));
+    processing_view.companion_enriched_payload = enriched;
     return processing_render_before_companion_fallback(enriched, trace_available);
   };
 })();
