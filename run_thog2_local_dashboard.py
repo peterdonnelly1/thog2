@@ -15,6 +15,10 @@ from run_thog2_local_dashboard_base import *  # noqa: F401,F403
 
 _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
+_dashboard_patch_names = (
+    "dashboard_v058_repair_workspace_patch.js",
+    "dashboard_sep16_workspace_ui_repair.js",
+)
 _processing_patch_names = (
     "dashboard_processing_resource_attribution.js",
     "dashboard_processing_ncu_2024_repair.js",
@@ -24,6 +28,9 @@ _processing_patch_names = (
 for _asset_name in (*sorted(_base._ASSET_NAMES), "index.html"):
     _source = _original_asset_root / _asset_name
     _payload = _source.read_bytes()
+    if _asset_name == "dashboard.js":
+        for _patch_name in _dashboard_patch_names:
+            _payload += b"\n\n" + (_original_asset_root / _patch_name).read_bytes() + b"\n"
     if _asset_name == "dashboard_processing.js":
         for _patch_name in _processing_patch_names:
             _payload += b"\n\n" + (_original_asset_root / _patch_name).read_bytes() + b"\n"
