@@ -41,6 +41,21 @@
     return artifact.includes("_NCU_") || artifact.includes("NCU_PREMAT");
   }
 
+  function run_timestamp(run_id) {
+    const run = run_for_id(run_id);
+    const created = Date.parse(run?.created_at || "");
+    if (Number.isFinite(created)) return created;
+    const artifact = String(run?.artifact_name || run?.run_name || "");
+    const match = /^(\d{6})-(\d{4})/.exec(artifact);
+    if (!match) return 0;
+    const yy = Number(match[1].slice(0, 2));
+    const mm = Number(match[1].slice(2, 4));
+    const dd = Number(match[1].slice(4, 6));
+    const hh = Number(match[2].slice(0, 2));
+    const minute = Number(match[2].slice(2, 4));
+    return Date.UTC(2000 + yy, mm - 1, dd, hh, minute);
+  }
+
   function save_visibility_if(changed) {
     if (changed) save_json("thog2_local_run_visibility", app.visibility);
   }
@@ -266,21 +281,38 @@
       .filter(run_id => is_visible(run_id) && predicate(run_id));
   }
 
+  function startup_nsys_source() {
+    const visible_nsys = visible_run_ids(is_nsys_run_id);
+    if (!visible_nsys.length) return "";
+    const current = String(app.current_run_id || "");
+    if (visible_nsys.includes(current)) return current;
+    return [...visible_nsys].sort((left, right) => {
+      const delta = run_timestamp(right) - run_timestamp(left);
+      return delta || String(right).localeCompare(String(left));
+    })[0];
+  }
+
   function reconcile_startup_pairing() {
+    if (app.instra_catalog_ready !== true || !(app.runs || []).length) return;
+
     const current = ensure_navigation_matches_current();
-    if (current && is_nsys_run_id(current)) {
+    if (current && is_nsys_run_id(current) && is_visible(current)) {
       processing_refresh(true);
       return;
     }
 
-    const visible_nsys = visible_run_ids(is_nsys_run_id);
+    // If a user deliberately persisted an NCU eye, do not silently replace that
+    // visible state on startup. The auto-pair startup rule applies when NSYS is
+    // visible but no NCU companion has been opened yet.
     const visible_ncu = visible_run_ids(is_ncu_run_id);
-    if (visible_nsys.length !== 1 || visible_ncu.length !== 0) return;
+    if (visible_ncu.length) return;
 
-    // Persisted visibility can restore an NSYS eye before any current-run
-    // selection exists. In that unambiguous case, promote the visible NSYS to
-    // the Processing source and let normal pairing open its NCU companion.
-    const source_run_id = visible_nsys[0];
+    const source_run_id = startup_nsys_source();
+    if (!source_run_id) return;
+
+    // A persisted NSYS eye is a stronger startup signal than the generic
+    // recommended/current run. Promote it to the Processing source, then normal
+    // pairing opens the nearest viable NCU companion.
     if (source_run_id !== String(app.current_run_id || "")) {
       select_run(source_run_id, {manual:true, replace_history:true});
     } else {
@@ -295,14 +327,18 @@
   }
 
   // window.load can precede the first catalogue result. Keep this fast-path for
-  // warm starts, and reconcile again when dashboard.js reports that the first
-  // run-database read has actually completed.
+  // warm starts, listen for the catalogue-ready event when possible, and also
+  // consult the persistent app flag in case that one-shot event fired before
+  // this Processing overlay installed its listener.
   window.addEventListener("load", () => {
     setTimeout(reconcile_startup_pairing, 0);
   });
   window.addEventListener("instra:catalog-ready", () => {
     queueMicrotask(reconcile_startup_pairing);
   });
+  if (app.instra_catalog_ready === true) {
+    queueMicrotask(reconcile_startup_pairing);
+  }
 
   window.addEventListener("popstate", () => {
     queueMicrotask(refresh_selected_nsys_now);
