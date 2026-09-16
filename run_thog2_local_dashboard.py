@@ -14,10 +14,31 @@ import run_thog2_local_dashboard_base as _base
 from run_thog2_local_dashboard_base import *  # noqa: F401,F403
 
 
+# vvv THOG expose the stored run configuration to the focused Runs-summary UI without changing the compact chart store
+_original_run_status = _base.RunDashboardState.status
+
+
+def _run_status_with_configuration(self):
+    status = _original_run_status(self)
+    metadata = self.reader.metadata()
+    try:
+        configuration = json.loads(metadata.get("config_json", "{}"))
+    except json.JSONDecodeError:
+        configuration = {}
+    enriched = dict(status)
+    enriched["configuration"] = configuration
+    enriched["command"] = metadata.get("command", configuration.get("command", ""))
+    return enriched
+
+
+_base.RunDashboardState.status = _run_status_with_configuration
+# ^^^ THOG
+
+
 # vvv THOG Processing GPU Resource Compatibility pairs separate NSYS and NCU runs server-side.
 # The artifact suffix after the triple underscore is the canonical encoded run
-# configuration.  Pair only identical suffixes on the same host, then choose the
-# newest NCU compatibility artifact.  This prevents unrelated profiler runs from
+# configuration. Pair only identical suffixes on the same host, then choose the
+# newest NCU compatibility artifact. This prevents unrelated profiler runs from
 # being silently combined merely because their model shape looks similar.
 _original_dashboard_state_for_path = _base.DashboardCatalog._state_for_path
 _original_processing_payload = _base.RunDashboardState.processing
@@ -141,6 +162,7 @@ _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
 _dashboard_patch_names = (
     "dashboard_workspace_only.js",
+    "dashboard_runs_table_restore.js",
     "dashboard_sep16_workspace_ui_repair.js",
 )
 _processing_patch_names = (
