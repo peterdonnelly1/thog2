@@ -16,7 +16,7 @@ from run_thog2_local_dashboard_base import *  # noqa: F401,F403
 _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
 _dashboard_patch_names = (
-    "dashboard_v058_repair_workspace_patch.js",
+    "dashboard_workspace_only.js",
     "dashboard_sep16_workspace_ui_repair.js",
 )
 _processing_patch_names = (
