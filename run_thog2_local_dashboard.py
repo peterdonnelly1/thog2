@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import atexit
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
@@ -41,9 +41,7 @@ _base.RunDashboardState.status = _run_status_with_configuration
 # vvv THOG Processing GPU Resource Compatibility pairs separate NSYS and NCU runs server-side.
 # The artifact suffix after the triple underscore is the canonical encoded run
 # configuration. Pair only identical suffixes on the same host, then choose the
-# valid NCU capture nearest in time to the selected NSYS capture. This makes the
-# selected NSYS run authoritative instead of allowing one globally-latest pair
-# to dominate every selection.
+# viable NCU capture nearest in artifact timestamp to the selected NSYS capture.
 _original_dashboard_state_for_path = _base.DashboardCatalog._state_for_path
 _original_processing_payload = _base.RunDashboardState.processing
 
@@ -54,18 +52,23 @@ def _dashboard_state_for_path_with_catalog(self, path: Path):
     return state
 
 
+def _state_artifact_name(state: Any) -> str:
+    metadata = state.reader.metadata()
+    return str(
+        metadata.get(
+            "artifact_name",
+            metadata.get("run_name", state.database_path.parent.name),
+        )
+    )
+
+
 def _processing_pair_key(state: Any) -> tuple[str, str] | None:
     metadata = state.reader.metadata()
     try:
         configuration = json.loads(metadata.get("config_json", "{}"))
     except json.JSONDecodeError:
         configuration = {}
-    artifact = str(
-        metadata.get(
-            "artifact_name",
-            metadata.get("run_name", state.database_path.parent.name),
-        )
-    )
+    artifact = _state_artifact_name(state)
     _prefix, separator, encoded = artifact.partition("___")
     if not separator or not encoded:
         return None
@@ -73,15 +76,27 @@ def _processing_pair_key(state: Any) -> tuple[str, str] | None:
     return host, encoded
 
 
-def _timestamp_seconds(value: Any, fallback: float = 0.0) -> float:
-    text = str(value or "").strip()
-    if not text:
-        return float(fallback)
+def _artifact_timestamp_seconds(artifact: Any, fallback: float = 0.0) -> float:
+    prefix = str(artifact or "").split("_", 1)[0]
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.strptime(prefix, "%y%m%d-%H%M").replace(tzinfo=timezone.utc)
         return float(parsed.timestamp())
     except (TypeError, ValueError, OverflowError):
         return float(fallback)
+
+
+def _is_ncu_artifact(artifact: Any) -> bool:
+    text = str(artifact or "").upper()
+    return "_NCU_" in text or "NCU_PREMAT" in text
+
+
+def _compatibility_file_has_rows(path: Path) -> bool:
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    rows = payload.get("rows", []) if isinstance(payload, dict) else payload
+    return isinstance(rows, list) and bool(rows)
 
 
 def _matching_ncu_companion(state: Any):
@@ -92,58 +107,77 @@ def _matching_ncu_companion(state: Any):
 
     now = time.monotonic()
     cached = getattr(state, "_instra_ncu_companion_cache", None)
-    if cached is not None and now - float(cached[0]) < 30.0:
+    if cached is not None and now - float(cached[0]) < 2.0:
         return cached[1]
 
-    try:
-        selected_status = state.status()
-    except Exception:
-        selected_status = {}
+    selected_artifact = _state_artifact_name(state)
     selected_fallback = state.database_path.stat().st_mtime if state.database_path.exists() else 0.0
-    selected_time = _timestamp_seconds(selected_status.get("created_at"), selected_fallback)
+    selected_time = _artifact_timestamp_seconds(selected_artifact, selected_fallback)
 
     _host, encoded = pair_key
     if not catalog.root.is_dir():
         state._instra_ncu_companion_cache = (now, None)
+        state._instra_ncu_companion_diagnostics = {}
         return None
 
-    # Search the full catalog root even when Instra itself was launched with
-    # --run. The encoded artifact suffix discards almost every run before any
-    # SQLite metadata is opened.
-    candidate_paths = tuple(catalog.root.glob(f"**/{_base.LOCAL_CHART_DATABASE_NAME}"))
-    candidates = []
-    for path in candidate_paths:
+    viable = []
+    invalid = []
+    for path in catalog.root.glob(f"**/{_base.LOCAL_CHART_DATABASE_NAME}"):
         if path.resolve() == state.database_path.resolve():
             continue
         artifact_hint = path.parent.parent.name if len(path.parents) >= 2 else ""
+        if not _is_ncu_artifact(artifact_hint):
+            continue
         if not str(artifact_hint).endswith(f"___{encoded}"):
             continue
+
         candidate = catalog._state_for_path(path)
         if _processing_pair_key(candidate) != pair_key:
             continue
+
+        candidate_artifact = _state_artifact_name(candidate)
+        candidate_fallback = path.stat().st_mtime if path.exists() else 0.0
+        candidate_time = _artifact_timestamp_seconds(candidate_artifact, candidate_fallback)
+        distance = abs(candidate_time - selected_time)
         compatibility_path = (
             candidate.database_path.parent
             / "processing"
             / "processing_premat_compatibility.json"
         )
-        if not compatibility_path.is_file():
+        if not compatibility_path.is_file() or not _compatibility_file_has_rows(compatibility_path):
+            invalid.append((distance, -candidate_time, candidate_artifact))
             continue
+
         try:
             status = candidate.status()
         except Exception:
+            invalid.append((distance, -candidate_time, candidate_artifact))
             continue
-        compatibility_mtime = float(compatibility_path.stat().st_mtime)
-        candidate_time = _timestamp_seconds(status.get("created_at"), compatibility_mtime)
-        candidates.append(
+
+        viable.append(
             (
-                abs(candidate_time - selected_time),
+                distance,
                 -candidate_time,
                 candidate,
                 status,
                 compatibility_path,
             )
         )
-    result = min(candidates, key=lambda item: (item[0], item[1])) if candidates else None
+
+    result = min(viable, key=lambda item: (item[0], item[1])) if viable else None
+    chosen_distance = result[0] if result is not None else float("inf")
+    skipped = sorted(
+        (item for item in invalid if item[0] < chosen_distance),
+        key=lambda item: (item[0], item[1]),
+    )
+    state._instra_ncu_companion_diagnostics = {
+        "selected_artifact": selected_artifact,
+        "distance_minutes": (float(result[0]) / 60.0) if result is not None else None,
+        "skipped_closer_invalid_count": len(skipped),
+        "skipped_closer_invalid_artifacts": [item[2] for item in skipped],
+        "viable_candidate_count": len(viable),
+        "matching_invalid_candidate_count": len(invalid),
+    }
     state._instra_ncu_companion_cache = (now, result)
     return result
 
@@ -258,7 +292,7 @@ def _processing_payload_with_ncu_companion(self):
     if not payload.get("available") or not payload.get("trace_available"):
         return payload
     data = payload.get("data")
-    if not isinstance(data, dict) or data.get("premat_compatibility"):
+    if not isinstance(data, dict):
         return payload
 
     companion = _matching_ncu_companion(self)
@@ -274,6 +308,7 @@ def _processing_payload_with_ncu_companion(self):
     if not compatibility:
         return payload
 
+    diagnostics = dict(getattr(self, "_instra_ncu_companion_diagnostics", {}) or {})
     merged_data = dict(data)
     merged_data["premat_compatibility"] = compatibility
     merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])
@@ -286,7 +321,11 @@ def _processing_payload_with_ncu_companion(self):
         "created_at": str(companion_status.get("created_at", "")),
         "host_label": str(companion_status.get("host_label", "")),
         "pair_key": pair_key_text(_processing_pair_key(self)),
-        "selection": "nearest_in_time",
+        "selection": "nearest_viable_ncu_by_artifact_time",
+        "distance_minutes": diagnostics.get("distance_minutes"),
+        "skipped_closer_invalid_count": diagnostics.get("skipped_closer_invalid_count", 0),
+        "skipped_closer_invalid_artifacts": diagnostics.get("skipped_closer_invalid_artifacts", []),
+        "viable_candidate_count": diagnostics.get("viable_candidate_count", 0),
     }
     result = dict(payload)
     result["data"] = merged_data
