@@ -46,6 +46,7 @@
         return {
           ...payload,
           premat_compatibility:data.premat_compatibility,
+          premat_hard_constraints:[...(data.premat_hard_constraints || [])],
           premat_compatibility_files:{...(data.premat_compatibility_files || {})},
           premat_compatibility_source:{
             dashboard_run_id:run_id,
