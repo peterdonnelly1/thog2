@@ -129,7 +129,7 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
         "--premat_processing_logging_capture_frequency_hz": "--processing_logging_capture_frequency_hz_internal",
         "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",
     }
-    outer_only_value_options = {"--premat_processing_profiler"}
+    outer_only_value_options = {"--premat_processing_profiler", "--ncu_probe_layer"}
     while index < len(arguments):
         argument = str(arguments[index])
         if argument in outer_only_value_options:
@@ -195,23 +195,23 @@ _PROCESSING_TARGET_FAMILIES = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"}
 
 
 def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
-    raw_layer = _argv_value(arguments, "--premat_target_layer")
+    raw_probe_layer = _argv_value(arguments, "--ncu_probe_layer")
     raw_matrix = _argv_value(arguments, "--premat_target_matrix")
-    if raw_layer is None or raw_matrix is None:
+    if raw_probe_layer is None or raw_matrix is None:
         raise ValueError(
             "--premat_processing_profiler ncu requires explicit "
-            "--premat_target_layer and --premat_target_matrix"
+            "--ncu_probe_layer and --premat_target_matrix"
         )
     try:
-        layer = int(str(raw_layer))
+        probe_layer = int(str(raw_probe_layer))
         matrix = int(str(raw_matrix))
     except ValueError as error:
-        raise ValueError("NCU processing target layer/matrix must be integers") from error
-    if layer < 0:
-        raise ValueError("--premat_target_layer must be non-negative for NCU processing capture")
+        raise ValueError("NCU probe layer/matrix must be integers") from error
+    if probe_layer < 0:
+        raise ValueError("--ncu_probe_layer must be non-negative")
     if matrix not in _PROCESSING_TARGET_FAMILIES:
         raise ValueError("--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) for NCU capture")
-    return layer, _PROCESSING_TARGET_FAMILIES[matrix]
+    return probe_layer, _PROCESSING_TARGET_FAMILIES[matrix]
 
 
 def _ncu_profile_command(
