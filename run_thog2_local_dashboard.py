@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import atexit
+import csv
 import json
 from pathlib import Path
 import shutil
@@ -78,7 +79,7 @@ def _matching_ncu_companion(state: Any):
 
     now = time.monotonic()
     cached = getattr(state, "_instra_ncu_companion_cache", None)
-    if cached is not None and now - float(cached[0]) < 5.0:
+    if cached is not None and now - float(cached[0]) < 30.0:
         return cached[1]
 
     _host, encoded = pair_key
@@ -87,8 +88,8 @@ def _matching_ncu_companion(state: Any):
         return None
 
     # Search the full catalog root even when Instra itself was launched with
-    # --run.  The artifact-directory suffix lets us discard virtually every run
-    # before opening its SQLite metadata.
+    # --run. The encoded artifact suffix discards almost every run before any
+    # SQLite metadata is opened.
     candidate_paths = tuple(catalog.root.glob(f"**/{_base.LOCAL_CHART_DATABASE_NAME}"))
     candidates = []
     for path in candidate_paths:
@@ -125,8 +126,113 @@ def _matching_ncu_companion(state: Any):
     return result
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(round(float(str(value).strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _hard_constraint_rows(
+    processing_directory: Path,
+    compatibility: Any,
+) -> list[dict[str, Any]]:
+    source = compatibility.get("rows", []) if isinstance(compatibility, dict) else compatibility
+    if not isinstance(source, list) or not source:
+        return []
+    resource_path = processing_directory / "processing_ncu_kernel_resources.csv"
+    if not resource_path.is_file():
+        return []
+    try:
+        with resource_path.open(newline="") as handle:
+            resources = list(csv.DictReader(handle))
+    except (OSError, csv.Error):
+        return []
+    if not resources:
+        return []
+
+    pair = source[0]
+    main_family = str(pair.get("main_family", "")).upper()
+    premat_family = str(pair.get("premat_family", "")).upper()
+    main_layer = str(pair.get("main_layer", ""))
+    premat_layer = str(pair.get("premat_layer", ""))
+
+    def choose(role: str, family: str, layer: str):
+        exact = [
+            row for row in resources
+            if str(row.get("role", "")).upper() == role
+            and str(row.get("family", "")).upper() == family
+            and str(row.get("layer", "")) == layer
+        ]
+        if exact:
+            return exact[0]
+        fallback = [row for row in resources if str(row.get("role", "")).upper() == role]
+        return fallback[0] if fallback else None
+
+    main = choose("MAIN", main_family, main_layer)
+    premat = choose("PREMAT", premat_family, premat_layer)
+    if main is None or premat is None:
+        return []
+
+    full_main_blocks = max(1, _safe_int(pair.get("main_theoretical_blocks_per_sm", 1)))
+    definitions = (
+        ("Registers", "registers_per_block", "sm_register_capacity", "registers"),
+        ("Shared memory", "shared_mem_bytes", "sm_shared_mem_bytes", "bytes"),
+        ("Warp slots", "warps_per_block", "sm_max_warps", "warps"),
+        ("Thread slots", "threads_per_block", "sm_max_threads", "threads"),
+        ("Block slots", None, "sm_max_blocks", "blocks"),
+    )
+    rows = []
+    for label, footprint_key, capacity_key, unit in definitions:
+        if footprint_key is None:
+            main_per_block = 1
+            premat_per_block = 1
+        elif footprint_key == "shared_mem_bytes":
+            main_per_block = _safe_int(pair.get("main_shared_mem_bytes", 0))
+            premat_per_block = _safe_int(pair.get("premat_shared_mem_bytes", 0))
+        else:
+            main_per_block = _safe_int(pair.get(f"main_{footprint_key}", main.get(footprint_key, 0)))
+            premat_per_block = _safe_int(pair.get(f"premat_{footprint_key}", premat.get(footprint_key, 0)))
+        capacity = _safe_int(main.get(capacity_key, premat.get(capacity_key, 0)))
+        pair_demand = main_per_block + premat_per_block
+        full_main_plus_premat = full_main_blocks * main_per_block + premat_per_block
+        rows.append({
+            "resource": label,
+            "unit": unit,
+            "capacity": capacity,
+            "main_per_block": main_per_block,
+            "premat_per_block": premat_per_block,
+            "main_full_residency_blocks": full_main_blocks,
+            "pair_demand": pair_demand,
+            "pair_capacity_pct": (100.0 * pair_demand / capacity) if capacity > 0 else None,
+            "full_main_plus_one_premat": full_main_plus_premat,
+            "full_main_plus_one_pct": (100.0 * full_main_plus_premat / capacity) if capacity > 0 else None,
+            "limiting": str(pair.get("limiting_resource", "")).replace("_", " ").lower() in {
+                label.lower(), unit.lower(), label.lower().replace(" slots", "s")
+            },
+        })
+    return rows
+
+
+def _attach_own_hard_constraints(state: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return payload
+    compatibility = data.get("premat_compatibility")
+    if not compatibility:
+        return payload
+    hard = _hard_constraint_rows(state.database_path.parent / "processing", compatibility)
+    if not hard:
+        return payload
+    updated = dict(payload)
+    updated_data = dict(data)
+    updated_data["premat_hard_constraints"] = hard
+    updated["data"] = updated_data
+    return updated
+
+
 def _processing_payload_with_ncu_companion(self):
-    payload = _original_processing_payload(self)
+    payload = _attach_own_hard_constraints(self, _original_processing_payload(self))
     if not payload.get("available") or not payload.get("trace_available"):
         return payload
     data = payload.get("data")
@@ -137,7 +243,10 @@ def _processing_payload_with_ncu_companion(self):
     if companion is None:
         return payload
     _mtime, _created_at, companion_state, companion_status, compatibility_path = companion
-    companion_payload = _original_processing_payload(companion_state)
+    companion_payload = _attach_own_hard_constraints(
+        companion_state,
+        _original_processing_payload(companion_state),
+    )
     companion_data = companion_payload.get("data") or {}
     compatibility = companion_data.get("premat_compatibility")
     if not compatibility:
@@ -145,6 +254,7 @@ def _processing_payload_with_ncu_companion(self):
 
     merged_data = dict(data)
     merged_data["premat_compatibility"] = compatibility
+    merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])
     merged_data["premat_compatibility_files"] = dict(
         companion_data.get("premat_compatibility_files") or {}
     )
