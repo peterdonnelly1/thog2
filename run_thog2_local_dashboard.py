@@ -15,14 +15,18 @@ from run_thog2_local_dashboard_base import *  # noqa: F401,F403
 
 _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
-_resource_patch_name = "dashboard_processing_resource_attribution.js"
+_processing_patch_names = (
+    "dashboard_processing_resource_attribution.js",
+    "dashboard_processing_ncu_2024_repair.js",
+)
 
 # vvv THOG build one explicit dashboard asset overlay at server startup; this avoids hidden import/read hooks and guarantees the resource view follows Processing
 for _asset_name in (*sorted(_base._ASSET_NAMES), "index.html"):
     _source = _original_asset_root / _asset_name
     _payload = _source.read_bytes()
     if _asset_name == "dashboard_processing.js":
-        _payload += b"\n\n" + (_original_asset_root / _resource_patch_name).read_bytes() + b"\n"
+        for _patch_name in _processing_patch_names:
+            _payload += b"\n\n" + (_original_asset_root / _patch_name).read_bytes() + b"\n"
     (_overlay_asset_root / _asset_name).write_bytes(_payload)
 _base._ASSET_ROOT = _overlay_asset_root
 # ^^^ THOG
