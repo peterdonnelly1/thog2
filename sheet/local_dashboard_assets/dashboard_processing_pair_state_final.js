@@ -35,6 +35,12 @@
     return artifact.includes("_NSYS_") || artifact.includes("NSYS_PREMAT");
   }
 
+  function is_ncu_run_id(run_id) {
+    const run = run_for_id(run_id);
+    const artifact = String(run?.artifact_name || run?.run_name || "").toUpperCase();
+    return artifact.includes("_NCU_") || artifact.includes("NCU_PREMAT");
+  }
+
   function save_visibility_if(changed) {
     if (changed) save_json("thog2_local_run_visibility", app.visibility);
   }
@@ -254,16 +260,48 @@
     apply_pair_state(effective, Boolean(trace_available), before_visibility, render_run_id);
   };
 
+  function visible_run_ids(predicate) {
+    return (app.runs || [])
+      .map(run => String(run_identifier(run)))
+      .filter(run_id => is_visible(run_id) && predicate(run_id));
+  }
+
+  function reconcile_startup_pairing() {
+    const current = ensure_navigation_matches_current();
+    if (current && is_nsys_run_id(current)) {
+      processing_refresh(true);
+      return;
+    }
+
+    const visible_nsys = visible_run_ids(is_nsys_run_id);
+    const visible_ncu = visible_run_ids(is_ncu_run_id);
+    if (visible_nsys.length !== 1 || visible_ncu.length !== 0) return;
+
+    // Persisted visibility can restore an NSYS eye before any current-run
+    // selection exists. In that unambiguous case, promote the visible NSYS to
+    // the Processing source and let normal pairing open its NCU companion.
+    const source_run_id = visible_nsys[0];
+    if (source_run_id !== String(app.current_run_id || "")) {
+      select_run(source_run_id, {manual:true, replace_history:true});
+    } else {
+      processing_refresh(true);
+    }
+  }
+
   function refresh_selected_nsys_now() {
     const current = ensure_navigation_matches_current();
     if (!current || !is_nsys_run_id(current)) return;
     processing_refresh(true);
   }
 
-  // Initial-route selection can occur before this overlay sees an explicit click.
-  // Treat an already-selected NSYS at startup exactly like a fresh navigation.
+  // window.load can precede the first catalogue result. Keep this fast-path for
+  // warm starts, and reconcile again when dashboard.js reports that the first
+  // run-database read has actually completed.
   window.addEventListener("load", () => {
-    setTimeout(refresh_selected_nsys_now, 0);
+    setTimeout(reconcile_startup_pairing, 0);
+  });
+  window.addEventListener("instra:catalog-ready", () => {
+    queueMicrotask(reconcile_startup_pairing);
   });
 
   window.addEventListener("popstate", () => {
