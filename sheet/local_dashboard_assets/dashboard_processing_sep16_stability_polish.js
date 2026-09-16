@@ -247,7 +247,9 @@
   const processing_render_before_stability_polish = processing_render;
   processing_render = async function(payload, trace_available) {
     await processing_render_before_stability_polish(payload, trace_available);
-    apply_processing_pair(payload, Boolean(trace_available));
+    if (app.processing_pair_state_final_installed !== true) {
+      apply_processing_pair(payload, Boolean(trace_available));
+    }
     polish_processing_labels();
     processing_gpu_link_time_axes();
   };

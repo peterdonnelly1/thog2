@@ -24,6 +24,13 @@ function extracted_function(name) {
 const sandbox = {
   app: {workspace_mode: true},
   processing_update_timing_cache: new Map(),
+  processing_update_timing_dense_representation_keys: new Set([
+    "model_type",
+    "model_scale_key",
+    "geometry_preset",
+    "depth_order",
+    "premat_attention_mode",
+  ]),
   processing_escape: value => String(value),
   run_identifier: run => run.id,
   fetch_calls: 0,
@@ -51,6 +58,13 @@ for (const name of [
   "processing_update_timing_lane_labels",
   "processing_update_timing_match_signature",
   "processing_update_timing_pair_assessment",
+  "processing_update_timing_abc_role",
+  "processing_update_timing_abc_mismatches",
+  "processing_update_timing_dense_thog_mismatches",
+  "processing_update_timing_abc_value",
+  "processing_update_timing_abc_delta",
+  "processing_update_timing_abc_signed",
+  "processing_update_timing_abc_assessment",
 ]) {
   vm.runInNewContext(`${extracted_function(name)}; this.${name} = ${name};`, sandbox);
 }
@@ -104,6 +118,65 @@ assert.equal(sandbox.processing_update_timing_pair_assessment([premat, nomat]).l
 const mismatched = structuredClone(premat);
 mismatched.timing.capture.match_signature.depth_order = 8;
 assert.equal(sandbox.processing_update_timing_pair_assessment([nomat, mismatched]).level, "error");
+
+function abc_entry(run_id, model_type, premat_mode, official_update_ms, label) {
+  return {
+    run_id,
+    run:{artifact_name:`260915-1200_scruffy_${label}___G0_test`},
+    timing:{
+      official_update_ms,
+      host_update_ms:official_update_ms,
+      optimizer_update:50,
+      capture:{
+        run_label:label,
+        premat_mode,
+        gradient_accumulation_steps:6,
+        batch_size:16,
+        block_size:1024,
+        match_signature:{
+          optimizer_update:50,
+          model_type,
+          model_scale_key:model_type === "dense" ? "dense-l16" : "depth-l16-p12",
+          geometry_preset:model_type === "dense" ? "dense" : "depth",
+          n_layer:16,
+          n_head:16,
+          n_embd:1024,
+          dropout:0,
+          bias:false,
+          depth_order:model_type === "dense" ? 16 : 12,
+          block_size:1024,
+          batch_size:16,
+          gradient_accumulation_steps:6,
+          checkpoint_segment_size:4,
+          dtype:"bfloat16",
+          optimizer_class:"AdamW",
+          learning_rate:0.0009,
+          premat_attention_mode:model_type === "dense" ? "disabled" : "fused",
+          world_size:1,
+        },
+      },
+    },
+  };
+}
+
+const dense = abc_entry("a", "dense", "disabled", 100, "A_DENSE_TIMING_RUN");
+const thog_nomat = abc_entry("b", "depth", "disabled", 110, "B_NOMAT_TIMING_RUN");
+const thog_premat = abc_entry("c", "depth", "enabled", 115, "C_PREMAT_TIMING_RUN");
+const abc_assessment = sandbox.processing_update_timing_abc_assessment([thog_premat, dense, thog_nomat]);
+assert.equal(abc_assessment.level, "ok");
+assert.deepEqual(
+  Array.from(abc_assessment.deltas, delta => [delta.expression, delta.delta_ms, delta.delta_percent]),
+  [["B-A", 10, 10], ["C-B", 5, 100 * 5 / 110], ["C-A", 15, 15]],
+);
+const wrong_layer_dense = structuredClone(dense);
+wrong_layer_dense.timing.capture.match_signature.n_layer = 32;
+const wrong_layer_assessment = sandbox.processing_update_timing_abc_assessment([
+  wrong_layer_dense,
+  thog_nomat,
+  thog_premat,
+]);
+assert.equal(wrong_layer_assessment.level, "error");
+assert.match(wrong_layer_assessment.text, /n_layer/);
 
 nomat.timing.timeline = [
   {phase: "setup", micro_step: 1, host_start_ms: 0, host_end_ms: 2},

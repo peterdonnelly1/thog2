@@ -2,13 +2,28 @@
 "use strict";
 
 (function install_processing_pair_state_final() {
-  app.processing_auto_opened_run_ids = app.processing_auto_opened_run_ids || new Set();
+  const auto_opened_storage_key = "thog2_processing_auto_opened_run_ids";
+  const stored_auto_opened_run_ids = load_json(auto_opened_storage_key, []);
+  app.processing_auto_opened_run_ids = app.processing_auto_opened_run_ids instanceof Set
+    ? app.processing_auto_opened_run_ids
+    : new Set(
+      (Array.isArray(stored_auto_opened_run_ids) ? stored_auto_opened_run_ids : [])
+        .map(run_id => String(run_id || ""))
+        .filter(Boolean)
+    );
   app.processing_paired_run_ids = app.processing_paired_run_ids || new Set();
   app.processing_pair_roles = app.processing_pair_roles || {};
+  app.processing_pair_state_final_installed = true;
 
   let navigation_epoch = 0;
   let refresh_serial = 0;
   let observed_current_run_id = String(app.current_run_id || "");
+  let processing_refresh_promise = null;
+  let processing_refresh_force_queued = false;
+  let processing_refresh_in_flight_force = false;
+  let processing_refresh_in_flight_run_id = "";
+  let startup_reconcile_run_id = "";
+  let startup_reconciled_generation = -1;
 
   function same_set(left, right) {
     if (left.size !== right.size) return false;
@@ -60,9 +75,14 @@
     if (changed) save_json("thog2_local_run_visibility", app.visibility);
   }
 
+  function save_auto_opened_run_ids() {
+    save_json(auto_opened_storage_key, [...(app.processing_auto_opened_run_ids || [])]);
+  }
+
   function clear_managed_pair(next_run_id = "") {
     let visibility_changed = false;
-    for (const run_id of new Set(app.processing_auto_opened_run_ids || [])) {
+    const previous_auto = new Set(app.processing_auto_opened_run_ids || []);
+    for (const run_id of previous_auto) {
       if (run_id === next_run_id) continue;
       if (is_visible(run_id)) {
         app.visibility[run_id] = false;
@@ -75,12 +95,14 @@
     app.processing_paired_run_ids = new Set();
     app.processing_auto_opened_run_ids = new Set();
     app.processing_pair_roles = {};
+    if (previous_auto.size) save_auto_opened_run_ids();
     if (visibility_changed || had_pair) render_runs();
   }
 
   function begin_navigation(next_run_id) {
     navigation_epoch += 1;
     observed_current_run_id = String(next_run_id || "");
+    if (startup_reconcile_run_id !== observed_current_run_id) startup_reconcile_run_id = "";
     clear_managed_pair(observed_current_run_id);
     processing_view.run_id = null;
     processing_view.revision = null;
@@ -119,7 +141,7 @@
     processing_view.companion_enriched_payload = null;
   }
 
-  processing_refresh = async function(force = false) {
+  async function processing_refresh_once(force = false) {
     const run_id = ensure_navigation_matches_current();
     const request_epoch = navigation_epoch;
     const request_serial = ++refresh_serial;
@@ -169,6 +191,33 @@
         && run_id === String(app.current_run_id || "")
       ) console.warn("Processing data refresh failed", error);
     }
+  }
+
+  processing_refresh = function(force = false) {
+    if (processing_refresh_promise) {
+      const current_run_id = String(app.current_run_id || "");
+      if (
+        force
+        && (!processing_refresh_in_flight_force || processing_refresh_in_flight_run_id !== current_run_id)
+      ) processing_refresh_force_queued = true;
+      return processing_refresh_promise;
+    }
+
+    processing_refresh_promise = (async () => {
+      let next_force = Boolean(force);
+      do {
+        processing_refresh_force_queued = false;
+        processing_refresh_in_flight_force = next_force;
+        processing_refresh_in_flight_run_id = String(app.current_run_id || "");
+        await processing_refresh_once(next_force);
+        next_force = processing_refresh_force_queued;
+      } while (next_force);
+    })().finally(() => {
+      processing_refresh_promise = null;
+      processing_refresh_in_flight_force = false;
+      processing_refresh_in_flight_run_id = "";
+    });
+    return processing_refresh_promise;
   };
 
   function companion_provenance(payload) {
@@ -224,15 +273,18 @@
         app.visibility[run_id] = true;
         visibility_changed = true;
       }
-      if (!was_visible_before_render || previous_auto.has(run_id)) next_auto.add(run_id);
+      const restored_companion = startup_reconcile_run_id === render_run_id && run_id === companion_id;
+      if (!was_visible_before_render || previous_auto.has(run_id) || restored_companion) next_auto.add(run_id);
     }
 
     save_visibility_if(visibility_changed);
-    const changed = !same_set(app.processing_paired_run_ids || new Set(), next)
-      || !same_set(app.processing_auto_opened_run_ids || new Set(), next_auto);
+    const auto_changed = !same_set(app.processing_auto_opened_run_ids || new Set(), next_auto);
+    const changed = !same_set(app.processing_paired_run_ids || new Set(), next) || auto_changed;
     app.processing_paired_run_ids = next;
     app.processing_auto_opened_run_ids = next_auto;
     app.processing_pair_roles = roles;
+    if (auto_changed) save_auto_opened_run_ids();
+    if (startup_reconcile_run_id === render_run_id) startup_reconcile_run_id = "";
     if (changed || visibility_changed) render_runs();
     companion_provenance(payload);
   }
@@ -292,30 +344,41 @@
     })[0];
   }
 
+  function remove_orphaned_auto_opened_runs() {
+    const previous_auto = new Set(app.processing_auto_opened_run_ids || []);
+    if (!previous_auto.size) return;
+    let visibility_changed = false;
+    for (const run_id of previous_auto) {
+      if (!run_for_id(run_id) || !is_visible(run_id)) continue;
+      app.visibility[run_id] = false;
+      visibility_changed = true;
+    }
+    app.processing_auto_opened_run_ids = new Set();
+    save_auto_opened_run_ids();
+    save_visibility_if(visibility_changed);
+    if (visibility_changed) render_runs();
+  }
+
   function reconcile_startup_pairing() {
     if (app.instra_catalog_ready !== true || !(app.runs || []).length) return;
+    const generation = Number(app.instra_catalog_generation || 0);
+    if (startup_reconciled_generation === generation) return;
+    startup_reconciled_generation = generation;
 
-    const current = ensure_navigation_matches_current();
-    if (current && is_nsys_run_id(current) && is_visible(current)) {
-      processing_refresh(true);
+    const source_run_id = startup_nsys_source();
+    if (!source_run_id) {
+      remove_orphaned_auto_opened_runs();
       return;
     }
 
-    // If a user deliberately persisted an NCU eye, do not silently replace that
-    // visible state on startup. The auto-pair startup rule applies when NSYS is
-    // visible but no NCU companion has been opened yet.
-    const visible_ncu = visible_run_ids(is_ncu_run_id);
-    if (visible_ncu.length) return;
-
-    const source_run_id = startup_nsys_source();
-    if (!source_run_id) return;
-
     // A persisted NSYS eye is a stronger startup signal than the generic
-    // recommended/current run. Promote it to the Processing source, then normal
-    // pairing opens the nearest viable NCU companion.
+    // recommended/current run, including when its previously paired NCU eye was
+    // also restored. Promote it, then normal pairing validates the companion.
     if (source_run_id !== String(app.current_run_id || "")) {
       select_run(source_run_id, {manual:true, replace_history:true});
+      startup_reconcile_run_id = source_run_id;
     } else {
+      startup_reconcile_run_id = source_run_id;
       processing_refresh(true);
     }
   }

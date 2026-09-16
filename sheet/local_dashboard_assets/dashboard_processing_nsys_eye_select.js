@@ -24,12 +24,14 @@
 
   // Selecting an NSYS source by name, row, route or the eye must not wait for
   // the finished-run polling cadence before profiler pairing becomes visible.
-  const select_run_before_nsys_processing_refresh = select_run;
-  select_run = function(run_id, options = {}) {
-    const result = select_run_before_nsys_processing_refresh(run_id, options);
-    refresh_processing_now_for(run_id);
-    return result;
-  };
+  if (app.processing_pair_state_final_installed !== true) {
+    const select_run_before_nsys_processing_refresh = select_run;
+    select_run = function(run_id, options = {}) {
+      const result = select_run_before_nsys_processing_refresh(run_id, options);
+      refresh_processing_now_for(run_id);
+      return result;
+    };
+  }
 
   const runs_body = by_id("runs_body");
   if (!runs_body || runs_body.dataset.instraNsysEyeSelectInstalled === "true") return;

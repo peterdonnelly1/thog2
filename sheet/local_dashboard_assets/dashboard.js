@@ -1852,8 +1852,17 @@ async function delete_menu_run() {
     await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}`, {method: "DELETE"});
     delete app.colours[run_id];
     delete app.visibility[run_id];
+    // vvv THOG remove deleted runs from the profiler-pair ownership state
+    app.processing_paired_run_ids?.delete?.(run_id);
+    app.processing_auto_opened_run_ids?.delete?.(run_id);
+    if (app.processing_pair_roles) delete app.processing_pair_roles[run_id];
+    // ^^^ THOG
     save_json("thog2_local_run_colours", app.colours);
     save_json("thog2_local_run_visibility", app.visibility);
+    save_json(
+      "thog2_processing_auto_opened_run_ids",
+      [...(app.processing_auto_opened_run_ids || [])]
+    );
     if (app.current_run_id === run_id) {
       restore_maximized_chart();
       app.current_run_id = null;

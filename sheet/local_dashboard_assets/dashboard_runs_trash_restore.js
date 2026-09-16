@@ -116,12 +116,17 @@
         delete app.visibility[run_id];
         app.processing_paired_run_ids?.delete?.(run_id);
         app.processing_auto_opened_run_ids?.delete?.(run_id);
+        if (app.processing_pair_roles) delete app.processing_pair_roles[run_id];
       } catch (error) {
         failures.push(`${run_id}: ${error.message}`);
       }
     }
     save_json("thog2_local_run_colours", app.colours);
     save_json("thog2_local_run_visibility", app.visibility);
+    save_json(
+      "thog2_processing_auto_opened_run_ids",
+      [...(app.processing_auto_opened_run_ids || [])]
+    );
     await refresh_catalog();
     update_trash_button();
     if (failures.length) {

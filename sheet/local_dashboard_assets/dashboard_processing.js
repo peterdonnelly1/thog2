@@ -1140,6 +1140,24 @@ function processing_update_timing_abc_mismatches(left, right, keys = null) {
   ));
 }
 
+const processing_update_timing_dense_representation_keys = new Set([
+  "model_type",
+  "model_scale_key",
+  "geometry_preset",
+  "depth_order",
+  "premat_attention_mode",
+]);
+
+function processing_update_timing_dense_thog_mismatches(dense, thog) {
+  const dense_signature = processing_update_timing_match_signature(dense);
+  const thog_signature = processing_update_timing_match_signature(thog);
+  const comparable_keys = Object.keys(dense_signature).filter(key => (
+    !processing_update_timing_dense_representation_keys.has(key)
+    && Object.prototype.hasOwnProperty.call(thog_signature, key)
+  ));
+  return processing_update_timing_abc_mismatches(dense, thog, comparable_keys);
+}
+
 function processing_update_timing_abc_value(entry) {
   return Number(entry.timing.official_update_ms ?? entry.timing.host_update_ms);
 }
@@ -1175,9 +1193,8 @@ function processing_update_timing_abc_assessment(entries) {
     return {level: "error", text: `Need exactly one A=DENSE, one B=THOG NOMAT and one C=THOG PREMAT; found A=${role_counts.A}, B=${role_counts.B}, C=${role_counts.C}.`};
   }
   const roles = Object.fromEntries(classified.map(item => [item.role.key, item.entry]));
-  const shared_control_keys = ["optimizer_update", "gradient_accumulation_steps", "batch_size", "block_size", "device_type", "snapshot_stage", "target_update_index"];
-  const a_b_mismatches = processing_update_timing_abc_mismatches(roles.A, roles.B, shared_control_keys);
-  const a_c_mismatches = processing_update_timing_abc_mismatches(roles.A, roles.C, shared_control_keys);
+  const a_b_mismatches = processing_update_timing_dense_thog_mismatches(roles.A, roles.B);
+  const a_c_mismatches = processing_update_timing_dense_thog_mismatches(roles.A, roles.C);
   const dense_mismatches = [...new Set([...a_b_mismatches, ...a_c_mismatches])];
   if (dense_mismatches.length) {
     return {level: "error", text: `DENSE/THOG controls are not matched: ${dense_mismatches.join(", ")} differ.`};
@@ -1222,7 +1239,9 @@ processing_update_timing_download_comparison = function() {
       mode: "dense_thog_abc",
       valid: assessment.level === "ok",
       assessment: assessment.text,
-      dense_representation_fields_intentionally_not_matched: ["model_type", "model_scale_key"],
+      dense_representation_fields_intentionally_not_matched: [
+        ...processing_update_timing_dense_representation_keys,
+      ],
     };
     if (assessment.level === "ok") {
       payload.comparison.roles = Object.fromEntries(["A", "B", "C"].map(key => {
