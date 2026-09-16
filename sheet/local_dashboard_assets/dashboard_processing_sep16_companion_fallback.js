@@ -15,12 +15,17 @@
     return marker >= 0 ? artifact.slice(marker + 3) : "";
   }
 
+  function run_time(run) {
+    return Date.parse(run?.created_at || run?.updated_at || "") || 0;
+  }
+
   function companion_candidates() {
     const selected = typeof current_run === "function" ? current_run() : null;
     if (!selected) return [];
     const selected_id = String(run_identifier(selected));
     const suffix = encoded_suffix(selected);
     const host = String(selected.host_label || "");
+    const selected_time = run_time(selected);
     if (!suffix) return [];
     return (app.runs || [])
       .filter(run => (
@@ -29,8 +34,11 @@
         && String(run.host_label || "") === host
       ))
       .sort((left, right) => {
-        const left_time = Date.parse(left.created_at || left.updated_at || "") || 0;
-        const right_time = Date.parse(right.created_at || right.updated_at || "") || 0;
+        const left_time = run_time(left);
+        const right_time = run_time(right);
+        const left_distance = Math.abs(left_time - selected_time);
+        const right_distance = Math.abs(right_time - selected_time);
+        if (left_distance !== right_distance) return left_distance - right_distance;
         return right_time - left_time;
       });
   }
@@ -54,11 +62,11 @@
             created_at:String(run.created_at || ""),
             host_label:String(run.host_label || ""),
             pair_key:`${run.host_label || ""}|${encoded_suffix(run)}`,
-            discovery:"browser_fallback",
+            discovery:"browser_fallback_nearest_in_time",
           },
         };
       } catch (_error) {
-        // Try the next exact-config candidate.
+        // Try the next nearest exact-config candidate.
       }
     }
     return payload;
