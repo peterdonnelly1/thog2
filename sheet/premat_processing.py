@@ -31,6 +31,8 @@ from sheet.processing_resource_attribution import (
 
 
 PROCESSING_SWITCHES = ("enabled", "disabled")
+PROCESSING_PROFILERS = ("nsys", "ncu")
+PROCESSING_DEFAULT_PROFILER = "nsys"
 PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ = 10_000
 PROCESSING_DEFAULT_CAPTURE_UPDATE = 1
 PROCESSING_MIN_CAPTURE_FREQUENCY_HZ = 10
@@ -84,6 +86,17 @@ def _argv_value(arguments: Sequence[str], name: str, default: Optional[str] = No
     return default
 
 
+def processing_profiler_from_argv(arguments: Sequence[str]) -> str:
+    profiler = str(_argv_value(arguments, "--premat_processing_profiler", PROCESSING_DEFAULT_PROFILER)).strip().lower()
+    if profiler not in PROCESSING_PROFILERS:
+        raise ValueError(
+            "--premat_processing_profiler must be one of "
+            + ", ".join(PROCESSING_PROFILERS)
+            + f"; got {profiler!r}"
+        )
+    return profiler
+
+
 def processing_requested_from_argv(arguments: Sequence[str]) -> tuple[bool, int, int]:
     logging = str(_argv_value(arguments, "--premat_processing_logging", "disabled"))
     raw_frequency = _argv_value(
@@ -116,8 +129,17 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
         "--premat_processing_logging_capture_frequency_hz": "--processing_logging_capture_frequency_hz_internal",
         "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",
     }
+    outer_only_value_options = {"--premat_processing_profiler"}
     while index < len(arguments):
         argument = str(arguments[index])
+        if argument in outer_only_value_options:
+            if index + 1 >= len(arguments):
+                raise ValueError(f"{argument} requires a value")
+            index += 2
+            continue
+        if any(argument.startswith(option + "=") for option in outer_only_value_options):
+            index += 1
+            continue
         matched = False
         for public_name, internal_name in replacements.items():
             if argument == public_name:
@@ -157,6 +179,92 @@ def _find_nsys() -> Optional[str]:
     candidates = sorted(Path("/opt/nvidia/nsight-systems").glob("*/bin/nsys"), reverse=True)
     candidates.extend(Path("/usr/local/cuda/bin").glob("nsys"))
     return str(candidates[0]) if candidates else None
+
+
+def _find_ncu() -> Optional[str]:
+    resolved = shutil.which("ncu")
+    if resolved:
+        return resolved
+    candidates = sorted(Path("/opt/nvidia/nsight-compute").glob("*/ncu"), reverse=True)
+    candidates.extend(sorted(Path("/opt/nvidia/nsight-compute").glob("*/target/linux-desktop-glibc_*/ncu"), reverse=True))
+    candidates.extend(Path("/usr/local/cuda/bin").glob("ncu"))
+    return str(candidates[0]) if candidates else None
+
+
+_PROCESSING_TARGET_FAMILIES = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"}
+
+
+def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
+    raw_layer = _argv_value(arguments, "--premat_target_layer")
+    raw_matrix = _argv_value(arguments, "--premat_target_matrix")
+    if raw_layer is None or raw_matrix is None:
+        raise ValueError(
+            "--premat_processing_profiler ncu requires explicit "
+            "--premat_target_layer and --premat_target_matrix"
+        )
+    try:
+        layer = int(str(raw_layer))
+        matrix = int(str(raw_matrix))
+    except ValueError as error:
+        raise ValueError("NCU processing target layer/matrix must be integers") from error
+    if layer < 0:
+        raise ValueError("--premat_target_layer must be non-negative for NCU processing capture")
+    if matrix not in _PROCESSING_TARGET_FAMILIES:
+        raise ValueError("--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) for NCU capture")
+    return layer, _PROCESSING_TARGET_FAMILIES[matrix]
+
+
+def _ncu_profile_command(
+    ncu: str,
+    *,
+    report_base: Path,
+    entrypoint: Path,
+    arguments: Sequence[str],
+    layer: int,
+    family: str,
+) -> list[str]:
+    main_label = _operation_label("MAIN", "consume", family, layer)
+    premat_label = _operation_label("PREMAT", "materialize", family, layer)
+    return [
+        ncu,
+        "--target-processes", "all",
+        "--nvtx",
+        "--nvtx-include", main_label + "/",
+        "--nvtx-include", premat_label + "/",
+        "--section", "LaunchStats",
+        "--section", "Occupancy",
+        "--metrics", "gpu__time_duration.sum",
+        "--replay-mode", "kernel",
+        "--force-overwrite",
+        "--export", str(report_base),
+        sys.executable,
+        str(Path(entrypoint).resolve()),
+        *arguments,
+    ]
+
+
+def _export_ncu_raw_csv(
+    ncu: str,
+    report_path: Path,
+    destination: Path,
+    *,
+    nvtx_rename: bool,
+) -> Path:
+    command = [
+        ncu,
+        "--import", str(report_path),
+        "--csv",
+        "--page", "raw",
+        "--print-units", "base",
+        "--print-metric-name", "name",
+    ]
+    if nvtx_rename:
+        command.extend(("--print-nvtx-rename", "kernel"))
+    completed = subprocess.run(command, stdout=subprocess.PIPE, text=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"Nsight Compute CSV export failed for {report_path}")
+    destination.write_text(completed.stdout)
+    return destination
 
 
 def _nsys_profile_command(
@@ -869,28 +977,99 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     if os.environ.get(_PROCESSING_CHILD_ENV) == "1":
         return None
     requested, frequency, capture_update = processing_requested_from_argv(arguments)
+    profiler = processing_profiler_from_argv(arguments)
     rewritten_arguments = rewrite_processing_cli_for_core(arguments)
     if not requested or processing_invocation_is_non_training(arguments):
         sys.argv[:] = [sys.argv[0], *rewritten_arguments]
         return None
-    nsys = _find_nsys()
-    if nsys is None:
-        raise RuntimeError("--premat_processing_logging enabled requires NVIDIA Nsight Systems (nsys) on PATH")
-    temporary_root = Path(tempfile.mkdtemp(prefix="thog2-premat-processing-"))
-    report_base = temporary_root / "processing_trace"
+
+    temporary_root = Path(tempfile.mkdtemp(prefix=f"thog2-premat-processing-{profiler}-"))
     handoff_path = temporary_root / "handoff.json"
     capture_metadata_path = temporary_root / "capture.json"
     environment = dict(os.environ)
     environment[_PROCESSING_CHILD_ENV] = "1"
     environment[_PROCESSING_HANDOFF_ENV] = str(handoff_path)
     environment[_PROCESSING_CAPTURE_METADATA_ENV] = str(capture_metadata_path)
-    environment["NSYS_NVTX_PROFILER_REGISTER_ONLY"] = "0"
-    command = _nsys_profile_command(
-        nsys, report_base=report_base, frequency=frequency, entrypoint=entrypoint, arguments=rewritten_arguments
+
+    if profiler == "nsys":
+        nsys = _find_nsys()
+        if nsys is None:
+            raise RuntimeError(
+                "--premat_processing_logging enabled with --premat_processing_profiler nsys "
+                "requires NVIDIA Nsight Systems (nsys) on PATH"
+            )
+        report_base = temporary_root / "processing_trace"
+        environment["NSYS_NVTX_PROFILER_REGISTER_ONLY"] = "0"
+        command = _nsys_profile_command(
+            nsys,
+            report_base=report_base,
+            frequency=frequency,
+            entrypoint=entrypoint,
+            arguments=rewritten_arguments,
+        )
+        print(
+            f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
+            f"capturing update {capture_update}, first forward microstep",
+            flush=True,
+        )
+        completed = subprocess.run(command, env=environment)
+        if completed.returncode != 0:
+            return int(completed.returncode)
+        if not handoff_path.exists():
+            raise RuntimeError(
+                "PREMAT processing capture completed but no INSTRA run handoff was written; "
+                "the profiled child did not reach telemetry attachment or did not inherit the THOG processing environment"
+            )
+        handoff = json.loads(handoff_path.read_text())
+        run_directory = Path(handoff["run_directory"])
+        processing_directory = run_directory / "processing"
+        processing_directory.mkdir(parents=True, exist_ok=True)
+        report_path = report_base.with_suffix(".nsys-rep")
+        if not report_path.exists():
+            reports = list(temporary_root.glob("*.nsys-rep"))
+            if len(reports) != 1:
+                raise RuntimeError("Nsight Systems did not produce exactly one .nsys-rep trace")
+            report_path = reports[0]
+        sqlite_path = temporary_root / "processing_trace.sqlite"
+        export = subprocess.run([
+            nsys, "export", "--type=sqlite", "--force-overwrite=true",
+            f"--output={sqlite_path}", str(report_path),
+        ])
+        if export.returncode != 0 or not sqlite_path.exists():
+            raise RuntimeError("Nsight Systems SQLite export failed for PREMAT processing capture")
+        capture_metadata = json.loads(capture_metadata_path.read_text()) if capture_metadata_path.exists() else {}
+        processing_data = normalize_nsys_sqlite(
+            sqlite_path,
+            processing_directory,
+            capture_frequency_hz=frequency,
+            handoff=handoff,
+            capture_metadata=capture_metadata,
+        )
+        processing_files = processing_data["metadata"]["files"]
+        shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])
+        print(f"THOG2 PREMAT processing data: {processing_directory / processing_files['bundle']}", flush=True)
+        return int(completed.returncode)
+
+    ncu = _find_ncu()
+    if ncu is None:
+        raise RuntimeError(
+            "--premat_processing_logging enabled with --premat_processing_profiler ncu "
+            "requires NVIDIA Nsight Compute CLI (ncu) on PATH"
+        )
+    layer, family = _processing_ncu_target_from_argv(arguments)
+    report_base = temporary_root / "processing_ncu_trace"
+    command = _ncu_profile_command(
+        ncu,
+        report_base=report_base,
+        entrypoint=entrypoint,
+        arguments=rewritten_arguments,
+        layer=layer,
+        family=family,
     )
     print(
-        f"THOG2 PREMAT processing capture: Nsight Systems @ {frequency} Hz; "
-        f"capturing update {capture_update}, first forward microstep",
+        "THOG2 PREMAT processing capture: Nsight Compute; "
+        f"capturing update {capture_update}, layer {layer} {family}; "
+        "MAIN consume + PREMAT materialize",
         flush=True,
     )
     completed = subprocess.run(command, env=environment)
@@ -898,43 +1077,61 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         return int(completed.returncode)
     if not handoff_path.exists():
         raise RuntimeError(
-            "PREMAT processing capture completed but no INSTRA run handoff was written; "
-            "the profiled child did not reach telemetry attachment or did not inherit the THOG processing environment"
+            "NCU processing capture completed but no INSTRA run handoff was written; "
+            "the profiled child did not reach telemetry attachment"
         )
     handoff = json.loads(handoff_path.read_text())
     run_directory = Path(handoff["run_directory"])
     processing_directory = run_directory / "processing"
     processing_directory.mkdir(parents=True, exist_ok=True)
-    report_path = report_base.with_suffix(".nsys-rep")
-    if not report_path.exists():
-        reports = list(temporary_root.glob("*.nsys-rep"))
-        if len(reports) != 1:
-            raise RuntimeError("Nsight Systems did not produce exactly one .nsys-rep trace")
+
+    reports = [
+        path for pattern in ("*.ncu-rep", "*.ncu-repz")
+        for path in temporary_root.glob(pattern)
+    ]
+    preferred = [path for path in reports if path.stem.startswith(report_base.name)]
+    if len(preferred) == 1:
+        report_path = preferred[0]
+    elif len(reports) == 1:
         report_path = reports[0]
-    sqlite_path = temporary_root / "processing_trace.sqlite"
-    export = subprocess.run([
-        nsys, "export", "--type=sqlite", "--force-overwrite=true",
-        f"--output={sqlite_path}", str(report_path),
-    ])
-    if export.returncode != 0 or not sqlite_path.exists():
-        raise RuntimeError("Nsight Systems SQLite export failed for PREMAT processing capture")
-    capture_metadata = json.loads(capture_metadata_path.read_text()) if capture_metadata_path.exists() else {}
-    processing_data = normalize_nsys_sqlite(
-        sqlite_path,
-        processing_directory,
-        capture_frequency_hz=frequency,
-        handoff=handoff,
-        capture_metadata=capture_metadata,
+    else:
+        raise RuntimeError(
+            f"Nsight Compute did not produce exactly one report; found {len(reports)}"
+        )
+
+    raw_csv = _export_ncu_raw_csv(
+        ncu, report_path, temporary_root / "processing_ncu_raw.csv", nvtx_rename=False
     )
-    processing_files = processing_data["metadata"]["files"]
-    shutil.copy2(report_path, processing_directory / processing_files["raw_trace"])
-    print(f"THOG2 PREMAT processing data: {processing_directory / processing_files['bundle']}", flush=True)
+    semantic_csv = _export_ncu_raw_csv(
+        ncu, report_path, temporary_root / "processing_ncu_semantic.csv", nvtx_rename=True
+    )
+    from sheet.processing_ncu_compatibility import (
+        normalize_semantic_ncu_exports,
+        select_representative_kernel_resources,
+        write_outputs,
+    )
+    resource_rows = normalize_semantic_ncu_exports(raw_csv, semantic_csv)
+    representative_rows = select_representative_kernel_resources(resource_rows)
+    paths = write_outputs(representative_rows, processing_directory)
+    report_destination = processing_directory / f"processing_ncu_trace{report_path.suffix}"
+    shutil.copy2(report_path, report_destination)
+    shutil.copy2(raw_csv, processing_directory / "processing_ncu_raw.csv")
+    shutil.copy2(semantic_csv, processing_directory / "processing_ncu_semantic.csv")
+    print(
+        "THOG2 PREMAT NCU compatibility data: "
+        f"{paths['csv']} ({family} layer {layer}; dominant MAIN/PREMAT kernels)",
+        flush=True,
+    )
     return int(completed.returncode)
 
 
 __all__ = [
     "PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ",
     "PROCESSING_DEFAULT_CAPTURE_UPDATE",
+    "PROCESSING_DEFAULT_PROFILER",
+    "PROCESSING_PROFILERS",
+    "_ncu_profile_command",
+    "_processing_ncu_target_from_argv",
     "maybe_reexec_under_nsys",
     "normalize_nsys_sqlite",
     "processing_capture_scope",
@@ -942,6 +1139,7 @@ __all__ = [
     "processing_operation_push",
     "processing_operation_range",
     "processing_invocation_is_non_training",
+    "processing_profiler_from_argv",
     "processing_requested_from_argv",
     "rewrite_processing_cli_for_core",
     "register_processing_handoff",

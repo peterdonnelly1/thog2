@@ -13,9 +13,12 @@ from run_thog2_local_dashboard import RunDashboardState
 from sheet.local_chart_store import LocalChartReader, LocalChartStore
 from sheet.premat_processing import (
     _mean_metric,
+    _ncu_profile_command,
     _nsys_profile_command,
+    _processing_ncu_target_from_argv,
     normalize_nsys_sqlite,
     processing_invocation_is_non_training,
+    processing_profiler_from_argv,
     processing_requested_from_argv,
     register_processing_handoff,
     should_capture_processing_forward,
@@ -565,4 +568,110 @@ def test_processing_update_timing_ui_uses_g_labels_pair_warning_and_fresh_worksp
     assert "unexplained_residual" in js
     assert ".processing-pair-warning" in css
     assert ".processing-update-timing-timeline-card.maximized" in css
+# ^^^ THOG
+
+
+# vvv THOG integrated Nsight Compute processing capture
+def test_processing_profiler_selector_defaults_to_nsys_and_strips_outer_option() -> None:
+    assert processing_profiler_from_argv([]) == "nsys"
+    assert processing_profiler_from_argv(["--premat_processing_profiler", "ncu"]) == "ncu"
+    with pytest.raises(ValueError, match="premat_processing_profiler"):
+        processing_profiler_from_argv(["--premat_processing_profiler", "bogus"])
+    assert rewrite_processing_cli_for_core([
+        "--premat_processing_profiler", "ncu",
+        "--premat_processing_logging", "enabled",
+        "--model-type", "sheet",
+    ]) == [
+        "--processing_logging_internal", "enabled",
+        "--model-type", "sheet",
+    ]
+
+
+def test_processing_ncu_target_uses_existing_premat_target() -> None:
+    assert _processing_ncu_target_from_argv([
+        "--premat_target_layer", "8",
+        "--premat_target_matrix", "4",
+    ]) == (8, "DOWN")
+    with pytest.raises(ValueError, match="target_layer"):
+        _processing_ncu_target_from_argv(["--premat_target_matrix", "4"])
+
+
+def test_ncu_profile_command_filters_semantic_main_and_premat_ranges(tmp_path: Path) -> None:
+    command = _ncu_profile_command(
+        "/usr/bin/ncu",
+        report_base=tmp_path / "trace",
+        entrypoint=tmp_path / "runner.py",
+        arguments=["--processing_logging_internal", "enabled"],
+        layer=8,
+        family="DOWN",
+    )
+    assert "--nvtx" in command
+    assert "LaunchStats" in command
+    assert "Occupancy" in command
+    assert "gpu__time_duration.sum" in command
+    assert "THOG2_PROCESSING|owner=MAIN|operation=consume|family=DOWN|layer=8/" in command
+    assert "THOG2_PROCESSING|owner=PREMAT|operation=materialize|family=DOWN|layer=8/" in command
+
+
+def _write_synthetic_ncu_csv(path: Path, semantic: bool) -> None:
+    fieldnames = [
+        "ID", "Process ID", "Kernel Name", "Context", "Stream", "CC", "Block Size",
+        "Metric Name", "Metric Unit", "Metric Value",
+    ]
+    launches = [
+        ("1", "THOG2_PROCESSING|owner=MAIN|operation=consume|family=DOWN|layer=8"
+         if semantic else "ampere_bf16_gemm", 72, 3_000_000),
+        ("2", "THOG2_PROCESSING|owner=PREMAT|operation=materialize|family=DOWN|layer=8"
+         if semantic else "materialize_kernel", 40, 340_000),
+    ]
+    rows = []
+    for launch_id, name, registers, duration in launches:
+        for metric, unit, value in (
+            ("launch__registers_per_thread_allocated", "register/thread", registers),
+            ("launch__shared_mem_per_block_allocated", "byte", 0),
+            ("gpu__time_duration.sum", "nsecond", duration),
+        ):
+            rows.append({
+                "ID": launch_id,
+                "Process ID": "123",
+                "Kernel Name": name,
+                "Context": "1",
+                "Stream": "7" if launch_id == "1" else "11",
+                "CC": "8.9",
+                "Block Size": "256,1,1",
+                "Metric Name": metric,
+                "Metric Unit": unit,
+                "Metric Value": value,
+            })
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_ncu_semantic_exports_select_dominant_main_and_premat(tmp_path: Path) -> None:
+    from sheet.processing_ncu_compatibility import (
+        normalize_semantic_ncu_exports,
+        select_representative_kernel_resources,
+        write_outputs,
+    )
+    raw = tmp_path / "raw.csv"
+    semantic = tmp_path / "semantic.csv"
+    _write_synthetic_ncu_csv(raw, False)
+    _write_synthetic_ncu_csv(semantic, True)
+    rows = normalize_semantic_ncu_exports(raw, semantic)
+    assert {(row["role"], row["family"], row["layer"]) for row in rows} == {
+        ("MAIN", "DOWN", 8),
+        ("PREMAT", "DOWN", 8),
+    }
+    representatives = select_representative_kernel_resources(rows)
+    assert len(representatives) == 2
+    assert {row["cuda_kernel_name"] for row in representatives} == {
+        "ampere_bf16_gemm",
+        "materialize_kernel",
+    }
+    outputs = write_outputs(representatives, tmp_path / "processing")
+    assert outputs["json"].exists()
+    assert outputs["csv"].exists()
+    assert outputs["kernel_resources"].exists()
 # ^^^ THOG

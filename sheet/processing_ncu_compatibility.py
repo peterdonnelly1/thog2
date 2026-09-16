@@ -5,7 +5,7 @@ Two inputs are supported:
 
 1. A normalized ``processing_ncu_kernel_resources.csv`` containing role=MAIN /
    role=PREMAT rows.
-2. Raw ``ncu --csv --page raw --units base`` CSV exports, supplied as repeated
+2. Raw ``ncu --csv --page raw --print-units base`` CSV exports, supplied as repeated
    ``--main FAMILY=path.csv`` / ``--premat FAMILY=path.csv`` arguments.  The
    raw importer deliberately requires each file to represent the requested
    semantic family; it never guesses MAIN/PREMAT ownership from kernel names.
@@ -259,6 +259,21 @@ def _byte_value(value: Any, unit: Any) -> int:
     return int(round(number * factors.get(normalized, 1)))
 
 
+def _duration_ns(value: Any, unit: Any) -> int:
+    number = _clean_number(value)
+    normalized = str(unit or "").strip().lower().replace(" ", "")
+    factors = {
+        "": 1.0,
+        "ns": 1.0, "nsecond": 1.0, "nanosecond": 1.0, "nanoseconds": 1.0,
+        "us": 1_000.0, "usecond": 1_000.0, "microsecond": 1_000.0, "microseconds": 1_000.0,
+        "ms": 1_000_000.0, "msecond": 1_000_000.0, "millisecond": 1_000_000.0, "milliseconds": 1_000_000.0,
+        "s": 1_000_000_000.0, "second": 1_000_000_000.0, "seconds": 1_000_000_000.0,
+    }
+    if normalized not in factors:
+        raise ValueError(f"unsupported NCU duration unit: {unit!r}")
+    return int(round(number * factors[normalized]))
+
+
 def _block_threads(value: Any) -> int:
     # Typical NCU CSV forms include "256,1,1", "(256, 1, 1)" and "256".
     numbers = [int(part) for part in re.findall(r"\d+", str(value or ""))]
@@ -393,6 +408,8 @@ def normalize_raw_ncu_csv(
                 stream_id = str(int(round(_clean_number(stream_metric[0]))))
             except ValueError:
                 pass
+        duration_metric = metric("gpu__time_duration.sum")
+        duration_ns = 0 if duration_metric is None else _duration_ns(*duration_metric)
 
         normalized.append({
             "role": role.upper(),
@@ -400,8 +417,11 @@ def normalize_raw_ncu_csv(
             "family": family.upper(),
             "layer": "" if layer is None else int(layer),
             "launch_id": key[0],
+            "process_id": first(representative, "Process ID", "PID"),
+            "context_id": key[2],
             "stream_id": stream_id,
             "cuda_kernel_name": key[1],
+            "duration_ns": duration_ns,
             "compute_capability": cc,
             "threads_per_block": threads,
             "warps_per_block": warps,
@@ -414,6 +434,134 @@ def normalize_raw_ncu_csv(
             "resource_source": "ncu_raw_csv",
         })
     return normalized
+
+
+def parse_processing_nvtx_label(value: Any) -> Dict[str, Any] | None:
+    text = str(value or "")
+    marker = "THOG2_PROCESSING|"
+    offset = text.find(marker)
+    if offset < 0:
+        return None
+    fields: Dict[str, Any] = {}
+    for part in text[offset:].split("|")[1:]:
+        if "=" not in part:
+            break
+        key, raw = part.split("=", 1)
+        fields[key.strip()] = raw.strip()
+    owner = str(fields.get("owner", "")).upper()
+    operation = str(fields.get("operation", "")).lower()
+    family = str(fields.get("family", "")).upper()
+    if owner not in {"MAIN", "PREMAT"} or not operation or not family:
+        return None
+    try:
+        layer = int(fields.get("layer", ""))
+    except (TypeError, ValueError):
+        return None
+    return {"role": owner, "operation": operation, "family": family, "layer": layer}
+
+
+def _semantic_launch_map(path: Path) -> Dict[tuple[str, str, str, str], Dict[str, Any]]:
+    rows = _raw_ncu_reader(path)
+
+    def first(row: Mapping[str, Any], *names: str) -> str:
+        for name in names:
+            value = row.get(name)
+            if value not in (None, ""):
+                return str(value)
+        return ""
+
+    mapping: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
+    for row in rows:
+        semantic = parse_processing_nvtx_label(first(row, "Kernel Name", "Kernel", "Name"))
+        if semantic is None:
+            continue
+        key = (
+            first(row, "ID", "Kernel ID", "Launch ID"),
+            first(row, "Process ID", "PID"),
+            first(row, "Context", "Context ID"),
+            first(row, "Stream", "Stream ID"),
+        )
+        existing = mapping.get(key)
+        if existing is not None and existing != semantic:
+            raise ValueError(f"conflicting semantic NCU labels for launch {key}")
+        mapping[key] = semantic
+    return mapping
+
+
+def normalize_semantic_ncu_exports(
+    raw_path: Path,
+    semantic_path: Path,
+    *,
+    compute_capability: str | None = None,
+) -> list[Dict[str, Any]]:
+    rows = normalize_raw_ncu_csv(
+        raw_path,
+        role="UNKNOWN",
+        family="UNKNOWN",
+        operation="unknown",
+        layer=None,
+        compute_capability=compute_capability,
+    )
+    semantic = _semantic_launch_map(semantic_path)
+    normalized: list[Dict[str, Any]] = []
+    for row in rows:
+        key = (
+            str(row.get("launch_id", "")),
+            str(row.get("process_id", "")),
+            str(row.get("context_id", "")),
+            str(row.get("stream_id", "")),
+        )
+        label = semantic.get(key)
+        if label is None:
+            continue
+        updated = dict(row)
+        updated.update(label)
+        normalized.append(updated)
+    roles = {str(row.get("role", "")).upper() for row in normalized}
+    if "MAIN" not in roles or "PREMAT" not in roles:
+        raise ValueError(
+            "NCU semantic export did not contain both MAIN consume and PREMAT materialize launches"
+        )
+    return normalized
+
+
+def select_representative_kernel_resources(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[Dict[str, Any]]:
+    groups: Dict[tuple[str, str, str, Any], list[Dict[str, Any]]] = {}
+    for source in rows:
+        row = dict(source)
+        key = (
+            str(row.get("role", "")).upper(),
+            str(row.get("operation", "")).lower(),
+            str(row.get("family", "")).upper(),
+            row.get("layer", ""),
+        )
+        groups.setdefault(key, []).append(row)
+    selected: list[Dict[str, Any]] = []
+    for key, candidates in groups.items():
+        timed = []
+        for row in candidates:
+            try:
+                duration = int(float(row.get("duration_ns", 0)))
+            except (TypeError, ValueError):
+                duration = 0
+            if duration > 0:
+                timed.append((duration, row))
+        if not timed:
+            raise ValueError(
+                "NCU representative selection requires gpu__time_duration.sum; "
+                f"no duration was recorded for {key}"
+            )
+        selected.append(max(timed, key=lambda item: item[0])[1])
+    selected.sort(
+        key=lambda row: (
+            0 if str(row.get("role", "")).upper() == "MAIN" else 1,
+            int(row.get("layer", 0) or 0),
+            str(row.get("family", "")),
+        )
+    )
+    return selected
 
 
 def write_kernel_resources(rows: Sequence[Mapping[str, Any]], path: Path) -> Path:
