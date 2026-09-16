@@ -2,6 +2,7 @@
 "use strict";
 
 processing_view.resource_available = false;
+processing_view.compatibility_available = false;
 processing_view.resource_axis_sync = false;
 
 const processing_resource_metric_specs = [
@@ -310,7 +311,7 @@ const processing_sync_visibility_before_resource_attribution = processing_sync_v
 processing_sync_visibility = function() {
   processing_sync_visibility_before_resource_attribution();
   const card = by_id("processing_resource_card");
-  if (card) card.hidden = !(processing_view.charts_tab_visible && processing_view.resource_available);
+  if (card) card.hidden = !(processing_view.charts_tab_visible && (processing_view.resource_available || processing_view.compatibility_available));
 };
 
 const processing_render_before_resource_attribution = processing_render;
@@ -400,6 +401,9 @@ function processing_gpu_inject_style() {
     .processing-resource-compat-shell { flex:0 0 auto; min-height:92px; position:relative !important; inset:auto !important; border-top:1px solid rgba(127,127,127,.12); }
     .processing-resource-card.maximized .processing-resource-clock-shell { flex-basis:128px; }
     .processing-resource-card.maximized .processing-resource-compat-shell { min-height:112px; }
+    .processing-resource-card.processing-resource-compat-only .processing-resource-main-shell,
+    .processing-resource-card.processing-resource-compat-only .processing-resource-clock-shell { display:none !important; }
+    .processing-resource-card.processing-resource-compat-only .processing-resource-compat-shell { flex:1 1 auto; min-height:150px; }
     .processing-throughput-axis-select {
       height:28px; max-width:150px; border:1px solid rgba(127,127,127,.32); border-radius:5px;
       background:#fff; color:inherit; padding:0 6px; font-size:11px;
@@ -575,8 +579,43 @@ async function processing_gpu_render_compatibility(payload) {
   }
   const families = [...new Set(compatibility.map(row => String(row.premat_family || "PREMAT")).filter(Boolean))];
   const class_colours = {GREEN: "#2e9d57", ORANGE: "#f28c28", YELLOW: "#f2cc0c", RED: "#d63c3c"};
+  const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
+  if (!intervals.length) {
+    const grouped = new Map();
+    for (const row of compatibility) {
+      const klass = String(row.compatibility_class || "").toUpperCase();
+      if (!class_colours[klass]) continue;
+      if (!grouped.has(klass)) grouped.set(klass, {x: [], y: [], hover: []});
+      const trace = grouped.get(klass);
+      const main_layer = row.main_layer === "" || row.main_layer === null || row.main_layer === undefined ? "—" : Number(row.main_layer) + 1;
+      const premat_layer = row.premat_layer === "" || row.premat_layer === null || row.premat_layer === undefined ? "—" : Number(row.premat_layer) + 1;
+      trace.x.push(1);
+      trace.y.push(`MAIN ${row.main_family || "?"} L${main_layer} → PREMAT ${row.premat_family || "?"} L${premat_layer}`);
+      trace.hover.push(
+        `${klass} · aggregate SM-budget pair ${row.pair_can_co_reside ? "can" : "cannot"} co-reside<br>`
+        + `PREMAT blocks with full MAIN residency: ${Number(row.premat_blocks_with_full_main_residency || 0)}<br>`
+        + `MAIN block: ${Number(row.main_threads_per_block || 0)} threads · ${Number(row.main_warps_per_block || 0)} warps · ${Number(row.main_registers_per_block || 0).toLocaleString()} regs · ${Number(row.main_shared_mem_bytes || 0).toLocaleString()} B shared<br>`
+        + `PREMAT block: ${Number(row.premat_threads_per_block || 0)} threads · ${Number(row.premat_warps_per_block || 0)} warps · ${Number(row.premat_registers_per_block || 0).toLocaleString()} regs · ${Number(row.premat_shared_mem_bytes || 0).toLocaleString()} B shared<br>`
+        + `limiter: ${processing_escape(row.limiting_resource || "—")}`
+      );
+    }
+    const traces = [...grouped.entries()].map(([klass, item]) => ({
+      type: "bar", orientation: "h", name: klass, x: item.x, y: item.y,
+      hovertext: item.hover, hoverinfo: "text", marker: {color: class_colours[klass]},
+      width: 0.62, showlegend: false,
+    }));
+    shell.hidden = false;
+    shell.style.flexBasis = `${Math.max(150, 84 + compatibility.length * 34)}px`;
+    await processing_plot("processing_resource_compatibility_plot", traces, {
+      margin: {l: 210, r: 34, t: 34, b: 24}, barmode: "group", hovermode: "closest",
+      title: {text: "Theoretical MAIN/PREMAT aggregate SM-budget co-residency · Nsight Compute", x: 0.01, xanchor: "left", font: {size: 11}},
+      xaxis: {visible: false, range: [0, 1]},
+      yaxis: {automargin: true},
+    });
+    return;
+  }
   const traces_by_class = new Map();
-  for (const interval of payload.intervals || []) {
+  for (const interval of intervals) {
     if (String(interval.owner) !== "MAIN") continue;
     for (const premat_family of families) {
       const match = processing_gpu_matching_compatibility(
@@ -626,8 +665,23 @@ async function processing_resource_render(payload) {
   if (!card) return;
   const rows = Array.isArray(payload.stream_resources) ? payload.stream_resources : [];
   processing_view.resource_available = Number(payload.metadata?.schema_version || 1) >= 2 && rows.length > 0;
-  card.hidden = !(processing_view.charts_tab_visible && processing_view.resource_available);
-  if (!processing_view.resource_available) return;
+  processing_view.compatibility_available = processing_gpu_compatibility_rows(payload).length > 0;
+  const any_resource_view = processing_view.resource_available || processing_view.compatibility_available;
+  card.hidden = !(processing_view.charts_tab_visible && any_resource_view);
+  card.classList.toggle("processing-resource-compat-only", !processing_view.resource_available && processing_view.compatibility_available);
+  const heading = card.querySelector(".chart-heading-copy h2");
+  const subtitle = card.querySelector(".chart-heading-copy > p:not(#processing_resource_idle_summary)");
+  if (heading) heading.textContent = processing_view.resource_available ? "Stream resource pressure" : "PREMAT compatibility";
+  if (subtitle) subtitle.textContent = processing_view.resource_available
+    ? "Exact stream attribution only · device-wide counters remain combined wherever Main and PREMAT overlap."
+    : "Nsight Compute structural result · aggregate SM-budget co-residency; not a timing measurement.";
+  if (!processing_view.resource_available) {
+    const idle = by_id("processing_resource_idle_summary");
+    if (idle) idle.textContent = "";
+    await processing_gpu_render_compatibility(payload);
+    processing_gpu_schedule_resize();
+    return;
+  }
   processing_resource_update_idle_summary(payload);
   const panes = processing_resource_panes(rows);
   const traces = [];
