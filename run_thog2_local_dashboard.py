@@ -189,6 +189,8 @@ _processing_patch_names = (
     "dashboard_processing_ncu_2024_repair.js",
     "dashboard_processing_compatibility_classification_patch.js",
     "dashboard_processing_sep16_stability_polish.js",
+    "dashboard_processing_sep16_companion_fallback.js",
+    "dashboard_processing_sep16_quiescence.js",
 )
 
 # vvv THOG build one explicit dashboard asset overlay at server startup; this avoids hidden import/read hooks and guarantees the resource view follows Processing
