@@ -579,7 +579,7 @@ def test_processing_profiler_selector_defaults_to_nsys_and_strips_outer_option()
         processing_profiler_from_argv(["--premat_processing_profiler", "bogus"])
     assert rewrite_processing_cli_for_core([
         "--premat_processing_profiler", "ncu",
-        "--ncu_probe_layer", "8",
+        "--ncu-probe-layer", "8",
         "--premat_target_layer", "1",
         "--premat_processing_logging", "enabled",
         "--model-type", "sheet",
@@ -591,6 +591,11 @@ def test_processing_profiler_selector_defaults_to_nsys_and_strips_outer_option()
 
 
 def test_processing_ncu_target_uses_separate_absolute_probe_layer() -> None:
+    assert _processing_ncu_target_from_argv([
+        "--premat_target_layer", "1",
+        "--ncu-probe-layer", "8",
+        "--premat_target_matrix", "4",
+    ]) == (8, "DOWN")
     assert _processing_ncu_target_from_argv([
         "--premat_target_layer", "1",
         "--ncu_probe_layer", "8",

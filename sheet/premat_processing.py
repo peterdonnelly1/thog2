@@ -129,7 +129,7 @@ def rewrite_processing_cli_for_core(arguments: Sequence[str]) -> list[str]:
         "--premat_processing_logging_capture_frequency_hz": "--processing_logging_capture_frequency_hz_internal",
         "--premat_processing_logging_capture_update": "--processing_logging_capture_update_internal",
     }
-    outer_only_value_options = {"--premat_processing_profiler", "--ncu_probe_layer"}
+    outer_only_value_options = {"--premat_processing_profiler", "--ncu_probe_layer", "--ncu-probe-layer"}
     while index < len(arguments):
         argument = str(arguments[index])
         if argument in outer_only_value_options:
@@ -195,12 +195,14 @@ _PROCESSING_TARGET_FAMILIES = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"}
 
 
 def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
-    raw_probe_layer = _argv_value(arguments, "--ncu_probe_layer")
+    raw_probe_layer = _argv_value(arguments, "--ncu-probe-layer")
+    if raw_probe_layer is None:
+        raw_probe_layer = _argv_value(arguments, "--ncu_probe_layer")
     raw_matrix = _argv_value(arguments, "--premat_target_matrix")
     if raw_probe_layer is None or raw_matrix is None:
         raise ValueError(
             "--premat_processing_profiler ncu requires explicit "
-            "--ncu_probe_layer and --premat_target_matrix"
+            "--ncu-probe-layer and --premat_target_matrix"
         )
     try:
         probe_layer = int(str(raw_probe_layer))
@@ -208,7 +210,7 @@ def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str
     except ValueError as error:
         raise ValueError("NCU probe layer/matrix must be integers") from error
     if probe_layer < 0:
-        raise ValueError("--ncu_probe_layer must be non-negative")
+        raise ValueError("--ncu-probe-layer must be non-negative")
     if matrix not in _PROCESSING_TARGET_FAMILIES:
         raise ValueError("--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) for NCU capture")
     return probe_layer, _PROCESSING_TARGET_FAMILIES[matrix]
