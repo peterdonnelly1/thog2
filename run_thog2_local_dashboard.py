@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import time
 from typing import Any, Optional
 
 import run_thog2_local_dashboard_base as _base
@@ -74,11 +75,29 @@ def _matching_ncu_companion(state: Any):
     pair_key = _processing_pair_key(state)
     if catalog is None or pair_key is None:
         return None
+
+    now = time.monotonic()
+    cached = getattr(state, "_instra_ncu_companion_cache", None)
+    if cached is not None and now - float(cached[0]) < 5.0:
+        return cached[1]
+
+    _host, encoded = pair_key
+    if not catalog.root.is_dir():
+        state._instra_ncu_companion_cache = (now, None)
+        return None
+
+    # Search the full catalog root even when Instra itself was launched with
+    # --run.  The artifact-directory suffix lets us discard virtually every run
+    # before opening its SQLite metadata.
+    candidate_paths = tuple(catalog.root.glob(f"**/{_base.LOCAL_CHART_DATABASE_NAME}"))
     candidates = []
-    for path in catalog._candidate_paths():
-        candidate = catalog._state_for_path(path)
-        if candidate.database_path.resolve() == state.database_path.resolve():
+    for path in candidate_paths:
+        if path.resolve() == state.database_path.resolve():
             continue
+        artifact_hint = path.parent.parent.name if len(path.parents) >= 2 else ""
+        if not str(artifact_hint).endswith(f"___{encoded}"):
+            continue
+        candidate = catalog._state_for_path(path)
         if _processing_pair_key(candidate) != pair_key:
             continue
         compatibility_path = (
@@ -101,9 +120,9 @@ def _matching_ncu_companion(state: Any):
                 compatibility_path,
             )
         )
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: (item[0], item[1]))
+    result = max(candidates, key=lambda item: (item[0], item[1])) if candidates else None
+    state._instra_ncu_companion_cache = (now, result)
+    return result
 
 
 def _processing_payload_with_ncu_companion(self):
