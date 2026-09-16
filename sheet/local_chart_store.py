@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 4                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
+LOCAL_CHART_SCHEMA_VERSION = 5                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
 LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
@@ -253,10 +253,25 @@ class LocalChartStore:
             );
             CREATE TABLE IF NOT EXISTS processing_throughput (
                 optimizer_update INTEGER PRIMARY KEY,
-                tokens_per_second REAL NOT NULL
+                tokens_per_second REAL NOT NULL,
+                wall_time REAL,
+                process_time_seconds REAL
             );
             """
         )
+        # vvv THOG Processing throughput time coordinates v1
+        throughput_columns = {
+            str(row["name"])
+            for row in self.connection.execute("PRAGMA table_info(processing_throughput)").fetchall()
+        }
+        if "wall_time" not in throughput_columns:
+            self.connection.execute("ALTER TABLE processing_throughput ADD COLUMN wall_time REAL")
+        if "process_time_seconds" not in throughput_columns:
+            self.connection.execute(
+                "ALTER TABLE processing_throughput ADD COLUMN process_time_seconds REAL"
+            )
+        self._processing_started_monotonic = time.monotonic()
+        # ^^^ THOG
         now = _utc_timestamp()
         metadata = {
             "schema_version": str(LOCAL_CHART_SCHEMA_VERSION),
@@ -558,9 +573,15 @@ class LocalChartStore:
         if value is None:
             return
         update = int(optimizer_update)
+        wall_time = time.time()
+        process_time_seconds = max(0.0, time.monotonic() - self._processing_started_monotonic)
         self.connection.execute(
-            "INSERT OR REPLACE INTO processing_throughput(optimizer_update, tokens_per_second) VALUES (?, ?)",
-            (update, value),
+            """
+            INSERT OR REPLACE INTO processing_throughput(
+                optimizer_update, tokens_per_second, wall_time, process_time_seconds
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (update, value, wall_time, process_time_seconds),
         )
         self._latest_observed_update = max(self._latest_observed_update, update)
         self._touch()
@@ -875,25 +896,66 @@ class LocalChartReader:
             connection.close()
         return tuple(_decode_payload(row["payload"]) for row in rows)
 
-    # vvv THOG old databases remain readable; they simply have no Processing throughput history
+    # vvv THOG old databases remain readable; time axes appear only where genuine timing was retained
     def processing_throughput(self) -> Tuple[Dict[str, Any], ...]:
         connection = self._connection()
+        created_epoch = None
         try:
             try:
+                columns = {
+                    str(row["name"])
+                    for row in connection.execute("PRAGMA table_info(processing_throughput)").fetchall()
+                }
+                selected = ["optimizer_update", "tokens_per_second"]
+                if "wall_time" in columns:
+                    selected.append("wall_time")
+                if "process_time_seconds" in columns:
+                    selected.append("process_time_seconds")
                 rows = connection.execute(
-                    "SELECT optimizer_update, tokens_per_second FROM processing_throughput ORDER BY optimizer_update"
+                    "SELECT " + ", ".join(selected)
+                    + " FROM processing_throughput ORDER BY optimizer_update"
                 ).fetchall()
+                created_row = connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'created_at'"
+                ).fetchone()
+                if created_row is not None:
+                    try:
+                        created_epoch = datetime.fromisoformat(
+                            str(created_row["value"]).replace("Z", "+00:00")
+                        ).timestamp()
+                    except (TypeError, ValueError):
+                        created_epoch = None
             except sqlite3.OperationalError:
                 rows = ()
+                columns = set()
         finally:
             connection.close()
-        return tuple(
-            {
+
+        result = []
+        for row in rows:
+            wall_time = (
+                None
+                if "wall_time" not in columns or row["wall_time"] is None
+                else float(row["wall_time"])
+            )
+            process_time_seconds = (
+                None
+                if "process_time_seconds" not in columns or row["process_time_seconds"] is None
+                else float(row["process_time_seconds"])
+            )
+            relative_wall_seconds = (
+                None
+                if wall_time is None or created_epoch is None
+                else max(0.0, wall_time - created_epoch)
+            )
+            result.append({
                 "optimizer_update": int(row["optimizer_update"]),
                 "tokens_per_second": float(row["tokens_per_second"]),
-            }
-            for row in rows
-        )
+                "wall_time": wall_time,
+                "relative_wall_seconds": relative_wall_seconds,
+                "process_time_seconds": process_time_seconds,
+            })
+        return tuple(result)
     # ^^^ THOG
 
     def latest_premat_snapshot(self) -> Optional[Dict[str, Any]]:
@@ -986,4 +1048,3 @@ __all__ = [
     "normalize_chart_destination",
 ]
 # ^^^ THOG
-

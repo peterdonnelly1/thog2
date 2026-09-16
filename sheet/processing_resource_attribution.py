@@ -416,3 +416,116 @@ __all__ = [
     "sample_bins",
 ]
 # ^^^ THOG
+
+# vvv THOG Processing resource tide metrics and operation subdivision v1
+_previous_processing_metric_fields = PROCESSING_METRIC_FIELDS
+PROCESSING_METRIC_SPECS.update({
+    "compute_warps_in_flight_pct": {
+        "patterns": (
+            "Compute Warps in Flight",
+            "Compute Warps In Flight",
+            "warps in flight",
+        ),
+        "unit": "%",
+        "required": False,
+    },
+    "gpc_clock_mhz": {
+        "patterns": (
+            "GPC Clock Frequency",
+            "GPC Clock",
+        ),
+        "unit": "MHz",
+        "required": False,
+    },
+})
+PROCESSING_METRIC_FIELDS = tuple(PROCESSING_METRIC_SPECS)
+_processing_resource_context_fields = tuple(
+    field for field in PROCESSING_STREAM_RESOURCE_FIELDS
+    if field not in _previous_processing_metric_fields
+)
+PROCESSING_STREAM_RESOURCE_FIELDS = (
+    *_processing_resource_context_fields,
+    *PROCESSING_METRIC_FIELDS,
+)
+
+
+def _operation_from_kernel_name(kernel_name: Any) -> str:
+    lower = str(kernel_name or "").strip().lower()
+    if not lower:
+        return "misc"
+    if any(token in lower for token in (
+        "flashattention", "flash_attn", "fmha", "fused_attention", "attention_forward",
+    )):
+        return "attention"
+    if any(token in lower for token in ("layer_norm", "layernorm", "rms_norm", "rmsnorm")):
+        return "layernorm"
+    if any(token in lower for token in ("gelu", "silu", "relu")):
+        return "activation"
+    if "residual" in lower:
+        return "residual"
+    if any(token in lower for token in ("cross_entropy", "nll_loss", "log_softmax")):
+        return "loss"
+    if any(token in lower for token in ("lm_head", "lmhead", "vocab_projection", "output_projection")):
+        return "lm_head"
+    return "misc"
+
+
+def classify_processing_operations(rows: Sequence[Mapping[str, Any]]) -> list[Dict[str, Any]]:
+    """Conservatively replace generic other with useful semantic classes.
+
+    Explicit NVTX operations are preserved. Kernel-name classification is used
+    only for otherwise generic work. A positional LM-head inference is made only
+    for one dominant long post-stack MAIN kernel. Ambiguous work remains misc.
+    """
+    result: list[Dict[str, Any]] = []
+    for source in rows:
+        row = dict(source)
+        operation = str(row.get("operation") or "other")
+        if operation != "other":
+            row.setdefault("operation_source", "nvtx")
+        else:
+            classified = _operation_from_kernel_name(row.get("kernel_name"))
+            row["operation"] = classified
+            row["operation_source"] = "kernel_name" if classified != "misc" else "misc"
+        result.append(row)
+
+    layered_main = [
+        row for row in result
+        if str(row.get("owner")) == "MAIN"
+        and row.get("layer") not in (None, "")
+        and _finite_number(row.get("end_us"))
+    ]
+    if not layered_main:
+        return result
+    last_layer_end = max(float(row["end_us"]) for row in layered_main)
+
+    for row in result:
+        if (
+            str(row.get("owner")) == "MAIN"
+            and str(row.get("operation")) == "misc"
+            and _finite_number(row.get("start_us"))
+            and float(row["start_us"]) >= last_layer_end
+        ):
+            lower = str(row.get("kernel_name") or "").lower()
+            if "softmax" in lower:
+                row["operation"] = "loss"
+                row["operation_source"] = "kernel_name_post_stack"
+
+    opaque_post_stack = [
+        row for row in result
+        if str(row.get("owner")) == "MAIN"
+        and str(row.get("operation")) == "misc"
+        and _finite_number(row.get("start_us"))
+        and _finite_number(row.get("duration_us"))
+        and float(row["start_us"]) >= last_layer_end
+        and float(row["duration_us"]) >= 5000.0
+    ]
+    opaque_post_stack.sort(key=lambda row: float(row["duration_us"]), reverse=True)
+    if opaque_post_stack:
+        dominant = opaque_post_stack[0]
+        runner_up_us = float(opaque_post_stack[1]["duration_us"]) if len(opaque_post_stack) > 1 else 0.0
+        if runner_up_us <= 0.0 or float(dominant["duration_us"]) >= 2.0 * runner_up_us:
+            dominant["operation"] = "lm_head"
+            dominant["operation_source"] = "position_post_stack_dominant"
+    return result
+# ^^^ THOG

@@ -22,6 +22,7 @@ from sheet.processing_resource_attribution import (
     PROCESSING_METRIC_SPECS,
     PROCESSING_STREAM_RESOURCE_FIELDS,
     build_stream_resource_rows,
+    classify_processing_operations,
     infer_kernel_owners,
     main_idle_intervals,
     merge_intervals,
@@ -711,7 +712,9 @@ def normalize_nsys_sqlite(
             })
             if op_id is not None:
                 operation_kernel_intervals.setdefault(op_id, []).append((start_us, end_us))
-        interval_rows = infer_kernel_owners(candidates)
+        # vvv THOG Processing resource tide export v1
+        interval_rows = classify_processing_operations(infer_kernel_owners(candidates))
+        # ^^^ THOG
 
         raw_samples, metric_mapping, available_metric_names = _metric_rows(
             connection, tables, capture_start, capture_end
@@ -776,18 +779,25 @@ def normalize_nsys_sqlite(
             "active_sm_unused_warp_slots_pct_mean": _mean_metric_intervals(
                 sample_rows, "active_sm_unused_warp_slots_pct", merged_main_intervals
             ),
+            "compute_warps_in_flight_pct_mean": _mean_metric_intervals(
+                sample_rows, "compute_warps_in_flight_pct", merged_main_intervals
+            ),
+            "gpc_clock_mhz_mean": _mean_metric_intervals(
+                sample_rows, "gpc_clock_mhz", merged_main_intervals
+            ),
         })
 
     matrix_summary = _processing_matrix_summary(interval_rows)
     sample_fields = ("time_us", *PROCESSING_METRIC_FIELDS)
     interval_fields = (
         "start_us", "end_us", "duration_us", "stream", "context_id", "owner", "owner_source",
-        "layer", "family", "operation", "kernel_name", "op_id",
+        "layer", "family", "operation", "operation_source", "kernel_name", "op_id",
     )
     summary_fields = (
         "op_id", "layer", "family", "start_us", "end_us", "duration_ms",
         "premat_overlap_ms", "premat_overlap_pct", "sm_active_pct_mean", "sm_issue_pct_mean",
         "tensor_active_pct_mean", "active_sm_unused_warp_slots_pct_mean",
+        "compute_warps_in_flight_pct_mean", "gpc_clock_mhz_mean",
     )
     run_artifact = str((handoff or {}).get("run_name", "")).strip()
     if "/" in run_artifact or "\\" in run_artifact:

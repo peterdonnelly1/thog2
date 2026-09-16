@@ -342,10 +342,44 @@ class RunDashboardState:
             data = {"metadata": None, "samples": [], "intervals": [], "summary": []}
             trace_revision = "pending"
         data["throughput"] = list(throughput)
+        if trace_available:
+            # Existing Processing bundles get the same conservative operation
+            # subdivision as newly normalized captures; the source file remains immutable.
+            from sheet.processing_resource_attribution import classify_processing_operations
+            data["intervals"] = classify_processing_operations(data.get("intervals", []))
+        # vvv THOG optional NCU compatibility artefacts v1
+        processing_directory = path.parent
+        compatibility_json = processing_directory / "processing_premat_compatibility.json"
+        compatibility_csv = processing_directory / "processing_premat_compatibility.csv"
+        kernel_resources_csv = processing_directory / "processing_ncu_kernel_resources.csv"
+        compatibility_revision_parts = []
+        compatibility_files: Dict[str, str] = {}
+        if compatibility_json.is_file():
+            data["premat_compatibility"] = json.loads(compatibility_json.read_text())
+            compatibility_files["json"] = compatibility_json.name
+            stat_result = compatibility_json.stat()
+            compatibility_revision_parts.append(
+                f"json:{stat_result.st_mtime_ns}:{stat_result.st_size}"
+            )
+        if compatibility_csv.is_file():
+            compatibility_files["csv"] = compatibility_csv.name
+            stat_result = compatibility_csv.stat()
+            compatibility_revision_parts.append(
+                f"csv:{stat_result.st_mtime_ns}:{stat_result.st_size}"
+            )
+        if kernel_resources_csv.is_file():
+            compatibility_files["kernel_resources"] = kernel_resources_csv.name
+            stat_result = kernel_resources_csv.stat()
+            compatibility_revision_parts.append(
+                f"ncu:{stat_result.st_mtime_ns}:{stat_result.st_size}"
+            )
+        data["premat_compatibility_files"] = compatibility_files
+        compatibility_revision = ";".join(compatibility_revision_parts) or "none"
+        # ^^^ THOG
         return {
             "available": True,
             "trace_available": trace_available,
-            "revision": f"{trace_revision}:{throughput_revision}",
+            "revision": f"{trace_revision}:{throughput_revision}:{compatibility_revision}",
             "data": data,
         }
     # ^^^ THOG
