@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import atexit
 import csv
+from datetime import datetime
 import json
 from pathlib import Path
 import shutil
@@ -40,8 +41,9 @@ _base.RunDashboardState.status = _run_status_with_configuration
 # vvv THOG Processing GPU Resource Compatibility pairs separate NSYS and NCU runs server-side.
 # The artifact suffix after the triple underscore is the canonical encoded run
 # configuration. Pair only identical suffixes on the same host, then choose the
-# newest NCU compatibility artifact. This prevents unrelated profiler runs from
-# being silently combined merely because their model shape looks similar.
+# valid NCU capture nearest in time to the selected NSYS capture. This makes the
+# selected NSYS run authoritative instead of allowing one globally-latest pair
+# to dominate every selection.
 _original_dashboard_state_for_path = _base.DashboardCatalog._state_for_path
 _original_processing_payload = _base.RunDashboardState.processing
 
@@ -71,6 +73,17 @@ def _processing_pair_key(state: Any) -> tuple[str, str] | None:
     return host, encoded
 
 
+def _timestamp_seconds(value: Any, fallback: float = 0.0) -> float:
+    text = str(value or "").strip()
+    if not text:
+        return float(fallback)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return float(parsed.timestamp())
+    except (TypeError, ValueError, OverflowError):
+        return float(fallback)
+
+
 def _matching_ncu_companion(state: Any):
     catalog = getattr(state, "_instra_dashboard_catalog", None)
     pair_key = _processing_pair_key(state)
@@ -81,6 +94,13 @@ def _matching_ncu_companion(state: Any):
     cached = getattr(state, "_instra_ncu_companion_cache", None)
     if cached is not None and now - float(cached[0]) < 30.0:
         return cached[1]
+
+    try:
+        selected_status = state.status()
+    except Exception:
+        selected_status = {}
+    selected_fallback = state.database_path.stat().st_mtime if state.database_path.exists() else 0.0
+    selected_time = _timestamp_seconds(selected_status.get("created_at"), selected_fallback)
 
     _host, encoded = pair_key
     if not catalog.root.is_dir():
@@ -112,16 +132,18 @@ def _matching_ncu_companion(state: Any):
             status = candidate.status()
         except Exception:
             continue
+        compatibility_mtime = float(compatibility_path.stat().st_mtime)
+        candidate_time = _timestamp_seconds(status.get("created_at"), compatibility_mtime)
         candidates.append(
             (
-                compatibility_path.stat().st_mtime_ns,
-                str(status.get("created_at", "")),
+                abs(candidate_time - selected_time),
+                -candidate_time,
                 candidate,
                 status,
                 compatibility_path,
             )
         )
-    result = max(candidates, key=lambda item: (item[0], item[1])) if candidates else None
+    result = min(candidates, key=lambda item: (item[0], item[1])) if candidates else None
     state._instra_ncu_companion_cache = (now, result)
     return result
 
@@ -242,7 +264,7 @@ def _processing_payload_with_ncu_companion(self):
     companion = _matching_ncu_companion(self)
     if companion is None:
         return payload
-    _mtime, _created_at, companion_state, companion_status, compatibility_path = companion
+    _distance, _neg_created_at, companion_state, companion_status, compatibility_path = companion
     companion_payload = _attach_own_hard_constraints(
         companion_state,
         _original_processing_payload(companion_state),
@@ -264,6 +286,7 @@ def _processing_payload_with_ncu_companion(self):
         "created_at": str(companion_status.get("created_at", "")),
         "host_label": str(companion_status.get("host_label", "")),
         "pair_key": pair_key_text(_processing_pair_key(self)),
+        "selection": "nearest_in_time",
     }
     result = dict(payload)
     result["data"] = merged_data
