@@ -23,6 +23,7 @@
   let processing_refresh_in_flight_force = false;
   let processing_refresh_in_flight_run_id = "";
   let startup_reconcile_run_id = "";
+  let startup_restored_ncu_run_ids = new Set();
   let startup_reconciled_generation = -1;
 
   function same_set(left, right) {
@@ -102,7 +103,10 @@
   function begin_navigation(next_run_id) {
     navigation_epoch += 1;
     observed_current_run_id = String(next_run_id || "");
-    if (startup_reconcile_run_id !== observed_current_run_id) startup_reconcile_run_id = "";
+    if (startup_reconcile_run_id !== observed_current_run_id) {
+      startup_reconcile_run_id = "";
+      startup_restored_ncu_run_ids = new Set();
+    }
     clear_managed_pair(observed_current_run_id);
     processing_view.run_id = null;
     processing_view.revision = null;
@@ -258,6 +262,15 @@
     let visibility_changed = false;
     const previous_auto = new Set(app.processing_auto_opened_run_ids || []);
     const next_auto = new Set();
+    const startup_restoring = startup_reconcile_run_id === render_run_id;
+
+    if (startup_restoring) {
+      for (const restored_ncu_run_id of startup_restored_ncu_run_ids) {
+        if (restored_ncu_run_id === companion_id || !is_visible(restored_ncu_run_id)) continue;
+        app.visibility[restored_ncu_run_id] = false;
+        visibility_changed = true;
+      }
+    }
 
     for (const run_id of previous_auto) {
       if (next.has(run_id)) continue;
@@ -273,7 +286,7 @@
         app.visibility[run_id] = true;
         visibility_changed = true;
       }
-      const restored_companion = startup_reconcile_run_id === render_run_id && run_id === companion_id;
+      const restored_companion = startup_restoring && run_id === companion_id;
       if (!was_visible_before_render || previous_auto.has(run_id) || restored_companion) next_auto.add(run_id);
     }
 
@@ -284,7 +297,10 @@
     app.processing_auto_opened_run_ids = next_auto;
     app.processing_pair_roles = roles;
     if (auto_changed) save_auto_opened_run_ids();
-    if (startup_reconcile_run_id === render_run_id) startup_reconcile_run_id = "";
+    if (startup_restoring) {
+      startup_reconcile_run_id = "";
+      startup_restored_ncu_run_ids = new Set();
+    }
     if (changed || visibility_changed) render_runs();
     companion_provenance(payload);
   }
@@ -374,11 +390,14 @@
     // A persisted NSYS eye is a stronger startup signal than the generic
     // recommended/current run, including when its previously paired NCU eye was
     // also restored. Promote it, then normal pairing validates the companion.
+    const restored_ncu_run_ids = new Set(visible_run_ids(is_ncu_run_id));
     if (source_run_id !== String(app.current_run_id || "")) {
       select_run(source_run_id, {manual:true, replace_history:true});
       startup_reconcile_run_id = source_run_id;
+      startup_restored_ncu_run_ids = restored_ncu_run_ids;
     } else {
       startup_reconcile_run_id = source_run_id;
+      startup_restored_ncu_run_ids = restored_ncu_run_ids;
       processing_refresh(true);
     }
   }

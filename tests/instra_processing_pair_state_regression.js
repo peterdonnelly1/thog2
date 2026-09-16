@@ -155,6 +155,7 @@ async function install_pair_state(options) {
   const nsys = run("nsys", "260916-1405_scruffy_NSYS_PREMAT___MATCH", "2026-09-16T14:05:00Z");
   const newer_nsys = run("newer_nsys", "260916-1612_scruffy_NSYS_PREMAT___MATCH", "2026-09-16T16:12:00Z");
   const ncu = run("ncu", "260916-1807_scruffy_NCU_PREMAT___MATCH", "2026-09-16T18:07:00Z");
+  const stale_ncu = run("stale_ncu", "260916-1440_scruffy_NCU_PREMAT___MATCH", "2026-09-16T14:40:00Z");
 
   const restored_pair = await install_pair_state({
     runs:[ordinary, nsys, ncu],
@@ -186,6 +187,17 @@ async function install_pair_state(options) {
   });
   assert.equal(orphaned_ncu.app.visibility.ncu, false, "an orphaned auto-opened NCU eye survived reload");
   assert.deepEqual(JSON.parse(orphaned_ncu.storage.get("thog2_processing_auto_opened_run_ids")), []);
+
+  const replaced_stale_ncu = await install_pair_state({
+    runs:[ordinary, nsys, stale_ncu, ncu],
+    visible_run_ids:[nsys.dashboard_run_id, stale_ncu.dashboard_run_id],
+  });
+  assert.equal(replaced_stale_ncu.app.visibility.stale_ncu, false, "stale restored NCU companion remained visible");
+  assert.equal(replaced_stale_ncu.app.visibility.ncu, true, "server-selected NCU companion was not opened");
+  assert.deepEqual(
+    JSON.parse(replaced_stale_ncu.storage.get("thog2_processing_auto_opened_run_ids")),
+    ["ncu"],
+  );
 
   const latest_nsys = await install_pair_state({
     runs:[ordinary, nsys, newer_nsys, ncu],
