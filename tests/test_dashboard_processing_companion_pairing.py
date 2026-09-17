@@ -104,4 +104,35 @@ def test_nearest_viable_ncu_skips_closer_invalid_capture(tmp_path: Path) -> None
     assert diagnostics["skipped_closer_invalid_artifacts"] == [
         f"260916-1440_scruffy_NCU_PREMAT___{encoded}"
     ]
+
+
+def test_candidate_kind_and_pairing_use_metadata_not_directory_names(tmp_path: Path) -> None:
+    encoded = "G0_chebyshev__d_owt_A_6_b_16__C_1024_D_1024_H_16_L_16__P_12"
+    selected_path = tmp_path / "opaque-a" / "local" / "charts.sqlite3"
+    candidate_path = tmp_path / "opaque-b" / "local" / "charts.sqlite3"
+    selected_path.parent.mkdir(parents=True)
+    candidate_path.parent.mkdir(parents=True)
+    selected_path.write_text("")
+    candidate_path.write_text("")
+    selected = _State(
+        f"260916-1405_scruffy_NSYS_PREMAT___{encoded}",
+        database_path=selected_path,
+    )
+    candidate = _State(
+        f"260916-1440_scruffy_NCU_PREMAT___{encoded}",
+        database_path=candidate_path,
+    )
+    processing = candidate_path.parent / "processing"
+    processing.mkdir()
+    (processing / "processing_premat_compatibility.json").write_text(
+        json.dumps({"rows": [{"compatibility_class": "GREEN"}]})
+    )
+    selected._instra_dashboard_catalog = _Catalog(
+        tmp_path,
+        {selected_path: selected, candidate_path: candidate},
+    )
+
+    match = dashboard._matching_ncu_companion(selected)
+    assert match is not None
+    assert match[2] is candidate
 # ^^^ THOG

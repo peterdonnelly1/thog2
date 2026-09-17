@@ -157,7 +157,9 @@
     }
 
     try {
-      const response = await fetch_json(`/api/processing?run=${encodeURIComponent(run_id)}`);
+      const response = await fetch_json(
+        `/api/processing?run=${encodeURIComponent(run_id)}&pair_epoch=${request_epoch}&request=${request_serial}`,
+      );
       if (
         request_serial !== refresh_serial
         || request_epoch !== navigation_epoch
@@ -249,6 +251,8 @@
     ) return;
 
     const source = payload?.premat_compatibility_source;
+    const source_nsys_run_id = String(source?.nsys_dashboard_run_id || "");
+    if (source_nsys_run_id && source_nsys_run_id !== render_run_id) return;
     const companion_id = String(source?.dashboard_run_id || "");
     const next = new Set();
     const roles = {};

@@ -35,7 +35,7 @@
   // local history. Make that work visible in the Runs title row without
   // disabling any controls. dashboard.js replaces this text when the read ends.
   const watch_status = by_id("watch_status");
-  const startup_status_text = "Reading run databases…";
+  const startup_status_text = "Reading capture database";
   let catalog_ready_emitted = false;
   app.instra_catalog_ready = app.instra_catalog_ready === true;
   app.instra_catalog_generation = Number(app.instra_catalog_generation || 0);
@@ -62,7 +62,7 @@
 
   if (watch_status && String(watch_status.textContent || "").trim() === "Connecting…") {
     watch_status.textContent = startup_status_text;
-    watch_status.title = "Instra is reading local run databases. Controls remain available.";
+    watch_status.title = "Instra is reading the capture database. Controls remain available.";
   }
 
   if (watch_status && typeof MutationObserver === "function") {

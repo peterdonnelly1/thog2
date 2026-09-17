@@ -188,6 +188,7 @@
   const processing_render_update_timing_before_stability = processing_render_update_timing;
   let timing_fingerprint = null;
   let timing_render_in_flight = false;
+  let timing_render_queued = false;
 
   function current_timing_fingerprint() {
     const runs = typeof processing_update_timing_ordered_runs === "function"
@@ -205,20 +206,27 @@
     });
   }
 
-  processing_render_update_timing = async function() {
+  processing_render_update_timing = async function(force = false) {
     const fingerprint = current_timing_fingerprint();
     const runs = typeof processing_update_timing_ordered_runs === "function"
       ? processing_update_timing_ordered_runs()
       : [];
     const any_active = runs.some(run => is_active_run_state(run.run_state));
-    if (!any_active && fingerprint === timing_fingerprint) return;
-    if (timing_render_in_flight) return;
+    if (!force && !any_active && fingerprint === timing_fingerprint) return;
+    if (timing_render_in_flight) {
+      timing_render_queued = timing_render_queued || force || fingerprint !== timing_fingerprint;
+      return;
+    }
     timing_render_in_flight = true;
     try {
       await processing_render_update_timing_before_stability();
       timing_fingerprint = fingerprint;
     } finally {
       timing_render_in_flight = false;
+      if (timing_render_queued) {
+        timing_render_queued = false;
+        queueMicrotask(() => processing_render_update_timing(true));
+      }
     }
   };
 

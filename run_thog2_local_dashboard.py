@@ -125,17 +125,13 @@ def _matching_ncu_companion(state: Any):
     for path in catalog.root.glob(f"**/{_base.LOCAL_CHART_DATABASE_NAME}"):
         if path.resolve() == state.database_path.resolve():
             continue
-        artifact_hint = path.parent.parent.name if len(path.parents) >= 2 else ""
-        if not _is_ncu_artifact(artifact_hint):
-            continue
-        if not str(artifact_hint).endswith(f"___{encoded}"):
-            continue
-
         candidate = catalog._state_for_path(path)
+        candidate_artifact = _state_artifact_name(candidate)
+        if not _is_ncu_artifact(candidate_artifact):
+            continue
         if _processing_pair_key(candidate) != pair_key:
             continue
 
-        candidate_artifact = _state_artifact_name(candidate)
         candidate_fallback = path.stat().st_mtime if path.exists() else 0.0
         candidate_time = _artifact_timestamp_seconds(candidate_artifact, candidate_fallback)
         distance = abs(candidate_time - selected_time)
@@ -309,6 +305,12 @@ def _processing_payload_with_ncu_companion(self):
         return payload
 
     diagnostics = dict(getattr(self, "_instra_ncu_companion_diagnostics", {}) or {})
+    selected_status = self.status()
+    selected_metadata = data.get("metadata") or {}
+    companion_metadata = companion_data.get("metadata") or {}
+    selected_files = dict(selected_metadata.get("files", {}) or {})
+    companion_files = dict(companion_metadata.get("files", {}) or {})
+    companion_files.update(dict(companion_data.get("premat_compatibility_files", {}) or {}))
     merged_data = dict(data)
     merged_data["premat_compatibility"] = compatibility
     merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])
@@ -316,6 +318,8 @@ def _processing_payload_with_ncu_companion(self):
         companion_data.get("premat_compatibility_files") or {}
     )
     merged_data["premat_compatibility_source"] = {
+        "nsys_dashboard_run_id": str(selected_status.get("dashboard_run_id", "")),
+        "nsys_artifact_name": str(selected_status.get("artifact_name", "")),
         "dashboard_run_id": str(companion_status.get("dashboard_run_id", "")),
         "artifact_name": str(companion_status.get("artifact_name", "")),
         "created_at": str(companion_status.get("created_at", "")),
@@ -326,6 +330,18 @@ def _processing_payload_with_ncu_companion(self):
         "skipped_closer_invalid_count": diagnostics.get("skipped_closer_invalid_count", 0),
         "skipped_closer_invalid_artifacts": diagnostics.get("skipped_closer_invalid_artifacts", []),
         "viable_candidate_count": diagnostics.get("viable_candidate_count", 0),
+    }
+    merged_data["paired_processing_downloads"] = {
+        "nsys": {
+            "dashboard_run_id": str(selected_status.get("dashboard_run_id", "")),
+            "artifact_name": str(selected_status.get("artifact_name", "")),
+            "files": selected_files,
+        },
+        "ncu": {
+            "dashboard_run_id": str(companion_status.get("dashboard_run_id", "")),
+            "artifact_name": str(companion_status.get("artifact_name", "")),
+            "files": companion_files,
+        },
     }
     result = dict(payload)
     result["data"] = merged_data
@@ -368,6 +384,7 @@ _processing_patch_names = (
     "dashboard_processing_operations_final.js",
     "dashboard_processing_pair_state_final.js",
     "dashboard_processing_nsys_eye_select.js",
+    "dashboard_processing_user_fixes.js",
 )
 
 # vvv THOG build one explicit dashboard asset overlay at server startup; this avoids hidden import/read hooks and guarantees the resource view follows Processing

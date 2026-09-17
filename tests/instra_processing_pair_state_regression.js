@@ -250,6 +250,54 @@ async function install_pair_state(options) {
   await Promise.all([first_refresh, second_refresh]);
   assert.equal(coalesced_force.fetch_calls, 1, "identical forced refreshes were not coalesced");
 
+  const interactive_repair = make_sandbox({
+    runs:[ordinary, nsys, newer_nsys, stale_ncu, ncu],
+    current_run_id:"nsys",
+    visible_run_ids:[nsys.dashboard_run_id, ncu.dashboard_run_id],
+    stored_auto_run_ids:[ncu.dashboard_run_id],
+    catalog_ready:false,
+  });
+  interactive_repair.fetch_json = async function() {
+    interactive_repair.fetch_calls += 1;
+    const source_run_id = String(interactive_repair.app.current_run_id);
+    const companion_id = source_run_id === "newer_nsys" ? "stale_ncu" : "ncu";
+    return {
+      available:true,
+      trace_available:true,
+      revision:`revision-${source_run_id}-${companion_id}`,
+      data:{premat_compatibility_source:{
+        nsys_dashboard_run_id:source_run_id,
+        dashboard_run_id:companion_id,
+      }},
+    };
+  };
+  vm.runInNewContext(pair_source, interactive_repair);
+  interactive_repair.select_run("newer_nsys", {manual:true});
+  await settle();
+  assert.equal(interactive_repair.app.visibility.ncu, false, "old NCU remained attached after selecting another NSYS");
+  assert.equal(interactive_repair.app.visibility.stale_ncu, true, "new NSYS did not open its server-selected nearest NCU");
+
+  const wrong_source = make_sandbox({
+    runs:[ordinary, nsys, ncu],
+    current_run_id:"nsys",
+    visible_run_ids:[nsys.dashboard_run_id],
+    catalog_ready:false,
+  });
+  wrong_source.fetch_json = async function() {
+    return {
+      available:true,
+      trace_available:true,
+      revision:"wrong-source",
+      data:{premat_compatibility_source:{
+        nsys_dashboard_run_id:"some-other-nsys",
+        dashboard_run_id:"ncu",
+      }},
+    };
+  };
+  vm.runInNewContext(pair_source, wrong_source);
+  await wrong_source.processing_refresh(true);
+  assert.equal(wrong_source.app.visibility.ncu, false, "stale cross-NSYS response was applied as a pair");
+
   const single_pair_owner = make_sandbox({
     runs:[ordinary, nsys, ncu],
     current_run_id:"nsys",
