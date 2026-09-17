@@ -331,7 +331,10 @@ def _processing_capture_snapshot(state: Any, data: dict[str, Any]) -> dict[str, 
     return dict(snapshots[-1])
 
 
-def _processing_lifecycle_rows(snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _processing_lifecycle_rows(
+    snapshot: dict[str, Any] | None,
+    capture_host_start_ns: Any = None,
+) -> list[dict[str, Any]]:
     if not snapshot:
         return []
     rows = []
@@ -340,7 +343,19 @@ def _processing_lifecycle_rows(snapshot: dict[str, Any] | None) -> list[dict[str
         if event not in _LIFECYCLE_EVENTS and not event.startswith("deadline_"):
             continue
         exact = source.get("processing_capture_elapsed_ms")
+        timing_basis = "capture_relative_host"
+        if exact is None and capture_host_start_ns is not None:
+            try:
+                exact = max(
+                    0.0,
+                    (float(source["host_time_ns"]) - float(capture_host_start_ns))
+                    / 1_000_000.0,
+                )
+            except (KeyError, TypeError, ValueError):
+                exact = None
         fallback = source.get("elapsed_ms")
+        if exact is None:
+            timing_basis = "pass_relative_legacy"
         try:
             capture_ms = float(exact if exact is not None else fallback)
         except (TypeError, ValueError):
@@ -359,7 +374,7 @@ def _processing_lifecycle_rows(snapshot: dict[str, Any] | None) -> list[dict[str
             "pass_sequence": source.get("pass_sequence", snapshot.get("pass_sequence", "")),
             "candidate_sequence": candidate_sequence,
             "capture_time_ms": capture_ms,
-            "timing_basis": "capture_relative_host" if exact is not None else "pass_relative_legacy",
+            "timing_basis": timing_basis,
             "event": event,
             "layer": layer,
             "family": family,
@@ -480,7 +495,10 @@ def _materialize_paired_analysis(
     processing_directory = state.database_path.parent / "processing"
     processing_directory.mkdir(parents=True, exist_ok=True)
     snapshot = _processing_capture_snapshot(state, data)
-    lifecycle_rows = _processing_lifecycle_rows(snapshot)
+    lifecycle_rows = _processing_lifecycle_rows(
+        snapshot,
+        ((data.get("metadata") or {}).get("capture") or {}).get("host_start_ns"),
+    )
     lifecycle_summary = _processing_lifecycle_summary(lifecycle_rows, data.get("intervals", []))
     lifecycle_name = "processing_premat_lifecycle_events.csv"
     lifecycle_summary_name = "processing_premat_lifecycle_summary.csv"
@@ -621,7 +639,10 @@ def _processing_payload_with_ncu_companion(self):
     )
     selected_files.update(generated_files)
     merged_data = dict(data)
-    lifecycle_rows = _processing_lifecycle_rows(_processing_capture_snapshot(self, data))
+    lifecycle_rows = _processing_lifecycle_rows(
+        _processing_capture_snapshot(self, data),
+        ((data.get("metadata") or {}).get("capture") or {}).get("host_start_ns"),
+    )
     merged_data["premat_lifecycle"] = lifecycle_rows
     merged_data["premat_lifecycle_summary"] = _processing_lifecycle_summary(
         lifecycle_rows,

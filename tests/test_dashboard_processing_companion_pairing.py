@@ -190,4 +190,26 @@ def test_lifecycle_rows_prefer_capture_relative_time_and_retain_legacy_fallback(
     summary = dashboard._processing_lifecycle_summary(rows)
     assert summary[0]["submitted_ms"] == 2.5
     assert summary[0]["deadline_ms"] == 3.0
+
+
+def test_lifecycle_rows_reconstruct_capture_time_from_host_clock() -> None:
+    snapshot = {
+        "pass_sequence": 8,
+        "events": [
+            {
+                "sequence": 1,
+                "event": "materialising",
+                "processing_capture_elapsed_ms": None,
+                "host_time_ns": 1_004_250_000,
+                "elapsed_ms": 8.0,
+                "layer_index": 2,
+                "family": "DOWN",
+            },
+        ],
+    }
+
+    rows = dashboard._processing_lifecycle_rows(snapshot, 1_000_000_000)
+
+    assert rows[0]["capture_time_ms"] == 4.25
+    assert rows[0]["timing_basis"] == "capture_relative_host"
 # ^^^ THOG

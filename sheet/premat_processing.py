@@ -428,6 +428,7 @@ def processing_capture_scope(
         raise RuntimeError("PREMAT processing capture requires CUDA")
     torch.cuda.synchronize(device)
     metadata_path = os.environ.get(_PROCESSING_CAPTURE_METADATA_ENV, "").strip()
+    metadata = None
     if metadata_path:
         metadata = {
             "optimizer_update": int(completed_updates) + 1,
@@ -436,14 +437,13 @@ def processing_capture_scope(
             "requested_capture_update": int(capture_update),
             "max_updates": int(max_updates),
         }
-        destination = Path(metadata_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
     _capture_stack_depth = 0
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
     # The NSYS capture begins at the NVTX push, so establish the host timing
     # origin immediately afterwards rather than including profiler setup time.
     _capture_start_ns = time.perf_counter_ns()
+    if metadata is not None:
+        metadata["host_start_ns"] = int(_capture_start_ns)
     _capture_active = True
     try:
         yield
@@ -456,6 +456,10 @@ def processing_capture_scope(
         _capture_active = False
         _capture_start_ns = None
         _capture_done = True
+        if metadata is not None:
+            destination = Path(metadata_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
 
 
 def _table_names(connection: sqlite3.Connection) -> set[str]:
