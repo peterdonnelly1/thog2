@@ -233,6 +233,7 @@ class OwtRunConfig:
     # vvv THOG dynamic pre-materialisation public controls
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
+    premat_timing: str = "as_the_code_flies"
     premat_target_layer: int = 1
     premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector in run identity
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -583,6 +584,7 @@ class OwtRunConfig:
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
+            timing=self.premat_timing,
             target_layer=self.premat_target_layer,
             target_matrix=self.premat_target_matrix,                                                                                                       # <<< THOG validate optional fused-family PREMAT selector
             weight_matrix_target_order=self.premat_weight_matrix_target_order,
@@ -1212,7 +1214,9 @@ class OwtRunConfig:
         if self.model_type == "sheet" and (
             self.premat != "disabled"
             or self.premat_attention_mode != "fused"
+            or self.premat_timing != "as_the_code_flies"
             or self.premat_target_layer != 1
+            or self.premat_target_matrix is not None
             or self.premat_weight_matrix_target_order != "r_to_l"
             or self.premat_headroom_stay_below_current_peak
             or self.premat_headroom_stay_within_global_buffer
@@ -1241,6 +1245,16 @@ class OwtRunConfig:
                 "GTD_" if self.premat_enable_gpu_timing_diagnostic else ""
             )
             shadow_fragment = "SHADOW_" if self.premat_enable_shadow_mode else ""
+            premat_timing_fragment = (
+                "PTGLE_"
+                if self.premat_timing == "previous_gemm_leading_edge"
+                else ""
+            )
+            target_matrix_fragment = (
+                f"M{self.premat_target_matrix}_"
+                if self.premat_target_matrix is not None
+                else ""
+            )
             processing_fragment = (
                 f"_PROC{self.premat_processing_logging_capture_frequency_hz}"
                 + (f"U{self.premat_processing_logging_capture_update}" if self.premat_processing_logging_capture_update != 1 else "")
@@ -1251,7 +1265,9 @@ class OwtRunConfig:
                 "PM__"
                 f"{self.premat[0].upper()}_"
                 f"{self.premat_attention_mode[0].upper()}_"
+                f"{premat_timing_fragment}"
                 f"T{self.premat_target_layer}_"
+                f"{target_matrix_fragment}"
                 f"O{self.premat_weight_matrix_target_order[0].upper()}_"
                 f"H{headroom_code}_"
                 f"B{self._artifact_float(self.premat_gpu_memory_buffer_gb)}_"
@@ -1442,6 +1458,7 @@ class OwtRunConfig:
             plastic__layer_count_cost_weight=float(self.plastic__layer_count_cost_weight),
             premat=self.premat,
             premat_attention_mode=self.premat_attention_mode,
+            premat_timing=self.premat_timing,
             premat_target_layer=self.premat_target_layer,
             premat_target_matrix=self.premat_target_matrix,                                                                                                # <<< THOG propagate selected PREMAT matrix into TrainingConfig
             premat_weight_matrix_target_order=self.premat_weight_matrix_target_order,
@@ -1596,12 +1613,18 @@ class OwtRunConfig:
                 values["premat_effective_fast_discard"] = True
             values["premat_schema_version"] = PREMAT_TELEMETRY_VERSION
             values["premat_lookahead_layer_limit"] = (
-                1 if self.premat_target_layer == 10 else self.premat_target_layer
+                1
+                if self.premat_timing == "previous_gemm_leading_edge"
+                else (1 if self.premat_target_layer == 10 else self.premat_target_layer)
             )
             values["premat_target_scope"] = (
-                "relative_layer_1_then_0"
-                if self.premat_target_layer == 10
-                else f"relative_layer_{self.premat_target_layer}"
+                "previous_gemm_successor"
+                if self.premat_timing == "previous_gemm_leading_edge"
+                else (
+                    "relative_layer_1_then_0"
+                    if self.premat_target_layer == 10
+                    else f"relative_layer_{self.premat_target_layer}"
+                )
             )
             values["premat_target_order"] = self.premat_weight_matrix_target_order
             # ^^^ THOG
@@ -1663,4 +1686,3 @@ __all__ = [
 # "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
 # "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
 # ^^^ THOG
-

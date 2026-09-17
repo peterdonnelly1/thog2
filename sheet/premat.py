@@ -14,6 +14,7 @@ from torch import Tensor
 
 PREMAT_SWITCHES = ("enabled", "disabled")
 PREMAT_ATTENTION_MODES = ("fused", "unfused")
+PREMAT_TIMINGS = ("as_the_code_flies", "previous_gemm_leading_edge")
 PREMAT_TARGET_LAYERS = (0, 1, 2, 10)
 # vvv THOG fixed matrix numbering is deliberately independent of l_to_r/r_to_l scheduling order
 PREMAT_TARGET_MATRICES = (1, 2, 3, 4)
@@ -49,6 +50,7 @@ def validate_premat_configuration(
     logging: str,
     instra: str,
     target_matrix: Optional[int] = None,                                                                                                                   # <<< THOG optional fused-family PREMAT selector; omitted preserves all-matrix scheduling
+    timing: str = "as_the_code_flies",
 ) -> None:
     for name, value in (("premat", premat), ("premat_logging", logging), ("premat_instra", instra)):
         if value not in PREMAT_SWITCHES:
@@ -57,6 +59,15 @@ def validate_premat_configuration(
         raise ValueError(
             f"premat_attention_mode must be one of {PREMAT_ATTENTION_MODES}; "
             f"got {attention_mode!r}"
+        )
+    if timing not in PREMAT_TIMINGS:
+        raise ValueError(
+            f"premat_timing must be one of {PREMAT_TIMINGS}; got {timing!r}"
+        )
+    if timing == "previous_gemm_leading_edge" and attention_mode != "fused":
+        raise ValueError(
+            "premat_timing=previous_gemm_leading_edge currently requires "
+            "premat_attention_mode=fused"
         )
     if allocator_aware_admission not in PREMAT_ALLOCATOR_AWARE_ADMISSION_MODES:
         raise ValueError(
@@ -543,6 +554,7 @@ class PrematRuntime:
         shadow_mode: bool = False,
         logging_enabled: bool,
         target_matrix: Optional[int] = None,                                                                                                               # <<< THOG runtime filter for one fixed fused matrix family
+        timing: str = "as_the_code_flies",
     ) -> None:
         self._materialize = materialize
         self._attach = attach or (lambda _family, _layer_index, tensor: tensor)
@@ -553,7 +565,29 @@ class PrematRuntime:
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
         self._allocator_aware_admission = allocator_aware_admission
         self._target_layer = int(target_layer)
+        if target_matrix is not None and (
+            isinstance(target_matrix, bool)
+            or target_matrix not in PREMAT_TARGET_MATRICES
+        ):
+            raise ValueError(
+                f"premat_target_matrix must be one of {PREMAT_TARGET_MATRICES} "
+                f"or None; got {target_matrix!r}"
+            )
+        if target_matrix is not None and attention_mode != "fused":
+            raise ValueError(
+                "premat_target_matrix currently requires premat_attention_mode=fused"
+            )
         self._target_matrix = None if target_matrix is None else int(target_matrix)                                                                        # <<< THOG retain optional fixed matrix-family selector
+        if timing not in PREMAT_TIMINGS:
+            raise ValueError(
+                f"premat_timing must be one of {PREMAT_TIMINGS}; got {timing!r}"
+            )
+        if timing == "previous_gemm_leading_edge" and attention_mode != "fused":
+            raise ValueError(
+                "premat_timing=previous_gemm_leading_edge currently requires "
+                "premat_attention_mode=fused"
+            )
+        self._timing = timing
         self._weight_matrix_target_order = weight_matrix_target_order
         self._cuda_stream_priority = cuda_stream_priority
         self._diagnostic_layer_delay_ms = float(diagnostic_layer_delay_ms)
@@ -1464,7 +1498,8 @@ class PrematRuntime:
             self._ensure_layer(permitted_layer)
         self._update_ordinary_peak()
         self._record("layer_start", layer=layer_index, outcome="reconsider")
-        self._advance(trigger="layer_start")
+        if self._timing == "as_the_code_flies":
+            self._advance(trigger="layer_start")
 
     def layer_complete(self, layer_index: int) -> None:
         """Apply the optional diagnostic host-dispatch delay after a layer.
@@ -1496,12 +1531,14 @@ class PrematRuntime:
             detail={"requested_ms": requested_ms},
         )
         while True:
-            self._advance(trigger="diagnostic_layer_delay_poll")
+            if self._timing == "as_the_code_flies":
+                self._advance(trigger="diagnostic_layer_delay_poll")
             remaining_ns = deadline_ns - time.perf_counter_ns()
             if remaining_ns <= 0:
                 break
             time.sleep(min(0.00025, remaining_ns / 1_000_000_000.0))
-        self._advance(trigger="diagnostic_layer_delay_final")
+        if self._timing == "as_the_code_flies":
+            self._advance(trigger="diagnostic_layer_delay_final")
         actual_ms = max(0.0, (time.perf_counter_ns() - start_ns) / 1_000_000.0)
         self._aggregate["diagnostic_layer_delay_ms_actual_total"] += actual_ms
         self._record(
@@ -1516,7 +1553,8 @@ class PrematRuntime:
         self._refresh_available()
         self._update_ordinary_peak()
         self._record(name, layer=layer_index, outcome="reconsider")
-        self._advance(trigger=name)
+        if self._timing == "as_the_code_flies":
+            self._advance(trigger=name)
 
     def acquire(self, family: str, layer_index: int) -> Tensor:
         self._require_active()
@@ -1916,7 +1954,29 @@ class PrematRuntime:
             outcome="consumption_complete",
         )
         self._resolve_pending_releases()
-        self._advance(trigger="consumed")
+        if self._timing == "as_the_code_flies":
+            self._advance(trigger="consumed")
+        else:
+            leading_edge_target = self._previous_gemm_leading_edge_target(
+                family=str(family),
+                layer_index=int(layer_index),
+            )
+            selected_family = (
+                PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                if self._target_matrix is not None
+                else None
+            )
+            if (
+                leading_edge_target is not None
+                and (
+                    selected_family is None
+                    or leading_edge_target[1] == selected_family
+                )
+            ):
+                self._advance(
+                    trigger=f"previous_gemm_leading_edge:{family}",
+                    eligible_keys=(leading_edge_target,),
+                )
 
     def report(self) -> Dict[str, object]:
         self._resolve_pending_timings()
@@ -1972,6 +2032,7 @@ class PrematRuntime:
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "enabled": True,
             "attention_mode": self._attention_mode,
+            "timing": self._timing,
             "materialisation_element_bytes": self._dtype_bytes,
             "target_offset": self._target_layer,
             "target_layer": self._target_layer,
@@ -2622,19 +2683,29 @@ class PrematRuntime:
         detail["final_reason"] = revised_decision.reason
         return revised_decision, detail
 
-    def _advance(self, *, trigger: str) -> None:
+    def _advance(
+        self,
+        *,
+        trigger: str,
+        eligible_keys: Optional[Sequence[Tuple[int, str]]] = None,
+    ) -> None:
         """Queue every consecutively admissible candidate for the exact target."""
         self._refresh_available()
         self._advance_sequence += 1
         invocation = self._advance_sequence
         submitted: List[Dict[str, object]] = []
         deferred_sequences: set[int] = set()
-        valid_target_layers = self._target_layer_indices()
-        first_candidate = self._next_premat_candidate()
+        exact_keys = tuple(eligible_keys) if eligible_keys is not None else None
+        valid_target_layers = (
+            tuple(dict.fromkeys(key[0] for key in exact_keys))
+            if exact_keys is not None
+            else self._target_layer_indices()
+        )
+        first_candidate = self._next_premat_candidate(eligible_keys=exact_keys)
         target_layer_index = (
             first_candidate.layer_index if first_candidate is not None else None
         )
-        target_offset = self._target_offset_for_candidate(first_candidate)
+        target_offset = self._relative_offset_for_candidate(first_candidate)
         self._record(
             "advance_begin",
             layer=(
@@ -2647,6 +2718,7 @@ class PrematRuntime:
                 "invocation": invocation,
                 "trigger": trigger,
                 "configured_target_layer": self._target_layer,
+                "timing": self._timing,
                 "target_offset": target_offset,
                 "target_layer_index": target_layer_index,
                 "matrix_order": self._weight_matrix_target_order,
@@ -2670,7 +2742,8 @@ class PrematRuntime:
 
         while True:
             candidate = self._next_premat_candidate(
-                excluded_sequences=deferred_sequences
+                excluded_sequences=deferred_sequences,
+                eligible_keys=exact_keys,
             )
             if candidate is None:
                 self._record_advance_return(
@@ -2681,9 +2754,9 @@ class PrematRuntime:
                 )
                 return
             target_layer_index = candidate.layer_index
-            target_offset = self._target_offset_for_candidate(candidate)
+            target_offset = self._relative_offset_for_candidate(candidate)
             if target_offset is None:
-                raise RuntimeError("Premat selected a candidate outside its configured target sweep")
+                raise RuntimeError("Premat selected a candidate outside the active layer sequence")
             considered_ns = time.perf_counter_ns()
             if candidate.first_considered_ns is None:
                 candidate.first_considered_ns = considered_ns
@@ -2804,7 +2877,13 @@ class PrematRuntime:
             candidate.launch_ns = time.perf_counter_ns()
             self._charge_candidate(candidate)
             current_stream = torch.cuda.current_stream(device=self._device)
-            self._stream.wait_stream(current_stream)
+            # The ordinary scheduler preserves its historical dependency on
+            # the Main Stream tail. At a previous-GEMM leading edge the target
+            # materialisation is independent of the predecessor's output, so
+            # adding that dependency would serialize the two streams and
+            # defeat the requested overlap.
+            if self._timing == "as_the_code_flies":
+                self._stream.wait_stream(current_stream)
             try:
                 with torch.cuda.stream(self._stream):
                     # vvv THOG completion is required for dependency/query semantics; the start timestamp is diagnostic only
@@ -2982,27 +3061,65 @@ class PrematRuntime:
                     result.append(layer_index)
         return tuple(result)
 
-    def _target_offset_for_candidate(
+    def _relative_offset_for_candidate(
         self,
         candidate: Optional[_Candidate],
     ) -> Optional[int]:
         if candidate is None or self._position < 0:
             return None
-        for offset in self._target_offsets():
-            position = self._position + offset
-            if (
-                0 <= position < len(self._layer_indices)
-                and int(self._layer_indices[position]) == int(candidate.layer_index)
-            ):
-                return int(offset)
-        return None
+        try:
+            candidate_position = self._layer_indices.index(int(candidate.layer_index))
+        except ValueError:
+            return None
+        return int(candidate_position - self._position)
+
+    def _previous_gemm_leading_edge_target(
+        self,
+        *,
+        family: str,
+        layer_index: int,
+    ) -> Optional[Tuple[int, str]]:
+        """Return the matrix whose PREMAT launch follows this MAIN GEMM enqueue."""
+        same_layer_successor = {
+            "QKV": "O",
+            "O": "UP",
+            "UP": "DOWN",
+        }.get(family)
+        if same_layer_successor is not None:
+            return (int(layer_index), same_layer_successor)
+        if family != "DOWN":
+            return None
+        try:
+            position = self._layer_indices.index(int(layer_index))
+        except ValueError:
+            return None
+        next_position = position + 1
+        if next_position >= len(self._layer_indices):
+            return None
+        return (int(self._layer_indices[next_position]), "QKV")
 
     def _next_premat_candidate(
         self,
         *,
         excluded_sequences: Optional[set[int]] = None,
+        eligible_keys: Optional[Sequence[Tuple[int, str]]] = None,
     ) -> Optional[_Candidate]:
         excluded = excluded_sequences or set()
+        if eligible_keys is not None:
+            for layer_index, family in eligible_keys:
+                candidate = self._candidates.get((int(layer_index), str(family)))
+                if (
+                    candidate is not None
+                    and candidate.state == CandidateState.UNAVAILABLE
+                    and candidate.sequence not in excluded
+                    and (
+                        self._target_matrix is None
+                        or candidate.family
+                        == PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                    )
+                ):
+                    return candidate
+            return None
         ordered = sorted(
             self._candidates.values(),
             key=lambda candidate: candidate.sequence,
@@ -3234,7 +3351,7 @@ class PrematRuntime:
             return None
         self._event_sequence += 1
         now_ns = time.perf_counter_ns()
-        candidate_target_offset = self._target_offset_for_candidate(candidate)
+        candidate_target_offset = self._relative_offset_for_candidate(candidate)
         payload: Dict[str, object] = {
             "schema_version": PREMAT_TELEMETRY_VERSION,
             "sequence": self._event_sequence,
@@ -3259,6 +3376,7 @@ class PrematRuntime:
                 else candidate_target_offset
             ),
             "target_matrix": self._target_matrix,                                                                                                          # <<< THOG retain matrix selector on every detailed PREMAT event
+            "timing": self._timing,
             "target_order": self._weight_matrix_target_order,
             "queue_depth": self._queue_depth(),
             "cumulative_charged_bytes": self._cumulative_charged_bytes(),

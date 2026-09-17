@@ -121,6 +121,7 @@ def _runtime(
     *,
     stay_below_current_peak: bool,
     attention_mode: str = "fused",
+    timing: str = "as_the_code_flies",
     target_layer: int = 1,
     target_matrix: int | None = None,                                                                                                                      # <<< THOG test helper can select one fixed fused PREMAT family
     weight_matrix_target_order: str = "r_to_l",
@@ -145,6 +146,7 @@ def _runtime(
         n_embd=8,
         n_head=2,
         attention_mode=attention_mode,
+        timing=timing,
         target_layer=target_layer,
         target_matrix=target_matrix,                                                                                                                       # <<< THOG exercise matrix-specific PREMAT runtime filtering
         weight_matrix_target_order=weight_matrix_target_order,
@@ -277,7 +279,7 @@ def test_retired_plastic_memory_budget_cli_names_replacement(capsys) -> None:
     assert "--premat_gpu_memory_buffer_gb" in capsys.readouterr().err
 
 
-def test_public_cli_exposes_exactly_the_sixteen_premat_options() -> None:
+def test_public_cli_exposes_exactly_the_seventeen_premat_options() -> None:
     parser = build_parser()
     option_strings = {
         option
@@ -289,6 +291,7 @@ def test_public_cli_exposes_exactly_the_sixteen_premat_options() -> None:
         "--premat",
         "--premat_allocator_aware_admission",
         "--premat_attention_mode",
+        "--premat_timing",
         "--premat_target_layer",
         "--premat_target_matrix",                                                                                                                          # <<< THOG new fused-family selector is an intentional core PREMAT option
         "--premat_weight_matrix_target_order",
@@ -311,7 +314,7 @@ def test_public_cli_exposes_exactly_the_sixteen_premat_options() -> None:
     ((1, "QKV"), (2, "O"), (3, "UP"), (4, "DOWN")),
 )
 def test_target_matrix_launches_only_the_selected_fused_family(monkeypatch, target_matrix, expected_family) -> None:
-    runtime, _fake_cuda, calls = _runtime(
+    runtime, fake_cuda, calls = _runtime(
         monkeypatch,
         stay_below_current_peak=False,
         target_layer=1,
@@ -320,6 +323,7 @@ def test_target_matrix_launches_only_the_selected_fused_family(monkeypatch, targ
     )
     runtime.layer_start(3)
     assert calls == [(expected_family, 5)]
+    assert fake_cuda.premat_stream.waited_streams == [fake_cuda.main_stream]
     report = runtime.report()
     assert report["target_matrix"] == target_matrix
     layer_candidates = [item for item in report["candidates"] if item["layer_index"] == 5]
@@ -357,9 +361,140 @@ def test_target_matrix_cli_propagates_to_training_config(tmp_path) -> None:
     ])
     run_config = config_from_arguments(arguments)
     assert run_config.premat_target_matrix == 2
+    assert "M2_" in run_config.compact_artifact_fragment()
     training_config = run_config.to_training_config(vocab_size=32, world_size=1, out_dir=tmp_path)
     assert training_config.premat_target_matrix == 2
     assert training_config.model_arguments()["premat_target_matrix"] == 2
+
+
+@pytest.mark.parametrize(
+    ("target_matrix", "predecessor", "predecessor_layer", "target_family", "target_layer"),
+    (
+        (1, "DOWN", 3, "QKV", 5),
+        (2, "QKV", 3, "O", 3),
+        (3, "O", 3, "UP", 3),
+        (4, "UP", 3, "DOWN", 3),
+    ),
+)
+def test_previous_gemm_leading_edge_launches_selected_successor_after_main_enqueue(
+    monkeypatch,
+    target_matrix,
+    predecessor,
+    predecessor_layer,
+    target_family,
+    target_layer,
+) -> None:
+    runtime, fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        timing="previous_gemm_leading_edge",
+        # Prove that the leading-edge mapping, rather than the ordinary
+        # relative-layer sweep, selects the exact successor.
+        target_layer=2,
+        target_matrix=target_matrix,
+    )
+    runtime.layer_start(3)
+    assert calls == []
+
+    runtime.acquire(predecessor, predecessor_layer)
+    assert calls == [(predecessor, predecessor_layer)]
+    runtime.consumed(predecessor, predecessor_layer)
+    assert calls == [
+        (predecessor, predecessor_layer),
+        (target_family, target_layer),
+    ]
+    assert fake_cuda.premat_stream.waited_streams == []
+
+    report = runtime.report()
+    assert report["timing"] == "previous_gemm_leading_edge"
+    launched = next(
+        item
+        for item in report["candidates"]
+        if item["layer_index"] == target_layer and item["family"] == target_family
+    )
+    assert launched["owner"] == "premat"
+
+
+def test_previous_gemm_leading_edge_does_not_launch_on_generic_events(monkeypatch) -> None:
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        timing="previous_gemm_leading_edge",
+        target_matrix=4,
+    )
+    runtime.layer_start(3)
+    runtime.event("after_attention", layer_index=3)
+    runtime.layer_complete(3)
+    assert calls == []
+
+
+def test_previous_gemm_leading_edge_chains_all_fused_families(monkeypatch) -> None:
+    runtime, _fake_cuda, calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        timing="previous_gemm_leading_edge",
+        target_layer=2,
+        target_matrix=None,
+    )
+    runtime.layer_start(3)
+
+    for family in ("QKV", "O", "UP", "DOWN"):
+        runtime.acquire(family, 3)
+        runtime.consumed(family, 3)
+
+    # Layer 3 QKV has no in-pass predecessor and therefore uses MAIN. Every
+    # subsequent matrix is prepared at its predecessor's GEMM leading edge;
+    # DOWN closes the ring by preparing QKV for the next active layer (5).
+    assert calls == [
+        ("QKV", 3),
+        ("O", 3),
+        ("UP", 3),
+        ("DOWN", 3),
+        ("QKV", 5),
+    ]
+
+
+def test_premat_timing_cli_defaults_and_propagates(tmp_path) -> None:
+    parser = build_parser()
+    default_arguments = parser.parse_args([])
+    assert default_arguments.premat_timing == "as_the_code_flies"
+
+    arguments = parser.parse_args([
+        "--model-type", "sheet",
+        "--premat", "enabled",
+        "--premat_timing", "previous_gemm_leading_edge",
+        "--device", "cuda",
+    ])
+    run_config = config_from_arguments(arguments)
+    assert run_config.premat_timing == "previous_gemm_leading_edge"
+    assert "PTGLE_" in run_config.compact_artifact_fragment()
+    canonical = run_config.canonical_dict(world_size=1)
+    assert canonical["premat_target_scope"] == "previous_gemm_successor"
+    training_config = run_config.to_training_config(
+        vocab_size=32,
+        world_size=1,
+        out_dir=tmp_path,
+    )
+    assert training_config.premat_timing == "previous_gemm_leading_edge"
+    assert training_config.model_arguments()["premat_timing"] == "previous_gemm_leading_edge"
+
+
+def test_previous_gemm_leading_edge_is_rejected_for_unfused_attention() -> None:
+    with pytest.raises(ValueError, match="currently requires premat_attention_mode=fused"):
+        validate_premat_configuration(
+            premat="enabled",
+            attention_mode="unfused",
+            timing="previous_gemm_leading_edge",
+            target_layer=1,
+            weight_matrix_target_order="r_to_l",
+            stay_below_current_peak=True,
+            stay_within_global_buffer=False,
+            gpu_memory_buffer_gb=1.0,
+            cuda_stream_priority="normal",
+            diagnostic_layer_delay_ms=0.0,
+            logging="disabled",
+            instra="disabled",
+        )
 
 
 # ^^^ THOG

@@ -328,7 +328,16 @@ def build_parser() -> argparse.ArgumentParser:
     # vvv THOG dynamic pre-materialisation public surface and mutually-exclusive headroom policies
     parser.add_argument("--premat", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--premat_attention_mode", choices=("fused", "unfused"), default="fused")
-    parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2, 10), default=1, help="PREMAT relative target: 10 means ordered +1 then +0 sweep")
+    parser.add_argument(
+        "--premat_timing",
+        choices=("as_the_code_flies", "previous_gemm_leading_edge"),
+        default="as_the_code_flies",
+        help=(
+            "PREMAT launch timing: preserve ordinary scheduler reconsideration, or launch "
+            "the next fused matrix immediately after its predecessor MAIN GEMM is enqueued"
+        ),
+    )
+    parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2, 10), default=1, help="PREMAT relative target for as_the_code_flies: 10 means ordered +1 then +0 sweep")
 # vvv THOG fixed fused-family PREMAT diagnostic selector
     parser.add_argument(
         "--premat_target_matrix",
@@ -767,6 +776,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         plastic__layer_count_cost_weight=arguments.plastic__layer_count_cost_weight,
         premat=arguments.premat,
         premat_attention_mode=arguments.premat_attention_mode,
+        premat_timing=arguments.premat_timing,
         premat_target_layer=arguments.premat_target_layer,
         premat_target_matrix=arguments.premat_target_matrix,                                                                                               # <<< THOG carry selected PREMAT matrix into persistent run configuration
         premat_weight_matrix_target_order=arguments.premat_weight_matrix_target_order,
@@ -1000,7 +1010,9 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
             "PREMAT:",
             f"premat={config.premat} "
             f"premat_attention_mode={config.premat_attention_mode} "
+            f"premat_timing={config.premat_timing} "
             f"premat_target_layer={config.premat_target_layer} "
+            f"premat_target_matrix={config.premat_target_matrix} "
             f"premat_weight_matrix_target_order={config.premat_weight_matrix_target_order} "
             f"headroom={headroom_mode} "
             f"premat_gpu_memory_buffer_gb={config.premat_gpu_memory_buffer_gb:.6g} "
@@ -1145,4 +1157,3 @@ if __name__ == "__main__":
 # plastic__layer_count_hold_updates=arguments.plastic__layer_count_hold_updates,
 # f"{config.plastic__layer_count_objective}  hold_updates={config.plastic__layer_count_hold_updates}",
 # ^^^ THOG
-

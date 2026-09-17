@@ -307,7 +307,7 @@ def register_processing_handoff(
         "config": {
             key: config.get(key)
             for key in (
-                "premat", "premat_target_layer", "premat_target_matrix", "premat_attention_mode",
+                "premat", "premat_timing", "premat_target_layer", "premat_target_matrix", "premat_attention_mode",
                 "premat_processing_logging", "premat_processing_logging_capture_frequency_hz",
                 "premat_processing_logging_capture_update", "n_layer", "n_embd", "n_head",
                 "batch_size", "block_size", "gradient_accumulation_steps", "dtype", "device",

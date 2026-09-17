@@ -186,6 +186,7 @@ MODEL_COMPATIBILITY_FIELDS = (
     # vvv THOG premat topology and memory policy are persistent resume compatibility identity
     "premat",
     "premat_attention_mode",
+    "premat_timing",
     "premat_target_layer",
     "premat_target_matrix",                                                                                                                                # <<< THOG make target-matrix selection resume compatibility identity
     "premat_weight_matrix_target_order",
@@ -296,6 +297,7 @@ class TrainingConfig:
     # vvv THOG dynamic pre-materialisation persistent execution identity
     premat: str = "disabled"
     premat_attention_mode: str = "fused"
+    premat_timing: str = "as_the_code_flies"
     premat_target_layer: int = 1
     premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector through training/checkpoint config
     premat_weight_matrix_target_order: str = "r_to_l"
@@ -590,6 +592,7 @@ class TrainingConfig:
         validate_premat_configuration(
             premat=self.premat,
             attention_mode=self.premat_attention_mode,
+            timing=self.premat_timing,
             target_layer=self.premat_target_layer,
             target_matrix=self.premat_target_matrix,                                                                                                       # <<< THOG validate selected PREMAT matrix in TrainingConfig
             weight_matrix_target_order=self.premat_weight_matrix_target_order,
@@ -1076,6 +1079,7 @@ class TrainingConfig:
                     # vvv THOG pass all premat topology and policy controls into SheetGPTConfig; disabled remains allocation-free
                     "premat": self.premat,
                     "premat_attention_mode": self.premat_attention_mode,
+                    "premat_timing": self.premat_timing,
                     "premat_target_layer": self.premat_target_layer,
                     "premat_target_matrix": self.premat_target_matrix,                                                                                     # <<< THOG pass selected PREMAT matrix into SheetGPTConfig
                     "premat_weight_matrix_target_order": self.premat_weight_matrix_target_order,
@@ -1223,12 +1227,17 @@ class TrainingConfig:
             identity["premat"] = {
                 "enabled": self.premat,
                 "attention_mode": self.premat_attention_mode,
+                "timing": self.premat_timing,
                 "target_layer": self.premat_target_layer,
                 "target_matrix": self.premat_target_matrix,                                                                                                # <<< THOG expose selected PREMAT matrix in compact training identity
                 "weight_matrix_target_order": self.premat_weight_matrix_target_order,
                 "stay_below_current_peak": self.premat_headroom_stay_below_current_peak,
                 "stay_within_global_buffer": self.premat_headroom_stay_within_global_buffer,
-                "target_scope": f"relative_layer_{self.premat_target_layer}",
+                "target_scope": (
+                    "previous_gemm_successor"
+                    if self.premat_timing == "previous_gemm_leading_edge"
+                    else f"relative_layer_{self.premat_target_layer}"
+                ),
                 "target_order": self.premat_weight_matrix_target_order,
                 "gpu_memory_buffer_gb": float(self.premat_gpu_memory_buffer_gb),
                 "allocator_aware_admission": self.premat_allocator_aware_admission,
@@ -1287,4 +1296,3 @@ class TrainingConfig:
 # "geometry_lr_multiplier": float(self.plastic__geometry_learning_rate_multiplier),
 # "freeze_geometry_during_warmup": self.plastic__freeze_geometry_during_warmup,
 # ^^^ THOG
-
