@@ -135,6 +135,10 @@ const source = fs.readFileSync(
   "sheet/local_dashboard_assets/dashboard_processing_user_fixes.js",
   "utf8",
 );
+const operations_source = fs.readFileSync(
+  "sheet/local_dashboard_assets/dashboard_processing_operations_final.js",
+  "utf8",
+);
 vm.runInNewContext(source, sandbox);
 const hooks = sandbox.window.processing_user_fix_test_hooks;
 
@@ -156,7 +160,10 @@ assert.match(hooks.processing_download_url_for_run("ncu id", "compat.json"), /ru
 hooks.render_paired_downloads({
   paired_processing_downloads:{
     nsys:{dashboard_run_id:"nsys", artifact_name:"NSYS full", files:{bundle:"nsys.zip", raw_trace:"trace.nsys-rep"}},
-    ncu:{dashboard_run_id:"ncu", artifact_name:"NCU full", files:{kernel_resources:"resources.csv", json:"compat.json"}},
+    ncu:{dashboard_run_id:"ncu", artifact_name:"NCU full", files:{
+      raw_ncu:"trace.ncu-rep", ncu_raw_csv:"raw.csv", ncu_semantic_csv:"semantic.csv",
+      kernel_resources:"resources.csv", json:"compat.json",
+    }},
   },
 });
 const rendered_groups = host.querySelector(".processing-paired-download-groups");
@@ -164,6 +171,13 @@ assert.ok(rendered_groups);
 assert.equal(rendered_groups.children.length, 2);
 assert.match(rendered_groups.children[0].children[1].href, /run=nsys/);
 assert.match(rendered_groups.children[1].children[1].href, /run=ncu/);
+assert.equal(rendered_groups.children[0].children.at(-1).textContent, "Raw nsys");
+assert.equal(rendered_groups.children[1].children[1].textContent, "Raw ncu");
+assert.equal(rendered_groups.children[1].children[2].textContent, "Raw metrics CSV");
+assert.equal(rendered_groups.children[1].children[3].textContent, "Semantic metrics CSV");
+
+assert.match(operations_source, /y:\(lane_y\.MAIN \+ lane_y\.PREMAT\) \/ 2/);
+assert.match(operations_source, /yanchor:"middle", font:\{size:11, color:"#545b65"\}/);
 
 hooks.apply_operations_maximized_geometry();
 assert.equal(restyles.at(-1).update.width, 0.24);

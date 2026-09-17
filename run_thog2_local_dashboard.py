@@ -283,6 +283,30 @@ def _attach_own_hard_constraints(state: Any, payload: dict[str, Any]) -> dict[st
     return updated
 
 
+def _ncu_processing_download_files(state: Any) -> dict[str, str]:
+    processing_directory = state.database_path.parent / "processing"
+    files: dict[str, str] = {}
+    raw_reports = sorted(
+        (
+            path
+            for pattern in ("processing_ncu_trace.ncu-rep", "processing_ncu_trace.ncu-repz")
+            for path in processing_directory.glob(pattern)
+            if path.is_file()
+        ),
+        key=lambda path: (path.suffix != ".ncu-rep", path.name),
+    )
+    if raw_reports:
+        files["raw_ncu"] = raw_reports[0].name
+    for key, filename in (
+        ("ncu_raw_csv", "processing_ncu_raw.csv"),
+        ("ncu_semantic_csv", "processing_ncu_semantic.csv"),
+    ):
+        path = processing_directory / filename
+        if path.is_file():
+            files[key] = filename
+    return files
+
+
 def _processing_payload_with_ncu_companion(self):
     payload = _attach_own_hard_constraints(self, _original_processing_payload(self))
     if not payload.get("available") or not payload.get("trace_available"):
@@ -311,6 +335,7 @@ def _processing_payload_with_ncu_companion(self):
     selected_files = dict(selected_metadata.get("files", {}) or {})
     companion_files = dict(companion_metadata.get("files", {}) or {})
     companion_files.update(dict(companion_data.get("premat_compatibility_files", {}) or {}))
+    companion_files.update(_ncu_processing_download_files(companion_state))
     merged_data = dict(data)
     merged_data["premat_compatibility"] = compatibility
     merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])

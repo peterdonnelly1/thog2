@@ -135,4 +135,25 @@ def test_candidate_kind_and_pairing_use_metadata_not_directory_names(tmp_path: P
     match = dashboard._matching_ncu_companion(selected)
     assert match is not None
     assert match[2] is candidate
+
+
+def test_ncu_download_manifest_includes_original_report_and_csv_exports(tmp_path: Path) -> None:
+    database_path = tmp_path / "run" / "charts.sqlite3"
+    database_path.parent.mkdir()
+    database_path.write_text("")
+    processing = database_path.parent / "processing"
+    processing.mkdir()
+    for filename in (
+        "processing_ncu_trace.ncu-rep",
+        "processing_ncu_raw.csv",
+        "processing_ncu_semantic.csv",
+    ):
+        (processing / filename).write_text("data")
+    state = _State("260916-1807_scruffy_NCU_PREMAT___CONFIG", database_path=database_path)
+
+    assert dashboard._ncu_processing_download_files(state) == {
+        "raw_ncu": "processing_ncu_trace.ncu-rep",
+        "ncu_raw_csv": "processing_ncu_raw.csv",
+        "ncu_semantic_csv": "processing_ncu_semantic.csv",
+    }
 # ^^^ THOG

@@ -135,8 +135,8 @@
         line:{color:"rgba(125,130,138,0.50)", width:1}, layer:"above",
       })),
       annotations:sorted.map(([layer, x]) => ({
-        xref:"x", yref:"y", x, y:0.835, text:String(layer + 1), showarrow:false,
-        xanchor:"center", yanchor:"top", font:{size:9, color:"#7a8088"},
+        xref:"x", yref:"y", x, y:(lane_y.MAIN + lane_y.PREMAT) / 2, text:String(layer + 1), showarrow:false,
+        xanchor:"center", yanchor:"middle", font:{size:11, color:"#545b65"},
       })),
     };
   }

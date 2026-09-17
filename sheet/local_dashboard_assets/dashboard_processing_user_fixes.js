@@ -33,13 +33,14 @@
 
   const download_order = [
     "bundle", "samples", "stream_resources", "intervals", "summary", "metadata",
-    "raw_trace", "kernel_resources", "csv", "json",
+    "raw_trace", "raw_ncu", "ncu_raw_csv", "ncu_semantic_csv", "kernel_resources", "csv", "json",
   ];
   const download_labels = {
     bundle:"Bundle ZIP", samples:"Samples CSV", stream_resources:"Stream resources",
     intervals:"Intervals CSV", summary:"Summary CSV", metadata:"Metadata JSON",
-    raw_trace:"Raw capture", kernel_resources:"Kernel resources", csv:"Compatibility CSV",
-    json:"Compatibility JSON",
+    raw_trace:"Raw nsys", raw_ncu:"Raw ncu", ncu_raw_csv:"Raw metrics CSV",
+    ncu_semantic_csv:"Semantic metrics CSV", kernel_resources:"NCU resources",
+    csv:"Compatibility CSV", json:"Compatibility JSON",
   };
 
   function processing_download_url_for_run(run_id, filename) {
