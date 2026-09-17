@@ -439,10 +439,12 @@ def processing_capture_scope(
         destination = Path(metadata_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
-    _capture_active = True
     _capture_stack_depth = 0
-    _capture_start_ns = time.perf_counter_ns()
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
+    # The NSYS capture begins at the NVTX push, so establish the host timing
+    # origin immediately afterwards rather than including profiler setup time.
+    _capture_start_ns = time.perf_counter_ns()
+    _capture_active = True
     try:
         yield
     finally:
@@ -1287,6 +1289,7 @@ __all__ = [
     "maybe_reexec_under_nsys",
     "normalize_nsys_sqlite",
     "processing_capture_scope",
+    "processing_capture_elapsed_ms",
     "processing_operation_pop",
     "processing_operation_push",
     "processing_operation_range",

@@ -136,9 +136,27 @@ def test_metric_catalog_marks_optional_unavailable_metrics_without_inventing_val
 def test_metric_matching_is_exact_and_rejects_vtg_warps():
     assert match_processing_metric_name("Compute Warps in Flight") == "compute_warps_in_flight_pct"
     assert match_processing_metric_name(
+        "Compute Warps in Flight [Throughput %]"
+    ) == "compute_warps_in_flight_pct"
+    assert match_processing_metric_name(
+        "SMs Active [Throughput %]"
+    ) == "sm_active_pct"
+    assert match_processing_metric_name(
+        "Unallocated Warps in Active SMs [Throughput %]"
+    ) == "active_sm_unused_warp_slots_pct"
+    assert match_processing_metric_name(
+        "DRAM Read Bandwidth [Throughput %]"
+    ) == "dram_read_pct"
+    assert match_processing_metric_name(
+        "GPC Clock Frequency [MHz]"
+    ) == "gpc_clock_mhz"
+    assert match_processing_metric_name(
         "tpc__warps_active_shader_cs_realtime.avg.pct_of_peak_sustained_elapsed"
     ) == "compute_warps_in_flight_pct"
     assert match_processing_metric_name("Vertex/Tess/Geometry Warps in Flight") is None
+    assert match_processing_metric_name(
+        "Vertex/Tess/Geometry Warps in Flight [Throughput %]"
+    ) is None
     assert match_processing_metric_name("prefix Compute Warps in Flight suffix") is None
 
 

@@ -1,0 +1,117 @@
+# vvv THOG
+import csv
+
+from sheet.processing_ncu_compatibility import (
+    compatibility_row,
+    normalize_raw_ncu_csv,
+    parse_processing_nvtx_label,
+)
+
+
+def _write_wide_ncu_csv(path, *, threads, registers_per_thread, registers_per_block, shared_bytes):
+    fields = [
+        "ID", "Kernel Name", "Context", "Stream", "Block Size", "CC",
+        "launch__registers_per_thread",
+        "launch__registers_per_thread_allocated",
+        "launch__shared_mem_per_block_allocated",
+        "gpu__time_duration.sum",
+    ]
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow({
+            "launch__registers_per_thread": "register/thread",
+            "launch__registers_per_thread_allocated": "register/thread",
+            "launch__shared_mem_per_block_allocated": "byte/block",
+            "gpu__time_duration.sum": "ns",
+        })
+        writer.writerow({
+            "ID": "4",
+            "Kernel Name": "test_kernel",
+            "Context": "1",
+            "Stream": "7",
+            "Block Size": f"({threads}, 1, 1)",
+            "CC": "8.9",
+            "launch__registers_per_thread": str(registers_per_thread),
+            "launch__registers_per_thread_allocated": f"{registers_per_block:,}",
+            "launch__shared_mem_per_block_allocated": f"{shared_bytes:,}",
+            "gpu__time_duration.sum": "1000",
+        })
+
+
+def test_wide_ncu_register_allocation_is_per_block_not_per_thread(tmp_path):
+    source = tmp_path / "main.csv"
+    _write_wide_ncu_csv(
+        source,
+        threads=256,
+        registers_per_thread=224,
+        registers_per_block=57344,
+        shared_bytes=74752,
+    )
+
+    rows = normalize_raw_ncu_csv(
+        source,
+        role="MAIN",
+        family="DOWN",
+        operation="consume",
+        layer=8,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["registers_per_thread"] == 224
+    assert rows[0]["registers_per_block"] == 57344
+    assert rows[0]["theoretical_blocks_per_sm"] == 1
+
+
+def test_ncu_nvtx_renamed_kernel_suffix_is_not_part_of_layer():
+    assert parse_processing_nvtx_label(
+        "THOG2_PROCESSING|owner=PREMAT|operation=materialize|"
+        "family=DOWN|layer=8/void at::vectorized_elementwise_kernel(...)"
+    ) == {
+        "role": "PREMAT",
+        "operation": "materialize",
+        "family": "DOWN",
+        "layer": 8,
+    }
+
+
+def test_corrected_down_pair_is_structurally_co_resident(tmp_path):
+    main_path = tmp_path / "main.csv"
+    premat_path = tmp_path / "premat.csv"
+    _write_wide_ncu_csv(
+        main_path,
+        threads=256,
+        registers_per_thread=224,
+        registers_per_block=57344,
+        shared_bytes=74752,
+    )
+    _write_wide_ncu_csv(
+        premat_path,
+        threads=128,
+        registers_per_thread=30,
+        registers_per_block=4096,
+        shared_bytes=1024,
+    )
+    main = normalize_raw_ncu_csv(
+        main_path,
+        role="MAIN",
+        family="DOWN",
+        operation="consume",
+        layer=8,
+    )[0]
+    premat = normalize_raw_ncu_csv(
+        premat_path,
+        role="PREMAT",
+        family="DOWN",
+        operation="materialize",
+        layer=8,
+    )[0]
+
+    result = compatibility_row(main, premat)
+
+    assert result["pair_can_co_reside"] is True
+    assert result["main_registers_per_block"] == 57344
+    assert result["premat_registers_per_block"] == 4096
+    assert result["premat_blocks_with_one_main_block"] == 2
+    assert result["compatibility_class"] == "GREEN"
+# ^^^ THOG

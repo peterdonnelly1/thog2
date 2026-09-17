@@ -29,6 +29,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
     "sm_active_pct": {
         "exact_names": (
             "SMs Active",
+            "SMs Active [Throughput %]",
             "sm__cycles_active.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -37,6 +38,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
     "sm_issue_pct": {
         "exact_names": (
             "SM Issue",
+            "SM Issue [Throughput %]",
             "sm__inst_executed_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -45,6 +47,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
     "tensor_active_pct": {
         "exact_names": (
             "Tensor Active",
+            "Tensor Active [Throughput %]",
             "sm__pipe_tensor_cycles_active_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -53,7 +56,9 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
     "active_sm_unused_warp_slots_pct": {
         "exact_names": (
             "Active SM Unused Warp Slots",
+            "Active SM Unused Warp Slots [Throughput %]",
             "Unallocated Warps in Active SM",
+            "Unallocated Warps in Active SMs [Throughput %]",
             "tpc__warps_inactive_sm_active_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -63,6 +68,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
         "exact_names": (
             "DRAM Read",
             "DRAM Read Throughput",
+            "DRAM Read Bandwidth [Throughput %]",
             "dram__read_throughput.avg.pct_of_peak_sustained_elapsed",
             "dramc__read_throughput.avg.pct_of_peak_sustained_elapsed",
         ),
@@ -73,6 +79,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
         "exact_names": (
             "DRAM Write",
             "DRAM Write Throughput",
+            "DRAM Write Bandwidth [Throughput %]",
             "dram__write_throughput.avg.pct_of_peak_sustained_elapsed",
             "dramc__write_throughput.avg.pct_of_peak_sustained_elapsed",
         ),
@@ -83,6 +90,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
         "exact_names": (
             "Graphics/Compute Active",
             "GR Active",
+            "GR Active [Throughput %]",
             "gr__cycles_active.sum.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -92,6 +100,7 @@ PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
         "exact_names": (
             "L2 Active",
             "L2 Throughput",
+            "L2 Active [Throughput %]",
             "lts__cycles_active.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -528,6 +537,7 @@ PROCESSING_METRIC_SPECS.update({
         "exact_names": (
             "Compute Warps in Flight",
             "Compute Warps In Flight",
+            "Compute Warps in Flight [Throughput %]",
             "tpc__warps_active_shader_cs_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -537,6 +547,7 @@ PROCESSING_METRIC_SPECS.update({
         "exact_names": (
             "Idle SM Unused Warp Slots",
             "Unallocated Warps in Idle SM",
+            "Unallocated Warps in Idle SMs [Throughput %]",
             "tpc__warps_inactive_sm_idle_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
@@ -546,6 +557,7 @@ PROCESSING_METRIC_SPECS.update({
         "exact_names": (
             "GPC Clock Frequency",
             "GPC Clock",
+            "GPC Clock Frequency [MHz]",
             "gpc__cycles_elapsed.avg.per_second",
         ),
         "unit": "MHz",

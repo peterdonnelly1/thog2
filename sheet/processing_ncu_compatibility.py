@@ -298,20 +298,69 @@ def _canonical_cc(value: Any, explicit: str | None) -> str:
 
 
 def _raw_ncu_reader(path: Path) -> list[Dict[str, str]]:
-    """Read NCU long-form CSV, tolerating warning/preamble lines before its header."""
+    """Read NCU long- or wide-form CSV into long-form metric rows."""
     lines = Path(path).read_text(errors="replace").splitlines()
-    header_index = None
+    long_header_index = None
     for index, line in enumerate(lines):
         if "Metric Name" in line and "Metric Value" in line:
-            header_index = index
+            long_header_index = index
             break
-    if header_index is None:
+
+    if long_header_index is not None:
+        reader = csv.DictReader(io.StringIO("\n".join(lines[long_header_index:])))
+        return [dict(row) for row in reader if any(str(value or "").strip() for value in row.values())]
+
+    wide_header_index = None
+    for index, line in enumerate(lines):
+        try:
+            columns = next(csv.reader([line]))
+        except csv.Error:
+            continue
+        if "ID" in columns and "Kernel Name" in columns and any(
+            name.startswith("launch__") for name in columns
+        ):
+            wide_header_index = index
+            break
+    if wide_header_index is None:
         raise ValueError(
             f"{path} does not look like `ncu --csv --page raw` output "
-            "(Metric Name / Metric Value columns not found)"
+            "(neither long-form Metric Name/Metric Value columns nor a wide-form "
+            "LaunchStats header was found)"
         )
-    reader = csv.DictReader(io.StringIO("\n".join(lines[header_index:])))
-    return [dict(row) for row in reader if any(str(value or "").strip() for value in row.values())]
+    wide_rows = [
+        dict(row)
+        for row in csv.DictReader(io.StringIO("\n".join(lines[wide_header_index:])))
+        if any(str(value or "").strip() for value in row.values())
+    ]
+    if not wide_rows:
+        return []
+
+    identity_columns = {
+        "ID", "Process ID", "Process Name", "Host Name", "Kernel Name",
+        "Context", "Stream", "Block Size", "Grid Size", "Device", "CC",
+    }
+    unit_row: Dict[str, str] = {}
+    first_row = wide_rows[0]
+    if not str(first_row.get("ID", "")).strip() and not str(
+        first_row.get("Kernel Name", "")
+    ).strip():
+        unit_row = wide_rows.pop(0)
+
+    result: list[Dict[str, str]] = []
+    for row in wide_rows:
+        if not str(row.get("ID", "")).strip() or not str(row.get("Kernel Name", "")).strip():
+            continue
+        identity = {name: str(row.get(name, "") or "") for name in identity_columns}
+        for metric_name, metric_value in row.items():
+            if metric_name in identity_columns or not str(metric_value or "").strip():
+                continue
+            result.append({
+                **identity,
+                "Metric Name": str(metric_name),
+                "Metric Value": str(metric_value),
+                "Metric Unit": str(unit_row.get(metric_name, "") or ""),
+            })
+    return result
 
 
 def normalize_raw_ncu_csv(
@@ -366,18 +415,29 @@ def normalize_raw_ncu_csv(
         block_text = first(representative, "Block Size", "Block")
         threads = _block_threads(block_text)
 
-        registers_metric = metric(
-            "launch__registers_per_thread_allocated",
-            "launch__registers_per_thread",
+        registers_per_thread_metric = metric("launch__registers_per_thread")
+        allocated_registers_per_block_metric = metric(
+            "launch__registers_per_thread_allocated"
         )
-        if registers_metric is None:
+        if registers_per_thread_metric is None:
             raise ValueError(f"{path}: launch is missing registers-per-thread metric; collect LaunchStats")
-        registers_per_thread = int(round(_clean_number(registers_metric[0])))
-        # launch__registers_per_thread_allocated is already the allocated register
-        # count per thread.  The aggregate test remains deliberately labelled
-        # theoretical; NCU occupancy remains the authority for exact allocation
-        # granularity.
-        registers_per_block = registers_per_thread * threads
+        registers_per_thread = int(round(_clean_number(registers_per_thread_metric[0])))
+        # Despite its metric name and reported unit, NCU's
+        # launch__registers_per_thread_allocated value is the allocation for the
+        # entire block.  It may exceed registers_per_thread * threads because
+        # register allocation is granular.  Treating it as per-thread and
+        # multiplying again creates impossible multi-million-register blocks.
+        registers_per_block = (
+            int(round(_clean_number(allocated_registers_per_block_metric[0])))
+            if allocated_registers_per_block_metric is not None
+            else registers_per_thread * threads
+        )
+        if registers_per_block < registers_per_thread * threads:
+            raise ValueError(
+                f"{path}: allocated registers per block ({registers_per_block}) "
+                f"is below registers-per-thread * threads "
+                f"({registers_per_thread * threads})"
+            )
 
         allocated_shared = metric("launch__shared_mem_per_block_allocated")
         static_shared = metric("launch__shared_mem_per_block_static")
@@ -442,8 +502,12 @@ def parse_processing_nvtx_label(value: Any) -> Dict[str, Any] | None:
     offset = text.find(marker)
     if offset < 0:
         return None
+    # With `ncu --print-nvtx-rename kernel`, NCU appends the original CUDA
+    # kernel name after the semantic range as `...|layer=N/<kernel>`.  Parse
+    # only the range label so the layer remains an integer.
+    label = text[offset:].split("/", 1)[0]
     fields: Dict[str, Any] = {}
-    for part in text[offset:].split("|")[1:]:
+    for part in label.split("|")[1:]:
         if "=" not in part:
             break
         key, raw = part.split("=", 1)
