@@ -27,63 +27,72 @@ PROCESSING_ATTRIBUTION_STATES = (
 
 PROCESSING_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
     "sm_active_pct": {
-        "patterns": ("SMs Active", "sm__cycles_active"),
+        "exact_names": (
+            "SMs Active",
+            "sm__cycles_active.avg.pct_of_peak_sustained_elapsed",
+        ),
         "unit": "%",
         "required": True,
     },
     "sm_issue_pct": {
-        "patterns": ("SM Issue", "sm__inst_executed"),
+        "exact_names": (
+            "SM Issue",
+            "sm__inst_executed_realtime.avg.pct_of_peak_sustained_elapsed",
+        ),
         "unit": "%",
         "required": True,
     },
     "tensor_active_pct": {
-        "patterns": ("Tensor Active", "sm__pipe_tensor"),
+        "exact_names": (
+            "Tensor Active",
+            "sm__pipe_tensor_cycles_active_realtime.avg.pct_of_peak_sustained_elapsed",
+        ),
         "unit": "%",
         "required": True,
     },
     "active_sm_unused_warp_slots_pct": {
-        "patterns": (
+        "exact_names": (
             "Active SM Unused Warp Slots",
             "Unallocated Warps in Active SM",
-            "tpc__warps_inactive_sm_active",
+            "tpc__warps_inactive_sm_active_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": True,
     },
     "dram_read_pct": {
-        "patterns": (
+        "exact_names": (
             "DRAM Read",
-            "Memory Read",
-            "dram__bytes_read",
-            "dram__throughput_read",
+            "DRAM Read Throughput",
+            "dram__read_throughput.avg.pct_of_peak_sustained_elapsed",
+            "dramc__read_throughput.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": False,
     },
     "dram_write_pct": {
-        "patterns": (
+        "exact_names": (
             "DRAM Write",
-            "Memory Write",
-            "dram__bytes_write",
-            "dram__throughput_write",
+            "DRAM Write Throughput",
+            "dram__write_throughput.avg.pct_of_peak_sustained_elapsed",
+            "dramc__write_throughput.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": False,
     },
     "gr_active_pct": {
-        "patterns": (
+        "exact_names": (
             "Graphics/Compute Active",
             "GR Active",
-            "gr__cycles_active",
+            "gr__cycles_active.sum.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": False,
     },
     "l2_active_pct": {
-        "patterns": (
+        "exact_names": (
             "L2 Active",
             "L2 Throughput",
-            "lts__cycles_active",
+            "lts__cycles_active.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": False,
@@ -330,8 +339,100 @@ def metric_catalog(metric_mapping: Mapping[str, str]) -> Dict[str, Dict[str, Any
             "unit": str(spec["unit"]),
             "available": bool(mapped),
             "required": bool(spec["required"]),
+            "matching": "exact",
+            "transform": str(spec.get("transform", "identity")),
         }
     return result
+
+
+def match_processing_metric_name(name: Any) -> str | None:
+    """Return a metric key only for an explicitly enumerated exact name."""
+    normalized = str(name or "").strip().casefold()
+    if not normalized:
+        return None
+    for key, specification in PROCESSING_METRIC_SPECS.items():
+        if normalized in {
+            str(candidate).strip().casefold()
+            for candidate in specification.get("exact_names", ())
+        }:
+            return key
+    return None
+
+
+def metric_display_value(key: str, value: Any) -> float | None:
+    """Apply the one allowed display conversion; percentages remain raw."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(number):
+        return None
+    if PROCESSING_METRIC_SPECS.get(key, {}).get("transform") == "hz_to_mhz":
+        return number / 1_000_000.0
+    return number
+
+
+def duration_weighted_metric_statistics(
+    samples: Sequence[Mapping[str, Any]],
+    key: str,
+    intervals: Iterable[tuple[float, float]],
+) -> Dict[str, float | int | None]:
+    """Summarise midpoint bins by their exact overlap with an interval union."""
+    target = merge_intervals(intervals)
+    weighted: list[tuple[float, float]] = []
+    for row in samples:
+        try:
+            value = float(row.get(key))
+        except (TypeError, ValueError):
+            continue
+        if not isfinite(value):
+            continue
+        try:
+            start = float(row["sample_start_us"])
+            end = float(row["sample_end_us"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        weight = sum(
+            max(0.0, min(end, right) - max(start, left))
+            for left, right in target
+            if right > start and left < end
+        )
+        if weight > 0.0:
+            weighted.append((value, weight))
+    if not weighted:
+        return {
+            "sample_count": 0,
+            "covered_us": 0.0,
+            "mean": None,
+            "min": None,
+            "p50": None,
+            "p90": None,
+            "p95": None,
+            "max": None,
+        }
+    total = sum(weight for _value, weight in weighted)
+    ordered = sorted(weighted)
+
+    def quantile(fraction: float) -> float:
+        threshold = total * fraction
+        cumulative = 0.0
+        for value, weight in ordered:
+            cumulative += weight
+            if cumulative >= threshold:
+                return value
+        return ordered[-1][0]
+
+    values = [value for value, _weight in weighted]
+    return {
+        "sample_count": len(weighted),
+        "covered_us": total,
+        "mean": sum(value * weight for value, weight in weighted) / total,
+        "min": min(values),
+        "p50": quantile(0.50),
+        "p90": quantile(0.90),
+        "p95": quantile(0.95),
+        "max": max(values),
+    }
 
 
 def _attribution_state(main_us: float, premat_us: float, other_us: float, simultaneous_us: float) -> str:
@@ -413,6 +514,9 @@ __all__ = [
     "main_idle_intervals",
     "merge_intervals",
     "metric_catalog",
+    "match_processing_metric_name",
+    "metric_display_value",
+    "duration_weighted_metric_statistics",
     "sample_bins",
 ]
 # ^^^ THOG
@@ -421,21 +525,32 @@ __all__ = [
 _previous_processing_metric_fields = PROCESSING_METRIC_FIELDS
 PROCESSING_METRIC_SPECS.update({
     "compute_warps_in_flight_pct": {
-        "patterns": (
+        "exact_names": (
             "Compute Warps in Flight",
             "Compute Warps In Flight",
-            "warps in flight",
+            "tpc__warps_active_shader_cs_realtime.avg.pct_of_peak_sustained_elapsed",
+        ),
+        "unit": "%",
+        "required": False,
+    },
+    "idle_sm_unused_warp_slots_pct": {
+        "exact_names": (
+            "Idle SM Unused Warp Slots",
+            "Unallocated Warps in Idle SM",
+            "tpc__warps_inactive_sm_idle_realtime.avg.pct_of_peak_sustained_elapsed",
         ),
         "unit": "%",
         "required": False,
     },
     "gpc_clock_mhz": {
-        "patterns": (
+        "exact_names": (
             "GPC Clock Frequency",
             "GPC Clock",
+            "gpc__cycles_elapsed.avg.per_second",
         ),
         "unit": "MHz",
         "required": False,
+        "transform": "hz_to_mhz",
     },
 })
 PROCESSING_METRIC_FIELDS = tuple(PROCESSING_METRIC_SPECS)

@@ -6,12 +6,15 @@ from __future__ import annotations
 import atexit
 import csv
 from datetime import datetime, timezone
+import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
 import tempfile
 import time
 from typing import Any, Optional
+import zipfile
 
 import run_thog2_local_dashboard_base as _base
 from run_thog2_local_dashboard_base import *  # noqa: F401,F403
@@ -307,6 +310,279 @@ def _ncu_processing_download_files(state: Any) -> dict[str, str]:
     return files
 
 
+_LIFECYCLE_EVENTS = frozenset({
+    "admission_considered", "admission_deferred", "materialising", "available",
+    "critical_path_wait", "materialising_on_critical_path", "available_on_critical_path",
+    "consuming", "consumed", "pass_end_release", "materialisation_failed",
+    "main_materialisation_failed",
+})
+
+
+def _processing_capture_snapshot(state: Any, data: dict[str, Any]) -> dict[str, Any] | None:
+    capture = (data.get("metadata") or {}).get("capture") or {}
+    target_update = _safe_int(capture.get("optimizer_update"))
+    snapshots = state.reader.premat_snapshots()
+    if not snapshots:
+        return None
+    if target_update:
+        matching = [row for row in snapshots if _safe_int(row.get("optimizer_update")) == target_update]
+        if matching:
+            return dict(matching[-1])
+    return dict(snapshots[-1])
+
+
+def _processing_lifecycle_rows(snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not snapshot:
+        return []
+    rows = []
+    for source in snapshot.get("events", []) or []:
+        event = str(source.get("event", source.get("event_type", "")))
+        if event not in _LIFECYCLE_EVENTS and not event.startswith("deadline_"):
+            continue
+        exact = source.get("processing_capture_elapsed_ms")
+        fallback = source.get("elapsed_ms")
+        try:
+            capture_ms = float(exact if exact is not None else fallback)
+        except (TypeError, ValueError):
+            continue
+        candidate_sequence = source.get("candidate_sequence", "")
+        layer = source.get("layer_index", "")
+        family = str(source.get("family", ""))
+        job_id = (
+            f"p{source.get('pass_sequence', snapshot.get('pass_sequence', ''))}:c{candidate_sequence}"
+            if candidate_sequence not in (None, "")
+            else f"p{source.get('pass_sequence', snapshot.get('pass_sequence', ''))}:l{layer}:{family}"
+        )
+        rows.append({
+            "job_id": job_id,
+            "sequence": source.get("sequence", ""),
+            "pass_sequence": source.get("pass_sequence", snapshot.get("pass_sequence", "")),
+            "candidate_sequence": candidate_sequence,
+            "capture_time_ms": capture_ms,
+            "timing_basis": "capture_relative_host" if exact is not None else "pass_relative_legacy",
+            "event": event,
+            "layer": layer,
+            "family": family,
+            "owner": source.get("owner", ""),
+            "state": source.get("state", source.get("new_state", "")),
+            "decision": source.get("decision", ""),
+            "outcome": source.get("outcome", source.get("final_outcome", "")),
+            "reason": source.get("reason", source.get("admission_reason", "")),
+            "critical_path_miss": source.get("critical_path_miss", ""),
+            "queue_depth": source.get("queue_depth", ""),
+            "cumulative_charged_bytes": source.get("cumulative_charged_bytes", ""),
+            "process_allocated_bytes": source.get("process_allocated_bytes", ""),
+            "process_reserved_bytes": source.get("process_reserved_bytes", ""),
+            "device_free_bytes": source.get("device_free_bytes", ""),
+            "predicted_retained_bytes": source.get("predicted_retained_bytes", ""),
+            "predicted_materialisation_peak_bytes": source.get("predicted_materialisation_peak_bytes", ""),
+            "detail_json": json.dumps(source.get("detail", {}), separators=(",", ":"), sort_keys=True),
+        })
+    return rows
+
+
+def _processing_lifecycle_summary(
+    rows: list[dict[str, Any]],
+    interval_rows: Any = (),
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["job_id"]), []).append(row)
+    event_columns = {
+        "requested_ms": {"admission_considered"},
+        "admitted_ms": {"admission_considered"},
+        "submitted_ms": {"materialising"},
+        "available_ms": {"available", "available_on_critical_path"},
+        "deadline_ms": set(),
+        "wait_ms": {"critical_path_wait"},
+        "consuming_ms": {"consuming"},
+        "completed_ms": {"consumed"},
+        "discarded_ms": {"pass_end_release"},
+    }
+    result = []
+    for job_id, group in grouped.items():
+        ordered = sorted(group, key=lambda row: (float(row["capture_time_ms"]), _safe_int(row["sequence"])))
+        first = ordered[0]
+        summary = {
+            "job_id": job_id,
+            "pass_sequence": first["pass_sequence"],
+            "candidate_sequence": first["candidate_sequence"],
+            "layer": first["layer"],
+            "family": first["family"],
+            "timing_basis": first["timing_basis"],
+            "final_owner": next((row["owner"] for row in reversed(ordered) if row["owner"]), ""),
+            "final_outcome": next((row["outcome"] for row in reversed(ordered) if row["outcome"]), ""),
+            "critical_path_miss": any(str(row["critical_path_miss"]).lower() == "true" for row in ordered),
+        }
+        for column, names in event_columns.items():
+            candidates = [
+                float(row["capture_time_ms"]) for row in ordered
+                if row["event"] in names or (column == "deadline_ms" and str(row["event"]).startswith("deadline_"))
+            ]
+            if column == "admitted_ms":
+                candidates = [
+                    float(row["capture_time_ms"]) for row in ordered
+                    if row["event"] == "admission_considered" and str(row["decision"]) == "admit"
+                ]
+            summary[column] = min(candidates) if candidates else ""
+        gpu_intervals = [
+            interval for interval in (interval_rows or [])
+            if str(interval.get("operation", "")) == "materialize"
+            and str(interval.get("family", "")) == str(summary["family"])
+            and str(interval.get("layer", "")) == str(summary["layer"])
+        ]
+        premat_intervals = [row for row in gpu_intervals if str(row.get("owner", "")) == "PREMAT"]
+        chosen_intervals = premat_intervals or gpu_intervals
+        summary["gpu_start_ms"] = (
+            min(float(row["start_us"]) for row in chosen_intervals) / 1000.0
+            if chosen_intervals else ""
+        )
+        summary["gpu_end_ms"] = (
+            max(float(row["end_us"]) for row in chosen_intervals) / 1000.0
+            if chosen_intervals else ""
+        )
+        result.append(summary)
+    return result
+
+
+def _csv_bytes(rows: list[dict[str, Any]], fields: list[str]) -> bytes:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_bytes_if_changed(path: Path, payload: bytes) -> None:
+    try:
+        if path.is_file() and path.read_bytes() == payload:
+            return
+    except OSError:
+        pass
+    path.write_bytes(payload)
+
+
+def _materialize_paired_analysis(
+    state: Any,
+    companion_state: Any,
+    data: dict[str, Any],
+    selected_files: dict[str, str],
+    companion_files: dict[str, str],
+) -> dict[str, str]:
+    processing_directory = state.database_path.parent / "processing"
+    processing_directory.mkdir(parents=True, exist_ok=True)
+    snapshot = _processing_capture_snapshot(state, data)
+    lifecycle_rows = _processing_lifecycle_rows(snapshot)
+    lifecycle_summary = _processing_lifecycle_summary(lifecycle_rows, data.get("intervals", []))
+    lifecycle_name = "processing_premat_lifecycle_events.csv"
+    lifecycle_summary_name = "processing_premat_lifecycle_summary.csv"
+    lifecycle_fields = [
+        "job_id", "sequence", "pass_sequence", "candidate_sequence", "capture_time_ms",
+        "timing_basis", "event", "layer", "family", "owner", "state", "decision",
+        "outcome", "reason", "critical_path_miss", "queue_depth",
+        "cumulative_charged_bytes", "process_allocated_bytes", "process_reserved_bytes",
+        "device_free_bytes", "predicted_retained_bytes",
+        "predicted_materialisation_peak_bytes", "detail_json",
+    ]
+    lifecycle_summary_fields = [
+        "job_id", "pass_sequence", "candidate_sequence", "layer", "family", "timing_basis",
+        "final_owner", "final_outcome", "critical_path_miss", "requested_ms", "admitted_ms",
+        "submitted_ms", "gpu_start_ms", "gpu_end_ms", "available_ms", "deadline_ms", "wait_ms", "consuming_ms",
+        "completed_ms", "discarded_ms",
+    ]
+    generated_files = {
+        "lifecycle_events": lifecycle_name,
+        "lifecycle_summary": lifecycle_summary_name,
+        "pair_manifest": "processing_pair_manifest.json",
+        "paired_analysis": "processing_paired_analysis.zip",
+    }
+    lifecycle_payload = _csv_bytes(lifecycle_rows, lifecycle_fields)
+    lifecycle_summary_payload = _csv_bytes(lifecycle_summary, lifecycle_summary_fields)
+
+    candidate_files: list[tuple[str, Path, str]] = []
+    for namespace, owner_state, files in (
+        ("nsys", state, selected_files),
+        ("ncu", companion_state, companion_files),
+    ):
+        directory = owner_state.database_path.parent / "processing"
+        for key, filename in sorted(files.items()):
+            if key in {"bundle", "raw_trace", "raw_nsys", "raw_capture", "raw_ncu"}:
+                continue
+            path = directory / str(filename)
+            if path.is_file():
+                candidate_files.append((f"{namespace}/{path.name}", path, key))
+    input_signature = (
+        hashlib.sha256(lifecycle_payload).hexdigest(),
+        hashlib.sha256(lifecycle_summary_payload).hexdigest(),
+        tuple(
+            (archive_name, path.stat().st_mtime_ns, path.stat().st_size)
+            for archive_name, path, _key in candidate_files
+        ),
+    )
+    if (
+        getattr(state, "_instra_paired_analysis_input_signature", None) == input_signature
+        and all((processing_directory / filename).is_file() for filename in generated_files.values())
+    ):
+        return generated_files
+    _write_bytes_if_changed(
+        processing_directory / lifecycle_name,
+        lifecycle_payload,
+    )
+    _write_bytes_if_changed(
+        processing_directory / lifecycle_summary_name,
+        lifecycle_summary_payload,
+    )
+
+    included: list[tuple[str, Path, str]] = list(candidate_files)
+    included.extend((
+        (f"nsys/{lifecycle_name}", processing_directory / lifecycle_name, "lifecycle_events"),
+        (f"nsys/{lifecycle_summary_name}", processing_directory / lifecycle_summary_name, "lifecycle_summary"),
+    ))
+    manifest = {
+        "schema_version": 1,
+        "pair_key": pair_key_text(_processing_pair_key(state)),
+        "nsys_artifact": _state_artifact_name(state),
+        "ncu_artifact": _state_artifact_name(companion_state),
+        "lifecycle_timing_basis": (
+            lifecycle_rows[0]["timing_basis"] if lifecycle_rows else "unavailable"
+        ),
+        "files": [
+            {
+                "path": archive_name,
+                "kind": key,
+                "bytes": path.stat().st_size,
+                "sha256": _sha256(path),
+            }
+            for archive_name, path, key in included
+        ],
+    }
+    manifest_name = "processing_pair_manifest.json"
+    manifest_path = processing_directory / manifest_name
+    _write_bytes_if_changed(
+        manifest_path,
+        json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"),
+    )
+    bundle_name = "processing_paired_analysis.zip"
+    bundle_path = processing_directory / bundle_name
+    signature = tuple((entry["path"], entry["sha256"]) for entry in manifest["files"])
+    if getattr(state, "_instra_paired_analysis_signature", None) != signature or not bundle_path.is_file():
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(manifest_path, arcname=manifest_name)
+            for archive_name, path, _key in included:
+                archive.write(path, arcname=archive_name)
+        state._instra_paired_analysis_signature = signature
+    state._instra_paired_analysis_input_signature = input_signature
+    return generated_files
+
+
 def _processing_payload_with_ncu_companion(self):
     payload = _attach_own_hard_constraints(self, _original_processing_payload(self))
     if not payload.get("available") or not payload.get("trace_available"):
@@ -336,7 +612,21 @@ def _processing_payload_with_ncu_companion(self):
     companion_files = dict(companion_metadata.get("files", {}) or {})
     companion_files.update(dict(companion_data.get("premat_compatibility_files", {}) or {}))
     companion_files.update(_ncu_processing_download_files(companion_state))
+    generated_files = _materialize_paired_analysis(
+        self,
+        companion_state,
+        data,
+        selected_files,
+        companion_files,
+    )
+    selected_files.update(generated_files)
     merged_data = dict(data)
+    lifecycle_rows = _processing_lifecycle_rows(_processing_capture_snapshot(self, data))
+    merged_data["premat_lifecycle"] = lifecycle_rows
+    merged_data["premat_lifecycle_summary"] = _processing_lifecycle_summary(
+        lifecycle_rows,
+        data.get("intervals", []),
+    )
     merged_data["premat_compatibility"] = compatibility
     merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])
     merged_data["premat_compatibility_files"] = dict(

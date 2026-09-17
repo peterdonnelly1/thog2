@@ -139,6 +139,10 @@ const operations_source = fs.readFileSync(
   "sheet/local_dashboard_assets/dashboard_processing_operations_final.js",
   "utf8",
 );
+const resource_source = fs.readFileSync(
+  "sheet/local_dashboard_assets/dashboard_processing_resource_attribution.js",
+  "utf8",
+);
 vm.runInNewContext(source, sandbox);
 const hooks = sandbox.window.processing_user_fix_test_hooks;
 
@@ -156,6 +160,16 @@ assert.ok(Math.abs(names[1].y - 1.36) < 1e-9);
 const files = hooks.download_entries({json:"compat.json", bundle:"bundle.zip", duplicate:"bundle.zip"});
 assert.deepEqual(Array.from(files, item => item[1]), ["bundle.zip", "compat.json"]);
 assert.match(hooks.processing_download_url_for_run("ncu id", "compat.json"), /run=ncu%20id/);
+const evidence_files = hooks.download_entries({
+  raw_trace:"trace.nsys-rep", metric_audit:"audit.csv", paired_analysis:"paired.zip",
+});
+assert.deepEqual(Array.from(evidence_files, item => item[0]), ["paired_analysis", "metric_audit", "raw_trace"]);
+
+assert.match(resource_source, /Active-SM allocated warp slots/);
+assert.match(resource_source, /Idle-SM warp-slot headroom/);
+assert.match(resource_source, /Nsight metric:/);
+assert.match(resource_source, /processing_gpu_link_inspection\(payload\)/);
+assert.match(resource_source, /payload\.premat_lifecycle/);
 
 hooks.render_paired_downloads({
   paired_processing_downloads:{

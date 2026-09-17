@@ -8,7 +8,7 @@ import time
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
-from .premat_processing import processing_operation_range                                                     # <<< THOG semantic processing ranges are inert outside the selected capture
+from .premat_processing import processing_capture_elapsed_ms, processing_operation_range                     # <<< THOG semantic processing ranges are inert outside the selected capture
 from torch import Tensor
 
 
@@ -3244,6 +3244,7 @@ class PrematRuntime:
                 if self._pass_start_ns is not None
                 else 0.0
             ),
+            "processing_capture_elapsed_ms": processing_capture_elapsed_ms(),
             "event": event,
             "event_type": event,
             "pass_sequence": self._pass_sequence,
@@ -3280,6 +3281,7 @@ class PrematRuntime:
         if candidate is not None:
             payload.update(
                 {
+                    "candidate_sequence": candidate.sequence,
                     "layer_index": candidate.layer_index,
                     "family": candidate.family,
                     "target_order_position": candidate.order_position,

@@ -347,13 +347,14 @@ Object.assign(chart_titles, {
 const processing_gpu_resource_specs = Object.freeze([
   {key: "tensor_active_pct", label: "Tensor Active", visible: true, colour: "#6f42c1"},
   {key: "sm_issue_pct", label: "SM Issue", visible: true, colour: "#0067c5"},
-  {key: "compute_warps_in_flight_pct", label: "Compute Warps In Flight", visible: true, colour: "#00a6d6"},
+  {key: "compute_warps_in_flight_pct", label: "Compute warp residency", visible: true, colour: "#00a6d6"},
   {key: "dram_read_pct", label: "DRAM read", visible: true, colour: "#f39c12"},
   {key: "dram_write_pct", label: "DRAM write", visible: true, colour: "#9b59b6"},
-  {key: "active_sm_unused_warp_slots_pct", label: "Unused warp slots", visible: false, colour: "#ff1493"},
+  {key: "active_sm_unused_warp_slots_pct", label: "Active-SM allocated warp slots", visible: true, colour: "#ff1493", invert: true},
+  {key: "idle_sm_unused_warp_slots_pct", label: "Idle-SM warp-slot headroom", visible: false, colour: "#c45a00"},
   {key: "l2_active_pct", label: "L2 active", visible: false, colour: "#7f8c8d"},
   {key: "sm_active_pct", label: "SM Active", visible: false, colour: "#4d79a7"},
-  {key: "gr_active_pct", label: "GR/compute active", visible: false, colour: "#8c6d5a"},
+  {key: "gr_active_pct", label: "GR engine active", visible: false, colour: "#8c6d5a"},
 ]);
 
 const processing_gpu_bar_palette = Object.freeze([
@@ -413,6 +414,13 @@ function processing_gpu_inject_style() {
       background:#f7f7f8; color:inherit; cursor:pointer; font-weight:700;
     }
     .processing-throughput-z-button:hover { background:#eceafc; border-color:#b8afea; color:#4732b7; }
+    .processing-resource-detail {
+      flex:0 0 auto; display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+      gap:4px 14px; padding:7px 12px; border-bottom:1px solid rgba(127,127,127,.16);
+      background:rgba(75,92,120,.045); font-size:11px; line-height:1.35;
+    }
+    .processing-resource-detail[hidden] { display:none !important; }
+    .processing-resource-detail strong { color:#222; }
   `;
   document.head.appendChild(style);
 }
@@ -498,6 +506,13 @@ processing_resource_ensure_card = function() {
     clock_shell.innerHTML = '<div class="processing-plot plot-mount" id="processing_resource_clock_plot"></div>';
     body.appendChild(clock_shell);
   }
+  if (body && !by_id("processing_resource_detail")) {
+    const detail = document.createElement("div");
+    detail.id = "processing_resource_detail";
+    detail.className = "processing-resource-detail";
+    detail.hidden = true;
+    body.insertBefore(detail, body.firstChild);
+  }
   if (body && !by_id("processing_resource_compatibility_plot")) {
     const compatibility_shell = document.createElement("div");
     compatibility_shell.className = "processing-plot-shell processing-resource-compat-shell";
@@ -515,12 +530,13 @@ processing_resource_ensure_card = function() {
   return card;
 };
 
-function processing_gpu_resource_trace(rows, pane, spec, showlegend) {
+function processing_gpu_resource_trace(rows, pane, spec, showlegend, metric_catalog) {
   const x = [];
   const y = [];
   const hover = [];
   for (const row of rows) {
-    const value = processing_resource_number(row[spec.key]);
+    const raw_value = processing_resource_number(row[spec.key]);
+    const value = raw_value === null ? null : (spec.invert ? 100 - raw_value : raw_value);
     if (!pane.states.has(String(row.attribution_state)) || value === null) {
       x.push(null); y.push(null); hover.push("");
       continue;
@@ -531,6 +547,7 @@ function processing_gpu_resource_trace(rows, pane, spec, showlegend) {
     hover.push(
       `${time_ms.toFixed(3)} ms<br>${processing_escape(row.attribution_state)}<br>${processing_resource_context(row)}<br>`
       + `${processing_escape(spec.label)}: ${value.toFixed(1)}%<br>`
+      + `Nsight metric: ${processing_escape(metric_catalog?.[spec.key]?.nsight_name || "unavailable")}<br>`
       + `MAIN coverage ${Number(row.main_coverage_pct || 0).toFixed(1)}% · PREMAT coverage ${Number(row.premat_coverage_pct || 0).toFixed(1)}%`
     );
   }
@@ -685,10 +702,12 @@ async function processing_resource_render(payload) {
   processing_resource_update_idle_summary(payload);
   const panes = processing_resource_panes(rows);
   const traces = [];
+  const metric_catalog = payload.metadata?.metric_catalog || {};
   for (const spec of processing_gpu_resource_specs) {
+    if (metric_catalog[spec.key] && metric_catalog[spec.key].available === false) continue;
     let legend_written = false;
     for (const pane of panes) {
-      const trace = processing_gpu_resource_trace(rows, pane, spec, !legend_written);
+      const trace = processing_gpu_resource_trace(rows, pane, spec, !legend_written, metric_catalog);
       if (!trace) continue;
       traces.push(trace);
       legend_written = true;
@@ -725,6 +744,7 @@ async function processing_resource_render(payload) {
   });
   await processing_gpu_render_compatibility(payload);
   processing_gpu_link_time_axes();
+  processing_gpu_link_inspection(payload);
   processing_gpu_schedule_resize();
 }
 
@@ -748,6 +768,107 @@ function processing_gpu_link_time_axes() {
   }
 }
 processing_resource_link_time_axes = processing_gpu_link_time_axes;
+
+function processing_gpu_point_time(point) {
+  if (Array.isArray(point?.customdata) && Number.isFinite(Number(point.customdata[6])) && Number.isFinite(Number(point.customdata[7]))) {
+    return (Number(point.customdata[6]) + Number(point.customdata[7])) / 2;
+  }
+  const base = Number(point?.base);
+  const width = Number(point?.x);
+  if (Number.isFinite(base) && Number.isFinite(width)) return base + width / 2;
+  const x = Number(point?.x);
+  return Number.isFinite(x) ? x : null;
+}
+
+function processing_gpu_set_linked_cursor(time_ms, selected) {
+  const mounts = [
+    by_id("processing_timeline_plot"), by_id("processing_resource_plot"),
+    by_id("processing_resource_clock_plot"), by_id("processing_resource_compatibility_plot"),
+  ].filter(mount => mount && mount.dataset.plotReady === "true" && mount.offsetParent !== null);
+  for (const mount of mounts) {
+    const shapes = [...(mount.layout?.shapes || [])].filter(shape => shape?.name !== "processing-linked-cursor");
+    if (Number.isFinite(time_ms)) shapes.push({
+      name: "processing-linked-cursor", type: "line", xref: "x", yref: "paper",
+      x0: time_ms, x1: time_ms, y0: 0, y1: 1,
+      line: {color: selected ? "#171717" : "rgba(23,23,23,.55)", width: selected ? 2 : 1, dash: selected ? "solid" : "dot"},
+      layer: "above",
+    });
+    Plotly.relayout(mount, {shapes});
+  }
+}
+
+function processing_gpu_selected_detail(payload, time_ms) {
+  const detail = by_id("processing_resource_detail");
+  if (!detail) return;
+  const rows = Array.isArray(payload.stream_resources) ? payload.stream_resources : [];
+  const sample = rows.find(row => Number(row.sample_start_us) / 1000 <= time_ms && Number(row.sample_end_us) / 1000 >= time_ms)
+    || rows.reduce((best, row) => !best || Math.abs(Number(row.time_us) / 1000 - time_ms) < Math.abs(Number(best.time_us) / 1000 - time_ms) ? row : best, null);
+  const interval = (payload.intervals || []).find(row => Number(row.start_us) / 1000 <= time_ms && Number(row.end_us) / 1000 >= time_ms && String(row.owner) === "MAIN")
+    || (payload.intervals || []).find(row => Number(row.start_us) / 1000 <= time_ms && Number(row.end_us) / 1000 >= time_ms);
+  const compatibility = interval ? processing_gpu_matching_compatibility(processing_gpu_compatibility_rows(payload), interval) : null;
+  const operation_stats = interval ? (payload.operation_resource_stats || []).filter(row => (
+    String(row.op_id) === String(interval.op_id)
+    && String(row.owner) === String(interval.owner)
+  )) : [];
+  const metric_catalog = payload.metadata?.metric_catalog || {};
+  const metrics = processing_gpu_resource_specs.flatMap(spec => {
+    const raw = processing_resource_number(sample?.[spec.key]);
+    if (raw === null || metric_catalog[spec.key]?.available === false) return [];
+    const value = spec.invert ? 100 - raw : raw;
+    return [`${spec.label} ${value.toFixed(1)}%`];
+  });
+  const lifecycle = (payload.premat_lifecycle || []).filter(row => Math.abs(Number(row.capture_time_ms) - time_ms) <= 0.25).map(row => row.event);
+  const fragments = [
+    `<span><strong>${time_ms.toFixed(3)} ms</strong> · ${processing_escape(sample?.attribution_state || "no sampled attribution")}</span>`,
+    `<span>${processing_resource_context(sample || {})}</span>`,
+    `<span>${processing_escape(metrics.join(" · ") || "No finite resource metric in this bin")}</span>`,
+  ];
+  if (compatibility) fragments.push(`<span>NCU: <strong>${processing_escape(compatibility.compatibility_class || "—")}</strong> · limiter ${processing_escape(compatibility.limiting_resource || "—")} · MAIN ${Number(compatibility.main_registers_per_block || 0).toLocaleString()} regs/${Number(compatibility.main_shared_mem_bytes || 0).toLocaleString()} B smem · PREMAT ${Number(compatibility.premat_registers_per_block || 0).toLocaleString()} regs/${Number(compatibility.premat_shared_mem_bytes || 0).toLocaleString()} B smem</span>`);
+  if (operation_stats.length) fragments.push(`<span>Interval weighted: ${processing_escape(operation_stats.slice(0, 6).map(row => {
+    const spec = processing_gpu_resource_specs.find(candidate => candidate.key === row.metric);
+    const label = spec?.label || row.metric;
+    if (spec?.invert) return `${label} mean ${(100 - Number(row.mean)).toFixed(1)}, range ${(100 - Number(row.max)).toFixed(1)}–${(100 - Number(row.min)).toFixed(1)}`;
+    return `${label} mean ${Number(row.mean).toFixed(1)}, p95 ${Number(row.p95).toFixed(1)}`;
+  }).join(" · "))}</span>`);
+  if (lifecycle.length) fragments.push(`<span>Lifecycle: ${processing_escape([...new Set(lifecycle)].join(", "))}</span>`);
+  detail.innerHTML = fragments.join("");
+  detail.hidden = false;
+}
+
+function processing_gpu_link_inspection(payload) {
+  processing_view.processing_payload = payload;
+  const mounts = [
+    by_id("processing_timeline_plot"), by_id("processing_resource_plot"),
+    by_id("processing_resource_clock_plot"), by_id("processing_resource_compatibility_plot"),
+  ].filter(mount => mount && mount.dataset.plotReady === "true");
+  for (const mount of mounts) {
+    if (mount._processing_inspection_handlers) {
+      for (const [name, handler] of Object.entries(mount._processing_inspection_handlers)) mount.removeListener?.(name, handler);
+    }
+    const hover = event => {
+      const time_ms = processing_gpu_point_time(event?.points?.[0]);
+      if (time_ms === null) return;
+      processing_view.processing_hover_time = time_ms;
+      if (processing_view.processing_hover_frame) return;
+      processing_view.processing_hover_frame = requestAnimationFrame(() => {
+        processing_view.processing_hover_frame = 0;
+        processing_gpu_set_linked_cursor(processing_view.processing_hover_time, false);
+      });
+    };
+    const unhover = () => processing_gpu_set_linked_cursor(processing_view.processing_selected_time, true);
+    const click = event => {
+      const time_ms = processing_gpu_point_time(event?.points?.[0]);
+      if (time_ms === null) return;
+      processing_view.processing_selected_time = time_ms;
+      processing_gpu_set_linked_cursor(time_ms, true);
+      processing_gpu_selected_detail(processing_view.processing_payload || payload, time_ms);
+    };
+    mount.on("plotly_hover", hover);
+    mount.on("plotly_unhover", unhover);
+    mount.on("plotly_click", click);
+    mount._processing_inspection_handlers = {plotly_hover: hover, plotly_unhover: unhover, plotly_click: click};
+  }
+}
 
 function processing_gpu_operation_colour(operation, owner) {
   if (String(operation) === "materialize") return "#ff1493";
@@ -781,9 +902,42 @@ async function processing_render_timeline(payload) {
       customdata: rows.map(row => [
         row.operation, row.family,
         row.layer === "" || row.layer === null || row.layer === undefined ? "—" : Number(row.layer) + 1,
-        row.kernel_name, row.owner_source,
+        row.kernel_name, row.owner_source, row.op_id, Number(row.start_us) / 1000.0,
+        Number(row.end_us) / 1000.0, row.owner,
       ]),
       hovertemplate: "%{y} · %{customdata[0]} · %{customdata[1]} · L%{customdata[2]}<br>%{customdata[3]}<br>%{x:.4f} ms<extra></extra>",
+    });
+  }
+  const lifecycle = Array.isArray(payload.premat_lifecycle) ? [...payload.premat_lifecycle] : [];
+  if (lifecycle.length && !owners.includes("PREMAT")) owners.push("PREMAT");
+  for (const summary of payload.premat_lifecycle_summary || []) {
+    for (const [field, event] of [["gpu_start_ms", "gpu_start"], ["gpu_end_ms", "gpu_end"]]) {
+      if (summary[field] === "" || summary[field] === null || summary[field] === undefined || !Number.isFinite(Number(summary[field]))) continue;
+      lifecycle.push({...summary, event, capture_time_ms:Number(summary[field]), owner:"PREMAT", state:"GPU", outcome:summary.final_outcome, reason:"exact NSYS CUDA interval"});
+    }
+  }
+  const lifecycle_groups = new Map();
+  for (const row of lifecycle) {
+    const event = String(row.event || "event");
+    const category = event.startsWith("deadline_") ? "deadline" : event;
+    if (!lifecycle_groups.has(category)) lifecycle_groups.set(category, []);
+    lifecycle_groups.get(category).push(row);
+  }
+  const lifecycle_colours = {
+    admission_considered: "#607d8b", admission_deferred: "#d98b2b", materialising: "#ff1493",
+    gpu_start: "#c21875", gpu_end: "#8e24aa", available: "#2e9d57", deadline: "#222", critical_path_wait: "#d63c3c",
+    consuming: "#0067c5", consumed: "#6f42c1", pass_end_release: "#8c8c8c",
+  };
+  for (const [category, rows] of lifecycle_groups) {
+    traces.push({
+      type: "scatter", mode: "markers", name: `lifecycle ${category}`,
+      x: rows.map(row => Number(row.capture_time_ms)),
+      y: rows.map(row => owners.includes(String(row.owner || "").toUpperCase()) ? String(row.owner).toUpperCase() : "PREMAT"),
+      marker: {size: 8, symbol: category === "deadline" ? "triangle-down" : "diamond", color: lifecycle_colours[category] || "#555", line: {color: "#fff", width: 1}},
+      customdata: rows.map(row => [row.event, row.family, row.layer === "" ? "—" : Number(row.layer) + 1, row.outcome, row.reason, row.timing_basis, row.job_id]),
+      hovertemplate: "%{customdata[0]} · %{customdata[1]} · L%{customdata[2]}<br>%{customdata[3]} · %{customdata[4]}<br>%{customdata[5]} · %{customdata[6]}<extra></extra>",
+      legendgroup: "lifecycle",
+      visible: ["materialising", "gpu_start", "gpu_end", "available", "deadline", "critical_path_wait", "consuming", "consumed"].includes(category) ? true : "legendonly",
     });
   }
   const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
@@ -794,6 +948,7 @@ async function processing_render_timeline(payload) {
     yaxis: {categoryorder: "array", categoryarray: owners, automargin: true},
   });
   processing_gpu_link_time_axes();
+  processing_gpu_link_inspection(payload);
 }
 
 function processing_gpu_ensure_throughput_controls() {

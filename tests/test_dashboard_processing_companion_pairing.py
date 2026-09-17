@@ -156,4 +156,38 @@ def test_ncu_download_manifest_includes_original_report_and_csv_exports(tmp_path
         "ncu_raw_csv": "processing_ncu_raw.csv",
         "ncu_semantic_csv": "processing_ncu_semantic.csv",
     }
+
+
+def test_lifecycle_rows_prefer_capture_relative_time_and_retain_legacy_fallback() -> None:
+    snapshot = {
+        "pass_sequence": 7,
+        "events": [
+            {
+                "sequence": 1,
+                "candidate_sequence": 3,
+                "event": "materialising",
+                "processing_capture_elapsed_ms": 2.5,
+                "elapsed_ms": 2.0,
+                "layer_index": 4,
+                "family": "DOWN",
+                "owner": "premat",
+            },
+            {
+                "sequence": 2,
+                "candidate_sequence": 3,
+                "event": "deadline_down",
+                "elapsed_ms": 3.0,
+                "layer_index": 4,
+                "family": "DOWN",
+            },
+        ],
+    }
+    rows = dashboard._processing_lifecycle_rows(snapshot)
+    assert rows[0]["capture_time_ms"] == 2.5
+    assert rows[0]["timing_basis"] == "capture_relative_host"
+    assert rows[0]["job_id"] == "p7:c3"
+    assert rows[1]["timing_basis"] == "pass_relative_legacy"
+    summary = dashboard._processing_lifecycle_summary(rows)
+    assert summary[0]["submitted_ms"] == 2.5
+    assert summary[0]["deadline_ms"] == 3.0
 # ^^^ THOG

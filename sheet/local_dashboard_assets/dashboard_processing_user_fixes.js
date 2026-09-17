@@ -32,12 +32,18 @@
   }
 
   const download_order = [
-    "bundle", "samples", "stream_resources", "intervals", "summary", "metadata",
+    "paired_analysis", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
+    "lifecycle_events", "lifecycle_summary", "operation_resource_stats",
+    "attribution_resource_stats", "metric_audit", "summary", "metadata",
     "raw_trace", "raw_ncu", "ncu_raw_csv", "ncu_semantic_csv", "kernel_resources", "csv", "json",
   ];
   const download_labels = {
-    bundle:"Bundle ZIP", samples:"Samples CSV", stream_resources:"Stream resources",
+    paired_analysis:"Paired analysis ZIP", pair_manifest:"Pair manifest", bundle:"Bundle ZIP",
+    samples:"Samples CSV", stream_resources:"Stream resources",
     intervals:"Intervals CSV", summary:"Summary CSV", metadata:"Metadata JSON",
+    lifecycle_events:"Lifecycle events", lifecycle_summary:"Lifecycle summary",
+    operation_resource_stats:"Operation resource stats",
+    attribution_resource_stats:"Attribution resource stats", metric_audit:"Metric audit",
     raw_trace:"Raw nsys", raw_ncu:"Raw ncu", ncu_raw_csv:"Raw metrics CSV",
     ncu_semantic_csv:"Semantic metrics CSV", kernel_resources:"NCU resources",
     csv:"Compatibility CSV", json:"Compatibility JSON",
@@ -169,15 +175,19 @@
     }
   }
 
+  const geometry_settle_timers = new WeakMap();
   function settle_card_geometry(card) {
-    for (const delay of [0, 50, 160, 360]) {
-      setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resize_card_plots(card))), delay);
-    }
+    if (!card) return;
+    window.clearTimeout(geometry_settle_timers.get(card));
+    requestAnimationFrame(() => resize_card_plots(card));
+    geometry_settle_timers.set(card, window.setTimeout(() => resize_card_plots(card), 120));
   }
 
   let comparison_refresh_timer = null;
   let comparison_refresh_generation = 0;
   let last_comparison_fingerprint = "";
+  let comparison_refresh_in_flight = false;
+  let comparison_refresh_pending = false;
 
   function comparison_fingerprint() {
     const runs = typeof processing_throughput_workspace_runs === "function"
@@ -196,17 +206,30 @@
     comparison_refresh_timer = window.setTimeout(async () => {
       const fingerprint = comparison_fingerprint();
       if (!force && fingerprint === last_comparison_fingerprint) return;
-      const generation = ++comparison_refresh_generation;
-      const payload = processing_view.throughput_last_payload;
-      if (payload) await processing_render_throughput(payload);
-      if (generation !== comparison_refresh_generation) return;
-      await processing_render_update_timing(true);
-      if (generation !== comparison_refresh_generation) return;
+      if (comparison_refresh_in_flight) {
+        comparison_refresh_pending = true;
+        return;
+      }
+      comparison_refresh_in_flight = true;
       last_comparison_fingerprint = fingerprint;
-      decorate_timing_timeline();
-      settle_card_geometry(document.querySelector('.chart-card[data-chart="processing_throughput"]'));
-      settle_card_geometry(by_id("processing_update_timing_timeline_card"));
-    }, 35);
+      const generation = ++comparison_refresh_generation;
+      try {
+        const payload = processing_view.throughput_last_payload;
+        if (payload) await processing_render_throughput(payload);
+        if (generation !== comparison_refresh_generation) return;
+        await processing_render_update_timing(true);
+        if (generation !== comparison_refresh_generation) return;
+        decorate_timing_timeline();
+        settle_card_geometry(document.querySelector('.chart-card[data-chart="processing_throughput"]'));
+        settle_card_geometry(by_id("processing_update_timing_timeline_card"));
+      } finally {
+        comparison_refresh_in_flight = false;
+        if (comparison_refresh_pending) {
+          comparison_refresh_pending = false;
+          schedule_comparison_refresh(false);
+        }
+      }
+    }, 120);
   }
 
   const render_runs_before_processing_user_fixes = render_runs;

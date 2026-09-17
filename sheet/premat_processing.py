@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, Sequence
 import zipfile
 
@@ -23,10 +24,13 @@ from sheet.processing_resource_attribution import (
     PROCESSING_STREAM_RESOURCE_FIELDS,
     build_stream_resource_rows,
     classify_processing_operations,
+    duration_weighted_metric_statistics,
     infer_kernel_owners,
     main_idle_intervals,
     merge_intervals,
     metric_catalog,
+    match_processing_metric_name,
+    metric_display_value,
 )
 
 
@@ -37,7 +41,7 @@ PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ = 10_000
 PROCESSING_DEFAULT_CAPTURE_UPDATE = 1
 PROCESSING_MIN_CAPTURE_FREQUENCY_HZ = 10
 PROCESSING_MAX_CAPTURE_FREQUENCY_HZ = 200_000
-PROCESSING_SCHEMA_VERSION = 2
+PROCESSING_SCHEMA_VERSION = 3
 PROCESSING_CAPTURE_RANGE = "THOG2_PREMAT_PROCESSING_CAPTURE"
 PROCESSING_OPERATION_PREFIX = "THOG2_PROCESSING"
 _PROCESSING_CHILD_ENV = "THOG2_PREMAT_PROCESSING_UNDER_NSYS"
@@ -47,6 +51,7 @@ _PROCESSING_CAPTURE_METADATA_ENV = "THOG2_PREMAT_PROCESSING_CAPTURE_METADATA"
 _capture_active = False
 _capture_done = False
 _capture_stack_depth = 0
+_capture_start_ns: Optional[int] = None
 
 
 def validate_processing_configuration(
@@ -373,6 +378,13 @@ def processing_operation_pop(pushed: bool) -> None:
         _capture_stack_depth = max(0, _capture_stack_depth - 1)
 
 
+def processing_capture_elapsed_ms() -> Optional[float]:
+    """Return host time relative to the active NSYS capture range."""
+    if not _capture_active or _capture_start_ns is None:
+        return None
+    return max(0.0, (time.perf_counter_ns() - _capture_start_ns) / 1_000_000.0)
+
+
 @contextmanager
 def processing_operation_range(
     owner: str,
@@ -399,7 +411,7 @@ def processing_capture_scope(
     micro_step: int,
     device: Any,
 ) -> Iterator[None]:
-    global _capture_active, _capture_done, _capture_stack_depth
+    global _capture_active, _capture_done, _capture_stack_depth, _capture_start_ns
     selected = should_capture_processing_forward(
         enabled=enabled,
         completed_updates=completed_updates,
@@ -429,6 +441,7 @@ def processing_capture_scope(
         destination.write_text(json.dumps(metadata, indent=2, sort_keys=True))
     _capture_active = True
     _capture_stack_depth = 0
+    _capture_start_ns = time.perf_counter_ns()
     _nvtx_push(PROCESSING_CAPTURE_RANGE)
     try:
         yield
@@ -439,6 +452,7 @@ def processing_capture_scope(
             _capture_stack_depth -= 1
         _nvtx_pop()
         _capture_active = False
+        _capture_start_ns = None
         _capture_done = True
 
 
@@ -605,14 +619,11 @@ def _metric_rows(
     selected: Dict[int, str] = {}
     mapping: Dict[str, str] = {}
     for identifier, name in names.items():
-        lower = name.lower()
-        for key, specification in PROCESSING_METRIC_SPECS.items():
-            if key in mapping:
-                continue
-            if any(str(pattern).lower() in lower for pattern in specification["patterns"]):
-                selected[identifier] = key
-                mapping[key] = name
-                break
+        key = match_processing_metric_name(name)
+        if key is None or key in mapping:
+            continue
+        selected[identifier] = key
+        mapping[key] = name
     available_metric_names = sorted(set(names.values()))
     if not selected:
         return [], mapping, available_metric_names
@@ -630,7 +641,9 @@ def _metric_rows(
             continue
         row = samples_by_time.setdefault(int(sample_time), {"timestamp": int(sample_time)})
         try:
-            row[key] = float(raw_value)
+            converted = metric_display_value(key, raw_value)
+            if converted is not None:
+                row[key] = converted
         except (TypeError, ValueError):
             continue
     return list(samples_by_time.values()), mapping, available_metric_names
@@ -743,6 +756,94 @@ def _mean_metric_intervals(
     return sum(values) / len(values) if values else None
 
 
+def _operation_resource_statistics(
+    stream_rows: Sequence[Mapping[str, Any]],
+    interval_rows: Sequence[Mapping[str, Any]],
+) -> list[Dict[str, Any]]:
+    groups: Dict[tuple[Any, ...], list[Mapping[str, Any]]] = {}
+    for index, row in enumerate(interval_rows):
+        raw_op_id = row.get("op_id")
+        identity = (
+            str(row.get("owner", "UNKNOWN")),
+            str(row.get("operation", "misc")),
+            str(row.get("family", "")),
+            row.get("layer", ""),
+            raw_op_id if raw_op_id not in (None, "") else f"kernel-{index + 1}",
+        )
+        groups.setdefault(identity, []).append(row)
+    result: list[Dict[str, Any]] = []
+    for identity, rows in groups.items():
+        owner, operation, family, layer, op_id = identity
+        intervals = [(float(row["start_us"]), float(row["end_us"])) for row in rows]
+        for metric_key in PROCESSING_METRIC_FIELDS:
+            stats = duration_weighted_metric_statistics(stream_rows, metric_key, intervals)
+            if not stats["sample_count"]:
+                continue
+            result.append({
+                "owner": owner,
+                "operation": operation,
+                "family": family,
+                "layer": layer,
+                "op_id": op_id,
+                "start_us": min(left for left, _right in intervals),
+                "end_us": max(right for _left, right in intervals),
+                "duration_us": _interval_duration(intervals),
+                "metric": metric_key,
+                **stats,
+            })
+    return result
+
+
+def _attribution_resource_statistics(
+    stream_rows: Sequence[Mapping[str, Any]],
+) -> list[Dict[str, Any]]:
+    result: list[Dict[str, Any]] = []
+    states = sorted({str(row.get("attribution_state", "")) for row in stream_rows})
+    for state in states:
+        rows = [row for row in stream_rows if str(row.get("attribution_state", "")) == state]
+        intervals = [
+            (float(row["sample_start_us"]), float(row["sample_end_us"]))
+            for row in rows
+        ]
+        for metric_key in PROCESSING_METRIC_FIELDS:
+            stats = duration_weighted_metric_statistics(rows, metric_key, intervals)
+            if stats["sample_count"]:
+                result.append({"attribution_state": state, "metric": metric_key, **stats})
+    return result
+
+
+def _metric_audit_rows(
+    sample_rows: Sequence[Mapping[str, Any]],
+    metric_mapping: Mapping[str, str],
+) -> list[Dict[str, Any]]:
+    result: list[Dict[str, Any]] = []
+    for key, specification in PROCESSING_METRIC_SPECS.items():
+        values = []
+        for row in sample_rows:
+            try:
+                value = float(row.get(key))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        mapped = str(metric_mapping.get(key, ""))
+        result.append({
+            "canonical_name": key,
+            "nsight_name": mapped,
+            "unit": str(specification["unit"]),
+            "required": bool(specification["required"]),
+            "available": bool(mapped and values),
+            "status": "available" if mapped and values else ("non_finite" if mapped else "not_captured"),
+            "matching": "exact",
+            "transform": str(specification.get("transform", "identity")),
+            "finite_sample_count": len(values),
+            "minimum": min(values) if values else None,
+            "maximum": max(values) if values else None,
+            "accepted_exact_names": ";".join(specification.get("exact_names", ())),
+        })
+    return result
+
+
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], fieldnames: Sequence[str]) -> None:
     with path.open("w", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
@@ -852,6 +953,15 @@ def normalize_nsys_sqlite(
         warnings.append(f"{other_kernels} CUDA kernel(s) belong to explicitly non-Main/non-PREMAT work")
 
     stream_resource_rows = build_stream_resource_rows(sample_rows, interval_rows, capture_duration_us)
+    sample_rows = [
+        {
+            "time_us": row.get("time_us", ""),
+            "sample_start_us": row.get("sample_start_us", ""),
+            "sample_end_us": row.get("sample_end_us", ""),
+            **{key: row.get(key, "") for key in PROCESSING_METRIC_FIELDS},
+        }
+        for row in stream_resource_rows
+    ]
     idle_rows = main_idle_intervals(interval_rows, capture_duration_us)
     premat_intervals = [
         (float(row["start_us"]), float(row["end_us"]))
@@ -882,22 +992,25 @@ def normalize_nsys_sqlite(
             "duration_ms": duration_us / 1000.0,
             "premat_overlap_ms": overlap_us / 1000.0,
             "premat_overlap_pct": 100.0 * overlap_us / duration_us if duration_us > 0.0 else 0.0,
-            "sm_active_pct_mean": _mean_metric_intervals(sample_rows, "sm_active_pct", merged_main_intervals),
-            "sm_issue_pct_mean": _mean_metric_intervals(sample_rows, "sm_issue_pct", merged_main_intervals),
-            "tensor_active_pct_mean": _mean_metric_intervals(sample_rows, "tensor_active_pct", merged_main_intervals),
-            "active_sm_unused_warp_slots_pct_mean": _mean_metric_intervals(
+            "sm_active_pct_mean": duration_weighted_metric_statistics(sample_rows, "sm_active_pct", merged_main_intervals)["mean"],
+            "sm_issue_pct_mean": duration_weighted_metric_statistics(sample_rows, "sm_issue_pct", merged_main_intervals)["mean"],
+            "tensor_active_pct_mean": duration_weighted_metric_statistics(sample_rows, "tensor_active_pct", merged_main_intervals)["mean"],
+            "active_sm_unused_warp_slots_pct_mean": duration_weighted_metric_statistics(
                 sample_rows, "active_sm_unused_warp_slots_pct", merged_main_intervals
-            ),
-            "compute_warps_in_flight_pct_mean": _mean_metric_intervals(
+            )["mean"],
+            "compute_warps_in_flight_pct_mean": duration_weighted_metric_statistics(
                 sample_rows, "compute_warps_in_flight_pct", merged_main_intervals
-            ),
-            "gpc_clock_mhz_mean": _mean_metric_intervals(
+            )["mean"],
+            "gpc_clock_mhz_mean": duration_weighted_metric_statistics(
                 sample_rows, "gpc_clock_mhz", merged_main_intervals
-            ),
+            )["mean"],
         })
 
     matrix_summary = _processing_matrix_summary(interval_rows)
-    sample_fields = ("time_us", *PROCESSING_METRIC_FIELDS)
+    operation_resource_stats = _operation_resource_statistics(stream_resource_rows, interval_rows)
+    attribution_resource_stats = _attribution_resource_statistics(stream_resource_rows)
+    metric_audit = _metric_audit_rows(sample_rows, metric_mapping)
+    sample_fields = ("time_us", "sample_start_us", "sample_end_us", *PROCESSING_METRIC_FIELDS)
     interval_fields = (
         "start_us", "end_us", "duration_us", "stream", "context_id", "owner", "owner_source",
         "layer", "family", "operation", "operation_source", "kernel_name", "op_id",
@@ -908,6 +1021,20 @@ def normalize_nsys_sqlite(
         "tensor_active_pct_mean", "active_sm_unused_warp_slots_pct_mean",
         "compute_warps_in_flight_pct_mean", "gpc_clock_mhz_mean",
     )
+    resource_stat_fields = (
+        "owner", "operation", "family", "layer", "op_id", "start_us", "end_us",
+        "duration_us", "metric", "sample_count", "covered_us", "mean", "min",
+        "p50", "p90", "p95", "max",
+    )
+    attribution_stat_fields = (
+        "attribution_state", "metric", "sample_count", "covered_us", "mean", "min",
+        "p50", "p90", "p95", "max",
+    )
+    metric_audit_fields = (
+        "canonical_name", "nsight_name", "unit", "required", "available", "status",
+        "matching", "transform", "finite_sample_count", "minimum", "maximum",
+        "accepted_exact_names",
+    )
     run_artifact = str((handoff or {}).get("run_name", "")).strip()
     if "/" in run_artifact or "\\" in run_artifact:
         run_artifact = Path(run_artifact).name
@@ -917,6 +1044,9 @@ def normalize_nsys_sqlite(
         "intervals": f"{prefix}processing_intervals.csv",
         "stream_resources": f"{prefix}processing_stream_resources.csv",
         "summary": f"{prefix}processing_summary.csv",
+        "operation_resource_stats": f"{prefix}processing_operation_resource_stats.csv",
+        "attribution_resource_stats": f"{prefix}processing_attribution_resource_stats.csv",
+        "metric_audit": f"{prefix}processing_metric_audit.csv",
         "metadata": f"{prefix}processing_metadata.json",
         "bundle": f"{prefix}processing_bundle.zip",
         "raw_trace": f"{prefix}processing_trace.nsys-rep",
@@ -929,6 +1059,21 @@ def normalize_nsys_sqlite(
         PROCESSING_STREAM_RESOURCE_FIELDS,
     )
     _write_csv(output_directory / processing_files["summary"], summary_rows, summary_fields)
+    _write_csv(
+        output_directory / processing_files["operation_resource_stats"],
+        operation_resource_stats,
+        resource_stat_fields,
+    )
+    _write_csv(
+        output_directory / processing_files["attribution_resource_stats"],
+        attribution_resource_stats,
+        attribution_stat_fields,
+    )
+    _write_csv(
+        output_directory / processing_files["metric_audit"],
+        metric_audit,
+        metric_audit_fields,
+    )
 
     attribution_counts: Dict[str, int] = {}
     for row in stream_resource_rows:
@@ -959,6 +1104,9 @@ def normalize_nsys_sqlite(
         "stream_resources": stream_resource_rows,
         "main_idle_intervals": idle_rows,
         "summary": summary_rows,
+        "operation_resource_stats": operation_resource_stats,
+        "attribution_resource_stats": attribution_resource_stats,
+        "metric_audit": metric_audit,
         "matrix_summary": matrix_summary,
     }
     (output_directory / "processing_data.json").write_text(
@@ -968,6 +1116,9 @@ def normalize_nsys_sqlite(
         for name in (
             processing_files["samples"], processing_files["intervals"],
             processing_files["stream_resources"], processing_files["summary"],
+            processing_files["operation_resource_stats"],
+            processing_files["attribution_resource_stats"],
+            processing_files["metric_audit"],
             processing_files["metadata"], "processing_data.json",
         ):
             archive.write(output_directory / name, arcname=name)
