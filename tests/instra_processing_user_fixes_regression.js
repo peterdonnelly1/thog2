@@ -197,6 +197,12 @@ assert.deepEqual(
 assert.match(operations_source, /processing_operations_reset_zoom/);
 assert.match(operations_source, /training_throughput_plot/);
 assert.match(operations_source, /processing_render_throughput_before_training_group/);
+assert.match(operations_source, /processing_view\.training_throughput_available/);
+assert.doesNotMatch(
+  operations_source,
+  /training_chart_group[\s\S]{0,1200}processing_view\.available/,
+  "Training throughput visibility still depends on Processing availability",
+);
 assert.match(operations_source, /#training_chart_group\s*\{[\s\S]*?min-height:0;/);
 assert.match(operations_source, /processing\.insertAdjacentElement\("afterend", group\)/);
 const chart_groups = new FakeElement("main");
@@ -208,6 +214,7 @@ chart_groups.appendChild(training_group);
 chart_groups.appendChild(processing_group);
 sandbox.processing_view.charts_tab_visible = true;
 sandbox.processing_view.available = true;
+sandbox.processing_view.training_throughput_available = true;
 sandbox.processing_view.trace_available = true;
 operation_hooks.sync_training_group_presentation();
 assert.deepEqual(chart_groups.children, [processing_group, training_group],

@@ -1051,6 +1051,7 @@ async function processing_render_throughput(payload) {
         : "%{x:.4g}<br>%{y:,.0f} tok/s<extra>%{fullData.name}</extra>",
     });
   }
+  processing_view.training_throughput_available = traces.length > 0;
   const maximum_points = Math.max(0, ...populated.map(entry => entry.rows.length));
   const workspace = app.workspace_mode === true;
   const x_titles = {step: "optimizer update", relative_wall: "relative wall time (hours)", relative_process: "relative process time (hours)", wall_time: "wall time"};

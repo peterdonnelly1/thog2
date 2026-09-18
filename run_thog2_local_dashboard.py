@@ -102,16 +102,29 @@ def _compatibility_file_has_rows(path: Path) -> bool:
     return isinstance(rows, list) and bool(rows)
 
 
-def _matching_ncu_companion(state: Any):
+def _matching_ncu_companion(
+    state: Any,
+    *,
+    excluded_ncu_run_ids: Optional[set[str]] = None,
+    preferred_ncu_run_id: Optional[str] = None,
+):
     catalog = getattr(state, "_instra_dashboard_catalog", None)
     pair_key = _processing_pair_key(state)
     if catalog is None or pair_key is None:
         return None
 
+    excluded = frozenset(str(value) for value in (excluded_ncu_run_ids or set()) if value)
+    preferred = str(preferred_ncu_run_id or "")
+    selection_key = (excluded, preferred)
     now = time.monotonic()
     cached = getattr(state, "_instra_ncu_companion_cache", None)
-    if cached is not None and now - float(cached[0]) < 2.0:
-        return cached[1]
+    if (
+        cached is not None
+        and len(cached) >= 3
+        and cached[1] == selection_key
+        and now - float(cached[0]) < 2.0
+    ):
+        return cached[2]
 
     selected_artifact = _state_artifact_name(state)
     selected_fallback = state.database_path.stat().st_mtime if state.database_path.exists() else 0.0
@@ -119,7 +132,7 @@ def _matching_ncu_companion(state: Any):
 
     _host, encoded = pair_key
     if not catalog.root.is_dir():
-        state._instra_ncu_companion_cache = (now, None)
+        state._instra_ncu_companion_cache = (now, selection_key, None)
         state._instra_ncu_companion_diagnostics = {}
         return None
 
@@ -153,6 +166,10 @@ def _matching_ncu_companion(state: Any):
             invalid.append((distance, -candidate_time, candidate_artifact))
             continue
 
+        candidate_run_id = str(status.get("dashboard_run_id", ""))
+        if candidate_run_id in excluded and candidate_run_id != preferred:
+            continue
+
         viable.append(
             (
                 distance,
@@ -163,7 +180,14 @@ def _matching_ncu_companion(state: Any):
             )
         )
 
-    result = min(viable, key=lambda item: (item[0], item[1])) if viable else None
+    if preferred:
+        preferred_candidates = [
+            item for item in viable
+            if str(item[3].get("dashboard_run_id", "")) == preferred
+        ]
+        result = preferred_candidates[0] if preferred_candidates else None
+    else:
+        result = min(viable, key=lambda item: (item[0], item[1])) if viable else None
     chosen_distance = result[0] if result is not None else float("inf")
     skipped = sorted(
         (item for item in invalid if item[0] < chosen_distance),
@@ -176,8 +200,10 @@ def _matching_ncu_companion(state: Any):
         "skipped_closer_invalid_artifacts": [item[2] for item in skipped],
         "viable_candidate_count": len(viable),
         "matching_invalid_candidate_count": len(invalid),
+        "excluded_claimed_candidate_count": len(excluded),
+        "preferred_ncu_run_id": preferred,
     }
-    state._instra_ncu_companion_cache = (now, result)
+    state._instra_ncu_companion_cache = (now, selection_key, result)
     return result
 
 
@@ -601,7 +627,12 @@ def _materialize_paired_analysis(
     return generated_files
 
 
-def _processing_payload_with_ncu_companion(self):
+def _processing_payload_with_ncu_companion(
+    self,
+    *,
+    excluded_ncu_run_ids: Optional[set[str]] = None,
+    preferred_ncu_run_id: Optional[str] = None,
+):
     payload = _attach_own_hard_constraints(self, _original_processing_payload(self))
     if not payload.get("available") or not payload.get("trace_available"):
         return payload
@@ -609,7 +640,11 @@ def _processing_payload_with_ncu_companion(self):
     if not isinstance(data, dict):
         return payload
 
-    companion = _matching_ncu_companion(self)
+    companion = _matching_ncu_companion(
+        self,
+        excluded_ncu_run_ids=excluded_ncu_run_ids,
+        preferred_ncu_run_id=preferred_ncu_run_id,
+    )
     if companion is None:
         return payload
     _distance, _neg_created_at, companion_state, companion_status, compatibility_path = companion
@@ -661,7 +696,11 @@ def _processing_payload_with_ncu_companion(self):
         "created_at": str(companion_status.get("created_at", "")),
         "host_label": str(companion_status.get("host_label", "")),
         "pair_key": pair_key_text(_processing_pair_key(self)),
-        "selection": "nearest_viable_ncu_by_artifact_time",
+        "selection": (
+            "persisted_pair"
+            if preferred_ncu_run_id
+            else "nearest_viable_unclaimed_ncu_by_artifact_time"
+        ),
         "distance_minutes": diagnostics.get("distance_minutes"),
         "skipped_closer_invalid_count": diagnostics.get("skipped_closer_invalid_count", 0),
         "skipped_closer_invalid_artifacts": diagnostics.get("skipped_closer_invalid_artifacts", []),

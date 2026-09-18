@@ -633,10 +633,11 @@ class WandbTelemetry:
 
     def log_event(self, event: str, payload: Mapping[str, Any]) -> None:
         # vvv THOG Processing duplicates the console tok/s scoreboard without adding another measurement
-        if (
-            event == "optimizer_progress"
-            and str(self.config.get("premat_processing_logging", "disabled")) == "enabled"
-        ):
+        # Training throughput is a small, generally useful run metric rather
+        # than Processing-only evidence.  Retain the console-equivalent value
+        # for every run so the Training chart does not depend on any PREMAT or
+        # profiler capture flag.
+        if event == "optimizer_progress":
             tokens_per_second = progress_tokens_per_second(payload)
             if tokens_per_second is not None:
                 ensure_local_chart_store(self).append_processing_throughput(

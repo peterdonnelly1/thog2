@@ -425,8 +425,12 @@
     const source = by_id("processing_throughput_plot");
     const target = by_id("training_throughput_plot");
     if (!group || !source || !target || source.dataset.plotReady !== "true") return;
-    group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
     const traces = Array.isArray(source.data) ? source.data : [];
+    processing_view.training_throughput_available = traces.length > 0;
+    group.hidden = !(
+      processing_view.charts_tab_visible
+      && processing_view.training_throughput_available
+    );
     const layout = {...source.layout, autosize:true};
     if (target.dataset.plotReady === "true") await Plotly.react(target, traces, layout, plot_config);
     else {
@@ -590,7 +594,10 @@
 
   function sync_training_group_presentation() {
     const group = by_id("training_chart_group");
-    if (group) group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
+    if (group) group.hidden = !(
+      processing_view.charts_tab_visible
+      && processing_view.training_throughput_available
+    );
     const processing = by_id("processing_chart_group");
     if (!group || !processing || group.parentElement !== processing.parentElement) return;
     // Processing evidence belongs to the selected run.  Put a selected trace
@@ -612,7 +619,10 @@
   window.processing_apply_detail_tab = charts_selected => {
     processing_apply_detail_tab_before_training_group?.(charts_selected);
     const group = by_id("training_chart_group");
-    if (group) group.hidden = !(Boolean(charts_selected) && processing_view.available);
+    if (group) group.hidden = !(
+      Boolean(charts_selected)
+      && processing_view.training_throughput_available
+    );
   };
 
   window.addEventListener("load", () => {

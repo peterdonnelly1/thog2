@@ -316,7 +316,12 @@ class RunDashboardState:
     # ^^^ THOG
 
     # vvv THOG live Processing exposes tok/s immediately; immutable Nsight evidence joins only after parent normalization completes
-    def processing(self) -> Dict[str, Any]:
+    def processing(
+        self,
+        *,
+        excluded_ncu_run_ids: Optional[set[str]] = None,
+        preferred_ncu_run_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         path = self.database_path.parent / "processing" / "processing_data.json"
         throughput = self.reader.processing_throughput()
         metadata = self.reader.metadata()
@@ -1032,7 +1037,18 @@ def _handler_for(catalog: DashboardCatalog):
                     elif path == "/api/figures":
                         value = state.figures()
                     elif path == "/api/processing":
-                        value = state.processing()
+                        excluded_ncu_run_ids = {
+                            value
+                            for raw in query.get("exclude_ncu", [])
+                            for value in raw.split(",")
+                            if value
+                        }
+                        value = state.processing(
+                            excluded_ncu_run_ids=excluded_ncu_run_ids,
+                            preferred_ncu_run_id=(
+                                query.get("preferred_ncu", [""])[0] or None
+                            ),
+                        )
                     elif path == "/api/processing-throughput":                                                                                           # <<< THOG keep multirun tok/s fetches independent of the selected run's Nsight bundle
                         value = state.processing_throughput()
                     else:

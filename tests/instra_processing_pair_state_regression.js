@@ -18,6 +18,7 @@ function make_sandbox({
   stored_pairs = [],
   catalog_ready = false,
   processing_responses = {},
+  throughput_responses = {},
 }) {
   const listeners = new Map();
   const storage = new Map([
@@ -45,6 +46,8 @@ function make_sandbox({
     },
     processing_view:{run_id:null, revision:null, companion_enriched_payload:null, render_request_run_id:null, render_request_epoch:0},
     fetch_calls:0,
+    fetch_urls:[],
+    throughput_renders:[],
     render_runs_calls:0,
     listeners,
     console,
@@ -71,15 +74,23 @@ function make_sandbox({
     processing_sync_visibility() {},
     processing_current_run() { return sandbox.app.current_run_id; },
     processing_render:async function() {},
+    processing_render_throughput:async function(payload) {
+      sandbox.throughput_renders.push(payload);
+    },
     processing_refresh:async function() {},
     select_run(run_id) {
       sandbox.app.current_run_id = String(run_id);
       return run_id;
     },
-    async fetch_json() {
+    async fetch_json(url) {
       sandbox.fetch_calls += 1;
+      sandbox.fetch_urls.push(String(url));
       const run_id = String(sandbox.app.current_run_id || "");
-      return processing_responses[run_id] || {available:false, trace_available:false};
+      if (String(url).startsWith("/api/processing-throughput")) {
+        return throughput_responses[run_id] || {throughput:[]};
+      }
+      const response = processing_responses[run_id] || {available:false, trace_available:false};
+      return typeof response === "function" ? response(String(url)) : response;
     },
     by_id(id) { return id === "runs_body" ? runs_body : null; },
     document:{head:{appendChild() {}}, getElementById() { return null; }, createElement() { return {id:"", textContent:""}; }},
@@ -170,6 +181,51 @@ async function settle() {
   vm.runInNewContext(pair_source, stable_pair);
   await stable_pair.processing_refresh(true);
   assert.equal(stable_pair.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a", "refreshing a pair silently changed its companion");
+  assert.match(
+    stable_pair.fetch_urls.find(url => url.startsWith("/api/processing?")),
+    /preferred_ncu=ncu_a/,
+    "an established pair did not request its persisted NCU companion",
+  );
+
+  const first_claim_wins = make_sandbox({
+    runs,
+    current_run_id:"nsys_b",
+    visible_run_ids:["nsys_a", "ncu_a", "nsys_b"],
+    stored_pairs:[{nsys_run_id:"nsys_a", ncu_run_id:"ncu_a", colour:"#24527A"}],
+    processing_responses:{
+      nsys_b:url => ({
+        available:true,
+        trace_available:true,
+        revision:"fallback",
+        data:{premat_compatibility_source:{
+          nsys_dashboard_run_id:"nsys_b",
+          dashboard_run_id:url.includes("exclude_ncu=ncu_a") ? "ncu_b" : "ncu_a",
+        }},
+      }),
+    },
+  });
+  vm.runInNewContext(pair_source, first_claim_wins);
+  await first_claim_wins.processing_refresh(true);
+  assert.equal(first_claim_wins.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a", "the first pair lost its claimed NCU");
+  assert.equal(first_claim_wins.app.processing_pairs.nsys_b.ncu_run_id, "ncu_b", "the next NSYS did not claim the next eligible NCU");
+  assert.match(
+    first_claim_wins.fetch_urls.find(url => url.startsWith("/api/processing?")),
+    /exclude_ncu=ncu_a/,
+    "claimed NCU identifiers were not sent to companion selection",
+  );
+
+  const throughput_only = make_sandbox({
+    runs,
+    current_run_id:"ordinary",
+    visible_run_ids:["ordinary"],
+    throughput_responses:{
+      ordinary:{throughput:[{optimizer_update:5, tokens_per_second:12345}]},
+    },
+  });
+  vm.runInNewContext(pair_source, throughput_only);
+  await throughput_only.processing_refresh(true);
+  assert.equal(throughput_only.throughput_renders.length, 1, "a run without Processing evidence did not render retained Training throughput");
+  assert.equal(throughput_only.throughput_renders[0].throughput[0].tokens_per_second, 12345);
 
   const eye_selection = make_sandbox({
     runs,
@@ -183,7 +239,7 @@ async function settle() {
   await settle();
   assert.equal(eye_selection.fetch_calls, 1, "stacked selection wrappers issued duplicate Processing requests");
 
-  console.log("PASS persistent multi-pair virtual runs, distinct colours, explicit unpairing and unmatched NSYS state");
+  console.log("PASS sticky first-claim pairs, fallback companions, throughput-only runs and explicit unpairing");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

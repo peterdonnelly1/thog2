@@ -208,6 +208,8 @@
     processing_view.companion_enriched_payload = null;
     processing_view.render_request_run_id = null;
     processing_view.render_request_epoch = navigation_epoch;
+    processing_view.training_throughput_available = false;
+    if (typeof processing_sync_visibility === "function") processing_sync_visibility();
   }
 
   function ensure_navigation_matches_current() {
@@ -239,6 +241,30 @@
     processing_view.companion_enriched_payload = null;
   }
 
+  function pairing_request_parameters(run_id) {
+    const existing = pair_for_run(run_id);
+    const claimed = Object.values(app.processing_pairs || {})
+      .map(pair => String(pair.ncu_run_id || ""))
+      .filter(id => id && id !== existing?.ncu_run_id);
+    return {
+      excluded:claimed,
+      preferred:String(existing?.ncu_run_id || ""),
+    };
+  }
+
+  async function refresh_training_throughput_only(run_id, request_epoch, request_serial) {
+    const response = await fetch_json(
+      `/api/processing-throughput?run=${encodeURIComponent(run_id)}`,
+    );
+    if (
+      request_serial !== refresh_serial
+      || request_epoch !== navigation_epoch
+      || run_id !== String(app.current_run_id || "")
+    ) return;
+    await processing_render_throughput({throughput:response.throughput || []});
+    if (typeof processing_sync_visibility === "function") processing_sync_visibility();
+  }
+
   async function processing_refresh_once(force = false) {
     const run_id = ensure_navigation_matches_current();
     const request_epoch = navigation_epoch;
@@ -249,8 +275,17 @@
     }
 
     try {
+      const pairing = pairing_request_parameters(run_id);
+      const pairing_query = [
+        pairing.excluded.length
+          ? `exclude_ncu=${encodeURIComponent(pairing.excluded.join(","))}`
+          : "",
+        pairing.preferred
+          ? `preferred_ncu=${encodeURIComponent(pairing.preferred)}`
+          : "",
+      ].filter(Boolean).join("&");
       const response = await fetch_json(
-        `/api/processing?run=${encodeURIComponent(run_id)}&pair_epoch=${request_epoch}&request=${request_serial}`,
+        `/api/processing?run=${encodeURIComponent(run_id)}&pair_epoch=${request_epoch}&request=${request_serial}${pairing_query ? `&${pairing_query}` : ""}`,
       );
       if (
         request_serial !== refresh_serial
@@ -259,6 +294,7 @@
       ) return;
       if (!response.available) {
         set_processing_unavailable(run_id);
+        await refresh_training_throughput_only(run_id, request_epoch, request_serial);
         return;
       }
       if (!force && processing_view.run_id === run_id && processing_view.revision === response.revision) return;
@@ -443,6 +479,7 @@
     rebuild_pair_indexes,
     restore_persisted_pairs,
     pair_palette,
+    pairing_request_parameters,
   });
 })();
 // ^^^ THOG
