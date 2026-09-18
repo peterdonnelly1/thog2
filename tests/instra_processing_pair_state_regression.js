@@ -4,18 +4,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
-const pair_source = fs.readFileSync(
-  "sheet/local_dashboard_assets/dashboard_processing_pair_state_final.js",
-  "utf8",
-);
-const eye_source = fs.readFileSync(
-  "sheet/local_dashboard_assets/dashboard_processing_nsys_eye_select.js",
-  "utf8",
-);
-const stability_source = fs.readFileSync(
-  "sheet/local_dashboard_assets/dashboard_processing_sep16_stability_polish.js",
-  "utf8",
-);
+const pair_source = fs.readFileSync("sheet/local_dashboard_assets/dashboard_processing_pair_state_final.js", "utf8");
+const eye_source = fs.readFileSync("sheet/local_dashboard_assets/dashboard_processing_nsys_eye_select.js", "utf8");
 
 function run(id, artifact_name, created_at) {
   return {dashboard_run_id:id, artifact_name, created_at, run_state:"finished"};
@@ -25,34 +15,35 @@ function make_sandbox({
   runs,
   current_run_id = "ordinary",
   visible_run_ids = [],
-  stored_auto_run_ids = [],
-  catalog_ready = true,
-  companion_run_id = "ncu",
+  stored_pairs = [],
+  catalog_ready = false,
+  processing_responses = {},
 }) {
   const listeners = new Map();
   const storage = new Map([
-    ["thog2_processing_auto_opened_run_ids", JSON.stringify(stored_auto_run_ids)],
+    ["thog2_processing_pairs_v2", JSON.stringify(stored_pairs)],
+    ["thog2_processing_auto_opened_run_ids", "[]"],
+    ["thog2_processing_unmatched_nsys_run_ids", "[]"],
   ]);
   const visible = new Set(visible_run_ids);
-  const visibility = Object.fromEntries(runs.map(item => [item.dashboard_run_id, visible.has(item.dashboard_run_id)]));
   const runs_body = {
     dataset:{},
-    addEventListener(type, listener) { listeners.set(`runs_body:${type}`, listener); },
+    addEventListener(type, listener) {
+      const key = `runs_body:${type}`;
+      const registered = listeners.get(key) || [];
+      registered.push(listener);
+      listeners.set(key, registered);
+    },
   };
   const sandbox = {
     app:{
       runs,
       current_run_id,
-      visibility,
+      visibility:Object.fromEntries(runs.map(item => [item.dashboard_run_id, visible.has(item.dashboard_run_id)])),
       instra_catalog_ready:catalog_ready,
+      instra_catalog_generation:1,
     },
-    processing_view:{
-      run_id:null,
-      revision:null,
-      companion_enriched_payload:null,
-      render_request_run_id:null,
-      render_request_epoch:0,
-    },
+    processing_view:{run_id:null, revision:null, companion_enriched_payload:null, render_request_run_id:null, render_request_epoch:0},
     fetch_calls:0,
     render_runs_calls:0,
     listeners,
@@ -65,9 +56,6 @@ function make_sandbox({
     Promise,
     Set,
     String,
-    CustomEvent:class CustomEvent {
-      constructor(type, options = {}) { this.type = type; this.detail = options.detail; }
-    },
     queueMicrotask,
     setTimeout,
     clearTimeout,
@@ -83,42 +71,18 @@ function make_sandbox({
     processing_sync_visibility() {},
     processing_current_run() { return sandbox.app.current_run_id; },
     processing_render:async function() {},
-    processing_render_timeline:async function() {},
-    processing_render_update_timing:async function() {},
-    processing_update_timing_ordered_runs() { return []; },
     processing_refresh:async function() {},
-    is_active_run_state() { return false; },
-    chart_titles:{},
-    Plotly:{
-      relayout:async function() {},
-      restyle:async function() {},
-    },
     select_run(run_id) {
       sandbox.app.current_run_id = String(run_id);
       return run_id;
     },
     async fetch_json() {
       sandbox.fetch_calls += 1;
-      return {
-        available:true,
-        trace_available:true,
-        revision:`revision-${sandbox.app.current_run_id}`,
-        data:{
-          premat_compatibility_source:{dashboard_run_id:companion_run_id},
-        },
-      };
+      const run_id = String(sandbox.app.current_run_id || "");
+      return processing_responses[run_id] || {available:false, trace_available:false};
     },
-    by_id(id) {
-      if (id === "runs_body") return runs_body;
-      return null;
-    },
-    document:{
-      visibilityState:"visible",
-      head:{appendChild() {}},
-      getElementById() { return null; },
-      createElement() { return {id:"", textContent:""}; },
-      querySelectorAll() { return []; },
-    },
+    by_id(id) { return id === "runs_body" ? runs_body : null; },
+    document:{head:{appendChild() {}}, getElementById() { return null; }, createElement() { return {id:"", textContent:""}; }},
     window:{
       location:{pathname:`/runs/${current_run_id}`},
       addEventListener(type, listener) {
@@ -143,196 +107,83 @@ async function settle() {
   await new Promise(resolve => setImmediate(resolve));
 }
 
-async function install_pair_state(options) {
-  const sandbox = make_sandbox(options);
-  vm.runInNewContext(pair_source, sandbox);
-  await settle();
-  return sandbox;
-}
-
 (async () => {
-  const ordinary = run("ordinary", "260916-0915_scruffy_PREMAT_SMOKES_THOG", "2026-09-16T09:15:00Z");
-  const nsys = run("nsys", "260916-1405_scruffy_NSYS_PREMAT___MATCH", "2026-09-16T14:05:00Z");
-  const newer_nsys = run("newer_nsys", "260916-1612_scruffy_NSYS_PREMAT___MATCH", "2026-09-16T16:12:00Z");
-  const ncu = run("ncu", "260916-1807_scruffy_NCU_PREMAT___MATCH", "2026-09-16T18:07:00Z");
-  const stale_ncu = run("stale_ncu", "260916-1440_scruffy_NCU_PREMAT___MATCH", "2026-09-16T14:40:00Z");
+  const ordinary = run("ordinary", "260918-1000_scruffy_NOMAT", "2026-09-18T10:00:00Z");
+  const nsys_a = run("nsys_a", "260918-1010_scruffy_PAIR_A_NSYS_PREMAT___MATCH_A", "2026-09-18T10:10:00Z");
+  const ncu_a = run("ncu_a", "260918-1011_scruffy_PAIR_A_NCU_PREMAT___MATCH_A", "2026-09-18T10:11:00Z");
+  const nsys_b = run("nsys_b", "260918-1020_scruffy_PAIR_B_NSYS_PREMAT___MATCH_B", "2026-09-18T10:20:00Z");
+  const ncu_b = run("ncu_b", "260918-1021_scruffy_PAIR_B_NCU_PREMAT___MATCH_B", "2026-09-18T10:21:00Z");
+  const runs = [ordinary, nsys_a, ncu_a, nsys_b, ncu_b];
 
-  const restored_pair = await install_pair_state({
-    runs:[ordinary, nsys, ncu],
-    visible_run_ids:[nsys.dashboard_run_id, ncu.dashboard_run_id],
-  });
-  assert.equal(restored_pair.app.current_run_id, "nsys", "a restored companion eye vetoed its NSYS source");
-  assert.equal(restored_pair.fetch_calls, 1, "startup pairing should issue one Processing request");
-  assert.deepEqual(
-    JSON.parse(restored_pair.storage.get("thog2_processing_auto_opened_run_ids")),
-    ["ncu"],
-    "legacy restored companion ownership was not migrated",
-  );
-  for (const listener of restored_pair.listeners.get("load") || []) listener();
-  await new Promise(resolve => setTimeout(resolve, 0));
+  const sandbox = make_sandbox({runs});
+  vm.runInNewContext(pair_source, sandbox);
+  const hooks = sandbox.window.processing_pair_state_test_hooks;
+  assert.equal(hooks.add_pair("nsys_a", "ncu_a"), true);
+  assert.equal(hooks.add_pair("nsys_b", "ncu_b"), true);
+  assert.equal(Object.keys(sandbox.app.processing_pairs).length, 2, "two profiler pairs were not retained");
+  assert.notEqual(sandbox.app.processing_pairs.nsys_a.colour, sandbox.app.processing_pairs.nsys_b.colour, "separate pairs received the same eye colour");
+  assert.deepEqual([...sandbox.app.processing_paired_run_ids].sort(), ["ncu_a", "ncu_b", "nsys_a", "nsys_b"]);
+
+  sandbox.select_run("ordinary", {manual:true});
   await settle();
-  assert.equal(restored_pair.fetch_calls, 1, "duplicate startup signals repeated pairing work");
-
-  const ncu_only = await install_pair_state({
-    runs:[ordinary, nsys, ncu],
-    visible_run_ids:[ncu.dashboard_run_id],
-  });
-  assert.equal(ncu_only.app.current_run_id, "ordinary", "an NCU-only eye must not promote an NSYS run");
-  assert.equal(ncu_only.fetch_calls, 0);
-
-  const orphaned_ncu = await install_pair_state({
-    runs:[ordinary, nsys, ncu],
-    visible_run_ids:[ncu.dashboard_run_id],
-    stored_auto_run_ids:[ncu.dashboard_run_id],
-  });
-  assert.equal(orphaned_ncu.app.visibility.ncu, false, "an orphaned auto-opened NCU eye survived reload");
-  assert.deepEqual(JSON.parse(orphaned_ncu.storage.get("thog2_processing_auto_opened_run_ids")), []);
-
-  const replaced_stale_ncu = await install_pair_state({
-    runs:[ordinary, nsys, stale_ncu, ncu],
-    visible_run_ids:[nsys.dashboard_run_id, stale_ncu.dashboard_run_id],
-  });
-  assert.equal(replaced_stale_ncu.app.visibility.stale_ncu, false, "stale restored NCU companion remained visible");
-  assert.equal(replaced_stale_ncu.app.visibility.ncu, true, "server-selected NCU companion was not opened");
-  assert.deepEqual(
-    JSON.parse(replaced_stale_ncu.storage.get("thog2_processing_auto_opened_run_ids")),
-    ["ncu"],
-  );
-
-  const latest_nsys = await install_pair_state({
-    runs:[ordinary, nsys, newer_nsys, ncu],
-    visible_run_ids:[nsys.dashboard_run_id, newer_nsys.dashboard_run_id],
-  });
-  assert.equal(latest_nsys.app.current_run_id, "newer_nsys", "latest restored NSYS was not selected");
-  assert.equal(latest_nsys.fetch_calls, 1);
-
-  const persisted_pair = await install_pair_state({
-    runs:[ordinary, nsys, ncu],
-    visible_run_ids:[nsys.dashboard_run_id, ncu.dashboard_run_id],
-    stored_auto_run_ids:[ncu.dashboard_run_id],
-  });
-  assert.equal(persisted_pair.app.visibility.ncu, true, "persisted companion was not reopened after reconciliation");
-  assert.deepEqual(JSON.parse(persisted_pair.storage.get("thog2_processing_auto_opened_run_ids")), ["ncu"]);
-
-  const one_request = make_sandbox({
-    runs:[ordinary, nsys, ncu],
-    visible_run_ids:[],
-    catalog_ready:false,
-  });
-  vm.runInNewContext(pair_source, one_request);
-  vm.runInNewContext(eye_source, one_request);
-  one_request.select_run("nsys", {manual:true});
+  sandbox.select_run("ncu_a", {manual:true});
   await settle();
-  assert.equal(one_request.fetch_calls, 1, "stacked NSYS selection wrappers issued duplicate Processing requests");
+  assert.equal(Object.keys(sandbox.app.processing_pairs).length, 2, "ordinary run navigation broke a profiler pair");
 
-  const coalesced_force = make_sandbox({
-    runs:[ordinary, nsys, ncu],
-    current_run_id:"nsys",
-    visible_run_ids:[nsys.dashboard_run_id],
-    catalog_ready:false,
-  });
-  let release_fetch;
-  coalesced_force.fetch_json = async function() {
-    coalesced_force.fetch_calls += 1;
-    await new Promise(resolve => { release_fetch = resolve; });
-    return {
-      available:true,
-      trace_available:true,
-      revision:"coalesced",
-      data:{premat_compatibility_source:{dashboard_run_id:"ncu"}},
-    };
-  };
-  vm.runInNewContext(pair_source, coalesced_force);
-  const first_refresh = coalesced_force.processing_refresh(true);
-  const second_refresh = coalesced_force.processing_refresh(true);
-  await Promise.resolve();
-  release_fetch();
-  await Promise.all([first_refresh, second_refresh]);
-  assert.equal(coalesced_force.fetch_calls, 1, "identical forced refreshes were not coalesced");
+  assert.equal(hooks.unpair_run("ncu_a"), true);
+  assert.equal(sandbox.app.visibility.nsys_a, false);
+  assert.equal(sandbox.app.visibility.ncu_a, false);
+  assert.equal(sandbox.app.visibility.nsys_b, true, "unpairing Pair A hid Pair B's NSYS run");
+  assert.equal(sandbox.app.visibility.ncu_b, true, "unpairing Pair A hid Pair B's NCU run");
+  assert.deepEqual([...sandbox.app.processing_paired_run_ids].sort(), ["ncu_b", "nsys_b"]);
 
-  const interactive_repair = make_sandbox({
-    runs:[ordinary, nsys, newer_nsys, stale_ncu, ncu],
-    current_run_id:"nsys",
-    visible_run_ids:[nsys.dashboard_run_id, ncu.dashboard_run_id],
-    stored_auto_run_ids:[ncu.dashboard_run_id],
-    catalog_ready:false,
+  const restored = make_sandbox({
+    runs,
+    stored_pairs:[
+      {nsys_run_id:"nsys_a", ncu_run_id:"ncu_a", colour:"#24527A"},
+      {nsys_run_id:"nsys_b", ncu_run_id:"ncu_b", colour:"#6B3F8C"},
+    ],
   });
-  interactive_repair.fetch_json = async function() {
-    interactive_repair.fetch_calls += 1;
-    const source_run_id = String(interactive_repair.app.current_run_id);
-    const companion_id = source_run_id === "newer_nsys" ? "stale_ncu" : "ncu";
-    return {
-      available:true,
-      trace_available:true,
-      revision:`revision-${source_run_id}-${companion_id}`,
-      data:{premat_compatibility_source:{
-        nsys_dashboard_run_id:source_run_id,
-        dashboard_run_id:companion_id,
-      }},
-    };
-  };
-  vm.runInNewContext(pair_source, interactive_repair);
-  interactive_repair.select_run("newer_nsys", {manual:true});
+  vm.runInNewContext(pair_source, restored);
+  restored.window.processing_pair_state_test_hooks.restore_persisted_pairs();
+  for (const id of ["nsys_a", "ncu_a", "nsys_b", "ncu_b"]) assert.equal(restored.app.visibility[id], true);
+
+  const unmatched = make_sandbox({
+    runs,
+    current_run_id:"nsys_a",
+    visible_run_ids:["nsys_a"],
+    processing_responses:{nsys_a:{available:true, trace_available:true, revision:"unmatched", data:{}}},
+  });
+  vm.runInNewContext(pair_source, unmatched);
+  await unmatched.processing_refresh(true);
+  assert.equal(unmatched.app.processing_unmatched_nsys_run_ids.has("nsys_a"), true, "NSYS without a qualifying NCU was not marked unmatched");
+
+  const stable_pair = make_sandbox({
+    runs,
+    current_run_id:"nsys_a",
+    visible_run_ids:["nsys_a", "ncu_a"],
+    stored_pairs:[{nsys_run_id:"nsys_a", ncu_run_id:"ncu_a", colour:"#24527A"}],
+    processing_responses:{
+      nsys_a:{available:true, trace_available:true, revision:"changed-choice", data:{premat_compatibility_source:{nsys_dashboard_run_id:"nsys_a", dashboard_run_id:"ncu_b"}}},
+    },
+  });
+  vm.runInNewContext(pair_source, stable_pair);
+  await stable_pair.processing_refresh(true);
+  assert.equal(stable_pair.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a", "refreshing a pair silently changed its companion");
+
+  const eye_selection = make_sandbox({
+    runs,
+    processing_responses:{
+      nsys_a:{available:true, trace_available:true, revision:"eye", data:{premat_compatibility_source:{nsys_dashboard_run_id:"nsys_a", dashboard_run_id:"ncu_a"}}},
+    },
+  });
+  vm.runInNewContext(pair_source, eye_selection);
+  vm.runInNewContext(eye_source, eye_selection);
+  eye_selection.select_run("nsys_a", {manual:true});
   await settle();
-  assert.equal(interactive_repair.app.visibility.ncu, false, "old NCU remained attached after selecting another NSYS");
-  assert.equal(interactive_repair.app.visibility.stale_ncu, true, "new NSYS did not open its server-selected nearest NCU");
+  assert.equal(eye_selection.fetch_calls, 1, "stacked selection wrappers issued duplicate Processing requests");
 
-  const wrong_source = make_sandbox({
-    runs:[ordinary, nsys, ncu],
-    current_run_id:"nsys",
-    visible_run_ids:[nsys.dashboard_run_id],
-    catalog_ready:false,
-  });
-  wrong_source.fetch_json = async function() {
-    return {
-      available:true,
-      trace_available:true,
-      revision:"wrong-source",
-      data:{premat_compatibility_source:{
-        nsys_dashboard_run_id:"some-other-nsys",
-        dashboard_run_id:"ncu",
-      }},
-    };
-  };
-  vm.runInNewContext(pair_source, wrong_source);
-  await wrong_source.processing_refresh(true);
-  assert.equal(wrong_source.app.visibility.ncu, false, "stale cross-NSYS response was applied as a pair");
-
-  const single_pair_owner = make_sandbox({
-    runs:[ordinary, nsys, ncu],
-    current_run_id:"nsys",
-    visible_run_ids:[nsys.dashboard_run_id],
-    catalog_ready:false,
-  });
-  vm.runInNewContext(stability_source, single_pair_owner);
-  vm.runInNewContext(pair_source, single_pair_owner);
-  await single_pair_owner.processing_refresh(true);
-  assert.equal(single_pair_owner.render_runs_calls, 1, "legacy and final pair owners both rendered the Runs table");
-
-  const closed_nsys = make_sandbox({
-    runs:[ordinary, nsys, ncu],
-    current_run_id:"nsys",
-    visible_run_ids:[nsys.dashboard_run_id],
-    catalog_ready:false,
-  });
-  vm.runInNewContext(pair_source, closed_nsys);
-  vm.runInNewContext(eye_source, closed_nsys);
-  await closed_nsys.processing_refresh(true);
-  assert.equal(closed_nsys.app.visibility.ncu, true, "test pair did not open its NCU companion");
-  closed_nsys.app.visibility.nsys = false;
-  const row = {dataset:{runId:"nsys"}};
-  const eye = {closest(selector) { return selector === "tr[data-run-id]" ? row : null; }};
-  const click_target = {closest(selector) { return selector === ".eye-button" ? eye : null; }};
-  closed_nsys.listeners.get("runs_body:click")({target:click_target});
-  assert.equal(closed_nsys.app.visibility.ncu, false, "closing paired NSYS did not close NCU");
-  assert.equal(closed_nsys.app.processing_paired_run_ids.size, 0, "closing paired NSYS retained pair state");
-  assert.deepEqual(
-    JSON.parse(closed_nsys.storage.get("thog2_processing_auto_opened_run_ids")),
-    [],
-    "closing paired NSYS retained automatic NCU ownership",
-  );
-
-  console.log("PASS startup profiler restoration, ownership migration and single-request NSYS selection");
+  console.log("PASS persistent multi-pair virtual runs, distinct colours, explicit unpairing and unmatched NSYS state");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

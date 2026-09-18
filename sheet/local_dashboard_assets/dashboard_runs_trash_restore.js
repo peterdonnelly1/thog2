@@ -9,6 +9,8 @@
     style.textContent = `
       .runs-trash-button {
         width:30px;
+        min-width:30px;
+        flex:0 0 30px;
         height:28px;
         padding:0;
         display:inline-flex;
@@ -109,6 +111,7 @@
     const failures = [];
     for (const run_id of selected) {
       try {
+        window.processing_pair_unpair_run?.(run_id, {close_both:false, render:false});
         await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}`, {method:"DELETE"});
         deleted += 1;
         app.selected.delete(run_id);
@@ -144,13 +147,19 @@
       button = document.createElement("button");
       button.id = "delete_selected_runs";
       button.type = "button";
-      button.className = "toolbar-button runs-trash-button";
-      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v5M14 11v5"/></svg>';
-      button.addEventListener("click", delete_selected_runs);
-      const group = by_id("group_button");
-      if (group) group.insertAdjacentElement("afterend", button);
-      else toolbar.appendChild(button);
     }
+    button.hidden = false;
+    button.classList.add("toolbar-button", "runs-trash-button");
+    if (!button.querySelector("svg")) {
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v5M14 11v5"/></svg>';
+    }
+    if (button.dataset.instraTrashHandler !== "true") {
+      button.dataset.instraTrashHandler = "true";
+      button.addEventListener("click", delete_selected_runs);
+    }
+    const group = by_id("group_button");
+    if (group && button.nextElementSibling !== group) toolbar.insertBefore(button, group);
+    else if (!group && button.parentElement !== toolbar) toolbar.prepend(button);
     update_trash_button();
     return button;
   }

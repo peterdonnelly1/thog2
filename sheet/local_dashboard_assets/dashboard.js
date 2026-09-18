@@ -1849,6 +1849,7 @@ async function delete_menu_run() {
   if (!confirmed) return;
   close_run_menu();
   try {
+    window.processing_pair_unpair_run?.(run_id, {close_both:false, render:false});
     await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}`, {method: "DELETE"});
     delete app.colours[run_id];
     delete app.visibility[run_id];

@@ -982,13 +982,19 @@ function processing_gpu_ensure_throughput_controls() {
     button.type = "button";
     button.textContent = "z";
     button.title = "Cycle which throughput curve is drawn on top";
-    button.addEventListener("click", () => {
-      processing_view.throughput_z_offset += 1;
-      if (processing_view.throughput_last_payload) processing_render_throughput(processing_view.throughput_last_payload);
-    });
+    button.addEventListener("click", processing_gpu_cycle_throughput_z);
     actions.insertBefore(button, actions.querySelector(".maximize-button"));
   }
 }
+
+function processing_gpu_cycle_throughput_z() {
+  processing_view.throughput_z_offset += 1;
+  if (processing_view.throughput_last_payload) {
+    processing_render_throughput(processing_view.throughput_last_payload);
+  }
+}
+
+window.processing_gpu_cycle_throughput_z = processing_gpu_cycle_throughput_z;
 
 function processing_gpu_throughput_value(row, mode) {
   if (mode === "step") return Number(row.optimizer_update);
@@ -1049,10 +1055,11 @@ async function processing_render_throughput(payload) {
   const workspace = app.workspace_mode === true;
   const x_titles = {step: "optimizer update", relative_wall: "relative wall time (hours)", relative_process: "relative process time (hours)", wall_time: "wall time"};
   await processing_plot("processing_throughput_plot", traces, {
-    margin: {l: 72, r: 24, t: 12, b: 54},
+    margin: {l: 72, r: 24, t: traces.length > 1 ? Math.min(132, 20 + traces.length * 18) : 12, b: 54},
     xaxis: {title: x_titles[mode], type: mode === "wall_time" ? "date" : undefined, dtick: mode === "step" && maximum_points <= 20 ? 1 : undefined},
     yaxis: {title: "tokens / second", rangemode: "tozero", separatethousands: true},
-    showlegend: traces.length > 1, legend: {orientation: "h", y: 1.10},
+    showlegend: traces.length > 1,
+    legend: {orientation: "v", x: 0, xanchor: "left", y: 1.02, yanchor: "bottom", font:{size:9}},
     annotations: traces.length ? [] : [{
       text: workspace ? "No retained tok/s samples for visible Workspace runs" : "No retained tok/s samples for this run",
       showarrow: false, xref: "paper", yref: "paper", x: 0.5, y: 0.5,

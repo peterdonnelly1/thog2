@@ -297,6 +297,7 @@
       if (reset) reset.disabled = true;
       return;
     }
+    if (reset) reset.disabled = false;
     const track = scrollbar.firstElementChild;
     const metrics = layer_scroll_metrics(
       mount._processing_layer_zoom_capture_ms,
@@ -305,7 +306,6 @@
     );
     if (!track || metrics.max_scroll <= 0) {
       scrollbar.hidden = true;
-      if (reset) reset.disabled = true;
       return;
     }
     scrollbar.hidden = false;
@@ -319,6 +319,8 @@
   function apply_layer_zoom(mount, range) {
     if (!mount || !Array.isArray(range)) return;
     mount._processing_layer_zoom_range = range.slice();
+    const reset = by_id("processing_operations_reset_zoom");
+    if (reset) reset.disabled = false;
     Plotly.relayout(mount, {"xaxis.range":range}).then(() => sync_layer_scrollbar(mount)).catch(() => {});
   }
 
@@ -402,7 +404,7 @@
       </header>
       <div class="chart-grid" id="training_grid">
         <article class="chart-card training-throughput-card" id="training_throughput_card" data-chart="training_throughput">
-          <header class="chart-card-header"><div class="chart-heading-copy"><h2>Training throughput (tok/s)</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="training_throughput" type="button" aria-label="Maximize training throughput" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+          <header class="chart-card-header"><div class="chart-heading-copy"><h2>Training throughput (tok/s)</h2></div><div class="chart-card-actions"><button class="processing-throughput-z-button" id="training_throughput_z_button" type="button" title="Cycle which throughput curve is drawn on top">z</button><button class="maximize-button" data-maximize="training_throughput" type="button" aria-label="Maximize training throughput" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
           <div class="plot-shell"><div class="plot-mount" id="training_throughput_plot"></div></div>
           <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
           <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
@@ -411,6 +413,9 @@
       </div>`;
     processing.insertAdjacentElement("afterend", group);
     if (typeof ensure_chart_settings_button === "function") ensure_chart_settings_button(group.querySelector(".chart-card"));
+    by_id("training_throughput_z_button")?.addEventListener("click", () => {
+      window.processing_gpu_cycle_throughput_z?.();
+    });
     if (typeof apply_saved_panel_sizes === "function") apply_saved_panel_sizes();
     return group;
   }
@@ -428,6 +433,9 @@
       await Plotly.newPlot(target, traces, layout, plot_config);
       target.dataset.plotReady = "true";
     }
+    const source_z = by_id("processing_throughput_z_button");
+    const training_z = by_id("training_throughput_z_button");
+    if (training_z && source_z) training_z.title = source_z.title;
     if (typeof ResizeObserver === "function" && !group._training_resize_observer) {
       group._training_resize_observer = new ResizeObserver(() => {
         if (target.dataset.plotReady === "true" && group.offsetParent !== null) Plotly.Plots.resize(target);

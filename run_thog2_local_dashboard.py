@@ -206,17 +206,7 @@ def _hard_constraint_rows(
     if not resources:
         return []
 
-    class_rank = {"RED": 0, "YELLOW": 1, "ORANGE": 2, "GREEN": 3}
-    pair = min(
-        source,
-        key=lambda row: (
-            class_rank.get(str(row.get("compatibility_class", "")).upper(), 4),
-            _safe_int(row.get("premat_blocks_with_full_main_residency", 0)),
-            _safe_int(row.get("premat_blocks_with_one_main_block", 0)),
-            str(row.get("main_family", "")),
-            str(row.get("premat_family", "")),
-        ),
-    )
+    pair = source[0]
     main_family = str(pair.get("main_family", "")).upper()
     premat_family = str(pair.get("premat_family", "")).upper()
     main_layer = str(pair.get("main_layer", ""))
@@ -262,8 +252,6 @@ def _hard_constraint_rows(
         pair_demand = main_per_block + premat_per_block
         full_main_plus_premat = full_main_blocks * main_per_block + premat_per_block
         rows.append({
-            "main_family": main_family,
-            "premat_family": premat_family,
             "resource": label,
             "unit": unit,
             "capacity": capacity,
@@ -720,6 +708,7 @@ _dashboard_patch_names = (
     "dashboard_runs_table_restore.js",
     "dashboard_sep16_workspace_ui_repair.js",
     "dashboard_runs_trash_restore.js",
+    "dashboard_feature_regression_restore.js",
 )
 _processing_patch_names = (
     "dashboard_processing_resource_attribution.js",

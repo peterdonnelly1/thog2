@@ -8,15 +8,25 @@
     style.id = style_id;
     style.textContent = `
       .runs-table .eye-button.instra-processing-paired {
-        color:#1378d4 !important;
+        color:var(--instra-pair-colour, #24527A) !important;
         filter:none !important;
       }
       .runs-table .eye-button.instra-processing-paired.off {
-        color:#1378d4 !important;
+        color:var(--instra-pair-colour, #24527A) !important;
         opacity:1 !important;
       }
-      .processing-throughput-card .chart-card-header { position:relative !important; }
-      .processing-throughput-card .processing-throughput-z-button {
+      .runs-table .eye-button.instra-processing-unmatched {
+        color:#fff !important;
+        background:#b42318 !important;
+        border-color:#8f1b12 !important;
+        border-radius:4px !important;
+        opacity:1 !important;
+        filter:none !important;
+      }
+      .processing-throughput-card .chart-card-header,
+      .training-throughput-card .chart-card-header { position:relative !important; }
+      .processing-throughput-card .processing-throughput-z-button,
+      .training-throughput-card .processing-throughput-z-button {
         position:absolute !important;
         left:50% !important;
         top:50% !important;
@@ -39,13 +49,24 @@
 
   function decorate_paired_eyes() {
     const paired = app.processing_paired_run_ids || new Set();
+    const unmatched = app.processing_unmatched_nsys_run_ids || new Set();
     for (const row of document.querySelectorAll('.runs-table tbody tr[data-run-id]')) {
       const run_id = String(row.dataset.runId || "");
       const eye = row.querySelector('.visibility-column .eye-button');
       if (!eye) continue;
       const is_paired = paired.has(run_id);
       eye.classList.toggle("instra-processing-paired", is_paired);
-      if (!is_paired) continue;
+      eye.classList.toggle("instra-processing-unmatched", !is_paired && unmatched.has(run_id));
+      if (!is_paired) {
+        eye.style.removeProperty("--instra-pair-colour");
+        if (unmatched.has(run_id)) {
+          const title = "No qualifying unpaired NCU companion was found for this NSYS capture";
+          eye.title = title;
+          eye.setAttribute("aria-label", title);
+        }
+        continue;
+      }
+      eye.style.setProperty("--instra-pair-colour", app.processing_pair_colours?.[run_id] || "#24527A");
       const role = app.processing_pair_roles?.[run_id] || "paired profiler run";
       eye.title = role;
       eye.setAttribute("aria-label", role);
