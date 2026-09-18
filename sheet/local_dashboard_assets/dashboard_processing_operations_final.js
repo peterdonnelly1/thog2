@@ -79,6 +79,11 @@
       }
       #training_chart_group {
         width:100%;
+        min-height:0;
+        padding-bottom:12px;
+      }
+      #training_chart_group > .chart-grid {
+        min-height:0;
       }
       #training_throughput_card {
         flex:0 0 100%;
@@ -404,7 +409,7 @@
           <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
         </article>
       </div>`;
-    processing.insertAdjacentElement("beforebegin", group);
+    processing.insertAdjacentElement("afterend", group);
     if (typeof ensure_chart_settings_button === "function") ensure_chart_settings_button(group.querySelector(".chart-card"));
     if (typeof apply_saved_panel_sizes === "function") apply_saved_panel_sizes();
     return group;
@@ -581,6 +586,13 @@
       processing_sync_visibility_before_training_group();
       const group = by_id("training_chart_group");
       if (group) group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
+      const processing = by_id("processing_chart_group");
+      if (!group || !processing || group.parentElement !== processing.parentElement) return;
+      // Processing evidence belongs to the selected run.  Put a selected trace
+      // first so a compact live-training mirror can never obscure an historic
+      // NSYS/NCU pair; throughput-only runs retain Training as their first view.
+      if (processing_view.trace_available) processing.parentElement.insertBefore(processing, group);
+      else processing.insertAdjacentElement("beforebegin", group);
     };
   }
 
