@@ -580,19 +580,23 @@
     await mirror_training_throughput();
   };
 
+  function sync_training_group_presentation() {
+    const group = by_id("training_chart_group");
+    if (group) group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
+    const processing = by_id("processing_chart_group");
+    if (!group || !processing || group.parentElement !== processing.parentElement) return;
+    // Processing evidence belongs to the selected run.  Put a selected trace
+    // first so a compact live-training mirror can never obscure an historic
+    // NSYS/NCU pair; throughput-only runs retain Training as their first view.
+    if (processing_view.trace_available) processing.parentElement.insertBefore(processing, group);
+    else processing.insertAdjacentElement("beforebegin", group);
+  }
+
   if (typeof processing_sync_visibility === "function") {
     const processing_sync_visibility_before_training_group = processing_sync_visibility;
     processing_sync_visibility = function() {
       processing_sync_visibility_before_training_group();
-      const group = by_id("training_chart_group");
-      if (group) group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
-      const processing = by_id("processing_chart_group");
-      if (!group || !processing || group.parentElement !== processing.parentElement) return;
-      // Processing evidence belongs to the selected run.  Put a selected trace
-      // first so a compact live-training mirror can never obscure an historic
-      // NSYS/NCU pair; throughput-only runs retain Training as their first view.
-      if (processing_view.trace_available) processing.parentElement.insertBefore(processing, group);
-      else processing.insertAdjacentElement("beforebegin", group);
+      sync_training_group_presentation();
     };
   }
 
@@ -622,6 +626,7 @@
     layer_zoom_range,
     layer_scroll_metrics,
     layer_range_for_scroll,
+    sync_training_group_presentation,
   });
 })();
 // ^^^ THOG
