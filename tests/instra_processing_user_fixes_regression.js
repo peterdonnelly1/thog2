@@ -24,6 +24,19 @@ class FakeElement {
     return child;
   }
 
+  insertBefore(child, reference) {
+    if (child.parentElement) child.parentElement.children = child.parentElement.children.filter(item => item !== child);
+    const index = this.children.indexOf(reference);
+    child.parentElement = this;
+    this.children.splice(index < 0 ? this.children.length : index, 0, child);
+    return child;
+  }
+
+  insertAdjacentElement(position, child) {
+    assert.equal(position, "beforebegin");
+    return this.parentElement?.insertBefore(child, this) || null;
+  }
+
   remove() {
     if (!this.parentElement) return;
     this.parentElement.children = this.parentElement.children.filter(child => child !== this);
@@ -186,11 +199,24 @@ assert.match(operations_source, /training_throughput_plot/);
 assert.match(operations_source, /processing_render_throughput_before_training_group/);
 assert.match(operations_source, /#training_chart_group\s*\{[\s\S]*?min-height:0;/);
 assert.match(operations_source, /processing\.insertAdjacentElement\("afterend", group\)/);
-assert.match(
-  operations_source,
-  /if \(processing_view\.trace_available\) processing\.parentElement\.insertBefore\(processing, group\)/,
-  "a selected profiler trace must be presented before the live Training mirror",
-);
+const chart_groups = new FakeElement("main");
+const training_group = new FakeElement("section");
+const processing_group = new FakeElement("section");
+elements.set("training_chart_group", training_group);
+elements.set("processing_chart_group", processing_group);
+chart_groups.appendChild(training_group);
+chart_groups.appendChild(processing_group);
+sandbox.processing_view.charts_tab_visible = true;
+sandbox.processing_view.available = true;
+sandbox.processing_view.trace_available = true;
+operation_hooks.sync_training_group_presentation();
+assert.deepEqual(chart_groups.children, [processing_group, training_group],
+  "a selected profiler trace must be presented before the live Training mirror");
+assert.equal(training_group.hidden, false);
+sandbox.processing_view.trace_available = false;
+operation_hooks.sync_training_group_presentation();
+assert.deepEqual(chart_groups.children, [training_group, processing_group],
+  "a throughput-only run should retain the Training-first presentation");
 
 const headings = hooks.resource_heading_annotations({stream_resources:[{}]});
 assert.deepEqual(Array.from(headings, item => item.text), [
