@@ -184,6 +184,13 @@ assert.deepEqual(
 assert.match(operations_source, /processing_operations_reset_zoom/);
 assert.match(operations_source, /training_throughput_plot/);
 assert.match(operations_source, /processing_render_throughput_before_training_group/);
+assert.match(operations_source, /#training_chart_group\s*\{[\s\S]*?min-height:0;/);
+assert.match(operations_source, /processing\.insertAdjacentElement\("afterend", group\)/);
+assert.match(
+  operations_source,
+  /if \(processing_view\.trace_available\) processing\.parentElement\.insertBefore\(processing, group\)/,
+  "a selected profiler trace must be presented before the live Training mirror",
+);
 
 const headings = hooks.resource_heading_annotations({stream_resources:[{}]});
 assert.deepEqual(Array.from(headings, item => item.text), [
