@@ -306,6 +306,8 @@
     if (plot_shell) plot_shell.hidden = true;
     if (key) key.hidden = true;
     panel.hidden = false;
+    const main_family = String(rows[0]?.main_family || "MAIN").toUpperCase();
+    const premat_family = String(rows[0]?.premat_family || "PREMAT").toUpperCase();
     panel.innerHTML = `
       <table class="processing-hard-constraints-table">
         <thead><tr><th>Hard constraint</th><th>SM capacity</th><th>MAIN / block</th><th>PREMAT / block</th><th>Full MAIN + 1 PREMAT</th><th>Capacity used</th></tr></thead>
@@ -322,7 +324,7 @@
           </tr>`;
         }).join("")}</tbody>
       </table>
-      <p class="processing-hard-constraints-note">The five hard SM-residency limits only. “Full MAIN + 1 PREMAT” tests one PREMAT block against MAIN at its theoretical full block residency; this is structural NCU evidence, not a time-resolved NSYS counter.</p>`;
+      <p class="processing-hard-constraints-note"><strong>Most constrained captured pair: MAIN ${processing_escape(main_family)} → PREMAT ${processing_escape(premat_family)}.</strong> The five hard SM-residency limits only. “Full MAIN + 1 PREMAT” tests one PREMAT block against MAIN at its theoretical full block residency; this is structural NCU evidence, not a time-resolved NSYS counter.</p>`;
   }
 
   function apply_final_design(payload) {

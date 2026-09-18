@@ -63,8 +63,10 @@ class _FakeEvent:
         self.enable_timing = enable_timing
         self.complete = False
         self.elapsed_time_override = None
+        self.recorded_streams = []
 
     def record(self, stream) -> None:
+        self.recorded_streams.append(stream)
         self.complete = (
             (stream.kind == "main" and self.cuda.complete_main_on_record)
             or self.cuda.complete_premat_on_record
@@ -376,7 +378,7 @@ def test_target_matrix_cli_propagates_to_training_config(tmp_path) -> None:
         (4, "UP", 3, "DOWN", 3),
     ),
 )
-def test_previous_gemm_leading_edge_launches_selected_successor_after_main_enqueue(
+def test_previous_gemm_leading_edge_event_gates_selected_successor_after_main_enqueue(
     monkeypatch,
     target_matrix,
     predecessor,
@@ -398,12 +400,19 @@ def test_previous_gemm_leading_edge_launches_selected_successor_after_main_enque
 
     runtime.acquire(predecessor, predecessor_layer)
     assert calls == [(predecessor, predecessor_layer)]
-    runtime.consumed(predecessor, predecessor_layer)
+    runtime.forensic_main_work_start(predecessor, predecessor_layer)
+    assert calls == [(predecessor, predecessor_layer)]
+    runtime.forensic_main_work_end(predecessor, predecessor_layer)
     assert calls == [
         (predecessor, predecessor_layer),
         (target_family, target_layer),
     ]
+    runtime.consumed(predecessor, predecessor_layer)
     assert fake_cuda.premat_stream.waited_streams == []
+    assert len(fake_cuda.premat_stream.waited_events) == 1
+    assert fake_cuda.premat_stream.waited_events[0].recorded_streams == [
+        fake_cuda.main_stream
+    ]
 
     report = runtime.report()
     assert report["timing"] == "previous_gemm_leading_edge"
@@ -440,6 +449,8 @@ def test_previous_gemm_leading_edge_chains_all_fused_families(monkeypatch) -> No
 
     for family in ("QKV", "O", "UP", "DOWN"):
         runtime.acquire(family, 3)
+        runtime.forensic_main_work_start(family, 3)
+        runtime.forensic_main_work_end(family, 3)
         runtime.consumed(family, 3)
 
     # Layer 3 QKV has no in-pass predecessor and therefore uses MAIN. Every
@@ -452,6 +463,7 @@ def test_previous_gemm_leading_edge_chains_all_fused_families(monkeypatch) -> No
         ("DOWN", 3),
         ("QKV", 5),
     ]
+    assert len(_fake_cuda.premat_stream.waited_events) == 4
 
 
 def test_premat_timing_cli_defaults_and_propagates(tmp_path) -> None:

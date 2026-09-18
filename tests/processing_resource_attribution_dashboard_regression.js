@@ -14,7 +14,7 @@ new Function(`${base}\n${resource}`); // Parse the exact concatenation served by
 
 const required_fragments = [
   "Stream resource pressure",
-  "processing_stream_resources",
+  "payload.stream_resources",
   "MAIN_PREMAT_OVERLAP",
   "MIXED_SEQUENTIAL",
   "OTHER_OR_UNKNOWN",

@@ -52,7 +52,14 @@ class FakeElement {
 
 const host = new FakeElement();
 host.className = "processing-downloads";
-host.appendChild(new FakeElement("a"));
+const direct_raw = new FakeElement("a");
+direct_raw.id = "processing_download_raw";
+direct_raw.textContent = "Raw capture";
+host.appendChild(direct_raw);
+const direct_compatibility = new FakeElement("a");
+direct_compatibility.id = "processing_download_compatibility";
+direct_compatibility.textContent = "Compatibility";
+host.appendChild(direct_compatibility);
 const actions = new FakeElement();
 const compatibility_card = new FakeElement();
 compatibility_card.actions = actions;
@@ -76,6 +83,7 @@ const sandbox = {
   console,
   document:{
     head:{appendChild() {}},
+    getElementById() { return null; },
     createElement(tag) { return new FakeElement(tag); },
     addEventListener() {},
     querySelector(selector) {
@@ -120,6 +128,8 @@ const sandbox = {
   processing_render_update_timing:async function() { timing_renders += 1; },
   processing_render_throughput:async function() { throughput_renders += 1; },
   processing_render:async function() {},
+  processing_render_timeline:async function() {},
+  processing_gpu_link_time_axes() {},
   processing_throughput_workspace_runs() { return []; },
   render_runs() {},
   run_identifier(run) { return run.dashboard_run_id; },
@@ -145,6 +155,23 @@ const resource_source = fs.readFileSync(
 );
 vm.runInNewContext(source, sandbox);
 const hooks = sandbox.window.processing_user_fix_test_hooks;
+vm.runInNewContext(operations_source, sandbox);
+const operation_hooks = sandbox.window.processing_operations_test_hooks;
+
+const guide_model = operation_hooks.layer_guides([
+  {owner:"MAIN", layer:0, start_us:10000},
+  {owner:"MAIN", layer:1, start_us:20000},
+  {owner:"MAIN", layer:2, start_us:35000},
+]);
+assert.equal(guide_model.shapes.length, 6, "each layer guide should span both lanes with a number gap");
+assert.deepEqual(Array.from(guide_model.shapes.slice(0, 2), shape => [shape.y0, shape.y1]), [
+  [0.59, 0.81], [0.89, 1.11],
+]);
+assert.deepEqual(
+  Array.from(operation_hooks.layer_zoom_range(guide_model.sorted, 50, 1), value => Number(value.toFixed(1))),
+  [18.8, 36.8],
+  "layer zoom did not retain 12% neighbour context",
+);
 
 const headings = hooks.resource_heading_annotations({stream_resources:[{}]});
 assert.deepEqual(Array.from(headings, item => item.text), [
@@ -164,6 +191,9 @@ const evidence_files = hooks.download_entries({
   raw_trace:"trace.nsys-rep", metric_audit:"audit.csv", paired_analysis:"paired.zip",
 });
 assert.deepEqual(Array.from(evidence_files, item => item[0]), ["paired_analysis", "metric_audit", "raw_trace"]);
+hooks.decorate_direct_downloads();
+assert.match(direct_raw.title, /Original Nsight Systems/);
+assert.match(direct_compatibility.title, /structural compatibility catalogue/);
 
 assert.match(resource_source, /Active-SM allocated warp slots/);
 assert.match(resource_source, /Idle-SM warp-slot headroom/);
@@ -189,9 +219,13 @@ assert.equal(rendered_groups.children[0].children.at(-1).textContent, "Raw nsys"
 assert.equal(rendered_groups.children[1].children[1].textContent, "Raw ncu");
 assert.equal(rendered_groups.children[1].children[2].textContent, "Raw metrics CSV");
 assert.equal(rendered_groups.children[1].children[3].textContent, "Semantic metrics CSV");
+assert.match(rendered_groups.children[1].children[1].title, /Original Nsight Compute/);
+assert.match(rendered_groups.children[0].children.at(-1).title, /Original Nsight Systems/);
 
 assert.match(operations_source, /y:\(lane_y\.MAIN \+ lane_y\.PREMAT\) \/ 2/);
-assert.match(operations_source, /yanchor:"middle", font:\{size:11, color:"#545b65"\}/);
+assert.match(operations_source, /captureevents:true/);
+assert.match(operations_source, /plotly_clickannotation/);
+assert.match(operations_source, /previous_span.*0\.12/s);
 
 hooks.apply_operations_maximized_geometry();
 assert.equal(restyles.at(-1).update.width, 0.24);

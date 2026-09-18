@@ -14,6 +14,8 @@ from sheet.local_chart_store import LocalChartReader, LocalChartStore
 from sheet.premat_processing import (
     _mean_metric,
     _ncu_profile_command,
+    _processing_file_prefix,
+    _processing_ncu_scope_from_argv,
     _nsys_profile_command,
     _processing_ncu_target_from_argv,
     normalize_nsys_sqlite,
@@ -590,6 +592,16 @@ def test_processing_profiler_selector_defaults_to_nsys_and_strips_outer_option()
     ]
 
 
+def test_processing_file_prefix_bounds_long_artifact_filenames() -> None:
+    artifact = "260918-1053_scruffy_" + "VERY_LONG_EXPERIMENT_NAME_" * 12
+    prefix = _processing_file_prefix(artifact)
+    filename = prefix + "processing_attribution_resource_stats.csv"
+    assert len(filename.encode("utf-8")) <= 255
+    assert prefix.startswith("260918-1053_scruffy_")
+    assert prefix.endswith("_")
+    assert len(prefix.rsplit("__", 1)[-1].rstrip("_")) == 12
+
+
 def test_processing_ncu_target_uses_separate_absolute_probe_layer() -> None:
     assert _processing_ncu_target_from_argv([
         "--premat_target_layer", "1",
@@ -601,7 +613,11 @@ def test_processing_ncu_target_uses_separate_absolute_probe_layer() -> None:
         "--ncu_probe_layer", "8",
         "--premat_target_matrix", "4",
     ]) == (8, "DOWN")
-    with pytest.raises(ValueError, match="ncu_probe_layer"):
+    assert _processing_ncu_scope_from_argv([
+        "--premat_target_layer", "1",
+        "--ncu-probe-layer", "8",
+    ]) == (8, ("QKV", "O", "UP", "DOWN"))
+    with pytest.raises(ValueError, match="ncu-probe-layer"):
         _processing_ncu_target_from_argv([
             "--premat_target_layer", "1",
             "--premat_target_matrix", "4",
@@ -623,6 +639,26 @@ def test_ncu_profile_command_filters_semantic_main_and_premat_ranges(tmp_path: P
     assert "gpu__time_duration.sum" in command
     assert "THOG2_PROCESSING|owner=MAIN|operation=consume|family=DOWN|layer=8/" in command
     assert "THOG2_PROCESSING|owner=PREMAT|operation=materialize|family=DOWN|layer=8/" in command
+    assert "THOG2_PROCESSING|owner=MAIN|operation=consume|family=QKV|layer=8/" in command
+
+
+def test_ncu_profile_command_captures_full_matrix_catalogue(tmp_path: Path) -> None:
+    command = _ncu_profile_command(
+        "/usr/bin/ncu",
+        report_base=tmp_path / "trace",
+        entrypoint=tmp_path / "runner.py",
+        arguments=["--processing_logging_internal", "enabled"],
+        layer=8,
+        premat_families=("QKV", "O", "UP", "DOWN"),
+    )
+    includes = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--nvtx-include"
+    ]
+    assert len(includes) == 8
+    assert sum("owner=MAIN" in value for value in includes) == 4
+    assert sum("owner=PREMAT" in value for value in includes) == 4
 
 
 def _write_synthetic_ncu_csv(path: Path, semantic: bool) -> None:

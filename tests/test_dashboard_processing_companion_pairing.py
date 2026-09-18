@@ -1,4 +1,5 @@
 # vvv THOG
+import csv
 import json
 from pathlib import Path
 
@@ -156,6 +157,54 @@ def test_ncu_download_manifest_includes_original_report_and_csv_exports(tmp_path
         "ncu_raw_csv": "processing_ncu_raw.csv",
         "ncu_semantic_csv": "processing_ncu_semantic.csv",
     }
+
+
+def test_hard_constraints_select_and_label_most_constrained_catalogue_pair(
+    tmp_path: Path,
+) -> None:
+    processing = tmp_path / "processing"
+    processing.mkdir()
+    fields = (
+        "role", "family", "layer", "threads_per_block", "registers_per_block",
+        "shared_mem_bytes", "warps_per_block", "sm_register_capacity",
+        "sm_shared_mem_bytes", "sm_max_warps", "sm_max_threads", "sm_max_blocks",
+    )
+    rows = [
+        ("MAIN", "QKV", "8", "128", "8192", "0", "4", "65536", "102400", "48", "1536", "24"),
+        ("MAIN", "DOWN", "8", "128", "32768", "0", "4", "65536", "102400", "48", "1536", "24"),
+        ("PREMAT", "UP", "8", "128", "32768", "0", "4", "65536", "102400", "48", "1536", "24"),
+    ]
+    with (processing / "processing_ncu_kernel_resources.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(fields)
+        writer.writerows(rows)
+    compatibility = {"rows": [
+        {
+            "main_family": "QKV", "premat_family": "UP", "main_layer": 8,
+            "premat_layer": 8, "compatibility_class": "GREEN",
+            "premat_blocks_with_full_main_residency": 2,
+            "premat_blocks_with_one_main_block": 4,
+            "main_theoretical_blocks_per_sm": 4,
+            "main_registers_per_block": 8192, "premat_registers_per_block": 32768,
+            "main_shared_mem_bytes": 0, "premat_shared_mem_bytes": 0,
+        },
+        {
+            "main_family": "DOWN", "premat_family": "UP", "main_layer": 8,
+            "premat_layer": 8, "compatibility_class": "RED",
+            "premat_blocks_with_full_main_residency": 0,
+            "premat_blocks_with_one_main_block": 1,
+            "main_theoretical_blocks_per_sm": 2,
+            "main_registers_per_block": 32768, "premat_registers_per_block": 32768,
+            "main_shared_mem_bytes": 0, "premat_shared_mem_bytes": 0,
+            "limiting_resource": "registers",
+        },
+    ]}
+
+    hard = dashboard._hard_constraint_rows(processing, compatibility)
+
+    assert hard
+    assert {(row["main_family"], row["premat_family"]) for row in hard} == {("DOWN", "UP")}
+    assert next(row for row in hard if row["resource"] == "Registers")["limiting"] is True
 
 
 def test_lifecycle_rows_prefer_capture_relative_time_and_retain_legacy_fallback() -> None:

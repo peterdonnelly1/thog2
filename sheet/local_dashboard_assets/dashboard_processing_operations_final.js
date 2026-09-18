@@ -129,16 +129,64 @@
       if (!first_by_layer.has(layer) || start < first_by_layer.get(layer)) first_by_layer.set(layer, start);
     }
     const sorted = [...first_by_layer.entries()].sort((left, right) => left[1] - right[1]);
+    const shapes = [];
+    for (const [_layer, x] of sorted) {
+      for (const [y0, y1] of [[0.59, 0.81], [0.89, 1.11]]) {
+        shapes.push({
+          type:"line", xref:"x", yref:"y", x0:x, x1:x, y0, y1,
+          line:{color:"rgba(112,118,127,0.56)", width:1}, layer:"above",
+        });
+      }
+    }
     return {
-      shapes:sorted.map(([_layer, x]) => ({
-        type:"line", xref:"x", yref:"y", x0:x, x1:x, y0:0.865, y1:1.085,
-        line:{color:"rgba(125,130,138,0.50)", width:1}, layer:"above",
-      })),
+      sorted,
+      shapes,
       annotations:sorted.map(([layer, x]) => ({
         xref:"x", yref:"y", x, y:(lane_y.MAIN + lane_y.PREMAT) / 2, text:String(layer + 1), showarrow:false,
-        xanchor:"center", yanchor:"middle", font:{size:11, color:"#545b65"},
+        xanchor:"center", yanchor:"middle", font:{size:12, color:"#454c55"},
+        name:`processing-layer-${layer}`, captureevents:true,
+        hovertext:`Zoom to layer ${layer + 1}`,
       })),
     };
+  }
+
+  function layer_zoom_range(sorted, capture_ms, layer) {
+    const index = sorted.findIndex(([value]) => Number(value) === Number(layer));
+    if (index < 0) return null;
+    const start = Number(sorted[index][1]);
+    const end = index + 1 < sorted.length
+      ? Number(sorted[index + 1][1])
+      : Math.max(start, Number(capture_ms || start));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    const previous_span = index > 0
+      ? start - Number(sorted[index - 1][1])
+      : end - start;
+    const next_span = index + 2 < sorted.length
+      ? Number(sorted[index + 2][1]) - end
+      : end - start;
+    return [
+      Math.max(0, start - Math.max(0, previous_span) * 0.12),
+      end + Math.max(0, next_span) * 0.12,
+    ];
+  }
+
+  function install_layer_zoom(mount, guides, capture_ms) {
+    if (!mount) return;
+    mount._processing_layer_zoom_guides = guides;
+    mount._processing_layer_zoom_capture_ms = capture_ms;
+    if (mount._processing_layer_zoom_installed === true) return;
+    mount._processing_layer_zoom_installed = true;
+    mount.on("plotly_clickannotation", event => {
+      const name = String(event?.annotation?.name || "");
+      const match = /^processing-layer-(\d+)$/.exec(name);
+      if (!match) return;
+      const range = layer_zoom_range(
+        mount._processing_layer_zoom_guides?.sorted || [],
+        mount._processing_layer_zoom_capture_ms,
+        Number(match[1]),
+      );
+      if (range) Plotly.relayout(mount, {"xaxis.range":range}).catch(() => {});
+    });
   }
 
   function operations_card_maximized() {
@@ -243,6 +291,7 @@
       annotations:guides.annotations,
       bargap:0,
     });
+    install_layer_zoom(by_id("processing_timeline_plot"), guides, capture_ms);
     processing_gpu_link_time_axes();
   };
 
@@ -315,6 +364,11 @@
       const observer = new MutationObserver(() => ensure_show_all_button());
       observer.observe(header, {childList:true, subtree:true});
     }
+  });
+
+  window.processing_operations_test_hooks = Object.freeze({
+    layer_guides,
+    layer_zoom_range,
   });
 })();
 // ^^^ THOG

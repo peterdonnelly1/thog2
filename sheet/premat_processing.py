@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 from contextlib import contextmanager
+import hashlib
 import json
 import math
 import os
@@ -52,6 +53,24 @@ _capture_active = False
 _capture_done = False
 _capture_stack_depth = 0
 _capture_start_ns: Optional[int] = None
+
+
+def _processing_file_prefix(run_artifact: str, *, max_utf8_bytes: int = 180) -> str:
+    """Return a readable, NAME_MAX-safe prefix for generated capture files."""
+    cleaned = str(run_artifact or "").strip()
+    if "/" in cleaned or "\\" in cleaned:
+        cleaned = Path(cleaned).name
+    if not cleaned:
+        return ""
+    encoded = cleaned.encode("utf-8")
+    if len(encoded) <= max_utf8_bytes:
+        return cleaned + "_"
+    digest = hashlib.sha256(encoded).hexdigest()[:12]
+    budget = max(1, max_utf8_bytes - len(digest.encode("ascii")) - 2)
+    shortened = cleaned
+    while shortened and len(shortened.encode("utf-8")) > budget:
+        shortened = shortened[:-1]
+    return f"{shortened}__{digest}_"
 
 
 def validate_processing_configuration(
@@ -199,26 +218,53 @@ def _find_ncu() -> Optional[str]:
 _PROCESSING_TARGET_FAMILIES = {1: "QKV", 2: "O", 3: "UP", 4: "DOWN"}
 
 
-def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
+def _processing_ncu_scope_from_argv(
+    arguments: Sequence[str],
+) -> tuple[int, tuple[str, ...]]:
+    """Return the absolute probe layer and PREMAT families to profile.
+
+    MAIN evidence is always collected for every fused matrix family.  An
+    explicit premat_target_matrix narrows only the PREMAT side; omitting it
+    profiles all four PREMAT families and produces the full 4x4 structural
+    compatibility catalogue from one NCU run.
+    """
     raw_probe_layer = _argv_value(arguments, "--ncu-probe-layer")
     if raw_probe_layer is None:
         raw_probe_layer = _argv_value(arguments, "--ncu_probe_layer")
-    raw_matrix = _argv_value(arguments, "--premat_target_matrix")
-    if raw_probe_layer is None or raw_matrix is None:
+    if raw_probe_layer is None:
         raise ValueError(
-            "--premat_processing_profiler ncu requires explicit "
-            "--ncu-probe-layer and --premat_target_matrix"
+            "--premat_processing_profiler ncu requires explicit --ncu-probe-layer"
         )
     try:
         probe_layer = int(str(raw_probe_layer))
-        matrix = int(str(raw_matrix))
     except ValueError as error:
-        raise ValueError("NCU probe layer/matrix must be integers") from error
+        raise ValueError("NCU probe layer must be an integer") from error
     if probe_layer < 0:
         raise ValueError("--ncu-probe-layer must be non-negative")
+
+    raw_matrix = _argv_value(arguments, "--premat_target_matrix")
+    if raw_matrix is None:
+        return probe_layer, tuple(_PROCESSING_TARGET_FAMILIES.values())
+    try:
+        matrix = int(str(raw_matrix))
+    except ValueError as error:
+        raise ValueError("NCU probe matrix must be an integer") from error
     if matrix not in _PROCESSING_TARGET_FAMILIES:
-        raise ValueError("--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) for NCU capture")
-    return probe_layer, _PROCESSING_TARGET_FAMILIES[matrix]
+        raise ValueError(
+            "--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) "
+            "when it is supplied for NCU capture"
+        )
+    return probe_layer, (_PROCESSING_TARGET_FAMILIES[matrix],)
+
+
+def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
+    """Backward-compatible helper for callers requiring one PREMAT family."""
+    probe_layer, families = _processing_ncu_scope_from_argv(arguments)
+    if len(families) != 1:
+        raise ValueError(
+            "single-target NCU selection requires explicit --premat_target_matrix"
+        )
+    return probe_layer, families[0]
 
 
 def _ncu_profile_command(
@@ -228,16 +274,36 @@ def _ncu_profile_command(
     entrypoint: Path,
     arguments: Sequence[str],
     layer: int,
-    family: str,
+    family: Optional[str] = None,
+    premat_families: Optional[Sequence[str]] = None,
 ) -> list[str]:
-    main_label = _operation_label("MAIN", "consume", family, layer)
-    premat_label = _operation_label("PREMAT", "materialize", family, layer)
-    return [
+    selected_premat = tuple(
+        str(value).upper()
+        for value in (
+            premat_families
+            if premat_families is not None
+            else ((family,) if family is not None else _PROCESSING_TARGET_FAMILIES.values())
+        )
+    )
+    unknown = set(selected_premat) - set(_PROCESSING_TARGET_FAMILIES.values())
+    if unknown:
+        raise ValueError(f"unknown NCU PREMAT families: {sorted(unknown)}")
+    command = [
         ncu,
         "--target-processes", "all",
         "--nvtx",
-        "--nvtx-include", main_label + "/",
-        "--nvtx-include", premat_label + "/",
+    ]
+    for main_family in _PROCESSING_TARGET_FAMILIES.values():
+        command.extend((
+            "--nvtx-include",
+            _operation_label("MAIN", "consume", main_family, layer) + "/",
+        ))
+    for premat_family in selected_premat:
+        command.extend((
+            "--nvtx-include",
+            _operation_label("PREMAT", "materialize", premat_family, layer) + "/",
+        ))
+    command.extend((
         "--section", "LaunchStats",
         "--section", "Occupancy",
         "--metrics", "gpu__time_duration.sum",
@@ -247,7 +313,8 @@ def _ncu_profile_command(
         sys.executable,
         str(Path(entrypoint).resolve()),
         *arguments,
-    ]
+    ))
+    return command
 
 
 def _export_ncu_raw_csv(
@@ -1042,9 +1109,7 @@ def normalize_nsys_sqlite(
         "accepted_exact_names",
     )
     run_artifact = str((handoff or {}).get("run_name", "")).strip()
-    if "/" in run_artifact or "\\" in run_artifact:
-        run_artifact = Path(run_artifact).name
-    prefix = f"{run_artifact}_" if run_artifact else ""
+    prefix = _processing_file_prefix(run_artifact)
     processing_files = {
         "samples": f"{prefix}processing_samples.csv",
         "intervals": f"{prefix}processing_intervals.csv",
@@ -1214,7 +1279,7 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
             "--premat_processing_logging enabled with --premat_processing_profiler ncu "
             "requires NVIDIA Nsight Compute CLI (ncu) on PATH"
         )
-    layer, family = _processing_ncu_target_from_argv(arguments)
+    layer, premat_families = _processing_ncu_scope_from_argv(arguments)
     report_base = temporary_root / "processing_ncu_trace"
     command = _ncu_profile_command(
         ncu,
@@ -1222,12 +1287,13 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
         entrypoint=entrypoint,
         arguments=rewritten_arguments,
         layer=layer,
-        family=family,
+        premat_families=premat_families,
     )
     print(
         "THOG2 PREMAT processing capture: Nsight Compute; "
-        f"capturing update {capture_update}, layer {layer} {family}; "
-        "MAIN consume + PREMAT materialize",
+        f"capturing update {capture_update}, layer {layer}; "
+        f"MAIN {','.join(_PROCESSING_TARGET_FAMILIES.values())} + "
+        f"PREMAT {','.join(premat_families)}",
         flush=True,
     )
     completed = subprocess.run(command, env=environment)
@@ -1277,7 +1343,8 @@ def maybe_reexec_under_nsys(arguments: Sequence[str], *, entrypoint: Path) -> Op
     shutil.copy2(semantic_csv, processing_directory / "processing_ncu_semantic.csv")
     print(
         "THOG2 PREMAT NCU compatibility data: "
-        f"{paths['csv']} ({family} layer {layer}; dominant MAIN/PREMAT kernels)",
+        f"{paths['csv']} (layer {layer}; MAIN all families x PREMAT "
+        f"{','.join(premat_families)}; dominant kernels)",
         flush=True,
     )
     return int(completed.returncode)
@@ -1289,6 +1356,8 @@ __all__ = [
     "PROCESSING_DEFAULT_PROFILER",
     "PROCESSING_PROFILERS",
     "_ncu_profile_command",
+    "_processing_file_prefix",
+    "_processing_ncu_scope_from_argv",
     "_processing_ncu_target_from_argv",
     "maybe_reexec_under_nsys",
     "normalize_nsys_sqlite",

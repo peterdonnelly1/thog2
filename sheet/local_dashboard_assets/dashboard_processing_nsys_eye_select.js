@@ -47,10 +47,14 @@
     if (!run || !is_nsys_run(run)) return;
 
     // The button's own listener runs before this delegated tbody listener, so
-    // visibility already reflects the click. Only opening the eye promotes the
-    // NSYS run to the active Processing source; closing it remains an ordinary
-    // visibility action.
-    if (!is_visible(run_id)) return;
+    // visibility already reflects the click. Closing a paired NSYS source also
+    // closes and releases its NCU companion; it must not remain visually paired
+    // or be reused implicitly for the next source.
+    if (!is_visible(run_id)) {
+      window.processing_unpair_hidden_nsys?.(run_id);
+      return;
+    }
+    window.processing_allow_pair_for_nsys?.(run_id);
 
     if (String(app.current_run_id || "") !== run_id) {
       select_run(run_id, {manual:true});

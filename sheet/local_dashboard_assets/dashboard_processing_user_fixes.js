@@ -48,6 +48,33 @@
     ncu_semantic_csv:"Semantic metrics CSV", kernel_resources:"NCU resources",
     csv:"Compatibility CSV", json:"Compatibility JSON",
   };
+  const download_help = {
+    paired_analysis:"Paired NSYS + NCU analysis archive.\nContains the structured, derived files from both runs plus the pair manifest and PREMAT lifecycle tables.\nRaw profiler captures are intentionally downloaded separately.",
+    pair_manifest:"Pair provenance manifest (JSON).\nRecords the exact NSYS and NCU artifacts, pairing key, file inventory, sizes and SHA-256 hashes used for this analysis.",
+    bundle:"This run's normalized Processing archive.\nContains structured samples, operation intervals, summaries, resource attribution, metric audit and metadata for reproducible analysis.",
+    samples:"Time-ordered NSYS GPU metric samples (CSV).\nIncludes capture timestamps and normalized device-wide counters at the requested sampling frequency.",
+    stream_resources:"Analysis-ready resource timeline (CSV).\nCombines normalized NSYS counters with MAIN-only, PREMAT-only, overlap and mixed/unattributed interval classification.",
+    intervals:"GPU kernel intervals (CSV).\nEach row contains start/end time, stream, inferred owner, semantic operation, matrix family, layer and kernel name.",
+    lifecycle_events:"PREMAT scheduler lifecycle events (CSV).\nCapture-relative request, admission, submission, readiness, deadline, wait, consumption and release evidence for each matrix job.",
+    lifecycle_summary:"One row per PREMAT job (CSV).\nCondenses scheduler lifecycle and GPU interval timing into analysis-ready readiness, lead, wait and completion fields.",
+    operation_resource_stats:"Duration-weighted NSYS resource statistics by semantic operation/family/layer (CSV).\nUse this to compare MAIN and PREMAT phases without reprocessing raw samples.",
+    attribution_resource_stats:"Duration-weighted resource statistics by attribution state (CSV).\nSeparates MAIN-only, PREMAT-only, simultaneous overlap and mixed/unattributed sampling bins.",
+    metric_audit:"Metric provenance and quality audit (CSV).\nShows the exact Nsight metric selected for every displayed series, transformations, units, sample counts and missing-data status.",
+    summary:"Per-matrix Processing summary (CSV).\nIncludes PREMAT busy time, MAIN overlap, concurrency percentages and capture-level totals.",
+    metadata:"Processing capture metadata (JSON).\nIncludes schema version, run configuration, capture update/frequency, timing origin, source profiler and generated-file map.",
+    raw_trace:"Original Nsight Systems .nsys-rep capture.\nOpen in Nsight Systems for complete timeline inspection beyond Instra's normalized views.",
+    raw_ncu:"Original Nsight Compute .ncu-rep capture.\nOpen in Nsight Compute for the complete collected kernel/resource report and source metrics.",
+    ncu_raw_csv:"Unmodified Nsight Compute raw-page metric export (CSV).\nKernel names are original CUDA names; use with the semantic export to audit every normalization step.",
+    ncu_semantic_csv:"Nsight Compute raw-page export with NVTX semantic kernel names (CSV).\nMaps launches to MAIN/PREMAT owner, operation, matrix family and zero-based layer.",
+    kernel_resources:"Representative NCU kernel resources (CSV).\nDominant kernel per captured owner/family/layer with threads, warps, registers, shared memory, occupancy and SM capacities.",
+    csv:"MAIN × PREMAT structural compatibility catalogue (CSV).\nTests block co-residency against register, shared-memory, warp, thread and block-slot limits; it does not claim observed overlap.",
+    json:"MAIN × PREMAT structural compatibility catalogue (JSON).\nSame compatibility evidence as the CSV, with schema and interpretation metadata for programmatic analysis.",
+  };
+  const download_id_alias = Object.freeze({
+    raw:"raw_trace",
+    ncu_resources:"kernel_resources",
+    compatibility:"csv",
+  });
 
   function processing_download_url_for_run(run_id, filename) {
     return `/api/local-file?run=${encodeURIComponent(run_id)}&path=${encodeURIComponent(`processing/${filename}`)}&download=1`;
@@ -93,11 +120,28 @@
         link.textContent = download_labels[key] || String(key).replaceAll("_", " ");
         link.href = processing_download_url_for_run(source.dashboard_run_id, filename);
         link.download = filename;
+        link.title = download_help[key] || `Download ${link.textContent}.\nFile: ${filename}`;
+        link.setAttribute("aria-label", `${link.textContent}. ${link.title.replaceAll("\n", " ")}`);
         group.appendChild(link);
       }
       groups.appendChild(group);
     }
     host.appendChild(groups);
+  }
+
+  function decorate_direct_downloads() {
+    const host = document.querySelector("#processing_chart_group .processing-downloads");
+    if (!host) return;
+    for (const link of host.querySelectorAll(":scope > a")) {
+      const id_key = String(link.id || "").replace(/^processing_download_/, "");
+      const label_key = Object.keys(download_labels).find(
+        key => download_labels[key] === String(link.textContent || "").trim(),
+      );
+      const key = download_id_alias[id_key] || id_key || label_key;
+      if (!key || !download_help[key]) continue;
+      link.title = download_help[key];
+      link.setAttribute("aria-label", `${link.textContent}. ${link.title.replaceAll("\n", " ")}`);
+    }
   }
 
   function resource_heading_annotations(payload) {
@@ -250,6 +294,7 @@
     await processing_render_before_user_fixes(payload, trace_available);
     const effective = processing_view.companion_enriched_payload || payload;
     ensure_compatibility_maximize_button();
+    decorate_direct_downloads();
     render_paired_downloads(effective);
     apply_operations_maximized_geometry();
     schedule_comparison_refresh(false);
@@ -280,6 +325,8 @@
     timing_name_annotations,
     apply_operations_maximized_geometry,
     render_paired_downloads,
+    decorate_direct_downloads,
+    download_help,
   };
 
   window.addEventListener("load", () => {

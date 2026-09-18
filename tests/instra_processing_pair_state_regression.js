@@ -309,6 +309,29 @@ async function install_pair_state(options) {
   await single_pair_owner.processing_refresh(true);
   assert.equal(single_pair_owner.render_runs_calls, 1, "legacy and final pair owners both rendered the Runs table");
 
+  const closed_nsys = make_sandbox({
+    runs:[ordinary, nsys, ncu],
+    current_run_id:"nsys",
+    visible_run_ids:[nsys.dashboard_run_id],
+    catalog_ready:false,
+  });
+  vm.runInNewContext(pair_source, closed_nsys);
+  vm.runInNewContext(eye_source, closed_nsys);
+  await closed_nsys.processing_refresh(true);
+  assert.equal(closed_nsys.app.visibility.ncu, true, "test pair did not open its NCU companion");
+  closed_nsys.app.visibility.nsys = false;
+  const row = {dataset:{runId:"nsys"}};
+  const eye = {closest(selector) { return selector === "tr[data-run-id]" ? row : null; }};
+  const click_target = {closest(selector) { return selector === ".eye-button" ? eye : null; }};
+  closed_nsys.listeners.get("runs_body:click")({target:click_target});
+  assert.equal(closed_nsys.app.visibility.ncu, false, "closing paired NSYS did not close NCU");
+  assert.equal(closed_nsys.app.processing_paired_run_ids.size, 0, "closing paired NSYS retained pair state");
+  assert.deepEqual(
+    JSON.parse(closed_nsys.storage.get("thog2_processing_auto_opened_run_ids")),
+    [],
+    "closing paired NSYS retained automatic NCU ownership",
+  );
+
   console.log("PASS startup profiler restoration, ownership migration and single-request NSYS selection");
 })().catch(error => {
   console.error(error);

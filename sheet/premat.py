@@ -624,6 +624,13 @@ class PrematRuntime:
         self._forensic_current_layers: List[_ForensicLayerInterval] = []
         self._forensic_current_candidates: List[_ForensicCandidateInterval] = []
         self._forensic_current_main_work: List[_ForensicMainWorkInterval] = []
+        # For previous-GEMM timing, the gate is recorded immediately before the
+        # MAIN GEMM and consumed only after that GEMM has been enqueued.  This
+        # preserves host enqueue order while allowing the two CUDA streams to
+        # run concurrently once MAIN reaches the recorded leading edge.
+        self._pending_leading_edge_gates: Dict[
+            Tuple[int, str], Tuple[Tuple[int, str], torch.cuda.Event]
+        ] = {}
         self._pending_forensic_passes: List[_PendingForensicPass] = []
         self._latest_forensic_pass: Optional[Dict[str, object]] = None
         # ^^^ THOG
@@ -806,13 +813,42 @@ class PrematRuntime:
         interval.end_event = event
 
     def forensic_main_work_start(self, family: str, layer_index: int) -> None:
-        if not self._enable_gpu_timing_diagnostic:
+        if (
+            self._timing != "previous_gemm_leading_edge"
+            and not self._enable_gpu_timing_diagnostic
+        ):
             return
         self._require_active()
         if self._device is None:
             raise RuntimeError("PREMAT forensic Main work timing has no CUDA device")
-        event = torch.cuda.Event(enable_timing=True)
-        event.record(torch.cuda.current_stream(device=self._device))
+        current_stream = torch.cuda.current_stream(device=self._device)
+        event: Optional[torch.cuda.Event] = None
+        if self._timing == "previous_gemm_leading_edge":
+            target = self._previous_gemm_leading_edge_target(
+                family=str(family),
+                layer_index=int(layer_index),
+            )
+            selected_family = (
+                PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                if self._target_matrix is not None
+                else None
+            )
+            if target is not None and (
+                selected_family is None or target[1] == selected_family
+            ):
+                event = torch.cuda.Event(
+                    enable_timing=self._enable_gpu_timing_diagnostic
+                )
+                event.record(current_stream)
+                self._pending_leading_edge_gates[
+                    (int(layer_index), str(family))
+                ] = (target, event)
+
+        if not self._enable_gpu_timing_diagnostic:
+            return
+        if event is None:
+            event = torch.cuda.Event(enable_timing=True)
+            event.record(current_stream)
         self._forensic_current_main_work.append(
             _ForensicMainWorkInterval(
                 pass_sequence=self._pass_sequence,
@@ -823,11 +859,28 @@ class PrematRuntime:
         )
 
     def forensic_main_work_end(self, family: str, layer_index: int) -> None:
-        if not self._enable_gpu_timing_diagnostic:
+        if (
+            self._timing != "previous_gemm_leading_edge"
+            and not self._enable_gpu_timing_diagnostic
+        ):
             return
         self._require_active()
         if self._device is None:
             raise RuntimeError("PREMAT forensic Main work timing has no CUDA device")
+        gate = self._pending_leading_edge_gates.pop(
+            (int(layer_index), str(family)),
+            None,
+        )
+        if gate is not None:
+            target, gate_event = gate
+            self._advance(
+                trigger=f"previous_gemm_leading_edge:{family}",
+                eligible_keys=(target,),
+                gate_event=gate_event,
+            )
+
+        if not self._enable_gpu_timing_diagnostic:
+            return
         interval = next(
             (
                 item
@@ -894,6 +947,7 @@ class PrematRuntime:
         self._forensic_current_layers = []
         self._forensic_current_candidates = []
         self._forensic_current_main_work = []
+        self._pending_leading_edge_gates.clear()
 
     @staticmethod
     def _forensic_derived_summary(values: Mapping[str, float | int]) -> Dict[str, object]:
@@ -1473,6 +1527,7 @@ class PrematRuntime:
         # Do not clear _pending_releases: unlike the old record_stream fallback,
         # explicit strong-reference lifetime may legitimately span microsteps.
         self._resolve_pending_releases()
+        self._pending_leading_edge_gates.clear()
         self._active = False
 
     def layer_start(self, layer_index: int) -> None:
@@ -1956,27 +2011,6 @@ class PrematRuntime:
         self._resolve_pending_releases()
         if self._timing == "as_the_code_flies":
             self._advance(trigger="consumed")
-        else:
-            leading_edge_target = self._previous_gemm_leading_edge_target(
-                family=str(family),
-                layer_index=int(layer_index),
-            )
-            selected_family = (
-                PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
-                if self._target_matrix is not None
-                else None
-            )
-            if (
-                leading_edge_target is not None
-                and (
-                    selected_family is None
-                    or leading_edge_target[1] == selected_family
-                )
-            ):
-                self._advance(
-                    trigger=f"previous_gemm_leading_edge:{family}",
-                    eligible_keys=(leading_edge_target,),
-                )
 
     def report(self) -> Dict[str, object]:
         self._resolve_pending_timings()
@@ -2688,6 +2722,7 @@ class PrematRuntime:
         *,
         trigger: str,
         eligible_keys: Optional[Sequence[Tuple[int, str]]] = None,
+        gate_event: Optional[torch.cuda.Event] = None,
     ) -> None:
         """Queue every consecutively admissible candidate for the exact target."""
         self._refresh_available()
@@ -2727,6 +2762,7 @@ class PrematRuntime:
                     if first_candidate is not None
                     else None
                 ),
+                "cuda_event_gate": gate_event is not None,
             },
         )
         if first_candidate is None:
@@ -2812,6 +2848,7 @@ class PrematRuntime:
                 **self._pending_release_diagnostics(),
                 "raw_memory": raw_memory,
                 "charged_memory": charged_memory,
+                "cuda_event_gate": gate_event is not None,
             }
             if decision.admitted and self._allocator_aware_admission == "cautious":
                 certificate_consumption = self._reserve_allocator_certificate(
@@ -2884,6 +2921,15 @@ class PrematRuntime:
             # defeat the requested overlap.
             if self._timing == "as_the_code_flies":
                 self._stream.wait_stream(current_stream)
+            elif gate_event is None:
+                raise RuntimeError(
+                    "previous_gemm_leading_edge admission has no CUDA event gate"
+                )
+            else:
+                # The MAIN GEMM has already been enqueued by the time _advance
+                # is called.  Only PREMAT waits on the event recorded directly
+                # before it; MAIN never waits on PREMAT here.
+                self._stream.wait_event(gate_event)
             try:
                 with torch.cuda.stream(self._stream):
                     # vvv THOG completion is required for dependency/query semantics; the start timestamp is diagnostic only

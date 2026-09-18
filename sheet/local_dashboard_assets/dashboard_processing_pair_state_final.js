@@ -25,6 +25,7 @@
   let startup_reconcile_run_id = "";
   let startup_restored_ncu_run_ids = new Set();
   let startup_reconciled_generation = -1;
+  let pairing_suppressed_nsys_run_id = "";
 
   function same_set(left, right) {
     if (left.size !== right.size) return false;
@@ -100,9 +101,39 @@
     if (visibility_changed || had_pair) render_runs();
   }
 
+  function unpair_hidden_nsys(run_id) {
+    const source_id = String(run_id || "");
+    if (!source_id || !is_nsys_run_id(source_id)) return false;
+    if (!(app.processing_paired_run_ids || new Set()).has(source_id)) return false;
+
+    let visibility_changed = false;
+    for (const paired_id of app.processing_paired_run_ids || []) {
+      if (!is_ncu_run_id(paired_id) || !is_visible(paired_id)) continue;
+      app.visibility[paired_id] = false;
+      visibility_changed = true;
+    }
+    if (visibility_changed) save_json("thog2_local_run_visibility", app.visibility);
+    app.processing_paired_run_ids = new Set();
+    app.processing_pair_roles = {};
+    app.processing_auto_opened_run_ids = new Set();
+    save_auto_opened_run_ids();
+    processing_view.companion_enriched_payload = null;
+    pairing_suppressed_nsys_run_id = source_id;
+    render_runs();
+    return true;
+  }
+
+  window.processing_unpair_hidden_nsys = unpair_hidden_nsys;
+  window.processing_allow_pair_for_nsys = run_id => {
+    if (pairing_suppressed_nsys_run_id === String(run_id || "")) {
+      pairing_suppressed_nsys_run_id = "";
+    }
+  };
+
   function begin_navigation(next_run_id) {
     navigation_epoch += 1;
     observed_current_run_id = String(next_run_id || "");
+    pairing_suppressed_nsys_run_id = "";
     if (startup_reconcile_run_id !== observed_current_run_id) {
       startup_reconcile_run_id = "";
       startup_restored_ncu_run_ids = new Set();
@@ -256,7 +287,12 @@
     const companion_id = String(source?.dashboard_run_id || "");
     const next = new Set();
     const roles = {};
-    if (trace_available && render_run_id && companion_id) {
+    if (
+      trace_available
+      && render_run_id
+      && companion_id
+      && pairing_suppressed_nsys_run_id !== render_run_id
+    ) {
       next.add(render_run_id);
       next.add(companion_id);
       roles[render_run_id] = "NSYS source · paired Processing evidence";
