@@ -172,6 +172,18 @@ assert.deepEqual(
   [18.8, 36.8],
   "layer zoom did not retain 12% neighbour context",
 );
+const scroll_metrics = operation_hooks.layer_scroll_metrics(100, [20, 40], 500);
+assert.equal(scroll_metrics.virtual_width, 2500, "zoom scrollbar does not represent the full capture");
+assert.equal(scroll_metrics.max_scroll, 2000);
+assert.equal(scroll_metrics.scroll_left, 500);
+assert.deepEqual(
+  Array.from(operation_hooks.layer_range_for_scroll(100, 20, 1000, 2000), value => Number(value.toFixed(1))),
+  [40, 60],
+  "scroll position did not pan the fixed-width zoom window",
+);
+assert.match(operations_source, /processing_operations_reset_zoom/);
+assert.match(operations_source, /training_throughput_plot/);
+assert.match(operations_source, /processing_render_throughput_before_training_group/);
 
 const headings = hooks.resource_heading_annotations({stream_resources:[{}]});
 assert.deepEqual(Array.from(headings, item => item.text), [
