@@ -12,15 +12,19 @@
     "#92400E", "#78350F", "#A0522D", "#6B4423", "#708090", "#475569", "#334155", "#1E293B",
     "#FF0000", "#00FF00", "#0000FF", "#00FFFF", "#FF00FF", "#FFFF00", "#000000", "#FFFFFF",
   ]);
+  const combined_palette = Object.freeze(
+    [...new Set([...default_palette, ...additional_palette].map(colour => String(colour).toUpperCase()))],
+  );
+  window.instra_colour_palette = combined_palette;
 
   function install_palette() {
     const container = by_id("colour_swatches");
-    if (!container || container.dataset.instraPalette128 === "true") return;
+    if (!container) return;
     const installed = new Set(
       [...container.querySelectorAll(".colour-swatch")]
         .map(button => String(button.title || "").toUpperCase()),
     );
-    for (const colour of additional_palette) {
+    for (const colour of combined_palette) {
       if (installed.has(colour)) continue;
       const button = document.createElement("button");
       button.type = "button";
@@ -33,6 +37,12 @@
     }
     container.dataset.instraPalette128 = "true";
   }
+
+  const open_colour_picker_before_palette_restore = open_colour_picker;
+  open_colour_picker = function(run_id, anchor) {
+    install_palette();
+    return open_colour_picker_before_palette_restore(run_id, anchor);
+  };
 
   function chart_has_data(chart_name) {
     if (!app.figures) return false;
@@ -74,6 +84,7 @@
 
   window.instra_feature_regression_test_hooks = Object.freeze({
     additional_palette,
+    combined_palette,
     install_palette,
     sync_depth_chart_availability,
   });

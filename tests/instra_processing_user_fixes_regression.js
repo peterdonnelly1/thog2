@@ -91,6 +91,7 @@ const restyles = [];
 const timers = [];
 let throughput_renders = 0;
 let timing_renders = 0;
+let saved_operation_colours = null;
 
 const sandbox = {
   console,
@@ -108,6 +109,7 @@ const sandbox = {
     addEventListener() {},
     clearTimeout() {},
     setTimeout(callback) { timers.push(callback); return timers.length; },
+    instra_colour_palette:["#111111", "#222222", "#333333"],
   },
   Plotly:{
     relayout:async (mount, update) => { relayouts.push({mount, update}); },
@@ -151,6 +153,10 @@ const sandbox = {
   encodeURIComponent,
   setTimeout(callback) { timers.push(callback); return timers.length; },
   requestAnimationFrame(callback) { callback(); },
+  load_json(_key, fallback) { return fallback; },
+  save_json(key, value) {
+    saved_operation_colours = {key, value:JSON.parse(JSON.stringify(value))};
+  },
 };
 sandbox.window.processing_view = sandbox.processing_view;
 
@@ -176,9 +182,13 @@ const guide_model = operation_hooks.layer_guides([
   {owner:"MAIN", layer:1, start_us:20000},
   {owner:"MAIN", layer:2, start_us:35000},
 ]);
-assert.equal(guide_model.shapes.length, 6, "each layer guide should span both lanes with a number gap");
-assert.deepEqual(Array.from(guide_model.shapes.slice(0, 2), shape => [shape.y0, shape.y1]), [
-  [0.59, 0.81], [0.89, 1.11],
+assert.equal(guide_model.shapes.length, 3, "each layer should have one continuous divider");
+assert.deepEqual(Array.from(guide_model.shapes, shape => [shape.y0, shape.y1]), [
+  [0.28, 1.42], [0.28, 1.42], [0.28, 1.42],
+]);
+assert.equal(guide_model.annotations.length, 6, "layer numbers should be duplicated above and below the lanes");
+assert.deepEqual(Array.from(guide_model.annotations.slice(0, 2), annotation => [annotation.name, annotation.y]), [
+  ["processing-layer-0-top", 1.42], ["processing-layer-0-bottom", 0.28],
 ]);
 assert.deepEqual(
   Array.from(operation_hooks.layer_zoom_range(guide_model.sorted, 50, 1), value => Number(value.toFixed(1))),
@@ -274,20 +284,28 @@ assert.equal(rendered_groups.children[1].children[3].textContent, "Semantic metr
 assert.match(rendered_groups.children[1].children[1].title, /Original Nsight Compute/);
 assert.match(rendered_groups.children[0].children.at(-1).title, /Original Nsight Systems/);
 
-assert.match(operations_source, /y:\(lane_y\.MAIN \+ lane_y\.PREMAT\) \/ 2/);
+assert.match(operations_source, /const lane_width = 0\.30/);
+assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:300px !important/,
+  "the normal Operations card does not leave room for the outer layer guides");
 assert.match(operations_source, /captureevents:true/);
 assert.match(operations_source, /plotly_clickannotation/);
 assert.match(operations_source, /previous_span.*0\.12/s);
+assert.equal(operation_hooks.marker_for({owner:"MAIN", operation:"consume", family:"QKV"}).pattern, undefined,
+  "MAIN GEMM operations should use a plain fill");
+assert.equal(operation_hooks.marker_for({owner:"PREMAT", operation:"materialize", family:"QKV"}).pattern.shape, "/",
+  "PREMAT operations should carry the diagonal pattern");
+assert.deepEqual(Array.from(operation_hooks.operations_colour_palette()), ["#111111", "#222222", "#333333"],
+  "Operations did not reuse the Runs colour-patch palette");
+assert.match(operations_source, /toggle\.textContent = "PREMAT"/);
+assert.match(operations_source, /thog2_processing_operation_colours_v1/);
 
 hooks.apply_operations_maximized_geometry();
-assert.equal(restyles.at(-1).update.width, 0.24);
-assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.48, 1.19]);
-assert.equal(relayouts.at(-1).update["legend.font.size"], 12);
+assert.equal(restyles.at(-1).update.width, 0.30);
+assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.20, 1.50]);
 operations_card.className = "";
 hooks.apply_operations_maximized_geometry();
-assert.equal(restyles.at(-1).update.width, 0.12);
-assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.53, 1.17]);
-assert.equal(relayouts.at(-1).update["legend.font.size"], 9);
+assert.equal(restyles.at(-1).update.width, 0.30);
+assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.20, 1.50]);
 
 sandbox.processing_render({}, true).then(async () => {
   assert.equal(actions.children[0].dataset.maximize, "processing_compatibility");
@@ -306,6 +324,16 @@ sandbox.processing_render({}, true).then(async () => {
   await timers[0]();
   assert.equal(throughput_renders, 1, "unchanged run cohort repeated throughput work");
   assert.equal(timing_renders, 1, "unchanged run cohort repeated timing work");
+  const colour_row = {owner:"MAIN", operation:"consume", family:"QKV"};
+  const colour_key = operation_hooks.operation_colour_key(colour_row);
+  operations_mount.data = [{meta:{operations_colour_key:colour_key, operations_owner:"MAIN"}}];
+  await operation_hooks.apply_operation_colour(colour_key, "#abcdef");
+  assert.equal(saved_operation_colours.key, "thog2_processing_operation_colours_v1");
+  assert.equal(saved_operation_colours.value[colour_key], "#ABCDEF",
+    "the chosen operation colour was not persisted");
+  assert.deepEqual(Array.from(restyles.at(-1).indices), [0]);
+  assert.equal(restyles.at(-1).update["marker.color"], "#ABCDEF",
+    "the chosen operation colour was not applied to the live trace");
   console.log("PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry");
 }).catch(error => {
   console.error(error);

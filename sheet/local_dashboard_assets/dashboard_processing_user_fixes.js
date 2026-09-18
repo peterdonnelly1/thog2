@@ -177,14 +177,12 @@
     const mount = by_id("processing_timeline_plot");
     if (!card || mount?.dataset.plotReady !== "true") return;
     const maximized = card.classList.contains("maximized");
-    const width = maximized ? 0.24 : 0.12;
+    const width = 0.30;
     const indices = Array.isArray(mount.data) ? mount.data.map((_trace, index) => index) : [];
     if (indices.length) Plotly.restyle(mount, {width}, indices).catch(() => {});
     Plotly.relayout(mount, {
-      "yaxis.range":maximized ? [0.48, 1.19] : [0.53, 1.17],
-      "legend.font.size":maximized ? 12 : 9,
-      "legend.y":maximized ? 1.08 : 1.14,
-      "margin.t":maximized ? 24 : 8,
+      "yaxis.range":[0.20, 1.50],
+      "margin.t":8,
       "margin.b":maximized ? 42 : 38,
     }).catch(() => {});
   }

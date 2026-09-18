@@ -37,6 +37,113 @@
         align-items:center !important;
         gap:5px !important;
       }
+      #processing_timeline_card .processing-operations-key {
+        position:absolute;
+        z-index:5;
+        top:60px;
+        right:34px;
+        left:88px;
+        min-height:42px;
+        max-height:54px;
+        display:flex;
+        align-content:center;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:4px 12px;
+        overflow-y:auto;
+        padding:4px 0;
+        background:#fff;
+      }
+      #processing_timeline_card .processing-plot-shell {
+        inset:118px 0 0 0 !important;
+      }
+      #processing_timeline_card:not(.maximized) {
+        min-height:300px !important;
+        height:300px !important;
+      }
+      #processing_timeline_card:not(.maximized) .processing-plot-shell {
+        min-height:182px !important;
+        height:auto !important;
+        flex:1 1 auto !important;
+      }
+      .processing-operations-key-item {
+        display:inline-flex;
+        align-items:center;
+        gap:4px;
+        color:#434a54;
+        font-size:9px;
+        white-space:nowrap;
+      }
+      .processing-operations-key-item.is-hidden {
+        opacity:.42;
+      }
+      .processing-operations-key-colour,
+      .processing-operations-key-pattern {
+        width:13px;
+        height:13px;
+        flex:0 0 13px;
+        padding:0;
+        border:1px solid rgba(0,0,0,.20);
+        border-radius:2px;
+      }
+      .processing-operations-key-colour {
+        cursor:pointer;
+      }
+      .processing-operations-key-pattern {
+        background:repeating-linear-gradient(135deg,#8a8f97 0 4px,#fff 4px 8px);
+      }
+      .processing-operations-key-toggle {
+        padding:0;
+        border:0;
+        background:transparent;
+        color:inherit;
+        font:inherit;
+        cursor:pointer;
+      }
+      .processing-operations-colour-popover {
+        position:fixed;
+        z-index:160;
+        width:310px;
+        max-height:min(360px,calc(100vh - 16px));
+        overflow:auto;
+        padding:10px;
+        border:1px solid #cfd2d8;
+        border-radius:7px;
+        background:#fff;
+        box-shadow:0 8px 28px rgba(23,25,30,.24);
+      }
+      .processing-operations-colour-popover[hidden] { display:none !important; }
+      .processing-operations-colour-title {
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        margin-bottom:8px;
+        color:#454c55;
+        font-size:10px;
+        font-weight:650;
+      }
+      .processing-operations-colour-reset {
+        padding:3px 7px;
+        border:1px solid rgba(127,127,127,.30);
+        border-radius:4px;
+        background:#fff;
+        color:inherit;
+        font-size:9px;
+        cursor:pointer;
+      }
+      .processing-operations-colour-swatches {
+        display:grid;
+        grid-template-columns:repeat(12,1fr);
+        gap:5px;
+      }
+      .processing-operations-colour-swatch {
+        aspect-ratio:1;
+        padding:0;
+        border:1px solid rgba(0,0,0,.10);
+        border-radius:3px;
+        cursor:pointer;
+      }
       .processing-operations-show-all {
         height:27px;
         padding:0 8px;
@@ -122,14 +229,35 @@
     misc:"#8c8c8c",
     other:"#8c8c8c",
   });
+  const operation_colour_storage_key = "thog2_processing_operation_colours_v1";
+  const custom_operation_colours = (
+    typeof load_json === "function"
+      ? load_json(operation_colour_storage_key, {})
+      : {}
+  );
   const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15});
-  const normal_y_range = [0.53, 1.17];
-  const maximized_y_range = [-1.35, 3.45];
+  const lane_width = 0.30;
+  const layer_top_y = 1.42;
+  const layer_bottom_y = 0.28;
+  const normal_y_range = [0.20, 1.50];
+  const maximized_y_range = [0.20, 1.50];
+  processing_view.operations_hidden_keys = processing_view.operations_hidden_keys || new Set();
+  processing_view.operations_colour_defaults = processing_view.operations_colour_defaults || {};
+
+  function operation_colour_key(row) {
+    const owner = String(row.owner || "UNKNOWN").toUpperCase();
+    const family = String(row.family || "-").toUpperCase();
+    const operation = String(row.operation || "misc").toLowerCase();
+    return `${owner}:${family}:${operation}:${semantic_label(row)}`;
+  }
 
   function family_colour(row) {
     const family = String(row.family || "").toUpperCase();
     const operation = String(row.operation || "misc").toLowerCase();
-    return family_colours[family] || operation_colours[operation] || "#8c8c8c";
+    const fallback = family_colours[family] || operation_colours[operation] || "#8c8c8c";
+    const key = operation_colour_key(row);
+    processing_view.operations_colour_defaults[key] = fallback;
+    return custom_operation_colours[key] || fallback;
   }
 
   function semantic_label(row) {
@@ -141,10 +269,10 @@
   }
 
   function marker_for(row) {
-    const operation = String(row.operation || "").toLowerCase();
+    const owner = String(row.owner || "").toUpperCase();
     const colour = family_colour(row);
     const marker = {color:colour, line:{width:0}};
-    if (operation === "consume") {
+    if (owner === "PREMAT") {
       marker.pattern = {
         shape:"/",
         fgcolor:"rgba(255,255,255,0.78)",
@@ -170,22 +298,28 @@
     const sorted = [...first_by_layer.entries()].sort((left, right) => left[1] - right[1]);
     const shapes = [];
     for (const [_layer, x] of sorted) {
-      for (const [y0, y1] of [[0.59, 0.81], [0.89, 1.11]]) {
-        shapes.push({
-          type:"line", xref:"x", yref:"y", x0:x, x1:x, y0, y1,
-          line:{color:"rgba(112,118,127,0.56)", width:1}, layer:"above",
+      shapes.push({
+        type:"line", xref:"x", yref:"y", x0:x, x1:x,
+        y0:layer_bottom_y, y1:layer_top_y,
+        line:{color:"rgba(96,103,113,0.58)", width:1}, layer:"above",
+      });
+    }
+    const annotations = [];
+    for (const [layer, x] of sorted) {
+      for (const [position, y] of [["top", layer_top_y], ["bottom", layer_bottom_y]]) {
+        annotations.push({
+          xref:"x", yref:"y", x, y, text:String(layer + 1), showarrow:false,
+          xanchor:"center", yanchor:"middle", font:{size:13, color:"#343a43"},
+          bgcolor:"rgba(255,255,255,0.94)", borderpad:2,
+          name:`processing-layer-${layer}-${position}`, captureevents:true,
+          hovertext:`Zoom to layer ${layer + 1}`,
         });
       }
     }
     return {
       sorted,
       shapes,
-      annotations:sorted.map(([layer, x]) => ({
-        xref:"x", yref:"y", x, y:(lane_y.MAIN + lane_y.PREMAT) / 2, text:String(layer + 1), showarrow:false,
-        xanchor:"center", yanchor:"middle", font:{size:12, color:"#454c55"},
-        name:`processing-layer-${layer}`, captureevents:true,
-        hovertext:`Zoom to layer ${layer + 1}`,
-      })),
+      annotations,
     };
   }
 
@@ -343,7 +477,7 @@
     mount._processing_layer_zoom_installed = true;
     mount.on("plotly_clickannotation", event => {
       const name = String(event?.annotation?.name || "");
-      const match = /^processing-layer-(\d+)$/.exec(name);
+      const match = /^processing-layer-(\d+)-(?:top|bottom)$/.exec(name);
       if (!match) return;
       const range = layer_zoom_range(
         mount._processing_layer_zoom_guides?.sorted || [],
@@ -360,6 +494,191 @@
 
   function current_y_range() {
     return operations_card_maximized() ? maximized_y_range : normal_y_range;
+  }
+
+  function operations_colour_palette() {
+    const shared = window.instra_colour_palette;
+    if (Array.isArray(shared) && shared.length) return shared;
+    return [...new Set([
+      ...Object.values(family_colours),
+      ...Object.values(operation_colours),
+      "#000000", "#FFFFFF",
+    ].map(colour => String(colour).toUpperCase()))];
+  }
+
+  function close_operations_colour_picker() {
+    const popover = by_id("processing_operations_colour_popover");
+    if (popover) popover.hidden = true;
+    processing_view.operations_colour_picker_key = null;
+  }
+
+  function operation_trace_indices(mount, key, premat = false) {
+    if (!mount || !Array.isArray(mount.data)) return [];
+    const indices = [];
+    mount.data.forEach((trace, index) => {
+      const meta = trace.meta || {};
+      if (premat ? meta.operations_owner === "PREMAT" : meta.operations_colour_key === key) {
+        indices.push(index);
+      }
+    });
+    return indices;
+  }
+
+  function save_operation_colours() {
+    if (typeof save_json === "function") {
+      save_json(operation_colour_storage_key, custom_operation_colours);
+    }
+  }
+
+  async function apply_operation_colour(key, colour) {
+    if (!key) return;
+    if (colour) custom_operation_colours[key] = String(colour).toUpperCase();
+    else delete custom_operation_colours[key];
+    save_operation_colours();
+    const resolved = custom_operation_colours[key]
+      || processing_view.operations_colour_defaults[key]
+      || "#8C8C8C";
+    const mount = by_id("processing_timeline_plot");
+    const indices = operation_trace_indices(mount, key, false);
+    if (indices.length) await Plotly.restyle(mount, {"marker.color":resolved}, indices);
+    render_operations_key(mount?.data || []);
+  }
+
+  function ensure_operations_colour_picker() {
+    let popover = by_id("processing_operations_colour_popover");
+    if (popover) return popover;
+    popover = document.createElement("div");
+    popover.id = "processing_operations_colour_popover";
+    popover.className = "processing-operations-colour-popover";
+    popover.hidden = true;
+    popover.innerHTML = `
+      <div class="processing-operations-colour-title">
+        <span id="processing_operations_colour_title">Operation colour</span>
+        <button class="processing-operations-colour-reset" type="button">Default</button>
+      </div>
+      <div class="processing-operations-colour-swatches"></div>`;
+    document.body.appendChild(popover);
+    popover.querySelector(".processing-operations-colour-reset")?.addEventListener("click", async event => {
+      event.preventDefault();
+      await apply_operation_colour(processing_view.operations_colour_picker_key, null);
+      close_operations_colour_picker();
+    });
+    const swatches = popover.querySelector(".processing-operations-colour-swatches");
+    for (const colour of operations_colour_palette()) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "processing-operations-colour-swatch";
+      button.style.background = colour;
+      button.title = colour;
+      button.setAttribute("aria-label", `Choose operation colour ${colour}`);
+      button.addEventListener("click", async event => {
+        event.preventDefault();
+        await apply_operation_colour(processing_view.operations_colour_picker_key, colour);
+        close_operations_colour_picker();
+      });
+      swatches?.appendChild(button);
+    }
+    return popover;
+  }
+
+  function open_operations_colour_picker(key, label, anchor) {
+    const popover = ensure_operations_colour_picker();
+    if (!popover || !anchor) return;
+    processing_view.operations_colour_picker_key = key;
+    const title = by_id("processing_operations_colour_title");
+    if (title) title.textContent = `${label} colour`;
+    popover.hidden = false;
+    const rect = anchor.getBoundingClientRect();
+    const width = 310;
+    const height = Math.min(360, Math.max(160, popover.offsetHeight || 300));
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8))}px`;
+  }
+
+  async function toggle_operations_key(key, premat = false) {
+    const mount = by_id("processing_timeline_plot");
+    const indices = operation_trace_indices(mount, key, premat);
+    if (!indices.length) return;
+    const state_key = premat ? "__PREMAT__" : key;
+    const hide = !processing_view.operations_hidden_keys.has(state_key);
+    if (hide) processing_view.operations_hidden_keys.add(state_key);
+    else processing_view.operations_hidden_keys.delete(state_key);
+    await Plotly.restyle(mount, {visible:hide ? false : true}, indices);
+    render_operations_key(mount.data || []);
+  }
+
+  function ensure_operations_key() {
+    let key = by_id("processing_operations_key");
+    if (key) return key;
+    const card = by_id("processing_timeline_card");
+    const shell = card?.querySelector(".processing-plot-shell");
+    if (!card || !shell) return null;
+    key = document.createElement("div");
+    key.id = "processing_operations_key";
+    key.className = "processing-operations-key";
+    key.setAttribute("aria-label", "MAIN and PREMAT operation key");
+    shell.insertAdjacentElement("beforebegin", key);
+    return key;
+  }
+
+  function render_operations_key(traces) {
+    const key = ensure_operations_key();
+    if (!key) return;
+    key.replaceChildren();
+    const items = new Map();
+    let has_premat = false;
+    for (const trace of traces || []) {
+      const meta = trace.meta || {};
+      if (meta.operations_owner === "PREMAT") {
+        has_premat = true;
+        continue;
+      }
+      if (!meta.operations_colour_key || items.has(meta.operations_colour_key)) continue;
+      items.set(meta.operations_colour_key, {
+        label:String(meta.operations_label || trace.name || "operation"),
+        colour:String(trace.marker?.color || "#8C8C8C"),
+      });
+    }
+    for (const [colour_key, item] of items) {
+      const wrapper = document.createElement("span");
+      wrapper.className = "processing-operations-key-item";
+      wrapper.classList.toggle("is-hidden", processing_view.operations_hidden_keys.has(colour_key));
+      const colour = document.createElement("button");
+      colour.type = "button";
+      colour.className = "processing-operations-key-colour";
+      colour.style.background = item.colour;
+      colour.title = `Choose ${item.label} colour`;
+      colour.setAttribute("aria-label", colour.title);
+      colour.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        open_operations_colour_picker(colour_key, item.label, colour);
+      });
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "processing-operations-key-toggle";
+      toggle.textContent = item.label;
+      toggle.title = `Show or hide ${item.label}`;
+      toggle.addEventListener("click", () => toggle_operations_key(colour_key, false));
+      wrapper.append(colour, toggle);
+      key.appendChild(wrapper);
+    }
+    if (has_premat) {
+      const wrapper = document.createElement("span");
+      wrapper.className = "processing-operations-key-item";
+      wrapper.classList.toggle("is-hidden", processing_view.operations_hidden_keys.has("__PREMAT__"));
+      const pattern = document.createElement("span");
+      pattern.className = "processing-operations-key-pattern";
+      pattern.setAttribute("aria-hidden", "true");
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "processing-operations-key-toggle";
+      toggle.textContent = "PREMAT";
+      toggle.title = "Show or hide all striped PREMAT operations";
+      toggle.addEventListener("click", () => toggle_operations_key("__PREMAT__", true));
+      wrapper.append(pattern, toggle);
+      key.appendChild(wrapper);
+    }
   }
 
   function ensure_show_all_button() {
@@ -381,6 +700,8 @@
         if (!mount || mount.dataset.plotReady !== "true" || !Array.isArray(mount.data)) return;
         const indices = mount.data.map((_trace, index) => index);
         if (indices.length) await Plotly.restyle(mount, {visible:true}, indices);
+        processing_view.operations_hidden_keys.clear();
+        render_operations_key(mount.data || []);
       });
       actions.insertBefore(button, actions.firstChild);
     }
@@ -458,12 +779,14 @@
   processing_render_timeline = async function(payload) {
     ensure_layer_zoom_controls();
     ensure_show_all_button();
+    processing_view.operations_payload = payload;
     const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
     const groups = new Map();
     for (const row of intervals) {
       const owner = ["MAIN", "PREMAT", "OTHER", "UNKNOWN"].includes(String(row.owner || ""))
         ? String(row.owner)
         : "UNKNOWN";
+      if (!(["MAIN", "PREMAT"].includes(owner))) continue;
       const label = semantic_label(row);
       const family = String(row.family || "").toUpperCase();
       const operation = String(row.operation || "misc").toLowerCase();
@@ -475,16 +798,24 @@
     const traces = [];
     for (const group of groups.values()) {
       const exemplar = group.rows[0] || {};
+      const colour_key = operation_colour_key(exemplar);
+      const state_key = group.owner === "PREMAT" ? "__PREMAT__" : colour_key;
       traces.push({
         type:"bar",
         orientation:"h",
         name:`${group.owner} ${group.label}`,
-        legendgroup:`${group.owner}:${group.label}`,
+        showlegend:false,
+        visible:processing_view.operations_hidden_keys.has(state_key) ? false : true,
         x:group.rows.map(row => Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0),
         base:group.rows.map(row => Number(row.start_us) / 1000.0),
         y:group.rows.map(() => lane_y[group.owner] ?? lane_y.UNKNOWN),
-        width:0.12,
+        width:lane_width,
         marker:marker_for(exemplar),
+        meta:{
+          operations_owner:group.owner,
+          operations_colour_key:colour_key,
+          operations_label:`${group.owner} ${group.label}`,
+        },
         customdata:group.rows.map(row => [
           semantic_label(row),
           row.family || "",
@@ -496,14 +827,13 @@
     }
 
     const guides = layer_guides(intervals);
-    const active_extra = ["OTHER", "UNKNOWN"].filter(owner => intervals.some(row => String(row.owner || "") === owner));
-    const tick_owners = ["PREMAT", "MAIN", ...active_extra];
+    const tick_owners = ["PREMAT", "MAIN"];
     const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
     await processing_plot("processing_timeline_plot", traces, {
       margin:{l:88, r:34, t:8, b:38},
       barmode:"overlay",
       hovermode:"closest",
-      legend:{orientation:"h", y:1.14, font:{size:9}, groupclick:"togglegroup"},
+      showlegend:false,
       xaxis:{title:"capture time (ms)", range:capture_ms > 0 ? [0, capture_ms] : undefined},
       yaxis:{
         tickmode:"array",
@@ -519,6 +849,7 @@
       annotations:guides.annotations,
       bargap:0,
     });
+    render_operations_key(traces);
     install_layer_zoom(by_id("processing_timeline_plot"), guides, capture_ms);
     reset_layer_zoom(by_id("processing_timeline_plot"));
     processing_gpu_link_time_axes();
@@ -580,6 +911,13 @@
   };
 
   document.addEventListener("click", event => {
+    const colour_popover = by_id("processing_operations_colour_popover");
+    if (
+      colour_popover
+      && !colour_popover.hidden
+      && !colour_popover.contains(event.target)
+      && !event.target.closest?.(".processing-operations-key-colour")
+    ) close_operations_colour_picker();
     const button = event.target.closest?.('#processing_timeline_card .maximize-button');
     if (!button) return;
     setTimeout(enforce_timeline_geometry, 40);
@@ -644,6 +982,12 @@
     layer_zoom_range,
     layer_scroll_metrics,
     layer_range_for_scroll,
+    marker_for,
+    operation_colour_key,
+    operations_colour_palette,
+    operation_trace_indices,
+    apply_operation_colour,
+    render_operations_key,
     sync_training_group_presentation,
   });
 })();
