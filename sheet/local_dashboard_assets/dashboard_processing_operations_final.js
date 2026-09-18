@@ -54,6 +54,40 @@
         border-color:#b8afea;
         color:#4732b7;
       }
+      .processing-operations-show-all:disabled {
+        cursor:default;
+        opacity:.45;
+        background:#f7f7f8;
+        border-color:rgba(127,127,127,.32);
+        color:inherit;
+      }
+      .processing-operations-hscroll {
+        display:block;
+        overflow-x:scroll;
+        overflow-y:hidden;
+        height:16px;
+        margin:0 34px 2px 88px;
+        scrollbar-gutter:stable;
+      }
+      .processing-operations-hscroll[hidden] {
+        display:none !important;
+      }
+      .processing-operations-hscroll-track {
+        height:1px;
+        min-width:100%;
+        pointer-events:none;
+      }
+      #training_chart_group {
+        width:100%;
+      }
+      #training_throughput_card {
+        flex:0 0 100%;
+        width:100%;
+        max-width:100%;
+      }
+      #training_throughput_card .plot-shell {
+        min-height:210px;
+      }
       #processing_contention_card:not(.maximized) {
         min-height:220px !important;
         height:220px !important;
@@ -170,6 +204,130 @@
     ];
   }
 
+  function layer_scroll_metrics(capture_ms, range, viewport_width) {
+    const capture = Math.max(0, Number(capture_ms) || 0);
+    const start = Math.max(0, Number(range?.[0]) || 0);
+    const end = Math.min(capture, Number(range?.[1]) || capture);
+    const span = Math.max(0, end - start);
+    const viewport = Math.max(1, Number(viewport_width) || 1);
+    if (!(capture > 0) || !(span > 0) || span >= capture) {
+      return {virtual_width:viewport, max_scroll:0, scroll_left:0, span:capture};
+    }
+    const virtual_width = Math.max(viewport + 1, Math.round(viewport * capture / span));
+    const max_scroll = Math.max(1, virtual_width - viewport);
+    const scroll_left = Math.max(0, Math.min(max_scroll, start / (capture - span) * max_scroll));
+    return {virtual_width, max_scroll, scroll_left, span};
+  }
+
+  function layer_range_for_scroll(capture_ms, span, scroll_left, max_scroll) {
+    const capture = Math.max(0, Number(capture_ms) || 0);
+    const width = Math.max(0, Math.min(capture, Number(span) || 0));
+    const maximum = Math.max(0, Number(max_scroll) || 0);
+    const position = Math.max(0, Math.min(maximum, Number(scroll_left) || 0));
+    const start = maximum > 0 ? position / maximum * Math.max(0, capture - width) : 0;
+    return [start, start + width];
+  }
+
+  function ensure_layer_zoom_controls() {
+    const card = by_id("processing_timeline_card");
+    const actions = card?.querySelector(".chart-card-actions");
+    const shell = card?.querySelector(".processing-plot-shell");
+    if (!actions || !shell) return;
+    let button = by_id("processing_operations_reset_zoom");
+    if (!button) {
+      button = document.createElement("button");
+      button.id = "processing_operations_reset_zoom";
+      button.type = "button";
+      button.className = "processing-operations-show-all";
+      button.textContent = "Reset zoom";
+      button.title = "Restore the complete MAIN/PREMAT capture time range";
+      button.disabled = true;
+      button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        reset_layer_zoom(by_id("processing_timeline_plot"));
+      });
+      actions.insertBefore(button, actions.firstChild);
+    }
+    let scrollbar = by_id("processing_operations_hscroll");
+    if (!scrollbar) {
+      scrollbar = document.createElement("div");
+      scrollbar.id = "processing_operations_hscroll";
+      scrollbar.className = "processing-operations-hscroll";
+      scrollbar.hidden = true;
+      scrollbar.title = "Pan the zoomed layer window across the complete capture";
+      scrollbar.innerHTML = '<div class="processing-operations-hscroll-track"></div>';
+      shell.insertAdjacentElement("afterend", scrollbar);
+      scrollbar.addEventListener("scroll", () => {
+        const mount = by_id("processing_timeline_plot");
+        if (!mount || mount._processing_layer_scroll_syncing || !mount._processing_layer_zoom_range) return;
+        if (mount._processing_layer_scroll_frame) cancelAnimationFrame(mount._processing_layer_scroll_frame);
+        mount._processing_layer_scroll_frame = requestAnimationFrame(() => {
+          mount._processing_layer_scroll_frame = null;
+          const range = layer_range_for_scroll(
+            mount._processing_layer_zoom_capture_ms,
+            mount._processing_layer_zoom_range[1] - mount._processing_layer_zoom_range[0],
+            scrollbar.scrollLeft,
+            scrollbar.scrollWidth - scrollbar.clientWidth,
+          );
+          mount._processing_layer_zoom_range = range;
+          Plotly.relayout(mount, {"xaxis.range":range}).catch(() => {});
+        });
+      }, {passive:true});
+      if (typeof ResizeObserver === "function") {
+        scrollbar._processing_resize_observer = new ResizeObserver(() => {
+          const mount = by_id("processing_timeline_plot");
+          if (mount?._processing_layer_zoom_range) sync_layer_scrollbar(mount);
+        });
+        scrollbar._processing_resize_observer.observe(shell);
+      }
+    }
+  }
+
+  function sync_layer_scrollbar(mount) {
+    const scrollbar = by_id("processing_operations_hscroll");
+    const reset = by_id("processing_operations_reset_zoom");
+    if (!scrollbar || !mount?._processing_layer_zoom_range) {
+      if (scrollbar) scrollbar.hidden = true;
+      if (reset) reset.disabled = true;
+      return;
+    }
+    const track = scrollbar.firstElementChild;
+    const metrics = layer_scroll_metrics(
+      mount._processing_layer_zoom_capture_ms,
+      mount._processing_layer_zoom_range,
+      scrollbar.clientWidth || mount.clientWidth,
+    );
+    if (!track || metrics.max_scroll <= 0) {
+      scrollbar.hidden = true;
+      if (reset) reset.disabled = true;
+      return;
+    }
+    scrollbar.hidden = false;
+    track.style.width = `${metrics.virtual_width}px`;
+    mount._processing_layer_scroll_syncing = true;
+    scrollbar.scrollLeft = metrics.scroll_left;
+    requestAnimationFrame(() => { mount._processing_layer_scroll_syncing = false; });
+    if (reset) reset.disabled = false;
+  }
+
+  function apply_layer_zoom(mount, range) {
+    if (!mount || !Array.isArray(range)) return;
+    mount._processing_layer_zoom_range = range.slice();
+    Plotly.relayout(mount, {"xaxis.range":range}).then(() => sync_layer_scrollbar(mount)).catch(() => {});
+  }
+
+  function reset_layer_zoom(mount) {
+    if (!mount) return;
+    const capture_ms = Number(mount._processing_layer_zoom_capture_ms || 0);
+    mount._processing_layer_zoom_range = null;
+    const scrollbar = by_id("processing_operations_hscroll");
+    const reset = by_id("processing_operations_reset_zoom");
+    if (scrollbar) scrollbar.hidden = true;
+    if (reset) reset.disabled = true;
+    Plotly.relayout(mount, {"xaxis.range":capture_ms > 0 ? [0, capture_ms] : null}).catch(() => {});
+  }
+
   function install_layer_zoom(mount, guides, capture_ms) {
     if (!mount) return;
     mount._processing_layer_zoom_guides = guides;
@@ -185,7 +343,7 @@
         mount._processing_layer_zoom_capture_ms,
         Number(match[1]),
       );
-      if (range) Plotly.relayout(mount, {"xaxis.range":range}).catch(() => {});
+      if (range) apply_layer_zoom(mount, range);
     });
   }
 
@@ -221,6 +379,58 @@
     }
   }
 
+  function ensure_training_throughput_group() {
+    let group = by_id("training_chart_group");
+    if (group) return group;
+    const processing = by_id("processing_chart_group");
+    if (!processing?.parentElement) return null;
+    group = document.createElement("section");
+    group.className = "chart-group training-group";
+    group.id = "training_chart_group";
+    group.dataset.chartGroup = "training";
+    group.hidden = true;
+    group.innerHTML = `
+      <header class="chart-group-header">
+        <button class="chart-group-toggle" id="training_group_toggle" type="button" aria-expanded="true" aria-controls="training_grid">
+          <span class="group-caret" aria-hidden="true">⌄</span><strong>training</strong><span class="group-count">1</span>
+        </button>
+      </header>
+      <div class="chart-grid" id="training_grid">
+        <article class="chart-card training-throughput-card" id="training_throughput_card" data-chart="training_throughput">
+          <header class="chart-card-header"><div class="chart-heading-copy"><h2>Training throughput (tok/s)</h2></div><div class="chart-card-actions"><button class="maximize-button" data-maximize="training_throughput" type="button" aria-label="Maximize training throughput" title="Maximize chart"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="pointer-events:none;vertical-align:middle"><rect x="4" y="4" width="16" height="16" rx="1"/></svg></button></div></header>
+          <div class="plot-shell"><div class="plot-mount" id="training_throughput_plot"></div></div>
+          <div class="panel-resizer panel-resizer-east" data-resize="east" title="Drag to resize chart width"></div>
+          <div class="panel-resizer panel-resizer-south" data-resize="south" title="Drag to resize chart height"></div>
+          <div class="panel-resizer panel-resizer-corner" data-resize="both" title="Drag to resize chart"></div>
+        </article>
+      </div>`;
+    processing.insertAdjacentElement("beforebegin", group);
+    if (typeof ensure_chart_settings_button === "function") ensure_chart_settings_button(group.querySelector(".chart-card"));
+    if (typeof apply_saved_panel_sizes === "function") apply_saved_panel_sizes();
+    return group;
+  }
+
+  async function mirror_training_throughput() {
+    const group = ensure_training_throughput_group();
+    const source = by_id("processing_throughput_plot");
+    const target = by_id("training_throughput_plot");
+    if (!group || !source || !target || source.dataset.plotReady !== "true") return;
+    group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
+    const traces = Array.isArray(source.data) ? source.data : [];
+    const layout = {...source.layout, autosize:true};
+    if (target.dataset.plotReady === "true") await Plotly.react(target, traces, layout, plot_config);
+    else {
+      await Plotly.newPlot(target, traces, layout, plot_config);
+      target.dataset.plotReady = "true";
+    }
+    if (typeof ResizeObserver === "function" && !group._training_resize_observer) {
+      group._training_resize_observer = new ResizeObserver(() => {
+        if (target.dataset.plotReady === "true" && group.offsetParent !== null) Plotly.Plots.resize(target);
+      });
+      group._training_resize_observer.observe(group);
+    }
+  }
+
   function enforce_timeline_geometry() {
     const mount = by_id("processing_timeline_plot");
     if (!mount || mount.dataset.plotReady !== "true") return;
@@ -229,6 +439,7 @@
   }
 
   processing_render_timeline = async function(payload) {
+    ensure_layer_zoom_controls();
     ensure_show_all_button();
     const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
     const groups = new Map();
@@ -292,6 +503,7 @@
       bargap:0,
     });
     install_layer_zoom(by_id("processing_timeline_plot"), guides, capture_ms);
+    reset_layer_zoom(by_id("processing_timeline_plot"));
     processing_gpu_link_time_axes();
   };
 
@@ -357,11 +569,38 @@
     setTimeout(enforce_timeline_geometry, 180);
   }, true);
 
+  const processing_render_throughput_before_training_group = processing_render_throughput;
+  processing_render_throughput = async function(payload) {
+    await processing_render_throughput_before_training_group(payload);
+    await mirror_training_throughput();
+  };
+
+  if (typeof processing_sync_visibility === "function") {
+    const processing_sync_visibility_before_training_group = processing_sync_visibility;
+    processing_sync_visibility = function() {
+      processing_sync_visibility_before_training_group();
+      const group = by_id("training_chart_group");
+      if (group) group.hidden = !(processing_view.charts_tab_visible && processing_view.available);
+    };
+  }
+
+  const processing_apply_detail_tab_before_training_group = window.processing_apply_detail_tab;
+  window.processing_apply_detail_tab = charts_selected => {
+    processing_apply_detail_tab_before_training_group?.(charts_selected);
+    const group = by_id("training_chart_group");
+    if (group) group.hidden = !(Boolean(charts_selected) && processing_view.available);
+  };
+
   window.addEventListener("load", () => {
+    ensure_training_throughput_group();
+    ensure_layer_zoom_controls();
     ensure_show_all_button();
     const header = by_id("processing_timeline_card")?.querySelector(".chart-card-header");
     if (header && typeof MutationObserver === "function") {
-      const observer = new MutationObserver(() => ensure_show_all_button());
+      const observer = new MutationObserver(() => {
+        ensure_layer_zoom_controls();
+        ensure_show_all_button();
+      });
       observer.observe(header, {childList:true, subtree:true});
     }
   });
@@ -369,6 +608,8 @@
   window.processing_operations_test_hooks = Object.freeze({
     layer_guides,
     layer_zoom_range,
+    layer_scroll_metrics,
+    layer_range_for_scroll,
   });
 })();
 // ^^^ THOG
