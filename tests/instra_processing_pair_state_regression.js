@@ -246,6 +246,26 @@ async function settle() {
   assert.equal(throughput_only.throughput_renders.length, 1, "a run without Processing evidence did not render retained Training throughput");
   assert.equal(throughput_only.throughput_renders[0].throughput[0].tokens_per_second, 12345);
 
+  const startup_all_pairs = make_sandbox({
+    runs,
+    current_run_id:"ordinary",
+    visible_run_ids:["nsys_a", "ncu_a", "nsys_b", "ncu_b"],
+    catalog_ready:false,
+    processing_responses:{
+      nsys_a:{available:true, trace_available:true, data:{premat_compatibility_source:{dashboard_run_id:"ncu_a"}}},
+      nsys_b:{available:true, trace_available:true, data:{premat_compatibility_source:{dashboard_run_id:"ncu_b"}}},
+    },
+  });
+  vm.runInNewContext(pair_source, startup_all_pairs);
+  startup_all_pairs.app.instra_catalog_ready = true;
+  await startup_all_pairs.window.processing_pair_state_test_hooks.reconcile_startup_pairing();
+  assert.equal(Object.keys(startup_all_pairs.app.processing_pairs).length, 2,
+    "startup reconciliation stopped after the first visible pair");
+  assert.equal(startup_all_pairs.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a");
+  assert.equal(startup_all_pairs.app.processing_pairs.nsys_b.ncu_run_id, "ncu_b");
+  assert.match(startup_all_pairs.fetch_urls[1], /exclude_ncu=ncu_a/,
+    "the second startup probe did not preserve the first NCU claim");
+
   const eye_selection = make_sandbox({
     runs,
     processing_responses:{
@@ -258,7 +278,7 @@ async function settle() {
   await settle();
   assert.equal(eye_selection.fetch_calls, 1, "stacked selection wrappers issued duplicate Processing requests");
 
-  console.log("PASS sticky first-claim pairs, fallback companions, throughput-only runs and explicit unpairing");
+  console.log("PASS full startup pairing, sticky first claims, fallback companions, throughput-only runs and explicit unpairing");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;

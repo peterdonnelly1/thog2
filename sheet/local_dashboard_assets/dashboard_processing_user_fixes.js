@@ -8,7 +8,7 @@
     .processing-downloads { min-width:0 !important; overflow-x:auto; scrollbar-width:thin; }
     .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:3px 7px; white-space:nowrap; }
     .processing-paired-download-group { display:inline-flex; align-items:center; gap:4px; }
-    .processing-paired-download-label { font-size:9px; font-weight:750; color:#69717d; letter-spacing:.04em; }
+    .processing-paired-download-label { font-size:9px; font-weight:850; color:#3f4650; letter-spacing:.04em; }
     #processing_timeline_card.maximized .processing-plot-shell { padding-top:0 !important; padding-bottom:0 !important; }
   `;
   document.head.appendChild(style);
@@ -99,10 +99,11 @@
     const host = document.querySelector("#processing_chart_group .processing-downloads");
     if (!host) return;
     host.querySelector(".processing-paired-download-groups")?.remove();
+    const original_children = [...host.children];
+    original_children.forEach(child => { child.hidden = false; });
     const pair = payload?.paired_processing_downloads;
-    const direct_links = [...host.querySelectorAll(":scope > a")];
     if (!pair?.nsys?.dashboard_run_id || !pair?.ncu?.dashboard_run_id) return;
-    direct_links.forEach(link => { link.hidden = true; });
+    original_children.forEach(child => { child.hidden = true; });
 
     const groups = document.createElement("span");
     groups.className = "processing-paired-download-groups";
@@ -112,7 +113,7 @@
       const group = document.createElement("span");
       group.className = "processing-paired-download-group";
       group.title = String(source.artifact_name || source.dashboard_run_id || "");
-      const heading = document.createElement("span");
+      const heading = document.createElement("strong");
       heading.className = "processing-paired-download-label";
       heading.textContent = `${label}:`;
       group.appendChild(heading);

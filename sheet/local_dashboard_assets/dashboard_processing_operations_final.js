@@ -104,7 +104,7 @@
         position:fixed;
         z-index:160;
         width:282px;
-        max-height:min(360px,calc(100vh - 16px));
+        max-height:min(590px,calc(100vh - 16px));
         overflow:auto;
         padding:10px;
         border:1px solid #cfd2d8;
@@ -631,7 +631,7 @@
     popover.hidden = false;
     const rect = anchor.getBoundingClientRect();
     const width = 282;
-    const height = Math.min(360, Math.max(160, popover.offsetHeight || 300));
+    const height = Math.min(590, Math.max(160, popover.offsetHeight || 590));
     popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
     popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8))}px`;
   }

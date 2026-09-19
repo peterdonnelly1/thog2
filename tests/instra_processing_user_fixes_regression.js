@@ -73,6 +73,9 @@ const direct_compatibility = new FakeElement("a");
 direct_compatibility.id = "processing_download_compatibility";
 direct_compatibility.textContent = "Compatibility";
 host.appendChild(direct_compatibility);
+const direct_uncategorized = new FakeElement("span");
+direct_uncategorized.textContent = "legacy downloads";
+host.appendChild(direct_uncategorized);
 const actions = new FakeElement();
 const compatibility_card = new FakeElement();
 compatibility_card.actions = actions;
@@ -276,6 +279,13 @@ hooks.render_paired_downloads({
 const rendered_groups = host.querySelector(".processing-paired-download-groups");
 assert.ok(rendered_groups);
 assert.equal(rendered_groups.children.length, 3);
+assert.equal(rendered_groups.children[0].children[0].tagName, "STRONG");
+assert.equal(rendered_groups.children[0].children[0].textContent, "PAIR:");
+assert.equal(rendered_groups.children[1].children[0].textContent, "NSYS:");
+assert.equal(rendered_groups.children[2].children[0].textContent, "NCU:");
+assert.equal(direct_raw.hidden, true);
+assert.equal(direct_compatibility.hidden, true);
+assert.equal(direct_uncategorized.hidden, true, "an uncategorized legacy download item remained visible beside paired groups");
 assert.equal(rendered_groups.children[0].children[1].textContent, "Everything");
 assert.match(rendered_groups.children[1].children[1].href, /run=nsys/);
 assert.match(rendered_groups.children[2].children[1].href, /run=ncu/);
@@ -285,6 +295,9 @@ assert.equal(rendered_groups.children[2].children[2].textContent, "Metrics");
 assert.equal(rendered_groups.children[2].children[3].textContent, "Semantic");
 assert.match(rendered_groups.children[2].children[1].title, /Original Nsight Compute/);
 assert.match(rendered_groups.children[1].children.at(-1).title, /Original Nsight Systems/);
+hooks.render_paired_downloads({});
+assert.equal(direct_raw.hidden, false, "unpairing did not restore the run-owned download buttons");
+assert.equal(direct_uncategorized.hidden, false, "unpairing did not restore the original download-bar contents");
 
 assert.match(operations_source, /const lane_width = 0\.30/);
 assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:300px !important/,

@@ -2,20 +2,56 @@
 "use strict";
 
 (function install_dashboard_feature_regression_restore() {
-  // One deliberately categorical palette for both run and operation pickers.
-  // It replaces the former light/dark shade families, whose adjacent patches
-  // were effectively duplicates at the size used by the picker.
+  function hsl_hex(hue, saturation, lightness) {
+    const s = saturation / 100;
+    const l = lightness / 100;
+    const chroma = (1 - Math.abs(2 * l - 1)) * s;
+    const section = ((hue % 360) + 360) % 360 / 60;
+    const second = chroma * (1 - Math.abs(section % 2 - 1));
+    const pairs = [
+      [chroma, second, 0], [second, chroma, 0], [0, chroma, second],
+      [0, second, chroma], [second, 0, chroma], [chroma, 0, second],
+    ];
+    const [red, green, blue] = pairs[Math.floor(section) % 6];
+    const match = l - chroma / 2;
+    return `#${[red, green, blue].map(value => (
+      Math.round((value + match) * 255).toString(16).padStart(2, "0")
+    )).join("").toUpperCase()}`;
+  }
+
+  // Step seven traverses every one of the 24 hue positions while keeping
+  // neighbouring picker patches far apart.  Each tonal band occupies six
+  // complete rows of eight; the exact primaries/secondaries/white/black form
+  // the nineteenth and final row.
+  const hue_order = Object.freeze(Array.from({length:24}, (_value, index) => (index * 7) % 24));
+  function tonal_band(first_saturation, first_lightness, second_saturation, second_lightness) {
+    return [
+      ...hue_order.map(index => hsl_hex(index * 15, first_saturation, first_lightness)),
+      ...hue_order.map(index => hsl_hex(index * 15 + 7.5, second_saturation, second_lightness)),
+    ];
+  }
   const combined_palette = Object.freeze([
-    "#0000FF", "#FF0000", "#00C800", "#000033", "#FF00B6", "#005300",
-    "#FFD300", "#009FFF", "#9A4D42", "#00DDA3", "#783FC1", "#1F9698",
-    "#FFACFD", "#8EAD3A", "#F1085C", "#FE8F42", "#B900D6", "#201A01",
-    "#720055", "#766C95", "#02AD24", "#B5D900", "#886C00", "#FFB79F",
-    "#858567", "#A10300", "#14DDE5", "#00479E", "#DC5E93", "#93D4FF",
-    "#004CFF", "#E6E600", "#D000D0", "#007D16", "#D6005E", "#00A7FF",
-    "#00A86B", "#B36B00", "#6840E0", "#008A8A", "#A58F00", "#FF6E9C",
-    "#3B5B00", "#6FA8DC", "#6B2D5C", "#008000", "#B78AD6", "#000000",
+    ...tonal_band(78, 29, 66, 43),
+    ...tonal_band(72, 61, 60, 72),
+    ...tonal_band(68, 84, 55, 92),
+    "#FF0000", "#00FF00", "#0000FF", "#00FFFF",
+    "#FF00FF", "#FFFF00", "#FFFFFF", "#000000",
   ]);
   window.instra_colour_palette = combined_palette;
+
+  const palette_style = document.createElement("style");
+  palette_style.id = "instra-shared-colour-palette-style";
+  palette_style.textContent = `
+    #colour_swatches {
+      grid-template-columns:repeat(8,minmax(0,1fr)) !important;
+    }
+    #colour_popover {
+      width:282px !important;
+      max-height:min(590px,calc(100vh - 16px)) !important;
+      overflow:auto !important;
+    }
+  `;
+  document.head.appendChild(palette_style);
 
   function install_palette() {
     const container = by_id("colour_swatches");
@@ -31,7 +67,7 @@
       button.addEventListener("click", () => set_picker_colour(hex_to_rgb(colour)));
       container.appendChild(button);
     }
-    container.dataset.instraPaletteVersion = "categorical-v2";
+    container.dataset.instraPaletteVersion = "categorical-v3-152";
   }
 
   const open_colour_picker_before_palette_restore = open_colour_picker;

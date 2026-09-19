@@ -163,7 +163,7 @@
     return true;
   }
 
-  function add_pair(nsys_run_id, ncu_run_id) {
+  function add_pair(nsys_run_id, ncu_run_id, {render = true} = {}) {
     const nsys_id = String(nsys_run_id || "");
     const ncu_id = String(ncu_run_id || "");
     if (!nsys_id || !ncu_id || !is_nsys_run_id(nsys_id) || !is_ncu_run_id(ncu_id)) return false;
@@ -172,7 +172,7 @@
     if (existing) return existing.nsys_run_id === nsys_id && existing.ncu_run_id === ncu_id;
     if (pair_for_run(ncu_id)) {
       set_unmatched(nsys_id, true);
-      render_runs();
+      if (render) render_runs();
       return false;
     }
 
@@ -194,7 +194,7 @@
     save_pairs();
     save_auto_opened_run_ids();
     if (visibility_changed) save_json("thog2_local_run_visibility", app.visibility);
-    render_runs();
+    if (render) render_runs();
     return true;
   }
 
@@ -427,24 +427,40 @@
     if (pairs_changed || visibility_changed || app.processing_paired_run_ids.size) render_runs();
   }
 
-  function reconcile_startup_pairing() {
+  async function reconcile_startup_pairing() {
     if (app.instra_catalog_ready !== true || !(app.runs || []).length) return;
     const generation = Number(app.instra_catalog_generation || 0);
     if (startup_reconciled_generation === generation) return;
     startup_reconciled_generation = generation;
     restore_persisted_pairs();
-    if (Object.keys(app.processing_pairs).length) return;
     const visible_nsys = (app.runs || [])
       .map(run => String(run_identifier(run)))
       .filter(run_id => is_visible(run_id) && is_nsys_run_id(run_id))
-      .sort((left, right) => run_timestamp(right) - run_timestamp(left));
-    const source_run_id = visible_nsys[0] || "";
-    if (!source_run_id) return;
-    if (source_run_id !== String(app.current_run_id || "")) {
-      select_run(source_run_id, {manual:true, replace_history:true});
-    } else {
-      processing_refresh(true);
+      .sort((left, right) => run_timestamp(left) - run_timestamp(right));
+    let state_changed = false;
+    for (const nsys_run_id of visible_nsys) {
+      if (pair_for_run(nsys_run_id)) continue;
+      const pairing = pairing_request_parameters(nsys_run_id);
+      const pairing_query = pairing.excluded.length
+        ? `&exclude_ncu=${encodeURIComponent(pairing.excluded.join(","))}`
+        : "";
+      try {
+        const response = await fetch_json(
+          `/api/processing?run=${encodeURIComponent(nsys_run_id)}&auto_pair_probe=1${pairing_query}`,
+        );
+        if (!response?.available || response.trace_available !== true) continue;
+        const source = response.data?.premat_compatibility_source;
+        const companion_id = String(source?.dashboard_run_id || "");
+        if (companion_id && add_pair(nsys_run_id, companion_id, {render:false})) {
+          state_changed = true;
+          continue;
+        }
+        state_changed = set_unmatched(nsys_run_id, true) || state_changed;
+      } catch (error) {
+        console.warn(`Automatic Processing pair discovery failed for ${nsys_run_id}`, error);
+      }
     }
+    if (state_changed) render_runs();
   }
 
   const runs_body = by_id("runs_body");
@@ -483,6 +499,7 @@
     pair_for_run,
     rebuild_pair_indexes,
     restore_persisted_pairs,
+    reconcile_startup_pairing,
     pair_palette,
     pairing_request_parameters,
   });
