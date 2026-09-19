@@ -81,7 +81,7 @@
   function enforce_titles() {
     const titles = [
       ["processing_resource_card", "Stream Resource Contention"],
-      ["processing_timeline_card", "MAIN / PREMAT Operations"],
+      ["processing_timeline_card", "GPT Level Operations by Stream (MAIN/PREMAT)"],
       ["processing_compatibility_card", "PREMAT Compatibility"],
     ];
     for (const [card_id, title] of titles) {
@@ -90,7 +90,7 @@
     }
     if (typeof chart_titles === "object") {
       chart_titles.processing_resource = "Stream Resource Contention";
-      chart_titles.processing_timeline = "MAIN / PREMAT Operations";
+      chart_titles.processing_timeline = "GPT Level Operations by Stream (MAIN/PREMAT)";
       chart_titles.processing_compatibility = "PREMAT Compatibility";
     }
     for (const heading of document.querySelectorAll("#processing_chart_group .chart-heading-copy h2")) {
@@ -306,9 +306,9 @@
     if (plot_shell) plot_shell.hidden = true;
     if (key) key.hidden = true;
     panel.hidden = false;
-    const main_family = String(rows[0]?.main_family || "MAIN").toUpperCase();
-    const premat_family = String(rows[0]?.premat_family || "PREMAT").toUpperCase();
+    const stage = rows[0] || {};
     panel.innerHTML = `
+      <p class="processing-hard-constraints-stage"><strong>${processing_escape(stage.compatibility_class || "—")}</strong> · most constrained PREMAT stage ${Number(stage.premat_stage_index || 1)}/${Number(stage.premat_stage_count || 1)} · ${processing_escape(stage.premat_kernel_name || "unknown kernel")}</p>
       <table class="processing-hard-constraints-table">
         <thead><tr><th>Hard constraint</th><th>SM capacity</th><th>MAIN / block</th><th>PREMAT / block</th><th>Full MAIN + 1 PREMAT</th><th>Capacity used</th></tr></thead>
         <tbody>${rows.map(row => {
@@ -324,7 +324,7 @@
           </tr>`;
         }).join("")}</tbody>
       </table>
-      <p class="processing-hard-constraints-note"><strong>Most constrained captured pair: MAIN ${processing_escape(main_family)} → PREMAT ${processing_escape(premat_family)}.</strong> The five hard SM-residency limits only. “Full MAIN + 1 PREMAT” tests one PREMAT block against MAIN at its theoretical full block residency; this is structural NCU evidence, not a time-resolved NSYS counter.</p>`;
+      <p class="processing-hard-constraints-note">The five hard SM-residency limits only. “Full MAIN + 1 PREMAT” tests one PREMAT block against MAIN at its theoretical full block residency; this is structural NCU evidence, not a time-resolved NSYS counter.</p>`;
   }
 
   function apply_final_design(payload) {

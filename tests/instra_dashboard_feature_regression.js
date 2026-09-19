@@ -23,6 +23,7 @@ const group = {
 const container = {
   dataset:{},
   appendChild(button) { swatches.push(button); },
+  replaceChildren() { swatches.length = 0; },
   querySelectorAll() { return swatches; },
 };
 const load_listeners = [];
@@ -62,9 +63,10 @@ const sandbox = {
 const source = fs.readFileSync("sheet/local_dashboard_assets/dashboard_feature_regression_restore.js", "utf8");
 vm.runInNewContext(source, sandbox);
 for (const listener of load_listeners) listener();
-assert.equal(swatches.length, 128, "the complete shared 128-colour palette was not restored");
-assert.equal(container.dataset.instraPalette128, "true");
-assert.equal(sandbox.window.instra_colour_palette.length, 128);
+assert.equal(swatches.length, 48, "the diverse categorical palette was not installed");
+assert.equal(container.dataset.instraPaletteVersion, "categorical-v2");
+assert.equal(sandbox.window.instra_colour_palette.length, 48);
+assert.equal(new Set(sandbox.window.instra_colour_palette).size, 48, "run palette contains duplicate colours");
 
 sandbox.app.figures = {heatmap:null, depth:{attn_q_head_N:{data:[]}}};
 sandbox.window.instra_feature_regression_test_hooks.sync_depth_chart_availability();

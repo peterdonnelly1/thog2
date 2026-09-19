@@ -2,30 +2,26 @@
 "use strict";
 
 (function install_dashboard_feature_regression_restore() {
-  const additional_palette = Object.freeze([
-    "#3B82F6", "#1D4ED8", "#0EA5E9", "#0369A1", "#06B6D4", "#0E7490", "#14B8A6", "#0F766E",
-    "#10B981", "#047857", "#22C55E", "#15803D", "#84CC16", "#4D7C0F", "#A3E635", "#65A30D",
-    "#EAB308", "#A16207", "#F59E0B", "#B45309", "#F97316", "#C2410C", "#EF4444", "#B91C1C",
-    "#F43F5E", "#BE123C", "#EC4899", "#BE185D", "#D946EF", "#A21CAF", "#A855F7", "#7E22CE",
-    "#8B5CF6", "#6D28D9", "#6366F1", "#4338CA", "#4F46E5", "#312E81", "#7C3AED", "#5B21B6",
-    "#0D9488", "#115E59", "#0891B2", "#155E75", "#0284C7", "#075985", "#2563EB", "#1E40AF",
-    "#92400E", "#78350F", "#A0522D", "#6B4423", "#708090", "#475569", "#334155", "#1E293B",
-    "#FF0000", "#00FF00", "#0000FF", "#00FFFF", "#FF00FF", "#FFFF00", "#000000", "#FFFFFF",
+  // One deliberately categorical palette for both run and operation pickers.
+  // It replaces the former light/dark shade families, whose adjacent patches
+  // were effectively duplicates at the size used by the picker.
+  const combined_palette = Object.freeze([
+    "#0000FF", "#FF0000", "#00C800", "#000033", "#FF00B6", "#005300",
+    "#FFD300", "#009FFF", "#9A4D42", "#00DDA3", "#783FC1", "#1F9698",
+    "#FFACFD", "#8EAD3A", "#F1085C", "#FE8F42", "#B900D6", "#201A01",
+    "#720055", "#766C95", "#02AD24", "#B5D900", "#886C00", "#FFB79F",
+    "#858567", "#A10300", "#14DDE5", "#00479E", "#DC5E93", "#93D4FF",
+    "#004CFF", "#E6E600", "#D000D0", "#007D16", "#D6005E", "#00A7FF",
+    "#00A86B", "#B36B00", "#6840E0", "#008A8A", "#A58F00", "#FF6E9C",
+    "#3B5B00", "#6FA8DC", "#6B2D5C", "#008000", "#B78AD6", "#000000",
   ]);
-  const combined_palette = Object.freeze(
-    [...new Set([...default_palette, ...additional_palette].map(colour => String(colour).toUpperCase()))],
-  );
   window.instra_colour_palette = combined_palette;
 
   function install_palette() {
     const container = by_id("colour_swatches");
     if (!container) return;
-    const installed = new Set(
-      [...container.querySelectorAll(".colour-swatch")]
-        .map(button => String(button.title || "").toUpperCase()),
-    );
+    container.replaceChildren();
     for (const colour of combined_palette) {
-      if (installed.has(colour)) continue;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "colour-swatch";
@@ -35,7 +31,7 @@
       button.addEventListener("click", () => set_picker_colour(hex_to_rgb(colour)));
       container.appendChild(button);
     }
-    container.dataset.instraPalette128 = "true";
+    container.dataset.instraPaletteVersion = "categorical-v2";
   }
 
   const open_colour_picker_before_palette_restore = open_colour_picker;
@@ -83,7 +79,6 @@
   });
 
   window.instra_feature_regression_test_hooks = Object.freeze({
-    additional_palette,
     combined_palette,
     install_palette,
     sync_depth_chart_availability,

@@ -174,15 +174,15 @@ def compatibility_row(main_row: Mapping[str, Any], premat_row: Mapping[str, Any]
     if not pair_can_co_reside:
         compatibility_class = "RED"
         limiting_resource = pair_limiter
-    elif premat_with_full_main <= 0:
-        compatibility_class = "YELLOW"
-        limiting_resource = full_main_limiter
-    elif premat_with_full_main == 1:
-        compatibility_class = "ORANGE"
-        limiting_resource = full_main_limiter
-    else:
+    elif premat_with_full_main >= 1:
         compatibility_class = "GREEN"
         limiting_resource = full_main_limiter
+    elif premat_with_one_main <= 1:
+        compatibility_class = "ORANGE"
+        limiting_resource = one_main_limiter
+    else:
+        compatibility_class = "YELLOW"
+        limiting_resource = one_main_limiter
 
     main_layer = main_row.get("layer", "")
     premat_layer = premat_row.get("layer", "")
@@ -203,6 +203,9 @@ def compatibility_row(main_row: Mapping[str, Any], premat_row: Mapping[str, Any]
         "premat_family": str(premat_row.get("family", "")),
         "premat_layer": "" if premat_layer in (None, "") else int(float(premat_layer)),
         "premat_cuda_kernel_name": str(premat_row.get("cuda_kernel_name", premat_row.get("kernel_name", ""))),
+        "premat_stage_index": int(premat_row.get("premat_stage_index", 1) or 1),
+        "premat_stage_count": int(premat_row.get("premat_stage_count", 1) or 1),
+        "premat_stage_duration_ns": int(float(premat_row.get("duration_ns", 0) or 0)),
         "premat_threads_per_block": int(premat["threads"]),
         "premat_warps_per_block": int(premat["warps"]),
         "premat_registers_per_thread": (
@@ -228,7 +231,28 @@ def build_compatibility_rows(rows: Sequence[Mapping[str, Any]]) -> list[Dict[str
         raise ValueError("NCU resource CSV has no role=MAIN rows")
     if not premat_rows:
         raise ValueError("NCU resource CSV has no role=PREMAT rows")
-    return [compatibility_row(main_row, premat_row) for main_row in main_rows for premat_row in premat_rows]
+    result = [compatibility_row(main_row, premat_row) for main_row in main_rows for premat_row in premat_rows]
+    grouped: Dict[tuple[Any, ...], list[Dict[str, Any]]] = {}
+    for row in result:
+        key = (
+            row.get("main_operation", ""), row.get("main_family", ""), row.get("main_layer", ""),
+            row.get("premat_operation", ""), row.get("premat_family", ""), row.get("premat_layer", ""),
+        )
+        grouped.setdefault(key, []).append(row)
+    class_rank = {"RED": 0, "ORANGE": 1, "YELLOW": 2, "GREEN": 3}
+    for candidates in grouped.values():
+        worst = min(
+            candidates,
+            key=lambda row: (
+                class_rank.get(str(row.get("compatibility_class", "")).upper(), 99),
+                int(row.get("premat_blocks_with_full_main_residency", 0)),
+                -int(row.get("premat_registers_per_block", 0)),
+                int(row.get("premat_stage_index", 0)),
+            ),
+        )
+        for row in candidates:
+            row["premat_stage_is_most_constrained"] = row is worst
+    return result
 
 
 def read_kernel_resources(path: Path) -> list[Dict[str, Any]]:
@@ -592,6 +616,12 @@ def normalize_semantic_ncu_exports(
 def select_representative_kernel_resources(
     rows: Sequence[Mapping[str, Any]],
 ) -> list[Dict[str, Any]]:
+    """Keep one dominant MAIN kernel and every distinct PREMAT sub-kernel.
+
+    A PREMAT operation is a short pipeline rather than one CUDA kernel.  The
+    former longest-duration-only reduction could therefore report a green
+    middle stage while silently discarding a register-constrained final stage.
+    """
     groups: Dict[tuple[str, str, str, Any], list[Dict[str, Any]]] = {}
     for source in rows:
         row = dict(source)
@@ -617,7 +647,34 @@ def select_representative_kernel_resources(
                 "NCU representative selection requires gpu__time_duration.sum; "
                 f"no duration was recorded for {key}"
             )
-        selected.append(max(timed, key=lambda item: item[0])[1])
+        role = key[0]
+        if role == "MAIN":
+            selected.append(max(timed, key=lambda item: item[0])[1])
+            continue
+
+        distinct: Dict[tuple[Any, ...], tuple[int, Dict[str, Any]]] = {}
+        for duration, row in timed:
+            signature = (
+                str(row.get("cuda_kernel_name", row.get("kernel_name", ""))),
+                row.get("threads_per_block", ""), row.get("registers_per_block", ""),
+                row.get("static_shared_mem_bytes", ""), row.get("dynamic_shared_mem_bytes", ""),
+            )
+            previous = distinct.get(signature)
+            if previous is None or duration > previous[0]:
+                distinct[signature] = (duration, row)
+
+        def launch_order(item: tuple[int, Dict[str, Any]]) -> tuple[int, str]:
+            raw = str(item[1].get("launch_id", ""))
+            try:
+                return int(float(raw)), raw
+            except (TypeError, ValueError):
+                return 1 << 30, raw
+
+        stages = [dict(item[1]) for item in sorted(distinct.values(), key=launch_order)]
+        for index, row in enumerate(stages, start=1):
+            row["premat_stage_index"] = index
+            row["premat_stage_count"] = len(stages)
+            selected.append(row)
     selected.sort(
         key=lambda row: (
             0 if str(row.get("role", "")).upper() == "MAIN" else 1,
@@ -655,8 +712,8 @@ def write_outputs(rows: Sequence[Mapping[str, Any]], output_directory: Path) -> 
     json_path = output_directory / "processing_premat_compatibility.json"
     csv_path = output_directory / "processing_premat_compatibility.csv"
     json_path.write_text(json.dumps({
-        "schema_version": 1,
-        "interpretation": "aggregate_sm_budget_only",
+        "schema_version": 2,
+        "interpretation": "aggregate_sm_budget_only_all_premat_stages",
         "rows": compatibility,
     }, indent=2, sort_keys=True))
     fieldnames = list(compatibility[0]) if compatibility else []

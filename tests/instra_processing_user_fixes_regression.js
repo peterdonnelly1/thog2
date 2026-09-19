@@ -250,9 +250,9 @@ const files = hooks.download_entries({json:"compat.json", bundle:"bundle.zip", d
 assert.deepEqual(Array.from(files, item => item[1]), ["bundle.zip", "compat.json"]);
 assert.match(hooks.processing_download_url_for_run("ncu id", "compat.json"), /run=ncu%20id/);
 const evidence_files = hooks.download_entries({
-  raw_trace:"trace.nsys-rep", metric_audit:"audit.csv", paired_analysis:"paired.zip",
+  raw_trace:"trace.nsys-rep", metric_audit:"audit.csv", everything:"everything.zip",
 });
-assert.deepEqual(Array.from(evidence_files, item => item[0]), ["paired_analysis", "metric_audit", "raw_trace"]);
+assert.deepEqual(Array.from(evidence_files, item => item[0]), ["everything", "metric_audit", "raw_trace"]);
 hooks.decorate_direct_downloads();
 assert.match(direct_raw.title, /Original Nsight Systems/);
 assert.match(direct_compatibility.title, /structural compatibility catalogue/);
@@ -265,6 +265,7 @@ assert.match(resource_source, /payload\.premat_lifecycle/);
 
 hooks.render_paired_downloads({
   paired_processing_downloads:{
+    pair:{dashboard_run_id:"nsys", artifact_name:"pair", files:{everything:"everything.zip", pair_manifest:"manifest.json"}},
     nsys:{dashboard_run_id:"nsys", artifact_name:"NSYS full", files:{bundle:"nsys.zip", raw_trace:"trace.nsys-rep"}},
     ncu:{dashboard_run_id:"ncu", artifact_name:"NCU full", files:{
       raw_ncu:"trace.ncu-rep", ncu_raw_csv:"raw.csv", ncu_semantic_csv:"semantic.csv",
@@ -274,15 +275,16 @@ hooks.render_paired_downloads({
 });
 const rendered_groups = host.querySelector(".processing-paired-download-groups");
 assert.ok(rendered_groups);
-assert.equal(rendered_groups.children.length, 2);
-assert.match(rendered_groups.children[0].children[1].href, /run=nsys/);
-assert.match(rendered_groups.children[1].children[1].href, /run=ncu/);
-assert.equal(rendered_groups.children[0].children.at(-1).textContent, "Raw nsys");
-assert.equal(rendered_groups.children[1].children[1].textContent, "Raw ncu");
-assert.equal(rendered_groups.children[1].children[2].textContent, "Raw metrics CSV");
-assert.equal(rendered_groups.children[1].children[3].textContent, "Semantic metrics CSV");
-assert.match(rendered_groups.children[1].children[1].title, /Original Nsight Compute/);
-assert.match(rendered_groups.children[0].children.at(-1).title, /Original Nsight Systems/);
+assert.equal(rendered_groups.children.length, 3);
+assert.equal(rendered_groups.children[0].children[1].textContent, "Everything");
+assert.match(rendered_groups.children[1].children[1].href, /run=nsys/);
+assert.match(rendered_groups.children[2].children[1].href, /run=ncu/);
+assert.equal(rendered_groups.children[1].children.at(-1).textContent, "Raw");
+assert.equal(rendered_groups.children[2].children[1].textContent, "Raw");
+assert.equal(rendered_groups.children[2].children[2].textContent, "Metrics");
+assert.equal(rendered_groups.children[2].children[3].textContent, "Semantic");
+assert.match(rendered_groups.children[2].children[1].title, /Original Nsight Compute/);
+assert.match(rendered_groups.children[1].children.at(-1).title, /Original Nsight Systems/);
 
 assert.match(operations_source, /const lane_width = 0\.30/);
 assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:300px !important/,
@@ -292,8 +294,15 @@ assert.match(operations_source, /plotly_clickannotation/);
 assert.match(operations_source, /previous_span.*0\.12/s);
 assert.equal(operation_hooks.marker_for({owner:"MAIN", operation:"consume", family:"QKV"}).pattern, undefined,
   "MAIN GEMM operations should use a plain fill");
+assert.equal(operation_hooks.marker_for({owner:"MAIN", operation:"materialize", family:"QKV"}).pattern.shape, "/",
+  "MAIN materialisation operations should carry the diagonal pattern");
 assert.equal(operation_hooks.marker_for({owner:"PREMAT", operation:"materialize", family:"QKV"}).pattern.shape, "/",
   "PREMAT operations should carry the diagonal pattern");
+assert.equal(
+  operation_hooks.operation_colour_key({owner:"MAIN", operation:"consume", family:"QKV"}),
+  operation_hooks.operation_colour_key({owner:"PREMAT", operation:"materialize", family:"QKV"}),
+  "MAIN GEMM and PREMAT did not share their matrix-family colour identity",
+);
 assert.deepEqual(Array.from(operation_hooks.operations_colour_palette()), ["#111111", "#222222", "#333333"],
   "Operations did not reuse the Runs colour-patch palette");
 assert.match(operations_source, /toggle\.textContent = "PREMAT"/);
@@ -326,14 +335,25 @@ sandbox.processing_render({}, true).then(async () => {
   assert.equal(timing_renders, 1, "unchanged run cohort repeated timing work");
   const colour_row = {owner:"MAIN", operation:"consume", family:"QKV"};
   const colour_key = operation_hooks.operation_colour_key(colour_row);
-  operations_mount.data = [{meta:{operations_colour_key:colour_key, operations_owner:"MAIN"}}];
+  operations_mount.data = [
+    {meta:{operations_colour_key:colour_key, operations_owner:"MAIN"}},
+    {meta:{operations_colour_key:colour_key, operations_owner:"PREMAT"}},
+  ];
   await operation_hooks.apply_operation_colour(colour_key, "#abcdef");
   assert.equal(saved_operation_colours.key, "thog2_processing_operation_colours_v1");
   assert.equal(saved_operation_colours.value[colour_key], "#ABCDEF",
     "the chosen operation colour was not persisted");
-  assert.deepEqual(Array.from(restyles.at(-1).indices), [0]);
+  assert.deepEqual(Array.from(restyles.at(-1).indices), [0, 1]);
   assert.equal(restyles.at(-1).update["marker.color"], "#ABCDEF",
     "the chosen operation colour was not applied to the live trace");
+  assert.equal(restyles.at(-1).update["marker.pattern.bgcolor"], "#ABCDEF",
+    "the chosen operation colour was not applied beneath the PREMAT stripe pattern");
+  operations_mount._processing_layer_zoom_capture_ms = 100;
+  operations_mount._processing_layer_zoom_range = [20, 40];
+  await operation_hooks.reset_layer_zoom(operations_mount);
+  assert.deepEqual(Array.from(relayouts.at(-1).update["xaxis.range"]), [0, 100],
+    "Reset Zoom did not restore the full capture range");
+  assert.equal(relayouts.at(-1).update["xaxis.autorange"], false);
   console.log("PASS paired downloads, resource headings, maximize controls, dynamic comparison refresh and compact chart geometry");
 }).catch(error => {
   console.error(error);

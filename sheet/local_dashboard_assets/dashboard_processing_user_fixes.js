@@ -6,7 +6,7 @@
   style.id = "instra-processing-user-fixes-style";
   style.textContent = `
     .processing-downloads { min-width:0 !important; overflow-x:auto; scrollbar-width:thin; }
-    .processing-paired-download-groups { display:flex; align-items:center; gap:7px; white-space:nowrap; }
+    .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:3px 7px; white-space:nowrap; }
     .processing-paired-download-group { display:inline-flex; align-items:center; gap:4px; }
     .processing-paired-download-label { font-size:9px; font-weight:750; color:#69717d; letter-spacing:.04em; }
     #processing_timeline_card.maximized .processing-plot-shell { padding-top:0 !important; padding-bottom:0 !important; }
@@ -32,24 +32,24 @@
   }
 
   const download_order = [
-    "paired_analysis", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
+    "everything", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
     "lifecycle_events", "lifecycle_summary", "operation_resource_stats",
     "attribution_resource_stats", "metric_audit", "summary", "metadata",
     "raw_trace", "raw_ncu", "ncu_raw_csv", "ncu_semantic_csv", "kernel_resources", "csv", "json",
   ];
   const download_labels = {
-    paired_analysis:"Paired analysis ZIP", pair_manifest:"Pair manifest", bundle:"Bundle ZIP",
-    samples:"Samples CSV", stream_resources:"Stream resources",
-    intervals:"Intervals CSV", summary:"Summary CSV", metadata:"Metadata JSON",
-    lifecycle_events:"Lifecycle events", lifecycle_summary:"Lifecycle summary",
-    operation_resource_stats:"Operation resource stats",
-    attribution_resource_stats:"Attribution resource stats", metric_audit:"Metric audit",
-    raw_trace:"Raw nsys", raw_ncu:"Raw ncu", ncu_raw_csv:"Raw metrics CSV",
-    ncu_semantic_csv:"Semantic metrics CSV", kernel_resources:"NCU resources",
-    csv:"Compatibility CSV", json:"Compatibility JSON",
+    everything:"Everything", pair_manifest:"Manifest", bundle:"Bundle",
+    samples:"Samples", stream_resources:"Streams",
+    intervals:"Intervals", summary:"Summary", metadata:"Metadata",
+    lifecycle_events:"Lifecycle", lifecycle_summary:"Life summary",
+    operation_resource_stats:"Op stats",
+    attribution_resource_stats:"Attrib stats", metric_audit:"Audit",
+    raw_trace:"Raw", raw_ncu:"Raw", ncu_raw_csv:"Metrics",
+    ncu_semantic_csv:"Semantic", kernel_resources:"Resources",
+    csv:"Compat CSV", json:"Compat JSON",
   };
   const download_help = {
-    paired_analysis:"Paired NSYS + NCU analysis archive.\nContains the structured, derived files from both runs plus the pair manifest and PREMAT lifecycle tables.\nRaw profiler captures are intentionally downloaded separately.",
+    everything:"Complete paired NSYS + NCU archive.\nContains every downloadable from both runs, including raw profiler reports, normalized bundles, CSV/JSON evidence, lifecycle data and the pair manifest.",
     pair_manifest:"Pair provenance manifest (JSON).\nRecords the exact NSYS and NCU artifacts, pairing key, file inventory, sizes and SHA-256 hashes used for this analysis.",
     bundle:"This run's normalized Processing archive.\nContains structured samples, operation intervals, summaries, resource attribution, metric audit and metadata for reproducible analysis.",
     samples:"Time-ordered NSYS GPU metric samples (CSV).\nIncludes capture timestamps and normalized device-wide counters at the requested sampling frequency.",
@@ -66,7 +66,7 @@
     raw_ncu:"Original Nsight Compute .ncu-rep capture.\nOpen in Nsight Compute for the complete collected kernel/resource report and source metrics.",
     ncu_raw_csv:"Unmodified Nsight Compute raw-page metric export (CSV).\nKernel names are original CUDA names; use with the semantic export to audit every normalization step.",
     ncu_semantic_csv:"Nsight Compute raw-page export with NVTX semantic kernel names (CSV).\nMaps launches to MAIN/PREMAT owner, operation, matrix family and zero-based layer.",
-    kernel_resources:"Representative NCU kernel resources (CSV).\nDominant kernel per captured owner/family/layer with threads, warps, registers, shared memory, occupancy and SM capacities.",
+    kernel_resources:"Captured NCU kernel resources (CSV).\nContains the dominant MAIN kernel and every distinct PREMAT sub-kernel per family/layer, including threads, warps, registers, shared memory, occupancy and SM capacities.",
     csv:"MAIN × PREMAT structural compatibility catalogue (CSV).\nTests block co-residency against register, shared-memory, warp, thread and block-slot limits; it does not claim observed overlap.",
     json:"MAIN × PREMAT structural compatibility catalogue (JSON).\nSame compatibility evidence as the CSV, with schema and interpretation metadata for programmatic analysis.",
   };
@@ -106,8 +106,9 @@
 
     const groups = document.createElement("span");
     groups.className = "processing-paired-download-groups";
-    for (const [role, label] of [["nsys", "NSYS"], ["ncu", "NCU"]]) {
+    for (const [role, label] of [["pair", "PAIR"], ["nsys", "NSYS"], ["ncu", "NCU"]]) {
       const source = pair[role] || {};
+      if (!source.dashboard_run_id || !download_entries(source.files).length) continue;
       const group = document.createElement("span");
       group.className = "processing-paired-download-group";
       group.title = String(source.artifact_name || source.dashboard_run_id || "");
@@ -139,6 +140,7 @@
       );
       const key = download_id_alias[id_key] || id_key || label_key;
       if (!key || !download_help[key]) continue;
+      link.textContent = download_labels[key] || link.textContent;
       link.title = download_help[key];
       link.setAttribute("aria-label", `${link.textContent}. ${link.title.replaceAll("\n", " ")}`);
     }

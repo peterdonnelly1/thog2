@@ -9,6 +9,9 @@
     style.textContent = `
       .runs-table .eye-button.instra-processing-paired {
         color:var(--instra-pair-colour, #24527A) !important;
+        background:color-mix(in srgb,var(--instra-pair-colour, #24527A) 18%,white) !important;
+        border:1px solid var(--instra-pair-colour, #24527A) !important;
+        border-radius:4px !important;
         filter:none !important;
       }
       .runs-table .eye-button.instra-processing-paired.off {
@@ -147,19 +150,19 @@
 
     const timeline = by_id("processing_timeline_card");
     const timeline_heading = timeline?.querySelector(".chart-heading-copy h2");
-    if (timeline_heading) timeline_heading.textContent = "MAIN / PREMAT Operations";
+    if (timeline_heading) timeline_heading.textContent = "GPT Level Operations by Stream (MAIN/PREMAT)";
 
     const compatibility = by_id("processing_compatibility_card");
     const compatibility_heading = compatibility?.querySelector(".chart-heading-copy h2");
     if (compatibility_heading) compatibility_heading.textContent = "PREMAT Compatibility";
     const compatibility_copy = compatibility?.querySelector(".chart-heading-copy > p:not(.processing-compatibility-source)");
     if (compatibility_copy) {
-      compatibility_copy.textContent = "NCU structural test: can the measured MAIN and PREMAT blocks coexist on one SM under register, shared-memory, warp, thread and block-slot limits? Colour applies only to the profiled MAIN operation/layer; blank means unmeasured. This is scheduling capability, not observed overlap.";
+      compatibility_copy.textContent = "NCU structural test across every captured PREMAT sub-kernel: can each measured MAIN/PREMAT block pair coexist on one SM under register, shared-memory, warp, thread and block-slot limits? The most constrained PREMAT stage controls the colour for a profiled MAIN operation/layer; blank means unmeasured. This is scheduling capability, not observed overlap.";
     }
 
     if (typeof chart_titles === "object") {
       chart_titles.processing_resource = "Stream Resource Contention";
-      chart_titles.processing_timeline = "MAIN / PREMAT Operations";
+      chart_titles.processing_timeline = "GPT Level Operations by Stream (MAIN/PREMAT)";
       chart_titles.processing_compatibility = "PREMAT Compatibility";
     }
   }

@@ -48,6 +48,7 @@ function make_sandbox({
     fetch_calls:0,
     fetch_urls:[],
     throughput_renders:[],
+    processing_renders:[],
     render_runs_calls:0,
     listeners,
     console,
@@ -73,7 +74,7 @@ function make_sandbox({
     render_runs() { sandbox.render_runs_calls += 1; },
     processing_sync_visibility() {},
     processing_current_run() { return sandbox.app.current_run_id; },
-    processing_render:async function() {},
+    processing_render:async function(payload) { sandbox.processing_renders.push(payload); },
     processing_render_throughput:async function(payload) {
       sandbox.throughput_renders.push(payload);
     },
@@ -85,7 +86,8 @@ function make_sandbox({
     async fetch_json(url) {
       sandbox.fetch_calls += 1;
       sandbox.fetch_urls.push(String(url));
-      const run_id = String(sandbox.app.current_run_id || "");
+      const parsed = new URL(String(url), "http://instra.local");
+      const run_id = String(parsed.searchParams.get("run") || sandbox.app.current_run_id || "");
       if (String(url).startsWith("/api/processing-throughput")) {
         return throughput_responses[run_id] || {throughput:[]};
       }
@@ -186,6 +188,23 @@ async function settle() {
     /preferred_ncu=ncu_a/,
     "an established pair did not request its persisted NCU companion",
   );
+
+  const ncu_virtual_run = make_sandbox({
+    runs,
+    current_run_id:"ncu_a",
+    visible_run_ids:["nsys_a", "ncu_a"],
+    stored_pairs:[{nsys_run_id:"nsys_a", ncu_run_id:"ncu_a", colour:"#0057B8"}],
+    processing_responses:{
+      nsys_a:{available:true, trace_available:true, revision:"pair-view", data:{paired_processing_downloads:{pair:{}, nsys:{}, ncu:{}}}},
+    },
+  });
+  vm.runInNewContext(pair_source, ncu_virtual_run);
+  await ncu_virtual_run.processing_refresh(true);
+  assert.match(ncu_virtual_run.fetch_urls[0], /run=nsys_a/,
+    "selecting the NCU half did not load the paired NSYS+NCU virtual-run payload");
+  assert.equal(ncu_virtual_run.processing_renders.length, 1);
+  assert.equal(Object.keys(ncu_virtual_run.app.processing_pairs).length, 1,
+    "opening the NCU half disturbed the established pair");
 
   const first_claim_wins = make_sandbox({
     runs,

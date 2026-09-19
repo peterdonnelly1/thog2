@@ -295,7 +295,7 @@ def maybe_reexec_under_nsys(
             "--premat_processing_logging enabled with --premat_processing_profiler ncu "
             "requires NVIDIA Nsight Compute CLI (ncu) on PATH"
         )
-    layer, family = _processing._processing_ncu_target_from_argv(arguments)
+    layer, premat_families = _processing._processing_ncu_scope_from_argv(arguments)
     report_base = temporary_root / "processing_ncu_trace"
     command = _processing._ncu_profile_command(
         ncu,
@@ -303,12 +303,13 @@ def maybe_reexec_under_nsys(
         entrypoint=entrypoint,
         arguments=rewritten_arguments,
         layer=layer,
-        family=family,
+        premat_families=premat_families,
     )
     print(
         "THOG2 PREMAT processing capture: Nsight Compute; "
-        f"capturing update {capture_update}, layer {layer} {family}; "
-        "MAIN consume + PREMAT materialize",
+        f"capturing update {capture_update}, layer {layer}; "
+        f"MAIN {','.join(_processing._PROCESSING_TARGET_FAMILIES.values())} + "
+        f"PREMAT {','.join(premat_families)}",
         flush=True,
     )
     completed = subprocess.run(command, env=environment)
@@ -358,7 +359,7 @@ def maybe_reexec_under_nsys(
         temporary_root / "processing_ncu_semantic.csv",
         nvtx_rename=True,
     )
-    _postrun_progress(5, total, "semantic NCU CSV export complete; normalizing representative kernels")
+    _postrun_progress(5, total, "semantic NCU CSV export complete; normalizing dominant MAIN kernels and every PREMAT stage")
 
     resource_rows = _compat.normalize_semantic_ncu_exports(raw_csv, semantic_csv)
     representative_rows = _compat.select_representative_kernel_resources(resource_rows)
@@ -372,11 +373,11 @@ def maybe_reexec_under_nsys(
     _postrun_progress(
         7,
         total,
-        f"INSTRA NCU artifacts ready: {paths['csv']} ({family} layer {layer})",
+        f"INSTRA NCU artifacts ready: {paths['csv']} ({','.join(premat_families)} layer {layer})",
     )
     print(
         "THOG2 PREMAT NCU compatibility data: "
-        f"{paths['csv']} ({family} layer {layer}; dominant MAIN/PREMAT kernels)",
+        f"{paths['csv']} ({','.join(premat_families)} layer {layer}; dominant MAIN kernels + every PREMAT stage)",
         flush=True,
     )
     return int(completed.returncode)
@@ -387,3 +388,4 @@ _compat._byte_value = _byte_value_2024
 _compat._semantic_launch_map = _semantic_launch_map_2024
 _processing.maybe_reexec_under_nsys = maybe_reexec_under_nsys
 # ^^^ THOG
+

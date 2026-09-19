@@ -88,6 +88,16 @@ def _artifact_timestamp_seconds(artifact: Any, fallback: float = 0.0) -> float:
         return float(fallback)
 
 
+def _status_timestamp_seconds(status: Any, artifact: Any, fallback: float = 0.0) -> float:
+    created_at = str((status or {}).get("created_at", "")).strip() if isinstance(status, dict) else ""
+    if created_at:
+        try:
+            return datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return _artifact_timestamp_seconds(artifact, fallback)
+
+
 def _is_ncu_artifact(artifact: Any) -> bool:
     text = str(artifact or "").upper()
     return "_NCU_" in text or "NCU_PREMAT" in text
@@ -127,8 +137,16 @@ def _matching_ncu_companion(
         return cached[2]
 
     selected_artifact = _state_artifact_name(state)
+    if _is_ncu_artifact(selected_artifact):
+        state._instra_ncu_companion_cache = (now, selection_key, None)
+        state._instra_ncu_companion_diagnostics = {}
+        return None
     selected_fallback = state.database_path.stat().st_mtime if state.database_path.exists() else 0.0
-    selected_time = _artifact_timestamp_seconds(selected_artifact, selected_fallback)
+    try:
+        selected_status = state.status()
+    except Exception:
+        selected_status = {}
+    selected_time = _status_timestamp_seconds(selected_status, selected_artifact, selected_fallback)
 
     _host, encoded = pair_key
     if not catalog.root.is_dir():
@@ -148,9 +166,16 @@ def _matching_ncu_companion(
         if _processing_pair_key(candidate) != pair_key:
             continue
 
+        try:
+            status = candidate.status()
+        except Exception:
+            status = {}
         candidate_fallback = path.stat().st_mtime if path.exists() else 0.0
-        candidate_time = _artifact_timestamp_seconds(candidate_artifact, candidate_fallback)
-        distance = abs(candidate_time - selected_time)
+        candidate_time = _status_timestamp_seconds(status, candidate_artifact, candidate_fallback)
+        # NCU is the second half of a pair: never consume an older capture.
+        if candidate_time <= selected_time:
+            continue
+        distance = candidate_time - selected_time
         compatibility_path = (
             candidate.database_path.parent
             / "processing"
@@ -160,9 +185,7 @@ def _matching_ncu_companion(
             invalid.append((distance, -candidate_time, candidate_artifact))
             continue
 
-        try:
-            status = candidate.status()
-        except Exception:
+        if not status:
             invalid.append((distance, -candidate_time, candidate_artifact))
             continue
 
@@ -173,7 +196,7 @@ def _matching_ncu_companion(
         viable.append(
             (
                 distance,
-                -candidate_time,
+                candidate_time,
                 candidate,
                 status,
                 compatibility_path,
@@ -232,26 +255,40 @@ def _hard_constraint_rows(
     if not resources:
         return []
 
-    pair = source[0]
+    compatibility_rank = {"RED": 0, "ORANGE": 1, "YELLOW": 2, "GREEN": 3}
+    pair = min(
+        source,
+        key=lambda row: (
+            compatibility_rank.get(str(row.get("compatibility_class", "")).upper(), 99),
+            _safe_int(row.get("premat_blocks_with_full_main_residency", 0)),
+            -_safe_int(row.get("premat_registers_per_block", 0)),
+        ),
+    )
     main_family = str(pair.get("main_family", "")).upper()
     premat_family = str(pair.get("premat_family", "")).upper()
     main_layer = str(pair.get("main_layer", ""))
     premat_layer = str(pair.get("premat_layer", ""))
 
-    def choose(role: str, family: str, layer: str):
+    def choose(role: str, family: str, layer: str, kernel_name: str):
         exact = [
             row for row in resources
             if str(row.get("role", "")).upper() == role
             and str(row.get("family", "")).upper() == family
             and str(row.get("layer", "")) == layer
         ]
+        kernel_exact = [
+            row for row in exact
+            if str(row.get("cuda_kernel_name", row.get("kernel_name", ""))) == kernel_name
+        ]
+        if kernel_exact:
+            return kernel_exact[0]
         if exact:
             return exact[0]
         fallback = [row for row in resources if str(row.get("role", "")).upper() == role]
         return fallback[0] if fallback else None
 
-    main = choose("MAIN", main_family, main_layer)
-    premat = choose("PREMAT", premat_family, premat_layer)
+    main = choose("MAIN", main_family, main_layer, str(pair.get("main_cuda_kernel_name", "")))
+    premat = choose("PREMAT", premat_family, premat_layer, str(pair.get("premat_cuda_kernel_name", "")))
     if main is None or premat is None:
         return []
 
@@ -291,6 +328,10 @@ def _hard_constraint_rows(
             "limiting": str(pair.get("limiting_resource", "")).replace("_", " ").lower() in {
                 label.lower(), unit.lower(), label.lower().replace(" slots", "s")
             },
+            "premat_stage_index": _safe_int(pair.get("premat_stage_index", 1)),
+            "premat_stage_count": _safe_int(pair.get("premat_stage_count", 1)),
+            "premat_kernel_name": str(pair.get("premat_cuda_kernel_name", "")),
+            "compatibility_class": str(pair.get("compatibility_class", "")),
         })
     return rows
 
@@ -546,23 +587,29 @@ def _materialize_paired_analysis(
         "lifecycle_events": lifecycle_name,
         "lifecycle_summary": lifecycle_summary_name,
         "pair_manifest": "processing_pair_manifest.json",
-        "paired_analysis": "processing_paired_analysis.zip",
+        "everything": "processing_everything.zip",
     }
     lifecycle_payload = _csv_bytes(lifecycle_rows, lifecycle_fields)
     lifecycle_summary_payload = _csv_bytes(lifecycle_summary, lifecycle_summary_fields)
 
     candidate_files: list[tuple[str, Path, str]] = []
+    candidate_archive_names: set[str] = set()
     for namespace, owner_state, files in (
         ("nsys", state, selected_files),
         ("ncu", companion_state, companion_files),
     ):
         directory = owner_state.database_path.parent / "processing"
         for key, filename in sorted(files.items()):
-            if key in {"bundle", "raw_trace", "raw_nsys", "raw_capture", "raw_ncu"}:
+            if key in {
+                "everything", "paired_analysis", "pair_manifest",
+                "lifecycle_events", "lifecycle_summary",
+            }:
                 continue
             path = directory / str(filename)
-            if path.is_file():
-                candidate_files.append((f"{namespace}/{path.name}", path, key))
+            archive_name = f"{namespace}/{path.name}"
+            if path.is_file() and archive_name not in candidate_archive_names:
+                candidate_files.append((archive_name, path, key))
+                candidate_archive_names.add(archive_name)
     input_signature = (
         hashlib.sha256(lifecycle_payload).hexdigest(),
         hashlib.sha256(lifecycle_summary_payload).hexdigest(),
@@ -614,14 +661,21 @@ def _materialize_paired_analysis(
         manifest_path,
         json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"),
     )
-    bundle_name = "processing_paired_analysis.zip"
+    bundle_name = "processing_everything.zip"
     bundle_path = processing_directory / bundle_name
     signature = tuple((entry["path"], entry["sha256"]) for entry in manifest["files"])
     if getattr(state, "_instra_paired_analysis_signature", None) != signature or not bundle_path.is_file():
         with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(manifest_path, arcname=manifest_name)
             for archive_name, path, _key in included:
-                archive.write(path, arcname=archive_name)
+                already_compressed = path.suffix.lower() in {
+                    ".zip", ".nsys-rep", ".ncu-rep", ".ncu-repz",
+                }
+                archive.write(
+                    path,
+                    arcname=archive_name,
+                    compress_type=zipfile.ZIP_STORED if already_compressed else zipfile.ZIP_DEFLATED,
+                )
         state._instra_paired_analysis_signature = signature
     state._instra_paired_analysis_input_signature = input_signature
     return generated_files
@@ -699,18 +753,35 @@ def _processing_payload_with_ncu_companion(
         "selection": (
             "persisted_pair"
             if preferred_ncu_run_id
-            else "nearest_viable_unclaimed_ncu_by_artifact_time"
+            else "nearest_forward_viable_unclaimed_ncu_by_artifact_time"
         ),
         "distance_minutes": diagnostics.get("distance_minutes"),
         "skipped_closer_invalid_count": diagnostics.get("skipped_closer_invalid_count", 0),
         "skipped_closer_invalid_artifacts": diagnostics.get("skipped_closer_invalid_artifacts", []),
         "viable_candidate_count": diagnostics.get("viable_candidate_count", 0),
     }
+    pair_files = {
+        key: selected_files[key]
+        for key in ("everything", "pair_manifest")
+        if key in selected_files
+    }
+    nsys_files = {
+        key: value for key, value in selected_files.items()
+        if key not in pair_files
+    }
     merged_data["paired_processing_downloads"] = {
+        "pair": {
+            "dashboard_run_id": str(selected_status.get("dashboard_run_id", "")),
+            "artifact_name": (
+                f"{selected_status.get('artifact_name', '')} + "
+                f"{companion_status.get('artifact_name', '')}"
+            ),
+            "files": pair_files,
+        },
         "nsys": {
             "dashboard_run_id": str(selected_status.get("dashboard_run_id", "")),
             "artifact_name": str(selected_status.get("artifact_name", "")),
-            "files": selected_files,
+            "files": nsys_files,
         },
         "ncu": {
             "dashboard_run_id": str(companion_status.get("dashboard_run_id", "")),

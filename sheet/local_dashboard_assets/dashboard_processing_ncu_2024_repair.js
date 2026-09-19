@@ -108,7 +108,7 @@
       <header class="chart-card-header">
         <div class="chart-heading-copy">
           <h2>C. PREMAT compatibility</h2>
-          <p>NCU structural evidence mapped only onto profiled MAIN operation/layer pairs; blank means unmeasured.</p>
+          <p>NCU structural evidence mapped only onto profiled MAIN operation/layer pairs; colour is controlled by the most constrained captured PREMAT stage; blank means unmeasured.</p>
           <p class="processing-compatibility-source" id="processing_compatibility_source"></p>
           <div class="processing-compatibility-key" aria-label="Compatibility key">
             <span><i style="background:${class_colours.GREEN}"></i>GREEN full-MAIN headroom</span>
@@ -197,7 +197,7 @@
     const resource_heading = resource?.querySelector(".chart-heading-copy h2");
     if (resource_heading) resource_heading.textContent = "A. Stream Resource Pressure";
     const timeline_heading = timeline?.querySelector(".chart-heading-copy h2");
-    if (timeline_heading) timeline_heading.textContent = "B. MAIN / PREMAT operations";
+    if (timeline_heading) timeline_heading.textContent = "GPT Level Operations by Stream (MAIN/PREMAT)";
     ensure_resource_controls();
   }
 
@@ -271,8 +271,13 @@
   function compatibility_hover(row, interval, klass) {
     const main_layer = row.main_layer === "" || row.main_layer === null || row.main_layer === undefined ? "—" : Number(row.main_layer) + 1;
     const premat_layer = row.premat_layer === "" || row.premat_layer === null || row.premat_layer === undefined ? "—" : Number(row.premat_layer) + 1;
+    const stage_index = Number(row.premat_stage_index || 1);
+    const stage_count = Number(row.premat_stage_count || 1);
+    const stage = `stage ${stage_index}/${stage_count}`;
     return `${klass} · MAIN ${processing_escape(interval.operation || row.main_operation || "?")} ${processing_escape(interval.family || row.main_family || "?")} L${main_layer}`
       + ` → PREMAT ${processing_escape(row.premat_family || "?")} L${premat_layer}<br>`
+      + `PREMAT ${stage}${row.premat_stage_is_most_constrained ? " · most constrained captured stage" : ""}<br>`
+      + `${processing_escape(row.premat_cuda_kernel_name || "unknown kernel")}<br>`
       + `Pair compatible: ${row.pair_can_co_reside ? "YES" : "NO"}<br>`
       + `PREMAT blocks with MAIN at full residency: ${Number(row.premat_blocks_with_full_main_residency || 0)}<br>`
       + `Limiter: ${processing_escape(row.limiting_resource || "—")}<br>`
@@ -315,7 +320,7 @@
         const premat_layer = row.premat_layer === "" || row.premat_layer === null || row.premat_layer === undefined ? "—" : Number(row.premat_layer) + 1;
         const synthetic_interval = {operation: row.main_operation, family: row.main_family};
         item.x.push(1);
-        item.y.push(`MAIN ${row.main_family || "?"} L${main_layer} → PREMAT ${row.premat_family || "?"} L${premat_layer}`);
+        item.y.push(`MAIN ${row.main_family || "?"} L${main_layer} → PREMAT ${row.premat_family || "?"} L${premat_layer} · stage ${Number(row.premat_stage_index || 1)}/${Number(row.premat_stage_count || 1)}`);
         item.hover.push(compatibility_hover(row, synthetic_interval, klass));
       }
       const traces = [...grouped.entries()].map(([klass, item]) => ({

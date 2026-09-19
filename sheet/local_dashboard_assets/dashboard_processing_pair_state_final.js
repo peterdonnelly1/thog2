@@ -6,9 +6,9 @@
   const auto_opened_storage_key = "thog2_processing_auto_opened_run_ids";
   const unmatched_storage_key = "thog2_processing_unmatched_nsys_run_ids";
   const pair_palette = Object.freeze([
-    "#24527A", "#6B3F8C", "#2F6B4F", "#8A4B2D",
-    "#7A2E4D", "#3B5F8A", "#596B2F", "#76512E",
-    "#3E5E66", "#654A75", "#35635B", "#754246",
+    "#0057B8", "#A000C8", "#007A3D", "#C45100",
+    "#B0003A", "#006B75", "#6A4C00", "#7A2E00",
+    "#0047AB", "#7B1FA2", "#008060", "#C00000",
   ]);
 
   function stored_string_set(key) {
@@ -275,6 +275,10 @@
     }
 
     try {
+      const existing_pair = pair_for_run(run_id);
+      const request_run_id = existing_pair && is_ncu_run_id(run_id)
+        ? existing_pair.nsys_run_id
+        : run_id;
       const pairing = pairing_request_parameters(run_id);
       const pairing_query = [
         pairing.excluded.length
@@ -285,7 +289,7 @@
           : "",
       ].filter(Boolean).join("&");
       const response = await fetch_json(
-        `/api/processing?run=${encodeURIComponent(run_id)}&pair_epoch=${request_epoch}&request=${request_serial}${pairing_query ? `&${pairing_query}` : ""}`,
+        `/api/processing?run=${encodeURIComponent(request_run_id)}&pair_epoch=${request_epoch}&request=${request_serial}${pairing_query ? `&${pairing_query}` : ""}`,
       );
       if (
         request_serial !== refresh_serial
@@ -398,6 +402,7 @@
         || !run_for_id(pair.ncu_run_id)
         || !is_nsys_run_id(nsys_run_id)
         || !is_ncu_run_id(pair.ncu_run_id)
+        || run_timestamp(pair.ncu_run_id) <= run_timestamp(nsys_run_id)
         || seen_ncu.has(pair.ncu_run_id)
       ) {
         delete app.processing_pairs[nsys_run_id];

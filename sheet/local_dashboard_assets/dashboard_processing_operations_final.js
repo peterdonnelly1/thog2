@@ -22,7 +22,7 @@
         display:flex !important;
         align-items:center !important;
         align-self:center !important;
-        flex-wrap:nowrap !important;
+        flex-wrap:wrap !important;
         gap:4px !important;
         white-space:nowrap !important;
       }
@@ -103,7 +103,7 @@
       .processing-operations-colour-popover {
         position:fixed;
         z-index:160;
-        width:310px;
+        width:282px;
         max-height:min(360px,calc(100vh - 16px));
         overflow:auto;
         padding:10px;
@@ -134,7 +134,7 @@
       }
       .processing-operations-colour-swatches {
         display:grid;
-        grid-template-columns:repeat(12,1fr);
+        grid-template-columns:repeat(8,1fr);
         gap:5px;
       }
       .processing-operations-colour-swatch {
@@ -243,8 +243,17 @@
   const maximized_y_range = [0.20, 1.50];
   processing_view.operations_hidden_keys = processing_view.operations_hidden_keys || new Set();
   processing_view.operations_colour_defaults = processing_view.operations_colour_defaults || {};
+  processing_view.operations_ancillary_white = false;
+  const ancillary_operations = new Set(["misc", "layernorm", "lm_head", "loss"]);
 
   function operation_colour_key(row) {
+    const family = String(row.family || "-").toUpperCase();
+    const operation = String(row.operation || "misc").toLowerCase();
+    if (Object.hasOwn(family_colours, family)) return `FAMILY:${family}`;
+    return `OPERATION:${operation}:${semantic_label(row)}`;
+  }
+
+  function legacy_operation_colour_key(row) {
     const owner = String(row.owner || "UNKNOWN").toUpperCase();
     const family = String(row.family || "-").toUpperCase();
     const operation = String(row.operation || "misc").toLowerCase();
@@ -256,8 +265,16 @@
     const operation = String(row.operation || "misc").toLowerCase();
     const fallback = family_colours[family] || operation_colours[operation] || "#8c8c8c";
     const key = operation_colour_key(row);
+    const legacy_main_key = Object.hasOwn(family_colours, family)
+      ? `MAIN:${family}:consume:${family} GEMM`
+      : null;
     processing_view.operations_colour_defaults[key] = fallback;
-    return custom_operation_colours[key] || fallback;
+    return custom_operation_colours[key]
+      || (legacy_main_key ? custom_operation_colours[legacy_main_key] : null)
+      || (!Object.hasOwn(family_colours, family)
+        ? custom_operation_colours[legacy_operation_colour_key(row)]
+        : null)
+      || fallback;
   }
 
   function semantic_label(row) {
@@ -268,11 +285,19 @@
     return operation === "lm_head" ? "LM HEAD" : operation.toUpperCase();
   }
 
+  function hover_label(row) {
+    const owner = String(row.owner || "UNKNOWN").toUpperCase();
+    const family = String(row.family || "").toUpperCase();
+    if (owner === "PREMAT") return family ? `PREMAT · ${family}` : "PREMAT";
+    return semantic_label(row);
+  }
+
   function marker_for(row) {
     const owner = String(row.owner || "").toUpperCase();
+    const operation = String(row.operation || "").toLowerCase();
     const colour = family_colour(row);
     const marker = {color:colour, line:{width:0}};
-    if (owner === "PREMAT") {
+    if (owner === "PREMAT" || operation === "materialize") {
       marker.pattern = {
         shape:"/",
         fgcolor:"rgba(255,255,255,0.78)",
@@ -381,10 +406,10 @@
       button.textContent = "Reset zoom";
       button.title = "Restore the complete MAIN/PREMAT capture time range";
       button.disabled = true;
-      button.addEventListener("click", event => {
+      button.addEventListener("click", async event => {
         event.preventDefault();
         event.stopPropagation();
-        reset_layer_zoom(by_id("processing_timeline_plot"));
+        await reset_layer_zoom(by_id("processing_timeline_plot"));
       });
       actions.insertBefore(button, actions.firstChild);
     }
@@ -458,7 +483,7 @@
     Plotly.relayout(mount, {"xaxis.range":range}).then(() => sync_layer_scrollbar(mount)).catch(() => {});
   }
 
-  function reset_layer_zoom(mount) {
+  async function reset_layer_zoom(mount) {
     if (!mount) return;
     const capture_ms = Number(mount._processing_layer_zoom_capture_ms || 0);
     mount._processing_layer_zoom_range = null;
@@ -466,7 +491,14 @@
     const reset = by_id("processing_operations_reset_zoom");
     if (scrollbar) scrollbar.hidden = true;
     if (reset) reset.disabled = true;
-    Plotly.relayout(mount, {"xaxis.range":capture_ms > 0 ? [0, capture_ms] : null}).catch(() => {});
+    const update = capture_ms > 0
+      ? {"xaxis.autorange":false, "xaxis.range":[0, capture_ms]}
+      : {"xaxis.autorange":true};
+    try {
+      await Plotly.relayout(mount, update);
+    } catch (_error) {
+      // Leave the controls reset even if Plotly is tearing down this run.
+    }
   }
 
   function install_layer_zoom(mount, guides, capture_ms) {
@@ -512,12 +544,12 @@
     processing_view.operations_colour_picker_key = null;
   }
 
-  function operation_trace_indices(mount, key, premat = false) {
+  function operation_trace_indices(mount, key, patterned = false) {
     if (!mount || !Array.isArray(mount.data)) return [];
     const indices = [];
     mount.data.forEach((trace, index) => {
       const meta = trace.meta || {};
-      if (premat ? meta.operations_owner === "PREMAT" : meta.operations_colour_key === key) {
+      if (patterned ? meta.operations_patterned === true : meta.operations_colour_key === key) {
         indices.push(index);
       }
     });
@@ -535,12 +567,21 @@
     if (colour) custom_operation_colours[key] = String(colour).toUpperCase();
     else delete custom_operation_colours[key];
     save_operation_colours();
-    const resolved = custom_operation_colours[key]
+    let resolved = custom_operation_colours[key]
       || processing_view.operations_colour_defaults[key]
       || "#8C8C8C";
     const mount = by_id("processing_timeline_plot");
     const indices = operation_trace_indices(mount, key, false);
-    if (indices.length) await Plotly.restyle(mount, {"marker.color":resolved}, indices);
+    if (
+      processing_view.operations_ancillary_white
+      && indices.some(index => ancillary_operations.has(String(mount?.data?.[index]?.meta?.operations_operation || "")))
+    ) resolved = "#FFFFFF";
+    if (indices.length) {
+      await Plotly.restyle(mount, {
+        "marker.color":resolved,
+        "marker.pattern.bgcolor":resolved,
+      }, indices);
+    }
     render_operations_key(mount?.data || []);
   }
 
@@ -556,7 +597,7 @@
         <span id="processing_operations_colour_title">Operation colour</span>
         <button class="processing-operations-colour-reset" type="button">Default</button>
       </div>
-      <div class="processing-operations-colour-swatches"></div>`;
+      <div class="colour-swatches processing-operations-colour-swatches"></div>`;
     document.body.appendChild(popover);
     popover.querySelector(".processing-operations-colour-reset")?.addEventListener("click", async event => {
       event.preventDefault();
@@ -567,7 +608,7 @@
     for (const colour of operations_colour_palette()) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "processing-operations-colour-swatch";
+      button.className = "colour-swatch processing-operations-colour-swatch";
       button.style.background = colour;
       button.title = colour;
       button.setAttribute("aria-label", `Choose operation colour ${colour}`);
@@ -589,17 +630,17 @@
     if (title) title.textContent = `${label} colour`;
     popover.hidden = false;
     const rect = anchor.getBoundingClientRect();
-    const width = 310;
+    const width = 282;
     const height = Math.min(360, Math.max(160, popover.offsetHeight || 300));
     popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
     popover.style.top = `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8))}px`;
   }
 
-  async function toggle_operations_key(key, premat = false) {
+  async function toggle_operations_key(key, patterned = false) {
     const mount = by_id("processing_timeline_plot");
-    const indices = operation_trace_indices(mount, key, premat);
+    const indices = operation_trace_indices(mount, key, patterned);
     if (!indices.length) return;
-    const state_key = premat ? "__PREMAT__" : key;
+    const state_key = patterned ? "__MATERIALISATION__" : key;
     const hide = !processing_view.operations_hidden_keys.has(state_key);
     if (hide) processing_view.operations_hidden_keys.add(state_key);
     else processing_view.operations_hidden_keys.delete(state_key);
@@ -626,11 +667,11 @@
     if (!key) return;
     key.replaceChildren();
     const items = new Map();
-    let has_premat = false;
+    let has_materialisation = false;
     for (const trace of traces || []) {
       const meta = trace.meta || {};
-      if (meta.operations_owner === "PREMAT") {
-        has_premat = true;
+      if (meta.operations_patterned === true) {
+        has_materialisation = true;
         continue;
       }
       if (!meta.operations_colour_key || items.has(meta.operations_colour_key)) continue;
@@ -663,10 +704,10 @@
       wrapper.append(colour, toggle);
       key.appendChild(wrapper);
     }
-    if (has_premat) {
+    if (has_materialisation) {
       const wrapper = document.createElement("span");
       wrapper.className = "processing-operations-key-item";
-      wrapper.classList.toggle("is-hidden", processing_view.operations_hidden_keys.has("__PREMAT__"));
+      wrapper.classList.toggle("is-hidden", processing_view.operations_hidden_keys.has("__MATERIALISATION__"));
       const pattern = document.createElement("span");
       pattern.className = "processing-operations-key-pattern";
       pattern.setAttribute("aria-hidden", "true");
@@ -674,8 +715,8 @@
       toggle.type = "button";
       toggle.className = "processing-operations-key-toggle";
       toggle.textContent = "PREMAT";
-      toggle.title = "Show or hide all striped PREMAT operations";
-      toggle.addEventListener("click", () => toggle_operations_key("__PREMAT__", true));
+      toggle.title = "Show or hide all striped materialisation and PREMAT operations";
+      toggle.addEventListener("click", () => toggle_operations_key("__MATERIALISATION__", true));
       wrapper.append(pattern, toggle);
       key.appendChild(wrapper);
     }
@@ -701,10 +742,59 @@
         const indices = mount.data.map((_trace, index) => index);
         if (indices.length) await Plotly.restyle(mount, {visible:true}, indices);
         processing_view.operations_hidden_keys.clear();
+        processing_view.operations_ancillary_white = false;
+        await restore_operation_trace_colours(mount);
         render_operations_key(mount.data || []);
       });
       actions.insertBefore(button, actions.firstChild);
     }
+  }
+
+  function resolved_trace_colour(trace) {
+    const key = String(trace?.meta?.operations_colour_key || "");
+    return custom_operation_colours[key]
+      || processing_view.operations_colour_defaults[key]
+      || String(trace?.meta?.operations_base_colour || trace?.marker?.color || "#8C8C8C");
+  }
+
+  async function restore_operation_trace_colours(mount) {
+    if (!mount || !Array.isArray(mount.data)) return;
+    for (let index = 0; index < mount.data.length; index += 1) {
+      const trace = mount.data[index];
+      const colour = resolved_trace_colour(trace);
+      await Plotly.restyle(mount, {
+        "marker.color":colour,
+        "marker.pattern.bgcolor":colour,
+      }, [index]);
+    }
+  }
+
+  function ensure_ancillary_button() {
+    const actions = by_id("processing_timeline_card")?.querySelector(".chart-card-actions");
+    const show_all = by_id("processing_operations_show_all");
+    if (!actions || !show_all || by_id("processing_operations_hide_ancillary")) return;
+    const button = document.createElement("button");
+    button.id = "processing_operations_hide_ancillary";
+    button.type = "button";
+    button.className = "processing-operations-show-all";
+    button.textContent = "Core only";
+    button.title = "Render MISC, LAYERNORM, LM HEAD and LOSS in white; Show All restores their colours";
+    button.addEventListener("click", async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const mount = by_id("processing_timeline_plot");
+      if (!mount || mount.dataset.plotReady !== "true" || !Array.isArray(mount.data)) return;
+      processing_view.operations_ancillary_white = true;
+      const indices = mount.data.flatMap((trace, index) => (
+        ancillary_operations.has(String(trace?.meta?.operations_operation || "")) ? [index] : []
+      ));
+      if (indices.length) await Plotly.restyle(mount, {
+        "marker.color":"#FFFFFF",
+        "marker.pattern.bgcolor":"#FFFFFF",
+      }, indices);
+      render_operations_key(mount.data || []);
+    });
+    actions.insertBefore(button, show_all);
   }
 
   function ensure_training_throughput_group() {
@@ -779,6 +869,7 @@
   processing_render_timeline = async function(payload) {
     ensure_layer_zoom_controls();
     ensure_show_all_button();
+    ensure_ancillary_button();
     processing_view.operations_payload = payload;
     const intervals = Array.isArray(payload.intervals) ? payload.intervals : [];
     const groups = new Map();
@@ -799,30 +890,37 @@
     for (const group of groups.values()) {
       const exemplar = group.rows[0] || {};
       const colour_key = operation_colour_key(exemplar);
-      const state_key = group.owner === "PREMAT" ? "__PREMAT__" : colour_key;
+      const patterned = group.owner === "PREMAT" || String(exemplar.operation || "").toLowerCase() === "materialize";
+      const state_key = patterned ? "__MATERIALISATION__" : colour_key;
+      const marker = marker_for(exemplar);
       traces.push({
         type:"bar",
         orientation:"h",
-        name:`${group.owner} ${group.label}`,
+        name:group.owner === "PREMAT"
+          ? `PREMAT${String(exemplar.family || "").trim() ? ` ${String(exemplar.family).toUpperCase()}` : ""}`
+          : `${group.owner} ${group.label}`,
         showlegend:false,
         visible:processing_view.operations_hidden_keys.has(state_key) ? false : true,
         x:group.rows.map(row => Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0),
         base:group.rows.map(row => Number(row.start_us) / 1000.0),
         y:group.rows.map(() => lane_y[group.owner] ?? lane_y.UNKNOWN),
         width:lane_width,
-        marker:marker_for(exemplar),
+        marker,
         meta:{
           operations_owner:group.owner,
+          operations_operation:String(exemplar.operation || "misc").toLowerCase(),
+          operations_patterned:patterned,
           operations_colour_key:colour_key,
-          operations_label:`${group.owner} ${group.label}`,
+          operations_label:group.label,
+          operations_base_colour:marker.color,
         },
         customdata:group.rows.map(row => [
-          semantic_label(row),
+          hover_label(row),
           row.family || "",
           row.layer === "" || row.layer === null || row.layer === undefined ? "—" : Number(row.layer) + 1,
           row.kernel_name || "",
         ]),
-        hovertemplate:"%{customdata[0]} · layer %{customdata[2]}<br>%{customdata[3]}<br>%{x:.4f} ms<extra>%{fullData.name}</extra>",
+        hovertemplate:"%{customdata[0]} · layer %{customdata[2]}<br>%{customdata[3]}<br>%{x:.4f} ms<extra></extra>",
       });
     }
 
@@ -852,6 +950,8 @@
     render_operations_key(traces);
     install_layer_zoom(by_id("processing_timeline_plot"), guides, capture_ms);
     reset_layer_zoom(by_id("processing_timeline_plot"));
+    const heading = by_id("processing_timeline_card")?.querySelector(".chart-heading-copy h2");
+    if (heading) heading.textContent = "GPT Level Operations by Stream (MAIN/PREMAT)";
     processing_gpu_link_time_axes();
   };
 
@@ -988,6 +1088,8 @@
     operation_trace_indices,
     apply_operation_colour,
     render_operations_key,
+    reset_layer_zoom,
+    resolved_trace_colour,
     sync_training_group_presentation,
   });
 })();

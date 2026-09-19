@@ -1,5 +1,6 @@
 # vvv THOG
 import json
+import zipfile
 from pathlib import Path
 
 import run_thog2_local_dashboard as dashboard
@@ -15,19 +16,23 @@ class _Reader:
     def metadata(self):
         return dict(self._metadata)
 
+    def premat_snapshots(self):
+        return []
+
 
 class _State:
-    def __init__(self, artifact: str, host: str = "scruffy", database_path: Path | None = None) -> None:
+    def __init__(self, artifact: str, host: str = "scruffy", database_path: Path | None = None, created_at: str = "") -> None:
         self.reader = _Reader(artifact, host)
         self.database_path = database_path or (Path("/tmp") / artifact / "charts.sqlite3")
         self._artifact = artifact
         self._host = host
+        self._created_at = created_at
 
     def status(self):
         return {
             "dashboard_run_id": self.database_path.parent.name,
             "artifact_name": self._artifact,
-            "created_at": "",
+            "created_at": self._created_at,
             "host_label": self._host,
         }
 
@@ -62,6 +67,13 @@ def test_artifact_time_and_profiler_kind_are_explicit() -> None:
     assert dashboard._artifact_timestamp_seconds(early) < dashboard._artifact_timestamp_seconds(late)
     assert dashboard._is_ncu_artifact(late)
     assert not dashboard._is_ncu_artifact(early)
+
+
+def test_precise_status_time_breaks_same_minute_pairing_ties() -> None:
+    artifact = "260916-1405_scruffy_NSYS_PREMAT___CONFIG_A"
+    early = _State(artifact, created_at="2026-09-16T14:05:01Z")
+    late = _State(artifact.replace("NSYS", "NCU"), created_at="2026-09-16T14:05:44Z")
+    assert dashboard._status_timestamp_seconds(late.status(), late._artifact) > dashboard._status_timestamp_seconds(early.status(), early._artifact)
 
 
 def test_nearest_viable_ncu_skips_closer_invalid_capture(tmp_path: Path) -> None:
@@ -178,6 +190,46 @@ def test_claimed_ncu_is_skipped_and_persisted_pair_is_preferred(tmp_path: Path) 
     assert persisted[2] is nearest
 
 
+def test_pairing_only_looks_forward_and_chooses_closest_unclaimed_ncu(tmp_path: Path) -> None:
+    encoded = "G0_chebyshev__d_owt_A_6_b_16__C_1024_D_1024_H_16_L_16__P_12"
+
+    def make_state(artifact: str) -> tuple[Path, _State]:
+        run_dir = tmp_path / artifact / artifact.split("_")[0]
+        run_dir.mkdir(parents=True)
+        database_path = run_dir / "charts.sqlite3"
+        database_path.write_text("")
+        state = _State(artifact, database_path=database_path)
+        if "_NCU_" in artifact:
+            processing = run_dir / "processing"
+            processing.mkdir()
+            (processing / "processing_premat_compatibility.json").write_text(
+                json.dumps({"rows": [{"compatibility_class": "GREEN"}]})
+            )
+        return database_path, state
+
+    selected_path, selected = make_state(f"260916-1405_scruffy_NSYS_PREMAT___{encoded}")
+    old_path, old = make_state(f"260916-1404_scruffy_NCU_PREMAT___{encoded}")
+    closest_path, closest = make_state(f"260916-1406_scruffy_NCU_PREMAT___{encoded}")
+    next_path, next_ncu = make_state(f"260916-1407_scruffy_NCU_PREMAT___{encoded}")
+    selected._instra_dashboard_catalog = _Catalog(
+        tmp_path,
+        {selected_path: selected, old_path: old, closest_path: closest, next_path: next_ncu},
+    )
+
+    match = dashboard._matching_ncu_companion(selected)
+    assert match is not None and match[2] is closest
+    fallback = dashboard._matching_ncu_companion(
+        selected,
+        excluded_ncu_run_ids={closest.database_path.parent.name},
+    )
+    assert fallback is not None and fallback[2] is next_ncu
+    rejected_preference = dashboard._matching_ncu_companion(
+        selected,
+        preferred_ncu_run_id=old.database_path.parent.name,
+    )
+    assert rejected_preference is None
+
+
 def test_ncu_download_manifest_includes_original_report_and_csv_exports(tmp_path: Path) -> None:
     database_path = tmp_path / "run" / "charts.sqlite3"
     database_path.parent.mkdir()
@@ -197,6 +249,45 @@ def test_ncu_download_manifest_includes_original_report_and_csv_exports(tmp_path
         "ncu_raw_csv": "processing_ncu_raw.csv",
         "ncu_semantic_csv": "processing_ncu_semantic.csv",
     }
+
+
+def test_everything_zip_contains_all_pair_downloads(tmp_path: Path) -> None:
+    nsys_db = tmp_path / "nsys" / "charts.sqlite3"
+    ncu_db = tmp_path / "ncu" / "charts.sqlite3"
+    nsys_db.parent.mkdir()
+    ncu_db.parent.mkdir()
+    nsys_db.write_text("")
+    ncu_db.write_text("")
+    nsys_processing = nsys_db.parent / "processing"
+    ncu_processing = ncu_db.parent / "processing"
+    nsys_processing.mkdir()
+    ncu_processing.mkdir()
+    (nsys_processing / "processing_bundle.zip").write_bytes(b"bundle")
+    (nsys_processing / "processing_trace.nsys-rep").write_bytes(b"nsys")
+    (ncu_processing / "processing_ncu_trace.ncu-rep").write_bytes(b"ncu")
+    (ncu_processing / "processing_ncu_semantic.csv").write_text("kernel\nexample\n")
+    nsys = _State("260919-1115_scruffy_ALL_NSYS___CONFIG", database_path=nsys_db)
+    ncu = _State("260919-1118_scruffy_ALL_NCU___CONFIG", database_path=ncu_db)
+
+    generated = dashboard._materialize_paired_analysis(
+        nsys,
+        ncu,
+        {"metadata": {"capture": {}}, "intervals": []},
+        {"bundle": "processing_bundle.zip", "raw_trace": "processing_trace.nsys-rep"},
+        {"raw_ncu": "processing_ncu_trace.ncu-rep", "ncu_semantic_csv": "processing_ncu_semantic.csv"},
+    )
+
+    assert generated["everything"] == "processing_everything.zip"
+    with zipfile.ZipFile(nsys_processing / generated["everything"]) as archive:
+        assert set(archive.namelist()) == {
+            "processing_pair_manifest.json",
+            "nsys/processing_bundle.zip",
+            "nsys/processing_trace.nsys-rep",
+            "nsys/processing_premat_lifecycle_events.csv",
+            "nsys/processing_premat_lifecycle_summary.csv",
+            "ncu/processing_ncu_trace.ncu-rep",
+            "ncu/processing_ncu_semantic.csv",
+        }
 
 
 def test_lifecycle_rows_prefer_capture_relative_time_and_retain_legacy_fallback() -> None:
