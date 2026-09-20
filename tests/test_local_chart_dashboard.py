@@ -283,10 +283,19 @@ def test_sep20_integrated_dashboard_repairs_are_in_the_runtime_asset_list() -> N
     ).read_text(encoding="utf-8")
 
     assert '"dashboard_sep20_integrated_repairs.js"' in launcher
+    assert '_ACTIVE_EXTRA_ASSET_NAMES = (' in launcher
+    active_assets = launcher.split("_ACTIVE_EXTRA_ASSET_NAMES = (", 1)[1].split(")", 1)[0]
+    assert '"dashboard_wandb_groups_patch.js"' in active_assets
+    assert '"dashboard_group_stability_patch.js"' in active_assets
+    assert '"dashboard_sep20_integrated_repairs.js"' in active_assets
+    assert '"dashboard_sep07_fixes_and_enhancements.js"' not in active_assets
+    assert "for asset_name in _ACTIVE_EXTRA_ASSET_NAMES:" in launcher
     assert "shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)" in launcher
     assert "shared_palette" in repair
     assert "selected_local_files" in repair
-    assert "refresh_regular_chart_groups" in repair
+    assert "refresh_regular_chart_groups" not in repair
+    assert 'observer.observe(document.body, {childList:true, subtree:true})' not in repair
+    assert 'body, body *' not in repair
     assert "register_throughput_figure" in repair
     assert 'querySelectorAll(\'[data-detail-tab="artifacts"]\')' in repair
     local_launcher = (project_root / "run_thog2_local_dashboard.py").read_text(encoding="utf-8")

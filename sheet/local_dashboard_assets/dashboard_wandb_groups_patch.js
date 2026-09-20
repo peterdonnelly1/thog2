@@ -213,14 +213,25 @@ window.addEventListener("load", () => {
             reason: "No data recorded for this run yet."});
         }
       }
-      for (const summary of sorted_group_summaries(summaries)) {
-        const section = update_group_section(summary);
-        parent.insertBefore(section, depth_group || null);
-      }
-      // vvv THOG Processing is an ordinary chart group in the stack: after Val (or Train when Val is unavailable), before Memory/System
+      const ordered_sections = sorted_group_summaries(summaries).map(update_group_section);
+      // vvv THOG Processing is an ordinary chart group in the stack: after Val
+      // (or Train when Val is unavailable), before Memory/System.  Reparent only
+      // when this managed sequence actually changes; moving live Plotly nodes on
+      // every one-second metadata poll caused visible flicker and stale widths.
       const processing_group = by_id("processing_chart_group");
-      const processing_anchor = group_section("val") || group_section("train");
-      if (processing_group && processing_anchor) processing_anchor.after(processing_group);
+      const processing_anchor = ordered_sections.find(section => section.dataset.metricGroup === "val")
+        || ordered_sections.find(section => section.dataset.metricGroup === "train");
+      const desired_nodes = [...ordered_sections];
+      if (processing_group && processing_anchor) {
+        desired_nodes.splice(desired_nodes.indexOf(processing_anchor) + 1, 0, processing_group);
+      }
+      const managed_nodes = new Set(desired_nodes);
+      const current_nodes = [...parent.children].filter(node => managed_nodes.has(node));
+      const order_changed = current_nodes.length !== desired_nodes.length
+        || desired_nodes.some((node, index) => current_nodes[index] !== node);
+      if (order_changed) {
+        for (const node of desired_nodes) parent.insertBefore(node, depth_group || null);
+      }
       // ^^^ THOG
     };
 

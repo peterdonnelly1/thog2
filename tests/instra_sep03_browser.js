@@ -82,7 +82,8 @@ const server = http.createServer(async (request, response) => {
     if (file.endsWith("index.html")) {
       let html = content.toString();
       const launcher = fs.readFileSync(path.join(root, "run_thog2_dashboard.py"), "utf8");
-      for (const match of launcher.matchAll(/"(dashboard_[a-z0-9_]+\.js)"/g)) {
+      const active_assets = launcher.match(/_ACTIVE_EXTRA_ASSET_NAMES\s*=\s*\(([\s\S]*?)\n\)/)?.[1] || "";
+      for (const match of active_assets.matchAll(/"(dashboard_[a-z0-9_]+\.js)"/g)) {
         if (!html.includes(`/assets/${match[1]}`)) html = html.replace("</head>", `<script src="/assets/${match[1]}" defer></script></head>`);
       }
       content = html;

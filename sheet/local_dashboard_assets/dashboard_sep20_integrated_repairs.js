@@ -43,8 +43,9 @@
   const style = document.createElement("style");
   style.id = "instra-sep20-integrated-repairs-style";
   style.textContent = `
-    body, body * { -webkit-user-select:text !important; user-select:text !important; }
-    input, textarea, select, button, a, .panel-resizer, .modebar { -webkit-user-select:auto !important; user-select:auto !important; }
+    body { -webkit-user-select:text; user-select:text; }
+    input, textarea, select, button, a, .panel-resizer, .modebar,
+    .plot-container, .svg-container { -webkit-user-select:auto; user-select:auto; }
     #colour_popover, .processing-operations-colour-popover {
       max-height:calc(100vh - 16px) !important;
       overflow:hidden !important;
@@ -173,16 +174,11 @@
     };
   }
 
-  function refresh_regular_chart_groups() {
-    window.__thog2_metric_groups?.refresh?.();
-  }
-
   const processing_render_before_sep20 = processing_render;
   processing_render = async function(payload, trace_available) {
     await processing_render_before_sep20(payload, trace_available);
     register_processing_figures();
     await register_throughput_figure(payload || {});
-    setTimeout(refresh_regular_chart_groups, 0);
   };
 
   if (typeof processing_render_update_timing === "function") {
@@ -358,6 +354,13 @@
     return result;
   };
 
+  const render_runs_before_sep20 = render_runs;
+  render_runs = function(...args) {
+    const result = render_runs_before_sep20.apply(this, args);
+    ensure_runs_trash_icon();
+    return result;
+  };
+
   window.addEventListener("load", () => {
     setTimeout(() => {
       install_shared_palette();
@@ -366,14 +369,6 @@
       ensure_file_delete_button();
       configure_host_timeline();
       register_processing_figures();
-      refresh_regular_chart_groups();
-      if (typeof MutationObserver === "function") {
-        const observer = new MutationObserver(() => {
-          remove_artifacts_tab();
-          ensure_runs_trash_icon();
-        });
-        observer.observe(document.body, {childList:true, subtree:true});
-      }
     }, 0);
   });
 

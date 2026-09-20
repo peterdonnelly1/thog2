@@ -85,6 +85,16 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_sep20_integrated_repairs.js",                                                                                                              # <<< THOG final owner for paired/ordinary chart coexistence and September UI repairs
 )
 
+# Most entries above are retained source assets for old focused repairs and
+# their regression fixtures.  Loading the entire historical stack gives many
+# obsolete wrappers simultaneous ownership of render_runs(), select_run() and
+# Plotly resize.  Keep the runtime deliberately small and ordered.
+_ACTIVE_EXTRA_ASSET_NAMES = (
+    "dashboard_wandb_groups_patch.js",
+    "dashboard_group_stability_patch.js",
+    "dashboard_sep20_integrated_repairs.js",
+)
+
 
 def _set_process_name() -> None:
     if not sys.platform.startswith("linux"):
@@ -123,7 +133,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
 
     index_path = runtime_root / "index.html"
     index_html = index_path.read_text(encoding="utf-8")
-    for asset_name in _EXTRA_ASSET_NAMES:
+    for asset_name in _ACTIVE_EXTRA_ASSET_NAMES:
         script_tag = f'  <script src="/assets/{asset_name}" defer></script>\n'
         if script_tag not in index_html:
             index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
