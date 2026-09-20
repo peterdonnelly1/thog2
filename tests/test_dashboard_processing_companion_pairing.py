@@ -278,6 +278,7 @@ def test_everything_zip_contains_all_pair_downloads(tmp_path: Path) -> None:
     )
 
     assert generated["everything"] == "processing_everything.zip"
+    assert generated["most"] == "processing_most.zip"
     with zipfile.ZipFile(nsys_processing / generated["everything"]) as archive:
         assert set(archive.namelist()) == {
             "processing_pair_manifest.json",
@@ -287,6 +288,15 @@ def test_everything_zip_contains_all_pair_downloads(tmp_path: Path) -> None:
             "nsys/processing_premat_lifecycle_summary.csv",
             "nsys/processing_contention_intervals.csv",
             "ncu/processing_ncu_trace.ncu-rep",
+            "ncu/processing_ncu_semantic.csv",
+        }
+    with zipfile.ZipFile(nsys_processing / generated["most"]) as archive:
+        assert set(archive.namelist()) == {
+            "processing_pair_manifest.json",
+            "nsys/processing_bundle.zip",
+            "nsys/processing_premat_lifecycle_events.csv",
+            "nsys/processing_premat_lifecycle_summary.csv",
+            "nsys/processing_contention_intervals.csv",
             "ncu/processing_ncu_semantic.csv",
         }
 

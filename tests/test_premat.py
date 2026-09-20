@@ -125,7 +125,7 @@ def _runtime(
     attention_mode: str = "fused",
     timing: str = "as_the_code_flies",
     target_layer: int = 1,
-    target_matrix: int | None = None,                                                                                                                      # <<< THOG test helper can select one fixed fused PREMAT family
+    target_matrix: object = None,                                                                                                                          # <<< THOG test helper can select one or more fused PREMAT families
     weight_matrix_target_order: str = "r_to_l",
     cuda_stream_priority: str = "normal",
     diagnostic_layer_delay_ms: float = 0.0,
@@ -362,11 +362,36 @@ def test_target_matrix_cli_propagates_to_training_config(tmp_path) -> None:
         "--device", "cuda",
     ])
     run_config = config_from_arguments(arguments)
-    assert run_config.premat_target_matrix == 2
-    assert "M2_" in run_config.compact_artifact_fragment()
+    assert run_config.premat_target_matrix == (2,)
+    assert "M2_" in run_config.parameter_artifact_fragment()
     training_config = run_config.to_training_config(vocab_size=32, world_size=1, out_dir=tmp_path)
-    assert training_config.premat_target_matrix == 2
-    assert training_config.model_arguments()["premat_target_matrix"] == 2
+    assert training_config.premat_target_matrix == (2,)
+    assert training_config.model_arguments()["premat_target_matrix"] == (2,)
+
+
+def test_target_matrix_cli_accepts_a_matrix_combination(tmp_path) -> None:
+    parser = build_parser()
+    arguments = parser.parse_args([
+        "--model-type", "sheet",
+        "--premat", "enabled",
+        "--premat_attention_mode", "fused",
+        "--premat_target_matrix", "2,3,4",
+        "--device", "cuda",
+    ])
+    run_config = config_from_arguments(arguments)
+    assert run_config.premat_target_matrix == (2, 3, 4)
+    assert "M2-3-4_" in run_config.parameter_artifact_fragment()
+    training_config = run_config.to_training_config(vocab_size=32, world_size=1, out_dir=tmp_path)
+    assert training_config.premat_target_matrix == (2, 3, 4)
+
+
+def test_target_matrix_combination_normalizes_the_selected_families(monkeypatch) -> None:
+    runtime, _fake_cuda, _calls = _runtime(
+        monkeypatch,
+        stay_below_current_peak=False,
+        target_matrix=(2, 3, 4),
+    )
+    assert runtime._target_families == frozenset({"O", "UP", "DOWN"})
 
 
 @pytest.mark.parametrize(
@@ -479,7 +504,7 @@ def test_premat_timing_cli_defaults_and_propagates(tmp_path) -> None:
     ])
     run_config = config_from_arguments(arguments)
     assert run_config.premat_timing == "previous_gemm_leading_edge"
-    assert "PTGLE_" in run_config.compact_artifact_fragment()
+    assert "PTGLE_" in run_config.parameter_artifact_fragment()
     canonical = run_config.canonical_dict(world_size=1)
     assert canonical["premat_target_scope"] == "previous_gemm_successor"
     training_config = run_config.to_training_config(

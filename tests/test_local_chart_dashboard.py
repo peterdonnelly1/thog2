@@ -264,7 +264,34 @@ def test_instra_files_browse_only_the_selected_local_run(
         catalog.local_file("files_run", "../outside.txt")
     with pytest.raises(PermissionError):
         catalog.local_file("files_run", "outside-link")
+    deleted = catalog.delete_local_file("files_run", "notes/summary.txt")
+    assert deleted["path"] == "notes/summary.txt"
+    assert not local_file.exists()
+    assert outside.read_text(encoding="utf-8") == "must remain private"
+    with pytest.raises(PermissionError):
+        catalog.delete_local_file("files_run", "")
+    with pytest.raises(PermissionError):
+        catalog.delete_local_file("files_run", "outside-link")
     close_local_chart_store(telemetry)
+
+
+def test_sep20_integrated_dashboard_repairs_are_in_the_runtime_asset_list() -> None:
+    project_root = Path(dashboard.__file__).parent
+    launcher = (project_root / "run_thog2_dashboard.py").read_text(encoding="utf-8")
+    repair = (
+        project_root / "sheet" / "local_dashboard_assets" / "dashboard_sep20_integrated_repairs.js"
+    ).read_text(encoding="utf-8")
+
+    assert '"dashboard_sep20_integrated_repairs.js"' in launcher
+    assert "shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)" in launcher
+    assert "shared_palette" in repair
+    assert "selected_local_files" in repair
+    assert "refresh_regular_chart_groups" in repair
+    assert "register_throughput_figure" in repair
+    assert 'querySelectorAll(\'[data-detail-tab="artifacts"]\')' in repair
+    local_launcher = (project_root / "run_thog2_local_dashboard.py").read_text(encoding="utf-8")
+    assert 'for name in ("_handler_for", "_ASSET_ROOT", "_ASSET_NAMES")' in local_launcher
+    assert "setattr(_base, name, globals()[name])" in local_launcher
 
 
 def test_wandb_files_are_exposed_as_a_folder_manifest(
@@ -329,57 +356,58 @@ def test_wandb_files_are_exposed_as_a_folder_manifest(
 
 
 def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> None:
+    asset_root = Path(dashboard.__file__).parent / "sheet" / "local_dashboard_assets"
     launcher = (Path(dashboard.__file__).with_name("run_thog2_dashboard.py")).read_text(
         encoding="utf-8"
     )
-    html = (dashboard._ASSET_ROOT / "index.html").read_text(encoding="utf-8")
-    javascript = (dashboard._ASSET_ROOT / "dashboard.js").read_text(encoding="utf-8")
+    html = (asset_root / "index.html").read_text(encoding="utf-8")
+    javascript = (asset_root / "dashboard.js").read_text(encoding="utf-8")
     heatmap_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_patch.js"
+        asset_root / "dashboard_heatmap_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_loss_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_loss_patch.js"
+        asset_root / "dashboard_heatmap_loss_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_centre_format_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_centre_format_patch.js"
+        asset_root / "dashboard_heatmap_centre_format_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_zoom_geometry_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_zoom_geometry_patch.js"
+        asset_root / "dashboard_heatmap_zoom_geometry_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_geometry_final_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_geometry_final_patch.js"
+        asset_root / "dashboard_heatmap_geometry_final_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_top_anchor_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_top_anchor_pencil_patch.js"
+        asset_root / "dashboard_heatmap_top_anchor_pencil_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_final_presentation_patch = (
-        dashboard._ASSET_ROOT / "dashboard_final_presentation_settings_patch.js"
+        asset_root / "dashboard_final_presentation_settings_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_dom_alignment_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_dom_alignment_patch.js"
+        asset_root / "dashboard_heatmap_dom_alignment_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_y_axis_refinement_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_y_axis_refinement_patch.js"
+        asset_root / "dashboard_heatmap_y_axis_refinement_patch.js"
     ).read_text(encoding="utf-8")
     heatmap_v057_patch = (
-        dashboard._ASSET_ROOT / "dashboard_heatmap_v057_patch.js"
+        asset_root / "dashboard_heatmap_v057_patch.js"
     ).read_text(encoding="utf-8")
     v058_repair_patch = (
-        dashboard._ASSET_ROOT / "dashboard_v058_repair_workspace_patch.js"
+        asset_root / "dashboard_v058_repair_workspace_patch.js"
     ).read_text(encoding="utf-8")
     weights_group_settings_patch = (
-        dashboard._ASSET_ROOT / "dashboard_weights_group_settings_patch.js"
+        asset_root / "dashboard_weights_group_settings_patch.js"
     ).read_text(encoding="utf-8")
     logs_modes_patch = (
-        dashboard._ASSET_ROOT / "dashboard_logs_modes_patch.js"
+        asset_root / "dashboard_logs_modes_patch.js"
     ).read_text(encoding="utf-8")
     maximize_lband_patch = (
-        dashboard._ASSET_ROOT / "dashboard_maximize_lband_patch.js"
+        asset_root / "dashboard_maximize_lband_patch.js"
     ).read_text(encoding="utf-8")
     wandb_groups_patch = (
-        dashboard._ASSET_ROOT / "dashboard_wandb_groups_patch.js"
+        asset_root / "dashboard_wandb_groups_patch.js"
     ).read_text(encoding="utf-8")
-    stylesheet = (dashboard._ASSET_ROOT / "dashboard.css").read_text(encoding="utf-8")
+    stylesheet = (asset_root / "dashboard.css").read_text(encoding="utf-8")
 
     assert 'id="heatmap_placeholder"' in html
     assert 'id="heatmap_plot"' in html
@@ -668,7 +696,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
 
 
 def test_dashboard_html_is_read_for_each_page_request() -> None:
-    server_source = Path(dashboard.__file__).read_text(encoding="utf-8")
+    server_source = Path(dashboard.__file__).with_name("run_thog2_local_dashboard_base.py").read_text(encoding="utf-8")
 
     handler_body = server_source.split("def _handler_for", 1)[1]
     assert 'index_html = (_ASSET_ROOT / "index.html").read_bytes()' not in handler_body

@@ -82,6 +82,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_weight_inspector.js",                                                                                                                       # <<< THOG inspect exact retained weights in a virtual grid and finalize latest-step deduplication
     "dashboard_thogopt.js",
     "dashboard_sep07_fixes_and_enhancements.js",                                                                                                          # <<< THOG final owner for September functionality, memory, table and interaction fixes
+    "dashboard_sep20_integrated_repairs.js",                                                                                                              # <<< THOG final owner for paired/ordinary chart coexistence and September UI repairs
 )
 
 
@@ -106,11 +107,19 @@ def _set_process_name() -> None:
 
 def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     source_root = Path(_dashboard._ASSET_ROOT)
+    canonical_asset_root = Path(__file__).resolve().parent / "sheet" / "local_dashboard_assets"
     temporary = tempfile.TemporaryDirectory(prefix="thog2-dashboard-assets-")
     runtime_root = Path(temporary.name)
     for source in source_root.iterdir():
         if source.is_file():
             shutil.copy2(source, runtime_root / source.name)
+    # The lower-level dashboard wrapper contains only its assembled core asset
+    # set.  Late feature assets live in the canonical source directory and must
+    # be copied as well as named in the HTML/allow-list; otherwise every script
+    # tag below resolves to a 404 and regular Train/Val/System/Memory charts
+    # silently disappear.
+    for asset_name in _EXTRA_ASSET_NAMES:
+        shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
 
     index_path = runtime_root / "index.html"
     index_html = index_path.read_text(encoding="utf-8")

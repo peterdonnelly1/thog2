@@ -33,6 +33,62 @@ PREMAT_DEFAULT_GPU_MEMORY_BUFFER_GB = 1.0
 PREMAT_TELEMETRY_VERSION = 4
 
 
+def normalize_premat_target_matrices(value: object) -> Optional[Tuple[int, ...]]:
+    """Return the selected fused matrix numbers in a stable, unique order."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(
+            f"premat_target_matrix must contain values from {PREMAT_TARGET_MATRICES}; got {value!r}"
+        )
+    raw_values: Sequence[object]
+    if isinstance(value, str):
+        raw_values = tuple(part.strip() for part in value.split(",") if part.strip())
+    elif isinstance(value, int):
+        raw_values = (value,)
+    elif isinstance(value, Sequence):
+        raw_values = value
+    else:
+        raw_values = (value,)
+    if not raw_values:
+        raise ValueError("premat_target_matrix must contain at least one matrix number")
+    selected: list[int] = []
+    for raw in raw_values:
+        if isinstance(raw, float) and not raw.is_integer():
+            raise ValueError(
+                "premat_target_matrix must be a comma-separated combination of 1,2,3,4"
+            )
+        try:
+            matrix = int(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "premat_target_matrix must be a comma-separated combination of 1,2,3,4"
+            ) from error
+        if matrix not in PREMAT_TARGET_MATRICES:
+            raise ValueError(
+                f"premat_target_matrix must contain only {PREMAT_TARGET_MATRICES}; got {value!r}"
+            )
+        if matrix not in selected:
+            selected.append(matrix)
+    return tuple(sorted(selected))
+
+
+def parse_premat_target_matrices(value: str) -> Tuple[int, ...]:
+    """argparse converter for one matrix or a comma-separated matrix set."""
+    selected = normalize_premat_target_matrices(value)
+    if selected is None:
+        raise ValueError("premat_target_matrix cannot be empty")
+    return selected
+
+
+def premat_target_matrix_telemetry(value: object) -> object:
+    """Keep the historical scalar shape for a single target; use a list for sets."""
+    selected = normalize_premat_target_matrices(value)
+    if selected is None:
+        return None
+    return selected[0] if len(selected) == 1 else list(selected)
+
+
 def validate_premat_configuration(
     *,
     premat: str,
@@ -49,7 +105,7 @@ def validate_premat_configuration(
     shadow_mode: bool = False,
     logging: str,
     instra: str,
-    target_matrix: Optional[int] = None,                                                                                                                   # <<< THOG optional fused-family PREMAT selector; omitted preserves all-matrix scheduling
+    target_matrix: object = None,                                                                                                                          # <<< THOG optional fused-family PREMAT selector set; omitted preserves all-matrix scheduling
     timing: str = "as_the_code_flies",
 ) -> None:
     for name, value in (("premat", premat), ("premat_logging", logging), ("premat_instra", instra)):
@@ -86,9 +142,8 @@ def validate_premat_configuration(
             f"got {target_layer!r}"
         )
     # vvv THOG matrix-specific targeting is intentionally fused-only until an unfused experiment is requested
-    if target_matrix is not None:
-        if isinstance(target_matrix, bool) or target_matrix not in PREMAT_TARGET_MATRICES:
-            raise ValueError(f"premat_target_matrix must be one of {PREMAT_TARGET_MATRICES} or None; got {target_matrix!r}")
+    target_matrices = normalize_premat_target_matrices(target_matrix)
+    if target_matrices is not None:
         if attention_mode != "fused":
             raise ValueError("premat_target_matrix currently requires premat_attention_mode=fused")
     # ^^^ THOG
@@ -553,7 +608,7 @@ class PrematRuntime:
         enable_gpu_timing_diagnostic: bool = False,
         shadow_mode: bool = False,
         logging_enabled: bool,
-        target_matrix: Optional[int] = None,                                                                                                               # <<< THOG runtime filter for one fixed fused matrix family
+        target_matrix: object = None,                                                                                                                      # <<< THOG runtime filter for one or more fused matrix families
         timing: str = "as_the_code_flies",
     ) -> None:
         self._materialize = materialize
@@ -565,19 +620,16 @@ class PrematRuntime:
         self._buffer_bytes = int(float(gpu_memory_buffer_gb) * (1024 ** 3))
         self._allocator_aware_admission = allocator_aware_admission
         self._target_layer = int(target_layer)
-        if target_matrix is not None and (
-            isinstance(target_matrix, bool)
-            or target_matrix not in PREMAT_TARGET_MATRICES
-        ):
-            raise ValueError(
-                f"premat_target_matrix must be one of {PREMAT_TARGET_MATRICES} "
-                f"or None; got {target_matrix!r}"
-            )
-        if target_matrix is not None and attention_mode != "fused":
+        target_matrices = normalize_premat_target_matrices(target_matrix)
+        if target_matrices is not None and attention_mode != "fused":
             raise ValueError(
                 "premat_target_matrix currently requires premat_attention_mode=fused"
             )
-        self._target_matrix = None if target_matrix is None else int(target_matrix)                                                                        # <<< THOG retain optional fixed matrix-family selector
+        self._target_matrices = target_matrices                                                                                                            # <<< THOG retain optional fused matrix-family selector set
+        self._target_families = None if target_matrices is None else frozenset(
+            PREMAT_FUSED_TARGET_MATRIX_FAMILIES[matrix] for matrix in target_matrices
+        )
+        self._target_matrix = premat_target_matrix_telemetry(target_matrices)                                                                              # <<< THOG backward-compatible single-target telemetry shape
         if timing not in PREMAT_TIMINGS:
             raise ValueError(
                 f"premat_timing must be one of {PREMAT_TIMINGS}; got {timing!r}"
@@ -828,13 +880,8 @@ class PrematRuntime:
                 family=str(family),
                 layer_index=int(layer_index),
             )
-            selected_family = (
-                PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
-                if self._target_matrix is not None
-                else None
-            )
             if target is not None and (
-                selected_family is None or target[1] == selected_family
+                self._target_families is None or target[1] in self._target_families
             ):
                 event = torch.cuda.Event(
                     enable_timing=self._enable_gpu_timing_diagnostic
@@ -3159,9 +3206,8 @@ class PrematRuntime:
                     and candidate.state == CandidateState.UNAVAILABLE
                     and candidate.sequence not in excluded
                     and (
-                        self._target_matrix is None
-                        or candidate.family
-                        == PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                        self._target_families is None
+                        or candidate.family in self._target_families
                     )
                 ):
                     return candidate
@@ -3179,8 +3225,8 @@ class PrematRuntime:
                     and item.layer_index == target_layer_index
                     # vvv THOG target_matrix filters PREMAT launch eligibility only; MAIN fallback candidates remain intact
                     and (
-                        self._target_matrix is None
-                        or item.family == PREMAT_FUSED_TARGET_MATRIX_FAMILIES[self._target_matrix]
+                        self._target_families is None
+                        or item.family in self._target_families
                     )
                     # ^^^ THOG
                     and item.sequence not in excluded

@@ -245,16 +245,11 @@ def _processing_ncu_scope_from_argv(
     raw_matrix = _argv_value(arguments, "--premat_target_matrix")
     if raw_matrix is None:
         return probe_layer, tuple(_PROCESSING_TARGET_FAMILIES.values())
-    try:
-        matrix = int(str(raw_matrix))
-    except ValueError as error:
-        raise ValueError("NCU probe matrix must be an integer") from error
-    if matrix not in _PROCESSING_TARGET_FAMILIES:
-        raise ValueError(
-            "--premat_target_matrix must be 1(QKV), 2(O), 3(UP), or 4(DOWN) "
-            "when it is supplied for NCU capture"
-        )
-    return probe_layer, (_PROCESSING_TARGET_FAMILIES[matrix],)
+    from .premat import normalize_premat_target_matrices
+    matrices = normalize_premat_target_matrices(raw_matrix)
+    return probe_layer, tuple(
+        _PROCESSING_TARGET_FAMILIES[matrix] for matrix in matrices or ()
+    )
 
 
 def _processing_ncu_target_from_argv(arguments: Sequence[str]) -> tuple[int, str]:
@@ -827,6 +822,16 @@ def _mean_metric_intervals(
         if math.isfinite(value):
             values.append(value)
     return sum(values) / len(values) if values else None
+
+
+def _mean_metric(
+    samples: Sequence[Mapping[str, Any]],
+    key: str,
+    start_us: float,
+    end_us: float,
+) -> Optional[float]:
+    """Backward-compatible single-window form used by analysis callers."""
+    return _mean_metric_intervals(samples, key, ((float(start_us), float(end_us)),))
 
 
 def _operation_resource_statistics(

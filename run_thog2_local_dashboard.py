@@ -862,6 +862,7 @@ def _materialize_paired_analysis(
         "lifecycle_summary": lifecycle_summary_name,
         "contention_intervals": contention_name,
         "pair_manifest": "processing_pair_manifest.json",
+        "most": "processing_most.zip",
         "everything": "processing_everything.zip",
     }
     lifecycle_payload = _csv_bytes(lifecycle_rows, lifecycle_fields)
@@ -942,14 +943,34 @@ def _materialize_paired_analysis(
     )
     bundle_name = "processing_everything.zip"
     bundle_path = processing_directory / bundle_name
+    most_name = "processing_most.zip"
+    most_path = processing_directory / most_name
     signature = tuple((entry["path"], entry["sha256"]) for entry in manifest["files"])
-    if getattr(state, "_instra_paired_analysis_signature", None) != signature or not bundle_path.is_file():
+    if (
+        getattr(state, "_instra_paired_analysis_signature", None) != signature
+        or not bundle_path.is_file()
+        or not most_path.is_file()
+    ):
         with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(manifest_path, arcname=manifest_name)
             for archive_name, path, _key in included:
                 already_compressed = path.suffix.lower() in {
                     ".zip", ".nsys-rep", ".ncu-rep", ".ncu-repz",
                 }
+                archive.write(
+                    path,
+                    arcname=archive_name,
+                    compress_type=zipfile.ZIP_STORED if already_compressed else zipfile.ZIP_DEFLATED,
+                )
+        with zipfile.ZipFile(most_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(manifest_path, arcname=manifest_name)
+            for archive_name, path, _key in included:
+                if path.name in {
+                    "processing_ncu_trace.ncu-rep",
+                    "processing_trace.nsys-rep",
+                }:
+                    continue
+                already_compressed = path.suffix.lower() in {".zip", ".ncu-repz"}
                 archive.write(
                     path,
                     arcname=archive_name,
@@ -1051,7 +1072,7 @@ def _processing_payload_with_ncu_companion(
     }
     pair_files = {
         key: selected_files[key]
-        for key in ("everything", "pair_manifest")
+        for key in ("everything", "most", "pair_manifest")
         if key in selected_files
     }
     nsys_files = {
@@ -1097,6 +1118,56 @@ def pair_key_text(value: tuple[str, str] | None) -> str:
 
 _base.DashboardCatalog._state_for_path = _dashboard_state_for_path_with_catalog
 _base.RunDashboardState.processing = _processing_payload_with_ncu_companion
+# ^^^ THOG
+
+
+# vvv THOG Files-tab deletion is restricted to ordinary files inside the selected run root.
+def _delete_local_file(self, run_name: str, relative_path: str) -> dict[str, Any]:
+    _state, path, relative = self._resolved_local_path(run_name, relative_path)
+    if not relative.parts:
+        raise PermissionError("refusing to delete a run root")
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("only ordinary files inside the selected run may be deleted")
+    path.unlink()
+    return {"deleted": str(path), "path": relative.as_posix()}
+
+
+_base.DashboardCatalog.delete_local_file = _delete_local_file
+_handler_for_before_file_delete = _base._handler_for
+
+
+def _handler_for_with_file_delete(catalog):
+    handler = _handler_for_before_file_delete(catalog)
+    original_do_delete = handler.do_DELETE
+
+    def do_delete(self):
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/local-file":
+            original_do_delete(self)
+            return
+        query = parse_qs(parsed.query)
+        run_name = query.get("run", [""])[0]
+        relative_path = query.get("path", [""])[0]
+        if not run_name or not relative_path:
+            self._send_json(
+                {"error": "run and path query parameters are required"},
+                status=_base.HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            self._send_json(catalog.delete_local_file(run_name, relative_path))
+        except (FileNotFoundError, KeyError) as error:
+            self._send_json({"error": str(error)}, status=_base.HTTPStatus.NOT_FOUND)
+        except (PermissionError, ValueError) as error:
+            self._send_json({"error": str(error)}, status=_base.HTTPStatus.BAD_REQUEST)
+
+    handler.do_DELETE = do_delete
+    return handler
+
+
+_base._handler_for = _handler_for_with_file_delete
 # ^^^ THOG
 
 
@@ -1152,6 +1223,15 @@ def __getattr__(name: str):
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    # Runtime launchers install API wrappers and add late assets on this public
+    # module.  The preserved server implementation resolves its globals in
+    # ``_base``, so copy the final assembled owners across immediately before
+    # starting it.  Without this bridge the UI can initially show core charts
+    # and later appear Processing-only because chart-group routes/assets were
+    # installed on a module the HTTP server never consulted.
+    for name in ("_handler_for", "_ASSET_ROOT", "_ASSET_NAMES"):
+        if name in globals():
+            setattr(_base, name, globals()[name])
     return _base.main(argv)
 
 

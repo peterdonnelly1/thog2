@@ -137,7 +137,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--premat_timing MODE", "as_the_code_flies | previous_gemm_leading_edge"),
             ("—", "--premat_gpu_memory_buffer_gb VALUE", "global CUDA reserve shared with memory_budget"),
             ("—", "--premat_target_layer 0|1|2|10", "relative target; 10 means ordered +1 then +0 sweep"),
-            ("—", "--premat_target_matrix 1|2|3|4", "optional QKV/O/UP/DOWN diagnostic selector"),
+            ("—", "--premat_target_matrix 1[,2,3,4]", "optional comma-separated QKV/O/UP/DOWN selector combination"),
             ("—", "--premat_weight_matrix_target_order l_to_r|r_to_l", "matrix submission order; default r_to_l"),
             ("—", "--premat_headroom_stay_below_current_peak", "admit only below the observed CUDA allocation peak"),
             ("—", "--premat_headroom_stay_within_global_buffer", "admit only within the configured global reserve"),

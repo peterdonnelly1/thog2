@@ -148,7 +148,7 @@ class SheetGPTConfig:
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
     premat_target_layer: int = 1
-    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG carry optional fused-family PREMAT selector into model runtime
+    premat_target_matrix: object = None                                                                                                                    # <<< THOG carry optional fused-family PREMAT selector set into model runtime
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
@@ -1325,4 +1325,3 @@ __all__ = ["SheetGPT", "SheetGPTConfig", "ConventionalLayerNorm"]
 # "plastic__layer_count_hold_updates must be a positive integer; "
 # f"got {self.plastic__layer_count_hold_updates!r}"
 # ^^^ THOG
-

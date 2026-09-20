@@ -299,7 +299,7 @@ class TrainingConfig:
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
     premat_target_layer: int = 1
-    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector through training/checkpoint config
+    premat_target_matrix: object = None                                                                                                                    # <<< THOG persist optional fused-family PREMAT selector set through training/checkpoint config
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False

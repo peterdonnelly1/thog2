@@ -623,6 +623,10 @@ def test_processing_ncu_target_uses_separate_absolute_probe_layer() -> None:
         "--premat_target_layer", "1",
         "--ncu-probe-layer", "8",
     ]) == (8, ("QKV", "O", "UP", "DOWN"))
+    assert _processing_ncu_scope_from_argv([
+        "--ncu-probe-layer", "8",
+        "--premat_target_matrix", "2,3,4",
+    ]) == (8, ("O", "UP", "DOWN"))
     with pytest.raises(ValueError, match="ncu-probe-layer"):
         _processing_ncu_target_from_argv([
             "--premat_target_layer", "1",

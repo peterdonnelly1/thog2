@@ -269,7 +269,7 @@ assert.match(resource_source, /payload\.premat_lifecycle/);
 
 hooks.render_paired_downloads({
   paired_processing_downloads:{
-    pair:{dashboard_run_id:"nsys", artifact_name:"pair", files:{everything:"everything.zip", pair_manifest:"manifest.json"}},
+    pair:{dashboard_run_id:"nsys", artifact_name:"pair", files:{everything:"everything.zip", most:"most.zip", pair_manifest:"manifest.json"}},
     nsys:{dashboard_run_id:"nsys", artifact_name:"NSYS full", files:{bundle:"nsys.zip", raw_trace:"trace.nsys-rep"}},
     ncu:{dashboard_run_id:"ncu", artifact_name:"NCU full", files:{
       raw_ncu:"trace.ncu-rep", ncu_raw_csv:"raw.csv", ncu_semantic_csv:"semantic.csv",
@@ -288,6 +288,8 @@ assert.equal(direct_raw.hidden, true);
 assert.equal(direct_compatibility.hidden, true);
 assert.equal(direct_uncategorized.hidden, true, "an uncategorized legacy download item remained visible beside paired groups");
 assert.equal(rendered_groups.children[0].children[1].textContent, "Everything");
+assert.equal(rendered_groups.children[0].children[2].textContent, "Most");
+assert.match(rendered_groups.children[0].children[2].title, /Excludes only processing_ncu_trace\.ncu-rep and processing_trace\.nsys-rep/);
 assert.match(rendered_groups.children[1].children[1].href, /run=nsys/);
 assert.match(rendered_groups.children[2].children[1].href, /run=ncu/);
 assert.equal(rendered_groups.children[1].children.at(-1).textContent, "Raw");

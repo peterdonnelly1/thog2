@@ -51,13 +51,13 @@
   }
 
   const download_order = [
-    "everything", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
+    "everything", "most", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
     "lifecycle_events", "lifecycle_summary", "contention_intervals", "operation_resource_stats",
     "attribution_resource_stats", "metric_audit", "summary", "metadata",
     "raw_trace", "raw_ncu", "ncu_raw_csv", "ncu_semantic_csv", "kernel_resources", "csv", "json",
   ];
   const download_labels = {
-    everything:"Everything", pair_manifest:"Manifest", bundle:"Bundle",
+    everything:"Everything", most:"Most", pair_manifest:"Manifest", bundle:"Bundle",
     samples:"Samples", stream_resources:"Streams",
     intervals:"Intervals", summary:"Summary", metadata:"Metadata",
     lifecycle_events:"Lifecycle", lifecycle_summary:"Life summary",
@@ -70,6 +70,7 @@
   };
   const download_help = {
     everything:"Complete paired NSYS + NCU archive.\nContains every downloadable from both runs, including raw profiler reports, normalized bundles, CSV/JSON evidence, lifecycle data and the pair manifest.",
+    most:"Zipped paired analysis without the two very large raw profiler reports.\nIncludes every other downloadable file: normalized bundles, CSV/JSON evidence, lifecycle data, compatibility data and the pair manifest. Excludes only processing_ncu_trace.ncu-rep and processing_trace.nsys-rep.",
     pair_manifest:"Pair provenance manifest (JSON).\nRecords the exact NSYS and NCU artifacts, pairing key, file inventory, sizes and SHA-256 hashes used for this analysis.",
     bundle:"This run's normalized Processing archive.\nContains structured samples, operation intervals, summaries, resource attribution, metric audit and metadata for reproducible analysis.",
     samples:"Time-ordered NSYS GPU metric samples (CSV).\nIncludes capture timestamps and normalized device-wide counters at the requested sampling frequency.",

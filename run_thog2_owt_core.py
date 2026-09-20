@@ -339,12 +339,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--premat_target_layer", type=int, choices=(0, 1, 2, 10), default=1, help="PREMAT relative target for as_the_code_flies: 10 means ordered +1 then +0 sweep")
 # vvv THOG fixed fused-family PREMAT diagnostic selector
+    from sheet.premat import parse_premat_target_matrices
     parser.add_argument(
         "--premat_target_matrix",
-        type=int,
-        choices=(1, 2, 3, 4),
+        type=parse_premat_target_matrices,
         default=None,
-        help="Optional fused-family PREMAT selector: 1=QKV, 2=O, 3=UP, 4=DOWN",
+        metavar="1[,2,3,4]",
+        help="Optional fused-family PREMAT selectors: 1=QKV, 2=O, 3=UP, 4=DOWN; comma-separate any combination",
     )
 # ^^^ THOG
     parser.add_argument("--premat_weight_matrix_target_order", choices=("l_to_r", "r_to_l"), default="r_to_l")

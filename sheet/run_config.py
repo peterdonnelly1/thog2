@@ -235,7 +235,7 @@ class OwtRunConfig:
     premat_attention_mode: str = "fused"
     premat_timing: str = "as_the_code_flies"
     premat_target_layer: int = 1
-    premat_target_matrix: Optional[int] = None                                                                                                             # <<< THOG persist optional fused-family PREMAT selector in run identity
+    premat_target_matrix: object = None                                                                                                                    # <<< THOG persist optional fused-family PREMAT selector set in run identity
     premat_weight_matrix_target_order: str = "r_to_l"
     premat_headroom_stay_below_current_peak: bool = False
     premat_headroom_stay_within_global_buffer: bool = False
@@ -1250,11 +1250,13 @@ class OwtRunConfig:
                 if self.premat_timing == "previous_gemm_leading_edge"
                 else ""
             )
-            target_matrix_fragment = (
-                f"M{self.premat_target_matrix}_"
-                if self.premat_target_matrix is not None
-                else ""
-            )
+            if self.premat_target_matrix is None:
+                target_matrix_fragment = ""
+            else:
+                from .premat import normalize_premat_target_matrices
+                target_matrix_fragment = "M" + "-".join(
+                    str(value) for value in normalize_premat_target_matrices(self.premat_target_matrix) or ()
+                ) + "_"
             processing_fragment = (
                 f"_PROC{self.premat_processing_logging_capture_frequency_hz}"
                 + (f"U{self.premat_processing_logging_capture_update}" if self.premat_processing_logging_capture_update != 1 else "")
