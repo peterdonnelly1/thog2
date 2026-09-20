@@ -287,6 +287,12 @@ def test_processing_normalizer_emits_graph_and_download_data(tmp_path: Path) -> 
     assert "active_sm_unused_warp_slots_pct" in payload["metadata"]["metric_mapping"]
     assert "Unallocated Warps in Active SMs [Throughput %]" in payload["metadata"]["available_gpu_metric_names"]
     assert {row["owner"] for row in payload["intervals"]} == {"MAIN", "PREMAT"}
+    premat_interval = next(row for row in payload["intervals"] if row["owner"] == "PREMAT")
+    assert premat_interval["submitted_us"] == pytest.approx(1.15)
+    assert premat_interval["eligible_lower_bound_us"] == pytest.approx(1.15)
+    assert premat_interval["admission_wait_lower_bound_us"] == pytest.approx(1.35)
+    assert premat_interval["premat_stage_index"] == 1
+    assert premat_interval["premat_stage_count"] == 1
     assert len(payload["summary"]) == 1
     summary = payload["summary"][0]
     assert summary["family"] == "QKV"

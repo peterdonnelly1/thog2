@@ -13,7 +13,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import time
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 import zipfile
 
 import run_thog2_local_dashboard_base as _base
@@ -235,6 +235,270 @@ def _safe_int(value: Any) -> int:
         return int(round(float(str(value).strip())))
     except (TypeError, ValueError):
         return 0
+
+
+# vvv THOG derive conservative MAIN/PREMAT contention evidence from correlated NSYS scheduling and NCU residency limits
+_CONTENTION_RESOURCE = {
+    "registers": ("R", "registers", "sm_register_capacity", "registers_per_block"),
+    "shared": ("S", "shared memory", "sm_shared_mem_bytes", "shared_mem_bytes"),
+    "shared_memory": ("S", "shared memory", "sm_shared_mem_bytes", "shared_mem_bytes"),
+    "warps": ("W", "warp slots", "sm_max_warps", "warps_per_block"),
+    "threads": ("W", "thread slots", "sm_max_threads", "threads_per_block"),
+    "blocks": ("W", "resident block slots", "sm_max_blocks", "blocks"),
+}
+
+
+def _compatibility_rows(compatibility: Any) -> list[dict[str, Any]]:
+    rows = compatibility.get("rows", []) if isinstance(compatibility, dict) else compatibility
+    return [dict(row) for row in rows] if isinstance(rows, list) else []
+
+
+def _compatibility_with_capacities(state: Any, compatibility: Any) -> Any:
+    rows = _compatibility_rows(compatibility)
+    resource_path = state.database_path.parent / "processing" / "processing_ncu_kernel_resources.csv"
+    if not rows or not resource_path.is_file():
+        return compatibility
+    try:
+        with resource_path.open(newline="") as handle:
+            resources = list(csv.DictReader(handle))
+    except (OSError, csv.Error):
+        return compatibility
+    capacity_keys = (
+        "sm_register_capacity", "sm_shared_mem_bytes", "sm_max_warps",
+        "sm_max_threads", "sm_max_blocks",
+    )
+    for row in rows:
+        kernel_names = {
+            str(row.get("main_cuda_kernel_name", "")),
+            str(row.get("premat_cuda_kernel_name", "")),
+        }
+        resource = next(
+            (
+                item for item in resources
+                if str(item.get("cuda_kernel_name", item.get("kernel_name", ""))) in kernel_names
+            ),
+            resources[0] if resources else None,
+        )
+        if resource is None:
+            continue
+        for key in capacity_keys:
+            if row.get(key, "") in ("", None):
+                row[key] = _safe_int(resource.get(key, 0))
+    if isinstance(compatibility, dict):
+        result = dict(compatibility)
+        result["rows"] = rows
+        return result
+    return rows
+
+
+def _compatibility_match(
+    rows: list[dict[str, Any]],
+    main: Mapping[str, Any],
+    premat: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    candidates = [
+        row for row in rows
+        if str(row.get("main_family", "")).upper() == str(main.get("family", "")).upper()
+        and str(row.get("premat_family", "")).upper() == str(premat.get("family", "")).upper()
+    ]
+    for field, interval in (
+        ("main_layer", main),
+        ("premat_layer", premat),
+    ):
+        exact = [
+            row for row in candidates
+            if row.get(field, "") in ("", None)
+            or str(row.get(field)) == str(interval.get("layer", ""))
+        ]
+        if exact:
+            candidates = exact
+    stage = _safe_int(premat.get("premat_stage_index", 0))
+    if stage:
+        exact_stage = [row for row in candidates if _safe_int(row.get("premat_stage_index", 0)) == stage]
+        if exact_stage:
+            candidates = exact_stage
+    return candidates[0] if candidates else None
+
+
+def _processing_contention_intervals(
+    data: Mapping[str, Any],
+    compatibility: Any = None,
+) -> list[dict[str, Any]]:
+    intervals = [dict(row) for row in data.get("intervals", []) if isinstance(row, Mapping)]
+    compatibility_rows = _compatibility_rows(compatibility)
+    premat_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in intervals:
+        if str(row.get("owner", "")) != "PREMAT" or str(row.get("operation", "")) != "materialize":
+            continue
+        group_key = (
+            row.get("op_id", ""), row.get("family", ""), row.get("layer", ""),
+            row.get("context_id", ""), row.get("stream", ""),
+        )
+        premat_groups.setdefault(group_key, []).append(row)
+    for group in premat_groups.values():
+        ordered = sorted(group, key=lambda item: float(item.get("start_us", 0.0)))
+        for index, row in enumerate(ordered, start=1):
+            row.setdefault("premat_stage_index", index)
+            row.setdefault("premat_stage_count", len(ordered))
+    # Older normalized captures predate launch-correlation fields.  They can
+    # still expose a conservative, explicitly inferred gap between consecutive
+    # kernels in one PREMAT operation; such rows never become solid exclusions.
+    stream_previous: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in sorted(intervals, key=lambda item: float(item.get("start_us", 0.0))):
+        stream_key = (str(row.get("context_id", "")), str(row.get("stream", "")))
+        previous = stream_previous.get(stream_key)
+        if row.get("eligible_lower_bound_us", "") in ("", None) and previous is not None:
+            same_premat_operation = (
+                str(row.get("owner", "")) == "PREMAT"
+                and str(previous.get("owner", "")) == "PREMAT"
+                and str(row.get("operation", "")) == "materialize"
+                and str(previous.get("operation", "")) == "materialize"
+                and (
+                    (row.get("op_id", "") not in ("", None) and row.get("op_id") == previous.get("op_id"))
+                    or (
+                        str(row.get("family", "")) == str(previous.get("family", ""))
+                        and str(row.get("layer", "")) == str(previous.get("layer", ""))
+                    )
+                )
+            )
+            if same_premat_operation:
+                row["eligible_lower_bound_us"] = float(previous.get("end_us", 0.0))
+                row["admission_wait_lower_bound_us"] = max(
+                    0.0, float(row.get("start_us", 0.0)) - float(previous.get("end_us", 0.0))
+                )
+                row["_contention_eligibility_basis"] = "same-stream predecessor only (legacy capture)"
+        row.setdefault(
+            "_contention_eligibility_basis",
+            "correlated launch completion + same-stream predecessor"
+            if row.get("submitted_us", "") not in ("", None)
+            else "same-stream predecessor only",
+        )
+        stream_previous[stream_key] = row
+    result: list[dict[str, Any]] = []
+    for victim in intervals:
+        victim_owner = str(victim.get("owner", "")).upper()
+        if victim_owner not in {"MAIN", "PREMAT"}:
+            continue
+        try:
+            eligible = float(victim["eligible_lower_bound_us"])
+            start = float(victim["start_us"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start - eligible < 1.0:
+            continue
+        blocker_owner = "PREMAT" if victim_owner == "MAIN" else "MAIN"
+        blockers = [
+            row for row in intervals
+            if str(row.get("owner", "")).upper() == blocker_owner
+            and float(row.get("end_us", 0.0)) > eligible
+            and float(row.get("start_us", 0.0)) < start
+        ]
+        for blocker in blockers:
+            main, premat = (victim, blocker) if victim_owner == "MAIN" else (blocker, victim)
+            match = _compatibility_match(compatibility_rows, main, premat)
+            if match is None:
+                continue
+            limiter = str(match.get("limiting_resource", "")).strip().lower().replace(" ", "_")
+            resource = _CONTENTION_RESOURCE.get(limiter)
+            if resource is None:
+                continue
+            code, cause, capacity_key, footprint_key = resource
+            capacity = _safe_int(match.get(capacity_key, 0))
+            if footprint_key == "blocks":
+                main_per_block = premat_per_block = 1
+            else:
+                main_per_block = _safe_int(match.get(f"main_{footprint_key}", 0))
+                premat_per_block = _safe_int(match.get(f"premat_{footprint_key}", 0))
+            if victim_owner == "PREMAT":
+                blocker_blocks = max(1, _safe_int(match.get("main_theoretical_blocks_per_sm", 1)))
+                available = max(0, capacity - blocker_blocks * main_per_block)
+                required = premat_per_block
+                full_residency_exclusion = _safe_int(
+                    match.get("premat_blocks_with_full_main_residency", 0)
+                ) == 0
+            else:
+                available = max(0, capacity - premat_per_block)
+                required = main_per_block
+                full_residency_exclusion = False
+            pair_exclusion = not bool(match.get("pair_can_co_reside", False))
+            correlated_eligibility = str(victim.get("_contention_eligibility_basis", "")).startswith(
+                "correlated launch"
+            )
+            hard = (pair_exclusion or full_residency_exclusion) and correlated_eligibility
+            result.append({
+                "start_us": max(eligible, float(blocker.get("start_us", eligible))),
+                "end_us": min(start, float(blocker.get("end_us", start))),
+                "victim_owner": victim_owner,
+                "victim_family": str(victim.get("family", "")),
+                "victim_layer": victim.get("layer", ""),
+                "victim_kernel_name": str(victim.get("kernel_name", "")),
+                "victim_stage_index": victim.get("premat_stage_index", ""),
+                "victim_stage_count": victim.get("premat_stage_count", ""),
+                "blocker_owner": blocker_owner,
+                "blocker_family": str(blocker.get("family", "")),
+                "blocker_layer": blocker.get("layer", ""),
+                "blocker_kernel_name": str(blocker.get("kernel_name", "")),
+                "admission_wait_us": start - eligible,
+                "resource_code": code,
+                "resource": cause,
+                "available": available,
+                "required": required,
+                "capacity": capacity,
+                "confidence": "hard exclusion" if hard else "inferred admission delay",
+                "hard_exclusion": hard,
+                "evidence": (
+                    "NSYS launch correlation + same-stream predecessor + NCU SM residency"
+                    if hard else f"{victim.get('_contention_eligibility_basis')}; NCU structural limit"
+                ),
+            })
+
+    pressure_specs = (
+        ("tensor_active_pct", "T", "tensor/issue pipelines", 75.0),
+        ("sm_issue_pct", "T", "tensor/issue pipelines", 90.0),
+        ("dram_read_pct", "D", "DRAM bandwidth", 75.0),
+        ("dram_write_pct", "D", "DRAM bandwidth", 75.0),
+        ("l2_active_pct", "L2", "L2 bandwidth", 75.0),
+    )
+    for sample in data.get("stream_resources", []) or []:
+        if str(sample.get("attribution_state", "")) != "MAIN_PREMAT_OVERLAP":
+            continue
+        selected = None
+        for metric, code, cause, threshold in pressure_specs:
+            try:
+                value = float(sample.get(metric, ""))
+            except (TypeError, ValueError):
+                continue
+            if value >= threshold and (selected is None or value > selected[-1]):
+                selected = (metric, code, cause, threshold, value)
+        if selected is None:
+            continue
+        metric, code, cause, threshold, value = selected
+        result.append({
+            "start_us": float(sample.get("sample_start_us", sample.get("time_us", 0.0))),
+            "end_us": float(sample.get("sample_end_us", sample.get("time_us", 0.0))),
+            "victim_owner": "BOTH",
+            "victim_family": str(sample.get("main_families", "")),
+            "victim_layer": str(sample.get("main_layers", "")),
+            "victim_kernel_name": "",
+            "blocker_owner": "BOTH",
+            "blocker_family": str(sample.get("premat_families", "")),
+            "blocker_layer": str(sample.get("premat_layers", "")),
+            "blocker_kernel_name": "",
+            "admission_wait_us": "",
+            "resource_code": code,
+            "resource": cause,
+            "available": "",
+            "required": "",
+            "capacity": "",
+            "pressure_metric": metric,
+            "pressure_value_pct": value,
+            "pressure_threshold_pct": threshold,
+            "confidence": "concurrent pressure; causation not established",
+            "hard_exclusion": False,
+            "evidence": "device-wide NSYS sample during exact MAIN/PREMAT overlap",
+        })
+    return [row for row in result if float(row["end_us"]) > float(row["start_us"])]
+# ^^^ THOG
 
 
 def _hard_constraint_rows(
@@ -558,6 +822,7 @@ def _materialize_paired_analysis(
     data: dict[str, Any],
     selected_files: dict[str, str],
     companion_files: dict[str, str],
+    compatibility: Any = None,
 ) -> dict[str, str]:
     processing_directory = state.database_path.parent / "processing"
     processing_directory.mkdir(parents=True, exist_ok=True)
@@ -567,8 +832,10 @@ def _materialize_paired_analysis(
         ((data.get("metadata") or {}).get("capture") or {}).get("host_start_ns"),
     )
     lifecycle_summary = _processing_lifecycle_summary(lifecycle_rows, data.get("intervals", []))
+    contention_rows = _processing_contention_intervals(data, compatibility)
     lifecycle_name = "processing_premat_lifecycle_events.csv"
     lifecycle_summary_name = "processing_premat_lifecycle_summary.csv"
+    contention_name = "processing_contention_intervals.csv"
     lifecycle_fields = [
         "job_id", "sequence", "pass_sequence", "candidate_sequence", "capture_time_ms",
         "timing_basis", "event", "layer", "family", "owner", "state", "decision",
@@ -583,14 +850,23 @@ def _materialize_paired_analysis(
         "submitted_ms", "gpu_start_ms", "gpu_end_ms", "available_ms", "deadline_ms", "wait_ms", "consuming_ms",
         "completed_ms", "discarded_ms",
     ]
+    contention_fields = [
+        "start_us", "end_us", "victim_owner", "victim_family", "victim_layer",
+        "victim_kernel_name", "victim_stage_index", "victim_stage_count", "blocker_owner",
+        "blocker_family", "blocker_layer", "blocker_kernel_name", "admission_wait_us",
+        "resource_code", "resource", "available", "required", "capacity", "pressure_metric",
+        "pressure_value_pct", "pressure_threshold_pct", "confidence", "hard_exclusion", "evidence",
+    ]
     generated_files = {
         "lifecycle_events": lifecycle_name,
         "lifecycle_summary": lifecycle_summary_name,
+        "contention_intervals": contention_name,
         "pair_manifest": "processing_pair_manifest.json",
         "everything": "processing_everything.zip",
     }
     lifecycle_payload = _csv_bytes(lifecycle_rows, lifecycle_fields)
     lifecycle_summary_payload = _csv_bytes(lifecycle_summary, lifecycle_summary_fields)
+    contention_payload = _csv_bytes(contention_rows, contention_fields)
 
     candidate_files: list[tuple[str, Path, str]] = []
     candidate_archive_names: set[str] = set()
@@ -602,7 +878,7 @@ def _materialize_paired_analysis(
         for key, filename in sorted(files.items()):
             if key in {
                 "everything", "paired_analysis", "pair_manifest",
-                "lifecycle_events", "lifecycle_summary",
+                "lifecycle_events", "lifecycle_summary", "contention_intervals",
             }:
                 continue
             path = directory / str(filename)
@@ -613,6 +889,7 @@ def _materialize_paired_analysis(
     input_signature = (
         hashlib.sha256(lifecycle_payload).hexdigest(),
         hashlib.sha256(lifecycle_summary_payload).hexdigest(),
+        hashlib.sha256(contention_payload).hexdigest(),
         tuple(
             (archive_name, path.stat().st_mtime_ns, path.stat().st_size)
             for archive_name, path, _key in candidate_files
@@ -631,11 +908,13 @@ def _materialize_paired_analysis(
         processing_directory / lifecycle_summary_name,
         lifecycle_summary_payload,
     )
+    _write_bytes_if_changed(processing_directory / contention_name, contention_payload)
 
     included: list[tuple[str, Path, str]] = list(candidate_files)
     included.extend((
         (f"nsys/{lifecycle_name}", processing_directory / lifecycle_name, "lifecycle_events"),
         (f"nsys/{lifecycle_summary_name}", processing_directory / lifecycle_summary_name, "lifecycle_summary"),
+        (f"nsys/{contention_name}", processing_directory / contention_name, "contention_intervals"),
     ))
     manifest = {
         "schema_version": 1,
@@ -710,6 +989,7 @@ def _processing_payload_with_ncu_companion(
     compatibility = companion_data.get("premat_compatibility")
     if not compatibility:
         return payload
+    compatibility = _compatibility_with_capacities(companion_state, compatibility)
 
     diagnostics = dict(getattr(self, "_instra_ncu_companion_diagnostics", {}) or {})
     selected_status = self.status()
@@ -725,6 +1005,7 @@ def _processing_payload_with_ncu_companion(
         data,
         selected_files,
         companion_files,
+        compatibility,
     )
     selected_files.update(generated_files)
     merged_data = dict(data)
@@ -738,6 +1019,14 @@ def _processing_payload_with_ncu_companion(
         data.get("intervals", []),
     )
     merged_data["premat_compatibility"] = compatibility
+    merged_data["processing_contention_intervals"] = _processing_contention_intervals(
+        data, compatibility
+    )
+    merged_data["processing_contention_method"] = {
+        "admission": "launch completion and preceding same-stream completion form an eligibility lower bound; NCU proves only structural SM admission exclusions",
+        "pressure": "device-wide NSYS samples at >=75% tensor/DRAM/L2 or >=90% issue during exact MAIN/PREMAT overlap; correlation, not causation",
+        "slowdown": "shown only when an exact matched-control delta is present; this payload does not synthesize one",
+    }
     merged_data["premat_hard_constraints"] = list(companion_data.get("premat_hard_constraints") or [])
     merged_data["premat_compatibility_files"] = dict(
         companion_data.get("premat_compatibility_files") or {}

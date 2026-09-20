@@ -6,10 +6,29 @@
   style.id = "instra-processing-user-fixes-style";
   style.textContent = `
     .processing-downloads { min-width:0 !important; overflow-x:auto; scrollbar-width:thin; }
-    .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:3px 7px; white-space:nowrap; }
+    .processing-download-dock {
+      flex:0 0 100%; width:100%; min-width:0; height:34px;
+      padding:2px 8px 4px; overflow:hidden; background:#fff;
+    }
+    .processing-download-dock > .processing-downloads {
+      width:100%; height:28px; max-width:none; margin:0 !important;
+      display:flex !important; align-items:flex-start !important; flex-wrap:nowrap !important;
+      overflow-x:auto; overflow-y:hidden;
+    }
+    #processing_grid.is-maximized {
+      flex-direction:column !important; flex-wrap:nowrap !important;
+    }
+    #processing_grid.is-maximized > .processing-download-dock {
+      flex:0 0 34px !important; width:100% !important;
+    }
+    .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-start; flex-wrap:nowrap; gap:3px 7px; white-space:nowrap; }
     .processing-paired-download-group { display:inline-flex; align-items:center; gap:4px; }
     .processing-paired-download-label { font-size:9px; font-weight:850; color:#3f4650; letter-spacing:.04em; }
     #processing_timeline_card.maximized .processing-plot-shell { padding-top:0 !important; padding-bottom:0 !important; }
+    #processing_compatibility_card .processing-compatibility-key { margin-top:8px; }
+    #processing_compatibility_card.maximized .processing-compatibility-key i {
+      width:26px; height:26px; flex:0 0 26px;
+    }
   `;
   document.head.appendChild(style);
 
@@ -33,7 +52,7 @@
 
   const download_order = [
     "everything", "pair_manifest", "bundle", "samples", "stream_resources", "intervals",
-    "lifecycle_events", "lifecycle_summary", "operation_resource_stats",
+    "lifecycle_events", "lifecycle_summary", "contention_intervals", "operation_resource_stats",
     "attribution_resource_stats", "metric_audit", "summary", "metadata",
     "raw_trace", "raw_ncu", "ncu_raw_csv", "ncu_semantic_csv", "kernel_resources", "csv", "json",
   ];
@@ -42,6 +61,7 @@
     samples:"Samples", stream_resources:"Streams",
     intervals:"Intervals", summary:"Summary", metadata:"Metadata",
     lifecycle_events:"Lifecycle", lifecycle_summary:"Life summary",
+    contention_intervals:"Contention",
     operation_resource_stats:"Op stats",
     attribution_resource_stats:"Attrib stats", metric_audit:"Audit",
     raw_trace:"Raw", raw_ncu:"Raw", ncu_raw_csv:"Metrics",
@@ -57,6 +77,7 @@
     intervals:"GPU kernel intervals (CSV).\nEach row contains start/end time, stream, inferred owner, semantic operation, matrix family, layer and kernel name.",
     lifecycle_events:"PREMAT scheduler lifecycle events (CSV).\nCapture-relative request, admission, submission, readiness, deadline, wait, consumption and release evidence for each matrix job.",
     lifecycle_summary:"One row per PREMAT job (CSV).\nCondenses scheduler lifecycle and GPU interval timing into analysis-ready readiness, lead, wait and completion fields.",
+    contention_intervals:"Conservative MAIN/PREMAT contention intervals (CSV).\nSolid rows combine NSYS eligibility timing with NCU structural exclusion; pressure rows are explicitly non-causal device-wide overlap evidence.",
     operation_resource_stats:"Duration-weighted NSYS resource statistics by semantic operation/family/layer (CSV).\nUse this to compare MAIN and PREMAT phases without reprocessing raw samples.",
     attribution_resource_stats:"Duration-weighted resource statistics by attribution state (CSV).\nSeparates MAIN-only, PREMAT-only, simultaneous overlap and mixed/unattributed sampling bins.",
     metric_audit:"Metric provenance and quality audit (CSV).\nShows the exact Nsight metric selected for every displayed series, transformations, units, sample counts and missing-data status.",
@@ -109,7 +130,8 @@
     groups.className = "processing-paired-download-groups";
     for (const [role, label] of [["pair", "PAIR"], ["nsys", "NSYS"], ["ncu", "NCU"]]) {
       const source = pair[role] || {};
-      if (!source.dashboard_run_id || !download_entries(source.files).length) continue;
+      const run_id = source.dashboard_run_id || (role === "pair" ? pair.nsys.dashboard_run_id : "");
+      if (!run_id || !download_entries(source.files).length) continue;
       const group = document.createElement("span");
       group.className = "processing-paired-download-group";
       group.title = String(source.artifact_name || source.dashboard_run_id || "");
@@ -120,7 +142,7 @@
       for (const [key, filename] of download_entries(source.files)) {
         const link = document.createElement("a");
         link.textContent = download_labels[key] || String(key).replaceAll("_", " ");
-        link.href = processing_download_url_for_run(source.dashboard_run_id, filename);
+        link.href = processing_download_url_for_run(run_id, filename);
         link.download = filename;
         link.title = download_help[key] || `Download ${link.textContent}.\nFile: ${filename}`;
         link.setAttribute("aria-label", `${link.textContent}. ${link.title.replaceAll("\n", " ")}`);
@@ -129,6 +151,21 @@
       groups.appendChild(group);
     }
     host.appendChild(groups);
+  }
+
+  function ensure_processing_download_dock() {
+    const host = document.querySelector("#processing_chart_group .processing-downloads");
+    const grid = by_id("processing_grid");
+    if (!host || !grid) return host;
+    let dock = by_id("processing_download_dock");
+    if (!dock) {
+      dock = document.createElement("div");
+      dock.id = "processing_download_dock";
+      dock.className = "processing-download-dock";
+      grid.insertBefore(dock, grid.firstElementChild);
+    }
+    if (host.parentElement !== dock) dock.appendChild(host);
+    return host;
   }
 
   function decorate_direct_downloads() {
@@ -181,12 +218,30 @@
     if (!card || mount?.dataset.plotReady !== "true") return;
     const maximized = card.classList.contains("maximized");
     const width = 0.30;
-    const indices = Array.isArray(mount.data) ? mount.data.map((_trace, index) => index) : [];
+    const indices = Array.isArray(mount.data)
+      ? mount.data.flatMap((trace, index) => trace?.meta?.operations_contention === true ? [] : [index])
+      : [];
     if (indices.length) Plotly.restyle(mount, {width}, indices).catch(() => {});
     Plotly.relayout(mount, {
-      "yaxis.range":[0.20, 1.50],
+      "yaxis.range":[0.30, 1.40],
       "margin.t":8,
       "margin.b":maximized ? 42 : 38,
+    }).catch(() => {});
+  }
+
+  function apply_compatibility_geometry() {
+    const card = by_id("processing_compatibility_card");
+    const mount = by_id("processing_resource_compatibility_plot");
+    if (!card || mount?.dataset.plotReady !== "true" || !Array.isArray(mount.data)) return;
+    const maximized = card.classList.contains("maximized");
+    const scatter_indices = mount.data.flatMap((trace, index) => trace.type === "scattergl" ? [index] : []);
+    const bar_indices = mount.data.flatMap((trace, index) => trace.type === "bar" ? [index] : []);
+    if (scatter_indices.length) Plotly.restyle(mount, {"line.width":maximized ? 34 : 16}, scatter_indices).catch(() => {});
+    if (bar_indices.length) Plotly.restyle(mount, {width:maximized ? 0.72 : 0.46}, bar_indices).catch(() => {});
+    Plotly.relayout(mount, {
+      "margin.t":maximized ? 18 : 4,
+      "margin.b":maximized ? 34 : 20,
+      autosize:true,
     }).catch(() => {});
   }
 
@@ -225,7 +280,11 @@
     if (!card) return;
     window.clearTimeout(geometry_settle_timers.get(card));
     requestAnimationFrame(() => resize_card_plots(card));
-    geometry_settle_timers.set(card, window.setTimeout(() => resize_card_plots(card), 120));
+    geometry_settle_timers.set(card, window.setTimeout(() => {
+      resize_card_plots(card);
+      if (card.id === "processing_timeline_card") apply_operations_maximized_geometry();
+      if (card.id === "processing_compatibility_card") apply_compatibility_geometry();
+    }, 180));
   }
 
   let comparison_refresh_timer = null;
@@ -292,12 +351,14 @@
 
   const processing_render_before_user_fixes = processing_render;
   processing_render = async function(payload, trace_available) {
+    ensure_processing_download_dock();
     await processing_render_before_user_fixes(payload, trace_available);
     const effective = processing_view.companion_enriched_payload || payload;
     ensure_compatibility_maximize_button();
     decorate_direct_downloads();
     render_paired_downloads(effective);
     apply_operations_maximized_geometry();
+    apply_compatibility_geometry();
     schedule_comparison_refresh(false);
   };
 
@@ -308,6 +369,7 @@
     setTimeout(() => {
       const card = document.querySelector(`.chart-card[data-chart="${chart_name}"]`);
       if (chart_name === "processing_timeline") apply_operations_maximized_geometry();
+      if (chart_name === "processing_compatibility") apply_compatibility_geometry();
       if (chart_name === "processing_throughput" && processing_view.throughput_last_payload) {
         processing_render_throughput(processing_view.throughput_last_payload);
       }
@@ -316,7 +378,11 @@
       }
       settle_card_geometry(card);
     }, 0);
-    if (chart_name === "processing_timeline") setTimeout(apply_operations_maximized_geometry, 180);
+    if (chart_name === "processing_timeline") {
+      setTimeout(apply_operations_maximized_geometry, 180);
+      setTimeout(() => settle_card_geometry(by_id("processing_timeline_card")), 320);
+    }
+    if (chart_name === "processing_compatibility") setTimeout(apply_compatibility_geometry, 180);
   }, true);
 
   window.processing_user_fix_test_hooks = {
@@ -327,10 +393,13 @@
     apply_operations_maximized_geometry,
     render_paired_downloads,
     decorate_direct_downloads,
+    ensure_processing_download_dock,
+    apply_compatibility_geometry,
     download_help,
   };
 
   window.addEventListener("load", () => {
+    ensure_processing_download_dock();
     ensure_compatibility_maximize_button();
     schedule_comparison_refresh(true);
   });

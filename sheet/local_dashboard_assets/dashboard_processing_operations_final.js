@@ -43,8 +43,8 @@
         top:60px;
         right:34px;
         left:88px;
-        min-height:42px;
-        max-height:54px;
+        min-height:30px;
+        max-height:38px;
         display:flex;
         align-content:center;
         align-items:center;
@@ -55,14 +55,14 @@
         background:#fff;
       }
       #processing_timeline_card .processing-plot-shell {
-        inset:118px 0 0 0 !important;
+        inset:100px 0 0 0 !important;
       }
       #processing_timeline_card:not(.maximized) {
         min-height:300px !important;
         height:300px !important;
       }
       #processing_timeline_card:not(.maximized) .processing-plot-shell {
-        min-height:182px !important;
+        min-height:160px !important;
         height:auto !important;
         flex:1 1 auto !important;
       }
@@ -78,7 +78,8 @@
         opacity:.42;
       }
       .processing-operations-key-colour,
-      .processing-operations-key-pattern {
+      .processing-operations-key-pattern,
+      .processing-contention-key-patch {
         width:13px;
         height:13px;
         flex:0 0 13px;
@@ -86,9 +87,17 @@
         border:1px solid rgba(0,0,0,.20);
         border-radius:2px;
       }
+      #processing_timeline_card.maximized .processing-operations-key-colour,
+      #processing_timeline_card.maximized .processing-operations-key-pattern,
+      #processing_timeline_card.maximized .processing-contention-key-patch {
+        width:26px;
+        height:26px;
+        flex-basis:26px;
+      }
       .processing-operations-key-colour {
         cursor:pointer;
       }
+      .processing-contention-key-patch { cursor:help; }
       .processing-operations-key-pattern {
         background:repeating-linear-gradient(135deg,#8a8f97 0 4px,#fff 4px 8px);
       }
@@ -237,10 +246,10 @@
   );
   const lane_y = Object.freeze({MAIN:1.00, PREMAT:0.70, OTHER:0.40, UNKNOWN:0.15});
   const lane_width = 0.30;
-  const layer_top_y = 1.42;
-  const layer_bottom_y = 0.28;
-  const normal_y_range = [0.20, 1.50];
-  const maximized_y_range = [0.20, 1.50];
+  const layer_top_y = 1.32;
+  const layer_bottom_y = 0.38;
+  const normal_y_range = [0.30, 1.40];
+  const maximized_y_range = [0.30, 1.40];
   processing_view.operations_hidden_keys = processing_view.operations_hidden_keys || new Set();
   processing_view.operations_colour_defaults = processing_view.operations_colour_defaults || {};
   processing_view.operations_ancillary_white = false;
@@ -333,7 +342,7 @@
     for (const [layer, x] of sorted) {
       for (const [position, y] of [["top", layer_top_y], ["bottom", layer_bottom_y]]) {
         annotations.push({
-          xref:"x", yref:"y", x, y, text:String(layer + 1), showarrow:false,
+          xref:"x", yref:"y", x, y, text:`Layer ${layer + 1}`, showarrow:false,
           xanchor:"center", yanchor:"middle", font:{size:13, color:"#343a43"},
           bgcolor:"rgba(255,255,255,0.94)", borderpad:2,
           name:`processing-layer-${layer}-${position}`, captureevents:true,
@@ -667,9 +676,21 @@
     if (!key) return;
     key.replaceChildren();
     const items = new Map();
+    const contention_items = new Map();
     let has_materialisation = false;
     for (const trace of traces || []) {
       const meta = trace.meta || {};
+      if (meta.operations_contention === true) {
+        const code = String(meta.resource_code || "?");
+        const key = `${code}:${meta.contention_hard === true}`;
+        if (!contention_items.has(key)) contention_items.set(key, {
+          code,
+          label:String(meta.resource_label || "resource pressure"),
+          colour:String(trace.marker?.color || "#546e7a"),
+          hard:meta.contention_hard === true,
+        });
+        continue;
+      }
       if (meta.operations_patterned === true) {
         has_materialisation = true;
         continue;
@@ -718,6 +739,21 @@
       toggle.title = "Show or hide all striped materialisation and PREMAT operations";
       toggle.addEventListener("click", () => toggle_operations_key("__MATERIALISATION__", true));
       wrapper.append(pattern, toggle);
+      key.appendChild(wrapper);
+    }
+    for (const item of contention_items.values()) {
+      const wrapper = document.createElement("span");
+      wrapper.className = "processing-operations-key-item";
+      wrapper.title = `${item.code}: ${item.label}. ${item.hard ? "Solid marks a structurally proven admission exclusion." : "Dotted/translucent marks concurrent pressure or an inferred delay; it does not establish causation."}`;
+      const patch = document.createElement("span");
+      patch.className = "processing-contention-key-patch";
+      patch.style.backgroundColor = item.colour;
+      patch.style.opacity = item.hard ? "0.96" : "0.48";
+      if (!item.hard) patch.style.backgroundImage = "radial-gradient(#fff 1px, transparent 1px)";
+      patch.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = `${item.code} ${item.label}`;
+      wrapper.append(patch, label);
       key.appendChild(wrapper);
     }
   }
@@ -866,6 +902,89 @@
     Plotly.relayout(mount, {"yaxis.range":range}).catch(() => {});
   }
 
+  const contention_colours = Object.freeze({
+    R:"#c62828", S:"#ef6c00", W:"#7b1fa2", T:"#1565c0", D:"#795548", L2:"#546e7a",
+  });
+
+  function contention_hover(row) {
+    const victim_stage = row.victim_stage_index
+      ? ` stage ${row.victim_stage_index}${row.victim_stage_count ? `/${row.victim_stage_count}` : ""}`
+      : "";
+    const victim = `${row.victim_owner || "?"} ${row.victim_family || ""}${victim_stage}`.trim();
+    const blocker = `${row.blocker_owner || "?"} ${row.blocker_family || ""}`.trim();
+    const lines = [
+      `<b>${processing_escape(row.resource_code || "?")} · ${processing_escape(row.resource || "resource pressure")}</b>`,
+      `Victim: ${processing_escape(victim)}`,
+      `Blocker: ${processing_escape(blocker)}`,
+    ];
+    if (row.admission_wait_us !== "" && row.admission_wait_us !== null && row.admission_wait_us !== undefined && Number.isFinite(Number(row.admission_wait_us))) {
+      lines.push(`Admission wait lower bound: ${(Number(row.admission_wait_us) / 1000).toFixed(4)} ms`);
+    }
+    if (row.available !== "" && row.available !== null && row.available !== undefined) {
+      lines.push(`Available: ${Number(row.available).toLocaleString()} · Required: ${Number(row.required || 0).toLocaleString()} · SM capacity: ${Number(row.capacity || 0).toLocaleString()}`);
+    }
+    if (Number.isFinite(Number(row.pressure_value_pct))) {
+      lines.push(`Observed ${processing_escape(row.pressure_metric || "pressure")}: ${Number(row.pressure_value_pct).toFixed(1)}%`);
+    }
+    lines.push(`Confidence: ${processing_escape(row.confidence || "inferred")}`);
+    lines.push(processing_escape(row.evidence || ""));
+    return lines.filter(Boolean).join("<br>");
+  }
+
+  function contention_traces(payload) {
+    const rows = Array.isArray(payload?.processing_contention_intervals)
+      ? payload.processing_contention_intervals
+      : [];
+    const groups = new Map();
+    for (const row of rows) {
+      const code = String(row.resource_code || "").toUpperCase();
+      if (!contention_colours[code]) continue;
+      const owner = String(row.victim_owner || "BOTH").toUpperCase();
+      const hard = row.hard_exclusion === true || String(row.hard_exclusion).toLowerCase() === "true";
+      const key = `${code}:${owner}:${hard}`;
+      if (!groups.has(key)) groups.set(key, {code, owner, hard, rows:[]});
+      groups.get(key).rows.push(row);
+    }
+    return [...groups.values()].map(group => ({
+      type:"bar", orientation:"h", showlegend:false,
+      name:`${group.code} ${group.hard ? "exclusion" : "pressure"}`,
+      x:group.rows.map(row => Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000),
+      base:group.rows.map(row => Number(row.start_us) / 1000),
+      y:group.rows.map(() => group.owner === "MAIN" ? 0.885 : group.owner === "PREMAT" ? 0.815 : 0.85),
+      width:group.owner === "BOTH" ? 0.07 : 0.055,
+      text:group.rows.map(() => group.code),
+      textposition:"inside", insidetextanchor:"middle",
+      textfont:{size:9, color:"#fff"}, constraintext:"none",
+      marker:{
+        color:contention_colours[group.code],
+        opacity:group.hard ? 0.96 : 0.48,
+        line:{color:contention_colours[group.code], width:group.hard ? 1 : 0},
+        pattern:group.hard ? undefined : {shape:".", solidity:0.25, size:5},
+      },
+      customdata:group.rows.map(contention_hover),
+      hovertemplate:"%{customdata}<extra></extra>",
+      meta:{
+        operations_contention:true,
+        resource_code:group.code,
+        resource_label:String(group.rows[0]?.resource || "resource pressure"),
+        contention_hard:group.hard,
+      },
+    }));
+  }
+
+  function slowdown_outline_traces(payload) {
+    const rows = Array.isArray(payload?.matched_slowdowns) ? payload.matched_slowdowns : [];
+    return rows.filter(row => Number(row.delta_ms) > 0).map(row => ({
+      type:"bar", orientation:"h", showlegend:false,
+      x:[Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000],
+      base:[Number(row.start_us) / 1000], y:[lane_y.MAIN], width:lane_width,
+      marker:{color:"rgba(0,0,0,0)", line:{color:"#d40000", width:2}},
+      customdata:[[Number(row.delta_ms), Number(row.delta_pct), row.control_artifact || "matched control"]],
+      hovertemplate:"Matched slowdown: +%{customdata[0]:.4f} ms / +%{customdata[1]:.1f}%<br>Control: %{customdata[2]}<extra></extra>",
+      meta:{operations_slowdown:true},
+    }));
+  }
+
   processing_render_timeline = async function(payload) {
     ensure_layer_zoom_controls();
     ensure_show_all_button();
@@ -919,10 +1038,13 @@
           row.family || "",
           row.layer === "" || row.layer === null || row.layer === undefined ? "—" : Number(row.layer) + 1,
           row.kernel_name || "",
+          Number(row.start_us) / 1000.0,
+          Math.max(0, Number(row.end_us) - Number(row.start_us)) / 1000.0,
         ]),
-        hovertemplate:"%{customdata[0]} · layer %{customdata[2]}<br>%{customdata[3]}<br>%{x:.4f} ms<extra></extra>",
+        hovertemplate:"%{customdata[0]} · Layer %{customdata[2]}<br>%{customdata[3]}<br>%{customdata[4]:.4f} ms capture time<br>Duration: %{customdata[5]:.4f} ms<extra></extra>",
       });
     }
+    traces.push(...contention_traces(payload), ...slowdown_outline_traces(payload));
 
     const guides = layer_guides(intervals);
     const tick_owners = ["PREMAT", "MAIN"];
@@ -1090,6 +1212,9 @@
     render_operations_key,
     reset_layer_zoom,
     resolved_trace_colour,
+    contention_traces,
+    contention_hover,
+    slowdown_outline_traces,
     sync_training_group_presentation,
   });
 })();

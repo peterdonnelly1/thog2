@@ -152,6 +152,13 @@ def test_registered_help_is_generated_from_the_complete_parser() -> None:
     source = (ROOT / "train_OWT.sh").read_text(encoding="utf-8")
     assert "registered runner hyperparameters" in source
     assert "build_parser().format_help()" in source
+    descriptor = (ROOT / "sheet" / "help_registry_descriptor_patch.py").read_text(encoding="utf-8")
+    for option in (
+        "--premat_timing", "--premat_target_matrix", "--premat_allocator_aware_admission",
+        "--premat_enable_shadow_mode", "--premat_processing_profiler",
+        "--premat_processing_logging_capture_update", "--ncu-probe-layer",
+    ):
+        assert option in descriptor
 
 
 def test_shell_core_owns_every_coarse_and_fine_control() -> None:

@@ -187,12 +187,13 @@ const guide_model = operation_hooks.layer_guides([
 ]);
 assert.equal(guide_model.shapes.length, 3, "each layer should have one continuous divider");
 assert.deepEqual(Array.from(guide_model.shapes, shape => [shape.y0, shape.y1]), [
-  [0.28, 1.42], [0.28, 1.42], [0.28, 1.42],
+  [0.38, 1.32], [0.38, 1.32], [0.38, 1.32],
 ]);
 assert.equal(guide_model.annotations.length, 6, "layer numbers should be duplicated above and below the lanes");
 assert.deepEqual(Array.from(guide_model.annotations.slice(0, 2), annotation => [annotation.name, annotation.y]), [
-  ["processing-layer-0-top", 1.42], ["processing-layer-0-bottom", 0.28],
+  ["processing-layer-0-top", 1.32], ["processing-layer-0-bottom", 0.38],
 ]);
+assert.equal(guide_model.annotations[0].text, "Layer 1");
 assert.deepEqual(
   Array.from(operation_hooks.layer_zoom_range(guide_model.sorted, 50, 1), value => Number(value.toFixed(1))),
   [18.8, 36.8],
@@ -295,6 +296,15 @@ assert.equal(rendered_groups.children[2].children[2].textContent, "Metrics");
 assert.equal(rendered_groups.children[2].children[3].textContent, "Semantic");
 assert.match(rendered_groups.children[2].children[1].title, /Original Nsight Compute/);
 assert.match(rendered_groups.children[1].children.at(-1).title, /Original Nsight Systems/);
+hooks.render_paired_downloads({
+  paired_processing_downloads:{
+    pair:{artifact_name:"pair", files:{everything:"everything.zip"}},
+    nsys:{dashboard_run_id:"nsys", files:{bundle:"nsys.zip"}},
+    ncu:{dashboard_run_id:"ncu", files:{raw_ncu:"trace.ncu-rep"}},
+  },
+});
+assert.equal(host.querySelector(".processing-paired-download-groups").children[0].children[1].textContent, "Everything",
+  "Everything disappeared when the pair group relied on the NSYS run-id fallback");
 hooks.render_paired_downloads({});
 assert.equal(direct_raw.hidden, false, "unpairing did not restore the run-owned download buttons");
 assert.equal(direct_uncategorized.hidden, false, "unpairing did not restore the original download-bar contents");
@@ -323,11 +333,24 @@ assert.match(operations_source, /thog2_processing_operation_colours_v1/);
 
 hooks.apply_operations_maximized_geometry();
 assert.equal(restyles.at(-1).update.width, 0.30);
-assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.20, 1.50]);
+assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.30, 1.40]);
 operations_card.className = "";
 hooks.apply_operations_maximized_geometry();
 assert.equal(restyles.at(-1).update.width, 0.30);
-assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.20, 1.50]);
+assert.deepEqual(Array.from(relayouts.at(-1).update["yaxis.range"]), [0.30, 1.40]);
+
+const contention = operation_hooks.contention_traces({processing_contention_intervals:[{
+  start_us:1000, end_us:2500, victim_owner:"PREMAT", victim_family:"DOWN",
+  victim_stage_index:3, victim_stage_count:3, blocker_owner:"MAIN", blocker_family:"UP",
+  admission_wait_us:2610, resource_code:"R", resource:"registers", available:4096,
+  required:5120, capacity:65536, confidence:"hard exclusion", hard_exclusion:true,
+  evidence:"fixture",
+}]});
+assert.equal(contention.length, 1);
+assert.equal(contention[0].y[0], 0.815, "PREMAT-victim contention was not placed on the PREMAT side of the spine");
+assert.equal(contention[0].marker.pattern, undefined, "hard exclusion must be solid");
+assert.match(contention[0].customdata[0], /Admission wait lower bound: 2\.6100 ms/);
+assert.match(contention[0].customdata[0], /Available: 4,096 · Required: 5,120/);
 
 sandbox.processing_render({}, true).then(async () => {
   assert.equal(actions.children[0].dataset.maximize, "processing_compatibility");

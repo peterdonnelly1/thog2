@@ -285,9 +285,48 @@ def test_everything_zip_contains_all_pair_downloads(tmp_path: Path) -> None:
             "nsys/processing_trace.nsys-rep",
             "nsys/processing_premat_lifecycle_events.csv",
             "nsys/processing_premat_lifecycle_summary.csv",
+            "nsys/processing_contention_intervals.csv",
             "ncu/processing_ncu_trace.ncu-rep",
             "ncu/processing_ncu_semantic.csv",
         }
+
+
+def test_contention_intervals_require_nsys_wait_and_map_ncu_register_exclusion() -> None:
+    data = {
+        "intervals": [
+            {
+                "owner": "MAIN", "family": "UP", "layer": 5, "operation": "consume",
+                "kernel_name": "main_up", "start_us": 1000, "end_us": 5000,
+            },
+            {
+                "owner": "PREMAT", "family": "DOWN", "layer": 6,
+                "operation": "materialize", "kernel_name": "premat_down",
+                "premat_stage_index": 3, "premat_stage_count": 3,
+                "submitted_us": 1500, "eligible_lower_bound_us": 2000,
+                "start_us": 4610, "end_us": 5200,
+            },
+        ],
+        "stream_resources": [],
+    }
+    compatibility = [{
+        "main_family": "UP", "main_layer": 5,
+        "premat_family": "DOWN", "premat_layer": 6,
+        "premat_stage_index": 3, "pair_can_co_reside": False,
+        "main_theoretical_blocks_per_sm": 2,
+        "premat_blocks_with_full_main_residency": 0,
+        "limiting_resource": "registers", "sm_register_capacity": 65536,
+        "main_registers_per_block": 30720, "premat_registers_per_block": 5120,
+    }]
+
+    rows = dashboard._processing_contention_intervals(data, compatibility)
+
+    assert len(rows) == 1
+    assert rows[0]["resource_code"] == "R"
+    assert rows[0]["victim_owner"] == "PREMAT"
+    assert rows[0]["admission_wait_us"] == 2610
+    assert rows[0]["available"] == 4096
+    assert rows[0]["required"] == 5120
+    assert rows[0]["confidence"] == "hard exclusion"
 
 
 def test_lifecycle_rows_prefer_capture_relative_time_and_retain_legacy_fallback() -> None:

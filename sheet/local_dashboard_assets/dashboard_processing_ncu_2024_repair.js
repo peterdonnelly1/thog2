@@ -54,6 +54,7 @@
       .processing-compatibility-key i {
         width:10px; height:10px; display:inline-block; border-radius:2px;
       }
+      .processing-compatibility-key span { cursor:help; }
       .processing-resource-legend-controls {
         display:inline-flex; align-items:center; gap:4px; margin-right:4px;
       }
@@ -111,10 +112,10 @@
           <p>NCU structural evidence mapped only onto profiled MAIN operation/layer pairs; colour is controlled by the most constrained captured PREMAT stage; blank means unmeasured.</p>
           <p class="processing-compatibility-source" id="processing_compatibility_source"></p>
           <div class="processing-compatibility-key" aria-label="Compatibility key">
-            <span><i style="background:${class_colours.GREEN}"></i>GREEN full-MAIN headroom</span>
-            <span><i style="background:${class_colours.YELLOW}"></i>YELLOW tail/partial residency</span>
-            <span><i style="background:${class_colours.ORANGE}"></i>ORANGE constrained</span>
-            <span><i style="background:${class_colours.RED}"></i>RED no pair co-residency</span>
+            <span title="GREEN: at least one PREMAT block still fits on an SM while MAIN retains its full theoretical block residency. This is structural headroom, not proof that the kernels overlapped or ran without slowdown."><i style="background:${class_colours.GREEN}"></i>GREEN full-MAIN headroom</span>
+            <span title="YELLOW: MAIN and PREMAT can share an SM, but PREMAT fits only after MAIN gives up some of its theoretical residency. Concurrency is feasible but has reduced headroom."><i style="background:${class_colours.YELLOW}"></i>YELLOW tail/partial residency</span>
+            <span title="ORANGE: the captured kernels can co-reside, but the pairing is tightly constrained—typically only one PREMAT block fits beside one MAIN block. Expect limited scheduling freedom."><i style="background:${class_colours.ORANGE}"></i>ORANGE constrained</span>
+            <span title="RED: even one captured MAIN block and one captured PREMAT block exceed at least one SM admission limit. The limiting resource shown in the bar hover is a hard structural exclusion for this kernel pair."><i style="background:${class_colours.RED}"></i>RED no pair co-residency</span>
           </div>
         </div>
         <div class="chart-card-actions"></div>
@@ -274,15 +275,20 @@
     const stage_index = Number(row.premat_stage_index || 1);
     const stage_count = Number(row.premat_stage_count || 1);
     const stage = `stage ${stage_index}/${stage_count}`;
-    return `${klass} · MAIN ${processing_escape(interval.operation || row.main_operation || "?")} ${processing_escape(interval.family || row.main_family || "?")} L${main_layer}`
-      + ` → PREMAT ${processing_escape(row.premat_family || "?")} L${premat_layer}<br>`
-      + `PREMAT ${stage}${row.premat_stage_is_most_constrained ? " · most constrained captured stage" : ""}<br>`
-      + `${processing_escape(row.premat_cuda_kernel_name || "unknown kernel")}<br>`
-      + `Pair compatible: ${row.pair_can_co_reside ? "YES" : "NO"}<br>`
-      + `PREMAT blocks with MAIN at full residency: ${Number(row.premat_blocks_with_full_main_residency || 0)}<br>`
-      + `Limiter: ${processing_escape(row.limiting_resource || "—")}<br>`
-      + `MAIN block: ${Number(row.main_warps_per_block || 0)} warps · ${Number(row.main_registers_per_block || 0).toLocaleString()} regs · ${Number(row.main_shared_mem_bytes || 0).toLocaleString()} B shared<br>`
-      + `PREMAT block: ${Number(row.premat_warps_per_block || 0)} warps · ${Number(row.premat_registers_per_block || 0).toLocaleString()} regs · ${Number(row.premat_shared_mem_bytes || 0).toLocaleString()} B shared`;
+    const summary = {
+      GREEN:"Full-MAIN headroom",
+      YELLOW:"Co-residency after MAIN residency falls",
+      ORANGE:"Tightly constrained co-residency",
+      RED:"No one-block pair co-residency",
+    }[klass] || "Structural compatibility";
+    return `<b>${klass} — ${summary}</b><br>`
+      + `MAIN: ${processing_escape(interval.operation || row.main_operation || "?")} ${processing_escape(interval.family || row.main_family || "?")} · Layer ${main_layer}<br>`
+      + `PREMAT: ${processing_escape(row.premat_family || "?")} · Layer ${premat_layer} · ${stage}${row.premat_stage_is_most_constrained ? " (most constrained)" : ""}<br>`
+      + `Headroom at full MAIN residency: ${Number(row.premat_blocks_with_full_main_residency || 0)} PREMAT block(s)/SM<br>`
+      + `Limiting resource: ${processing_escape(row.limiting_resource || "—")}<br>`
+      + `PREMAT kernel: ${processing_escape(row.premat_cuda_kernel_name || "unknown")}<br>`
+      + `Footprints — MAIN: ${Number(row.main_warps_per_block || 0)} warps, ${Number(row.main_registers_per_block || 0).toLocaleString()} regs, ${Number(row.main_shared_mem_bytes || 0).toLocaleString()} B shared<br>`
+      + `PREMAT: ${Number(row.premat_warps_per_block || 0)} warps, ${Number(row.premat_registers_per_block || 0).toLocaleString()} regs, ${Number(row.premat_shared_mem_bytes || 0).toLocaleString()} B shared`;
   }
 
   // C: one narrow, absolute-time structural strip. Unprofiled intervals stay blank.
@@ -349,22 +355,22 @@
         const klass = String(match.compatibility_class || "").toUpperCase();
         if (!class_colours[klass]) continue;
         const key = `${klass}:${premat_family}`;
-        if (!by_key.has(key)) by_key.set(key, {klass, premat_family, x: [], y: [], hover: []});
+        if (!by_key.has(key)) by_key.set(key, {klass, premat_family, x: [], base: [], y: [], hover: []});
         const item = by_key.get(key);
         const start = Number(interval.start_us) / 1000.0;
         const end = Number(interval.end_us) / 1000.0;
-        const middle = (start + end) / 2.0;
         const detail = compatibility_hover(match, interval, klass);
-        item.x.push(start, middle, end, null);
-        item.y.push(`PREMAT ${premat_family}`, `PREMAT ${premat_family}`, `PREMAT ${premat_family}`, null);
-        item.hover.push(detail, detail, detail, "");
+        item.x.push(Math.max(0, end - start));
+        item.base.push(start);
+        item.y.push(`PREMAT ${premat_family}`);
+        item.hover.push(detail);
       }
     }
     const traces = [...by_key.values()].map(item => ({
-      type: "scattergl", mode: "lines", name: item.klass,
-      x: item.x, y: item.y, hovertext: item.hover, hoverinfo: "text",
-      connectgaps: false, showlegend: false,
-      line: {width: 16, color: class_colours[item.klass]},
+      type: "bar", orientation:"h", name: item.klass,
+      x: item.x, base:item.base, y: item.y, hovertext: item.hover, hoverinfo: "text",
+      showlegend: false, width:0.46,
+      marker: {color: class_colours[item.klass]},
     }));
     const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
     await processing_plot("processing_resource_compatibility_plot", traces, {

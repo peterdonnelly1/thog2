@@ -116,6 +116,8 @@ def test_corrected_down_pair_is_structurally_co_resident(tmp_path):
     assert result["premat_registers_per_block"] == 4096
     assert result["premat_blocks_with_one_main_block"] == 2
     assert result["compatibility_class"] == "GREEN"
+    assert result["sm_register_capacity"] == 65536
+    assert result["sm_max_blocks"] == 24
 
 
 def _resource_row(*, role, launch_id, duration, registers, kernel):

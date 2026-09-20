@@ -42,7 +42,7 @@ PROCESSING_DEFAULT_CAPTURE_FREQUENCY_HZ = 10_000
 PROCESSING_DEFAULT_CAPTURE_UPDATE = 1
 PROCESSING_MIN_CAPTURE_FREQUENCY_HZ = 10
 PROCESSING_MAX_CAPTURE_FREQUENCY_HZ = 200_000
-PROCESSING_SCHEMA_VERSION = 3
+PROCESSING_SCHEMA_VERSION = 4
 PROCESSING_CAPTURE_RANGE = "THOG2_PREMAT_PROCESSING_CAPTURE"
 PROCESSING_OPERATION_PREFIX = "THOG2_PROCESSING"
 _PROCESSING_CHILD_ENV = "THOG2_PREMAT_PROCESSING_UNDER_NSYS"
@@ -957,6 +957,10 @@ def normalize_nsys_sqlite(
             operations.append({"op_id": len(operations) + 1, **event, **parsed})
 
         runtimes = _runtime_rows(connection, tables)
+        runtime_by_correlation = {
+            int(runtime["correlation"]): runtime
+            for runtime in runtimes
+        }
         kernels = _kernel_rows(connection, tables, strings)
         correlation_to_operation: Dict[int, Dict[str, Any]] = {}
         for operation in operations:
@@ -979,6 +983,10 @@ def normalize_nsys_sqlite(
                 continue
             operation = correlation_to_operation.get(int(kernel["correlation"]))
             op_id = int(operation["op_id"]) if operation is not None else None
+            runtime = runtime_by_correlation.get(int(kernel["correlation"]))
+            submitted_us: float | str = ""
+            if runtime is not None:
+                submitted_us = max(0.0, (int(runtime["end"]) - capture_start) / 1000.0)
             candidates.append({
                 "start_us": start_us,
                 "end_us": end_us,
@@ -992,11 +1000,53 @@ def normalize_nsys_sqlite(
                 "operation": "other" if operation is None else str(operation["operation"]),
                 "kernel_name": str(kernel["kernel_name"]),
                 "op_id": "" if op_id is None else op_id,
+                "correlation_id": int(kernel["correlation"]),
+                "submitted_us": submitted_us,
             })
             if op_id is not None:
                 operation_kernel_intervals.setdefault(op_id, []).append((start_us, end_us))
         # vvv THOG Processing resource tide export v1
         interval_rows = classify_processing_operations(infer_kernel_owners(candidates))
+        # Launch completion is the earliest time a kernel can be eligible.  A
+        # preceding kernel on the same CUDA stream is an additional exact
+        # dependency.  This is deliberately exported as a lower bound: event
+        # waits not represented by a correlated kernel may move true
+        # eligibility later, never earlier.
+        previous_end_by_stream: Dict[tuple[Any, int], float] = {}
+        for row in sorted(
+            interval_rows,
+            key=lambda item: (
+                str(item.get("context_id", "")),
+                int(item.get("stream", 0)),
+                float(item.get("start_us", 0.0)),
+            ),
+        ):
+            stream_key = (row.get("context_id", ""), int(row.get("stream", 0)))
+            prior_end = previous_end_by_stream.get(stream_key)
+            row["previous_stream_end_us"] = "" if prior_end is None else prior_end
+            submitted = row.get("submitted_us", "")
+            eligibility_terms = [value for value in (submitted, prior_end) if value not in (None, "")]
+            if eligibility_terms:
+                eligible = max(float(value) for value in eligibility_terms)
+                row["eligible_lower_bound_us"] = eligible
+                row["admission_wait_lower_bound_us"] = max(0.0, float(row["start_us"]) - eligible)
+            else:
+                row["eligible_lower_bound_us"] = ""
+                row["admission_wait_lower_bound_us"] = ""
+            previous_end_by_stream[stream_key] = max(float(row["end_us"]), prior_end or 0.0)
+
+        premat_groups: Dict[Any, list[Dict[str, Any]]] = {}
+        for row in interval_rows:
+            if str(row.get("owner")) == "PREMAT" and str(row.get("operation")) == "materialize":
+                key = row.get("op_id") or (
+                    row.get("family", ""), row.get("layer", ""), row.get("stream", "")
+                )
+                premat_groups.setdefault(key, []).append(row)
+        for group in premat_groups.values():
+            ordered = sorted(group, key=lambda item: float(item["start_us"]))
+            for stage_index, row in enumerate(ordered, start=1):
+                row["premat_stage_index"] = stage_index
+                row["premat_stage_count"] = len(ordered)
         # ^^^ THOG
 
         raw_samples, metric_mapping, available_metric_names = _metric_rows(
@@ -1087,6 +1137,8 @@ def normalize_nsys_sqlite(
     interval_fields = (
         "start_us", "end_us", "duration_us", "stream", "context_id", "owner", "owner_source",
         "layer", "family", "operation", "operation_source", "kernel_name", "op_id",
+        "correlation_id", "submitted_us", "previous_stream_end_us", "eligible_lower_bound_us",
+        "admission_wait_lower_bound_us", "premat_stage_index", "premat_stage_count",
     )
     summary_fields = (
         "op_id", "layer", "family", "start_us", "end_us", "duration_ms",
