@@ -88,6 +88,21 @@ window.addEventListener("load", () => {
       if (host_match) return host_match[1];
       return /(?:^|[_ -])scruffy(?:$|[_ -])/i.test(source) ? 0 : null;
     };
+    const premat_matrix_text = run => {
+      const premat = configured_value(run, "premat");
+      const enabled = premat === true || premat === 1 || String(premat || "").toLowerCase() === "enabled";
+      if (!enabled) return "—";
+      const raw = configured_value(run, "premat_target_matrix");
+      let selected;
+      if (raw === null || raw === undefined || raw === "") {
+        selected = new Set([1, 2, 3, 4]);
+      } else if (Array.isArray(raw)) {
+        selected = new Set(raw.map(Number));
+      } else {
+        selected = new Set((String(raw).match(/[1-4]/g) || []).map(Number));
+      }
+      return [1, 2, 3, 4].map(matrix => selected.has(matrix) ? String(matrix) : " ").join(" ");
+    };
 
     const generated = Object.freeze({
       gpu: {label: "GPU", title: "physical GPU selected for this run", numeric: true, value: gpu_value},
@@ -107,6 +122,7 @@ window.addEventListener("load", () => {
           ? "—"
           : configured_value(run, "o_depth"),
       },
+      premat: {label: "premat", title: "prematerialised matrix numbers (1=QKV, 2=O, 3=UP, 4=DOWN)", numeric: false, value: premat_matrix_text},
       parms: {label: "PARMS", title: "persistent model parameters (millions, rounded)", numeric: true, value: run => million_parameters(run, false)},
       equiv: {
         label: "EQUIV", title: "dense-equivalent parameters (millions, THOG only)", numeric: true,
@@ -134,14 +150,14 @@ window.addEventListener("load", () => {
 
     const order = Object.freeze([
       "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
-      "preset", "optimizer", "gb", "layers", "depth_order", "parms", "equiv", "warmup",
+      "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated", "menu",
     ]);
     const widths = Object.freeze({
       select:34, visibility:34, steps:62, duration:72, state:88, wandb:0, host:84, gpu:42,
-      preset:64, optimizer:70, gb:52, layers:42, depth_order:42, parms:58, equiv:58, warmup:42,
+      preset:64, optimizer:70, gb:52, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
       context:64, d_model:64, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
       curve_start:50, curve_end:64, capture_period:50, updated:92, menu:36,
@@ -349,6 +365,10 @@ window.addEventListener("load", () => {
       .runs-table .instra-dense-preset { font-weight:750 !important; }
       .runs-table [data-instra-column-key="layers"],
       .runs-table [data-instra-column-key="depth_order"] { color:#7a1f3d !important; font-weight:700; }
+      .runs-table [data-instra-column-key="premat"] {
+        white-space:pre !important; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+        font-variant-numeric:tabular-nums; text-align:left !important; text-transform:none !important;
+      }
       .runs-table .name-column {
         position:relative; width:auto !important; min-width:0 !important; max-width:none !important;
       }

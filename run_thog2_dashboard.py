@@ -83,6 +83,7 @@ _EXTRA_ASSET_NAMES = (
     "dashboard_thogopt.js",
     "dashboard_sep07_fixes_and_enhancements.js",                                                                                                          # <<< THOG final owner for September functionality, memory, table and interaction fixes
     "dashboard_sep20_integrated_repairs.js",                                                                                                              # <<< THOG final owner for paired/ordinary chart coexistence and September UI repairs
+    "dashboard_sep21_instra_repairs.js",                                                                                                                  # <<< THOG final owner for long-session quiescence, pairing, columns, colours and timing-chart refinements
 )
 
 # Most entries above are retained source assets for old focused repairs and
@@ -93,6 +94,7 @@ _ACTIVE_EXTRA_ASSET_NAMES = (
     "dashboard_wandb_groups_patch.js",
     "dashboard_group_stability_patch.js",
     "dashboard_sep20_integrated_repairs.js",
+    "dashboard_sep21_instra_repairs.js",
 )
 
 

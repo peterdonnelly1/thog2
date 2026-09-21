@@ -132,15 +132,7 @@
         font-size:10px;
         font-weight:650;
       }
-      .processing-operations-colour-reset {
-        padding:3px 7px;
-        border:1px solid rgba(127,127,127,.30);
-        border-radius:4px;
-        background:#fff;
-        color:inherit;
-        font-size:9px;
-        cursor:pointer;
-      }
+      .processing-operations-colour-values { margin-bottom:8px; }
       .processing-operations-colour-swatches {
         display:grid;
         grid-template-columns:repeat(8,1fr);
@@ -604,15 +596,36 @@
     popover.innerHTML = `
       <div class="processing-operations-colour-title">
         <span id="processing_operations_colour_title">Operation colour</span>
-        <button class="processing-operations-colour-reset" type="button">Default</button>
+      </div>
+      <div class="colour-values processing-operations-colour-values">
+        <label>Hex<input id="processing_operations_colour_hex" type="text" maxlength="7" spellcheck="false"></label>
+        <label>R<input id="processing_operations_colour_r" type="number" min="0" max="255" step="1"></label>
+        <label>G<input id="processing_operations_colour_g" type="number" min="0" max="255" step="1"></label>
+        <label>B<input id="processing_operations_colour_b" type="number" min="0" max="255" step="1"></label>
       </div>
       <div class="colour-swatches processing-operations-colour-swatches"></div>`;
     document.body.appendChild(popover);
-    popover.querySelector(".processing-operations-colour-reset")?.addEventListener("click", async event => {
-      event.preventDefault();
-      await apply_operation_colour(processing_view.operations_colour_picker_key, null);
-      close_operations_colour_picker();
+    const hex = by_id("processing_operations_colour_hex");
+    const channels = [
+      by_id("processing_operations_colour_r"),
+      by_id("processing_operations_colour_g"),
+      by_id("processing_operations_colour_b"),
+    ];
+    const apply_typed_colour = async () => {
+      const values = channels.map(input => Number(input?.value));
+      if (values.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return;
+      const colour = rgb_to_hex(values);
+      if (hex) hex.value = colour;
+      await apply_operation_colour(processing_view.operations_colour_picker_key, colour);
+    };
+    hex?.addEventListener("change", async () => {
+      const colour = String(hex.value || "").trim();
+      if (!/^#[0-9a-f]{6}$/i.test(colour)) return;
+      const rgb = hex_to_rgb(colour);
+      channels.forEach((input, index) => { if (input) input.value = String(rgb[index]); });
+      await apply_operation_colour(processing_view.operations_colour_picker_key, colour);
     });
+    channels.forEach(input => input?.addEventListener("change", apply_typed_colour));
     const swatches = popover.querySelector(".processing-operations-colour-swatches");
     for (const colour of operations_colour_palette()) {
       const button = document.createElement("button");
@@ -635,6 +648,18 @@
     const popover = ensure_operations_colour_picker();
     if (!popover || !anchor) return;
     processing_view.operations_colour_picker_key = key;
+    const colour = String(
+      custom_operation_colours[key]
+      || processing_view.operations_colour_defaults[key]
+      || "#8C8C8C"
+    ).toUpperCase();
+    const rgb = hex_to_rgb(colour);
+    const hex = by_id("processing_operations_colour_hex");
+    if (hex) hex.value = colour;
+    ["r", "g", "b"].forEach((channel, index) => {
+      const input = by_id(`processing_operations_colour_${channel}`);
+      if (input) input.value = String(rgb[index]);
+    });
     const title = by_id("processing_operations_colour_title");
     if (title) title.textContent = `${label} colour`;
     popover.hidden = false;
