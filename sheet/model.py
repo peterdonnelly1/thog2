@@ -165,6 +165,9 @@ class SheetGPTConfig:
     # ^^^ THOG
     depth_compress_layer_norm_and_bias: bool = False                                                                                                   # <<< THOG DEPTH-only LayerNorm/bias depth-compression switch
     fast_discard: bool = field(default_factory=lambda: _env_bool("THOG2_FAST_DISCARD", False))
+    # vvv THOG opt-in non-final-microstep relay retains only the final checkpoint replay group's dense matrix values
+    save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step: bool = False
+    # ^^^ THOG
     bypass_semantic_qkv_adapter: bool = field(default_factory=lambda: _env_bool("THOG2_BYPASS_SEMANTIC_QKV_ADAPTER", True))                                       # <<< THOG selectable semantic-QKV adapter bypass
     # direct_thog_mlp_application: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_THOG_MLP_APPLICATION", False))                              # <<< THOG retired old option name; retained for source history
     direct_factorised_mlp: bool = field(default_factory=lambda: _env_bool("THOG2_DIRECT_FACTORISED_MLP", True))                                              # <<< THOG default-on exact direct application of existing THOG MLP factors
@@ -345,6 +348,17 @@ class SheetGPTConfig:
             ):
                 self.premat_headroom_stay_below_current_peak = True
             self.fast_discard = True
+        # ^^^ THOG
+        # vvv THOG the relay is a fast-discard optimisation; retained-update mode already keeps every operational weight
+        if not isinstance(self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step, bool):
+            raise ValueError(
+                "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step must be bool"
+            )
+        if self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step and not self.fast_discard:
+            raise ValueError(
+                "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step "
+                "requires fast_discard=true (PREMAT enables fast_discard automatically)"
+            )
         # ^^^ THOG
         if not isinstance(self.bypass_semantic_qkv_adapter, bool):
             raise ValueError(f"bypass_semantic_qkv_adapter must be bool; got {self.bypass_semantic_qkv_adapter!r}")                                         # <<< THOG validate selectable hot path
@@ -772,7 +786,8 @@ class SheetGPT(nn.Module):
             value_bias = None
             packed_bias = None
             if self.config.bias:
-                packed_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
+                # packed_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)                                                   # <<< THOG preserve pre-relay materialisation
+                packed_bias = self._optional_bias("attention_input_bias", layer_index)                                                                    # <<< THOG route packed bias through the same optional boundary relay hook
                 qk_bias = packed_bias[: 2 * self.config.n_embd]
                 value_bias = packed_bias[2 * self.config.n_embd :]
             self._premat_forensic_main_work_start("QK", layer_index)
@@ -815,12 +830,14 @@ class SheetGPT(nn.Module):
             attention_weight = self._premat_weight("QKV", layer_index)
             attention_bias = None
             if self.config.bias:
-                attention_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)
+                # attention_bias = self.trajectory.materialize_vector("attention_input_bias", layer_index)                                                # <<< THOG preserve pre-relay materialisation
+                attention_bias = self._optional_bias("attention_input_bias", layer_index)                                                                 # <<< THOG allow DEPTH-generated packed bias relay
         else:
             attention_weight = self._premat_weight("QKV", layer_index)
             attention_bias = None
             if self.config.bias:
-                attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)
+                # attention_bias = self.semantic_materializer.reconstructed_attention_input_bias(layer_index)                                             # <<< THOG preserve semantic-adapter source path
+                attention_bias = self._optional_bias("attention_input_bias", layer_index)                                                                 # <<< THOG packed reconstruction is identical and relay-aware
         # ^^^ THOG
         if not use_unfused_attention:
             self._premat_forensic_main_work_start("QKV", layer_index)

@@ -38,6 +38,17 @@ window.addEventListener("load", () => {
       #training_throughput_card > .chart-card-header > .chart-heading-copy { max-width:calc(50% - 24px); }
       #training_throughput_card .plot-mount { width:100%; min-width:0; height:100%; min-height:0; }
       #training_throughput_card .plot-shell { overflow:hidden; }
+      /* vvv THOG Runs/Workspace train charts are one full-width vertical stack, with loss before throughput. */
+      .local-metric-group[data-metric-group="train"] > .local-metric-grid {
+        flex-direction:column !important; flex-wrap:nowrap !important; align-items:stretch !important;
+      }
+      .local-metric-group[data-metric-group="train"] > .local-metric-grid > .chart-card:not(.maximized) {
+        width:100% !important; max-width:none !important; min-width:300px !important; flex:0 0 365px !important;
+      }
+      .local-metric-group[data-metric-group="train"] > .local-metric-grid > .chart-card { order:2; }
+      .local-metric-group[data-metric-group="train"] > .local-metric-grid > .instra-train-loss-card { order:0; }
+      .local-metric-group[data-metric-group="train"] > .local-metric-grid > #training_throughput_card { order:1; }
+      /* ^^^ THOG */
       @media (max-width:1100px) { #training_throughput_card { flex-basis:calc(50% - 10px); } }
       @media (max-width:760px) { #training_throughput_card { flex-basis:100%; } }
       #processing_update_timing_timeline_card > .chart-card-header { min-height:78px !important; height:78px !important; }
@@ -239,6 +250,18 @@ window.addEventListener("load", () => {
       }).catch(() => {});
     }
 
+    // vvv THOG chart discovery is asynchronous, so classify the loss card whenever train data or throughput changes.
+    function layout_train_charts() {
+      const train = document.querySelector('.local-metric-group[data-metric-group="train"]');
+      const grid = train?.querySelector(".local-metric-grid");
+      if (!grid) return;
+      for (const card of grid.querySelectorAll(":scope > .chart-card")) {
+        const identity = `${card.dataset.metricChartId || ""} ${card.querySelector(".chart-heading-copy h2")?.textContent || ""}`.toLowerCase();
+        card.classList.toggle("instra-train-loss-card", /(^|[^a-z])loss([^a-z]|$)/.test(identity));
+      }
+    }
+    // ^^^ THOG
+
     function place_training_throughput() {
       const legacy_group = by_id("training_chart_group");
       const card = by_id("training_throughput_card");
@@ -254,7 +277,26 @@ window.addEventListener("load", () => {
       const count = train.querySelector(".local-metric-group-count");
       if (count) count.textContent = String(grid.querySelectorAll(":scope > .chart-card").length);
       standardize_throughput_plot(by_id("training_throughput_plot"));
+      layout_train_charts();                                                                                                                               // <<< THOG keep loss above the full-width throughput card
     }
+
+    // vvv THOG in Runs view, ordinary training throughput does not make the Processing evidence group available
+    const processing_sync_visibility_before_sep21 = processing_sync_visibility;
+    processing_sync_visibility = function(...args) {
+      const result = processing_sync_visibility_before_sep21.apply(this, args);
+      const group = by_id("processing_chart_group");
+      if (group && app.workspace_mode !== true) {
+        const capture_available = Boolean(
+          processing_view.trace_available
+          || processing_view.resource_available
+          || processing_view.compatibility_available
+          || processing_view.timing_available
+        );
+        group.hidden = !(processing_view.charts_tab_visible && capture_available);
+      }
+      return result;
+    };
+    // ^^^ THOG
 
     function configure_throughput() {
       processing_view.throughput_axis_mode = "step";
@@ -297,6 +339,7 @@ window.addEventListener("load", () => {
       metric_groups.refresh = async function(...args) {
         const result = await refresh_metric_groups_before_sep21.apply(this, args);
         place_training_throughput();
+        layout_train_charts();
         return result;
       };
     }
@@ -475,7 +518,7 @@ window.addEventListener("load", () => {
     window.instra_sep21_repair_test_hooks = Object.freeze({
       light_run_palette, apply_column_visibility, ensure_columns_control, place_training_throughput,
       configure_throughput, configure_host_timeline, apply_compatibility_bar_height, runs_signature,
-      timing_fingerprint,
+      timing_fingerprint, layout_train_charts,
     });
   }, 250);
 });

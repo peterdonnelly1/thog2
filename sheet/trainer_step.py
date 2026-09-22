@@ -864,6 +864,11 @@ class TrainerStepMixin:
         # ^^^ THOG
         microbatch_starts: List[Tuple[int, ...]] = []
         retained_materializations_active = self._begin_optimizer_update_materializations()                                                                  # <<< THOG activate update-lifetime materialisations only for fast_discard=false sheet models
+        # vvv THOG the relay is active only across the A-1 boundaries that cannot contain an optimiser update
+        final_checkpoint_weight_relay_enabled = bool(
+            self.config.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step
+        )
+        # ^^^ THOG
         try:
             for micro_step in range(accumulation_steps):
                 # batch = self.batch_source.get_batch("train", device=self.device)
@@ -920,6 +925,8 @@ class TrainerStepMixin:
                             )
                         else:
                             _, loss = self.model(batch.inputs, batch.targets)
+                        if final_checkpoint_weight_relay_enabled and micro_step > 0:
+                            self.raw_model.finish_final_activation_checkpoint_weight_reuse()
                         local_finite = loss is not None and bool(
                             torch.isfinite(loss).item()
                         )
@@ -948,13 +955,27 @@ class TrainerStepMixin:
                             )
                         scaled_loss = loss / accumulation_steps
                     total_loss += self.distributed.mean_float(loss.detach())
-                    self.scaler.scale(scaled_loss).backward()
+                    # vvv THOG retain the first checkpoint segment only while this non-final microstep's backward replays it
+                    relay_capture_active = False
+                    if final_checkpoint_weight_relay_enabled and micro_step < accumulation_steps - 1:
+                        relay_capture_active = self.raw_model.begin_final_activation_checkpoint_weight_capture()
+                    try:
+                        self.scaler.scale(scaled_loss).backward()
+                    except BaseException:
+                        if relay_capture_active:
+                            self.raw_model.clear_final_activation_checkpoint_weight_relay()
+                        raise
+                    if relay_capture_active:
+                        self.raw_model.finish_final_activation_checkpoint_weight_capture()
+                    # ^^^ THOG
             if retained_materializations_active:
                 self._finalize_optimizer_update_materializations()                                                                                           # <<< THOG project scaled operational gradients before the standard scaler unscale
                 retained_materializations_active = False
         finally:
             if retained_materializations_active:
                 self._end_optimizer_update_materializations()                                                                                                # <<< THOG discard retained tensors on any failed or interrupted update
+            if final_checkpoint_weight_relay_enabled:
+                self.raw_model.clear_final_activation_checkpoint_weight_relay()                                                                              # <<< THOG never retain a dense relay tensor beyond its one deterministic boundary
 
         self.scaler.unscale_(self.optimizer)
         if not self.distributed.all_true(

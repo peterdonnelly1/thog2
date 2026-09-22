@@ -181,6 +181,7 @@ _OPERATIONAL_CONFIG_DESTINATIONS = {
     "attention_backend",
     "activation_checkpointing",
     "checkpoint_segment_size",
+    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step",                                                                       # <<< THOG allow relay selection on lifecycle resume/fork
     "nonfinite_update_policy",
     "max_nonfinite_update_skips",
     "device",
@@ -532,6 +533,7 @@ def _run_config_from_training_config(
         residual_init_depth_value=training_config.residual_init_depth_value,
         activation_checkpointing=training_config.checkpoint_segment_size > 0,
         checkpoint_segment_size=checkpoint_segment_size,
+        save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step=training_config.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step,  # <<< THOG recover relay execution state from direct checkpoints
         learning_rate=training_config.learning_rate,
         min_lr=training_config.min_learning_rate,
         warmup_iters=training_config.warmup_updates,
@@ -1352,6 +1354,7 @@ def _resume_overrides(training_config: TrainingConfig) -> Dict[str, Any]:
         "eval_batches": training_config.eval_batches,
         "checkpoint_interval": training_config.checkpoint_interval,
         "checkpoint_segment_size": training_config.checkpoint_segment_size,
+        "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step": training_config.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step,  # <<< THOG resume with the selected relay execution policy
         "out_dir": training_config.out_dir,
         "log_interval": training_config.log_interval,
         "nonfinite_update_policy": training_config.nonfinite_update_policy,
@@ -1743,4 +1746,3 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 # ^^^ THOG
-

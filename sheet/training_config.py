@@ -70,7 +70,7 @@ ROW_ORDER_SCALING_RULE = "proportional_ceil_v1"
 MODEL_TYPES = ("dense", "thog2_sheet")
 # vvv THOG processing capture is diagnostic execution state, never checkpoint model identity
 # EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic"}
-EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update"}                         # <<< THOG processing capture is diagnostic execution state, never checkpoint model identity
+EXECUTION_OVERRIDE_FIELDS = {"instrumentation__optimizer_histories__full_matrix_every_n_steps", "device", "dtype", "max_updates", "max_wall_minutes", "eval_interval", "eval_batches", "checkpoint_interval", "checkpoint_segment_size", "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "out_dir", "log_interval", "nonfinite_update_policy", "max_nonfinite_update_skips", "premat_enable_gpu_timing_diagnostic", "premat_processing_logging", "premat_processing_logging_capture_frequency_hz", "premat_processing_logging_capture_update"}                         # <<< THOG processing and relay controls are execution state, never checkpoint model identity
 # ^^^ THOG
 # vvv THOG PLASTIC DEPTH fields are omitted from persistent disabled-run metadata to preserve the exact pre-feature identity
 PLASTIC_TRAINING_CONFIG_FIELDS = (
@@ -332,6 +332,7 @@ class TrainingConfig:
     chaos_bump__sampling__max_movement_fraction_of_local_gap: float = 0.10
     # ^^^ THOG
     checkpoint_segment_size: int = 0
+    save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step: bool = False                                                             # <<< THOG default-off A-1 microstep boundary weight relay
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
     # vvv THOG stratified layer-dropout controls; None resolves to the all-active current behaviour
@@ -809,6 +810,35 @@ class TrainingConfig:
             raise ValueError("PLASTIC DEPTH v0.1 may not be combined with layer dropout")
         # ^^^ THOG
         validate_checkpoint_segment_size(self.checkpoint_segment_size)
+        # vvv THOG reject configurations where no checkpoint replay can populate the requested boundary relay
+        if not isinstance(self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step, bool):
+            raise ValueError(
+                "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step must be bool"
+            )
+        if self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step:
+            if self.model_type != "thog2_sheet":
+                raise ValueError(
+                    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires model_type='thog2_sheet'"
+                )
+            if self.hyperblock_enabled:
+                raise ValueError(
+                    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires DEPTH geometry, not HYPERBLOCK"
+                )
+            relay_selectors = resolve_compact_selectors(
+                geometry_preset=self.geometry_preset,
+                attention_geometry=self.attention_geometry,
+                mlp_geometry=self.mlp_geometry,
+                basis_family=self.basis_family,
+            )
+            if relay_selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
+                raise ValueError(
+                    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires geometry_preset='depth'"
+                )
+            if self.checkpoint_segment_size <= 0:
+                raise ValueError(
+                    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires checkpoint_segment_size > 0"
+                )
+        # ^^^ THOG
         if self.n_embd % self.n_head != 0:
             raise ValueError(f"n_embd must be divisible by n_head; got {self.n_embd} and {self.n_head}")
         # vvv THOG legacy geometry orders are inactive when HYPERBLOCK owns every covered matrix axis
@@ -1013,6 +1043,8 @@ class TrainingConfig:
                 values.pop(name, None)
         if not self.premat_retain_detailed_premat_history:
             values.pop("premat_retain_detailed_premat_history", None)
+        if not self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step:
+            values.pop("save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", None)                                             # <<< THOG preserve byte-stable default checkpoint identity
         # vvv THOG default-off diagnostic does not perturb established checkpoint identity
         if not self.premat_enable_gpu_timing_diagnostic:
             values.pop("premat_enable_gpu_timing_diagnostic", None)
@@ -1092,6 +1124,7 @@ class TrainingConfig:
                     "premat_enable_gpu_timing_diagnostic": self.premat_enable_gpu_timing_diagnostic,
                     "premat_logging": self.premat_logging,
                     "premat_instra": self.premat_instra,
+                    "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step": self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step,  # <<< THOG pass execution-only boundary relay into the training model
                     # ^^^ THOG
                 })
                 # vvv THOG disabled PLASTIC DEPTH passes no new model arguments; enabled runs carry the complete Plasticity Engine identity

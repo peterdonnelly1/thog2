@@ -38,6 +38,15 @@ assert.match(repair, /title\.textContent = "tokens throughput"/);
 assert.match(repair, /processing_view\.throughput_axis_mode = "step"/);
 assert.match(repair, /"xaxis\.title\.text":"steps"/);
 assert.match(repair, /"legend\.x":1, "legend\.xanchor":"right"/);
+assert.match(repair, /data-metric-group="train"[\s\S]*flex-direction:column !important/);
+assert.match(repair, /instra-train-loss-card \{ order:0/);
+assert.match(repair, /#training_throughput_card \{ order:1/);
+
+// The Processing group in Runs view requires real capture/timing/resource data;
+// ordinary train throughput alone remains in the train group.
+assert.match(repair, /app\.workspace_mode !== true/);
+assert.match(repair, /processing_view\.trace_available[\s\S]*processing_view\.timing_available/);
+assert.match(repair, /group\.hidden = !\(processing_view\.charts_tab_visible && capture_available\)/);
 
 // 6-8: user-selectable columns, a PREMAT matrix column with fixed character
 // positions, and a modestly enlarged darker trash glyph.

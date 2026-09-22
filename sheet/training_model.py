@@ -14,6 +14,7 @@ from .checkpointing import (
     execute_logical_layers,
     validate_checkpoint_segment_size,
 )
+from .depth_trajectory import DepthTrajectory                                                                                                              # <<< THOG final-checkpoint-group relay uses DEPTH's exact cached-value autograd binder
 from .model import SheetGPT, SheetGPTConfig
 from .plastic_depth_cuda import is_cuda_out_of_memory
 from .plastic_depth_inline import (
@@ -243,6 +244,24 @@ class TrainingSheetGPT(SheetGPT):
 
     def __init__(self, config: SheetGPTConfig) -> None:
         super().__init__(config)
+        # vvv THOG default-off relay owns no dense tensors until a non-final microstep backward reaches the first checkpoint group
+        self._final_checkpoint_weight_relay_enabled = bool(
+            config.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step
+        )
+        if self._final_checkpoint_weight_relay_enabled and not isinstance(self.trajectory, DepthTrajectory):
+            raise ValueError(
+                "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step "
+                "currently requires the DEPTH trajectory"
+            )
+        self._final_checkpoint_weight_relay_phase = "idle"
+        self._final_checkpoint_weight_relay_layers: Tuple[int, ...] = ()
+        self._final_checkpoint_weight_relay_cache: Dict[Tuple[str, int], Tensor] = {}
+        self._final_checkpoint_weight_relay_last_forward_layers: Tuple[int, ...] = ()
+        self._final_checkpoint_weight_relay_captured = 0
+        self._final_checkpoint_weight_relay_reused = 0
+        self._final_checkpoint_weight_relay_discarded = 0
+        self._final_checkpoint_weight_relay_boundaries = 0
+        # ^^^ THOG
         # vvv THOG fast_discard=false retains one operational materialisation per active layer and family for an optimiser update
         self._update_retained_materializations = attach_update_retained_materializations(
             self.trajectory,
@@ -270,6 +289,115 @@ class TrainingSheetGPT(SheetGPT):
 
     def set_checkpoint_segment_size(self, segment_size: int) -> None:
         self.checkpoint_segment_size = validate_checkpoint_segment_size(segment_size)
+
+    # vvv THOG relay cached checkpoint-replay matrices across A-1 deterministic microstep boundaries
+    def _premat_materialize_candidate(self, family: str, layer_index: int) -> Tensor:
+        key = (str(family), int(layer_index))
+        if self._final_checkpoint_weight_relay_phase == "ready":
+            cached = self._final_checkpoint_weight_relay_cache.pop(key, None)
+            if cached is not None:
+                self._final_checkpoint_weight_relay_reused += 1
+                return (
+                    self._premat_attach_candidate(family, layer_index, cached)
+                    if torch.is_grad_enabled()
+                    else cached
+                )
+        generated = super()._premat_materialize_candidate(family, layer_index)
+        if (
+            self._final_checkpoint_weight_relay_phase == "capture"
+            and int(layer_index) in self._final_checkpoint_weight_relay_layers
+        ):
+            self._final_checkpoint_weight_relay_cache[key] = generated.detach()
+        return generated
+
+    def _final_checkpoint_weight_relay_vector(self, name: str, layer_index: int) -> Tensor:
+        # Conventional per-layer vectors are already direct views, so only DEPTH-generated vectors enter the relay.
+        try:
+            metadata = self.trajectory.family_metadata(name)
+            generated_by_depth = self.trajectory._representation(metadata) == "depth_coefficients"
+        except (AttributeError, KeyError):
+            generated_by_depth = False
+        if not generated_by_depth:
+            return self.trajectory.materialize_vector(name, layer_index)
+        key = (f"VECTOR:{name}", int(layer_index))
+        if self._final_checkpoint_weight_relay_phase == "ready":
+            cached = self._final_checkpoint_weight_relay_cache.pop(key, None)
+            if cached is not None:
+                self._final_checkpoint_weight_relay_reused += 1
+                rebound = (
+                    self.trajectory.attach_prematerialized((name,), layer_index, cached)
+                    if torch.is_grad_enabled()
+                    else cached
+                )
+                return rebound[0]
+        generated = self.trajectory.materialize(name, layer_index)
+        if (
+            self._final_checkpoint_weight_relay_phase == "capture"
+            and int(layer_index) in self._final_checkpoint_weight_relay_layers
+        ):
+            self._final_checkpoint_weight_relay_cache[key] = generated.detach()
+        return generated[0]
+
+    def _optional_bias(self, name: str, layer_index: int) -> Optional[Tensor]:
+        if not self.config.bias:
+            return None
+        return self._final_checkpoint_weight_relay_vector(name, layer_index)
+
+    def begin_final_activation_checkpoint_weight_capture(self) -> bool:
+        if not self._final_checkpoint_weight_relay_enabled:
+            return False
+        if self.checkpoint_segment_size <= 0:
+            raise RuntimeError("final activation-checkpoint weight relay requires checkpointing")
+        if self._final_checkpoint_weight_relay_phase != "idle" or self._final_checkpoint_weight_relay_cache:
+            raise RuntimeError("final activation-checkpoint weight relay has stale boundary state")
+        if not self._final_checkpoint_weight_relay_last_forward_layers:
+            raise RuntimeError("final activation-checkpoint weight relay has no completed forward layer sequence")
+        self._final_checkpoint_weight_relay_layers = self._final_checkpoint_weight_relay_last_forward_layers[
+            : self.checkpoint_segment_size
+        ]
+        self._final_checkpoint_weight_relay_phase = "capture"
+        return True
+
+    def finish_final_activation_checkpoint_weight_capture(self) -> int:
+        if self._final_checkpoint_weight_relay_phase != "capture":
+            raise RuntimeError("final activation-checkpoint weight relay is not capturing")
+        captured = len(self._final_checkpoint_weight_relay_cache)
+        self._final_checkpoint_weight_relay_captured += captured
+        self._final_checkpoint_weight_relay_boundaries += 1
+        self._final_checkpoint_weight_relay_layers = ()
+        self._final_checkpoint_weight_relay_phase = "ready" if captured else "idle"
+        return captured
+
+    def finish_final_activation_checkpoint_weight_reuse(self) -> int:
+        if not self._final_checkpoint_weight_relay_enabled:
+            return 0
+        if self._final_checkpoint_weight_relay_phase == "idle":
+            return 0
+        if self._final_checkpoint_weight_relay_phase != "ready":
+            raise RuntimeError("final activation-checkpoint weight relay has no reusable boundary")
+        discarded = len(self._final_checkpoint_weight_relay_cache)
+        self._final_checkpoint_weight_relay_discarded += discarded
+        self._final_checkpoint_weight_relay_cache.clear()
+        self._final_checkpoint_weight_relay_phase = "idle"
+        return discarded
+
+    def clear_final_activation_checkpoint_weight_relay(self) -> None:
+        self._final_checkpoint_weight_relay_discarded += len(self._final_checkpoint_weight_relay_cache)
+        self._final_checkpoint_weight_relay_cache.clear()
+        self._final_checkpoint_weight_relay_layers = ()
+        self._final_checkpoint_weight_relay_phase = "idle"
+
+    def final_activation_checkpoint_weight_relay_report(self) -> Dict[str, object]:
+        return {
+            "enabled": self._final_checkpoint_weight_relay_enabled,
+            "phase": self._final_checkpoint_weight_relay_phase,
+            "cached_count": len(self._final_checkpoint_weight_relay_cache),
+            "captured": self._final_checkpoint_weight_relay_captured,
+            "reused": self._final_checkpoint_weight_relay_reused,
+            "discarded": self._final_checkpoint_weight_relay_discarded,
+            "boundaries": self._final_checkpoint_weight_relay_boundaries,
+        }
+    # ^^^ THOG
 
     # vvv THOG explicit optimiser-update lifetime for non-fast-discard materialisations
     def _optimizer_update_layer_indices(self) -> Tuple[int, ...]:
@@ -434,6 +562,11 @@ class TrainingSheetGPT(SheetGPT):
         # vvv THOG the CUDA event scheduler is intentionally eager-only in v1
         if resolved_mode != "false" and self.config.premat == "enabled":
             raise ValueError("--premat enabled currently requires eager execution; torch.compile is unsupported")
+        if resolved_mode != "false" and self._final_checkpoint_weight_relay_enabled:
+            raise ValueError(
+                "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step "
+                "currently requires eager execution"
+            )
         # ^^^ THOG
         self._torch_compile_mode = resolved_mode
         self._regional_segment_runners.clear()
@@ -457,7 +590,7 @@ class TrainingSheetGPT(SheetGPT):
         with torch.autocast(device_type=inputs.device.type, enabled=False):
             # vvv THOG preserve FP64 in the optimizer-equivalence reference; ordinary execution retains FP32 normalization weights
             normalization_dtype = torch.float64 if inputs.dtype == torch.float64 else torch.float32
-            weight = self.trajectory.materialize_vector(weight_name, layer_index).to(dtype=normalization_dtype)
+            weight = self._final_checkpoint_weight_relay_vector(weight_name, layer_index).to(dtype=normalization_dtype)
             bias = self._optional_bias(bias_name, layer_index)
             if bias is not None:
                 bias = bias.to(dtype=normalization_dtype)
@@ -785,6 +918,7 @@ class TrainingSheetGPT(SheetGPT):
                     f"selected={selected_count}, candidates={plastic_depth_probe_request.candidate_counts}"
                 )
             hidden = checkpoint_by_count[selected_count]
+            self._final_checkpoint_weight_relay_last_forward_layers = tuple(range(selected_count))                                                         # <<< THOG capture the exact selected checkpoint chain for the following backward relay
             local_losses = tuple(float(loss.item()) for _, loss in candidate_losses)
             sampled_count = (
                 int(targets.numel())
@@ -827,6 +961,7 @@ class TrainingSheetGPT(SheetGPT):
                 )
             regional_segment_runner_factory = self._regional_segment_runner if self._torch_compile_mode == "regional" else None
             premat_layer_indices = tuple(range(self.config.n_layer)) if layer_indices is None else layer_indices
+            self._final_checkpoint_weight_relay_last_forward_layers = tuple(premat_layer_indices)                                                         # <<< THOG remember the exact checkpointed layer sequence until this microstep's backward
             # vvv THOG the original checkpointed forward owns one whole-model
             # Premat pass and l+1 lookahead.  Replay reconstructs consumption
             # without a second auxiliary-stream scheduler.

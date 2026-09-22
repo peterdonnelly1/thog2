@@ -380,6 +380,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--processing_logging_capture_update_internal", dest="premat_processing_logging_capture_update", type=int, default=1, help=argparse.SUPPRESS)                    # <<< THOG exact optimizer update for bounded Nsight capture
     # ^^^ THOG
     parser.add_argument("--premat_retain_detailed_premat_history", type=_true_false, default=False, metavar="true|false")
+    parser.add_argument(
+        "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step",
+        action="store_true",
+        default=False,
+        help="retain the final activation-checkpoint replay group's dense matrix values across each non-final accumulation microstep boundary",
+    )                                                                                                                                                     # <<< THOG literal public spelling requested for the default-off relay
     # ^^^ THOG
     parser.add_argument("--depth-compress-layer-norm-and-bias", action=argparse.BooleanOptionalAction, default=False)                                      # <<< THOG DEPTH-only vector participation control
     parser.add_argument("--geometry-preset", choices=GEOMETRY_PRESETS, default=GEOMETRY_PRESET_DEPTH)
@@ -820,6 +826,7 @@ def config_from_arguments(arguments: argparse.Namespace, *, geometry_plan=None) 
         residual_init_depth_value=arguments.residual_init_depth_value,
         activation_checkpointing=arguments.activation_checkpointing,
         checkpoint_segment_size=arguments.checkpoint_segment_size,
+        save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step=arguments.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step,  # <<< THOG carry boundary relay into resolved run configuration
         learning_rate=arguments.learning_rate,
         min_lr=arguments.min_lr,
         warmup_iters=arguments.warmup_iters,
@@ -998,7 +1005,7 @@ def print_model_parameters_and_options(config: OwtRunConfig, trainer: OwtTrainer
         model_config = trainer.raw_model.config
         # vvv THOG preserve the pre-HYPERBLOCK-direct execution row exactly for source history
         # _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
-        _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  direct_factorised_hyperblock_mlp={model_config.direct_factorised_hyperblock_mlp}  activation_checkpointing={config.activation_checkpointing}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
+        _print_model_option("execution:", f"semantic_qkv_bypass={model_config.bypass_semantic_qkv_adapter}  vectorise_per_head={model_config.vectorise_per_head_materialisation}  direct_factorised_mlp={model_config.direct_factorised_mlp}  direct_factorised_hyperblock_mlp={model_config.direct_factorised_hyperblock_mlp}  activation_checkpointing={config.activation_checkpointing}  save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step={model_config.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step}  depth_compress_layer_norm_and_bias={model_config.depth_compress_layer_norm_and_bias}")
         headroom_mode = (
             "stay_within_global_buffer"
             if config.premat_headroom_stay_within_global_buffer

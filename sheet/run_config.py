@@ -279,6 +279,7 @@ class OwtRunConfig:
 
     activation_checkpointing: bool = True
     checkpoint_segment_size: int = 12
+    save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step: bool = False                                                             # <<< THOG default-off A-1 microstep boundary weight relay
 
     learning_rate: float = 6.0e-4
     min_lr: float = 6.0e-5
@@ -839,6 +840,35 @@ class OwtRunConfig:
             raise ValueError("dof_implied_depth residual init is only defined for SHEET")
         if not self.activation_checkpointing and self.checkpoint_segment_size < 1:
             raise ValueError("checkpoint_segment_size must remain positive")
+        # vvv THOG the relay is meaningful only for compact checkpointed training
+        if not isinstance(self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step, bool):
+            raise ValueError(
+                "save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step must be bool"
+            )
+        if self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step:
+            if self.model_type != "sheet":
+                raise ValueError(
+                    "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires --model-type sheet"
+                )
+            if self.hyperblock_enabled:
+                raise ValueError(
+                    "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires DEPTH geometry, not HYPERBLOCK"
+                )
+            relay_selectors = resolve_compact_selectors(
+                geometry_preset=self.geometry_preset,
+                attention_geometry=self.attention_geometry,
+                mlp_geometry=self.mlp_geometry,
+                basis_family=self.basis_family,
+            )
+            if relay_selectors.geometry_preset != GEOMETRY_PRESET_DEPTH:
+                raise ValueError(
+                    "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires --geometry-preset depth"
+                )
+            if not self.activation_checkpointing:
+                raise ValueError(
+                    "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step requires activation checkpointing"
+                )
+        # ^^^ THOG
         if self.learning_rate <= 0.0 or self.min_lr < 0.0:
             raise ValueError("learning rates must be non-negative and maximum must be positive")
         if self.min_lr > self.learning_rate:
@@ -1429,6 +1459,7 @@ class OwtRunConfig:
             residual_init_depth_source=self.residual_init_depth_source,
             residual_init_depth_value=self.residual_init_depth_value,
             checkpoint_segment_size=self.checkpoint_segment_size if self.activation_checkpointing else 0,
+            save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step=self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step,  # <<< THOG propagate boundary relay into shared training config
             batch_size=self.batch_size,
             gradient_accumulation_steps=self.local_gradient_accumulation_steps(world_size),
             # vvv THOG pass complete PLASTIC DEPTH Plasticity Engine identity into the shared trainer
@@ -1545,6 +1576,8 @@ class OwtRunConfig:
                 values.pop(name, None)
         if not self.premat_retain_detailed_premat_history:
             values.pop("premat_retain_detailed_premat_history", None)
+        if not self.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step:
+            values.pop("save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", None)                                             # <<< THOG preserve established run identity while disabled
         # vvv THOG default-off diagnostic does not perturb established run identity
         if not self.premat_enable_gpu_timing_diagnostic:
             values.pop("premat_enable_gpu_timing_diagnostic", None)
