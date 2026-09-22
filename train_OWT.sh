@@ -89,7 +89,10 @@ thog2_normalize_nonplastic_long_option() {
 THOG2_STRICT_LONG_ARGS=()
 while (( $# > 0 )); do
   case "$1" in
-    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*|--premat|--premat_*)
+    # vvv THOG preserve exact underscore spelling for the checkpoint-boundary weight relay
+    # --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*|--premat|--premat_*)
+    --plastic__*|--no-plastic__*|--chaos_bump__sampling__*|--no-chaos_bump__sampling__*|--instrumentation__*|--thogopt__*|--premat|--premat_*|--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step)
+      # ^^^ THOG
       THOG2_STRICT_LONG_ARGS+=("$1")
       shift
       ;;

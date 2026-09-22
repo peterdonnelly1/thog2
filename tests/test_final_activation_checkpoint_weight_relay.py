@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 import torch
@@ -57,6 +58,14 @@ def test_cli_flag_is_default_disabled_and_literal_spelling_enables_it() -> None:
         "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step"
     ])
     assert arguments.save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step is True
+
+
+def test_canonical_wrapper_preserves_literal_underscore_spelling() -> None:
+    wrapper = Path("train_OWT.sh").read_text(encoding="utf-8")
+    assert (
+        "|--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step)"
+        in wrapper
+    )
 
 
 def test_relay_requires_compact_checkpointed_training() -> None:
