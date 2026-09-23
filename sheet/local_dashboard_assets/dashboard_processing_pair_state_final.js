@@ -302,12 +302,16 @@
         return;
       }
       if (!force && processing_view.run_id === run_id && processing_view.revision === response.revision) return;
-      processing_view.run_id = run_id;
-      processing_view.revision = response.revision;
+      // vvv THOG commit the revision only after the charts render successfully, so a failed render retries
       processing_view.companion_enriched_payload = null;
       processing_view.render_request_run_id = run_id;
       processing_view.render_request_epoch = request_epoch;
       await processing_render(response.data, response.trace_available === true);
+      if (request_serial === refresh_serial && request_epoch === navigation_epoch && run_id === String(app.current_run_id || "")) {
+        processing_view.run_id = run_id;
+        processing_view.revision = response.revision;
+      }
+      // ^^^ THOG
     } catch (error) {
       if (
         request_serial === refresh_serial

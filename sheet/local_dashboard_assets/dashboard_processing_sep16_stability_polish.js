@@ -262,7 +262,10 @@
     const mount = by_id("processing_timeline_plot");
     if (!mount || !Array.isArray(mount.data)) return;
     const seen = new Set();
-    const updates = [];
+    // vvv THOG batch legend changes into one Plotly redraw and leave unchanged traces alone
+    const indices = [];
+    const names = [];
+    const visibility = [];
     mount.data.forEach((trace, index) => {
       const name = String(trace.name || "");
       const parts = name.trim().split(/\s+/);
@@ -271,9 +274,13 @@
       const compact = `${owner} ${operation}`.trim();
       const showlegend = !seen.has(compact);
       if (showlegend) seen.add(compact);
-      updates.push(Plotly.restyle(mount, {name:compact, showlegend}, [index]));
+      if (trace.name === compact && trace.showlegend === showlegend) return;
+      indices.push(index);
+      names.push(compact);
+      visibility.push(showlegend);
     });
-    await Promise.all(updates);
+    if (indices.length) await Plotly.restyle(mount, {name:names, showlegend:visibility}, indices);
+    // ^^^ THOG
   };
 
   const processing_render_before_stability_polish = processing_render;

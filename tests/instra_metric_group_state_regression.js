@@ -20,6 +20,12 @@ const app = {
   dynamic_chart_figures: {},
   dynamic_chart_metadata: {},
 };
+// vvv THOG verify background discovery is quiescent and wakes on tab visibility
+let visibility_state = "hidden";
+let metric_timer;
+let visibility_listener;
+let chart_visibility_checks = 0;
+// ^^^ THOG
 const context = {
   console,
   app,
@@ -33,18 +39,26 @@ const context = {
     },
   },
   document: {
+    get visibilityState() { return visibility_state; },
+    addEventListener(name, listener) { if (name === "visibilitychange") visibility_listener = listener; },
     head: {appendChild() {}},
     createElement: () => ({style: {}, textContent: ""}),
     querySelectorAll: () => [],
   },
-  by_id: id => id === "charts_scroll" ? {hidden: true} : null,
+  by_id: id => {
+    if (id === "charts_scroll") {
+      chart_visibility_checks += 1;
+      return {hidden:true};
+    }
+    return null;
+  },
   run_identifier: run => run.local_run_id,
   prepare_figure: figure => JSON.parse(JSON.stringify(figure)),
   load_json: (_key, fallback) => fallback,
   save_json() {},
   select_run(run_id) { app.current_run_id = String(run_id); },
   setTimeout(callback) { callback(); return 1; },
-  setInterval() { return 1; },
+  setInterval(callback) { metric_timer = callback; return 1; },
   clearInterval() {},
 };
 context.window.window = context.window;
@@ -54,6 +68,14 @@ vm.runInContext(source, context, {filename: "dashboard_wandb_groups_patch.js"});
 
 const groups = context.window.__thog2_metric_groups;
 assert.ok(groups, "metric-group controller did not install");
+// vvv THOG background ticks do not inspect chart DOM; returning to the tab checks it immediately
+chart_visibility_checks = 0;
+for (let index = 0; index < 1000; index += 1) metric_timer();
+assert.equal(chart_visibility_checks, 0);
+visibility_state = "visible";
+visibility_listener();
+assert.equal(chart_visibility_checks, 1);
+// ^^^ THOG
 assert.equal(groups.context_key(), "run:R1");
 assert.equal(groups.group_is_collapsed("train"), true);
 assert.equal(groups.group_is_collapsed("system"), true);

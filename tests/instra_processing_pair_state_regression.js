@@ -266,6 +266,29 @@ async function settle() {
   assert.match(startup_all_pairs.fetch_urls[1], /exclude_ncu=ncu_a/,
     "the second startup probe did not preserve the first NCU claim");
 
+  // vvv THOG a transient Plotly failure must not mark an unchanged revision as rendered
+  const retry_after_render_error = make_sandbox({
+    runs,
+    current_run_id:"nsys_a",
+    visible_run_ids:["nsys_a"],
+    processing_responses:{nsys_a:{available:true, trace_available:true, revision:"same-revision", data:{}}},
+  });
+  const expected_warnings = [];
+  retry_after_render_error.console = {...console, warn(...args) { expected_warnings.push(args); }};
+  vm.runInNewContext(pair_source, retry_after_render_error);
+  let render_attempts = 0;
+  retry_after_render_error.processing_render = async function() {
+    render_attempts += 1;
+    if (render_attempts === 1) throw new Error("transient Plotly failure");
+  };
+  await retry_after_render_error.processing_refresh();
+  assert.equal(retry_after_render_error.processing_view.revision, null);
+  assert.equal(expected_warnings.length, 1);
+  await retry_after_render_error.processing_refresh();
+  assert.equal(render_attempts, 2, "unchanged Processing revision was skipped after a render error");
+  assert.equal(retry_after_render_error.processing_view.revision, "same-revision");
+  // ^^^ THOG
+
   const eye_selection = make_sandbox({
     runs,
     processing_responses:{

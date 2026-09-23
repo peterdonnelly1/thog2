@@ -461,6 +461,9 @@ window.addEventListener("load", () => {
 
     const refresh_metric_groups = async () => {
       if (!app.current_run_id || poll_in_flight) return;
+      // vvv THOG pause chart discovery in a hidden tab; catch up as soon as it is visible
+      if (document.visibilityState === "hidden") return;
+      // ^^^ THOG
       if (by_id("charts_scroll")?.hidden) return;
       poll_in_flight = true;
       const requested_run = current_view_key();
@@ -566,6 +569,11 @@ window.addEventListener("load", () => {
     // between ordinary dashboard polls. One-second discovery keeps the pending
     // train group responsive without loading any collapsed chart payloads.
     setInterval(refresh_metric_groups, 1000);
+    // vvv THOG resume chart discovery promptly after background tab quiescence
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refresh_metric_groups();
+    });
+    // ^^^ THOG
     setTimeout(refresh_metric_groups, 50);
   }, 0);
 });
