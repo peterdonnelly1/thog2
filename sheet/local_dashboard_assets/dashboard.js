@@ -248,7 +248,7 @@ function filtered_runs() {
   const filter = by_id("state_filter").value;
   const sort = by_id("run_sort").value;
   const runs = app.runs.filter(run => {
-    const searchable = `${run.artifact_name} ${run.wandb_run_id} ${run.local_run_id} ${run.host_label}`.toLowerCase();
+    const searchable = `${run.artifact_name} ${run.wandb_run_id} ${run.local_run_id} ${run.host_label} ${run.producing_host || ""} ${run.thog_host_id || ""}`.toLowerCase(); // <<< THOG include authoritative host in combined run filtering
     return (!query || searchable.includes(query)) && (filter === "all" || display_run_state(run) === filter);
   });
   runs.sort((left, right) => {
@@ -369,7 +369,17 @@ function append_run_row(body, run) {
   }
   state_cell.appendChild(badge);
   row.appendChild(state_cell);
-  row.appendChild(text_cell(run.host_label || "—"));
+  // vvv THOG show producing host and age when a remote acquisition is stale
+  const host_cell = text_cell(run.producing_host || run.host_label || "—");
+  if (run.remote_copy && run.acquisition_state !== "current") {
+    const stale = document.createElement("small");
+    stale.className = "stale-warning";
+    stale.textContent = " · stale";
+    stale.title = run.acquired_at ? `Last acquired ${new Date(run.acquired_at).toLocaleString()}` : "Remote data unavailable";
+    host_cell.appendChild(stale);
+  }
+  row.appendChild(host_cell);
+  // ^^^ THOG
   row.appendChild(text_cell(format_integer(run.heatmap_minimum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.heatmap_maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.depth_minimum_update), "numeric-column"));
@@ -425,7 +435,7 @@ function render_runs() {
   }
   let previous_group = null;
   for (const run of page_runs) {
-    const group = run.host_label || "Unlabelled host";
+    const group = run.producing_host || run.host_label || "Unlabelled host";                                                                                  // <<< THOG group by Network's producing host
     if (app.group_by_host && group !== previous_group) {
       const group_row = document.createElement("tr");
       group_row.className = "group-row";
@@ -1260,7 +1270,8 @@ function render_run_heading() {
   const values = [
     {text: run.wandb_run_id ? `W&B ID ${run.wandb_run_id}` : `Local ID ${run.local_run_id}`, class_name: "identity"},
     {text: format_run_state(display_run_state(run))},
-    {text: run.host_label ? `host ${run.host_label}` : ""},
+    {text: run.producing_host ? `host ${run.producing_host}` : (run.host_label ? `host ${run.host_label}` : "")},                              // <<< THOG identify producing host rather than a W&B label
+    {text: run.remote_copy && run.acquisition_state !== "current" ? `stale · last acquired ${run.acquired_at ? new Date(run.acquired_at).toLocaleString() : "never"}` : "", class_name: "stale-warning"}, // <<< THOG distinguish stale acquired copies
     {text: `${format_integer(run.heatmap_count)} probes`},
     {text: `${format_integer(run.depth_snapshot_count)} curves`},
     {text: `latest step ${format_integer(run.maximum_update)}`},
@@ -1838,6 +1849,7 @@ async function copy_text(value, description) {
 async function delete_menu_run() {
   const run = run_for_id(app.menu_run_id);
   if (!run) return;
+  if (run.remote_copy) { close_run_menu(); show_toast("Acquired remote runs cannot be deleted here."); return; }                                     // <<< THOG prevent ambiguous deletion of disposable acquired data
   const run_id = run_identifier(run);
   const state = display_run_state(run);
   const active_warning = is_active_run_state(run.run_state) && state !== "timed_out"

@@ -472,7 +472,7 @@ def test_premat_view_has_all_layer_playback_controls_complete_key_and_inspector(
     assert "Admission history" in index
     assert "Queue / charged" in index
     assert "PREMAT_PREMATERIALISING_DURATION_MULTIPLIER = 1.5" in javascript
-    assert "<dialog" not in index
+    assert '<dialog id="premat_' not in index                                                                                                                  # <<< THOG Network owns an independent host dialog; PREMAT still has no dialog
     assert 'id="premat_recap_view"' in index
     assert "history=1" in javascript
     assert "link.download =" in javascript
@@ -523,4 +523,3 @@ def test_premat_aggregate_persists_without_detailed_snapshot(tmp_path: Path) -> 
     finally:
         store.close(final_state="finished")
 # ^^^ THOG
-

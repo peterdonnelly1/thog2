@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from pathlib import PurePosixPath
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -92,11 +93,13 @@ def _event(operation, host_id, category, message):
         fcntl.flock(output, fcntl.LOCK_UN)
 
 
-def log_event(source, operation, host_id, category, message):
+def log_event(source, operation, host_id, category, message, duration_seconds=None):
     if source not in {"Monitoring", "Runner", "Network"}:
         raise ValueError("invalid log source")
     record = {"time": _now(), "source": source, "operation": operation, "thog_host_id": host_id,
               "outcome": category, "message": str(message)[:300]}
+    if duration_seconds is not None:
+        record["duration_seconds"] = round(float(duration_seconds), 3)
     STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     with LOG_PATH.open("a") as output:
         fcntl.flock(output, fcntl.LOCK_EX)
@@ -459,6 +462,81 @@ class NetworkService:
         finally:
             temporary.unlink(missing_ok=True)
 
+    # vvv THOG expose root-scoped SSH listing and pull-only transfer to Monitoring; discovery and credentials remain owned by Network
+    def _monitor_source(self, host_id, root_kind, relative_path=""):
+        host = self._host(host_id)
+        if host.get("local") or not host.get("monitoring_enabled"):
+            raise NetworkError("validation", "Remote monitoring is not enabled for this host", host_id)
+        discovery = host.get("last_discovered") or {}
+        root_key = {"logs": "instra_logs_root", "wandb": "wandb_root"}.get(root_kind)
+        root = discovery.get(root_key) if root_key else None
+        if not isinstance(root, str) or not root.startswith("/") or any(character in root for character in "\0\r\n"):
+            raise NetworkError("validation", "Monitoring source root is unavailable", host_id)
+        if relative_path:
+            if (not isinstance(relative_path, str) or relative_path.startswith("/") or "\\" in relative_path
+                    or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
+                raise NetworkError("validation", "Invalid monitoring source path", host_id)
+        if not _is_known(host):
+            raise NetworkError("host key", "Host key is not accepted", host_id)
+        return host, str(PurePosixPath(root) / relative_path)
+
+    def monitor_files(self, host_id, root_kind, relative_directory=""):
+        """List readable regular files without following links or requiring a running node agent."""
+        host, source = self._monitor_source(host_id, root_kind, relative_directory)
+        remote_command = "find " + shlex.quote(source) + " -type d ! -readable -prune -o -type f -readable -printf '%P\\0%s\\0%T@\\0'"
+        command = ["ssh", "-p", str(host["ssh_port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                   "-o", "StrictHostKeyChecking=yes", "-o",
+                   f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
+                   "--", _ssh_target(host), remote_command]
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise NetworkError(_SSH_ERROR, "Monitoring source listing failed", host_id) from error
+        if result.returncode:
+            raise NetworkError(_SSH_ERROR, "Monitoring source unavailable or SSH authentication failed", host_id)
+        fields = result.stdout.split(b"\0")
+        if fields[-1:] == [b""]:
+            fields.pop()
+        if len(fields) % 3 or len(fields) > 150000:
+            raise NetworkError("operation", "Invalid or excessive monitoring source listing", host_id)
+        return [(os.fsdecode(fields[index]), int(fields[index + 1]), float(fields[index + 2]))
+                for index in range(0, len(fields), 3)]
+
+    def monitor_transfer(self, host_id, root_kind, relative_path, destination, *, database=False):
+        """Pull one file using rsync or SQLite's live-database protocol, never writing to the producer."""
+        host, source = self._monitor_source(host_id, root_kind, relative_path)
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        ssh_options = ["ssh", "-p", str(host["ssh_port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+                       "-o", "StrictHostKeyChecking=yes", "-o",
+                       f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}"]
+        ssh_wrapper = None
+        try:
+            if database:
+                if not shutil.which("sqlite3_rsync"):
+                    raise NetworkError("dependency", "sqlite3_rsync is required on both thog_hosts", host_id)
+                with tempfile.NamedTemporaryFile(mode="w", prefix="instra-sqlite-ssh-", delete=False) as output:
+                    ssh_wrapper = Path(output.name)
+                    output.write("#!/bin/sh\nexec " + " ".join(shlex.quote(option) for option in ssh_options) + ' "$@"\n')
+                ssh_wrapper.chmod(0o700)
+                command = ["sqlite3_rsync", "--ssh", str(ssh_wrapper), f"{_ssh_target(host)}:{source}", str(destination)]
+            else:
+                if not shutil.which("rsync"):
+                    raise NetworkError("dependency", "rsync is required on both thog_hosts", host_id)
+                command = ["rsync", "--protect-args", "--no-links", "--no-owner", "--no-group", "--no-perms",
+                           "--timeout=90", "-e", " ".join(shlex.quote(option) for option in ssh_options),
+                           "--", f"{_ssh_target(host)}:{source}", str(destination)]
+            result = subprocess.run(command, capture_output=True, timeout=180)
+            if result.returncode:
+                raise NetworkError("transfer", f"{'sqlite3_rsync' if database else 'rsync'} acquisition failed", host_id)
+            return destination
+        except (OSError, subprocess.SubprocessError) as error:
+            raise NetworkError("transfer", "Monitoring transfer failed or timed out", host_id) from error
+        finally:
+            if ssh_wrapper is not None:
+                ssh_wrapper.unlink(missing_ok=True)
+    # ^^^ THOG
+
     def _execute(self, action, host_id, **args):
         if action == "update":
             return self.update_host(host_id, **args)
@@ -541,13 +619,14 @@ class NetworkService:
             self._record(host_id, last_contact=_now())
             _event(action, host_id, "success", "Node operation completed")
             return result
-        if action == "monitor_refresh":
+        if action in {"monitor_refresh", "monitor_settings"}:
             host = self._host(host_id)
             if not host["monitoring_enabled"] or not host.get("last_discovered"):
                 raise NetworkError("validation", "Monitoring is not enabled or discovery is incomplete")
             if self.monitoring_provider is None:
                 raise NetworkError("operation", "Monitoring acquisition is not installed yet")
-            return self.monitoring_provider(host_id, host["last_discovered"])
+            return self.monitoring_provider(host_id, host["last_discovered"],
+                                            refresh_interval=args.get("refresh_interval") if action == "monitor_settings" else None)
         raise NetworkError("validation", "Unknown Network action")
 
     def _validated_host(self, args):

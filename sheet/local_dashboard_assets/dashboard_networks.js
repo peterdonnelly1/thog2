@@ -152,6 +152,15 @@
       pair(data, "Refresh interval", status.refresh_interval ?? "—"); pair(data, "Acquisition", status.activity ?? "—");
       pair(data, "Last acquisition", date_text(status.last_success)); pair(data, "Data age", age_text(status.last_success));
       pair(data, "Latest acquisition failure", status.latest_error || "—");
+      // vvv THOG configure each monitoring instance's background check interval in existing host details
+      const interval_label = append(detail, "label", "Check interval (seconds) ");
+      const interval_input = append(interval_label, "input");
+      interval_input.type = "number"; interval_input.min = "2"; interval_input.max = "300"; interval_input.step = "1";
+      interval_input.value = String(status.refresh_interval || 5);
+      interval_input.disabled = !host.monitoring_enabled;
+      interval_input.addEventListener("change", () => run_action("monitor_settings", host.thog_host_id,
+        {refresh_interval:Number(interval_input.value)}).catch(() => { interval_input.value = String(status.refresh_interval || 5); }));
+      // ^^^ THOG
       button(detail, "Refresh run data", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
     } else if (selected_tab === "profiles") {
       const profiles = discovery.execution_profiles || [];

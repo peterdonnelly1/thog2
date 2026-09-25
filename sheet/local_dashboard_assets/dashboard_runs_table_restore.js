@@ -74,6 +74,7 @@ window.addEventListener("load", () => {
       return value === null ? "—" : String(Math.round(value / 1_000_000));
     };
     const gpu_value = run => {
+      if (run?.gpu_assignment) return run.gpu_assignment.status === "verified" ? run.gpu_assignment.ordinal : "?";                             // <<< THOG never display a guessed GPU as verified
       const explicit = configured_value(run, "gpu_index");
       if (explicit !== null) return explicit;
       const source = [
@@ -224,7 +225,9 @@ window.addEventListener("load", () => {
         const raw = definition.value(run);
         const shown = definition.key === "activation_checkpointing" ? raw : display_value(raw);
         cell.textContent = shown;
-        cell.title = `${definition.title}: ${shown}`;
+        cell.title = key === "gpu" && run?.gpu_assignment
+          ? `${run.gpu_assignment.status}: recorded GPU ${run.gpu_assignment.recorded_ordinal ?? run.gpu_assignment.ordinal ?? "unknown"}; ${run.gpu_assignment.model || "model unknown"} ${run.gpu_assignment.uuid || ""}`
+          : `${definition.title}: ${shown}`;                                                                                                                 // <<< THOG expose verified GPU model and stable UUID
         tag(cell, key);
         if (key === "preset") {
           cell.classList.toggle("instra-dense-preset", String(shown).trim().toLowerCase() === "dense");

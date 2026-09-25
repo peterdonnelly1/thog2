@@ -247,14 +247,14 @@
   function update_file_delete_button() {
     const button = by_id("delete_selected_files");
     if (!button) return;
-    button.disabled = app.file_source !== "instra" || selected_local_files.size === 0;
+    button.disabled = app.file_source !== "instra" || current_run()?.remote_copy || selected_local_files.size === 0;                                      // <<< THOG acquired files are viewable but cannot be deleted
     button.title = selected_local_files.size
       ? `Delete ${selected_local_files.size} selected file${selected_local_files.size === 1 ? "" : "s"} from its real run-directory location`
       : "Select local files with the checkboxes to delete them";
     const select_all = by_id("select_all_local_files");
     const boxes = [...document.querySelectorAll("#files_body .file-select-box")];
     if (select_all) {
-      select_all.disabled = app.file_source !== "instra" || boxes.length === 0;
+      select_all.disabled = app.file_source !== "instra" || current_run()?.remote_copy || boxes.length === 0;                                             // <<< THOG disable file deletion selection on acquired runs
       select_all.checked = boxes.length > 0 && boxes.every(box => box.checked);
       select_all.indeterminate = boxes.some(box => box.checked) && !select_all.checked;
     }
@@ -292,7 +292,7 @@
       button.setAttribute("aria-label", "Delete selected local files");
       button.addEventListener("click", async () => {
         const paths = [...selected_local_files];
-        if (!paths.length || !window.confirm(`Delete ${paths.length} selected file${paths.length === 1 ? "" : "s"} from disk?`)) return;
+        if (!paths.length || current_run()?.remote_copy || !window.confirm(`Delete ${paths.length} selected file${paths.length === 1 ? "" : "s"} from disk?`)) return; // <<< THOG guard stale selection after run switching
         const failures = [];
         for (const path of paths) {
           const query = new URLSearchParams({run:app.current_run_id, path});
@@ -317,7 +317,7 @@
   append_file_row = function(body, entry) {
     append_file_row_before_sep20(body, entry);
     const row = body.lastElementChild;
-    if (!row || app.file_source !== "instra" || entry.kind !== "file") return;
+    if (!row || app.file_source !== "instra" || current_run()?.remote_copy || entry.kind !== "file") return;                                            // <<< THOG remote files have no destructive checkbox
     row.dataset.filePath = entry.path;
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";

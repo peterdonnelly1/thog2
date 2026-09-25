@@ -572,15 +572,16 @@ class _ScannerCatalog:
         self.scanners: Dict[Path, _WandbRunScanner] = {}
 
     def _find_path(self, run_id: str, status: Optional[dict[str, Any]] = None) -> Optional[Path]:
-        cached = self.paths.get(run_id)
+        status = status or {}
+        cache_key = str(status.get("dashboard_run_id") or run_id) if status.get("remote_copy") else run_id                                            # <<< THOG remote producers may reuse a W&B ID
+        cached = self.paths.get(cache_key)
         if cached is not None and cached.exists():
             return cached
-        if run_id in self.paths and self.paths[run_id] is None:
+        if cache_key in self.paths and self.paths[cache_key] is None:
             # Recheck missing live runs; W&B may create the file after the dashboard starts.
             pass
 
         candidates = []
-        status = status or {}
         recorded_directory = status.get("wandb_run_directory")
         if recorded_directory:
             directory = Path(recorded_directory)
@@ -588,8 +589,11 @@ class _ScannerCatalog:
             for parent in (directory, directory.parent):
                 recorded_path = parent / f"run-{run_id}.wandb"
                 if recorded_path.is_file():
-                    self.paths[run_id] = recorded_path.resolve()
-                    return self.paths[run_id]
+                    self.paths[cache_key] = recorded_path.resolve()
+                    return self.paths[cache_key]
+        if status.get("remote_copy"):
+            self.paths[cache_key] = None                                                                                                                       # <<< THOG a missing acquired copy must not resolve to another producer's local W&B data
+            return None
         project_root = Path(self.catalog.root).resolve().parent
         roots = [Path.cwd() / "wandb", Path.cwd(), project_root / "wandb"]
         configured_root = (status.get("configuration") or {}).get("wandb_root")
@@ -612,7 +616,7 @@ class _ScannerCatalog:
                 candidates.extend(path for path in resolved.glob(f"**/run-{run_id}.wandb") if path.is_file())
         unique = {path.resolve(): path.resolve() for path in candidates}
         chosen = max(unique.values(), key=lambda path: path.stat().st_mtime, default=None)
-        self.paths[run_id] = chosen
+        self.paths[cache_key] = chosen
         return chosen
 
     def scanner_for(self, state: Any) -> Optional[_WandbRunScanner]:

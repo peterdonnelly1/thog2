@@ -1222,6 +1222,7 @@ _base._handler_for = _handler_for_with_file_delete
 
 # vvv THOG install local Networks APIs through the established dashboard handler factory
 import instra_network as _instra_network
+import instra_monitoring as _instra_monitoring                                                                                                               # <<< THOG install remote acquisition with the established Network service
 
 _network_service = None
 _handler_for_before_network = _base._handler_for
@@ -1241,7 +1242,7 @@ def _network_do_post(self):
         host_id = payload.get("host_id")
         arguments = payload.get("args", {})
         allowed = {"prepare_host", "add", "discover", "update", "settings", "designate_master", "release_master",
-                   "remove", "start_instra", "restart_instra", "state", "monitor_refresh"}
+                   "remove", "start_instra", "restart_instra", "state", "monitor_refresh", "monitor_settings"}
         if action not in allowed or not isinstance(arguments, dict):
             raise ValueError("Unknown Networks action")
         # A password enters this one request only; the job discards it on completion.
@@ -1259,6 +1260,16 @@ def _handler_for_with_network(catalog):
         from urllib.parse import parse_qs, urlparse
 
         parsed = urlparse(self.path)
+        if parsed.path == "/api/remote-wandb-file":                                                                                                       # <<< THOG serve only acquired W&B run files through the existing local HTTP backend
+            query = parse_qs(parsed.query)
+            try:
+                file_path = catalog.remote_wandb_path(query.get("run", [""])[0], query.get("path", [""])[0])
+                if not file_path.is_file():
+                    raise FileNotFoundError("Acquired W&B file unavailable")
+                self._send_file(file_path, download=query.get("download", ["0"])[0] == "1")
+            except (OSError, KeyError, ValueError, PermissionError) as error:
+                self._send_json({"error": str(error)}, status=_base.HTTPStatus.NOT_FOUND)
+            return
         if not parsed.path.startswith("/api/network"):
             original_get(self)
             return
@@ -1359,9 +1370,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     global _network_service
     arguments = _base.build_parser().parse_args(argv)
     _network_service = _instra_network.NetworkService(logs_root=arguments.root)
+    _instra_monitoring.install(_base, _network_service)                                                                                                      # <<< THOG add remote copies to the local catalogue before the HTTP server is created
     try:
         return _base.main(argv)
     finally:
+        if _instra_monitoring._active_service is not None:                                                                                                   # <<< THOG finish acquisition before closing Network
+            _instra_monitoring._active_service.close()
         _network_service.close()
 
 

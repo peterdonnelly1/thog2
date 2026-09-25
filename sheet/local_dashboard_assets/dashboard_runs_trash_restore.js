@@ -77,7 +77,7 @@
   queueMicrotask(emit_catalog_ready_once);
 
   function selected_existing_runs() {
-    const ids = new Set((app.runs || []).map(run => String(run_identifier(run))));
+    const ids = new Set((app.runs || []).filter(run => !run.remote_copy).map(run => String(run_identifier(run))));                              // <<< THOG exclude acquired runs from bulk destructive actions
     return [...(app.selected || new Set())].filter(run_id => ids.has(String(run_id)));
   }
 
