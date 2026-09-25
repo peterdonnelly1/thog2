@@ -246,13 +246,15 @@ def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None
         response = json.loads(result.stdout)
     except ValueError:
         stderr = result.stderr.lower()
-        if "permission denied" in stderr or "authentication" in stderr:
-            raise NetworkError("authentication", "SSH authentication failed")
+        # vvv THOG verbose SSH can report "Authentication succeeded" before an unavailable node agent; only explicit denial means bad credentials
         if "host key verification" in stderr or "remote host identification has changed" in stderr:
-            raise NetworkError("host key", "SSH host identity verification failed")
+            raise NetworkError("host key", "SSH host identity verification failed", host["thog_host_id"])
+        if "permission denied" in stderr or "authentication failed" in stderr:
+            raise NetworkError("authentication", "SSH authentication failed", host["thog_host_id"])
+        # ^^^ THOG
         if result.returncode == 255:
-            raise NetworkError(_SSH_ERROR, "SSH connection failed")
-        raise NetworkError("agent availability", "Node agent unavailable on this host")
+            raise NetworkError(_SSH_ERROR, "SSH connection failed", host["thog_host_id"])
+        raise NetworkError("agent availability", "Node agent unavailable on this host", host["thog_host_id"])
     if not response.get("ok"):
         category = response.get("category")
         if category not in {"agent availability", "operation"}:

@@ -53,6 +53,41 @@
       return job.result;
     }
   }
+  // vvv THOG keep one-attempt SSH passwords masked unless the user explicitly shows them
+  function request_password(host) {
+    const dialog = element("network_auth_dialog");
+    const form = element("network_auth_form");
+    const input = element("network_auth_password");
+    const cancel = element("network_auth_cancel");
+    element("network_auth_message").textContent = `SSH key or certificate authentication failed for ${host?.ssh_user || "your SSH user"}@${host?.address || "this host"}. Check that Instra can use your existing SSH credential. A password is optional and is sent for this attempt only.`;
+    input.value = "";
+    input.type = "password";
+    element("network_auth_eye").setAttribute("aria-label", "Show password");
+    element("network_auth_eye").setAttribute("aria-pressed", "false");
+    return new Promise(resolve => {
+      const finish = value => {
+        form.onsubmit = null; cancel.onclick = null; dialog.oncancel = null;
+        if (dialog.open) dialog.close();
+        input.value = ""; input.type = "password";
+        resolve(value);
+      };
+      form.onsubmit = event => { event.preventDefault(); finish(input.value || null); };
+      cancel.onclick = () => finish(null);
+      dialog.oncancel = event => { event.preventDefault(); finish(null); };
+      dialog.showModal();
+      input.focus();
+    });
+  }
+  function toggle_password(input, control) {
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    control.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    control.setAttribute("aria-pressed", String(visible));
+  }
+  element("network_auth_eye").addEventListener("click", () => toggle_password(element("network_auth_password"), element("network_auth_eye")));
+  element("network_password_eye").addEventListener("click", () => toggle_password(form_password(), element("network_password_eye")));
+  function form_password() { return element("network_add_form").elements.password; }
+  // ^^^ THOG
   async function run_action(name, host_id, args = {}) {
     message(`${name.replaceAll("_", " ")}…`);
     try {
@@ -67,7 +102,7 @@
       const supplied = multi_host_action ? args.passwords?.[auth_host_id] : args.password;
       if (error.category === "authentication" && auth_host_id && !supplied) {
         const host = snapshot?.hosts.find(item => item.thog_host_id === auth_host_id);
-        const password = window.prompt(`SSH password for ${host?.address || auth_host_id} (this attempt only):`);
+        const password = await request_password(host);
         if (password) {
           const retry_args = multi_host_action ? {...args, passwords:{...args.passwords, [auth_host_id]:password}} : {...args, password};
           return run_action(name, host_id, retry_args);
@@ -92,11 +127,24 @@
     element("network_restart_mode").value = snapshot.restart_mode;
     if (document.activeElement !== element("network_retry_interval")) element("network_retry_interval").value = snapshot.retry_interval;
     for (const host of snapshot.hosts) {
-      const row = button(list, "", () => { selected_id = host.thog_host_id; render(); });
-      row.className = `network-host-row${host.thog_host_id === selected_id ? " active" : ""}`;
-      append(row, "strong", `${host.display_name}${snapshot.master_id === host.thog_host_id ? " · Runner Master" : ""}`);
-      append(row, "span", host.thog_host_id);
-      append(row, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`);
+      // vvv THOG place removal beside its host; selection and deletion are separate buttons
+      const row = append(list, "div", undefined, `network-host-row${host.thog_host_id === selected_id ? " active" : ""}`);
+      const select = button(row, "", () => { selected_id = host.thog_host_id; render(); });
+      select.className = "network-host-select";
+      append(select, "strong", `${host.display_name}${snapshot.master_id === host.thog_host_id ? " · Runner Master" : ""}`);
+      append(select, "span", host.thog_host_id);
+      append(select, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`);
+      if (!host.local) {
+        const remove_button = button(row, "Remove", () => {
+          if (confirm(`Remove ${host.display_name} from Instra configuration? Runs and files are retained.`)) {
+            run_action("remove", host.thog_host_id).catch(() => {});
+          }
+        }, Boolean(snapshot.master_id));
+        remove_button.className = "network-host-remove";
+        remove_button.setAttribute("aria-label", `Remove ${host.display_name}`);
+        remove_button.title = snapshot.master_id ? "Release Runner Master before removing a participating host" : `Remove ${host.display_name}`;
+      }
+      // ^^^ THOG
     }
     const host = snapshot.hosts.find(item => item.thog_host_id === selected_id);
     if (host) render_detail(host);
@@ -107,6 +155,11 @@
     detail.replaceChildren();
     element("network_host_title").textContent = host.display_name;
     element("network_host_state").textContent = host.state;
+    // vvv THOG expose host discovery above all detail tabs, including Monitoring
+    const host_actions = element("network_host_actions");
+    host_actions.replaceChildren();
+    button(host_actions, "Refresh discovery", () => run_action("discover", host.thog_host_id).catch(() => {}));
+    // ^^^ THOG
     for (const tab of element("network_tabs").querySelectorAll("button")) tab.classList.toggle("active", tab.dataset.networkTab === selected_tab);
     const stale = host.state !== "available" ? " (stale)" : "";
     if (selected_tab === "overview") {
@@ -131,7 +184,6 @@
         append(wrapper, "span", ` ${label}`);
       }
       const actions = append(detail, "div", undefined, "actions");
-      button(actions, "Refresh discovery", () => run_action("discover", host.thog_host_id).catch(() => {}));
       button(actions, "Start Instra", () => run_action("start_instra", host.thog_host_id).catch(() => {}));
       button(actions, "Restart Instra", () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
       if (snapshot.master_id === host.thog_host_id) {
@@ -140,9 +192,6 @@
       } else if (host.local && !snapshot.master_id) {
         button(actions, "Designate Runner Master", () => run_action("designate_master", host.thog_host_id).catch(() => {}));
       }
-      if (!host.local) button(actions, "Remove", () => {
-        if (confirm(`Remove ${host.display_name} from Instra configuration? Runs and files are retained.`)) run_action("remove", host.thog_host_id).catch(() => {});
-      });
     } else if (selected_tab === "monitoring") {
       const data = append(detail, "dl");
       pair(data, "Monitoring", host.monitoring_enabled ? "Enabled" : "Disabled");
@@ -214,6 +263,9 @@
   const form = element("network_add_form");
   element("network_add_button").addEventListener("click", () => {
     form.reset(); pending_fingerprint = null;
+    form_password().type = "password";
+    element("network_password_eye").setAttribute("aria-label", "Show password");
+    element("network_password_eye").setAttribute("aria-pressed", "false");
     element("network_password_label").hidden = true;
     element("network_fingerprint").hidden = true;
     element("network_add_error").textContent = "";

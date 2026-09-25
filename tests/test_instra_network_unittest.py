@@ -266,6 +266,28 @@ class NetworkTests(unittest.TestCase):
                 network._ssh_request(host, "discover", {})
         self.assertEqual(failure.exception.category, "agent availability")
 
+    # vvv THOG successful certificate login followed by a missing agent must never prompt for a password
+    def test_successful_ssh_authentication_does_not_mask_missing_agent(self):
+        host = self.service._new_host("dreedle", "peter", 22)
+        stderr = ("debug1: Authentications that can continue: publickey\n"
+                  "debug1: Authentication succeeded (publickey).\n"
+                  "sh: ~/.local/state/instra/agent-request: No such file or directory\n")
+        response = SimpleNamespace(stdout="", stderr=stderr, returncode=127)
+        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response):
+            with self.assertRaises(network.NetworkError) as failure:
+                network._ssh_request(host, "discover", {})
+        self.assertEqual(failure.exception.category, "agent availability")
+        self.assertIn("agent", str(failure.exception).lower())
+        self.assertEqual(failure.exception.host_id, host["thog_host_id"])
+
+        denied = SimpleNamespace(stdout="", stderr="Permission denied (publickey,password).", returncode=255)
+        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=denied):
+            with self.assertRaises(network.NetworkError) as failure:
+                network._ssh_request(host, "discover", {})
+        self.assertEqual(failure.exception.category, "authentication")
+        self.assertEqual(failure.exception.host_id, host["thog_host_id"])
+    # ^^^ THOG
+
     def test_remote_agent_command_uses_installed_entry_not_checkout_path(self):
         host = self.service._new_host("dreedle", "peter", 22)
         response = SimpleNamespace(stdout='{"ok":true,"result":{}}', stderr="", returncode=0)

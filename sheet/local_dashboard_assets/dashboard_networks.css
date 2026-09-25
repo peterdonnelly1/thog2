@@ -4,6 +4,11 @@
 .network-list-pane,.network-detail-pane { display:flex; flex-direction:column; min-width:0; min-height:0; background:white; }
 .network-list-pane { border-right:1px solid var(--border); }
 .network-list-pane header,.network-detail-pane header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:16px; border-bottom:1px solid var(--border); }
+/* vvv THOG show discovery and removal without scrolling through the Overview tab */
+.network-detail-pane header { flex-wrap:wrap; }
+.network-host-heading { display:grid; gap:3px; min-width:0; }
+.network-host-actions { display:flex; flex-wrap:wrap; gap:8px; }
+/* ^^^ THOG */
 .network-view h1 { margin:0; font-size:17px; }
 .network-view h2 { margin:0 0 14px; font-size:15px; }
 .network-view h3 { margin:0 0 8px; font-size:13px; }
@@ -11,9 +16,12 @@
 .network-view button:hover,.network-add-dialog button:hover { background:#eef5f8; }
 .network-view button:disabled { opacity:.5; cursor:default; }
 .network-host-list { flex:1; overflow:auto; }
-.network-host-row { display:block; width:100%; text-align:left; border:0 !important; border-radius:0 !important; padding:13px 16px !important; border-bottom:1px solid #e7e9ed !important; }
+.network-host-row { display:flex; align-items:center; width:100%; border-bottom:1px solid #e7e9ed; }
 .network-host-row.active { background:#e5f5f8; border-left:3px solid #008da9 !important; }
-.network-host-row strong,.network-host-row span { display:block; margin-bottom:4px; }
+.network-host-select { flex:1; min-width:0; text-align:left; border:0 !important; border-radius:0 !important; padding:13px 16px !important; background:transparent !important; }
+.network-host-select strong,.network-host-select span,.network-host-select small { display:block; overflow-wrap:anywhere; }
+.network-host-select strong,.network-host-select span { margin-bottom:4px; }
+.network-host-remove { flex:none; margin-right:12px; }
 .network-host-row small,.network-muted { color:#68717d; }
 .network-list-footer { padding:12px; border-top:1px solid var(--border); display:grid; gap:9px; }
 .network-list-footer label,.network-add-dialog label { display:grid; gap:5px; }
@@ -36,6 +44,11 @@
 .network-add-dialog::backdrop { background:#20212470; }
 .network-add-dialog form { display:grid; gap:14px; }
 .network-add-dialog input { width:100%; min-height:32px; padding:5px; }
+/* vvv THOG align the password visibility control beside masked SSH inputs */
+.network-password-field { display:flex; gap:6px; align-items:center; }
+.network-password-field input { flex:1; min-width:0; }
+.network-password-field button { flex:none; min-width:38px; }
+/* ^^^ THOG */
 .network-add-dialog details label { margin:10px 0; }
 .network-add-dialog footer { display:flex; justify-content:flex-end; gap:7px; }
 #network_add_error { color:#b03038; margin:0; }

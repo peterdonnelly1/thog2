@@ -58,7 +58,9 @@
       </label><label>Retry (seconds) <input id="network_retry_interval" type="number" min="1" max="3600" value="30"></label></div>
     </aside>
     <article class="network-detail-pane">
-      <header><h1 id="network_host_title">Networks</h1><span id="network_host_state"></span></header>
+      <!-- vvv THOG keep host discovery visible from every Networks detail tab -->
+      <header><div class="network-host-heading"><h1 id="network_host_title">Networks</h1><span id="network_host_state"></span></div><div id="network_host_actions" class="network-host-actions"></div></header>
+      <!-- ^^^ THOG -->
       <nav id="network_tabs" class="network-tabs" aria-label="Host details">
         <button type="button" data-network-tab="overview">Overview</button><button type="button" data-network-tab="monitoring">Monitoring</button>
         <button type="button" data-network-tab="profiles">Execution Profiles</button><button type="button" data-network-tab="gpus">GPUs</button>
@@ -76,12 +78,23 @@
       <label>Hostname or IP address<input name="address" autocomplete="off" required></label>
       <details><summary>Advanced SSH options</summary><label>SSH username<input name="ssh_user" autocomplete="username"></label>
         <label>SSH port<input name="ssh_port" type="number" min="1" max="65535" value="22"></label></details>
-      <label id="network_password_label" hidden>Password for this attempt<input name="password" type="password" autocomplete="off"></label>
+      <!-- vvv THOG mask one-attempt SSH credentials until the user explicitly chooses to show them -->
+      <label id="network_password_label" hidden>Password for this attempt<span class="network-password-field"><input name="password" type="password" autocomplete="off"><button type="button" id="network_password_eye" aria-label="Show password" aria-pressed="false" title="Show or hide password">👁</button></span></label>
+      <!-- ^^^ THOG -->
       <p id="network_fingerprint" hidden></p><p id="network_add_error" role="alert"></p>
       <footer><button type="button" id="network_password_button">Use password</button><button type="button" id="network_add_cancel">Cancel</button>
         <button type="submit" id="network_add_submit">Connect</button></footer>
     </form>
   </dialog>
+  <!-- vvv THOG replace the cleartext browser prompt with a masked, cancellable SSH retry -->
+  <dialog id="network_auth_dialog" class="network-add-dialog">
+    <form method="dialog" id="network_auth_form"><h2>SSH authentication</h2>
+      <p id="network_auth_message"></p>
+      <label>Password for this attempt<span class="network-password-field"><input id="network_auth_password" type="password" autocomplete="off"><button type="button" id="network_auth_eye" aria-label="Show password" aria-pressed="false" title="Show or hide password">👁</button></span></label>
+      <footer><button type="button" id="network_auth_cancel">Cancel</button><button type="submit">Retry with password</button></footer>
+    </form>
+  </dialog>
+  <!-- ^^^ THOG -->
   <!-- ^^^ THOG -->
 
   <main class="workspace" id="workspace">
