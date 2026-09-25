@@ -263,8 +263,44 @@ async function settle() {
     "startup reconciliation stopped after the first visible pair");
   assert.equal(startup_all_pairs.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a");
   assert.equal(startup_all_pairs.app.processing_pairs.nsys_b.ncu_run_id, "ncu_b");
+  assert.ok(startup_all_pairs.fetch_urls.every(url => url.startsWith("/api/processing-pair?")),
+    "startup pairing loaded full Processing captures instead of the lightweight lookup");
   assert.match(startup_all_pairs.fetch_urls[1], /exclude_ncu=ncu_a/,
     "the second startup probe did not preserve the first NCU claim");
+
+  // vvv THOG a paired eye appears even when full Processing charts are still rendering
+  let finish_charts;
+  const slow_charts = make_sandbox({
+    runs,
+    visible_run_ids:["nsys_a"],
+    processing_responses:{
+      nsys_a:{available:true, trace_available:true, revision:"slow", data:{
+        premat_compatibility_source:{nsys_dashboard_run_id:"nsys_a", dashboard_run_id:"ncu_a"},
+      }},
+    },
+  });
+  vm.runInNewContext(pair_source, slow_charts);
+  slow_charts.processing_render = () => new Promise(resolve => { finish_charts = resolve; });
+  slow_charts.select_run("nsys_a", {manual:true});
+  await settle();
+  assert.equal(slow_charts.app.processing_pairs.nsys_a.ncu_run_id, "ncu_a",
+    "the eye waited for a slow chart render");
+  assert.ok(slow_charts.fetch_urls.some(url => url.startsWith("/api/processing-pair?")));
+  assert.ok(slow_charts.fetch_urls.some(url => url.startsWith("/api/processing?")));
+  finish_charts();
+  await settle();
+
+  const no_companion = make_sandbox({
+    runs,
+    visible_run_ids:["nsys_b"],
+    processing_responses:{nsys_b:{available:true, trace_available:true, data:{}}},
+  });
+  vm.runInNewContext(pair_source, no_companion);
+  await no_companion.window.processing_pair_state_test_hooks.probe_pair("nsys_b");
+  assert.equal(no_companion.app.processing_unmatched_nsys_run_ids.has("nsys_b"), true,
+    "an NSYS run without a viable companion was left waiting indefinitely");
+  assert.equal(no_companion.app.visibility.ncu_b, false, "an unqualified NCU was opened");
+  // ^^^ THOG
 
   // vvv THOG a transient Plotly failure must not mark an unchanged revision as rendered
   const retry_after_render_error = make_sandbox({

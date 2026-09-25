@@ -54,6 +54,7 @@
   let processing_refresh_in_flight_force = false;
   let processing_refresh_in_flight_run_id = "";
   let startup_reconciled_generation = -1;
+  const pair_probes_in_flight = new Map();
 
   function run_for_id(run_id) {
     return (app.runs || []).find(candidate => String(run_identifier(candidate)) === String(run_id)) || null;
@@ -226,6 +227,7 @@
     if (next) {
       queueMicrotask(() => {
         if (String(app.current_run_id || "") !== next) return;
+        if (is_nsys_run_id(next)) void probe_pair(next);
         processing_refresh(true);
       });
     }
@@ -251,6 +253,36 @@
       preferred:String(existing?.ncu_run_id || ""),
     };
   }
+
+  // vvv THOG update paired eyes independently of costly trace rendering and ZIP generation
+  function probe_pair(run_id) {
+    if (pair_for_run(run_id) || !is_visible(run_id) || !is_nsys_run_id(run_id)) return Promise.resolve(false);
+    if (pair_probes_in_flight.has(run_id)) return pair_probes_in_flight.get(run_id);
+    const request = (async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const pairing = pairing_request_parameters(run_id);
+        const query = pairing.excluded.length
+          ? `&exclude_ncu=${encodeURIComponent(pairing.excluded.join(","))}`
+          : "";
+        const response = await fetch_json(`/api/processing-pair?run=${encodeURIComponent(run_id)}${query}`);
+        if (!is_visible(run_id) || !run_for_id(run_id) || pair_for_run(run_id)) return false;
+        if (!response.available || response.trace_available !== true) return false;
+        const companion_id = String(response.data?.premat_compatibility_source?.dashboard_run_id || "");
+        if (companion_id && pair_for_run(companion_id)) continue; // another visible source claimed it during this request
+        if (companion_id) return add_pair(run_id, companion_id);
+        set_unmatched(run_id, true);
+        render_runs();
+        return true;
+      }
+      return false;
+    })().catch(error => {
+      console.warn(`Processing pair lookup failed for ${run_id}`, error);
+      return false;
+    }).finally(() => pair_probes_in_flight.delete(run_id));
+    pair_probes_in_flight.set(run_id, request);
+    return request;
+  }
+  // ^^^ THOG
 
   async function refresh_training_throughput_only(run_id, request_epoch, request_serial) {
     const response = await fetch_json(
@@ -444,25 +476,7 @@
     let state_changed = false;
     for (const nsys_run_id of visible_nsys) {
       if (pair_for_run(nsys_run_id)) continue;
-      const pairing = pairing_request_parameters(nsys_run_id);
-      const pairing_query = pairing.excluded.length
-        ? `&exclude_ncu=${encodeURIComponent(pairing.excluded.join(","))}`
-        : "";
-      try {
-        const response = await fetch_json(
-          `/api/processing?run=${encodeURIComponent(nsys_run_id)}&auto_pair_probe=1${pairing_query}`,
-        );
-        if (!response?.available || response.trace_available !== true) continue;
-        const source = response.data?.premat_compatibility_source;
-        const companion_id = String(source?.dashboard_run_id || "");
-        if (companion_id && add_pair(nsys_run_id, companion_id, {render:false})) {
-          state_changed = true;
-          continue;
-        }
-        state_changed = set_unmatched(nsys_run_id, true) || state_changed;
-      } catch (error) {
-        console.warn(`Automatic Processing pair discovery failed for ${nsys_run_id}`, error);
-      }
+      state_changed = (await probe_pair(nsys_run_id)) || state_changed;
     }
     if (state_changed) render_runs();
   }
@@ -474,7 +488,12 @@
       const eye = event.target.closest?.(".eye-button");
       const row = eye?.closest?.("tr[data-run-id]");
       const run_id = String(row?.dataset?.runId || "");
-      if (!run_id || is_visible(run_id) || !pair_for_run(run_id)) return;
+      if (!run_id) return;
+      if (is_visible(run_id)) {
+        if (is_nsys_run_id(run_id)) void probe_pair(run_id);
+        return;
+      }
+      if (!pair_for_run(run_id)) return;
       unpair_run(run_id, {close_both:true, render:true});
     });
   }
@@ -506,6 +525,7 @@
     reconcile_startup_pairing,
     pair_palette,
     pairing_request_parameters,
+    probe_pair,
   });
 })();
 // ^^^ THOG

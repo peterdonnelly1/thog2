@@ -7,6 +7,7 @@ import atexit
 import csv
 from datetime import datetime, timezone
 import hashlib
+from http import HTTPStatus
 import io
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ import shutil
 import tempfile
 import time
 from typing import Any, Mapping, Optional
+from urllib.parse import parse_qs, urlparse
 import zipfile
 
 import run_thog2_local_dashboard_base as _base
@@ -1118,6 +1120,53 @@ def pair_key_text(value: tuple[str, str] | None) -> str:
 
 _base.DashboardCatalog._state_for_path = _dashboard_state_for_path_with_catalog
 _base.RunDashboardState.processing = _processing_payload_with_ncu_companion
+
+# vvv THOG discover a companion without normalizing the trace or building paired download archives
+_handler_for_before_pair_probe = _base._handler_for
+
+
+def _handler_for_with_pair_probe(catalog):
+    handler = _handler_for_before_pair_probe(catalog)
+
+    class PairProbeHandler(handler):
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/processing-pair":
+                return super().do_GET()
+            query = parse_qs(parsed.query)
+            run_id = query.get("run", [""])[0]
+            if not run_id:
+                self._send_json({"error": "run query parameter is required"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                state = catalog.state_for_run(run_id)
+                trace_available = (state.database_path.parent / "processing" / "processing_data.json").is_file()
+                excluded = {
+                    value for raw in query.get("exclude_ncu", []) for value in raw.split(",") if value
+                }
+                companion = _matching_ncu_companion(
+                    state,
+                    excluded_ncu_run_ids=excluded,
+                    preferred_ncu_run_id=query.get("preferred_ncu", [""])[0] or None,
+                ) if trace_available else None
+                self._send_json({
+                    "available": trace_available,
+                    "trace_available": trace_available,
+                    "data": {"premat_compatibility_source": {
+                        "nsys_dashboard_run_id": run_id,
+                        "dashboard_run_id": str(companion[3].get("dashboard_run_id", "")),
+                    }} if companion else {},
+                })
+            except (FileNotFoundError, KeyError, NotADirectoryError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            except (OSError, ValueError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+
+    return PairProbeHandler
+
+
+_base._handler_for = _handler_for_with_pair_probe
+# ^^^ THOG
 # ^^^ THOG
 
 
