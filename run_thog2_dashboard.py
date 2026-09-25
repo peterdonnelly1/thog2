@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import ctypes
+import os
+import signal
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from sheet import local_heatmap_loss_metadata_patch as _local_heatmap_loss_metadata_patch
@@ -132,6 +136,8 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # silently disappear.
     for asset_name in _EXTRA_ASSET_NAMES:
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
+    for asset_name in ("dashboard_networks.js", "dashboard_networks.css"):
+        shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
 
     index_path = runtime_root / "index.html"
     index_html = index_path.read_text(encoding="utf-8")
@@ -139,20 +145,56 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
         script_tag = f'  <script src="/assets/{asset_name}" defer></script>\n'
         if script_tag not in index_html:
             index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
+    index_html = index_html.replace("</head>", '  <script src="/assets/dashboard_networks.js" defer></script>\n</head>', 1)                     # <<< THOG load Networks after the established dashboard owners
     index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
     _dashboard._ASSET_NAMES = frozenset(
-        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES)
+        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_networks.js", "dashboard_networks.css")
     )
     return temporary
 
 
+# vvv THOG one launch action starts the independent local node agent and records this backend's restart command
+def _start_node_agent() -> None:
+    import instra_node_agent
+
+    try:
+        instra_node_agent.request("state", timeout=1)
+    except (OSError, RuntimeError):
+        instra_node_agent.STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with (instra_node_agent.STATE_DIR / "agent.log").open("ab") as output:
+            subprocess.Popen([sys.executable, str(Path(instra_node_agent.__file__).resolve()), "serve"],
+                             cwd=Path(__file__).resolve().parent, stdin=subprocess.DEVNULL,
+                             stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(40):
+            try:
+                instra_node_agent.request("state", timeout=1)
+                break
+            except (OSError, RuntimeError):
+                time.sleep(0.05)
+        else:
+            raise RuntimeError("Instra node agent did not start")
+    arguments = _dashboard._base.build_parser().parse_args()
+    instra_node_agent.request("configure", {"launch_command": [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
+                                            "logs_root": str(arguments.root.resolve()), "backend_pid": os.getpid()})
+# ^^^ THOG
+
+
 if __name__ == "__main__":
     _set_process_name()
+    _start_node_agent()                                                                                                                                     # <<< THOG keep local discovery and recovery available after backend exit
+    def _intentional_sigterm(_number, _frame):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _intentional_sigterm)                                                                                                      # <<< THOG record a deliberate user stop before the independent agent evaluates restart
     runtime_assets = _prepare_runtime_assets()
     try:
         raise SystemExit(_dashboard.main())
     finally:
+        try:
+            import instra_node_agent
+            instra_node_agent.request("backend_exited", {"backend_pid": os.getpid()}, timeout=1)
+        except (OSError, RuntimeError):
+            pass
         runtime_assets.cleanup()
 # ^^^ THOG

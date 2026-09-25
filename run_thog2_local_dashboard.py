@@ -1171,6 +1171,76 @@ _base._handler_for = _handler_for_with_file_delete
 # ^^^ THOG
 
 
+# vvv THOG install local Networks APIs through the established dashboard handler factory
+import instra_network as _instra_network
+
+_network_service = None
+_handler_for_before_network = _base._handler_for
+
+
+def _handler_for_with_network(catalog):
+    handler = _handler_for_before_network(catalog)
+    original_get = handler.do_GET
+    original_post = handler.do_POST if hasattr(handler, "do_POST") else None
+
+    def do_get(self):
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/network"):
+            original_get(self)
+            return
+        if _network_service is None:
+            self._send_json({"error": "Network Service unavailable"}, status=_base.HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        query = parse_qs(parsed.query)
+        if parsed.path == "/api/network":
+            self._send_json(_network_service.list_hosts())
+        elif parsed.path == "/api/network/job":
+            self._send_json(_network_service.job(query.get("id", [""])[0]))
+        elif parsed.path == "/api/network/events":
+            self._send_json({"events": _network_service.events(query.get("host_id", [None])[0])})
+        else:
+            self._send_json({"error": "Unknown Networks route"}, status=_base.HTTPStatus.NOT_FOUND)
+
+    def do_post(self):
+        from urllib.parse import urlparse
+
+        if urlparse(self.path).path != "/api/network/action":
+            if original_post:
+                original_post(self)
+            else:
+                self.send_error(405)
+            return
+        if _network_service is None:
+            self._send_json({"error": "Network Service unavailable"}, status=_base.HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if size < 1 or size > 16384:
+                raise ValueError("Invalid request size")
+            payload = json.loads(self.rfile.read(size))
+            action = payload["action"]
+            host_id = payload.get("host_id")
+            arguments = payload.get("args", {})
+            allowed = {"prepare_host", "add", "discover", "update", "settings", "designate_master", "release_master",
+                       "remove", "start_instra", "restart_instra", "state", "monitor_refresh"}
+            if action not in allowed or not isinstance(arguments, dict):
+                raise ValueError("Unknown Networks action")
+            # A password enters this one request only; the job discards it on completion.
+            self._send_json(_network_service.submit(action, host_id, **arguments))
+        except (KeyError, ValueError, TypeError) as error:
+            self._send_json({"error": str(error)}, status=_base.HTTPStatus.BAD_REQUEST)
+
+    handler.do_GET = do_get
+    handler.do_POST = do_post
+    return handler
+
+
+_base._handler_for = _handler_for_with_network
+# ^^^ THOG
+
+
 _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
 _dashboard_patch_names = (
@@ -1232,7 +1302,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     for name in ("_handler_for", "_ASSET_ROOT", "_ASSET_NAMES"):
         if name in globals():
             setattr(_base, name, globals()[name])
-    return _base.main(argv)
+    global _network_service
+    arguments = _base.build_parser().parse_args(argv)
+    _network_service = _instra_network.NetworkService(logs_root=arguments.root)
+    try:
+        return _base.main(argv)
+    finally:
+        _network_service.close()
 
 
 if __name__ == "__main__":

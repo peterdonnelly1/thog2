@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/assets/dashboard.css">
   <link rel="stylesheet" href="/assets/dashboard_premat.css">                                                                                           <!-- THOG dedicated Premat view -->
   <link rel="stylesheet" href="/assets/dashboard_processing.css">                                                                                        <!-- THOG Processing view -->
+  <link rel="stylesheet" href="/assets/dashboard_networks.css">                                                                                           <!-- THOG Networks layout -->
   <script src="/plotly.min.js"></script>
   <script src="/assets/dashboard.js" defer></script>
   <!-- vvv THOG keep local heatmap coordinate/view-size behaviour isolated from the established dashboard script -->
@@ -29,19 +30,59 @@
   </header>
 
   <nav class="icon-rail" aria-label="Instrumentation sections">
+    <!-- vvv THOG expose the distributed Runner and Networks sections in the common navigation rail -->
+    <button class="rail-item" id="runner_nav" type="button" title="Runner"><span class="settings-icon" aria-hidden="true">▶</span><span>Runner</span></button>
     <button class="rail-item" id="workspace_nav" type="button" title="Workspace">
       <span class="workspace-icon" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span>Workspace</span>
+      <span>Multiview</span>
     </button>
     <button class="rail-item selected" id="runs_nav" type="button" title="Runs">
       <span class="runs-icon" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>Runs</span>
     </button>
+    <button class="rail-item" id="networks_nav" type="button" title="Networks"><span class="settings-icon" aria-hidden="true">⌁</span><span>Networks</span></button>
+    <!-- ^^^ THOG -->
     <button class="rail-item" id="settings_nav" type="button" title="Settings">
       <span class="settings-icon" aria-hidden="true">⚙</span>
       <span>Settings</span>
     </button>
   </nav>
+
+  <!-- vvv THOG Networks owns only host configuration, discovery and process control; run charts retain their existing workspace -->
+  <section class="network-view" id="network_view" aria-label="Networks" hidden>
+    <aside class="network-list-pane">
+      <header><h1>Thog Hosts</h1><button id="network_add_button" type="button">Add host</button></header>
+      <div id="network_host_list" class="network-host-list"></div>
+      <div class="network-list-footer"><label>Auto restart
+        <select id="network_restart_mode"><option value="off">Off</option><option value="remote">Remote instances</option><option value="all">Local and remote instances</option></select>
+      </label><label>Retry (seconds) <input id="network_retry_interval" type="number" min="1" max="3600" value="30"></label></div>
+    </aside>
+    <article class="network-detail-pane">
+      <header><h1 id="network_host_title">Networks</h1><span id="network_host_state"></span></header>
+      <nav id="network_tabs" class="network-tabs" aria-label="Host details">
+        <button type="button" data-network-tab="overview">Overview</button><button type="button" data-network-tab="monitoring">Monitoring</button>
+        <button type="button" data-network-tab="profiles">Execution Profiles</button><button type="button" data-network-tab="gpus">GPUs</button>
+        <button type="button" data-network-tab="logs">Logs</button>
+      </nav>
+      <div id="network_detail" class="network-detail"></div>
+      <p id="network_message" role="status" aria-live="polite"></p>
+    </article>
+  </section>
+  <section class="network-view network-runner" id="runner_view" aria-label="Runner" hidden>
+    <h1>Runner</h1><p>Remote execution will be configured here when the Runner enhancement is installed. Designate Runner Master in Networks first.</p>
+  </section>
+  <dialog id="network_add_dialog" class="network-add-dialog">
+    <form method="dialog" id="network_add_form"><h2>Add Thog Host</h2>
+      <label>Hostname or IP address<input name="address" autocomplete="off" required></label>
+      <details><summary>Advanced SSH options</summary><label>SSH username<input name="ssh_user" autocomplete="username"></label>
+        <label>SSH port<input name="ssh_port" type="number" min="1" max="65535" value="22"></label></details>
+      <label id="network_password_label" hidden>Password for this attempt<input name="password" type="password" autocomplete="off"></label>
+      <p id="network_fingerprint" hidden></p><p id="network_add_error" role="alert"></p>
+      <footer><button type="button" id="network_password_button">Use password</button><button type="button" id="network_add_cancel">Cancel</button>
+        <button type="submit" id="network_add_submit">Connect</button></footer>
+    </form>
+  </dialog>
+  <!-- ^^^ THOG -->
 
   <main class="workspace" id="workspace">
     <aside class="runs-pane" id="runs_pane" aria-label="Runs and local artifacts">
