@@ -60,6 +60,13 @@
       await refresh();
       return result;
     } catch (error) {
+      // vvv THOG password-only SSH requires a fresh credential for each manual attempt
+      if (error.category === "authentication" && host_id && !args.password) {
+        const host = snapshot?.hosts.find(item => item.thog_host_id === host_id);
+        const password = window.prompt(`SSH password for ${host?.address || host_id} (this attempt only):`);
+        if (password) return run_action(name, host_id, {...args, password});
+      }
+      // ^^^ THOG
       message(`${error.category || "Network"}: ${error.message}`);
       throw error;
     }

@@ -311,8 +311,10 @@ class NetworkService:
             except NetworkError as error:
                 outcome = {"status": "error", "category": error.category, "error": str(error)}
                 if host_id and action == "discover":
-                    state = "authentication required" if error.category in {"authentication", "host key"} else (
-                        "unavailable" if error.category in {"agent availability", "operation"} else "disconnected")
+                    host = self._host(host_id)
+                    state = "disabled" if not host["monitoring_enabled"] and not host["execution_enabled"] else (
+                        "authentication required" if error.category in {"authentication", "host key"} else (
+                            "unavailable" if error.category in {"agent availability", "operation"} else "disconnected"))
                     self._record(host_id, state=state, latest_error={"category": error.category, "message": str(error), "time": _now()})
                 _event(action, host_id, error.category, str(error))
             except Exception:
@@ -440,7 +442,7 @@ class NetworkService:
             master_id = _read_config()["master_id"]
             if master_id:
                 self._agent_request(host, "claim_master", {"master_id": master_id}, password=args.get("password"))
-            host.update(state="available", last_discovered=discovery, last_success=_now(), last_contact=_now(),
+            host.update(state="disabled", last_discovered=discovery, last_success=_now(), last_contact=_now(),
                         resolved_ip=resolved_ip, latest_error=None, authentication_mode="password" if args.get("password") else "certificate_or_agent")
             host.pop("_connected_ip", None)
             with _locked_config() as config:
@@ -452,11 +454,12 @@ class NetworkService:
         if action == "discover":
             host = self._host(host_id)
             self._record(host_id, state="discovering")
-            discovery = self._agent_request(host, "discover")
+            discovery = self._agent_request(host, "discover", password=args.get("password"))
             if not isinstance(discovery, dict) or not discovery.get("instra_logs_root") or not discovery.get("wandb_root"):
                 raise NetworkError("operation", "Incomplete node discovery")
             discovery = self._identify_discovery(host_id, discovery)
-            self._record(host_id, state="available", last_discovered=discovery, last_success=_now(), last_contact=_now(), latest_error=None,
+            state = "available" if host["monitoring_enabled"] or host["execution_enabled"] else "disabled"
+            self._record(host_id, state=state, last_discovered=discovery, last_success=_now(), last_contact=_now(), latest_error=None,
                          resolved_ip=None if host["local"] else _direct_route(host))
             try:
                 runtime = self._agent_request(host, "state")
@@ -480,7 +483,8 @@ class NetworkService:
                 if config["master_id"] != self.local_id or not host["execution_enabled"]:
                     raise NetworkError("authority", "This Instra is not the Runner Master or execution is disabled")
                 args["master_id"] = self.local_id
-            result = self._agent_request(host, action, args)
+            password = args.pop("password", None)
+            result = self._agent_request(host, action, args, password=password)
             self._record(host_id, last_contact=_now())
             _event(action, host_id, "success", "Node operation completed")
             return result
@@ -525,7 +529,12 @@ class NetworkService:
         next_execution = changes.get("execution_enabled", host["execution_enabled"])
         if not next_monitoring and not next_execution:
             changes["state"] = "disabled"
+        became_enabled = not host["monitoring_enabled"] and not host["execution_enabled"] and (next_monitoring or next_execution)
+        if became_enabled:
+            changes["state"] = "discovering"
         self._record(host_id, **changes)
+        if became_enabled:
+            self.submit("discover", host_id)
         return self._host(host_id)
 
     def settings(self, restart_mode=None, retry_interval=None):

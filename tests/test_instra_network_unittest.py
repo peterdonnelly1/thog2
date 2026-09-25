@@ -69,7 +69,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(result["status"], "done")
         host_id = result["result"]["thog_host_id"]
         self.assertEqual(host_id, "thog_host.ip_192_168_1_2")
-        self.assertEqual(self.service._host(host_id)["state"], "available")
+        self.assertEqual(self.service._host(host_id)["state"], "disabled")
         self.assertNotIn("secret-value", network.CONFIG_PATH.read_text() + network.LOG_PATH.read_text())
         second = self._await(self.service.submit("add", address="192.168.1.2", ssh_port=22)["job_id"])
         self.assertEqual(second["category"], "validation")
@@ -91,6 +91,22 @@ class NetworkTests(unittest.TestCase):
         with patch.object(self.service, "submit") as submit:
             self.service._retry_loop()
             submit.assert_not_called()
+
+    def test_disabled_host_keeps_disabled_state_after_manual_refresh_and_reenables(self):
+        self.service.update_host(self.service.local_id, monitoring_enabled=False, execution_enabled=False)
+        discovered = {"instra_logs_root":"/logs", "wandb_root":"/wandb", "execution_profiles":[]}
+        with patch.object(self.service, "_agent_request", return_value=discovered):
+            outcome = self._await(self.service.submit("discover", self.service.local_id)["job_id"])
+        self.assertEqual(outcome["status"], "done")
+        self.assertEqual(self.service._host(self.service.local_id)["state"], "disabled")
+        with patch.object(self.service, "_agent_request", return_value=discovered):
+            enabled = self.service.update_host(self.service.local_id, monitoring_enabled=True)
+            self.assertIn(enabled["state"], {"discovering", "available"})
+            for _ in range(100):
+                if self.service._host(self.service.local_id)["state"] == "available":
+                    break
+                time.sleep(0.02)
+        self.assertEqual(self.service._host(self.service.local_id)["state"], "available")
 
     def test_master_release_pending_and_restart_settings(self):
         with patch.object(self.service, "_agent_request", return_value={"master_id":self.service.local_id}):
@@ -164,6 +180,26 @@ class NetworkTests(unittest.TestCase):
             with self.assertRaises(network.NetworkError) as failure:
                 network._ssh_request(host, "discover", {})
         self.assertEqual(failure.exception.category, "agent availability")
+
+    def test_manual_discovery_accepts_one_attempt_password_without_saving_it(self):
+        host = self.service._new_host("dreedle", "peter", 22)
+        host_id = host["thog_host_id"]
+        host["monitoring_enabled"] = True
+        with network._locked_config() as config:
+            config["hosts"][host_id] = host
+        discovered = {"instra_logs_root":"/logs", "wandb_root":"/wandb", "execution_profiles":[]}
+        def remote_request(_host, operation, args=None, password=None, accepted_fingerprint=None):
+            if password != "one-use-secret":
+                raise network.NetworkError("authentication", "SSH authentication failed")
+            return discovered
+        with (patch.object(self.service, "_agent_request", side_effect=remote_request),
+              patch.object(network, "_direct_route", return_value="192.168.1.3")):
+            failure = self._await(self.service.submit("discover", host_id)["job_id"])
+            self.assertEqual(failure["category"], "authentication")
+            success = self._await(self.service.submit("discover", host_id, password="one-use-secret")["job_id"])
+        self.assertEqual(success["status"], "done")
+        self.assertEqual(self.service._host(host_id)["state"], "available")
+        self.assertNotIn("one-use-secret", network.CONFIG_PATH.read_text() + network.LOG_PATH.read_text())
 
     def test_node_cli_distinguishes_socket_failure_from_operation_failure(self):
         for failure, category in ((OSError("socket unavailable"), "agent availability"),
