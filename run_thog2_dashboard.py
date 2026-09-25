@@ -196,6 +196,7 @@ def _start_node_agent() -> None:
                 time.sleep(0.05)
         else:
             raise RuntimeError("Instra node agent did not start")
+    instra_node_agent._install_agent_entry()                                                                                                                  # <<< THOG refresh the SSH entry even when an older node agent is already serving
     arguments = _dashboard._base.build_parser().parse_args()
     instra_node_agent.request("configure", {"launch_command": [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
                                             "logs_root": str(arguments.root.resolve()), "backend_pid": os.getpid()})

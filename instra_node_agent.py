@@ -334,9 +334,11 @@ def serve():
     if SOCKET_PATH.exists():
         try:
             request("state", timeout=1)
-            raise RuntimeError("node agent already running")
         except (OSError, ConnectionError):
             SOCKET_PATH.unlink()
+        else:
+            _install_agent_entry()                                                                                                                           # <<< THOG refresh the SSH entry when an existing agent survives a code update
+            return
     _install_agent_entry()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(SOCKET_PATH))

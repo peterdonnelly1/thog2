@@ -257,6 +257,41 @@ class NetworkTests(unittest.TestCase):
         self.assertIn(str(self.state_dir), entry.read_text())
         self.assertIn(str(Path(agent.__file__).resolve()), entry.read_text())
 
+    # vvv THOG upgrading Instra must repair the remote SSH entry while retaining its running node agent
+    def test_launcher_repairs_entry_when_node_agent_is_already_running(self):
+        source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())
+        launcher = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_start_node_agent")
+        parser = SimpleNamespace(parse_args=lambda: SimpleNamespace(root=self.state_dir / "logs"))
+        dashboard = SimpleNamespace(_base=SimpleNamespace(build_parser=lambda: parser))
+        namespace = {"_dashboard": dashboard, "os": os, "Path": Path, "subprocess": subprocess,
+                     "sys": sys, "time": time, "__file__": str(agent.ROOT / "run_thog2_dashboard.py")}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[launcher], type_ignores=[])),
+                     "run_thog2_dashboard.py", "exec"), namespace)
+        events = []
+        def record_request(operation, *args, **kwargs):
+            events.append(operation)
+            return {}
+        with (patch.object(agent, "request", side_effect=record_request),
+              patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
+              patch.object(subprocess, "Popen") as popen):
+            namespace["_start_node_agent"]()
+        popen.assert_not_called()
+        self.assertEqual(events, ["state", "entry", "configure"])
+    # ^^^ THOG
+
+    # vvv THOG rerunning serve after an update repairs SSH bootstrap without disturbing the active agent
+    def test_serve_repairs_entry_for_running_agent(self):
+        socket_path = self.state_dir / "existing.sock"
+        socket_path.touch()
+        with (patch.object(agent, "SOCKET_PATH", socket_path),
+              patch.object(agent, "request", return_value={}) as request,
+              patch.object(agent, "_install_agent_entry") as install):
+            agent.serve()
+        request.assert_called_once_with("state", timeout=1)
+        install.assert_called_once_with()
+        self.assertTrue(socket_path.exists())
+    # ^^^ THOG
+
     def test_remote_agent_absence_has_distinct_failure_category(self):
         host = self.service._new_host("dreedle", "peter", 22)
         response = SimpleNamespace(stdout=json.dumps({"ok": False, "category": "agent availability",
