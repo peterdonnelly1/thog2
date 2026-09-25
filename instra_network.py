@@ -32,9 +32,19 @@ _SSH_ERROR = "SSH transport"
 
 
 class NetworkError(Exception):
-    def __init__(self, category, message):
+    def __init__(self, category, message, host_id=None):
         super().__init__(message)
         self.category = category
+        self.host_id = host_id
+
+
+def _one_attempt_password(passwords, host_id):
+    if passwords is None:
+        return None
+    if not isinstance(passwords, dict) or any(not isinstance(key, str) or not isinstance(value, str) or not value
+                                                   for key, value in passwords.items()):
+        raise NetworkError("validation", "Invalid one-attempt SSH credentials")
+    return passwords.get(host_id)
 
 
 def _now():
@@ -102,7 +112,13 @@ def _host_key(hostname):
         if len(key) > 63:
             key = "ip_" + hashlib.sha256(address.packed).hexdigest()[:32]
     except ValueError:
-        key = hostname.split(".", 1)[0].lower()
+        name = hostname.lower()
+        if "." in name:
+            # Different fully qualified names must not collapse to one short host ID.
+            label = re.sub(r"[^a-z0-9_-]", "_", name)[:45]
+            key = f"{label}_{hashlib.sha256(name.encode()).hexdigest()[:12]}"
+        else:
+            key = name
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", key):
         raise NetworkError("validation", "Host name must begin with a letter or digit and contain only letters, digits, '-' or '_'.")
     return key
@@ -184,16 +200,10 @@ def _direct_route(host):
         return None
 
 
-def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None):
-    _verify_identity(host, accepted_fingerprint)
+@contextmanager
+def _ssh_askpass(password):
     if password is not None and (not isinstance(password, str) or not password):
         raise NetworkError("authentication", "Invalid SSH password")
-    ssh_options = ["-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
-                   "-o", "ConnectTimeout=8", "-p", str(host["ssh_port"])]
-    ssh_options += ["-o", "BatchMode=no" if password is not None else "BatchMode=yes"]
-    # The remote command is fixed and never interpolates user inputs.
-    remote_command = "python3 ~/git/thog2/instra_node_agent.py request"
-    command = ["ssh", "-v", *ssh_options, "--", _ssh_target(host), remote_command]
     environment = os.environ.copy()
     askpass_file = None
     if password is not None:
@@ -203,16 +213,29 @@ def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None
         os.chmod(askpass_file, 0o700)
         environment.update(SSH_ASKPASS=askpass_file, SSH_ASKPASS_REQUIRE="force", INSTRA_SSH_PASSWORD=password, DISPLAY="instra:0")
     try:
-        result = subprocess.run(command, input=json.dumps({"operation": operation, "args": args}), capture_output=True,
-                                text=True, timeout=35, env=environment, start_new_session=password is not None)
-    except subprocess.TimeoutExpired as error:
-        raise NetworkError(_SSH_ERROR, "SSH connection or agent request timed out") from error
-    except OSError as error:
-        raise NetworkError(_SSH_ERROR, "SSH client unavailable") from error
+        yield environment
     finally:
         if askpass_file:
             Path(askpass_file).unlink(missing_ok=True)
         environment.pop("INSTRA_SSH_PASSWORD", None)
+
+
+def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None):
+    _verify_identity(host, accepted_fingerprint)
+    ssh_options = ["-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
+                   "-o", "ConnectTimeout=8", "-p", str(host["ssh_port"])]
+    ssh_options += ["-o", "BatchMode=no" if password is not None else "BatchMode=yes"]
+    # The remote command is fixed and never interpolates user inputs.
+    remote_command = "~/.local/state/instra/agent-request"
+    command = ["ssh", "-v", *ssh_options, "--", _ssh_target(host), remote_command]
+    try:
+        with _ssh_askpass(password) as environment:
+            result = subprocess.run(command, input=json.dumps({"operation": operation, "args": args}), capture_output=True,
+                                    text=True, timeout=35, env=environment, start_new_session=password is not None)
+    except subprocess.TimeoutExpired as error:
+        raise NetworkError(_SSH_ERROR, "SSH connection or agent request timed out") from error
+    except OSError as error:
+        raise NetworkError(_SSH_ERROR, "SSH client unavailable") from error
     connected = re.search(r"Connecting to [^\n]* \[([^\]]+)\] port \d+", result.stderr)
     if connected:
         host["_connected_ip"] = connected.group(1)
@@ -274,7 +297,11 @@ class NetworkService:
                 raise NetworkError("agent availability", "Local node agent unavailable") from error
             except RuntimeError as error:
                 raise NetworkError("operation", str(error)[:200]) from error
-        return _ssh_request(host, operation, args or {}, password, accepted_fingerprint)
+        try:
+            return _ssh_request(host, operation, args or {}, password, accepted_fingerprint)
+        except NetworkError as error:
+            error.host_id = host["thog_host_id"]
+            raise
 
     def _record(self, host_id, **changes):
         with _locked_config() as config:
@@ -288,6 +315,10 @@ class NetworkService:
             {**profile, "execution_profile_id": f"{host_id}.execution_profile.{profile['profile_key']}"}
             for profile in discovery.get("execution_profiles", [])
         ]
+        result["gpus"] = [
+            {**gpu, "gpu_id": f"{host_id}.gpu.{gpu['gpu_key']}"}
+            for gpu in discovery.get("gpus", [])
+        ]
         return result
         # ^^^ THOG
 
@@ -296,7 +327,7 @@ class NetworkService:
             config = _read_config()
             for host_id, host in config["hosts"].items():
                 if host["monitoring_enabled"] or host["execution_enabled"]:
-                    if host["state"] not in {"discovering", "authentication required"}:
+                    if host["state"] != "discovering":
                         self.submit("discover", host_id)
             self.stop_event.wait(max(1, int(config.get("retry_interval", 30))))
 
@@ -310,13 +341,19 @@ class NetworkService:
                 outcome = {"status": "done", "result": result}
             except NetworkError as error:
                 outcome = {"status": "error", "category": error.category, "error": str(error)}
+                if error.host_id:
+                    outcome["failed_host_id"] = error.host_id
+                log_failure = True
                 if host_id and action == "discover":
                     host = self._host(host_id)
+                    previous = host.get("latest_error") or {}
+                    log_failure = previous.get("category") != error.category or previous.get("message") != str(error)
                     state = "disabled" if not host["monitoring_enabled"] and not host["execution_enabled"] else (
                         "authentication required" if error.category in {"authentication", "host key"} else (
                             "unavailable" if error.category in {"agent availability", "operation"} else "disconnected"))
                     self._record(host_id, state=state, latest_error={"category": error.category, "message": str(error), "time": _now()})
-                _event(action, host_id, error.category, str(error))
+                if log_failure:
+                    _event(action, host_id, error.category, str(error))
             except Exception:
                 outcome = {"status": "error", "category": "operation", "error": "Network operation failed"}
                 _event(action, host_id, "operation", "Network operation failed")
@@ -367,7 +404,7 @@ class NetworkService:
         self._record(host_id, monitoring_status={key: status.get(key) for key in (
             "refresh_interval", "activity", "last_success", "latest_error")})
 
-    def acquire_file(self, host_id, root_kind, relative_path, destination):
+    def acquire_file(self, host_id, root_kind, relative_path, destination, password=None):
         """Monitoring calls this to acquire one reported-root file over authenticated SSH."""
         host = self._host(host_id)
         if not host["monitoring_enabled"]:
@@ -399,12 +436,22 @@ class NetworkService:
                 batch = f"get {quoted(source)} {quoted(str(temporary))}\n"
                 command = ["sftp", "-b", "-", "-o", "StrictHostKeyChecking=yes",
                            "-o", f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
-                           "-o", "ConnectTimeout=8", "-P", str(host["ssh_port"]), "--", _ssh_target(host)]
+                           "-o", "ConnectTimeout=8", "-o", "BatchMode=no" if password is not None else "BatchMode=yes",
+                           "-P", str(host["ssh_port"]), "--", _ssh_target(host)]
                 try:
-                    result = subprocess.run(command, input=batch, text=True, capture_output=True, timeout=120)
+                    with _ssh_askpass(password) as environment:
+                        result = subprocess.run(command, input=batch, text=True, capture_output=True, timeout=120,
+                                                env=environment, start_new_session=password is not None)
                 except (OSError, subprocess.SubprocessError) as error:
                     raise NetworkError(_SSH_ERROR, "SFTP acquisition failed") from error
                 if result.returncode:
+                    failure = (result.stderr or "").lower()
+                    if "permission denied (" in failure or "authentication failed" in failure:
+                        raise NetworkError("authentication", "SFTP authentication failed", host_id)
+                    if "host key verification failed" in failure or "remote host identification has changed" in failure:
+                        raise NetworkError("host key", "SFTP host identity verification failed", host_id)
+                    if "no such file" in failure or "couldn't stat" in failure:
+                        raise NetworkError("operation", "Requested run file is unavailable", host_id)
                     raise NetworkError(_SSH_ERROR, "SFTP acquisition failed; source file or connection unavailable")
             os.replace(temporary, target)
             log_event("Monitoring", "acquire_file", host_id, "success", f"Acquired {root_kind} run file")
@@ -418,9 +465,9 @@ class NetworkService:
         if action == "settings":
             return self.settings(**args)
         if action == "designate_master":
-            return self.designate(host_id)
+            return self.designate(host_id, passwords=args.get("passwords"))
         if action == "release_master":
-            return self.release()
+            return self.release(passwords=args.get("passwords"))
         if action == "remove":
             return self.remove(host_id)
         if action == "prepare_host":
@@ -432,7 +479,10 @@ class NetworkService:
         if action == "add":
             host = self._validated_host(args)
             host_id = host["thog_host_id"]
-            if host_id in _read_config()["hosts"]:
+            saved_hosts = _read_config()["hosts"]
+            if host_id in saved_hosts or any((old["address"], old["ssh_user"], old["ssh_port"]) ==
+                                             (host["address"], host["ssh_user"], host["ssh_port"])
+                                             for old in saved_hosts.values()):
                 raise NetworkError("validation", "Host key already exists; remove the existing host before adding a changed hostname")
             discovery = self._agent_request(host, "discover", password=args.get("password"), accepted_fingerprint=args.get("fingerprint"))
             resolved_ip = _direct_route(host)
@@ -462,7 +512,7 @@ class NetworkService:
             self._record(host_id, state=state, last_discovered=discovery, last_success=_now(), last_contact=_now(), latest_error=None,
                          resolved_ip=None if host["local"] else _direct_route(host))
             try:
-                runtime = self._agent_request(host, "state")
+                runtime = self._agent_request(host, "state", password=args.get("password"))
                 restart = runtime.get("last_auto_restart")
                 if restart and restart.get("time") != host.get("last_auto_restart_id"):
                     _event("automatic_restart", host_id, restart.get("outcome", "operation"), "Automatic Instra restart attempted")
@@ -471,7 +521,8 @@ class NetworkService:
                 pass
             mode = _read_config()["restart_mode"]
             try:
-                self._agent_request(host, "configure", {"auto_restart": mode == "all" or (mode == "remote" and not host["local"])})
+                self._agent_request(host, "configure", {"auto_restart": mode == "all" or (mode == "remote" and not host["local"])},
+                                    password=args.get("password"))
             except NetworkError:
                 pass
             _event(action, host_id, "success", "Host discovery completed")
@@ -482,6 +533,8 @@ class NetworkService:
                 config = _read_config()
                 if config["master_id"] != self.local_id or not host["execution_enabled"]:
                     raise NetworkError("authority", "This Instra is not the Runner Master or execution is disabled")
+                if action == "launch_run" and config["release_pending"]:
+                    raise NetworkError("authority", "Runner Master release is pending; new remote runs are paused")
                 args["master_id"] = self.local_id
             password = args.pop("password", None)
             result = self._agent_request(host, action, args, password=password)
@@ -537,11 +590,12 @@ class NetworkService:
             self.submit("discover", host_id)
         return self._host(host_id)
 
-    def settings(self, restart_mode=None, retry_interval=None):
+    def settings(self, restart_mode=None, retry_interval=None, passwords=None):
         if restart_mode is not None and restart_mode not in {"off", "remote", "all"}:
             raise NetworkError("validation", "Invalid automatic restart mode")
         if retry_interval is not None and (isinstance(retry_interval, bool) or not isinstance(retry_interval, int) or not 1 <= retry_interval <= 3600):
             raise NetworkError("validation", "Retry interval must be 1–3600 seconds")
+        _one_attempt_password(passwords, self.local_id)
         with _locked_config() as config:
             if restart_mode is not None:
                 config["restart_mode"] = restart_mode
@@ -550,12 +604,15 @@ class NetworkService:
         if restart_mode is not None:
             for host in _read_config()["hosts"].values():
                 try:
-                    self._agent_request(host, "configure", {"auto_restart": restart_mode == "all" or (restart_mode == "remote" and not host["local"])})
-                except NetworkError:
-                    pass
+                    self._agent_request(host, "configure", {"auto_restart": restart_mode == "all" or (restart_mode == "remote" and not host["local"])},
+                                        password=_one_attempt_password(passwords, host["thog_host_id"]))
+                except NetworkError as error:
+                    _event("configure_restart", host["thog_host_id"], error.category, str(error))
+                    if error.category == "authentication":
+                        raise
         return self.list_hosts()
 
-    def designate(self, host_id):
+    def designate(self, host_id, passwords=None):
         if host_id != self.local_id:
             raise NetworkError("authority", "Designate Runner Master from its own Instra instance")
         config = _read_config()
@@ -564,13 +621,15 @@ class NetworkService:
         claimed = []
         try:
             for other in config["hosts"].values():
-                self._agent_request(other, "claim_master", {"master_id": host_id})
+                self._agent_request(other, "claim_master", {"master_id": host_id},
+                                    password=_one_attempt_password(passwords, other["thog_host_id"]))
                 claimed.append(other)
         except NetworkError:
             if config["master_id"] != host_id:
                 for other in reversed(claimed):
                     try:
-                        self._agent_request(other, "release_master", {"master_id": host_id})
+                        self._agent_request(other, "release_master", {"master_id": host_id},
+                                            password=_one_attempt_password(passwords, other["thog_host_id"]))
                     except NetworkError:
                         pass
             raise
@@ -579,15 +638,25 @@ class NetworkService:
         _event("designate_master", host_id, "success", "Runner Master designated")
         return self.list_hosts()
 
-    def release(self):
+    def release(self, passwords=None):
         with _locked_config() as config:
             if config["master_id"] != self.local_id:
                 raise NetworkError("authority", "This Instra is not Runner Master")
             if config["grid_active"] or config["queue_nonempty"]:
                 config["release_pending"] = True
                 return {"release_pending": True}
-        for host in _read_config()["hosts"].values():
-            self._agent_request(host, "release_master", {"master_id": self.local_id})
+        hosts = list(_read_config()["hosts"].values())
+        # Check authentication for every host before changing any Master claim.
+        for host in hosts:
+            self._agent_request(host, "state", password=_one_attempt_password(passwords, host["thog_host_id"]))
+        with _locked_config() as config:
+            if config["grid_active"] or config["queue_nonempty"]:
+                config["release_pending"] = True
+                return {"release_pending": True}
+            config["release_pending"] = True
+        for host in hosts:
+            self._agent_request(host, "release_master", {"master_id": self.local_id},
+                                password=_one_attempt_password(passwords, host["thog_host_id"]))
         with _locked_config() as config:
             config.update(master_id=None, release_pending=False)
         _event("release_master", self.local_id, "success", "Runner Master released")

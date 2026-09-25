@@ -47,6 +47,7 @@
       if (job.status === "error") {
         const failure = new Error(job.error);
         failure.category = job.category;
+        failure.failed_host_id = job.failed_host_id;
         throw failure;
       }
       return job.result;
@@ -61,10 +62,16 @@
       return result;
     } catch (error) {
       // vvv THOG password-only SSH requires a fresh credential for each manual attempt
-      if (error.category === "authentication" && host_id && !args.password) {
-        const host = snapshot?.hosts.find(item => item.thog_host_id === host_id);
-        const password = window.prompt(`SSH password for ${host?.address || host_id} (this attempt only):`);
-        if (password) return run_action(name, host_id, {...args, password});
+      const auth_host_id = error.failed_host_id || host_id;
+      const multi_host_action = ["designate_master", "release_master", "settings"].includes(name);
+      const supplied = multi_host_action ? args.passwords?.[auth_host_id] : args.password;
+      if (error.category === "authentication" && auth_host_id && !supplied) {
+        const host = snapshot?.hosts.find(item => item.thog_host_id === auth_host_id);
+        const password = window.prompt(`SSH password for ${host?.address || auth_host_id} (this attempt only):`);
+        if (password) {
+          const retry_args = multi_host_action ? {...args, passwords:{...args.passwords, [auth_host_id]:password}} : {...args, password};
+          return run_action(name, host_id, retry_args);
+        }
       }
       // ^^^ THOG
       message(`${error.category || "Network"}: ${error.message}`);
@@ -128,7 +135,8 @@
       button(actions, "Start Instra", () => run_action("start_instra", host.thog_host_id).catch(() => {}));
       button(actions, "Restart Instra", () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
       if (snapshot.master_id === host.thog_host_id) {
-        button(actions, snapshot.release_pending ? "Release pending" : "Release Runner Master", () => run_action("release_master", host.thog_host_id).catch(() => {}), snapshot.release_pending);
+        button(actions, snapshot.release_pending ? "Retry Runner Master release" : "Release Runner Master",
+          () => run_action("release_master", host.thog_host_id).catch(() => {}));
       } else if (host.local && !snapshot.master_id) {
         button(actions, "Designate Runner Master", () => run_action("designate_master", host.thog_host_id).catch(() => {}));
       }
@@ -160,7 +168,7 @@
       if (!gpus.length) append(detail, "p", "No CUDA GPUs discovered" + stale);
       for (const gpu of gpus) {
         const card = append(detail, "section", undefined, "network-card"); append(card, "h3", `CUDA ${gpu.ordinal}: ${gpu.model}`);
-        const data = append(card, "dl"); pair(data, "GPU ID", `${host.thog_host_id}.gpu.${gpu.gpu_key}`);
+        const data = append(card, "dl"); pair(data, "GPU ID", gpu.gpu_id);
         pair(data, "NVIDIA UUID", gpu.uuid); pair(data, "Memory (MiB)", gpu.memory_mib); pair(data, "Driver", gpu.driver);
         pair(data, "Compute processes at discovery", (gpu.compute_pids || []).join(", ") || "None");
       }

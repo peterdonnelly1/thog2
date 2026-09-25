@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -20,6 +21,8 @@ ROOT = Path(__file__).resolve().parent
 STATE_DIR = Path(os.environ.get("INSTRA_STATE_DIR", Path.home() / ".local/state/instra"))
 SOCKET_PATH = STATE_DIR / "node.sock"
 AGENT_STATE = STATE_DIR / "node.json"
+BOOTSTRAP_DIR = Path.home() / ".local/state/instra"
+AGENT_ENTRY = BOOTSTRAP_DIR / "agent-request"
 MAX_MESSAGE = 1024 * 1024
 _lock = threading.RLock()
 
@@ -211,6 +214,10 @@ def _operation(name, args):
             return {"master_id": owner}
         if name == "release_master":
             _validate_args(args, {"master_id"})
+            if not isinstance(args.get("master_id"), str) or not re.fullmatch(r"thog_host\.[a-z0-9][a-z0-9_-]{0,62}", args["master_id"]):
+                raise ValueError("invalid Runner Master identity")
+            if state.get("master_id") is None:
+                return {"released": True, "already_released": True}
             if state.get("master_id") != args.get("master_id"):
                 raise PermissionError("Runner Master identity mismatch")
             state.pop("master_id", None)
@@ -306,6 +313,21 @@ def _watch_backend():
                 output.write(f"{datetime.now(timezone.utc).isoformat()} automatic Instra restart failed: {type(error).__name__}\n")
 
 
+def _install_agent_entry():
+    # SSH needs a stable entry point even when THOG lives outside ~/git/thog2.
+    BOOTSTRAP_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(BOOTSTRAP_DIR, 0o700)
+    entry = AGENT_ENTRY.with_name(f".{AGENT_ENTRY.name}.{os.getpid()}.tmp")
+    try:
+        entry.write_text("#!/bin/sh\n" +
+                         f"INSTRA_STATE_DIR={shlex.quote(str(STATE_DIR))} "
+                         f"exec {shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} request\n")
+        entry.chmod(0o700)
+        os.replace(entry, AGENT_ENTRY)
+    finally:
+        entry.unlink(missing_ok=True)
+
+
 def serve():
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(STATE_DIR, 0o700)
@@ -315,6 +337,7 @@ def serve():
             raise RuntimeError("node agent already running")
         except (OSError, ConnectionError):
             SOCKET_PATH.unlink()
+    _install_agent_entry()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
         listener.bind(str(SOCKET_PATH))
         os.chmod(SOCKET_PATH, 0o600)
