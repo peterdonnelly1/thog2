@@ -146,6 +146,10 @@ def _operation(name, args):
                     "runs": {key: {**run, "running": _running(run.get("pid"))} for key, run in runs.items()}}
         if name == "configure":
             _validate_args(args, {"launch_command", "logs_root", "backend_pid", "auto_restart"})
+            # vvv THOG reject a second live backend before it overwrites the PID that owns this node agent
+            if "backend_pid" in args and state.get("backend_pid") != args["backend_pid"] and _running(state.get("backend_pid")):
+                raise RuntimeError("Instra backend is already running; use Restart Instra")
+            # ^^^ THOG
             command = args.get("launch_command")
             if command is not None:
                 if not isinstance(command, list) or len(command) < 2 or any(not isinstance(v, str) for v in command):

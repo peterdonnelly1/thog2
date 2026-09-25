@@ -261,10 +261,13 @@ class NetworkTests(unittest.TestCase):
     def test_launcher_repairs_entry_when_node_agent_is_already_running(self):
         source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())
         launcher = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_start_node_agent")
-        parser = SimpleNamespace(parse_args=lambda: SimpleNamespace(root=self.state_dir / "logs"))
+        parser = SimpleNamespace(parse_args=lambda: SimpleNamespace(root=self.state_dir / "logs", host="127.0.0.1", port=0))
         dashboard = SimpleNamespace(_base=SimpleNamespace(build_parser=lambda: parser))
         namespace = {"_dashboard": dashboard, "os": os, "Path": Path, "subprocess": subprocess,
                      "sys": sys, "time": time, "__file__": str(agent.ROOT / "run_thog2_dashboard.py")}
+        import socket
+        import errno
+        namespace.update(socket=socket, errno=errno)
         exec(compile(ast.fix_missing_locations(ast.Module(body=[launcher], type_ignores=[])),
                      "run_thog2_dashboard.py", "exec"), namespace)
         events = []
@@ -277,6 +280,20 @@ class NetworkTests(unittest.TestCase):
             namespace["_start_node_agent"]()
         popen.assert_not_called()
         self.assertEqual(events, ["state", "entry", "configure"])
+
+        # vvv THOG a second launch must retain the first backend's identity when its port is occupied
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            parser.parse_args = lambda: SimpleNamespace(root=self.state_dir / "logs", host="127.0.0.1",
+                                                         port=listener.getsockname()[1])
+            events.clear()
+            with (patch.object(agent, "request", side_effect=record_request),
+                  patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry"))):
+                with self.assertRaisesRegex(RuntimeError, "already listening"):
+                    namespace["_start_node_agent"]()
+            self.assertEqual(events, ["state", "entry"])
+        # ^^^ THOG
     # ^^^ THOG
 
     # vvv THOG rerunning serve after an update repairs SSH bootstrap without disturbing the active agent
@@ -290,6 +307,16 @@ class NetworkTests(unittest.TestCase):
         request.assert_called_once_with("state", timeout=1)
         install.assert_called_once_with()
         self.assertTrue(socket_path.exists())
+    # ^^^ THOG
+
+    # vvv THOG an occupied node agent must retain its live backend PID when a duplicate launcher appears
+    def test_node_agent_rejects_duplicate_live_backend_registration(self):
+        agent._write_state({"backend_pid": os.getpid(), "logs_root": "/original/logs"})
+        with self.assertRaisesRegex(RuntimeError, "already running"):
+            agent._operation("configure", {"backend_pid": os.getpid() + 1, "logs_root": "/wrong/logs"})
+        state = agent._read_state()
+        self.assertEqual(state["backend_pid"], os.getpid())
+        self.assertEqual(state["logs_root"], "/original/logs")
     # ^^^ THOG
 
     def test_remote_agent_absence_has_distinct_failure_category(self):

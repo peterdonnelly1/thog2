@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import ctypes
+import errno                                                                                                                                                  # <<< THOG distinguish an occupied Instra port from other socket failures
 import os
 import signal
 import shutil
+import socket                                                                                                                                                 # <<< THOG check the listener address before registering a new Instra backend PID
 import subprocess
 import sys
 import tempfile
@@ -198,6 +200,16 @@ def _start_node_agent() -> None:
             raise RuntimeError("Instra node agent did not start")
     instra_node_agent._install_agent_entry()                                                                                                                  # <<< THOG refresh the SSH entry even when an older node agent is already serving
     arguments = _dashboard._base.build_parser().parse_args()
+    # vvv THOG a duplicate dashboard must not displace the running backend PID in the node agent
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((str(arguments.host), int(arguments.port)))
+        except OSError as error:
+            if error.errno == errno.EADDRINUSE:
+                raise RuntimeError(f"Instra is already listening on {arguments.host}:{arguments.port}; use the existing instance") from error
+            raise
+    # ^^^ THOG
     instra_node_agent.request("configure", {"launch_command": [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]],
                                             "logs_root": str(arguments.root.resolve()), "backend_pid": os.getpid()})
 # ^^^ THOG
