@@ -39,6 +39,27 @@ _local_dashboard_notes_patch.install(_dashboard)                                
 from sheet.thogopt_dashboard import install as _install_thogopt_dashboard
 _install_thogopt_dashboard(_dashboard)
 
+# vvv THOG Networks POST must precede the matched-weight handler, which returns plain-text 404 for every other POST path
+_handler_for_before_network_post = _dashboard._handler_for
+
+
+def _handler_for_with_network_post(catalog):
+    from urllib.parse import urlparse
+
+    handler = _handler_for_before_network_post(catalog)
+
+    class NetworkPostHandler(handler):
+        def do_POST(self):
+            if urlparse(self.path).path == "/api/network/action":
+                return _dashboard._network_do_post(self)
+            return super().do_POST()
+
+    return NetworkPostHandler
+
+
+_dashboard._handler_for = _handler_for_with_network_post
+# ^^^ THOG
+
 _PROCESS_NAME = b"thog2-dashboard"
 _PR_SET_NAME = 15
 _EXTRA_ASSET_NAMES = (

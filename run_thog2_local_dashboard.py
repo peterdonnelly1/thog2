@@ -1178,6 +1178,29 @@ _network_service = None
 _handler_for_before_network = _base._handler_for
 
 
+def _network_do_post(self):
+    """Handle the Networks action after all dashboard POST route owners have run."""
+    if _network_service is None:
+        self._send_json({"error": "Network Service unavailable"}, status=_base.HTTPStatus.SERVICE_UNAVAILABLE)
+        return
+    try:
+        size = int(self.headers.get("Content-Length", "0"))
+        if size < 1 or size > 16384:
+            raise ValueError("Invalid request size")
+        payload = json.loads(self.rfile.read(size))
+        action = payload["action"]
+        host_id = payload.get("host_id")
+        arguments = payload.get("args", {})
+        allowed = {"prepare_host", "add", "discover", "update", "settings", "designate_master", "release_master",
+                   "remove", "start_instra", "restart_instra", "state", "monitor_refresh"}
+        if action not in allowed or not isinstance(arguments, dict):
+            raise ValueError("Unknown Networks action")
+        # A password enters this one request only; the job discards it on completion.
+        self._send_json(_network_service.submit(action, host_id, **arguments))
+    except (KeyError, ValueError, TypeError) as error:
+        self._send_json({"error": str(error)}, status=_base.HTTPStatus.BAD_REQUEST)
+
+
 def _handler_for_with_network(catalog):
     handler = _handler_for_before_network(catalog)
     original_get = handler.do_GET
@@ -1212,25 +1235,7 @@ def _handler_for_with_network(catalog):
             else:
                 self.send_error(405)
             return
-        if _network_service is None:
-            self._send_json({"error": "Network Service unavailable"}, status=_base.HTTPStatus.SERVICE_UNAVAILABLE)
-            return
-        try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if size < 1 or size > 16384:
-                raise ValueError("Invalid request size")
-            payload = json.loads(self.rfile.read(size))
-            action = payload["action"]
-            host_id = payload.get("host_id")
-            arguments = payload.get("args", {})
-            allowed = {"prepare_host", "add", "discover", "update", "settings", "designate_master", "release_master",
-                       "remove", "start_instra", "restart_instra", "state", "monitor_refresh"}
-            if action not in allowed or not isinstance(arguments, dict):
-                raise ValueError("Unknown Networks action")
-            # A password enters this one request only; the job discards it on completion.
-            self._send_json(_network_service.submit(action, host_id, **arguments))
-        except (KeyError, ValueError, TypeError) as error:
-            self._send_json({"error": str(error)}, status=_base.HTTPStatus.BAD_REQUEST)
+        _network_do_post(self)
 
     handler.do_GET = do_get
     handler.do_POST = do_post

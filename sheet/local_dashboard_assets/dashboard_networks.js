@@ -29,7 +29,10 @@
   };
   async function json_response(url, options) {
     const response = await fetch(url, options);
-    const value = await response.json();
+    const raw = await response.text();
+    let value;
+    try { value = JSON.parse(raw); }
+    catch { throw new Error(`HTTP ${response.status}: ${raw.trim().slice(0, 160) || "invalid JSON response"}`); }
     if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
     return value;
   }

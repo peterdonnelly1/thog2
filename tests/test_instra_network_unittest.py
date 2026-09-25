@@ -2,6 +2,8 @@
 """Run with python -m unittest tests/test_instra_network_unittest.py -v."""
 
 import json
+import ast
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -10,6 +12,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import instra_network as network
 import instra_node_agent as agent
@@ -130,6 +133,40 @@ class NetworkTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unknown operation"):
             agent.request("shell", {"command": "touch /tmp/forbidden"})
         self.assertFalse(agent._read_state().get("runs"))
+
+    def test_network_post_wins_over_existing_post_handler(self):
+        source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())
+        wrapper = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_handler_for_with_network_post")
+        calls = []
+        class PreviousHandler:
+            def do_POST(self):
+                calls.append("existing handler")
+        dashboard = SimpleNamespace(_network_do_post=lambda handler: calls.append("Network action"))
+        namespace = {"_dashboard": dashboard, "_handler_for_before_network_post": lambda catalog: PreviousHandler}
+        exec(compile(ast.Module(body=[wrapper], type_ignores=[]), "run_thog2_dashboard.py", "exec"), namespace)
+        handler = namespace["_handler_for_with_network_post"](None)()
+        handler.path = "/api/network/action"
+        handler.do_POST()
+        handler.path = "/api/weight-selection"
+        handler.do_POST()
+        self.assertEqual(calls, ["Network action", "existing handler"])
+
+    def test_network_post_returns_json_job(self):
+        source = ast.parse((agent.ROOT / "run_thog2_local_dashboard.py").read_text())
+        operation = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_network_do_post")
+        service = SimpleNamespace(submit=lambda action, host_id, **args: {"job_id": "test-job"})
+        namespace = {"_network_service": service, "_base": SimpleNamespace(HTTPStatus=SimpleNamespace(BAD_REQUEST=400, SERVICE_UNAVAILABLE=503)), "json": json}
+        exec(compile(ast.Module(body=[operation], type_ignores=[]), "run_thog2_local_dashboard.py", "exec"), namespace)
+        class Handler:
+            headers = {"Content-Length": ""}
+            def _send_json(self, result, **kwargs):
+                self.result = result
+        handler = Handler()
+        body = json.dumps({"action": "prepare_host", "args": {"address": "dreedle"}}).encode()
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        namespace["_network_do_post"](handler)
+        self.assertEqual(handler.result, {"job_id": "test-job"})
 
 
 if __name__ == "__main__":
