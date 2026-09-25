@@ -228,7 +228,10 @@ def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None
             raise NetworkError(_SSH_ERROR, "SSH connection failed")
         raise NetworkError("agent availability", "Node agent unavailable on this host")
     if not response.get("ok"):
-        raise NetworkError("operation", str(response.get("error", "Node agent request failed"))[:200])
+        category = response.get("category")
+        if category not in {"agent availability", "operation"}:
+            category = "operation"
+        raise NetworkError(category, str(response.get("error", "Node agent request failed"))[:200])
     return response["result"]
 
 
@@ -245,7 +248,9 @@ class NetworkService:
         self.logs_root = logs_root
         if start_worker:
             threading.Thread(target=self._retry_loop, name="instra-network-retry", daemon=True).start()
-            self.submit("discover", self.local_id)
+            local_host = self._host(self.local_id)
+            if local_host["monitoring_enabled"] or local_host["execution_enabled"]:
+                self.submit("discover", self.local_id)
 
     def _new_host(self, address, ssh_user, ssh_port, local=False):
         host_id = f"thog_host.{_host_key(address)}"
@@ -276,11 +281,21 @@ class NetworkService:
             if host_id in config["hosts"]:
                 config["hosts"][host_id].update(changes)
 
+    def _identify_discovery(self, host_id, discovery):
+        # vvv THOG the saved host identity, not the remote hostname, owns its execution profiles
+        result = dict(discovery)
+        result["execution_profiles"] = [
+            {**profile, "execution_profile_id": f"{host_id}.execution_profile.{profile['profile_key']}"}
+            for profile in discovery.get("execution_profiles", [])
+        ]
+        return result
+        # ^^^ THOG
+
     def _retry_loop(self):
         while not self.stop_event.is_set():
             config = _read_config()
             for host_id, host in config["hosts"].items():
-                if host["local"] or host["monitoring_enabled"] or host["execution_enabled"]:
+                if host["monitoring_enabled"] or host["execution_enabled"]:
                     if host["state"] not in {"discovering", "authentication required"}:
                         self.submit("discover", host_id)
             self.stop_event.wait(max(1, int(config.get("retry_interval", 30))))
@@ -421,6 +436,7 @@ class NetworkService:
             resolved_ip = _direct_route(host)
             if not isinstance(discovery, dict) or not discovery.get("instra_logs_root") or not discovery.get("wandb_root"):
                 raise NetworkError("operation", "Discovery did not report both monitoring source roots")
+            discovery = self._identify_discovery(host_id, discovery)
             master_id = _read_config()["master_id"]
             if master_id:
                 self._agent_request(host, "claim_master", {"master_id": master_id}, password=args.get("password"))
@@ -439,6 +455,7 @@ class NetworkService:
             discovery = self._agent_request(host, "discover")
             if not isinstance(discovery, dict) or not discovery.get("instra_logs_root") or not discovery.get("wandb_root"):
                 raise NetworkError("operation", "Incomplete node discovery")
+            discovery = self._identify_discovery(host_id, discovery)
             self._record(host_id, state="available", last_discovered=discovery, last_success=_now(), last_contact=_now(), latest_error=None,
                          resolved_ip=None if host["local"] else _direct_route(host))
             try:
@@ -504,7 +521,9 @@ class NetworkService:
                 changes[key] = value
         if display_name is not None:
             changes["display_name"] = display_name.strip()
-        if not host["local"] and changes.get("execution_enabled") is False and changes.get("monitoring_enabled") is False:
+        next_monitoring = changes.get("monitoring_enabled", host["monitoring_enabled"])
+        next_execution = changes.get("execution_enabled", host["execution_enabled"])
+        if not next_monitoring and not next_execution:
             changes["state"] = "disabled"
         self._record(host_id, **changes)
         return self._host(host_id)

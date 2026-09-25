@@ -5,6 +5,7 @@ import json
 import ast
 import io
 import os
+from contextlib import redirect_stdout
 from pathlib import Path
 import subprocess
 import sys
@@ -47,10 +48,13 @@ class NetworkTests(unittest.TestCase):
         self.fail("network operation did not finish")
 
     def test_local_discovery_and_stale_update(self):
-        discovered = {"hostname": "scruffy", "instra_logs_root": "/logs", "wandb_root": "/wandb", "gpus": []}
+        discovered = {"hostname": "scruffy", "instra_logs_root": "/logs", "wandb_root": "/wandb", "gpus": [],
+                      "execution_profiles": [{"profile_key": "current", "python": "/python"}]}
         with patch.object(self.service, "_agent_request", return_value=discovered):
             self.assertEqual(self._await(self.service.submit("discover", self.service.local_id)["job_id"])["status"], "done")
         first = self.service._host(self.service.local_id)["last_discovered"]
+        self.assertEqual(first["execution_profiles"][0]["execution_profile_id"],
+                         f"{self.service.local_id}.execution_profile.current")
         with patch.object(self.service, "_agent_request", side_effect=network.NetworkError("agent availability", "agent unavailable")):
             failure = self._await(self.service.submit("discover", self.service.local_id)["job_id"])
         self.assertEqual(failure["category"], "agent availability")
@@ -69,6 +73,24 @@ class NetworkTests(unittest.TestCase):
         self.assertNotIn("secret-value", network.CONFIG_PATH.read_text() + network.LOG_PATH.read_text())
         second = self._await(self.service.submit("add", address="192.168.1.2", ssh_port=22)["job_id"])
         self.assertEqual(second["category"], "validation")
+
+    def test_disabling_local_host_stops_scheduled_discovery(self):
+        disabled = self.service.update_host(self.service.local_id, monitoring_enabled=False, execution_enabled=False)
+        self.assertEqual(disabled["state"], "disabled")
+        self.assertFalse(disabled["monitoring_enabled"] or disabled["execution_enabled"])
+        class OnePass:
+            checks = 0
+            def is_set(self):
+                self.checks += 1
+                return self.checks > 1
+            def wait(self, _interval):
+                pass
+            def set(self):
+                self.checks = 2
+        self.service.stop_event = OnePass()
+        with patch.object(self.service, "submit") as submit:
+            self.service._retry_loop()
+            submit.assert_not_called()
 
     def test_master_release_pending_and_restart_settings(self):
         with patch.object(self.service, "_agent_request", return_value={"master_id":self.service.local_id}):
@@ -133,6 +155,55 @@ class NetworkTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unknown operation"):
             agent.request("shell", {"command": "touch /tmp/forbidden"})
         self.assertFalse(agent._read_state().get("runs"))
+
+    def test_remote_agent_absence_has_distinct_failure_category(self):
+        host = self.service._new_host("dreedle", "peter", 22)
+        response = SimpleNamespace(stdout=json.dumps({"ok": False, "category": "agent availability",
+                                                       "error": "local socket unavailable"}), stderr="", returncode=1)
+        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response):
+            with self.assertRaises(network.NetworkError) as failure:
+                network._ssh_request(host, "discover", {})
+        self.assertEqual(failure.exception.category, "agent availability")
+
+    def test_node_cli_distinguishes_socket_failure_from_operation_failure(self):
+        for failure, category in ((OSError("socket unavailable"), "agent availability"),
+                                  (ValueError("invalid operation"), "operation")):
+            output = io.StringIO()
+            with (patch.object(agent.sys, "stdin", io.StringIO('{"operation":"state","args":{}}')),
+                  patch.object(agent, "request", side_effect=failure), redirect_stdout(output)):
+                self.assertEqual(agent.main(["request"]), 1)
+            self.assertEqual(json.loads(output.getvalue())["category"], category)
+
+    def test_backend_restart_marks_only_intentional_exits(self):
+        source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())
+        runner = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_run_backend_with_agent")
+        installed = {}
+        cleaned = []
+        class Assets:
+            def cleanup(self):
+                cleaned.append(True)
+        backend = SimpleNamespace(main=lambda: 0)
+        namespace = {"_set_process_name": lambda: None, "_start_node_agent": lambda: None,
+                     "signal": SimpleNamespace(SIGTERM=15, signal=lambda _kind, callback: installed.update(callback=callback)),
+                     "_prepare_runtime_assets": Assets, "_dashboard": backend, "os": os}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[runner], type_ignores=[])),
+                     "run_thog2_dashboard.py", "exec"), namespace)
+        launch = namespace["_run_backend_with_agent"]
+        with patch.object(agent, "request") as request:
+            self.assertEqual(launch(), 0)
+            self.assertEqual(request.call_count, 1)
+            request.reset_mock()
+            def crash():
+                raise RuntimeError("backend crashed")
+            backend.main = crash
+            with self.assertRaisesRegex(RuntimeError, "backend crashed"):
+                launch()
+            request.assert_not_called()
+            backend.main = lambda: installed["callback"](15, None)
+            with self.assertRaises(SystemExit):
+                launch()
+            self.assertEqual(request.call_count, 1)
+        self.assertEqual(len(cleaned), 3)
 
     def test_network_post_wins_over_existing_post_handler(self):
         source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())

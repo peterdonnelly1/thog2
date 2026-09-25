@@ -202,20 +202,34 @@ def _start_node_agent() -> None:
 # ^^^ THOG
 
 
-if __name__ == "__main__":
+def _run_backend_with_agent():
     _set_process_name()
     _start_node_agent()                                                                                                                                     # <<< THOG keep local discovery and recovery available after backend exit
+    intentional_exit = False
+
     def _intentional_sigterm(_number, _frame):
+        nonlocal intentional_exit
+        intentional_exit = True
         raise SystemExit(0)
+
     signal.signal(signal.SIGTERM, _intentional_sigterm)                                                                                                      # <<< THOG record a deliberate user stop before the independent agent evaluates restart
     runtime_assets = _prepare_runtime_assets()
     try:
-        raise SystemExit(_dashboard.main())
+        exit_code = _dashboard.main()
+        intentional_exit = exit_code == 0
+        return exit_code
     finally:
-        try:
-            import instra_node_agent
-            instra_node_agent.request("backend_exited", {"backend_pid": os.getpid()}, timeout=1)
-        except (OSError, RuntimeError):
-            pass
+        # vvv THOG a backend exception must leave the agent free to restart it
+        if intentional_exit:
+            try:
+                import instra_node_agent
+                instra_node_agent.request("backend_exited", {"backend_pid": os.getpid()}, timeout=1)
+            except (OSError, RuntimeError):
+                pass
+        # ^^^ THOG
         runtime_assets.cleanup()
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_backend_with_agent())
 # ^^^ THOG

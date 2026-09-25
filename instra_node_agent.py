@@ -340,9 +340,14 @@ def main(argv=None):
         result = request(payload["operation"], payload.get("args", {}))
         print(json.dumps({"ok": True, "result": result}))
         return 0
-    except (ValueError, KeyError, OSError, RuntimeError) as error:
-        print(json.dumps({"ok": False, "error": str(error)}))
+    # vvv THOG report socket failures separately so the Network view can distinguish an absent agent
+    except OSError as error:
+        print(json.dumps({"ok": False, "category": "agent availability", "error": str(error)}))
         return 1
+    except (ValueError, KeyError, RuntimeError) as error:
+        print(json.dumps({"ok": False, "category": "operation", "error": str(error)}))
+        return 1
+    # ^^^ THOG
 
 
 if __name__ == "__main__":

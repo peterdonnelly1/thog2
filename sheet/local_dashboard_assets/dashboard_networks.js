@@ -143,7 +143,8 @@
       if (!profiles.length) append(detail, "p", "No execution profiles discovered" + stale);
       for (const profile of profiles) {
         const card = append(detail, "section", undefined, "network-card"); append(card, "h3", profile.profile_key);
-        const data = append(card, "dl"); pair(data, "Location", profile.location); pair(data, "Python", profile.python);
+        const data = append(card, "dl"); pair(data, "Profile ID", profile.execution_profile_id);
+        pair(data, "Location", profile.location); pair(data, "Python", profile.python);
         pair(data, "Shell entry", profile.shell_entry); pair(data, "THOG entry", profile.thog_entry);
       }
     } else if (selected_tab === "gpus") {
@@ -154,6 +155,7 @@
         const card = append(detail, "section", undefined, "network-card"); append(card, "h3", `CUDA ${gpu.ordinal}: ${gpu.model}`);
         const data = append(card, "dl"); pair(data, "GPU ID", `${host.thog_host_id}.gpu.${gpu.gpu_key}`);
         pair(data, "NVIDIA UUID", gpu.uuid); pair(data, "Memory (MiB)", gpu.memory_mib); pair(data, "Driver", gpu.driver);
+        pair(data, "Compute processes at discovery", (gpu.compute_pids || []).join(", ") || "None");
       }
     } else if (selected_tab === "logs") {
       append(detail, "p", "Material Network, Monitoring and Runner events for this host.");
