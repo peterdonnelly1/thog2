@@ -92,6 +92,7 @@ const app = {
   page_size: load_number("thog2_local_page_size", 50),
   current_page: 1,
   sort_descending: localStorage.getItem("thog2_local_sort_descending") !== "0",
+  column_sort_key: null,
   timeout_minutes: load_number(
     "thog2_local_timeout_minutes",
     load_number("thog2_local_crash_timeout_minutes", 15),
@@ -259,7 +260,14 @@ function filtered_runs() {
   });
   runs.sort((left, right) => {
     let comparison = 0;
-    if (sort === "name") comparison = String(left.artifact_name).localeCompare(String(right.artifact_name));
+    if (app.column_sort_key && app.column_sort_values?.[app.column_sort_key]) {
+      const value = app.column_sort_values[app.column_sort_key];
+      const first = value(left), second = value(right);
+      // Missing observations stay at the end for either sort direction.
+      if (first === null && second !== null) return 1;
+      if (second === null && first !== null) return -1;
+      comparison = first === null ? 0 : first - second;
+    } else if (sort === "name") comparison = String(left.artifact_name).localeCompare(String(right.artifact_name));
     else if (sort === "heatmap") comparison = Number(left.heatmap_maximum_update) - Number(right.heatmap_maximum_update);
     else if (sort === "depth") comparison = Number(left.depth_maximum_update) - Number(right.depth_maximum_update);
     else if (sort === "updated") comparison = String(left.updated_at).localeCompare(String(right.updated_at));
@@ -473,8 +481,12 @@ function should_follow_recommendation(recommended) {
 }
 
 async function refresh_catalog() {
+  if (app.catalog_refresh_in_flight) return;
+  app.catalog_refresh_in_flight = true;
+  const abort = new AbortController();
+  const deadline = setTimeout(() => abort.abort(), 45000);
   try {
-    const catalog = await fetch_json("/api/runs");
+    const catalog = await fetch_json("/api/runs", {signal: abort.signal});
     app.runs = catalog.runs;
     app.requested_run = catalog.requested_run;
     app.recommended_run_id = catalog.recommended_run_id;
@@ -516,6 +528,9 @@ async function refresh_catalog() {
   } catch (error) {
     by_id("watch_status").textContent = `Viewer error: ${error.message}`;
     by_id("topbar_state").textContent = "Viewer error";
+  } finally {
+    clearTimeout(deadline);
+    app.catalog_refresh_in_flight = false;
   }
 }
 
@@ -2461,7 +2476,7 @@ function bind_events() {
   });
   by_id("run_search").addEventListener("input", reset_pagination);
   by_id("state_filter").addEventListener("change", reset_pagination);
-  by_id("run_sort").addEventListener("change", reset_pagination);
+  by_id("run_sort").addEventListener("change", () => { app.column_sort_key = null; reset_pagination(); });
   by_id("sort_direction").addEventListener("click", () => {
     app.sort_descending = !app.sort_descending;
     localStorage.setItem("thog2_local_sort_descending", app.sort_descending ? "1" : "0");

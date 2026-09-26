@@ -337,8 +337,12 @@ class NetworkService:
             self.stop_event.wait(max(1, int(config.get("retry_interval", 30))))
 
     def submit(self, action, host_id=None, **args):
-        job_id = uuid.uuid4().hex
         with self.jobs_lock:
+            if action == "discover" and host_id and not args:
+                for existing_id, job in self.jobs.items():
+                    if job["status"] == "working" and job["action"] == action and job["host_id"] == host_id:
+                        return {"job_id": existing_id}
+            job_id = uuid.uuid4().hex
             self.jobs[job_id] = {"status": "working", "action": action, "host_id": host_id}
         def work():
             try:

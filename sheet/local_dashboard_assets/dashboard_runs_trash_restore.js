@@ -28,7 +28,7 @@
       }
       .runs-trash-button:not(:disabled) { color:#a12a2a; }
       .runs-trash-button:disabled { opacity:.38; cursor:default; }
-      .runs-table th.duration-column { text-transform:none !important; }
+      .runs-table th.duration-column, .runs-table th.loss-column { text-transform:none !important; }
     `;
     document.head.appendChild(style);
   }

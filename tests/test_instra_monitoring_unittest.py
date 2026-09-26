@@ -229,6 +229,7 @@ class MonitoringTests(unittest.TestCase):
             self.monitor.request_refresh(host_id, {}, refresh_interval=1)
         self.monitor.request_refresh(host_id, {}, refresh_interval=9)
         self.assertEqual(self.monitor.interval(host_id), 9)
+        self.assertEqual(self.network._host(host_id)["monitoring_status"]["refresh_interval"], 9)
 
     def test_agent_can_be_unavailable_while_ssh_copy_is_current_and_restart_keeps_data(self):
         host_id, _path = self._producer("source")

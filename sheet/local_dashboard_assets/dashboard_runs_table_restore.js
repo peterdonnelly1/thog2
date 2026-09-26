@@ -149,6 +149,27 @@ window.addEventListener("load", () => {
       },
     });
 
+    const numeric_sort_value = value => finite_number(value);
+    app.column_sort_values = Object.freeze({
+      steps: run => numeric_sort_value(run.maximum_update),
+      duration: run => {
+        const start = Date.parse(run?.created_at || "");
+        const end = is_active_run_state(run?.run_state) && display_run_state(run) !== "timed_out"
+          ? Date.now() : Date.parse(run?.heartbeat_at || run?.updated_at || "");
+        return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : null;
+      },
+      loss: run => numeric_sort_value(run.last_loss),
+      probe_start: run => numeric_sort_value(run.heatmap_minimum_update),
+      probe_end: run => numeric_sort_value(run.heatmap_maximum_update),
+      curve_start: run => numeric_sort_value(run.depth_minimum_update),
+      curve_end: run => numeric_sort_value(run.depth_maximum_update),
+      updated: run => Number.isFinite(Date.parse(run?.updated_at || "")) ? Date.parse(run.updated_at) : null,
+      ...Object.fromEntries(Object.entries(generated)
+        .filter(([, definition]) => definition.numeric)
+        .map(([key, definition]) => [key, run => numeric_sort_value(definition.value(run) === "Y" ? 1 :
+          definition.value(run) === "N" ? 0 : definition.value(run))])),
+    });
+
     const order = Object.freeze([
       "select", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
       "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
@@ -339,6 +360,13 @@ window.addEventListener("load", () => {
       }
       install_name_resizer();
       apply_geometry(stored_name_width());
+      for (const header of header_row.children) {
+        const key = header.dataset.instraColumnKey;
+        if (!app.column_sort_values[key]) continue;
+        header.classList.add("instra-sortable-heading");
+        header.setAttribute("aria-sort", key === app.column_sort_key
+          ? app.sort_descending ? "descending" : "ascending" : "none");
+      }
       const column_count = header_row.children.length;
       table.querySelectorAll("tbody .group-row td").forEach(cell => { cell.colSpan = column_count; });
     };
@@ -364,6 +392,7 @@ window.addEventListener("load", () => {
     const style = document.createElement("style");
     style.id = "instra-focused-runs-table-restore-style";
     style.textContent = `
+      .runs-table th.instra-sortable-heading { cursor:pointer; }
       .runs-table .instra-run-summary-column { white-space:nowrap; font-variant-numeric:tabular-nums; }
       .runs-table [data-instra-column-key="wandb"] { display:none !important; }
       .runs-table .instra-dense-preset { font-weight:750 !important; }
@@ -388,6 +417,17 @@ window.addEventListener("load", () => {
       .run-name-column-resizer.dragging::after { width:2px; background:#1590a8; }
     `;
     document.head.appendChild(style);
+
+    document.querySelector(".runs-table thead")?.addEventListener("click", event => {
+      const heading = event.target.closest("th[data-instra-column-key]");
+      const key = heading?.dataset.instraColumnKey;
+      if (!app.column_sort_values[key]) return;
+      app.sort_descending = app.column_sort_key === key ? !app.sort_descending : false;
+      app.column_sort_key = key;
+      localStorage.setItem("thog2_local_sort_descending", app.sort_descending ? "1" : "0");
+      update_sort_direction_ui();
+      reset_pagination();
+    });
 
     polish();
     render_runs();

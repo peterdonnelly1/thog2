@@ -10,6 +10,7 @@
   let visible = false;
   let pending_fingerprint = null;
   let refresh_watch_until = 0;
+  let refresh_in_flight = false;
   const message = value => { element("network_message").textContent = value || ""; };
   const date_text = value => value ? new Date(value).toLocaleString() : "—";
   const age_text = value => value ? `${Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60000))} min` : "—";
@@ -32,13 +33,17 @@
     return control;
   };
   async function json_response(url, options) {
-    const response = await fetch(url, options);
-    const raw = await response.text();
-    let value;
-    try { value = JSON.parse(raw); }
-    catch { throw new Error(`HTTP ${response.status}: ${raw.trim().slice(0, 160) || "invalid JSON response"}`); }
-    if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
-    return value;
+    const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(), 20000);
+    try {
+      const response = await fetch(url, {...options, signal:abort.signal});
+      const raw = await response.text();
+      let value;
+      try { value = JSON.parse(raw); }
+      catch { throw new Error(`HTTP ${response.status}: ${raw.trim().slice(0, 160) || "invalid JSON response"}`); }
+      if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
+      return value;
+    } finally { clearTimeout(deadline); }
   }
   async function action(name, host_id = null, args = {}) {
     const result = await json_response("/api/network/action", {method:"POST", headers:{"Content-Type":"application/json"},
@@ -119,12 +124,14 @@
     }
   }
   async function refresh() {
-    if (!visible) return;
+    if (!visible || refresh_in_flight) return;
+    refresh_in_flight = true;
     try {
       snapshot = await json_response("/api/network");
       if (!snapshot.hosts.some(host => host.thog_host_id === selected_id)) selected_id = snapshot.local_id;
       render();
     } catch (error) { message(error.message); }
+    finally { refresh_in_flight = false; }
   }
   function render() {
     const list = element("network_host_list");
@@ -138,7 +145,8 @@
       select.className = "network-host-select";
       append(select, "strong", `${host.display_name}${snapshot.master_id === host.thog_host_id ? " · Runner Master" : ""}`);
       append(select, "span", host.thog_host_id);
-      append(select, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`);
+      append(select, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`,
+        host.state === "discovering" ? "network-discovering" : "");
       if (!host.local) {
         const remove_button = button(row, "Remove", () => {
           if (snapshot.master_id) {
@@ -156,14 +164,19 @@
       // ^^^ THOG
     }
     const host = snapshot.hosts.find(item => item.thog_host_id === selected_id);
-    if (host) render_detail(host);
+    // Keep the editor mounted while its user is typing; polling must not replace the input.
+    const editing_interval = document.activeElement?.dataset?.networkCheckInterval === selected_id
+      && selected_tab === "monitoring";
+    if (host && !editing_interval) render_detail(host);
   }
   function render_detail(host) {
     const discovery = host.last_discovered || {};
     const detail = element("network_detail");
     detail.replaceChildren();
     element("network_host_title").textContent = host.display_name;
-    element("network_host_state").textContent = host.state;
+    const state_label = element("network_host_state");
+    state_label.textContent = host.state;
+    state_label.classList.toggle("network-discovering", host.state === "discovering");
     // vvv THOG expose host discovery above all detail tabs, including Monitoring
     const host_actions = element("network_host_actions");
     host_actions.replaceChildren();
@@ -177,11 +190,12 @@
       pair(data, "Resolved IP", host.resolved_ip || discovery.resolved_ip);
       pair(data, "Remote hostname", discovery.hostname); pair(data, "SSH user / port", `${host.ssh_user || "SSH default"} / ${host.ssh_port}`);
       pair(data, "Authentication", host.authentication_mode);
-      pair(data, "Agent", host.state, host.state === "available" ? "network-healthy" : "network-unhealthy");
+      pair(data, "Agent", host.state, host.state === "available" ? "network-healthy" :
+        host.state === "discovering" ? "network-discovering" : "network-unhealthy");
       pair(data, "Last successful discovery", date_text(host.last_success) + stale);
       pair(data, "Discovery age", age_text(host.last_success)); pair(data, "Last contact", date_text(host.last_contact));
       pair(data, "Dashboard installation", discovery.instra?.root); pair(data, "Dashboard version", discovery.instra?.version);
-      pair(data, "Dashboard process", discovery.instra?.running ? "Running" : "Not running at last discovery",
+      pair(data, "Dashboard process", discovery.instra?.running ? "running" : "not running at last discovery",
         discovery.instra?.running ? "network-healthy" : "network-unhealthy");
       pair(data, "THOG installation", discovery.thog?.root); pair(data, "THOG version", discovery.thog?.version);
       pair(data, "Operating system", discovery.os);
@@ -195,7 +209,7 @@
         button(actions, `Restart dashboard on ${host.display_name}`, () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
       }
     } else if (selected_tab === "monitoring") {
-      toggle(detail, host, "monitoring_enabled", `Enable Runs to Monitor ${host.display_name} runs`);
+      toggle(detail, host, "monitoring_enabled", `Enable other thog hosts to monitor runs on ${host.display_name}`);
       const data = append(detail, "dl");
       pair(data, "Instra logs root", (discovery.instra_logs_root || "—") + stale);
       pair(data, "W&B root", (discovery.wandb_root || "—") + stale);
@@ -209,12 +223,14 @@
       interval_input.type = "number"; interval_input.min = "2"; interval_input.max = "300"; interval_input.step = "1";
       interval_input.value = String(status.refresh_interval || 5);
       interval_input.disabled = !host.monitoring_enabled;
+      interval_input.dataset.networkCheckInterval = host.thog_host_id;
       interval_input.addEventListener("change", () => run_action("monitor_settings", host.thog_host_id,
         {refresh_interval:Number(interval_input.value)}).catch(() => { interval_input.value = String(status.refresh_interval || 5); }));
+      interval_input.addEventListener("blur", () => { if (visible) refresh(); });
       // ^^^ THOG
       button(detail, "Manually refresh run data now", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
     } else if (selected_tab === "profiles") {
-      toggle(detail, host, "execution_enabled", `Enable Execution of runs on ${host.display_name}`);
+      toggle(detail, host, "execution_enabled", `Enable other thog hosts to execute runs on ${host.display_name}`);
       const master_row = append(detail, "div", undefined, "toggles");
       const master_label = append(master_row, "label");
       const master_check = append(master_label, "input");

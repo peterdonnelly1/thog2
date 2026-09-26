@@ -215,6 +215,7 @@ window.addEventListener("load", () => {
         current:String(app.current_run_id || ""), workspace:Boolean(app.workspace_mode), page:app.current_page,
         page_size:app.page_size, search:by_id("run_search")?.value || "",
         filter:by_id("state_filter")?.value || "all", sort:by_id("run_sort")?.value || "created",
+        column_sort:app.column_sort_key || null,
         descending:app.sort_descending, grouped:app.group_by_host,
         selected:[...(app.selected || [])].map(String).sort(), visibility:app.visibility, colours:app.colours,
         pairs:[...(app.processing_paired_run_ids || [])].map(String).sort(),

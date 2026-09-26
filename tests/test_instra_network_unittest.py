@@ -198,6 +198,13 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(self._await(second["job_id"])["status"], "done")
             self.assertEqual(self._await(first["job_id"])["category"], "SSH transport")
 
+    def test_repeated_discovery_shares_one_pending_job(self):
+        with patch.object(self.service.executor, "submit") as enqueue:
+            first = self.service.submit("discover", self.service.local_id)
+            second = self.service.submit("discover", self.service.local_id)
+            self.assertEqual(first["job_id"], second["job_id"])
+            enqueue.assert_called_once()
+
     def test_monitoring_can_acquire_from_last_discovery_while_agent_unavailable(self):
         logs = self.state_dir / "logs"
         (logs / "run-1").mkdir(parents=True)

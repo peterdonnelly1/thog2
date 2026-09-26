@@ -111,6 +111,11 @@ class MonitoringService:
             with self.lock:
                 self.settings[host_id] = refresh_interval
                 _atomic_json(self.settings_path, self.settings)
+            # Publish the saved interval immediately; an in-flight acquisition may take minutes.
+            previous = self.network._host(host_id).get("monitoring_status") or {}
+            self.network.update_monitoring_status(host_id, {
+                **previous, "refresh_interval": refresh_interval,
+            })
         with self.lock:
             self.pending.add(host_id)
         return {"requested": host_id, "refresh_interval": self.interval(host_id)}

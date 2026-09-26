@@ -23,6 +23,7 @@
 .network-host-select strong,.network-host-select span { margin-bottom:4px; }
 .network-host-remove { flex:none; margin-right:12px; }
 .network-host-row small,.network-muted { color:#68717d; }
+.network-host-row .network-discovering { color:#b56a10; font-weight:normal; }
 .network-list-footer { padding:12px; border-top:1px solid var(--border); display:grid; gap:9px; }
 .network-list-footer label,.network-add-dialog label { display:grid; gap:5px; }
 .network-list-footer input { width:80px; }
@@ -32,8 +33,9 @@
 .network-detail dl { display:grid; grid-template-columns:minmax(145px,180px) minmax(0,1fr); gap:11px 15px; margin:0 0 24px; }
 .network-detail dt { color:#69717d; }
 .network-detail dd { margin:0; overflow-wrap:anywhere; }
-.network-detail .network-healthy { color:#18733d; font-weight:600; }
-.network-detail .network-unhealthy { color:#b02f3b; font-weight:600; }
+.network-detail .network-healthy { color:#18733d; font-weight:normal; }
+.network-detail .network-unhealthy { color:#b02f3b; font-weight:normal; }
+.network-detail .network-discovering, #network_host_state.network-discovering { color:#b56a10; font-weight:normal; }
 .network-rail-icon { width:26px; height:26px; display:block; color:#515c66; }
 /* vvv THOG keep the Monitoring interval beside its label inside Networks host details */
 .network-detail input[type="number"] { width:78px; margin-left:8px; }
