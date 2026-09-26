@@ -271,6 +271,28 @@ class MonitoringTests(unittest.TestCase):
         self.assertTrue(captured[1][-2].startswith("test_user@localhost:"))
         self.assertFalse(captured[1][-1].startswith("test_user@localhost:"))
 
+    def test_transfer_reports_remote_missing_tool_and_useful_bounded_errors(self):
+        host_id, _path = self._producer("source")
+        service = instra_network.NetworkService(start_worker=False)
+        self.addCleanup(service.close)
+        destination = self.root / "copy.sqlite3"
+        with mock.patch.object(service, "_host", return_value=self.network._host(host_id)):
+            with mock.patch.object(instra_network, "_is_known", return_value=True):
+                with mock.patch.object(instra_network.shutil, "which", return_value="/usr/local/bin/sqlite3_rsync"):
+                    with mock.patch.object(instra_network.subprocess, "run",
+                                           return_value=mock.Mock(returncode=127, stderr=b"sh: 1: sqlite3_rsync: not found")):
+                        with self.assertRaises(instra_network.NetworkError) as missing:
+                            service.monitor_transfer(host_id, "logs", "run/same_id/charts.sqlite3", destination, database=True)
+                    self.assertEqual(missing.exception.category, "dependency")
+                    self.assertIn("producing host", str(missing.exception))
+                    with mock.patch.object(instra_network.subprocess, "run",
+                                           return_value=mock.Mock(returncode=2, stderr=b"cannot read origin\n" + b"x" * 600)):
+                        with self.assertRaises(instra_network.NetworkError) as failed:
+                            service.monitor_transfer(host_id, "logs", "run/same_id/charts.sqlite3", destination, database=True)
+                    self.assertEqual(failed.exception.category, "transfer")
+                    self.assertIn("(exit 2): cannot read origin", str(failed.exception))
+                    self.assertLess(len(str(failed.exception)), 260)
+
     def test_one_slow_host_does_not_block_another(self):
         slow, _ = self._producer("slow")
         fast, _ = self._producer("fast")

@@ -530,7 +530,15 @@ class NetworkService:
                            "--", f"{_ssh_target(host)}:{source}", str(destination)]
             result = subprocess.run(command, capture_output=True, timeout=180)
             if result.returncode:
-                raise NetworkError("transfer", f"{'sqlite3_rsync' if database else 'rsync'} acquisition failed", host_id)
+                # vvv THOG retain a short, printable tool error so a failed remote copy identifies its cause
+                program = "sqlite3_rsync" if database else "rsync"
+                diagnostic = re.sub(r"[\x00-\x1f\x7f-\x9f]+", " ",
+                                    (result.stderr or b"")[:512].decode("utf-8", "replace")).strip()[:180]
+                if re.search(rf"\b{program}\b\s*:\s*(?:command\s+)?not found\b", diagnostic, re.IGNORECASE):
+                    raise NetworkError("dependency", f"{program} is unavailable on the producing host's SSH PATH", host_id)
+                detail = f": {diagnostic}" if diagnostic else ""
+                raise NetworkError("transfer", f"{program} acquisition failed (exit {result.returncode}){detail}", host_id)
+                # ^^^ THOG
             return destination
         except (OSError, subprocess.SubprocessError) as error:
             raise NetworkError("transfer", "Monitoring transfer failed or timed out", host_id) from error
