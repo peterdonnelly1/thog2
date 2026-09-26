@@ -516,7 +516,7 @@ class NetworkService:
         try:
             if database:
                 if not shutil.which("sqlite3_rsync"):
-                    raise NetworkError("dependency", "sqlite3_rsync is required on both thog_hosts", host_id)
+                    raise NetworkError("dependency", "sqlite3_rsync is missing on the monitoring host; install it on both hosts", host_id)
                 with tempfile.NamedTemporaryFile(mode="w", prefix="instra-sqlite-ssh-", delete=False) as output:
                     ssh_wrapper = Path(output.name)
                     output.write("#!/bin/sh\nexec " + " ".join(shlex.quote(option) for option in ssh_options) + ' "$@"\n')
@@ -524,7 +524,7 @@ class NetworkService:
                 command = ["sqlite3_rsync", "--ssh", str(ssh_wrapper), f"{_ssh_target(host)}:{source}", str(destination)]
             else:
                 if not shutil.which("rsync"):
-                    raise NetworkError("dependency", "rsync is required on both thog_hosts", host_id)
+                    raise NetworkError("dependency", "rsync is missing on the monitoring host; install it on both hosts", host_id)
                 command = ["rsync", "--protect-args", "--no-links", "--no-owner", "--no-group", "--no-perms",
                            "--timeout=90", "-e", " ".join(shlex.quote(option) for option in ssh_options),
                            "--", f"{_ssh_target(host)}:{source}", str(destination)]

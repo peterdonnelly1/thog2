@@ -275,7 +275,7 @@ class MonitoringService:
                     record.pop("error", None)
                 except (instra_network.NetworkError, OSError, ValueError, sqlite3.DatabaseError) as error:
                     error_category = error.category if isinstance(error, instra_network.NetworkError) else "acquisition"
-                    error_message = error_category
+                    error_message = str(error) if isinstance(error, instra_network.NetworkError) else error_category
                     record["error"] = error_category
                     if not (self._host_root(host_id) / "logs" / relative).is_file():
                         manifest["runs"].pop(relative, None)
@@ -288,7 +288,7 @@ class MonitoringService:
                                        f"{changed} acquired files", duration_seconds=time.monotonic()-began)
         except (instra_network.NetworkError, OSError, ValueError) as error:
             error_category = error.category if isinstance(error, instra_network.NetworkError) else "acquisition"
-            error_message = error_category
+            error_message = str(error) if isinstance(error, instra_network.NetworkError) else error_category
         finally:
             try:
                 previous_status = self.network._host(host_id).get("monitoring_status") or {}

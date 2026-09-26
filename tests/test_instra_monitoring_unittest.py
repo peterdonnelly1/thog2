@@ -206,6 +206,16 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.catalog.runs()["runs"], [])
         self.assertEqual(self.network._host(host_id)["monitoring_status"]["activity"], "failed")
 
+    def test_missing_transfer_dependency_names_program_in_host_status(self):
+        host_id, _path = self._producer("source")
+        def missing_dependency(*_args, **_kwargs):
+            raise instra_network.NetworkError("dependency", "sqlite3_rsync is missing on the monitoring host; install it on both hosts", host_id)
+        self.network.monitor_transfer = missing_dependency
+        self.monitor._sync_host(host_id)
+        self.assertEqual(self.network._host(host_id)["monitoring_status"]["activity"], "failed")
+        self.assertIn("sqlite3_rsync", self.network._host(host_id)["monitoring_status"]["latest_error"])
+        self.assertEqual(self.catalog.runs()["runs"], [])
+
     def test_network_rejects_path_escape_before_running_ssh(self):
         host_id, _path = self._producer("source")
         service = instra_network.NetworkService(start_worker=False)
