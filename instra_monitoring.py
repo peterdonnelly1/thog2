@@ -204,6 +204,8 @@ class MonitoringService:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.part")
         try:
+            if destination.is_file():
+                shutil.copyfile(destination, temporary)
             self.network.monitor_transfer(host_id, root_kind, relative, temporary)
             if temporary.stat().st_size != size:
                 raise ValueError("Source file changed during acquisition")
@@ -242,6 +244,7 @@ class MonitoringService:
             databases = [relative for relative in files if Path(relative).name == "charts.sqlite3"]
             for missing in set(manifest["runs"]) - set(databases):
                 manifest["runs"][missing]["error"] = "source unavailable"                                                                                # <<< THOG retain acquired results while marking a vanished source stale
+                manifest["runs"][missing]["error_detail"] = "Run database is no longer listed on the producing host"
             for relative in sorted(databases):
                 if not self.network._host(host_id)["monitoring_enabled"]:
                     break
@@ -256,7 +259,8 @@ class MonitoringService:
                     record["run_state"] = metadata.get("run_state", "unknown")
                     parent = Path(relative).parent
                     for file_relative, (size, modified) in files.items():
-                        if file_relative != relative and parent in Path(file_relative).parents:
+                        is_run_log = Path(file_relative) == parent.parent / "train.log"
+                        if file_relative != relative and (parent in Path(file_relative).parents or is_run_log):
                             if self._sync_ordinary(host_id, "logs", file_relative, size, modified, record):
                                 changed += 1
                     recorded = metadata.get("wandb_run_directory", "")
@@ -273,10 +277,12 @@ class MonitoringService:
                         record.pop("wandb_relative", None)                                                                                                   # <<< THOG never retain a mapping after the producer changes its W&B run path
                     record["acquired_at"] = _time_now()
                     record.pop("error", None)
+                    record.pop("error_detail", None)
                 except (instra_network.NetworkError, OSError, ValueError, sqlite3.DatabaseError) as error:
                     error_category = error.category if isinstance(error, instra_network.NetworkError) else "acquisition"
                     error_message = str(error) if isinstance(error, instra_network.NetworkError) else error_category
                     record["error"] = error_category
+                    record["error_detail"] = (str(error) or error_category)[:200]
                     if not (self._host_root(host_id) / "logs" / relative).is_file():
                         manifest["runs"].pop(relative, None)
                     continue
@@ -374,7 +380,7 @@ def install(dashboard_module, network):
         value["acquisition_state"] = ("local" if origin is None else
             "stale" if (not host.get("monitoring_enabled") or record.get("error") or monitor_status.get("activity") == "failed"
                         or (host.get("state") != "available" and not fresh_ssh)) else "current")
-        value["acquisition_error"] = record.get("error") or host.get("monitoring_status", {}).get("latest_error")
+        value["acquisition_error"] = record.get("error_detail") or record.get("error") or host.get("monitoring_status", {}).get("latest_error")
         raw_gpu = value.get("gpu_index")
         gpus = (host.get("last_discovered") or {}).get("gpus", [])
         recorded_uuid = self.reader.metadata().get("gpu_uuid") or (value.get("configuration") or {}).get("gpu_uuid")

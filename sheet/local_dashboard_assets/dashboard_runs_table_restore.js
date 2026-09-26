@@ -150,14 +150,14 @@ window.addEventListener("load", () => {
     });
 
     const order = Object.freeze([
-      "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
+      "select", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
       "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated", "menu",
     ]);
     const widths = Object.freeze({
-      select:34, visibility:34, steps:62, duration:72, state:88, wandb:0, host:84, gpu:42,
+      select:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
       preset:64, optimizer:70, gb:52, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
       context:64, d_model:64, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
@@ -184,6 +184,7 @@ window.addEventListener("load", () => {
       tag(row.querySelector(".curve-end-column"), "curve_end");
       tag(row.querySelector(".step-column"), "steps");
       tag(row.querySelector(".duration-column"), "duration");
+      tag(row.querySelector(".loss-column"), "loss");
       tag(by_text("UPDATED"), "updated");
       tag(row.querySelector(".menu-column"), "menu");
     };
@@ -191,7 +192,7 @@ window.addEventListener("load", () => {
       const keys = [
         "select", "visibility", "name", "wandb", "state", "host",
         "probe_start", "probe_end", "curve_start", "curve_end",
-        "steps", "duration", "updated", "menu",
+        "steps", "duration", "loss", "updated", "menu",
       ];
       [...row.children].slice(0, keys.length).forEach((cell, index) => tag(cell, keys[index]));
     };

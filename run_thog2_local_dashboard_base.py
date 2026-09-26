@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import mimetypes
+import re
 import sqlite3
 import stat
 import threading
@@ -171,12 +173,40 @@ class RunDashboardState:
         self.database_path = Path(database_path)
         self.reader = LocalChartReader(self.database_path)
         self.lock = threading.Lock()
+        self.loss_log_cache = None
         self.cached_revision: Optional[Tuple[Any, ...]] = None
         self.cached_figures: Dict[str, Any] = {
             "heatmap": None,
             "heatmap_dimensions": {"layers": 0, "probes": 0},
             "depth": {},
         }
+
+    def _latest_logged_loss(self) -> Optional[float]:
+        log_path = self.database_path.parent.parent / "train.log"
+        try:
+            stat_result = log_path.stat()
+            signature = (stat_result.st_mtime_ns, stat_result.st_size)
+            with self.lock:
+                if self.loss_log_cache is not None and self.loss_log_cache[0] == signature:
+                    return self.loss_log_cache[1]
+            with log_path.open("rb") as source:
+                source.seek(max(0, stat_result.st_size - 65536))
+                lines = source.read().decode("utf-8", "replace").splitlines()
+            result = None
+            for line in reversed(lines):
+                if not re.match(r"^\s*T\s+\d+\s", line):
+                    continue
+                match = re.search(r"(?<![\w/])loss\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", line)
+                if match:
+                    value = float(match[1])
+                    if math.isfinite(value):
+                        result = value
+                        break
+            with self.lock:
+                self.loss_log_cache = (signature, result)
+            return result
+        except OSError:
+            return None
 
     def status(self) -> Dict[str, Any]:
         status = self.reader.status()
@@ -234,6 +264,9 @@ class RunDashboardState:
             and local_run_id == artifact_name
             and self.database_path.parent.name == artifact_name
         )
+        latest_loss = self._latest_logged_loss()
+        if latest_loss is None:
+            latest_loss = self.reader.latest_recorded_loss()
         return {
             **status,
             "run_name": artifact_name,
@@ -274,6 +307,7 @@ class RunDashboardState:
             },
             # ^^^ THOG
             "maximum_update": maximum_update,
+            "last_loss": latest_loss,
             "chart_maximum_update": chart_maximum_update,
             "database_bytes": int(self.database_path.stat().st_size),
             "run_directory": str(self.database_path.parent.resolve()),

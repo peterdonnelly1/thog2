@@ -78,6 +78,9 @@ async function main() {
 
   element("network_host_list").children[1].children[0].click();
   tabs.children[1].click();
+  assert.equal(element("network_detail").children[0].children[0].children[1].textContent,
+    " Enable Runs to Monitor dreedle runs");
+  assert.equal(element("network_detail").children.at(-1).textContent, "Manually refresh run data now");
   const actions = element("network_host_actions").children;
   assert.deepEqual(actions.map(child => child.textContent), ["Refresh discovery"]);
   const remove_button = element("network_host_list").children[1].children[1];
@@ -94,7 +97,17 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   element("network_host_list").children[1].children[0].click();
   tabs.children[0].click();
-  assert.equal(element("network_host_list").children[1].children[1].disabled, true);
+  assert.equal(element("network_host_list").children[1].children[1].disabled, false);
+  const prior_calls = calls.length;
+  element("network_host_list").children[1].children[1].click();
+  assert.equal(calls.length, prior_calls);
+  assert.match(element("network_message").textContent, /Release Runner Master/);
+  element("network_host_list").children[0].children[0].click();
+  tabs.children[2].click();
+  const master_check = element("network_detail").children[1].children[0].children[0];
+  assert.equal(master_check.checked, true);
+  assert.equal(element("network_detail").children[0].children[0].children[1].textContent,
+    " Enable Execution of runs on scruffy");
   assert.equal(element("network_host_actions").children[0].textContent, "Refresh discovery");
   fail_auth = true;
   element("network_host_actions").children[0].click();

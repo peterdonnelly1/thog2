@@ -220,6 +220,12 @@ function format_run_duration(run) {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
+function format_last_loss(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const number = Number(value);
+  return number.toFixed(number < 10 ? 2 : 1);
+}
+
 function text_cell(value, class_name = "") {
   const cell = document.createElement("td");
   cell.textContent = value;
@@ -375,7 +381,7 @@ function append_run_row(body, run) {
     const stale = document.createElement("small");
     stale.className = "stale-warning";
     stale.textContent = " · stale";
-    stale.title = run.acquired_at ? `Last acquired ${new Date(run.acquired_at).toLocaleString()}` : "Remote data unavailable";
+    stale.title = `${run.acquisition_error ? `${run.acquisition_error} · ` : ""}${run.acquired_at ? `Last acquired ${new Date(run.acquired_at).toLocaleString()}` : "Remote data unavailable"}`;
     host_cell.appendChild(stale);
   }
   row.appendChild(host_cell);
@@ -386,6 +392,7 @@ function append_run_row(body, run) {
   row.appendChild(text_cell(format_integer(run.depth_maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_integer(run.maximum_update), "numeric-column"));
   row.appendChild(text_cell(format_run_duration(run), "numeric-column duration-column"));
+  row.appendChild(text_cell(format_last_loss(run.last_loss), "numeric-column loss-column"));
   row.appendChild(text_cell(format_time(run.updated_at)));
   const menu_cell = document.createElement("td");
   menu_cell.className = "menu-column";
@@ -1271,7 +1278,7 @@ function render_run_heading() {
     {text: run.wandb_run_id ? `W&B ID ${run.wandb_run_id}` : `Local ID ${run.local_run_id}`, class_name: "identity"},
     {text: format_run_state(display_run_state(run))},
     {text: run.producing_host ? `host ${run.producing_host}` : (run.host_label ? `host ${run.host_label}` : "")},                              // <<< THOG identify producing host rather than a W&B label
-    {text: run.remote_copy && run.acquisition_state !== "current" ? `stale · last acquired ${run.acquired_at ? new Date(run.acquired_at).toLocaleString() : "never"}` : "", class_name: "stale-warning"}, // <<< THOG distinguish stale acquired copies
+    {text: run.remote_copy && run.acquisition_state !== "current" ? `stale${run.acquisition_error ? `: ${run.acquisition_error}` : ""} · last acquired ${run.acquired_at ? new Date(run.acquired_at).toLocaleString() : "never"}` : "", class_name: "stale-warning"}, // <<< THOG distinguish stale acquired copies
     {text: `${format_integer(run.heatmap_count)} probes`},
     {text: `${format_integer(run.depth_snapshot_count)} curves`},
     {text: `latest step ${format_integer(run.maximum_update)}`},

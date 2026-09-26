@@ -734,6 +734,23 @@ class LocalChartReader:
             connection.close()
         return {str(row["key"]): str(row["value"]) for row in rows}
 
+    def latest_recorded_loss(self) -> Optional[float]:
+        """Read the last loss saved with a layer-count probe, if available."""
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT payload FROM heatmap_records ORDER BY optimizer_update DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        value = _decode_payload(row["payload"]).get("current_loss")
+        if value is None:
+            return None
+        number = float(value)
+        return number if math.isfinite(number) else None
+
     def status(self) -> Dict[str, Any]:
         connection = self._connection()
         try:

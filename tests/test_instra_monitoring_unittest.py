@@ -124,6 +124,7 @@ class MonitoringTests(unittest.TestCase):
         (path.parent / "processing" / "processing_data.json").write_text('{"rows":[]}')
         (root / "wandb" / "run-same_id" / "run-same_id.wandb").write_bytes(b"wandb data")
         (root / "wandb" / "run-same_id" / "files" / "metadata.json").write_text('{"ok":true}')
+        (root / "logs" / "run" / "train.log").write_text("T 42 loss=9.876 Δstep=4.0 s\n")
         return host_id, path
 
     def test_same_wandb_id_from_two_hosts_stays_separate_and_files_are_mapped(self):
@@ -138,6 +139,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(len({run["dashboard_run_id"] for run in runs}), 2)
         self.assertTrue(all(run["host_label"] == "misleading" for run in runs))
         self.assertEqual({run["producing_host"] for run in runs}, {"scruffy", "dreedle"})
+        self.assertTrue(all(run["last_loss"] == 9.876 for run in runs))
         self.assertEqual({run["gpu_assignment"]["status"] for run in runs}, {"verified", "unverified"})
         scanner = _ScannerCatalog(self.catalog)
         scanned_paths = {scanner._find_path("same_id", run) for run in runs}
@@ -154,6 +156,22 @@ class MonitoringTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.catalog.delete_local_file(run["dashboard_run_id"], "processing/processing_data.json")
         self.assertTrue(path_a.is_file() and path_b.is_file())
+
+    def test_latest_log_loss_updates_and_ordinary_transfer_reuses_previous_copy(self):
+        host_id, path = self._producer("source")
+        self.monitor._sync_host(host_id)
+        log_path = path.parent.parent / "train.log"
+        log_path.write_text("T 42 loss=9.876\nV 43 validation loss=6.3\nT 44 loss=10.24\n")
+        ordinary_transfer = self.network.monitor_transfer
+        reused = []
+        def transfer(host_id, root_kind, relative, destination, *, database=False):
+            if relative == "run/train.log":
+                reused.append(Path(destination).read_text() if Path(destination).is_file() else "")
+            return ordinary_transfer(host_id, root_kind, relative, destination, database=database)
+        with mock.patch.object(self.network, "monitor_transfer", side_effect=transfer):
+            self.monitor._sync_host(host_id)
+        self.assertEqual(reused, ["T 42 loss=9.876 Δstep=4.0 s\n"])
+        self.assertEqual(self.catalog.runs()["runs"][0]["last_loss"], 10.24)
 
     def test_failure_keeps_usable_copy_then_catches_up(self):
         host_id, path = self._producer("source")
@@ -177,6 +195,29 @@ class MonitoringTests(unittest.TestCase):
         calls = len(self.network.transfer_calls)
         self.monitor._sync_host(host_id)
         self.assertEqual(len(self.network.transfer_calls), calls)
+
+    def test_source_disappearing_keeps_run_and_explains_stale_copy(self):
+        host_id, path = self._producer("source")
+        self.monitor._sync_host(host_id)
+        path.unlink()
+        self.monitor._sync_host(host_id)
+        self.monitor.host_snapshot = (0, {})
+        run = self.catalog.runs()["runs"][0]
+        self.assertEqual(run["acquisition_state"], "stale")
+        self.assertIn("no longer listed", run["acquisition_error"])
+        self.assertEqual(self.network._host(host_id)["monitoring_status"]["activity"], "idle")
+
+    def test_loss_falls_back_to_latest_probe_when_training_log_is_unavailable(self):
+        host_id, path = self._producer("source")
+        (path.parent.parent / "train.log").unlink()
+        store = LocalChartStore(path, run_name="same run", run_id="same_id", wandb_run_id="same_id", config={})
+        store.append_heatmap_records([{
+            "optimizer_update": 42, "probe_id": "P42", "active_layers": 4,
+            "selected_layers": 4, "shrink": (), "growth": (), "current_loss": 10.25,
+        }])
+        store.close()
+        self.monitor._sync_host(host_id)
+        self.assertEqual(self.catalog.runs()["runs"][0]["last_loss"], 10.25)
 
     def test_disabling_stops_scheduling_but_keeps_copy_and_interval_validates(self):
         host_id, _path = self._producer("source")

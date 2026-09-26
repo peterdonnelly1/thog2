@@ -9,6 +9,7 @@
   let selected_tab = "overview";
   let visible = false;
   let pending_fingerprint = null;
+  let refresh_watch_until = 0;
   const message = value => { element("network_message").textContent = value || ""; };
   const date_text = value => value ? new Date(value).toLocaleString() : "—";
   const age_text = value => value ? `${Math.max(0, Math.round((Date.now() - Date.parse(value)) / 60000))} min` : "—";
@@ -19,7 +20,10 @@
     parent.appendChild(child);
     return child;
   };
-  const pair = (container, key, value) => { append(container, "dt", key); append(container, "dd", value ?? "—"); };
+  const pair = (container, key, value, value_class) => {
+    append(container, "dt", key);
+    append(container, "dd", value ?? "—", value_class);
+  };
   const button = (container, label, action, disabled = false) => {
     const control = append(container, "button", label);
     control.type = "button";
@@ -89,10 +93,11 @@
   function form_password() { return element("network_add_form").elements.password; }
   // ^^^ THOG
   async function run_action(name, host_id, args = {}) {
-    message(`${name.replaceAll("_", " ")}…`);
+    message(name === "monitor_refresh" ? "Requesting run data refresh…" : `${name.replaceAll("_", " ")}…`);
     try {
       const result = await action(name, host_id, args);
-      message(name === "monitor_refresh" ? "Run data refresh requested" : `${name.replaceAll("_", " ")} completed`);
+      if (name === "monitor_refresh") refresh_watch_until = Date.now() + 30000;
+      message(name === "monitor_refresh" ? "Run data refresh queued; acquisition status is updating below" : `${name.replaceAll("_", " ")} completed`);
       await refresh();
       return result;
     } catch (error) {
@@ -136,13 +141,17 @@
       append(select, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`);
       if (!host.local) {
         const remove_button = button(row, "Remove", () => {
+          if (snapshot.master_id) {
+            message("Release Runner Master in the Execution tab before removing a participating host.");
+            return;
+          }
           if (confirm(`Remove ${host.display_name} from Instra configuration? Runs and files are retained.`)) {
             run_action("remove", host.thog_host_id).catch(() => {});
           }
-        }, Boolean(snapshot.master_id));
+        });
         remove_button.className = "network-host-remove";
         remove_button.setAttribute("aria-label", `Remove ${host.display_name}`);
-        remove_button.title = snapshot.master_id ? "Release Runner Master before removing a participating host" : `Remove ${host.display_name}`;
+        remove_button.title = snapshot.master_id ? "Release Runner Master in Execution before removing a participating host" : `Remove ${host.display_name}`;
       }
       // ^^^ THOG
     }
@@ -167,40 +176,33 @@
       pair(data, "Host ID", host.thog_host_id); pair(data, "SSH destination", host.address);
       pair(data, "Resolved IP", host.resolved_ip || discovery.resolved_ip);
       pair(data, "Remote hostname", discovery.hostname); pair(data, "SSH user / port", `${host.ssh_user || "SSH default"} / ${host.ssh_port}`);
-      pair(data, "Authentication", host.authentication_mode); pair(data, "Agent", host.state);
+      pair(data, "Authentication", host.authentication_mode);
+      pair(data, "Agent", host.state, host.state === "available" ? "network-healthy" : "network-unhealthy");
       pair(data, "Last successful discovery", date_text(host.last_success) + stale);
       pair(data, "Discovery age", age_text(host.last_success)); pair(data, "Last contact", date_text(host.last_contact));
-      pair(data, "Instra installation", discovery.instra?.root); pair(data, "Instra version", discovery.instra?.version);
-      pair(data, "Instra process", discovery.instra?.running ? "Running" : "Not running at last discovery");
+      pair(data, "Dashboard installation", discovery.instra?.root); pair(data, "Dashboard version", discovery.instra?.version);
+      pair(data, "Dashboard process", discovery.instra?.running ? "Running" : "Not running at last discovery",
+        discovery.instra?.running ? "network-healthy" : "network-unhealthy");
       pair(data, "THOG installation", discovery.thog?.root); pair(data, "THOG version", discovery.thog?.version);
       pair(data, "Operating system", discovery.os);
       if (host.latest_error) append(detail, "p", `Latest failure (${host.latest_error.category}): ${host.latest_error.message}`);
-      const switches = append(detail, "div", undefined, "toggles");
-      for (const [key, label] of [["monitoring_enabled", "Monitoring enabled"], ["execution_enabled", "Execution enabled"]]) {
-        const wrapper = append(switches, "label");
-        const check = append(wrapper, "input");
-        check.type = "checkbox"; check.checked = host[key];
-        check.addEventListener("change", () => run_action("update", host.thog_host_id, {[key]:check.checked}).catch(() => { check.checked = !check.checked; }));
-        append(wrapper, "span", ` ${label}`);
-      }
-      const actions = append(detail, "div", undefined, "actions");
-      button(actions, "Start Instra", () => run_action("start_instra", host.thog_host_id).catch(() => {}));
-      button(actions, "Restart Instra", () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
-      if (snapshot.master_id === host.thog_host_id) {
-        button(actions, snapshot.release_pending ? "Retry Runner Master release" : "Release Runner Master",
-          () => run_action("release_master", host.thog_host_id).catch(() => {}));
-      } else if (host.local && !snapshot.master_id) {
-        button(actions, "Designate Runner Master", () => run_action("designate_master", host.thog_host_id).catch(() => {}));
+      if (host.local) {
+        append(detail, "p", "This is the dashboard currently open in your browser. Its node agent is a separate background service.", "network-muted");
+      } else {
+        append(detail, "p", "The Instra process is this host's dashboard. Its separate node agent reports host status even when that dashboard is stopped.", "network-muted");
+        const actions = append(detail, "div", undefined, "actions");
+        button(actions, `Start dashboard on ${host.display_name}`, () => run_action("start_instra", host.thog_host_id).catch(() => {}));
+        button(actions, `Restart dashboard on ${host.display_name}`, () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
       }
     } else if (selected_tab === "monitoring") {
+      toggle(detail, host, "monitoring_enabled", `Enable Runs to Monitor ${host.display_name} runs`);
       const data = append(detail, "dl");
-      pair(data, "Monitoring", host.monitoring_enabled ? "Enabled" : "Disabled");
       pair(data, "Instra logs root", (discovery.instra_logs_root || "—") + stale);
       pair(data, "W&B root", (discovery.wandb_root || "—") + stale);
       const status = host.monitoring_status || {};
       pair(data, "Refresh interval", status.refresh_interval ?? "—"); pair(data, "Acquisition", status.activity ?? "—");
       pair(data, "Last acquisition", date_text(status.last_success)); pair(data, "Data age", age_text(status.last_success));
-      pair(data, "Latest acquisition failure", status.latest_error || "—");
+      pair(data, "Latest acquisition failure", status.latest_error || "—", status.latest_error ? "network-unhealthy" : "");
       // vvv THOG configure each monitoring instance's background check interval in existing host details
       const interval_label = append(detail, "label", "Check interval (seconds) ");
       const interval_input = append(interval_label, "input");
@@ -210,12 +212,27 @@
       interval_input.addEventListener("change", () => run_action("monitor_settings", host.thog_host_id,
         {refresh_interval:Number(interval_input.value)}).catch(() => { interval_input.value = String(status.refresh_interval || 5); }));
       // ^^^ THOG
-      button(detail, "Refresh run data", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
+      button(detail, "Manually refresh run data now", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
     } else if (selected_tab === "profiles") {
+      toggle(detail, host, "execution_enabled", `Enable Execution of runs on ${host.display_name}`);
+      const master_row = append(detail, "div", undefined, "toggles");
+      const master_label = append(master_row, "label");
+      const master_check = append(master_label, "input");
+      master_check.type = "checkbox";
+      master_check.checked = snapshot.master_id === host.thog_host_id;
+      master_check.disabled = !host.local || Boolean(snapshot.master_id && snapshot.master_id !== host.thog_host_id);
+      master_check.addEventListener("change", () => {
+        const command = master_check.checked ? "designate_master" : "release_master";
+        run_action(command, host.thog_host_id).catch(() => { master_check.checked = !master_check.checked; });
+      });
+      append(master_label, "span", " Runner Master");
+      if (!host.local) append(detail, "p", "Designate Runner Master on the local host's Execution tab.", "network-muted");
+      if (snapshot.release_pending && master_check.checked) append(detail, "p", "Runner Master release pending; deselect to retry.", "network-muted");
       const profiles = discovery.execution_profiles || [];
       if (!profiles.length) append(detail, "p", "No execution profiles discovered" + stale);
       for (const profile of profiles) {
-        const card = append(detail, "section", undefined, "network-card"); append(card, "h3", profile.profile_key);
+        const card = append(detail, "section", undefined, "network-card");
+        if (profile.profile_key !== "current") append(card, "h3", profile.profile_key);
         const data = append(card, "dl"); pair(data, "Profile ID", profile.execution_profile_id);
         pair(data, "Location", profile.location); pair(data, "Python", profile.python);
         pair(data, "Shell entry", profile.shell_entry); pair(data, "THOG entry", profile.thog_entry);
@@ -237,6 +254,15 @@
         for (const event of value.events) append(detail, "p", `${date_text(event.time)} · ${event.source} · ${event.operation} · ${event.outcome}: ${event.message}`, "network-card");
       }).catch(error => message(error.message));
     }
+  }
+  function toggle(detail, host, key, label) {
+    const switches = append(detail, "div", undefined, "toggles");
+    const wrapper = append(switches, "label");
+    const check = append(wrapper, "input");
+    check.type = "checkbox";
+    check.checked = host[key];
+    check.addEventListener("change", () => run_action("update", host.thog_host_id, {[key]:check.checked}).catch(() => { check.checked = !check.checked; }));
+    append(wrapper, "span", ` ${label}`);
   }
   function show(which) {
     visible = which === "networks";
@@ -301,6 +327,7 @@
       if (error.category === "authentication") element("network_password_label").hidden = false;
     } finally { form.elements.password.value = ""; element("network_add_submit").disabled = false; }
   });
-  setInterval(() => { if (visible) refresh(); }, 5000);
+  let refresh_tick = 0;
+  setInterval(() => { if (visible && (Date.now() < refresh_watch_until || ++refresh_tick % 5 === 0)) refresh(); }, 1000);
 })();
 // ^^^ THOG

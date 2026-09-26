@@ -104,7 +104,7 @@ window.addEventListener("load", () => {
 
     const column_storage_key = "thog2_local_hidden_run_columns_v1";
     const column_labels = Object.freeze({
-      select:"select", visibility:"visible", steps:"logged", duration:"t", state:"state", name:"name",
+      select:"select", visibility:"visible", steps:"logged", duration:"t", loss:"l", state:"state", name:"name",
       wandb:"W&B ID", host:"host", gpu:"GPU", preset:"p", optimizer:"OPT", gb:"GB", layers:"L",
       depth_order:"P", premat:"premat", parms:"PARMS", equiv:"EQUIV", warmup:"w", context:"C",
       d_model:"D", heads:"H", grad_accum:"A", activation_checkpointing:"S", learning_rate:"c",
@@ -221,7 +221,7 @@ window.addEventListener("load", () => {
         unmatched:[...(app.processing_unmatched_nsys_run_ids || [])].map(String).sort(),
         runs:(app.runs || []).map(run => [
           String(run_identifier(run)), run.revision || null, run.run_state || null, run.heartbeat_at || null,
-          run.updated_at || null, run.maximum_update ?? null, run.chart_maximum_update ?? null,
+          run.updated_at || null, run.maximum_update ?? null, run.chart_maximum_update ?? null, run.last_loss ?? null,
           run.configuration?.premat ?? null, run.configuration?.premat_target_matrix ?? null,
         ]),
       });

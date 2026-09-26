@@ -32,11 +32,14 @@
 .network-detail dl { display:grid; grid-template-columns:minmax(145px,180px) minmax(0,1fr); gap:11px 15px; margin:0 0 24px; }
 .network-detail dt { color:#69717d; }
 .network-detail dd { margin:0; overflow-wrap:anywhere; }
+.network-detail .network-healthy { color:#18733d; font-weight:600; }
+.network-detail .network-unhealthy { color:#b02f3b; font-weight:600; }
+.network-rail-icon { width:26px; height:26px; display:block; color:#515c66; }
 /* vvv THOG keep the Monitoring interval beside its label inside Networks host details */
 .network-detail input[type="number"] { width:78px; margin-left:8px; }
 /* ^^^ THOG */
 .network-detail .actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:18px 0; }
-.network-detail .toggles { display:flex; flex-wrap:wrap; gap:24px; margin:16px 0; }
+.network-detail .toggles { display:flex; flex-direction:column; gap:10px; margin:16px 0; }
 .network-detail .network-card { border:1px solid #dce0e5; border-radius:7px; padding:14px; margin:0 0 10px; }
 .network-detail pre { white-space:pre-wrap; overflow-wrap:anywhere; }
 #network_message { margin:0; padding:8px 20px; min-height:34px; color:#6b306b; }

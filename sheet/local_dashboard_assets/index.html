@@ -40,7 +40,7 @@
       <span class="runs-icon" aria-hidden="true"><i></i><i></i><i></i></span>
       <span>Runs</span>
     </button>
-    <button class="rail-item" id="networks_nav" type="button" title="Networks"><span class="settings-icon" aria-hidden="true">⌁</span><span>Networks</span></button>
+    <button class="rail-item" id="networks_nav" type="button" title="Networks"><svg class="network-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M14 10h36M14 10 7 36m7-26 15 25M50 10 29 35m21-25 6 27M7 36l22-1m-22 1 33 20M29 35l27 2m-27-2 11 21m16-19L40 56" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><g fill="currentColor"><circle cx="14" cy="10" r="6"/><circle cx="50" cy="10" r="6"/><circle cx="7" cy="36" r="6"/><circle cx="29" cy="35" r="6"/><circle cx="56" cy="37" r="6"/><circle cx="40" cy="56" r="6"/></g></svg><span>Networks</span></button>
     <!-- ^^^ THOG -->
     <button class="rail-item" id="settings_nav" type="button" title="Settings">
       <span class="settings-icon" aria-hidden="true">⚙</span>
@@ -63,7 +63,7 @@
       <!-- ^^^ THOG -->
       <nav id="network_tabs" class="network-tabs" aria-label="Host details">
         <button type="button" data-network-tab="overview">Overview</button><button type="button" data-network-tab="monitoring">Monitoring</button>
-        <button type="button" data-network-tab="profiles">Execution Profiles</button><button type="button" data-network-tab="gpus">GPUs</button>
+        <button type="button" data-network-tab="profiles">Execution</button><button type="button" data-network-tab="gpus">GPUs</button>
         <button type="button" data-network-tab="logs">Logs</button>
       </nav>
       <div id="network_detail" class="network-detail"></div>
@@ -152,6 +152,7 @@
               <th class="numeric-column curve-end-column" title="Last retained weight-curve capture step">C_e</th>
               <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">Logged</th>
               <th class="numeric-column duration-column" title="Elapsed run time">t</th>
+              <th class="numeric-column loss-column" title="Most recent recorded loss">l</th>
               <th>Updated</th>
               <th class="menu-column"><span class="visually-hidden">Run menu</span></th>
             </tr>
