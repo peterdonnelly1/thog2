@@ -284,8 +284,8 @@ class MonitoringService:
                 self.manifests[host_id] = manifest
                 _atomic_json(self._manifest_path(host_id), manifest)
             if changed:
-                self.network.log_event("Monitoring", "acquire", host_id, "success",
-                                       f"{changed} acquired files", duration_seconds=time.monotonic()-began)
+                instra_network.log_event("Monitoring", "acquire", host_id, "success",
+                                         f"{changed} acquired files", duration_seconds=time.monotonic()-began)
         except (instra_network.NetworkError, OSError, ValueError) as error:
             error_category = error.category if isinstance(error, instra_network.NetworkError) else "acquisition"
             error_message = str(error) if isinstance(error, instra_network.NetworkError) else error_category
@@ -298,8 +298,8 @@ class MonitoringService:
                     "last_success": _time_now() if success else previous_status.get("last_success"),
                     "latest_error": None if success else error_message})
                 if error_category:
-                    self.network.log_event("Monitoring", "acquire", host_id, error_category,
-                                           "Acquisition failed", duration_seconds=time.monotonic()-began)
+                    instra_network.log_event("Monitoring", "acquire", host_id, error_category,
+                                             "Acquisition failed", duration_seconds=time.monotonic()-began)
             finally:
                 with self.lock:
                     self.active.discard(host_id)

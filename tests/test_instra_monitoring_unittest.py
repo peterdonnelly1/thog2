@@ -59,9 +59,6 @@ class FakeNetwork:
     def update_monitoring_status(self, host_id, value):
         self.host_data[host_id]["monitoring_status"] = value
 
-    def log_event(self, *args, **kwargs):
-        self.events.append((args, kwargs))
-
     def monitor_files(self, host_id, root_kind, relative_directory=""):
         root = Path(self._host(host_id)["last_discovered"]["instra_logs_root" if root_kind == "logs" else "wandb_root"])
         root = root / relative_directory
@@ -90,6 +87,10 @@ class MonitoringTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.network = FakeNetwork(self.root)
+        event_patch = mock.patch.object(instra_network, "log_event",
+                                        side_effect=lambda *args, **kwargs: self.network.events.append((args, kwargs)))
+        event_patch.start()
+        self.addCleanup(event_patch.stop)
         self.original = {name: (getattr(dashboard.DashboardCatalog, name)) for name in (
             "__init__", "_candidate_paths", "_state_for_path", "delete_run", "delete_local_file", "wandb_files")}
         self.original_status = dashboard.RunDashboardState.status
@@ -130,6 +131,7 @@ class MonitoringTests(unittest.TestCase):
         second, path_b = self._producer("dreedle", gpu=9)
         self.monitor._sync_host(first)
         self.monitor._sync_host(second)
+        self.assertEqual([args[3] for args, _ in self.network.events], ["success", "success"])
         runs = self.catalog.runs()["runs"]
         self.assertEqual(len(runs), 2)
         self.assertEqual({run["thog_host_id"] for run in runs}, {first, second})
@@ -215,6 +217,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.network._host(host_id)["monitoring_status"]["activity"], "failed")
         self.assertIn("sqlite3_rsync", self.network._host(host_id)["monitoring_status"]["latest_error"])
         self.assertEqual(self.catalog.runs()["runs"], [])
+        self.assertEqual(self.network.events[-1][0][3], "dependency")
 
     def test_network_rejects_path_escape_before_running_ssh(self):
         host_id, _path = self._producer("source")

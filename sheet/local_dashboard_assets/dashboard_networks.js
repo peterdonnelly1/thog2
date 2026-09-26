@@ -92,7 +92,7 @@
     message(`${name.replaceAll("_", " ")}…`);
     try {
       const result = await action(name, host_id, args);
-      message(`${name.replaceAll("_", " ")} completed`);
+      message(name === "monitor_refresh" ? "Run data refresh requested" : `${name.replaceAll("_", " ")} completed`);
       await refresh();
       return result;
     } catch (error) {
