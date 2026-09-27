@@ -304,6 +304,7 @@ class NodeReservationTests(unittest.TestCase):
         patcher.start(); self.addCleanup(patcher.stop)
 
     def test_atomic_owner_memory_idempotence_and_release(self):
+        self.assertEqual(agent._operation("runner_capabilities", {})["cuda_preflight"], True)
         first, second = uuid.uuid4().hex, uuid.uuid4().hex
         args = {"grid_id": first, "gpu_key": "GPU-0", "required_mib": 4096, "headroom_mib": 512}
         agent._operation("runner_reserve", args)
@@ -346,10 +347,40 @@ class NodeReservationTests(unittest.TestCase):
                 "--n-layer": 2, "--n-embd": 64, "--n-head": 4, "DEPTH.order": 1},
                 "dtype": "bfloat16", "attention_backend": "sdpa", "gpu_uuid": "GPU-0"}
         args = {"run": base, "gpu_key": "GPU-0", "host_label": "local"}
-        self.assertTrue(agent._operation("runner_preflight", args)["resolved"])
-        with self.assertRaisesRegex((ValueError, RuntimeError), "preflight"):
-            agent._operation("runner_preflight", {**args, "run": {**base, "parameters":
-                {**base["parameters"], "--geometry-preset": "invalid_preset"}}})
+        with patch.object(agent, "_check_torch_cuda") as check_cuda:
+            self.assertTrue(agent._operation("runner_preflight", args)["resolved"])
+            check_cuda.assert_called_once()
+            self.assertEqual(check_cuda.call_args.args[1]["CUDA_VISIBLE_DEVICES"], "0")
+            with self.assertRaisesRegex((ValueError, RuntimeError), "preflight"):
+                agent._operation("runner_preflight", {**args, "run": {**base, "parameters":
+                    {**base["parameters"], "--geometry-preset": "invalid_preset"}}})
+            check_cuda.assert_called_once()  # Bad parameters never probe CUDA.
+
+    def test_cuda_preflight_reports_failure_before_reserving_or_launching(self):
+        base = {"run_id": uuid.uuid4().hex, "grid_tag": "G-00001", "pairing_id": None,
+                "profiler": "none", "parameters": {"--max-iters": 2, "--warmup-iters": 0,
+                "--n-layer": 2, "--n-embd": 64, "--n-head": 4, "DEPTH.order": 1},
+                "dtype": "bfloat16", "attention_backend": "sdpa", "gpu_uuid": "GPU-0"}
+        args = {"run": base, "gpu_key": "GPU-0", "host_label": "local"}
+        real_run = agent.subprocess.run
+
+        def no_cuda(command, **options):
+            if command[:2] == [agent.sys.executable, "-c"]:
+                self.assertEqual(options["env"]["CUDA_VISIBLE_DEVICES"], "0")
+                return SimpleNamespace(returncode=1, stdout="", stderr="RuntimeError: CUDA unknown error")
+            return real_run(command, **options)
+
+        with patch.object(agent.subprocess, "run", side_effect=no_cuda):
+            with self.assertRaisesRegex(RuntimeError, "PyTorch cannot initialize CUDA on GPU 0.*CUDA unknown error"):
+                agent._operation("runner_preflight", args)
+        self.assertEqual(agent._read_state(), {})
+
+    def test_cuda_preflight_accepts_initialized_selected_gpu(self):
+        with patch.object(agent.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout="Test GPU\n", stderr="")) as check:
+            agent._check_torch_cuda(gpu(1), {"CUDA_VISIBLE_DEVICES": "1"})
+        self.assertEqual(check.call_args.args[0][:2], [agent.sys.executable, "-c"])
+        self.assertEqual(check.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "1")
 
 
 if __name__ == "__main__":

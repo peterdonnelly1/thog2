@@ -295,13 +295,13 @@ class NetworkTests(unittest.TestCase):
         events = []
         def record_request(operation, *args, **kwargs):
             events.append(operation)
-            return {}
+            return {"protocol": 2, "cuda_preflight": True} if operation == "runner_capabilities" else {}
         with (patch.object(agent, "request", side_effect=record_request),
               patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
               patch.object(subprocess, "Popen") as popen):
             namespace["_start_node_agent"]()
         popen.assert_not_called()
-        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "entry", "configure"])                                                          # <<< THOG verify the current agent protocol before registering the backend
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "runner_capabilities", "entry", "configure"])
 
         # vvv THOG a second launch must retain the first backend's identity when its port is occupied
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -314,7 +314,7 @@ class NetworkTests(unittest.TestCase):
                   patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry"))):
                 with self.assertRaisesRegex(RuntimeError, "already listening"):
                     namespace["_start_node_agent"]()
-        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "entry"])                                                                       # <<< THOG verify protocol on already-running agent before repairing entry
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "runner_capabilities", "entry"])
 
         # The first Runner release supports reconcile but lacks log retrieval.
         # A launcher restart must replace that verified, same-user Node Agent.
@@ -355,6 +355,23 @@ class NetworkTests(unittest.TestCase):
             upgraded["_start_node_agent"]()
         self.assertEqual(killed, [(12345, signal.SIGTERM)])
         self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "state", "entry", "configure"])
+        popen.assert_called_once()
+        # An agent from the log-enabled release also needs replacement so its
+        # parameter-only preflight cannot silently skip the CUDA check.
+        killed.clear()
+        events.clear()
+        def old_cuda_request(operation, *_args, **_kwargs):
+            events.append(operation)
+            if operation == "runner_log": raise RuntimeError("Unknown Runner attempt")
+            if operation == "runner_capabilities": raise RuntimeError("unknown operation")
+            return {}
+        with (patch.object(agent, "request", side_effect=old_cuda_request),
+              patch.object(agent, "_running", return_value=False),
+              patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
+              patch.object(subprocess, "Popen") as popen):
+            upgraded["_start_node_agent"]()
+        self.assertEqual(killed, [(12345, signal.SIGTERM)])
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "runner_capabilities", "state", "entry", "configure"])
         popen.assert_called_once()
         # ^^^ THOG
     # ^^^ THOG
@@ -419,6 +436,16 @@ class NetworkTests(unittest.TestCase):
         with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response) as run:
             network._ssh_request(host, "state", {})
         self.assertEqual(run.call_args.args[0][-1], "~/.local/state/instra/agent-request")
+        self.assertEqual(run.call_args.kwargs["timeout"], 35)
+        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response) as run:
+            network._ssh_request(host, "runner_preflight", {})
+        self.assertEqual(run.call_args.kwargs["timeout"], 85)
+
+    def test_local_cuda_preflight_allows_time_for_training_parser_and_torch(self):
+        host = self.service._host(self.service.local_id)
+        with patch.object(agent, "request", return_value={}) as request:
+            self.service._agent_request(host, "runner_preflight", {})
+            request.assert_called_once_with("runner_preflight", {}, timeout=75)
 
     def test_master_operations_accept_transient_per_host_passwords(self):
         remote = self.service._new_host("dreedle", "peter", 22)
@@ -493,6 +520,14 @@ class NetworkTests(unittest.TestCase):
                   patch.object(agent, "request", side_effect=failure), redirect_stdout(output)):
                 self.assertEqual(agent.main(["request"]), 1)
             self.assertEqual(json.loads(output.getvalue())["category"], category)
+
+    def test_node_cli_cuda_preflight_uses_extended_request_timeout(self):
+        output = io.StringIO()
+        with (patch.object(agent.sys, "stdin", io.StringIO('{"operation":"runner_preflight","args":{}}')),
+              patch.object(agent, "request", return_value={"resolved": True}) as request,
+              redirect_stdout(output)):
+            self.assertEqual(agent.main(["request"]), 0)
+        request.assert_called_once_with("runner_preflight", {}, timeout=75)
 
     def test_backend_restart_marks_only_intentional_exits(self):
         source = ast.parse((agent.ROOT / "run_thog2_dashboard.py").read_text())

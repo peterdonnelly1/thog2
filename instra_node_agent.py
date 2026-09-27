@@ -178,8 +178,28 @@ def _known_thog_compute_pids(gpu):
     return found
 
 
+def _check_torch_cuda(gpu, environment):
+    """Check CUDA in a fresh process with the same GPU visibility as training."""
+    try:
+        checked = subprocess.run(
+            [sys.executable, "-c", "import torch; torch.cuda.init(); print(torch.cuda.get_device_name(0))"],
+            cwd=ROOT, env=environment, capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f"PyTorch CUDA preflight unavailable on GPU {gpu['ordinal']}: {error}") from error
+    if checked.returncode:
+        detail = (checked.stderr or checked.stdout).strip()[-900:] or f"exit {checked.returncode}"
+        raise RuntimeError(
+            f"PyTorch cannot initialize CUDA on GPU {gpu['ordinal']} ({gpu['gpu_key']}); "
+            f"CUDA_VISIBLE_DEVICES={environment['CUDA_VISIBLE_DEVICES']}: {detail}"
+        )
+
+
 def _runner_operation(state, name, args):
     from thog_grid_runner import command_for, environment_for, validate_recipe
+    if name == "runner_capabilities":
+        _validate_args(args, set())
+        return {"protocol": 2, "cuda_preflight": True}
     if name == "runner_log":
         _validate_args(args, {"attempt_id", "max_bytes"})
         attempt_id = args.get("attempt_id")
@@ -221,6 +241,7 @@ def _runner_operation(state, name, args):
             raise RuntimeError(f"THOG parameter preflight unavailable: {type(error).__name__}") from error
         if checked.returncode:
             raise ValueError(f"THOG parameter preflight rejected this run: {checked.stderr.strip()[-450:]}")
+        _check_torch_cuda(gpu, environment)
         return {"resolved": True, "gpu_uuid": gpu["uuid"]}
     if name == "runner_reconcile":
         _validate_args(args, set())
@@ -605,7 +626,8 @@ def main(argv=None):
         return 0
     try:
         payload = json.load(sys.stdin)
-        result = request(payload["operation"], payload.get("args", {}))
+        operation = payload["operation"]
+        result = request(operation, payload.get("args", {}), timeout=75 if operation == "runner_preflight" else 30)
         print(json.dumps({"ok": True, "result": result}))
         return 0
     # vvv THOG report socket failures separately so the Network view can distinguish an absent agent

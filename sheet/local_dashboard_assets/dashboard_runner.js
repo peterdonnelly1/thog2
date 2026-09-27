@@ -227,7 +227,7 @@
   }
   function render_run(parent,run) {
     const row=add(parent,"details",undefined,"runner-run");
-    if (run.state === "failed") row.open = true;
+    if (["failed","blocked"].includes(run.state)) row.open = true;
     add(row,"summary",`${run.run_id.slice(0,8)} · ${run.state} · ${run.host_label} GPU ${run.gpu.ordinal} · ${run.profiler.toUpperCase()}`);
     add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power requested ${run.requested_power_w??"default"} W`);
     if (run.pairing_id) add(row,"p",`Paired profiler runs: ${run.pairing_id}`);
@@ -347,7 +347,9 @@
         const failed=grid.runs.find(run=>run.state==="failed");
         const last=failed?.attempts?.at(-1);
         const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1).slice(0,110)}` : ""}` : "";
-        button(list,`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}`,
+        const blocked=grid.runs.find(run=>run.state==="blocked" && run.blocking_reason);
+        const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
+        button(list,`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
         ()=>{chosen=grid.grid_id;render();}).classList.toggle("active",chosen===grid.grid_id);
       }
       const grid=grids.find(item=>item.grid_id===chosen)||grids.at(-1);

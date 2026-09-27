@@ -234,7 +234,8 @@ def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None
     try:
         with _ssh_askpass(password) as environment:
             result = subprocess.run(command, input=json.dumps({"operation": operation, "args": args}), capture_output=True,
-                                    text=True, timeout=35, env=environment, start_new_session=password is not None)
+                                    text=True, timeout=85 if operation == "runner_preflight" else 35,
+                                    env=environment, start_new_session=password is not None)
     except subprocess.TimeoutExpired as error:
         raise NetworkError(_SSH_ERROR, "SSH connection or agent request timed out") from error
     except OSError as error:
@@ -297,7 +298,7 @@ class NetworkService:
     def _agent_request(self, host, operation, args=None, password=None, accepted_fingerprint=None):
         if host["local"]:
             try:
-                return agent.request(operation, args)
+                return agent.request(operation, args, timeout=75 if operation == "runner_preflight" else 30)
             except OSError as error:
                 raise NetworkError("agent availability", "Local node agent unavailable") from error
             except RuntimeError as error:
