@@ -36,6 +36,8 @@ assert.match(recipe_problems({...recipe,parameters:{...parameters,"--max-iters":
 assert.match(recipe_problems({...recipe,parameters:{...parameters,"DEPTH.order":""}}, hosts).join(" "), /DEPTH.order is required/);
 assert.match(runner,/if \(run.state === "failed"\) row.open = true/,
   "failed attempt diagnostics must open in History without an extra click");
+assert.match(runner,/Unable to retrieve attempt log: \$\{error\.message\}/,
+  "log retrieval errors must be shown beside the attempt, not only in the toolbar");
 
 const table = fs.readFileSync("sheet/local_dashboard_assets/dashboard_runs_table_restore.js", "utf8");
 const segment = table.match(/activation_checkpointing: \{([\s\S]*?)\n      \},\n      learning_rate:/)?.[1];

@@ -301,7 +301,7 @@ class NetworkTests(unittest.TestCase):
               patch.object(subprocess, "Popen") as popen):
             namespace["_start_node_agent"]()
         popen.assert_not_called()
-        self.assertEqual(events, ["state", "runner_reconcile", "entry", "configure"])                                                                          # <<< THOG verify upgraded agent protocol before registering the backend
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "entry", "configure"])                                                          # <<< THOG verify the current agent protocol before registering the backend
 
         # vvv THOG a second launch must retain the first backend's identity when its port is occupied
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -314,7 +314,48 @@ class NetworkTests(unittest.TestCase):
                   patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry"))):
                 with self.assertRaisesRegex(RuntimeError, "already listening"):
                     namespace["_start_node_agent"]()
-        self.assertEqual(events, ["state", "runner_reconcile", "entry"])                                                                                       # <<< THOG verify protocol on already-running agent before repairing entry
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "entry"])                                                                       # <<< THOG verify protocol on already-running agent before repairing entry
+
+        # The first Runner release supports reconcile but lacks log retrieval.
+        # A launcher restart must replace that verified, same-user Node Agent.
+        import signal
+        import struct
+        killed = []
+        class Peer:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def settimeout(self, _seconds): pass
+            def connect(self, _path): pass
+            def getsockopt(self, *_args): return struct.pack("3i", 12345, os.getuid(), os.getgid())
+            def setsockopt(self, *_args): pass
+            def bind(self, _address): pass
+        def virtual_path(path):
+            if str(path) == "/proc/12345/cmdline":
+                return SimpleNamespace(read_bytes=lambda: b"python\0instra_node_agent.py\0serve\0")
+            return Path(path)
+        upgraded = dict(namespace, Path=virtual_path, struct=struct, signal=signal,
+                        socket=SimpleNamespace(socket=lambda *_args: Peer(), AF_UNIX=socket.AF_UNIX,
+                                               AF_INET=socket.AF_INET, SOCK_STREAM=socket.SOCK_STREAM,
+                                               SOL_SOCKET=socket.SOL_SOCKET, SO_PEERCRED=socket.SO_PEERCRED,
+                                               SO_REUSEADDR=socket.SO_REUSEADDR),
+                        os=SimpleNamespace(getuid=os.getuid, getpid=os.getpid,
+                                           kill=lambda pid, signum: killed.append((pid, signum))))
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[launcher], type_ignores=[])),
+                     "run_thog2_dashboard.py", "exec"), upgraded)
+        parser.parse_args = lambda: SimpleNamespace(root=self.state_dir / "logs", host="127.0.0.1", port=0)
+        events.clear()
+        def partially_upgraded_request(operation, *_args, **_kwargs):
+            events.append(operation)
+            if operation == "runner_log": raise RuntimeError("Unknown Runner operation")
+            return {}
+        with (patch.object(agent, "request", side_effect=partially_upgraded_request),
+              patch.object(agent, "_running", return_value=False),
+              patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
+              patch.object(subprocess, "Popen") as popen):
+            upgraded["_start_node_agent"]()
+        self.assertEqual(killed, [(12345, signal.SIGTERM)])
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "state", "entry", "configure"])
+        popen.assert_called_once()
         # ^^^ THOG
     # ^^^ THOG
 

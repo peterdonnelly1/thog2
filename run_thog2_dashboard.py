@@ -191,8 +191,17 @@ def _start_node_agent() -> None:
         # vvv THOG replace an older local Node Agent protocol after a branch update; accepted child jobs survive
         try:
             instra_node_agent.request("runner_reconcile", timeout=1)
+            # An agent from the initial Runner release already understands
+            # reconcile but cannot serve attempt logs. Probe the new operation
+            # using an impossible attempt ID; the new agent rejects the ID,
+            # while the old one rejects the operation itself.
+            try:
+                instra_node_agent.request("runner_log", {"attempt_id": "__instra_capability_probe__", "max_bytes": 1}, timeout=1)
+            except RuntimeError as error:
+                if "Unknown Runner attempt" not in str(error):
+                    raise
         except RuntimeError as error:
-            if "unknown operation" not in str(error):
+            if not any(text in str(error).lower() for text in ("unknown operation", "unknown runner operation")):
                 raise
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
                 peer.settimeout(2)

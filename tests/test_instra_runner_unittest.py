@@ -176,6 +176,30 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(len(after["attempts"]),2)
         self.assertNotEqual(after["attempts"][1]["attempt_id"],first)
 
+    def test_failed_attempt_explains_old_agent_log_protocol_and_can_be_read_after_upgrade(self):
+        recipe = {"label":"small", "parameters":{"--max-iters":2,"--warmup-iters":0,
+                  "--n-embd":8,"--n-head":2,"--n-layer":2,"--batch-size":1,"--block-size":8}}
+        saved = self.service.save_recipe(None, recipe)
+        grid = self.service.launch(saved["recipe_id"])
+        self.service._refresh()
+        run = self.service.snapshot()["grids"][0]["runs"][0]
+        attempt_id = run["attempts"][0]["attempt_id"]
+        self.fake.attempts[attempt_id]["state"] = "failed"
+        original = self.fake.runner_call
+        def old_agent(host_id, operation, args=None):
+            if operation == "runner_log":
+                raise network.NetworkError("operation", "Unknown Runner operation")
+            return original(host_id, operation, args)
+        self.fake.runner_call = old_agent
+        self.service._refresh()
+        result = self.service.snapshot()["grids"][0]["runs"][0]
+        self.assertIn("Unknown Runner operation", result["attempts"][0]["failure_excerpt"])
+        self.fake.runner_call = original
+        self.assertIn("simulated training failure", self.service.attempt_log(
+            grid["grid_id"], run["run_id"], attempt_id)["text"])
+        self.assertIn("simulated training failure", self.service.snapshot()["grids"][0]["runs"][0]
+                      ["attempts"][0]["failure_excerpt"])
+
     def test_tight_conversion_reassigns_pending_work_without_moving_running(self):
         saved=self.service.save_recipe(None,self.recipe)
         source=self.service.launch(saved["recipe_id"])

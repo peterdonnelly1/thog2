@@ -254,7 +254,7 @@
     });
     for (const attempt of run.attempts||[]) {
       add(row,"p",`Attempt ${attempt.attempt_id} · ${attempt.started_at} · ${attempt.state||run.state} · exit ${attempt.exit_code??"pending"}`);
-      if (attempt.failure_excerpt) add(row,"pre",attempt.failure_excerpt,"runner-failure-log");
+      const excerpt=attempt.failure_excerpt ? add(row,"pre",attempt.failure_excerpt,"runner-failure-log") : null;
       if (attempt.state==="failed" || run.state==="failed") {
         const log=add(row,"pre","","runner-failure-log");log.hidden=true;
         button(row,"View attempt log",async()=>{
@@ -262,7 +262,8 @@
             const query=new URLSearchParams({grid_id:run.grid_id,run_id:run.run_id,attempt_id:attempt.attempt_id});
             const result=await request(`/api/runner/log?${query}`);
             log.textContent=result.text||"No log output";log.hidden=false;
-          } catch(error){message.textContent=error.message;}
+            if(excerpt)excerpt.hidden=true;
+          } catch(error){log.textContent=`Unable to retrieve attempt log: ${error.message}`;log.hidden=false;message.textContent=error.message;}
         });
       }
     }

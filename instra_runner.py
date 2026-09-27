@@ -322,7 +322,20 @@ class RunnerService:
         run = next((item for item in grid["runs"] if item["run_id"] == run_id), None)
         if run is None or not any(item["attempt_id"] == attempt_id for item in run["attempts"]):
             raise KeyError("Unknown attempt in this Grid")
-        return self.network.runner_call(run["host_id"], "runner_log", {"attempt_id": attempt_id, "max_bytes": 16384})
+        result = self.network.runner_call(run["host_id"], "runner_log", {"attempt_id": attempt_id, "max_bytes": 16384})
+        # A click after an Agent upgrade should repair stale generic excerpts
+        # on terminal Grids as well as show the fetched log immediately.
+        excerpt = str(result.get("text", ""))[-4096:]
+        if excerpt:
+            with self.lock:
+                state = _read()
+                current_grid = next((item for item in state["grids"] if item["grid_id"] == grid_id), None)
+                current_run = next((item for item in current_grid["runs"] if item["run_id"] == run_id), None) if current_grid else None
+                current = next((item for item in current_run["attempts"] if item["attempt_id"] == attempt_id), None) if current_run else None
+                if current and current.get("state") == "failed" and current.get("failure_excerpt") != excerpt:
+                    current["failure_excerpt"] = excerpt
+                    _write(state)
+        return result
 
     def stop_grid(self, grid_id, force=False):
         self._require_controller()
@@ -447,8 +460,8 @@ class RunnerService:
                                 excerpt = self.network.runner_call(run["host_id"], "runner_log", {
                                     "attempt_id": latest["attempt_id"], "max_bytes": 4096})["text"]
                                 latest["failure_excerpt"] = excerpt[-4096:]
-                            except (network.NetworkError, RuntimeError, OSError, KeyError):
-                                latest["failure_excerpt"] = "Training log unavailable; inspect the producing thog_host."
+                            except (network.NetworkError, RuntimeError, OSError, KeyError) as error:
+                                latest["failure_excerpt"] = f"Attempt log unavailable: {type(error).__name__}: {error}"
                         if remote["state"] in TERMINAL and not run.get("duration_seconds"):
                             finished = datetime.fromisoformat(remote["finished_at"]).timestamp() if remote.get("finished_at") else time.time()
                             run["duration_seconds"] = max(0, finished - datetime.fromisoformat(latest["started_at"]).timestamp())
