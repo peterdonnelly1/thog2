@@ -7,22 +7,22 @@
   style.textContent = `
     .processing-downloads { min-width:0 !important; overflow-x:auto; scrollbar-width:thin; }
     .processing-download-dock {
-      flex:0 0 100%; width:100%; min-width:0; height:34px;
-      padding:2px 8px 4px; overflow:hidden; background:#fff;
+      flex:0 0 100%; width:100%; min-width:0; height:auto;
+      padding:4px 8px 8px; overflow:visible; background:#fff;
     }
     .processing-download-dock > .processing-downloads {
-      width:100%; height:28px; max-width:none; margin:0 !important;
-      display:flex !important; align-items:flex-start !important; flex-wrap:nowrap !important;
-      overflow-x:auto; overflow-y:hidden;
+      width:100%; height:auto; max-width:none; margin:0 !important;
+      display:flex !important; align-items:center !important; flex-wrap:wrap !important;
+      overflow:visible;
     }
     #processing_grid.is-maximized {
       flex-direction:column !important; flex-wrap:nowrap !important;
     }
     #processing_grid.is-maximized > .processing-download-dock {
-      flex:0 0 34px !important; width:100% !important;
+      flex:0 0 auto !important; width:100% !important;
     }
-    .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-start; flex-wrap:nowrap; gap:3px 7px; white-space:nowrap; }
-    .processing-paired-download-group { display:inline-flex; align-items:center; gap:4px; }
+    .processing-paired-download-groups { display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:6px 14px; }
+    .processing-paired-download-group { display:inline-flex; align-items:center; flex-wrap:wrap; gap:4px; border-right:1px solid #bcc8d5; padding-right:12px; }
     .processing-paired-download-label { font-size:9px; font-weight:850; color:#3f4650; letter-spacing:.04em; }
     #processing_timeline_card.maximized .processing-plot-shell { padding-top:0 !important; padding-bottom:0 !important; }
     #processing_compatibility_card .processing-compatibility-key { margin-top:8px; }
@@ -122,16 +122,25 @@
     if (!host) return;
     host.querySelector(".processing-paired-download-groups")?.remove();
     const original_children = [...host.children];
-    original_children.forEach(child => { child.hidden = false; });
-    const pair = payload?.paired_processing_downloads;
-    if (!pair?.nsys?.dashboard_run_id || !pair?.ncu?.dashboard_run_id) return;
+    // The base Processing owner has already set each direct anchor's visibility
+    // for this run. Only restore non-anchor legacy content after a paired view.
+    original_children.filter(child => child.tagName !== "A").forEach(child => { child.hidden = false; });
+    let pair = payload?.paired_processing_downloads;
+    if (!pair?.nsys?.dashboard_run_id || !pair?.ncu?.dashboard_run_id) {
+      const files = {...(payload?.metadata?.files || {}), ...(payload?.premat_compatibility_files || {})};
+      if (!download_entries(files).length) return;
+      const is_ncu = Boolean(files.raw_ncu || files.ncu_raw_csv || files.kernel_resources ||
+        payload?.premat_compatibility_source?.dashboard_run_id === processing_current_run());
+      pair = {[is_ncu ? "ncu" : "nsys"]:{dashboard_run_id:processing_current_run(),
+        artifact_name:payload?.metadata?.artifact_name || "Current run", files}};
+    }
     original_children.forEach(child => { child.hidden = true; });
 
     const groups = document.createElement("span");
     groups.className = "processing-paired-download-groups";
     for (const [role, label] of [["pair", "PAIR"], ["nsys", "NSYS"], ["ncu", "NCU"]]) {
       const source = pair[role] || {};
-      const run_id = source.dashboard_run_id || (role === "pair" ? pair.nsys.dashboard_run_id : "");
+      const run_id = source.dashboard_run_id || (role === "pair" ? pair.nsys?.dashboard_run_id : "");
       if (!run_id || !download_entries(source.files).length) continue;
       const group = document.createElement("span");
       group.className = "processing-paired-download-group";

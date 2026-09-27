@@ -315,6 +315,15 @@ class RunnerService:
             raise KeyError("Unknown Grid file")
         return paths[name]
 
+    def attempt_log(self, grid_id, run_id, attempt_id):
+        grid = next((item for item in _read()["grids"] if item["grid_id"] == grid_id), None)
+        if grid is None:
+            raise KeyError("Unknown Grid")
+        run = next((item for item in grid["runs"] if item["run_id"] == run_id), None)
+        if run is None or not any(item["attempt_id"] == attempt_id for item in run["attempts"]):
+            raise KeyError("Unknown attempt in this Grid")
+        return self.network.runner_call(run["host_id"], "runner_log", {"attempt_id": attempt_id, "max_bytes": 16384})
+
     def stop_grid(self, grid_id, force=False):
         self._require_controller()
         with self.lock:
@@ -433,6 +442,13 @@ class RunnerService:
                         run["blocking_reason"] = "" if remote["state"] != "unknown" else "Node Agent outcome uncertain"
                         latest.update({key: remote.get(key) for key in ("pid", "exit_code", "log_path", "requested_power_w", "observed_power_w", "finished_at")})
                         latest["state"] = remote["state"]
+                        if remote["state"] == "failed" and "failure_excerpt" not in latest:
+                            try:
+                                excerpt = self.network.runner_call(run["host_id"], "runner_log", {
+                                    "attempt_id": latest["attempt_id"], "max_bytes": 4096})["text"]
+                                latest["failure_excerpt"] = excerpt[-4096:]
+                            except (network.NetworkError, RuntimeError, OSError, KeyError):
+                                latest["failure_excerpt"] = "Training log unavailable; inspect the producing thog_host."
                         if remote["state"] in TERMINAL and not run.get("duration_seconds"):
                             finished = datetime.fromisoformat(remote["finished_at"]).timestamp() if remote.get("finished_at") else time.time()
                             run["duration_seconds"] = max(0, finished - datetime.fromisoformat(latest["started_at"]).timestamp())

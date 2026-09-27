@@ -151,7 +151,8 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(network._read_config()["restart_mode"], "remote")
 
     def test_pending_master_release_allows_accepted_remote_grid_to_drain(self):
-        remote = self.service._new_host("dreedle", "peter", 22)
+        # A test host named after the machine running pytest would overwrite the local record.
+        remote = self.service._new_host("runner-test-remote.invalid", "peter", 22)
         remote["execution_enabled"] = True
         remote["last_discovered"] = {"gpus": [{"gpu_key": "GPU-test"}], "execution_profiles":
                                      [{"profile_key": "current"}], "thog": {"version": "same"}}

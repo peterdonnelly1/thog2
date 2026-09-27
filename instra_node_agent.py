@@ -180,6 +180,23 @@ def _known_thog_compute_pids(gpu):
 
 def _runner_operation(state, name, args):
     from thog_grid_runner import command_for, environment_for, validate_recipe
+    if name == "runner_log":
+        _validate_args(args, {"attempt_id", "max_bytes"})
+        attempt_id = args.get("attempt_id")
+        if attempt_id not in state.get("attempts", {}):
+            raise KeyError("Unknown Runner attempt")
+        max_bytes = args.get("max_bytes", 8192)
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 16384:
+            raise ValueError("Invalid log excerpt size")
+        path = STATE_DIR / f"attempt-{attempt_id}.log"
+        try:
+            with path.open("rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, stream.tell() - max_bytes))
+                excerpt = stream.read().decode("utf-8", errors="replace")
+        except FileNotFoundError:
+            excerpt = "No training output has been written yet."
+        return {"attempt_id": attempt_id, "text": excerpt, "log_path": str(path)}
     if name == "runner_preflight":
         _validate_args(args, {"run", "gpu_key", "host_label"})
         run = args.get("run")

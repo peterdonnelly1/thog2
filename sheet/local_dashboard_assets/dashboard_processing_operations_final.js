@@ -481,7 +481,10 @@
     mount._processing_layer_zoom_range = range.slice();
     const reset = by_id("processing_operations_reset_zoom");
     if (reset) reset.disabled = false;
-    Plotly.relayout(mount, {"xaxis.range":range}).then(() => sync_layer_scrollbar(mount)).catch(() => {});
+    mount._processing_layer_zoom_programmatic = true;
+    Plotly.relayout(mount, {"xaxis.range":range})
+      .then(() => sync_layer_scrollbar(mount)).catch(() => {})
+      .finally(() => { mount._processing_layer_zoom_programmatic = false; });
   }
 
   async function reset_layer_zoom(mount) {
@@ -495,10 +498,13 @@
     const update = capture_ms > 0
       ? {"xaxis.autorange":false, "xaxis.range":[0, capture_ms]}
       : {"xaxis.autorange":true};
+    mount._processing_layer_zoom_programmatic = true;
     try {
       await Plotly.relayout(mount, update);
     } catch (_error) {
       // Leave the controls reset even if Plotly is tearing down this run.
+    } finally {
+      mount._processing_layer_zoom_programmatic = false;
     }
   }
 
@@ -508,6 +514,24 @@
     mount._processing_layer_zoom_capture_ms = capture_ms;
     if (mount._processing_layer_zoom_installed === true) return;
     mount._processing_layer_zoom_installed = true;
+    mount.on("plotly_relayout", update => {
+      if (mount._processing_layer_zoom_programmatic || mount._processing_layer_zoom_rendering) return;
+      if (update?.["xaxis.autorange"] === true) {
+        mount._processing_layer_zoom_range = null;
+      } else {
+        const range = update?.["xaxis.range"] || (
+          update?.["xaxis.range[0]"] !== undefined && update?.["xaxis.range[1]"] !== undefined
+            ? [update["xaxis.range[0]"], update["xaxis.range[1]"]]
+            : null
+        );
+        if (!range || !range.every(value => Number.isFinite(Number(value)))) return;
+        const capture = Number(mount._processing_layer_zoom_capture_ms || 0);
+        const start = Math.max(0, Math.min(capture, Number(range[0])));
+        const end = Math.max(start, Math.min(capture, Number(range[1])));
+        mount._processing_layer_zoom_range = start <= 0 && end >= capture ? null : [start, end];
+      }
+      sync_layer_scrollbar(mount);
+    });
     mount.on("plotly_clickannotation", event => {
       const name = String(event?.annotation?.name || "");
       const match = /^processing-layer-(\d+)-(?:top|bottom)$/.exec(name);
@@ -519,6 +543,20 @@
       );
       if (range) apply_layer_zoom(mount, range);
     });
+  }
+
+  function retained_layer_range(mount, run_id, capture_ms) {
+    if (!mount) return null;
+    if (mount._processing_layer_zoom_run_id !== run_id) {
+      mount._processing_layer_zoom_range = null;
+      mount._processing_layer_zoom_run_id = run_id;
+    }
+    const previous = mount._processing_layer_zoom_range;
+    const range = previous && capture_ms > 0
+      ? [Math.max(0, Math.min(capture_ms, previous[0])), Math.max(0, Math.min(capture_ms, previous[1]))]
+      : null;
+    mount._processing_layer_zoom_range = range?.[1] > range?.[0] ? range : null;
+    return mount._processing_layer_zoom_range;
   }
 
   function operations_card_maximized() {
@@ -1074,12 +1112,18 @@
     const guides = layer_guides(intervals);
     const tick_owners = ["PREMAT", "MAIN"];
     const capture_ms = Number(payload.metadata?.capture_duration_ms || 0);
-    await processing_plot("processing_timeline_plot", traces, {
+    const mount = by_id("processing_timeline_plot");
+    const retained_range = retained_layer_range(mount, processing_view.run_id, capture_ms);
+    if (mount) {
+      mount._processing_layer_zoom_rendering = true;
+    }
+    try {
+      await processing_plot("processing_timeline_plot", traces, {
       margin:{l:88, r:34, t:8, b:38},
       barmode:"overlay",
       hovermode:"closest",
       showlegend:false,
-      xaxis:{title:"capture time (ms)", range:capture_ms > 0 ? [0, capture_ms] : undefined},
+      xaxis:{title:"capture time (ms)", range:retained_range || (capture_ms > 0 ? [0, capture_ms] : undefined)},
       yaxis:{
         tickmode:"array",
         tickvals:tick_owners.map(owner => lane_y[owner]),
@@ -1093,10 +1137,13 @@
       shapes:guides.shapes,
       annotations:guides.annotations,
       bargap:0,
-    });
+      });
+    } finally {
+      if (mount) mount._processing_layer_zoom_rendering = false;
+    }
     render_operations_key(traces);
-    install_layer_zoom(by_id("processing_timeline_plot"), guides, capture_ms);
-    reset_layer_zoom(by_id("processing_timeline_plot"));
+    install_layer_zoom(mount, guides, capture_ms);
+    sync_layer_scrollbar(mount);
     const heading = by_id("processing_timeline_card")?.querySelector(".chart-heading-copy h2");
     if (heading) heading.textContent = "GPT Level Operations by Stream (MAIN/PREMAT)";
     processing_gpu_link_time_axes();
@@ -1236,6 +1283,8 @@
     apply_operation_colour,
     render_operations_key,
     reset_layer_zoom,
+    install_layer_zoom,
+    retained_layer_range,
     resolved_trace_colour,
     contention_traces,
     contention_hover,

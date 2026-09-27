@@ -154,6 +154,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--premat_processing_logging_capture_frequency_hz HZ", "NSYS GPU metric sample rate; default 10000"),
             ("—", "--premat_processing_logging_capture_update UPDATE", "successful optimiser update to capture; default 1"),
             ("—", "--ncu-probe-layer LAYER", "required zero-based absolute layer for NCU capture"),
+            ("—", "--plastic-layer-count-hold-updates N", "minimum updates to hold a committed layer count"),
             ("—", "--plastic__layer_count__cuda_allocator_reserve_gib VALUE", "upward-probe free-memory reserve"),
             ("LG", "--plastic__geometry_learning_rate_multiplier VALUE", "sampling-geometry LR multiplier"),
             ("LF", "--plastic__freeze_geometry_during_warmup | --no-plastic__freeze_geometry_during_warmup", "freeze or permit geometry changes during warmup"),
@@ -206,6 +207,7 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("-D", "N_EMBD", "model width"),
             ("-C", "BLOCK_SIZE", "context length"),
             ("-P", "O_DEPTH", "DEPTH coefficient order"),
+            ("—", "DEPTH.order=N", "DEPTH coefficient order selected through --option DEPTH.order=N"),
             ("-Q", "O_ATTN_D_MODEL", "attention D_MODEL order"),
             ("-J", "O_ATTN_QKV_PER_CHANNEL", "Q/K/V head-channel order"),
             ("-O", "O_ATTN_OUT_PER_CHANNEL", "attention-output head-channel order"),
@@ -224,6 +226,8 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
             ("—", "--depth-materialisation-matmul true|false", "DEPTH matrix materialisation path"),
             ("—", "--materialisation-profiling true|false", "pure DEPTH materialisation timing"),
             ("—", "--torch-compile false|true|regional", "eager | whole-model | regional compile"),
+            ("—", "--cuda-expandable-segment enabled|disabled", "PyTorch expandable CUDA segments allocator; enabled by default"),
+            ("—", "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step", "retain the final checkpoint group's weights across a microstep boundary"),
             ("—", "THOG2_BYPASS_SEMANTIC_QKV_ADAPTER=true|false", "semantic Q/K/V adapter bypass"),
             ("—", "THOG2_DIRECT_FACTORISED_MLP=true|false", "direct factorised compact MLP execution"),
             ("—", "THOG2_VECTORISE_PER_HEAD_MATERIALISATION=true|false", "vectorised per-head materialisation"),
@@ -240,6 +244,8 @@ _DESCRIPTOR_SECTIONS: Tuple[DescriptorSection, ...] = (
     (
         "Paths",
         (
+            ("—", "--save-dense-initialisation-snapshot", "save a dense initialisation snapshot for a later THOG run"),
+            ("—", "--initialise-from-dense-snapshot PATH", "initialise THOG from a saved dense snapshot"),
             ("-d", "DATASET_NAME", "dataset identity"),
             ("-t", "DATA_DIR", "directory containing train.bin and val.bin"),
             ("-o", "CHECKPOINT_ROOT", "checkpoint root"),

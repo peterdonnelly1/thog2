@@ -148,6 +148,7 @@ const sandbox = {
   processing_render:async function() {},
   processing_render_timeline:async function() {},
   processing_gpu_link_time_axes() {},
+  processing_current_run() { return "nsys"; },
   processing_throughput_workspace_runs() { return []; },
   render_runs() {},
   run_identifier(run) { return run.dashboard_run_id; },
@@ -208,6 +209,25 @@ assert.deepEqual(
   [40, 60],
   "scroll position did not pan the fixed-width zoom window",
 );
+const zoom_events = {};
+operations_mount.on = (name, handler) => { zoom_events[name] = handler; };
+operation_hooks.install_layer_zoom(operations_mount, guide_model, 100);
+zoom_events.plotly_relayout({"xaxis.range[0]":20,"xaxis.range[1]":40});
+assert.equal(operation_hooks.retained_layer_range(operations_mount, "run-a", 100), null,
+  "a new run should start at the full time range");
+zoom_events.plotly_relayout({"xaxis.range[0]":20,"xaxis.range[1]":40});
+assert.deepEqual(Array.from(operation_hooks.retained_layer_range(operations_mount, "run-a", 100)), [20,40],
+  "a poll for the same run lost the user-selected Plotly drag range");
+operations_mount._processing_layer_zoom_rendering = true;
+zoom_events.plotly_relayout({"xaxis.range[0]":0,"xaxis.range[1]":100});
+operations_mount._processing_layer_zoom_rendering = false;
+assert.deepEqual(Array.from(operations_mount._processing_layer_zoom_range),[20,40],
+  "a Plotly redraw overwrote the user's zoom");
+assert.deepEqual(Array.from(operation_hooks.retained_layer_range(operations_mount, "run-a", 30)), [20,30]);
+zoom_events.plotly_relayout({"xaxis.autorange":true});
+assert.equal(operation_hooks.retained_layer_range(operations_mount, "run-a", 100),null,
+  "reset zoom did not clear the retained range");
+assert.match(operations_source, /range:retained_range \|\|/);
 assert.match(operations_source, /processing_operations_reset_zoom/);
 assert.match(operations_source, /training_throughput_plot/);
 assert.match(operations_source, /processing_render_throughput_before_training_group/);
@@ -307,9 +327,20 @@ hooks.render_paired_downloads({
 });
 assert.equal(host.querySelector(".processing-paired-download-groups").children[0].children[1].textContent, "Everything",
   "Everything disappeared when the pair group relied on the NSYS run-id fallback");
+direct_raw.hidden = true; // The base download owner hid missing files on the new run.
 hooks.render_paired_downloads({});
-assert.equal(direct_raw.hidden, false, "unpairing did not restore the run-owned download buttons");
-assert.equal(direct_uncategorized.hidden, false, "unpairing did not restore the original download-bar contents");
+assert.equal(direct_raw.hidden, true, "a missing raw report became downloadable on a new run");
+assert.equal(direct_uncategorized.hidden, false, "unpairing did not restore legacy download-bar content");
+assert.equal(host.querySelector(".processing-paired-download-groups"),null,
+  "unpairing did not remove the old paired download buttons");
+hooks.render_paired_downloads({metadata:{files:{bundle:"single.zip", samples:"samples.csv", raw_trace:"trace.nsys-rep"}}});
+assert.equal(host.querySelector(".processing-paired-download-groups").children[0].children[0].textContent,"NSYS:",
+  "a standalone NSYS run did not show its available grouped downloads");
+hooks.render_paired_downloads({metadata:{files:{raw_ncu:"trace.ncu-rep", kernel_resources:"resources.csv"}}});
+assert.equal(host.querySelector(".processing-paired-download-groups").children[0].children[0].textContent,"NCU:",
+  "a standalone NCU run did not show its available grouped downloads");
+assert.match(source,/\.processing-download-dock \{[\s\S]*?height:auto/,
+  "the download dock still clips rows of grouped links");
 
 assert.match(operations_source, /const lane_width = 0\.30/);
 assert.match(operations_source, /#processing_timeline_card:not\(\.maximized\)[\s\S]*?height:300px !important/,

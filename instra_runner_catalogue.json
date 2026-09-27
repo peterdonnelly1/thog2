@@ -1,25 +1,28 @@
 {
   "--activation-checkpointing": {
     "boolean_optional": true,
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": true,
+    "help": "enable or disable activation checkpointing",
     "kind": "dimension",
     "type": "flag"
   },
   "--artifact-name-limit": {
     "category": "Run Control Parameters",
     "default": 240,
+    "help": "maximum artifact component length",
     "kind": "fixed",
     "type": "int"
   },
   "--artifact-suffix": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "additional artifact-name suffix",
     "kind": "fixed",
     "type": "string"
   },
   "--attention-backend": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "choices": [
       "auto",
       "flash2",
@@ -27,73 +30,91 @@
       "math"
     ],
     "default": "auto",
+    "help": "auto | flash2 | sdpa | math",
     "kind": "automatic",
+    "short": "-K",
     "type": "string"
   },
   "--attention-geometry": {
     "category": "Geometry",
     "default": null,
+    "help": "legacy attention geometry selector",
     "kind": "dimension",
+    "short": "-a",
     "type": "string"
   },
   "--basis-family": {
     "category": "Geometry",
     "default": null,
+    "help": "chebyshev | dct | haar | lapped_cosine",
     "kind": "dimension",
+    "short": "-B",
     "type": "string"
   },
   "--basis-version": {
     "category": "Geometry",
     "default": "auto",
+    "help": "auto or exact registered version",
     "kind": "dimension",
+    "short": "-v",
     "type": "string"
   },
   "--batch-size": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 12,
+    "help": "microbatch size; scalar or wrapper grid",
     "kind": "dimension",
+    "short": "-b",
     "type": "int"
   },
   "--beta1": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 0.9,
+    "help": "Adam first-moment coefficient",
     "kind": "dimension",
     "type": "float"
   },
   "--beta2": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 0.95,
+    "help": "Adam second-moment coefficient",
     "kind": "dimension",
     "type": "float"
   },
   "--bias": {
     "boolean_optional": true,
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": true,
+    "help": "enable or disable conventional bias parameters",
     "kind": "dimension",
     "type": "flag"
   },
   "--block-size": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 256,
+    "help": "context length",
     "kind": "dimension",
+    "short": "-C",
     "type": "int"
   },
   "--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps": {
     "category": "Chaos Bumps",
     "default": 0.05,
+    "help": "duration ceiling as a fraction of elapsed successful updates; default 0.05",
     "kind": "dimension",
     "type": "float"
   },
   "--chaos_bump__sampling__duration__max_steps": {
     "category": "Chaos Bumps",
     "default": 256,
+    "help": "maximum bump duration in successful updates; default 256",
     "kind": "dimension",
     "type": "int"
   },
   "--chaos_bump__sampling__duration__min_steps": {
     "category": "Chaos Bumps",
     "default": 16,
+    "help": "minimum bump duration in successful updates; default 16",
     "kind": "dimension",
     "type": "int"
   },
@@ -101,55 +122,67 @@
     "boolean_optional": true,
     "category": "Chaos Bumps",
     "default": false,
+    "help": "enable sampling-coordinate chaos bumps",
     "kind": "dimension",
     "type": "flag"
   },
   "--chaos_bump__sampling__initial_lockout__steps": {
     "category": "Chaos Bumps",
     "default": 16,
+    "help": "initial successful updates during which bumps are prohibited; default 16",
     "kind": "dimension",
     "type": "int"
   },
   "--chaos_bump__sampling__interlude__max_steps": {
     "category": "Chaos Bumps",
     "default": 256,
+    "help": "maximum ordinary successful updates between bumps; default 256",
     "kind": "dimension",
     "type": "int"
   },
   "--chaos_bump__sampling__interlude__min_steps": {
     "category": "Chaos Bumps",
     "default": 128,
+    "help": "minimum ordinary successful updates between bumps; default 128",
     "kind": "dimension",
     "type": "int"
   },
   "--chaos_bump__sampling__max_movement_fraction_of_local_gap": {
     "category": "Chaos Bumps",
     "default": 0.1,
+    "help": "maximum coordinate displacement as a fraction of the local gap; default 0.10",
     "kind": "dimension",
     "type": "float"
   },
   "--chaos_bump__sampling__maximum_bumps": {
     "category": "Chaos Bumps",
     "default": 1,
+    "help": "maximum bumps per run; default 1",
     "kind": "dimension",
     "type": "int"
   },
   "--checkpoint-interval": {
     "category": "Run Control Parameters",
     "default": 0,
+    "help": "periodic checkpoint interval; 0 disables",
     "kind": "fixed",
+    "short": "-k",
     "type": "int"
   },
   "--checkpoint-root": {
     "category": "Run Control Parameters",
     "default": "checkpoints",
+    "help": "checkpoint root",
     "kind": "fixed",
+    "short": "-o",
     "type": "string"
   },
   "--checkpoint-segment-size": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 12,
+    "help": "activation-checkpoint segment size",
     "kind": "dimension",
+    "short": "-S",
     "type": "int"
   },
   "--cuda-expandable-segment": {
@@ -159,124 +192,151 @@
       "disabled"
     ],
     "default": null,
+    "help": "PyTorch expandable CUDA segments allocator; enabled by default",
     "kind": "fixed",
     "type": "string"
   },
   "--data-dir": {
     "category": "Run Control Parameters",
     "default": "data/openwebtext",
+    "help": "directory containing train.bin and val.bin",
     "kind": "fixed",
+    "short": "-t",
     "type": "string"
   },
   "--data-seed": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 7331,
+    "help": "batch-sampling seed",
     "kind": "dimension",
     "type": "int"
   },
   "--dataset": {
     "category": "Run Control Parameters",
     "default": "openwebtext",
+    "help": "dataset identity",
     "kind": "fixed",
+    "short": "-d",
     "type": "string"
   },
   "--depth-compress-layer-norm-and-bias": {
     "boolean_optional": true,
     "category": "Geometry",
     "default": false,
+    "help": "DEPTH LayerNorm/bias participation",
     "kind": "dimension",
     "type": "flag"
   },
   "--depth-materialisation-matmul": {
-    "category": "NSIGHT",
+    "category": "Geometry",
     "choices": [
       "true",
       "false"
     ],
     "default": null,
+    "help": "DEPTH matrix materialisation path",
     "kind": "fixed",
     "type": "string"
   },
   "--device": {
     "category": "Run Control Parameters",
     "default": "cuda",
+    "help": "PyTorch device string",
     "kind": "fixed",
     "type": "string"
   },
   "--direct-factorised-hyperblock-mlp": {
     "category": "Geometry",
     "default": null,
+    "help": "direct HYPERBLOCK UP/DOWN execution",
     "kind": "dimension",
     "type": "string"
   },
   "--dropout": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 0.0,
+    "help": "model dropout probability",
     "kind": "dimension",
     "type": "float"
   },
   "--dry-run": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "true | false",
     "kind": "fixed",
+    "short": "-x",
     "type": "flag"
   },
   "--dtype": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "choices": [
       "float32",
       "float16",
       "bfloat16"
     ],
     "default": "bfloat16",
+    "help": "float32 | float16 | bfloat16",
     "kind": "automatic",
+    "short": "-T",
     "type": "string"
   },
   "--eval-interval": {
     "category": "Run Control Parameters",
     "default": 50,
+    "help": "updates between evaluations",
     "kind": "fixed",
+    "short": "-e",
     "type": "int"
   },
   "--eval-iters": {
     "category": "Run Control Parameters",
     "default": 5,
+    "help": "validation batches per evaluation",
     "kind": "fixed",
+    "short": "-u",
     "type": "int"
   },
   "--experiment-prefix": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "low-level experiment-prefix override",
     "kind": "fixed",
     "type": "string"
   },
   "--explain-geometry": {
     "category": "Geometry",
     "default": null,
+    "help": "resolve and report geometry, then exit",
     "kind": "fixed",
     "type": "flag"
   },
   "--geometry-preset": {
     "category": "Geometry",
     "default": null,
+    "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block",
     "kind": "dimension",
+    "short": "-p",
     "type": "string"
   },
   "--grad-clip": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 1.0,
+    "help": "gradient-norm clipping threshold",
     "kind": "dimension",
     "type": "float"
   },
   "--gradient-accumulation-steps": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 160,
+    "help": "global accumulation count",
     "kind": "dimension",
+    "short": "-A",
     "type": "int"
   },
   "--host-label": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "machine label",
     "kind": "fixed",
     "type": "string"
   },
@@ -284,90 +344,105 @@
     "boolean_optional": true,
     "category": "Geometry",
     "default": false,
+    "help": "enable or disable coupled-field HYPERBLOCK",
     "kind": "dimension",
     "type": "flag"
   },
   "--hyperblock-attention-family-order": {
     "category": "Geometry",
     "default": 4,
+    "help": "attention-family coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-attention-head-channel-order": {
     "category": "Geometry",
     "default": 16,
+    "help": "head-channel coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-attention-head-order": {
     "category": "Geometry",
     "default": 16,
+    "help": "attention-head coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-common-family-order": {
     "category": "Geometry",
     "default": 6,
+    "help": "common-family coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-compressor": {
     "category": "Geometry",
     "default": null,
+    "help": "registered HYPERBLOCK compressor",
     "kind": "dimension",
     "type": "string"
   },
   "--hyperblock-compressor-version": {
     "category": "Geometry",
     "default": "auto",
+    "help": "auto or an exact registered version",
     "kind": "dimension",
     "type": "string"
   },
   "--hyperblock-d-model-order": {
     "category": "Geometry",
     "default": 16,
+    "help": "D_MODEL-axis coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-depth-order": {
     "category": "Geometry",
     "default": 16,
+    "help": "DEPTH-axis coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-loop-count": {
     "category": "Geometry",
     "default": 1,
+    "help": "shared recurrence count",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-loop-decay": {
     "category": "Geometry",
     "default": 1.0,
+    "help": "recurrent update decay in (0,1]",
     "kind": "dimension",
     "type": "float"
   },
   "--hyperblock-mlp-family-order": {
     "category": "Geometry",
     "default": 2,
+    "help": "MLP-family coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-mlp-hidden-multiplier": {
     "category": "Geometry",
     "default": 4,
+    "help": "physical MLP expansion multiplier",
     "kind": "dimension",
     "type": "int"
   },
   "--hyperblock-mlp-hidden-order": {
     "category": "Geometry",
     "default": 16,
+    "help": "MLP_HIDDEN-axis coefficient order",
     "kind": "dimension",
     "type": "int"
   },
   "--initialise-from-dense-snapshot": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "initialise THOG from a saved dense snapshot",
     "kind": "fixed",
     "type": "string"
   },
@@ -378,6 +453,7 @@
       "linear"
     ],
     "default": null,
+    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -389,238 +465,290 @@
       "none"
     ],
     "default": "local",
+    "help": "heatmap destination; default local",
     "kind": "dimension",
     "type": "string"
   },
   "--instrumentation__delta_loss_v_layer_heatmap_abs_limit": {
     "category": "Run Control Parameters",
     "default": 0.05,
+    "help": "fixed symmetric colour limit; default 0.05",
     "kind": "dimension",
     "type": "float"
   },
   "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes": {
     "category": "Run Control Parameters",
     "default": 250,
+    "help": "W&B-only sparse upload cadence; default 250 probes",
     "kind": "dimension",
     "type": "int"
   },
   "--instrumentation__depth_weight_curves__destination": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "six THOG curves or DENSE cross-marker charts; default local",
     "kind": "dimension",
     "type": "string"
   },
   "--instrumentation__optimizer_histories__full_matrix_every_n_steps": {
     "category": "Run Control Parameters",
     "default": 0,
+    "help": "full optimizer matrix capture; 0 disables",
     "kind": "dimension",
     "type": "int"
   },
   "--lapped-cosine-overlap-fraction": {
     "category": "Geometry",
     "default": null,
+    "help": "currently 0.5 only",
     "kind": "dimension",
+    "short": "-i",
     "type": "float"
   },
   "--lapped-cosine-window-length": {
     "category": "Geometry",
     "default": null,
+    "help": "even physical locality window",
     "kind": "dimension",
+    "short": "-W",
     "type": "int"
   },
   "--layer-dropout-active-per-stratum": {
     "category": "Geometry",
     "default": null,
+    "help": "active layers per stratum",
     "kind": "dimension",
+    "short": "-M",
     "type": "int"
   },
   "--layer-dropout-resample-steps": {
     "category": "Geometry",
     "default": 1,
+    "help": "updates per sampled layer set",
     "kind": "dimension",
     "type": "int"
   },
   "--layer-dropout-stratum-size": {
     "category": "Geometry",
     "default": null,
+    "help": "layer-dropout nominal layers per stratum",
     "kind": "dimension",
+    "short": "-s",
     "type": "int"
   },
   "--learning-rate": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 0.0006,
+    "help": "direct floating-point maximum LR",
     "kind": "dimension",
+    "short": "-c",
     "type": "float"
   },
   "--log-interval": {
     "category": "Run Control Parameters",
     "default": 10,
+    "help": "updates between progress rows",
     "kind": "fixed",
+    "short": "-l",
     "type": "int"
   },
   "--log-root": {
     "category": "Run Control Parameters",
     "default": "logs",
+    "help": "log root",
     "kind": "fixed",
+    "short": "-j",
     "type": "string"
   },
   "--log-timestamp": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "explicit log timestamp",
     "kind": "fixed",
     "type": "string"
   },
   "--materialisation-profiling": {
-    "category": "NSIGHT",
+    "category": "Run Control Parameters",
     "choices": [
       "true",
       "false"
     ],
     "default": null,
+    "help": "pure DEPTH materialisation timing",
     "kind": "fixed",
     "type": "string"
   },
   "--max-iters": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 100,
+    "help": "total successful optimiser updates",
     "kind": "fixed",
+    "short": "-n",
     "type": "int"
   },
   "--max-nonfinite-update-skips": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 99999,
+    "help": "maximum tolerated skipped non-finite updates",
     "kind": "dimension",
     "type": "int"
   },
   "--max-wall-minutes": {
     "category": "Run Control Parameters",
     "default": 0,
+    "help": "soft wall-clock limit; 0 disables",
     "kind": "fixed",
     "type": "int"
   },
   "--min-lr": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 6e-05,
+    "help": "direct floating-point minimum LR",
     "kind": "dimension",
+    "short": "-f",
     "type": "float"
   },
   "--mlp-geometry": {
     "category": "Geometry",
     "default": null,
+    "help": "legacy MLP geometry selector",
     "kind": "dimension",
+    "short": "-m",
     "type": "string"
   },
   "--mlp-hidden-compressor": {
     "category": "Geometry",
     "default": null,
+    "help": "registered local MLP_HIDDEN compressor",
     "kind": "dimension",
     "type": "string"
   },
   "--mlp-hidden-group-size": {
     "category": "Geometry",
     "default": null,
+    "help": "physical MLP_HIDDEN segment size",
     "kind": "dimension",
     "type": "int"
   },
   "--model-seed": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 1337,
+    "help": "model initialisation seed",
     "kind": "dimension",
     "type": "int"
   },
   "--model-type": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "choices": [
       "dense",
       "sheet"
     ],
     "default": null,
+    "help": "dense | sheet; normally wrapper-derived",
     "kind": "dimension",
     "type": "string"
   },
   "--n-embd": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 768,
+    "help": "model width",
     "kind": "dimension",
+    "short": "-D",
     "type": "int"
   },
   "--n-head": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 12,
+    "help": "attention-head count",
     "kind": "dimension",
+    "short": "-H",
     "type": "int"
   },
   "--n-layer": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 72,
+    "help": "dense depth or maximum PLASTIC capacity",
     "kind": "dimension",
+    "short": "-L",
     "type": "int"
   },
   "--ncu-probe-layer": {
     "category": "NSIGHT",
     "default": null,
+    "help": "required zero-based absolute layer for NCU capture",
     "kind": "fixed",
     "type": "int"
   },
   "--no-activation-checkpointing": {
     "alias_for": "--activation-checkpointing",
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": null,
+    "help": "enable or disable activation checkpointing",
     "kind": "manual",
     "type": "flag"
   },
   "--no-bias": {
     "alias_for": "--bias",
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": null,
+    "help": "enable or disable conventional bias parameters",
     "kind": "manual",
     "type": "flag"
   },
   "--no-chaos_bump__sampling__enabled": {
     "category": "Chaos Bumps",
     "default": null,
+    "help": "disable sampling-coordinate chaos bumps; default",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-depth-compress-layer-norm-and-bias": {
     "category": "Geometry",
     "default": null,
+    "help": "DEPTH LayerNorm/bias participation",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-direct-factorised-hyperblock-mlp": {
     "category": "Geometry",
     "default": null,
+    "help": "direct HYPERBLOCK UP/DOWN execution",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-hyperblock": {
     "category": "Geometry",
     "default": null,
+    "help": "enable or disable coupled-field HYPERBLOCK",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-plastic__coarse_phase_roll_through": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": null,
+    "help": "continue immediately or pause after COARSE",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-plastic__do_learn_layer_count": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "retain fixed active-layer count",
     "kind": "dimension",
     "type": "flag"
   },
   "--no-plastic__enabled": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "enable or disable the PLASTIC descriptor group",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "ui_hidden": true
   },
   "--no-plastic__freeze_geometry_during_warmup": {
-    "category": "Plastic",
+    "category": "Layer Spacing",
     "default": null,
+    "help": "freeze or permit geometry changes during warmup",
     "kind": "dimension",
     "type": "flag"
   },
@@ -628,258 +756,307 @@
     "alias_for": "--wandb",
     "category": "Run Control Parameters",
     "default": null,
+    "help": "direct W&B enablement",
     "kind": "manual",
     "type": "flag"
   },
   "--nonfinite-update-policy": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "choices": [
       "raise",
       "skip"
     ],
     "default": "skip",
+    "help": "raise | skip",
     "kind": "dimension",
     "type": "string"
   },
   "--o-attn-d-model": {
     "category": "Geometry",
     "default": null,
+    "help": "attention D_MODEL order",
     "kind": "dimension",
+    "short": "-Q",
     "type": "int"
   },
   "--o-attn-out-per-channel": {
     "category": "Geometry",
     "default": null,
+    "help": "attention-output head-channel order",
     "kind": "dimension",
+    "short": "-O",
     "type": "int"
   },
   "--o-attn-qkv-per-channel": {
     "category": "Geometry",
     "default": null,
+    "help": "Q/K/V head-channel order",
     "kind": "dimension",
+    "short": "-J",
     "type": "int"
   },
   "--o-depth": {
     "category": "Geometry",
     "default": 16,
+    "help": "DEPTH coefficient order",
     "kind": "manual",
+    "short": "-P",
     "type": "int"
   },
   "--o-mlp-d-model": {
     "category": "Geometry",
     "default": null,
+    "help": "MLP D_MODEL order",
     "kind": "dimension",
+    "short": "-X",
     "type": "int"
   },
   "--o-mlp-hidden": {
     "category": "Geometry",
     "default": null,
+    "help": "MLP_HIDDEN order",
     "kind": "dimension",
+    "short": "-Y",
     "type": "int"
   },
   "--optimizer": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": null,
+    "help": "adamw | thogopt | sgd | sgd_nesterov | adafactor | rmsprop",
     "kind": "dimension",
+    "short": "-y",
     "type": "string"
   },
   "--optimizer-momentum": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": null,
+    "help": "momentum for SGD, Nesterov and RMSprop",
     "kind": "dimension",
     "type": "string"
   },
   "--option": {
     "category": "Geometry",
     "default": [],
+    "help": "assign a systematic geometry option; repeatable",
     "kind": "list",
     "type": "list"
   },
   "--plastic-layer-count-hold-updates": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "minimum updates to hold a committed layer count",
     "kind": "dimension",
     "type": "string"
   },
   "--plastic__coarse_phase": {
-    "category": "Plastic",
+    "category": "Coarse",
     "choices": [
       "enabled",
       "disabled"
     ],
     "default": "disabled",
+    "help": "enable or bypass COARSE",
     "kind": "dimension",
     "type": "string"
   },
   "--plastic__coarse_phase_roll_through": {
     "boolean_optional": true,
-    "category": "Plastic",
+    "category": "Coarse",
     "default": false,
+    "help": "continue immediately or pause after COARSE",
     "kind": "dimension",
     "type": "flag"
   },
   "--plastic__do_learn_layer_count": {
     "boolean_optional": true,
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": false,
+    "help": "enable dynamic active-layer count",
     "kind": "dimension",
     "type": "flag"
   },
   "--plastic__enabled": {
     "boolean_optional": true,
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": false,
+    "help": "enable or disable the PLASTIC descriptor group",
     "kind": "dimension",
-    "type": "flag"
+    "type": "flag",
+    "ui_hidden": true
   },
   "--plastic__freeze_geometry_during_warmup": {
     "boolean_optional": true,
-    "category": "Plastic",
+    "category": "Layer Spacing",
     "default": true,
+    "help": "freeze or permit geometry changes during warmup",
     "kind": "dimension",
     "type": "flag"
   },
   "--plastic__geometry_learning_rate_multiplier": {
-    "category": "Plastic",
+    "category": "Layer Spacing",
     "default": 0.1,
+    "help": "sampling-geometry LR multiplier",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__initial_layer_count": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "initial FINE active count",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 0.8,
+    "help": "discount for extrapolative/right-side directional evidence",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__layer_count__cuda_allocator_reserve_gib": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 0.5,
+    "help": "upward-probe free-memory reserve",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__layer_count__max_allowable_layer_change": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 1,
+    "help": "maximum committed count movement",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count_cost_weight": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 0.0,
+    "help": "layer-cost penalty weight",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__layer_count_objective": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": "lowest_loss",
+    "help": "lowest_loss | layer_efficiency | relative_training_wall_time | memory_budget",
     "kind": "dimension",
     "type": "string"
   },
   "--plastic__layer_count_probe__number_of_sampled_valid_tokens": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 1024,
+    "help": "valid-token sample per probe microbatch; 0 means all valid tokens",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count_probe__probe_every_n_steps": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "updates between count probes",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count_probe__window_size_as_number_of_probes": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 50,
+    "help": "paired-score history window",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count_probe_noise_lambda": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 3.0,
+    "help": "directional_coherence robust significance threshold; ignored by Sen/Kendall and jump modes",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__layer_count_probe_radius": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 1,
+    "help": "integer candidate radius",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_count_update_brake": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 5,
+    "help": "minimum updates between committed count changes",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__layer_sampling_initialisation": {
-    "category": "Plastic",
+    "category": "Layer Spacing",
     "default": "equidistant",
+    "help": "equidistant | random",
     "kind": "dimension",
     "type": "string"
   },
   "--plastic__layers_to_sample": {
-    "category": "Plastic",
+    "category": "Layer Spacing",
     "default": null,
+    "help": "fixed active-layer count",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__log_interval_coarse": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": 10,
+    "help": "COARSE progress interval",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__max_permitted_layers": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": null,
+    "help": "maximum allocated layer capacity",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__phase_1__number_of_trials": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": null,
+    "help": "COARSE candidate count",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__phase_1_evaluation_steps_count": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": null,
+    "help": "final validation batches per trial",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__phase_1_n_steps": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": null,
+    "help": "updates per COARSE trial",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__phase_1_starting_layer_count": {
-    "category": "Plastic",
+    "category": "Coarse",
     "default": null,
+    "help": "first COARSE candidate count",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__wall_time_equivalent_time_gain_discount": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 0.9,
+    "help": "credited fraction of positive equivalent-time gain in [0,1]; default 0.9",
     "kind": "dimension",
     "type": "float"
   },
   "--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 16,
+    "help": "observations required before the loss-rate fit is usable; default 16",
     "kind": "dimension",
     "type": "int"
   },
   "--plastic__wall_time_equivalent_time_gain_loss_rate_window": {
-    "category": "Plastic",
+    "category": "Variable Depth",
     "default": 64,
+    "help": "rolling ordinary-training loss-rate window; default 64",
     "kind": "dimension",
     "type": "int"
   },
@@ -890,6 +1067,7 @@
       "disabled"
     ],
     "default": "disabled",
+    "help": "enable dynamic CUDA-stream pre-materialisation; default disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -902,6 +1080,7 @@
       "aggressive"
     ],
     "default": "disabled",
+    "help": "disabled | cautious | normal | aggressive",
     "kind": "dimension",
     "type": "string"
   },
@@ -912,6 +1091,7 @@
       "unfused"
     ],
     "default": "fused",
+    "help": "attention materialisation mode; default fused",
     "kind": "dimension",
     "type": "string"
   },
@@ -922,42 +1102,49 @@
       "high"
     ],
     "default": "normal",
+    "help": "Premat CUDA dispatch priority; default normal",
     "kind": "dimension",
     "type": "string"
   },
   "--premat_diagnostic_layer_delay_ms": {
     "category": "Premat",
     "default": 0.0,
+    "help": "Diagnostic host-dispatch delay after each non-final layer; default 0",
     "kind": "fixed",
     "type": "float"
   },
   "--premat_enable_gpu_timing_diagnostic": {
     "category": "Premat",
     "default": false,
+    "help": "collect expensive CUDA timestamp/classification diagnostics",
     "kind": "fixed",
     "type": "bool_value"
   },
   "--premat_enable_shadow_mode": {
     "category": "Premat",
     "default": false,
+    "help": "exercise scheduling without side-stream materialisation",
     "kind": "fixed",
     "type": "bool_value"
   },
   "--premat_gpu_memory_buffer_gb": {
     "category": "Premat",
     "default": 1.0,
+    "help": "global CUDA reserve shared with memory_budget",
     "kind": "dimension",
     "type": "float"
   },
   "--premat_headroom_stay_below_current_peak": {
     "category": "Premat",
     "default": null,
+    "help": "admit only below the observed CUDA allocation peak",
     "kind": "dimension",
     "type": "flag"
   },
   "--premat_headroom_stay_within_global_buffer": {
     "category": "Premat",
     "default": null,
+    "help": "admit only within the configured global reserve",
     "kind": "dimension",
     "type": "flag"
   },
@@ -968,6 +1155,7 @@
       "disabled"
     ],
     "default": "disabled",
+    "help": "publish PREMAT data to the local Instra dashboard",
     "kind": "fixed",
     "type": "string"
   },
@@ -978,24 +1166,28 @@
       "disabled"
     ],
     "default": "disabled",
+    "help": "write PREMAT scheduler history",
     "kind": "fixed",
     "type": "string"
   },
   "--premat_processing_logging": {
     "category": "NSIGHT",
     "default": null,
+    "help": "run bounded Nsight Processing capture",
     "kind": "fixed",
     "type": "string"
   },
   "--premat_processing_profiler": {
     "category": "NSIGHT",
     "default": null,
+    "help": "select temporal NSYS or structural NCU capture",
     "kind": "automatic",
     "type": "string"
   },
   "--premat_retain_detailed_premat_history": {
     "category": "Premat",
     "default": false,
+    "help": "retain per-event PREMAT history",
     "kind": "fixed",
     "type": "bool_value"
   },
@@ -1008,12 +1200,14 @@
       10
     ],
     "default": 1,
+    "help": "relative target; 10 means ordered +1 then +0 sweep",
     "kind": "dimension",
     "type": "int"
   },
   "--premat_target_matrix": {
     "category": "Premat",
     "default": null,
+    "help": "optional comma-separated QKV/O/UP/DOWN selector combination",
     "kind": "list",
     "type": "list"
   },
@@ -1024,6 +1218,7 @@
       "previous_gemm_leading_edge"
     ],
     "default": "as_the_code_flies",
+    "help": "as_the_code_flies | previous_gemm_leading_edge",
     "kind": "dimension",
     "type": "string"
   },
@@ -1034,37 +1229,41 @@
       "r_to_l"
     ],
     "default": "r_to_l",
+    "help": "matrix submission order; default r_to_l",
     "kind": "dimension",
     "type": "string"
   },
   "--print-artifact-name": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "print the resolved artifact name and exit",
     "kind": "fixed",
     "type": "flag"
   },
   "--print-geometry-registry": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "print geometry and complete help",
     "kind": "fixed",
     "type": "string"
   },
   "--print-resolved-json": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "print the resolved configuration and exit",
     "kind": "manual",
     "type": "flag"
   },
   "--processing_logging_capture_frequency_hz_internal": {
     "category": "Run Control Parameters",
     "default": 10000,
-    "kind": "dimension",
+    "kind": "manual",
     "type": "int"
   },
   "--processing_logging_capture_update_internal": {
     "category": "Run Control Parameters",
     "default": 1,
-    "kind": "dimension",
+    "kind": "manual",
     "type": "int"
   },
   "--processing_logging_internal": {
@@ -1074,37 +1273,46 @@
       "disabled"
     ],
     "default": "disabled",
-    "kind": "dimension",
+    "kind": "manual",
     "type": "string"
   },
   "--reset-optimizer": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "explicit fork only: reset histories and bias-correction counters",
     "kind": "fixed",
     "type": "string"
   },
   "--residual-init-depth-source": {
     "category": "Geometry",
     "default": null,
+    "help": "true_layer_depth | dof_implied_depth | user_forced_depth",
     "kind": "dimension",
+    "short": "-z",
     "type": "string"
   },
   "--residual-init-depth-value": {
     "category": "Geometry",
     "default": null,
+    "help": "explicit user-forced depth",
     "kind": "dimension",
+    "short": "-Z",
     "type": "int"
   },
   "--residual-init-policy": {
     "category": "Geometry",
     "default": null,
+    "help": "depth_scaled | unscaled",
     "kind": "dimension",
+    "short": "-r",
     "type": "string"
   },
   "--result-root": {
     "category": "Run Control Parameters",
     "default": "results",
+    "help": "result root",
     "kind": "fixed",
+    "short": "-R",
     "type": "string"
   },
   "--run-mode": {
@@ -1114,65 +1322,77 @@
       "resume"
     ],
     "default": "fresh",
+    "help": "fresh | resume | fork",
     "kind": "fixed",
+    "short": "-q",
     "type": "string"
   },
   "--run-name": {
     "category": "Run Control Parameters",
     "default": "AKAROA",
+    "help": "human run-name prefix",
     "kind": "fixed",
+    "short": "-g",
     "type": "string"
   },
   "--run-start-label": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "explicit run-start label",
     "kind": "fixed",
     "type": "string"
   },
   "--save-dense-initialisation-snapshot": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "save a dense initialisation snapshot for a later THOG run",
     "kind": "fixed",
     "type": "flag"
   },
   "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step": {
     "category": "Run Control Parameters",
     "default": false,
+    "help": "retain the final checkpoint group's weights across a microstep boundary",
     "kind": "dimension",
     "type": "flag"
   },
   "--select-depth": {
     "category": "Geometry",
     "default": null,
+    "help": "select the universal registered DEPTH geometry",
     "kind": "dimension",
     "type": "flag"
   },
   "--select-element": {
     "category": "Geometry",
     "default": [],
+    "help": "select a registered element geometry; repeatable",
     "kind": "list",
     "type": "list"
   },
   "--thogopt__momentum_history_coefficients": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "raw-gradient momentum history; auto=min(P,L)",
     "kind": "dimension",
     "type": "string"
   },
   "--thogopt__scaling_history_coefficients": {
     "category": "Run Control Parameters",
     "default": "auto",
+    "help": "raw squared-gradient approximation budget; auto=min(2P-1,L), independent of momentum",
     "kind": "dimension",
     "type": "string"
   },
   "--torch-compile": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "choices": [
       "false",
       "true",
       "regional"
     ],
     "default": null,
+    "help": "eager | whole-model | regional compile",
     "kind": "dimension",
     "type": "string"
   },
@@ -1180,12 +1400,14 @@
     "boolean_optional": true,
     "category": "Run Control Parameters",
     "default": true,
+    "help": "direct W&B enablement",
     "kind": "fixed",
     "type": "flag"
   },
   "--wandb-entity": {
     "category": "Run Control Parameters",
     "default": null,
+    "help": "W&B entity",
     "kind": "fixed",
     "type": "string"
   },
@@ -1197,36 +1419,43 @@
       "disabled"
     ],
     "default": "online",
+    "help": "online | offline | disabled",
     "kind": "fixed",
     "type": "string"
   },
   "--wandb-project": {
     "category": "Run Control Parameters",
     "default": "thog",
+    "help": "W&B project",
     "kind": "fixed",
     "type": "string"
   },
   "--wandb-root": {
     "category": "Run Control Parameters",
     "default": "wandb",
+    "help": "local W&B root",
     "kind": "fixed",
     "type": "string"
   },
   "--warmup-iters": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 10,
+    "help": "learning-rate warmup updates",
     "kind": "dimension",
+    "short": "-w",
     "type": "int"
   },
   "--weight-decay": {
-    "category": "Base Hyperparameters",
+    "category": "GPT-2 Hyperparameters",
     "default": 0.1,
+    "help": "optimiser weight decay",
     "kind": "dimension",
     "type": "float"
   },
   "DEPTH.order": {
     "category": "Geometry",
     "default": 16,
+    "help": "DEPTH coefficient order selected through --option DEPTH.order=N",
     "kind": "dimension",
     "type": "int"
   }

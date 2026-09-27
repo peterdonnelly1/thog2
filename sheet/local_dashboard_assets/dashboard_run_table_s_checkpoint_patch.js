@@ -19,12 +19,12 @@ window.addEventListener("load", () => {
       for (const row of document.querySelectorAll(".runs-table tbody tr[data-run-id]")) {
         const run_id = String(row.dataset.runId || "");
         const run = app.runs.find(candidate => run_identifier(candidate) === run_id);
-        const cell = row.querySelector('[data-instra-run-shape-cell="activation_checkpointing"]');
+        const cell = row.querySelector('[data-instra-run-summary-cell="activation_checkpointing"]');
         if (!run || !cell) continue;
         cell.textContent = checkpoint_segment_text(run);
         cell.title = `activation checkpointing segment size: ${cell.textContent}`;
       }
-      const header = document.querySelector('[data-instra-run-shape-header="activation_checkpointing"]');
+      const header = document.querySelector('[data-instra-run-summary-header="activation_checkpointing"]');
       if (header) header.title = "activation checkpointing segment size";
     };
 

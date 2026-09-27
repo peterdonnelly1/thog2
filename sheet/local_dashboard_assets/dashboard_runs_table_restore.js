@@ -137,8 +137,9 @@ window.addEventListener("load", () => {
       heads: {label: "H", title: "attention heads", numeric: true, value: run => configured_value(run, "n_head")},
       grad_accum: {label: "A", title: "gradient accumulation steps", numeric: true, value: run => configured_value(run, "gradient_accumulation_steps")},
       activation_checkpointing: {
-        label: "S", title: "activation checkpointing", numeric: true,
-        value: run => display_boolean(configured_value(run, "activation_checkpointing")),
+        label: "S", title: "activation checkpoint segment size", numeric: true,
+        value: run => configured_value(run, "activation_checkpointing") === false
+          ? "off" : configured_value(run, "checkpoint_segment_size"),
       },
       learning_rate: {label: "c", title: "maximum learning rate in units of 1e-5", numeric: true, value: run => learning_rate_code(run, "learning_rate")},
       min_learning_rate: {label: "f", title: "minimum learning rate in units of 1e-5", numeric: true, value: run => learning_rate_code(run, "min_learning_rate", "min_lr")},

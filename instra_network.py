@@ -338,7 +338,7 @@ class NetworkService:
 
     # vvv THOG expose named Runner operations while Network retains SSH and remote authority
     def runner_call(self, host_id, operation, args=None):
-        if operation not in {"runner_preflight", "runner_reserve", "runner_release", "runner_launch", "runner_status", "runner_stop", "runner_reconcile"}:
+        if operation not in {"runner_preflight", "runner_reserve", "runner_release", "runner_launch", "runner_status", "runner_stop", "runner_reconcile", "runner_log"}:
             raise NetworkError("validation", "Unknown Runner operation", host_id)
         host = self._host(host_id)
         config = _read_config()

@@ -11,9 +11,9 @@ import shlex
 import uuid
 
 CATALOGUE = json.loads(Path(__file__).with_name("instra_runner_catalogue.json").read_text())
-COMMON = ("--max-iters", "--batch-size", "--geometry-preset", "--n-layer", "DEPTH.order",
+COMMON = ("--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
           "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps",
-          "--checkpoint-segment-size", "--optimizer", "--learning-rate", "--min-lr", "--warmup-iters")
+          "--checkpoint-segment-size", "--learning-rate", "--min-lr", "--max-iters", "--batch-size")
 FORBIDDEN = {"--device", "--host-label", "--dtype", "--attention-backend", "--o-depth", "--run-name",
              "--print-resolved-json"}
 WRAPPER_ENV_OPTIONS = {"--depth-materialisation-matmul": "THOG2_DEPTH_MATERIALISATION_MATMUL",
@@ -171,6 +171,10 @@ def command_for(run, gpu, *, python="python", entry="run_thog2_owt", host_label=
         args += ["--attention-backend", run["attention_backend"]]
     preset = values.get("--geometry-preset", "depth")
     args += ["--model-type", values.get("--model-type", "dense" if preset == "dense" else "sheet")]
+    if (any(name.startswith("--plastic__") and name != "--plastic__enabled" and
+            (CATALOGUE[name]["type"] != "flag" or value is True) for name, value in values.items())
+            and "--plastic__enabled" not in values and "--no-plastic__enabled" not in values):
+        args.append("--plastic__enabled")
     for name, value in values.items():
         if name == "DEPTH.order":
             args += ["--select-depth", "--option", f"DEPTH.order={value}"]

@@ -45,6 +45,8 @@ class FakeNetwork:
             return {"attempts": self.attempts.copy(), "reservations": self.reservations.copy(), "gpus": self.gpus}
         if operation == "runner_preflight":
             return {"resolved": True}
+        if operation == "runner_log":
+            return {"attempt_id": args["attempt_id"], "text": "RuntimeError: simulated training failure\n", "log_path": "/tmp/mock.log"}
         if operation == "runner_reserve":
             key, owner = args["gpu_key"], self.reservations.get(args["gpu_key"])
             if owner and owner != args["grid_id"]:
@@ -93,6 +95,14 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runs[0]["parameters"]["--option"], ["MLP_UP.order=2", "MLP_DOWN.order=2"])
         self.assertNotIn("--o-depth", command_for({**runs[0], "grid_tag": "G-00001"}, gpu(0)))
         self.assertIn("DEPTH.order=1", command_for({**runs[0], "grid_tag": "G-00001"}, gpu(0)))
+
+    def test_plastic_subordinate_controls_enable_plastic_without_a_ui_master_switch(self):
+        base = {"run_id": uuid.uuid4().hex, "grid_tag": "G-00001", "profiler": "none", "parameters": {}}
+        disabled = command_for({**base, "parameters": {"--plastic__do_learn_layer_count": False}}, gpu(0))
+        self.assertNotIn("--plastic__enabled", disabled)
+        selected = command_for({**base, "parameters": {"--plastic__layers_to_sample": 3}}, gpu(0))
+        self.assertIn("--plastic__enabled", selected)
+        self.assertIn("--plastic__layers_to_sample", selected)
 
     def test_input_rejection_and_script_quoting(self):
         with self.assertRaisesRegex(ValueError, "automatic"):
@@ -156,6 +166,9 @@ class RunnerTests(unittest.TestCase):
         first=before["attempts"][0]["attempt_id"]
         self.fake.attempts[first]["state"]="failed"
         self.service._refresh()
+        failed=self.service.snapshot()["grids"][0]["runs"][0]
+        self.assertIn("simulated training failure", failed["attempts"][0]["failure_excerpt"])
+        self.assertIn("simulated training failure", self.service.attempt_log(grid["grid_id"],before["run_id"],first)["text"])
         self.service.retry_run(grid["grid_id"],before["run_id"])
         self.service._refresh()
         after=self.service.snapshot()["grids"][0]["runs"][0]
@@ -297,6 +310,10 @@ class NodeReservationTests(unittest.TestCase):
             agent._operation("runner_release",{"grid_id":grid_id,"gpu_key":"GPU-0"})
         (agent.STATE_DIR/f"attempt-{attempt_id}.exit").write_text("0\n")
         self.assertEqual(agent._operation("runner_reconcile",{})["attempts"][attempt_id]["state"],"completed")
+        (agent.STATE_DIR/f"attempt-{attempt_id}.log").write_text("first line\nTraceback: meaningful failure\n")
+        self.assertIn("meaningful failure", agent._operation("runner_log",{"attempt_id":attempt_id,"max_bytes":40})["text"])
+        with self.assertRaises(KeyError):
+            agent._operation("runner_log",{"attempt_id":uuid.uuid4().hex})
         self.assertTrue(agent._operation("runner_release",{"grid_id":grid_id,"gpu_key":"GPU-0"})["released"])
 
     def test_actual_training_parser_preflight_rejects_invalid_geometry(self):

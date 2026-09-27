@@ -1373,6 +1373,15 @@ def _handler_for_with_runner(catalog):
             except (KeyError, OSError) as error:
                 self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
             return
+        if parsed.path == "/api/runner/log":
+            query = parse_qs(parsed.query)
+            try:
+                result = _runner_service.attempt_log(query.get("grid_id", [""])[0], query.get("run_id", [""])[0],
+                                                     query.get("attempt_id", [""])[0])
+                self._send_json(result)
+            except (KeyError, OSError, ValueError, RuntimeError, _instra_network.NetworkError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            return
         old_get(self)
 
     def do_post(self):
