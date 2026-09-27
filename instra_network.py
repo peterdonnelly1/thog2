@@ -336,6 +336,33 @@ class NetworkService:
                         self.submit("discover", host_id)
             self.stop_event.wait(max(1, int(config.get("retry_interval", 30))))
 
+    # vvv THOG expose named Runner operations while Network retains SSH and remote authority
+    def runner_call(self, host_id, operation, args=None):
+        if operation not in {"runner_preflight", "runner_reserve", "runner_release", "runner_launch", "runner_status", "runner_stop", "runner_reconcile"}:
+            raise NetworkError("validation", "Unknown Runner operation", host_id)
+        host = self._host(host_id)
+        config = _read_config()
+        # A pending release must let accepted Grids reconcile, stop, and drain their queue.
+        if not host["local"] and (config["master_id"] != self.local_id or not host["execution_enabled"]):
+            raise NetworkError("authority", "Remote execution requires this Runner Master and an enabled host", host_id)
+        discovery = host.get("last_discovered") or {}
+        if not discovery.get("execution_profiles") or not discovery.get("gpus"):
+            raise NetworkError("validation", "Host execution profile and GPUs must be discovered", host_id)
+        local = config["hosts"].get(self.local_id, {}).get("last_discovered") or {}
+        if not host["local"] and local.get("thog", {}).get("version") != discovery.get("thog", {}).get("version"):
+            raise NetworkError("validation", "THOG software versions differ across hosts", host_id)
+        result = self._agent_request(host, operation, args or {})
+        # A three-second Runner poll should not force a config fsync on every contact.
+        last_contact = host.get("last_contact")
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_contact)).total_seconds()
+        except (TypeError, ValueError):
+            age = 60
+        if age >= 30:
+            self._record(host_id, last_contact=_now())
+        return result
+    # ^^^ THOG
+
     def submit(self, action, host_id=None, **args):
         with self.jobs_lock:
             if action == "discover" and host_id and not args:

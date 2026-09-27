@@ -9,6 +9,7 @@ import os
 import signal
 import shutil
 import socket                                                                                                                                                 # <<< THOG check the listener address before registering a new Instra backend PID
+import struct                                                                                                                                                 # <<< THOG identify the local Node Agent process before a protocol upgrade
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,8 @@ def _handler_for_with_network_post(catalog):
         def do_POST(self):
             if urlparse(self.path).path == "/api/network/action":
                 return _dashboard._network_do_post(self)
+            if urlparse(self.path).path == "/api/runner/action":
+                return _dashboard._runner_do_post(self)                                                                                                     # <<< THOG route Runner actions before legacy POST owners
             return super().do_POST()
 
     return NetworkPostHandler
@@ -159,7 +162,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # silently disappear.
     for asset_name in _EXTRA_ASSET_NAMES:
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
-    for asset_name in ("dashboard_networks.js", "dashboard_networks.css"):
+    for asset_name in ("dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css"):
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
 
     index_path = runtime_root / "index.html"
@@ -169,11 +172,12 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
         if script_tag not in index_html:
             index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
     index_html = index_html.replace("</head>", '  <script src="/assets/dashboard_networks.js" defer></script>\n</head>', 1)                     # <<< THOG load Networks after the established dashboard owners
+    index_html = index_html.replace("</head>", '  <script src="/assets/dashboard_runner.js" defer></script>\n</head>', 1)                       # <<< THOG install Runner interactions after Networks navigation
     index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
     _dashboard._ASSET_NAMES = frozenset(
-        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_networks.js", "dashboard_networks.css")
+        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css")
     )
     return temporary
 
@@ -184,7 +188,29 @@ def _start_node_agent() -> None:
 
     try:
         instra_node_agent.request("state", timeout=1)
-    except (OSError, RuntimeError):
+        # vvv THOG replace an older local Node Agent protocol after a branch update; accepted child jobs survive
+        try:
+            instra_node_agent.request("runner_reconcile", timeout=1)
+        except RuntimeError as error:
+            if "unknown operation" not in str(error):
+                raise
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+                peer.settimeout(2)
+                peer.connect(str(instra_node_agent.SOCKET_PATH))
+                pid, uid, _gid = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+            if uid != os.getuid() or b"instra_node_agent.py" not in command or b"serve" not in command:
+                raise RuntimeError("The existing Node Agent protocol is old; restart its verified process manually") from error
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(60):
+                if not instra_node_agent._running(pid):
+                    break
+                time.sleep(.05)
+            if instra_node_agent._running(pid):
+                raise RuntimeError("Older Node Agent did not exit for protocol upgrade") from error
+            raise OSError("Node Agent protocol upgraded; start replacement")
+        # ^^^ THOG
+    except OSError:
         instra_node_agent.STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (instra_node_agent.STATE_DIR / "agent.log").open("ab") as output:
             subprocess.Popen([sys.executable, str(Path(instra_node_agent.__file__).resolve()), "serve"],

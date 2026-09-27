@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/assets/dashboard_premat.css">                                                                                           <!-- THOG dedicated Premat view -->
   <link rel="stylesheet" href="/assets/dashboard_processing.css">                                                                                        <!-- THOG Processing view -->
   <link rel="stylesheet" href="/assets/dashboard_networks.css">                                                                                           <!-- THOG Networks layout -->
+  <link rel="stylesheet" href="/assets/dashboard_runner.css">                                                                                             <!-- THOG Runner views -->
   <script src="/plotly.min.js"></script>
   <script src="/assets/dashboard.js" defer></script>
   <!-- vvv THOG keep local heatmap coordinate/view-size behaviour isolated from the established dashboard script -->
@@ -71,7 +72,14 @@
     </article>
   </section>
   <section class="network-view network-runner" id="runner_view" aria-label="Runner" hidden>
-    <h1>Runner</h1><p>Remote execution will be configured here when the Runner enhancement is installed. Designate Runner Master in Networks first.</p>
+    <!-- vvv THOG persistent Grid Recipes, live Progress, History and retained Files -->
+    <header class="runner-heading"><h1>Runner</h1><nav id="runner_tabs" aria-label="Runner views">
+      <button type="button" data-runner-tab="recipes">Recipes</button><button type="button" data-runner-tab="progress">Progress</button>
+      <button type="button" data-runner-tab="history">History</button><button type="button" data-runner-tab="files">Files</button>
+    </nav></header>
+    <p id="runner_message" role="status" aria-live="polite"></p>
+    <div class="runner-layout"><aside id="runner_list" aria-label="Runner selection"></aside><article id="runner_detail"></article></div>
+    <!-- ^^^ THOG -->
   </section>
   <dialog id="network_add_dialog" class="network-add-dialog">
     <form method="dialog" id="network_add_form"><h2>Add Thog Host</h2>

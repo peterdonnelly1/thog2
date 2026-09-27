@@ -1,0 +1,1233 @@
+{
+  "--activation-checkpointing": {
+    "boolean_optional": true,
+    "category": "Base Hyperparameters",
+    "default": true,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--artifact-name-limit": {
+    "category": "Run Control Parameters",
+    "default": 240,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--artifact-suffix": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--attention-backend": {
+    "category": "Base Hyperparameters",
+    "choices": [
+      "auto",
+      "flash2",
+      "sdpa",
+      "math"
+    ],
+    "default": "auto",
+    "kind": "automatic",
+    "type": "string"
+  },
+  "--attention-geometry": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--basis-family": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--basis-version": {
+    "category": "Geometry",
+    "default": "auto",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--batch-size": {
+    "category": "Base Hyperparameters",
+    "default": 12,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--beta1": {
+    "category": "Base Hyperparameters",
+    "default": 0.9,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--beta2": {
+    "category": "Base Hyperparameters",
+    "default": 0.95,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--bias": {
+    "boolean_optional": true,
+    "category": "Base Hyperparameters",
+    "default": true,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--block-size": {
+    "category": "Base Hyperparameters",
+    "default": 256,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__duration__max_fraction_of_elapsed_steps": {
+    "category": "Chaos Bumps",
+    "default": 0.05,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--chaos_bump__sampling__duration__max_steps": {
+    "category": "Chaos Bumps",
+    "default": 256,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__duration__min_steps": {
+    "category": "Chaos Bumps",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__enabled": {
+    "boolean_optional": true,
+    "category": "Chaos Bumps",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--chaos_bump__sampling__initial_lockout__steps": {
+    "category": "Chaos Bumps",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__interlude__max_steps": {
+    "category": "Chaos Bumps",
+    "default": 256,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__interlude__min_steps": {
+    "category": "Chaos Bumps",
+    "default": 128,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--chaos_bump__sampling__max_movement_fraction_of_local_gap": {
+    "category": "Chaos Bumps",
+    "default": 0.1,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--chaos_bump__sampling__maximum_bumps": {
+    "category": "Chaos Bumps",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--checkpoint-interval": {
+    "category": "Run Control Parameters",
+    "default": 0,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--checkpoint-root": {
+    "category": "Run Control Parameters",
+    "default": "checkpoints",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--checkpoint-segment-size": {
+    "category": "Base Hyperparameters",
+    "default": 12,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--cuda-expandable-segment": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--data-dir": {
+    "category": "Run Control Parameters",
+    "default": "data/openwebtext",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--data-seed": {
+    "category": "Base Hyperparameters",
+    "default": 7331,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--dataset": {
+    "category": "Run Control Parameters",
+    "default": "openwebtext",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--depth-compress-layer-norm-and-bias": {
+    "boolean_optional": true,
+    "category": "Geometry",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--depth-materialisation-matmul": {
+    "category": "NSIGHT",
+    "choices": [
+      "true",
+      "false"
+    ],
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--device": {
+    "category": "Run Control Parameters",
+    "default": "cuda",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--direct-factorised-hyperblock-mlp": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--dropout": {
+    "category": "Base Hyperparameters",
+    "default": 0.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--dry-run": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "flag"
+  },
+  "--dtype": {
+    "category": "Base Hyperparameters",
+    "choices": [
+      "float32",
+      "float16",
+      "bfloat16"
+    ],
+    "default": "bfloat16",
+    "kind": "automatic",
+    "type": "string"
+  },
+  "--eval-interval": {
+    "category": "Run Control Parameters",
+    "default": 50,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--eval-iters": {
+    "category": "Run Control Parameters",
+    "default": 5,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--experiment-prefix": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--explain-geometry": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "fixed",
+    "type": "flag"
+  },
+  "--geometry-preset": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--grad-clip": {
+    "category": "Base Hyperparameters",
+    "default": 1.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--gradient-accumulation-steps": {
+    "category": "Base Hyperparameters",
+    "default": 160,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--host-label": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--hyperblock": {
+    "boolean_optional": true,
+    "category": "Geometry",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--hyperblock-attention-family-order": {
+    "category": "Geometry",
+    "default": 4,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-attention-head-channel-order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-attention-head-order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-common-family-order": {
+    "category": "Geometry",
+    "default": 6,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-compressor": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--hyperblock-compressor-version": {
+    "category": "Geometry",
+    "default": "auto",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--hyperblock-d-model-order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-depth-order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-loop-count": {
+    "category": "Geometry",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-loop-decay": {
+    "category": "Geometry",
+    "default": 1.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--hyperblock-mlp-family-order": {
+    "category": "Geometry",
+    "default": 2,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-mlp-hidden-multiplier": {
+    "category": "Geometry",
+    "default": 4,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--hyperblock-mlp-hidden-order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--initialise-from-dense-snapshot": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--instrumentation__delta_loss_v_layer_heatmap": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "log",
+      "linear"
+    ],
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--instrumentation__delta_loss_v_layer_heatmap__destination": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "wandb",
+      "local",
+      "none"
+    ],
+    "default": "local",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--instrumentation__delta_loss_v_layer_heatmap_abs_limit": {
+    "category": "Run Control Parameters",
+    "default": 0.05,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes": {
+    "category": "Run Control Parameters",
+    "default": 250,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--instrumentation__depth_weight_curves__destination": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--instrumentation__optimizer_histories__full_matrix_every_n_steps": {
+    "category": "Run Control Parameters",
+    "default": 0,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--lapped-cosine-overlap-fraction": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--lapped-cosine-window-length": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--layer-dropout-active-per-stratum": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--layer-dropout-resample-steps": {
+    "category": "Geometry",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--layer-dropout-stratum-size": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--learning-rate": {
+    "category": "Base Hyperparameters",
+    "default": 0.0006,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--log-interval": {
+    "category": "Run Control Parameters",
+    "default": 10,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--log-root": {
+    "category": "Run Control Parameters",
+    "default": "logs",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--log-timestamp": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--materialisation-profiling": {
+    "category": "NSIGHT",
+    "choices": [
+      "true",
+      "false"
+    ],
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--max-iters": {
+    "category": "Base Hyperparameters",
+    "default": 100,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--max-nonfinite-update-skips": {
+    "category": "Base Hyperparameters",
+    "default": 99999,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--max-wall-minutes": {
+    "category": "Run Control Parameters",
+    "default": 0,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--min-lr": {
+    "category": "Base Hyperparameters",
+    "default": 6e-05,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--mlp-geometry": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--mlp-hidden-compressor": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--mlp-hidden-group-size": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--model-seed": {
+    "category": "Base Hyperparameters",
+    "default": 1337,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--model-type": {
+    "category": "Base Hyperparameters",
+    "choices": [
+      "dense",
+      "sheet"
+    ],
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--n-embd": {
+    "category": "Base Hyperparameters",
+    "default": 768,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--n-head": {
+    "category": "Base Hyperparameters",
+    "default": 12,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--n-layer": {
+    "category": "Base Hyperparameters",
+    "default": 72,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--ncu-probe-layer": {
+    "category": "NSIGHT",
+    "default": null,
+    "kind": "fixed",
+    "type": "int"
+  },
+  "--no-activation-checkpointing": {
+    "alias_for": "--activation-checkpointing",
+    "category": "Base Hyperparameters",
+    "default": null,
+    "kind": "manual",
+    "type": "flag"
+  },
+  "--no-bias": {
+    "alias_for": "--bias",
+    "category": "Base Hyperparameters",
+    "default": null,
+    "kind": "manual",
+    "type": "flag"
+  },
+  "--no-chaos_bump__sampling__enabled": {
+    "category": "Chaos Bumps",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-depth-compress-layer-norm-and-bias": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-direct-factorised-hyperblock-mlp": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-hyperblock": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-plastic__coarse_phase_roll_through": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-plastic__do_learn_layer_count": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-plastic__enabled": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-plastic__freeze_geometry_during_warmup": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--no-wandb": {
+    "alias_for": "--wandb",
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "manual",
+    "type": "flag"
+  },
+  "--nonfinite-update-policy": {
+    "category": "Base Hyperparameters",
+    "choices": [
+      "raise",
+      "skip"
+    ],
+    "default": "skip",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--o-attn-d-model": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--o-attn-out-per-channel": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--o-attn-qkv-per-channel": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--o-depth": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "manual",
+    "type": "int"
+  },
+  "--o-mlp-d-model": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--o-mlp-hidden": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--optimizer": {
+    "category": "Base Hyperparameters",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--optimizer-momentum": {
+    "category": "Base Hyperparameters",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--option": {
+    "category": "Geometry",
+    "default": [],
+    "kind": "list",
+    "type": "list"
+  },
+  "--plastic-layer-count-hold-updates": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--plastic__coarse_phase": {
+    "category": "Plastic",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": "disabled",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--plastic__coarse_phase_roll_through": {
+    "boolean_optional": true,
+    "category": "Plastic",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--plastic__do_learn_layer_count": {
+    "boolean_optional": true,
+    "category": "Plastic",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--plastic__enabled": {
+    "boolean_optional": true,
+    "category": "Plastic",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--plastic__freeze_geometry_during_warmup": {
+    "boolean_optional": true,
+    "category": "Plastic",
+    "default": true,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--plastic__geometry_learning_rate_multiplier": {
+    "category": "Plastic",
+    "default": 0.1,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__initial_layer_count": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count__adding_layers__discount_factor_for_extrapolation_evidence": {
+    "category": "Plastic",
+    "default": 0.8,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__layer_count__cuda_allocator_reserve_gib": {
+    "category": "Plastic",
+    "default": 0.5,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__layer_count__max_allowable_layer_change": {
+    "category": "Plastic",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count_cost_weight": {
+    "category": "Plastic",
+    "default": 0.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__layer_count_objective": {
+    "category": "Plastic",
+    "default": "lowest_loss",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--plastic__layer_count_probe__number_of_sampled_valid_tokens": {
+    "category": "Plastic",
+    "default": 1024,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count_probe__probe_every_n_steps": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count_probe__window_size_as_number_of_probes": {
+    "category": "Plastic",
+    "default": 50,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count_probe_noise_lambda": {
+    "category": "Plastic",
+    "default": 3.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__layer_count_probe_radius": {
+    "category": "Plastic",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_count_update_brake": {
+    "category": "Plastic",
+    "default": 5,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__layer_sampling_initialisation": {
+    "category": "Plastic",
+    "default": "equidistant",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--plastic__layers_to_sample": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__log_interval_coarse": {
+    "category": "Plastic",
+    "default": 10,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__max_permitted_layers": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__phase_1__number_of_trials": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__phase_1_evaluation_steps_count": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__phase_1_n_steps": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__phase_1_starting_layer_count": {
+    "category": "Plastic",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__wall_time_equivalent_time_gain_discount": {
+    "category": "Plastic",
+    "default": 0.9,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--plastic__wall_time_equivalent_time_gain_loss_rate_min_observations": {
+    "category": "Plastic",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--plastic__wall_time_equivalent_time_gain_loss_rate_window": {
+    "category": "Plastic",
+    "default": 64,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--premat": {
+    "category": "Premat",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": "disabled",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--premat_allocator_aware_admission": {
+    "category": "Premat",
+    "choices": [
+      "disabled",
+      "cautious",
+      "normal",
+      "aggressive"
+    ],
+    "default": "disabled",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--premat_attention_mode": {
+    "category": "Premat",
+    "choices": [
+      "fused",
+      "unfused"
+    ],
+    "default": "fused",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--premat_cuda_stream_priority": {
+    "category": "Premat",
+    "choices": [
+      "normal",
+      "high"
+    ],
+    "default": "normal",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--premat_diagnostic_layer_delay_ms": {
+    "category": "Premat",
+    "default": 0.0,
+    "kind": "fixed",
+    "type": "float"
+  },
+  "--premat_enable_gpu_timing_diagnostic": {
+    "category": "Premat",
+    "default": false,
+    "kind": "fixed",
+    "type": "bool_value"
+  },
+  "--premat_enable_shadow_mode": {
+    "category": "Premat",
+    "default": false,
+    "kind": "fixed",
+    "type": "bool_value"
+  },
+  "--premat_gpu_memory_buffer_gb": {
+    "category": "Premat",
+    "default": 1.0,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "--premat_headroom_stay_below_current_peak": {
+    "category": "Premat",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--premat_headroom_stay_within_global_buffer": {
+    "category": "Premat",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--premat_instra": {
+    "category": "Premat",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": "disabled",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--premat_logging": {
+    "category": "Premat",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": "disabled",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--premat_processing_logging": {
+    "category": "NSIGHT",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--premat_processing_profiler": {
+    "category": "NSIGHT",
+    "default": null,
+    "kind": "automatic",
+    "type": "string"
+  },
+  "--premat_retain_detailed_premat_history": {
+    "category": "Premat",
+    "default": false,
+    "kind": "fixed",
+    "type": "bool_value"
+  },
+  "--premat_target_layer": {
+    "category": "Premat",
+    "choices": [
+      0,
+      1,
+      2,
+      10
+    ],
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--premat_target_matrix": {
+    "category": "Premat",
+    "default": null,
+    "kind": "list",
+    "type": "list"
+  },
+  "--premat_timing": {
+    "category": "Premat",
+    "choices": [
+      "as_the_code_flies",
+      "previous_gemm_leading_edge"
+    ],
+    "default": "as_the_code_flies",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--premat_weight_matrix_target_order": {
+    "category": "Premat",
+    "choices": [
+      "l_to_r",
+      "r_to_l"
+    ],
+    "default": "r_to_l",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--print-artifact-name": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "flag"
+  },
+  "--print-geometry-registry": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--print-resolved-json": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "manual",
+    "type": "flag"
+  },
+  "--processing_logging_capture_frequency_hz_internal": {
+    "category": "Run Control Parameters",
+    "default": 10000,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--processing_logging_capture_update_internal": {
+    "category": "Run Control Parameters",
+    "default": 1,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--processing_logging_internal": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "enabled",
+      "disabled"
+    ],
+    "default": "disabled",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--reset-optimizer": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--residual-init-depth-source": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--residual-init-depth-value": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--residual-init-policy": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--result-root": {
+    "category": "Run Control Parameters",
+    "default": "results",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--run-mode": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "fresh",
+      "resume"
+    ],
+    "default": "fresh",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--run-name": {
+    "category": "Run Control Parameters",
+    "default": "AKAROA",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--run-start-label": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--save-dense-initialisation-snapshot": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "flag"
+  },
+  "--save_and_reuse_final_activation_checkpoin_group_weights_on_next_forward_step": {
+    "category": "Run Control Parameters",
+    "default": false,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--select-depth": {
+    "category": "Geometry",
+    "default": null,
+    "kind": "dimension",
+    "type": "flag"
+  },
+  "--select-element": {
+    "category": "Geometry",
+    "default": [],
+    "kind": "list",
+    "type": "list"
+  },
+  "--thogopt__momentum_history_coefficients": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--thogopt__scaling_history_coefficients": {
+    "category": "Run Control Parameters",
+    "default": "auto",
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--torch-compile": {
+    "category": "Base Hyperparameters",
+    "choices": [
+      "false",
+      "true",
+      "regional"
+    ],
+    "default": null,
+    "kind": "dimension",
+    "type": "string"
+  },
+  "--wandb": {
+    "boolean_optional": true,
+    "category": "Run Control Parameters",
+    "default": true,
+    "kind": "fixed",
+    "type": "flag"
+  },
+  "--wandb-entity": {
+    "category": "Run Control Parameters",
+    "default": null,
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--wandb-mode": {
+    "category": "Run Control Parameters",
+    "choices": [
+      "online",
+      "offline",
+      "disabled"
+    ],
+    "default": "online",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--wandb-project": {
+    "category": "Run Control Parameters",
+    "default": "thog",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--wandb-root": {
+    "category": "Run Control Parameters",
+    "default": "wandb",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--warmup-iters": {
+    "category": "Base Hyperparameters",
+    "default": 10,
+    "kind": "dimension",
+    "type": "int"
+  },
+  "--weight-decay": {
+    "category": "Base Hyperparameters",
+    "default": 0.1,
+    "kind": "dimension",
+    "type": "float"
+  },
+  "DEPTH.order": {
+    "category": "Geometry",
+    "default": 16,
+    "kind": "dimension",
+    "type": "int"
+  }
+}

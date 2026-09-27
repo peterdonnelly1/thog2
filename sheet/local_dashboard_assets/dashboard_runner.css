@@ -1,0 +1,23 @@
+/* vvv THOG align Runner list and details with the Networks workspace */
+#runner_view { overflow:auto; padding:1.2rem; }
+.runner-heading { display:flex; gap:2rem; align-items:center; flex-wrap:wrap; }
+#runner_tabs { display:flex; gap:.5rem; }
+#runner_tabs button.active { border-color:#5b9ded; color:#80bafa; }
+.runner-layout { display:grid; grid-template-columns:minmax(15rem,24%) minmax(20rem,1fr); gap:1rem; min-height:30rem; }
+#runner_list { display:flex; flex-direction:column; gap:.5rem; }
+#runner_list button { text-align:left; overflow-wrap:anywhere; }
+#runner_list button.active { outline:2px solid #5792cc; }
+#runner_detail { min-width:0; overflow:auto; }
+#runner_detail h2 { margin:.25rem 0 1rem; }
+#runner_detail label { display:flex; flex-direction:column; margin:.6rem 0; gap:.3rem; }
+#runner_detail input, #runner_detail select { max-width:32rem; }
+.runner-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:0 .8rem; }
+.runner-actions { display:flex; flex-wrap:wrap; gap:.6rem; margin:.9rem 0; }
+.runner-categories { display:flex; flex-wrap:wrap; gap:.4rem; margin:1rem 0; }
+.runner-categories button.active { outline:2px solid #5792cc; }
+.runner-run { padding:.75rem; border-top:1px solid #68778a; overflow-wrap:anywhere; }
+.runner-run summary { cursor:pointer; }
+.runner-run pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+#runner_message { min-height:1.3rem; color:#e8b668; }
+@media (max-width:760px) {.runner-layout { grid-template-columns:1fr; }}
+/* ^^^ THOG */

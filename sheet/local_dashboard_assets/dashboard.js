@@ -255,7 +255,9 @@ function filtered_runs() {
   const filter = by_id("state_filter").value;
   const sort = by_id("run_sort").value;
   const runs = app.runs.filter(run => {
-    const searchable = `${run.artifact_name} ${run.wandb_run_id} ${run.local_run_id} ${run.host_label} ${run.producing_host || ""} ${run.thog_host_id || ""}`.toLowerCase(); // <<< THOG include authoritative host in combined run filtering
+    // vvv THOG let the ordinary Runs search filter by explicit Runner Grid and run identity
+    const searchable = `${run.artifact_name} ${run.wandb_run_id} ${run.local_run_id} ${run.host_label} ${run.producing_host || ""} ${run.thog_host_id || ""} ${run.runner_grid_tag || ""} ${run.runner_run_id || ""}`.toLowerCase();
+    // ^^^ THOG
     return (!query || searchable.includes(query)) && (filter === "all" || display_run_state(run) === filter);
   });
   runs.sort((left, right) => {
@@ -338,6 +340,14 @@ function append_run_row(body, run) {
   name.title = run.artifact_name;
   name.addEventListener("click", () => select_run(run_id, {manual: true}));
   name_cell.append(colour, name);
+  // vvv THOG expose Runner identity without changing legacy and manual rows
+  if (run.runner_grid_tag) {
+    const grid_identity = document.createElement("small");
+    grid_identity.textContent = ` ${run.runner_grid_tag} · ${String(run.runner_run_id || "").slice(0, 8)}`;
+    grid_identity.title = `Runner run ${run.runner_run_id}`;
+    name_cell.append(grid_identity);
+  }
+  // ^^^ THOG
   row.appendChild(name_cell);
 
   const wandb_cell = document.createElement("td");

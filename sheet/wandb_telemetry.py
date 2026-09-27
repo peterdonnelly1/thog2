@@ -541,6 +541,16 @@ class WandbTelemetry:
         self.config.setdefault("gpu_index", selected_gpu_index())
         self.config.setdefault("cuda_visible_devices", str(os.environ.get("CUDA_VISIBLE_DEVICES", "")))
         self.config.setdefault("instrumentation_configuration", instrumentation_environment_configuration())                                                     # <<< THOG make every effective environment-backed instrumentation setting resumable
+        # vvv THOG preserve Runner identity in W&B and ordinary local charts while manual runs stay metadata-free
+        runner_identity = os.environ.get("THOG2_RUNNER_METADATA")
+        if runner_identity:
+            try:
+                self.config["runner"] = {key: value for key, value in json.loads(runner_identity).items()
+                                         if key in {"grid_id", "grid_tag", "recipe_id", "run_id", "pairing_id", "attempt_id", "profiler",
+                                                    "thog_host_id", "execution_profile", "gpu_uuid"}}
+            except (ValueError, TypeError, AttributeError):
+                pass
+        # ^^^ THOG
         # ^^^ THOG
         self.backend = _selected_backend()
         self.module: Optional[Any] = None

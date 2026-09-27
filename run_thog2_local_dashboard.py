@@ -36,6 +36,9 @@ def _run_status_with_configuration(self):
     enriched = dict(status)
     enriched["configuration"] = configuration
     enriched["command"] = metadata.get("command", configuration.get("command", ""))
+    if isinstance(configuration.get("runner"), dict):
+        enriched["runner_grid_tag"] = configuration["runner"].get("grid_tag")
+        enriched["runner_run_id"] = configuration["runner"].get("run_id")
     return enriched
 
 
@@ -1223,8 +1226,10 @@ _base._handler_for = _handler_for_with_file_delete
 # vvv THOG install local Networks APIs through the established dashboard handler factory
 import instra_network as _instra_network
 import instra_monitoring as _instra_monitoring                                                                                                               # <<< THOG install remote acquisition with the established Network service
+import instra_runner as _instra_runner                                                                                                                       # <<< THOG add persistent Grid service beside Network
 
 _network_service = None
+_runner_service = None                                                                                                                                      # <<< THOG Runner starts after Network and reconciles Node Agents independently
 _handler_for_before_network = _base._handler_for
 
 
@@ -1306,6 +1311,86 @@ _base._handler_for = _handler_for_with_network
 # ^^^ THOG
 
 
+# vvv THOG serve validated Runner Recipes, preview, history and retained Grid files
+def _runner_do_post(self):
+    if _runner_service is None:
+        self._send_json({"error": "Runner unavailable"}, status=HTTPStatus.SERVICE_UNAVAILABLE)
+        return
+    try:
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 1 <= length <= 131072:
+            raise ValueError("Invalid Runner request size")
+        payload = json.loads(self.rfile.read(length))
+        action = payload.get("action")
+        if action == "save":
+            result = _runner_service.save_recipe(payload.get("recipe_id"), payload["recipe"])
+        elif action == "preview":
+            result = _runner_service.preview(payload["recipe"])
+        elif action == "launch":
+            result = _runner_service.launch(payload["recipe_id"], confirm_large=payload.get("confirm_large") is True)
+        elif action == "stop":
+            result = _runner_service.stop_grid(payload["grid_id"], force=payload.get("force") is True)
+        elif action == "retry_run":
+            result = _runner_service.retry_run(payload["grid_id"], payload["run_id"])
+        elif action == "fail_grid":
+            result = _runner_service.fail_grid(payload["grid_id"])
+        elif action == "convert_to_loose":
+            result = _runner_service.convert_to_loose(payload["grid_id"])
+        elif action == "repeat_preview":
+            result = _runner_service.repeat_preview(payload["grid_id"], payload["mode"])
+        elif action == "repeat":
+            source_id, mode = payload["grid_id"], payload["mode"]
+            original = next((grid for grid in _runner_service.snapshot()["grids"] if grid["grid_id"] == source_id), None)
+            if original is None:
+                raise KeyError("Unknown Grid")
+            result = _runner_service.launch(original["recipe_id"], source_grid_id=source_id, repeat_mode=mode,
+                                             confirm_large=payload.get("confirm_large") is True)
+        else:
+            raise ValueError("Unknown Runner action")
+        self._send_json(result)
+    except (ValueError, TypeError, KeyError, RuntimeError, OSError, _instra_network.NetworkError) as error:
+        self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+
+
+_handler_for_before_runner = _base._handler_for
+
+
+def _handler_for_with_runner(catalog):
+    handler = _handler_for_before_runner(catalog)
+    old_get = handler.do_GET
+    old_post = handler.do_POST
+
+    def do_get(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/runner":
+            self._send_json(_runner_service.snapshot() if _runner_service else {"error": "Runner unavailable"})
+            return
+        if parsed.path == "/api/runner/file":
+            query = parse_qs(parsed.query)
+            try:
+                path = _runner_service.file(query.get("grid_id", [""])[0], query.get("name", [""])[0])
+                self._send_file(path, download=query.get("download", ["0"])[0] == "1")
+            except (KeyError, OSError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
+            return
+        old_get(self)
+
+    def do_post(self):
+        if urlparse(self.path).path == "/api/runner/action":
+            _runner_do_post(self)
+        else:
+            old_post(self)
+
+    handler.do_GET = do_get
+    handler.do_POST = do_post
+    return handler
+
+
+_base._handler_for = _handler_for_with_runner
+_handler_for = _handler_for_with_runner                                                                                                                     # <<< THOG let late dashboard owners wrap the assembled Network and Runner GET routes
+# ^^^ THOG
+
+
 _original_asset_root = Path(_base._ASSET_ROOT)
 _overlay_asset_root = Path(tempfile.mkdtemp(prefix="thog2-instra-assets-"))
 _dashboard_patch_names = (
@@ -1368,14 +1453,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         if name in globals():
             setattr(_base, name, globals()[name])
     global _network_service
+    global _runner_service
     arguments = _base.build_parser().parse_args(argv)
     _network_service = _instra_network.NetworkService(logs_root=arguments.root)
+    _runner_service = _instra_runner.RunnerService(_network_service)                                                                                         # <<< THOG reconcile persistent Grids before new dispatch
     _instra_monitoring.install(_base, _network_service)                                                                                                      # <<< THOG add remote copies to the local catalogue before the HTTP server is created
     try:
         return _base.main(argv)
     finally:
         if _instra_monitoring._active_service is not None:                                                                                                   # <<< THOG finish acquisition before closing Network
             _instra_monitoring._active_service.close()
+        _runner_service.close()                                                                                                                             # <<< THOG quiesce Runner calls before closing Network transport
         _network_service.close()
 
 

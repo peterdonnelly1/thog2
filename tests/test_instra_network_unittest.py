@@ -150,6 +150,20 @@ class NetworkTests(unittest.TestCase):
             self.service.settings(restart_mode="all", passwords={"unknown": 123})
         self.assertEqual(network._read_config()["restart_mode"], "remote")
 
+    def test_pending_master_release_allows_accepted_remote_grid_to_drain(self):
+        remote = self.service._new_host("dreedle", "peter", 22)
+        remote["execution_enabled"] = True
+        remote["last_discovered"] = {"gpus": [{"gpu_key": "GPU-test"}], "execution_profiles":
+                                     [{"profile_key": "current"}], "thog": {"version": "same"}}
+        with network._locked_config() as config:
+            config["hosts"][remote["thog_host_id"]] = remote
+            config["hosts"][self.service.local_id]["last_discovered"] = {"thog": {"version": "same"}}
+            config["master_id"] = self.service.local_id
+            config["release_pending"] = True
+        with patch.object(self.service, "_agent_request", return_value={"attempts": {}}) as request:
+            self.assertEqual(self.service.runner_call(remote["thog_host_id"], "runner_reconcile"), {"attempts": {}})
+            request.assert_called_once()
+
     def test_node_agent_rejects_competing_runner_master(self):
         first = "thog_host.scruffy"
         second = "thog_host.dreedle"
@@ -286,7 +300,7 @@ class NetworkTests(unittest.TestCase):
               patch.object(subprocess, "Popen") as popen):
             namespace["_start_node_agent"]()
         popen.assert_not_called()
-        self.assertEqual(events, ["state", "entry", "configure"])
+        self.assertEqual(events, ["state", "runner_reconcile", "entry", "configure"])                                                                          # <<< THOG verify upgraded agent protocol before registering the backend
 
         # vvv THOG a second launch must retain the first backend's identity when its port is occupied
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -299,7 +313,7 @@ class NetworkTests(unittest.TestCase):
                   patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry"))):
                 with self.assertRaisesRegex(RuntimeError, "already listening"):
                     namespace["_start_node_agent"]()
-            self.assertEqual(events, ["state", "entry"])
+        self.assertEqual(events, ["state", "runner_reconcile", "entry"])                                                                                       # <<< THOG verify protocol on already-running agent before repairing entry
         # ^^^ THOG
     # ^^^ THOG
 

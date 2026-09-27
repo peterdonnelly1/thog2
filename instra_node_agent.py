@@ -60,20 +60,29 @@ def _running(pid):
         return False
 
 
+def _pid_start_time(pid):
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
 def _gpu_information():
-    command = ["nvidia-smi", "--query-gpu=index,uuid,name,memory.total,driver_version", "--format=csv,noheader,nounits"]
+    command = ["nvidia-smi", "--query-gpu=index,uuid,name,memory.total,driver_version,memory.free,compute_cap,power.limit", "--format=csv,noheader,nounits"]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=8, check=True)
     except (OSError, subprocess.SubprocessError):
         return []
     gpus = []
     for line in result.stdout.splitlines():
-        fields = [field.strip() for field in line.split(",", 4)]
-        if len(fields) != 5 or not fields[0].isdigit():
+        fields = [field.strip() for field in line.split(",", 7)]
+        if len(fields) != 8 or not fields[0].isdigit():
             continue
-        ordinal, uuid, model, memory, driver = fields
+        ordinal, uuid, model, memory, driver, free, compute_cap, power = fields
         gpus.append({"gpu_key": uuid if uuid.startswith("GPU-") else f"ordinal-{ordinal}", "uuid": uuid if uuid.startswith("GPU-") else None,
-                     "ordinal": int(ordinal), "model": model, "memory_mib": int(memory) if memory.isdigit() else None, "driver": driver})
+                     "ordinal": int(ordinal), "model": model, "memory_mib": int(memory) if memory.isdigit() else None,
+                     "free_mib": int(free) if free.isdigit() else None, "compute_cap": compute_cap,
+                     "power_cap_w": float(power) if re.fullmatch(r"\d+(?:\.\d+)?", power) else None, "driver": driver})
     try:
         occupied = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid", "--format=csv,noheader,nounits"],
                                   capture_output=True, text=True, timeout=8, check=True)
@@ -131,9 +140,221 @@ def _validate_args(args, fields):
         raise ValueError("invalid operation arguments")
 
 
+# vvv THOG durable GPU reservations and attempt reconciliation owned by the local Node Agent
+def _attempt_status(run):
+    result = dict(run)
+    exit_file = STATE_DIR / f"attempt-{run['attempt_id']}.exit"
+    if exit_file.exists():
+        try:
+            result["exit_code"] = int(exit_file.read_text().strip())
+            result["finished_at"] = datetime.fromtimestamp(exit_file.stat().st_mtime, timezone.utc).isoformat()
+        except (OSError, ValueError):
+            result["exit_code"] = None
+        result["state"] = "completed" if result["exit_code"] == 0 else "failed"
+    elif _running(run.get("pid")) and run.get("pid_start_time") == _pid_start_time(run["pid"]):
+        result["state"] = "running"
+    elif run.get("stop_requested") and isinstance(run.get("pid"), int):
+        try:
+            os.killpg(run["pid"], 0)
+            result["state"] = "unknown"  # The supervisor exited, but a child might still be alive.
+        except ProcessLookupError:
+            result["state"] = "cancelled"
+        except PermissionError:
+            result["state"] = "unknown"
+    else:
+        result["state"] = "unknown"
+    return result
+
+
+def _known_thog_compute_pids(gpu):
+    found = []
+    for pid in gpu.get("compute_pids", []):
+        try:
+            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+            if b"run_thog2_owt" in command or b"train_OWT" in command:
+                found.append(pid)
+        except OSError:
+            continue
+    return found
+
+
+def _runner_operation(state, name, args):
+    from thog_grid_runner import command_for, environment_for, validate_recipe
+    if name == "runner_preflight":
+        _validate_args(args, {"run", "gpu_key", "host_label"})
+        run = args.get("run")
+        if not isinstance(run, dict) or set(run) != {"run_id", "grid_tag", "pairing_id", "profiler", "parameters", "dtype", "attention_backend", "gpu_uuid"}:
+            raise ValueError("Invalid resolved run metadata")
+        validate_recipe({"label": "resolved execution", "parameters": run["parameters"], "profilers": [run["profiler"]]})
+        gpu = next((item for item in _gpu_information() if item["gpu_key"] == args.get("gpu_key")), None)
+        if gpu is None or gpu["uuid"] != run["gpu_uuid"]:
+            raise RuntimeError("Resolved GPU unavailable or changed")
+        if run["dtype"] not in {"float16", "bfloat16"} or run["attention_backend"] != "sdpa":
+            raise ValueError("Unsupported resolved dtype or attention backend")
+        if run["dtype"] == "bfloat16" and int(str(gpu.get("compute_cap", "0")).split(".")[0]) < 8:
+            raise ValueError("Selected GPU does not support bfloat16")
+        environment = os.environ.copy()
+        environment.update(environment_for(run))
+        environment["CUDA_VISIBLE_DEVICES"] = str(gpu["ordinal"])
+        command = command_for(run, gpu, python=sys.executable, host_label=args.get("host_label"))
+        try:
+            checked = subprocess.run(command + ["--print-resolved-json"], cwd=ROOT, env=environment,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"THOG parameter preflight unavailable: {type(error).__name__}") from error
+        if checked.returncode:
+            raise ValueError(f"THOG parameter preflight rejected this run: {checked.stderr.strip()[-450:]}")
+        return {"resolved": True, "gpu_uuid": gpu["uuid"]}
+    if name == "runner_reconcile":
+        _validate_args(args, set())
+        return {"attempts": {key: _attempt_status(value) for key, value in state.get("attempts", {}).items()},
+                "reservations": state.get("reservations", {}), "gpus": _gpu_information()}
+    if name == "runner_reserve":
+        _validate_args(args, {"grid_id", "gpu_key", "required_mib", "headroom_mib", "power_cap_w"})
+        grid_id, key = args.get("grid_id"), args.get("gpu_key")
+        if not isinstance(grid_id, str) or not re.fullmatch(r"[a-f0-9]{32}", grid_id) or not isinstance(key, str):
+            raise ValueError("Invalid reservation identity")
+        required, headroom = args.get("required_mib"), args.get("headroom_mib")
+        if any(type(v) is not int or not 0 <= v <= 131072 for v in (required, headroom)):
+            raise ValueError("Invalid required memory or headroom")
+        cap = args.get("power_cap_w")
+        if cap is not None and (type(cap) is not int or not 50 <= cap <= 600):
+            raise ValueError("Invalid GPU power cap")
+        gpu = next((gpu for gpu in _gpu_information() if gpu["gpu_key"] == key), None)
+        if gpu is None:
+            raise RuntimeError("Selected GPU unavailable")
+        owner = state.setdefault("reservations", {}).get(key)
+        if owner and owner["grid_id"] != grid_id:
+            raise RuntimeError(f"GPU reserved by {owner['grid_id']}")
+        if gpu["free_mib"] is None or gpu["free_mib"] < required + headroom:
+            raise RuntimeError(f"GPU {key} free {gpu['free_mib']} MiB; needs {required}+{headroom} MiB")
+        if _known_thog_compute_pids(gpu) and not any(run["gpu_key"] == key and _attempt_status(run)["state"] == "running"
+                                                 and run["grid_id"] == grid_id for run in state.get("attempts", {}).values()):
+            raise RuntimeError(f"GPU {key} has a THOG training process outside this Grid")
+        state["reservations"][key] = {"grid_id": grid_id, "gpu_key": key, "required_mib": required,
+                                        "headroom_mib": headroom, "ordinal": gpu["ordinal"], "requested_power_w": cap}
+        _write_state(state)
+        return {"reservation": state["reservations"][key], "gpu": gpu}
+    if name == "runner_release":
+        _validate_args(args, {"grid_id", "gpu_key"})
+        owner = state.get("reservations", {}).get(args.get("gpu_key"))
+        if owner and owner["grid_id"] != args.get("grid_id"):
+            raise PermissionError("Reservation belongs to a different Grid")
+        if any(run["grid_id"] == args.get("grid_id") and run["gpu_key"] == args.get("gpu_key")
+               and _attempt_status(run)["state"] in {"running", "unknown"} for run in state.get("attempts", {}).values()):
+            raise RuntimeError("Running or uncertain attempt still owns this GPU")
+        state.get("reservations", {}).pop(args.get("gpu_key"), None)
+        _write_state(state)
+        return {"released": True}
+    if name == "runner_launch":
+        _validate_args(args, {"grid_id", "attempt_id", "run", "gpu_key", "host_label", "thog_host_id", "execution_profile", "recipe_id"})
+        attempt_id = args.get("attempt_id")
+        if not isinstance(attempt_id, str) or not re.fullmatch(r"[a-f0-9]{32}", attempt_id):
+            raise ValueError("Invalid attempt identity")
+        old = state.setdefault("attempts", {}).get(attempt_id)
+        if old:
+            return _attempt_status(old)
+        key, grid_id, run = args.get("gpu_key"), args.get("grid_id"), args.get("run")
+        reservation = state.get("reservations", {}).get(key)
+        if reservation is None or reservation["grid_id"] != grid_id:
+            raise PermissionError("Run requires an owned GPU reservation")
+        if not isinstance(run, dict) or set(run) != {"run_id", "grid_tag", "pairing_id", "profiler", "parameters", "dtype", "attention_backend", "gpu_uuid"}:
+            raise ValueError("Invalid resolved run metadata")
+        if not isinstance(run["run_id"], str) or not re.fullmatch(r"[a-f0-9]{32}", run["run_id"]):
+            raise ValueError("Invalid run ID")
+        validate_recipe({"label": "resolved execution", "parameters": run["parameters"], "profilers": [run["profiler"]]})
+        gpu = next((gpu for gpu in _gpu_information() if gpu["gpu_key"] == key), None)
+        if gpu is None or gpu["free_mib"] is None or gpu["free_mib"] < reservation["required_mib"] + reservation["headroom_mib"]:
+            raise RuntimeError("GPU memory no longer sufficient")
+        if _known_thog_compute_pids(gpu):
+            raise RuntimeError("Selected GPU has a THOG training process")
+        if gpu["uuid"] != run["gpu_uuid"] or run["attention_backend"] != "sdpa" or run["dtype"] not in {"float16", "bfloat16"}:
+            raise ValueError("Resolved GPU, dtype or backend changed since preflight")
+        if run["dtype"] == "bfloat16" and int(str(gpu.get("compute_cap", "0")).split(".")[0]) < 8:
+            raise ValueError("Selected GPU does not support bfloat16")
+        if any(other["gpu_key"] == key and _attempt_status(other)["state"] in {"running", "unknown"}
+               for other in state["attempts"].values()):
+            raise RuntimeError("A managed attempt is already on this GPU")
+        requested_power = reservation.get("requested_power_w")
+        if requested_power is not None:
+            try:
+                subprocess.run(["nvidia-smi", "-i", str(gpu["ordinal"]), "-pl", str(requested_power)],
+                               check=True, capture_output=True, timeout=8)
+            except (OSError, subprocess.SubprocessError) as error:
+                raise RuntimeError(f"GPU {key} power cap {requested_power} W could not be applied") from error
+            gpu = next((item for item in _gpu_information() if item["gpu_key"] == key), gpu)
+        command = command_for(run, gpu, python=sys.executable, host_label=args.get("host_label"))
+        log_path = STATE_DIR / f"attempt-{attempt_id}.log"
+        metadata_path = STATE_DIR / f"attempt-{attempt_id}.json"
+        metadata_path.write_text(json.dumps({"argv": command, "cwd": str(ROOT), "log_path": str(log_path),
+                                             "exit_path": str(STATE_DIR / f"attempt-{attempt_id}.exit"),
+                                             "runner_metadata": {"grid_id": grid_id, "grid_tag": run["grid_tag"],
+                                                                  "recipe_id": args.get("recipe_id"),
+                                                                  "run_id": run["run_id"], "pairing_id": run["pairing_id"],
+                                                                  "attempt_id": attempt_id, "profiler": run["profiler"],
+                                                                  "thog_host_id": args.get("thog_host_id"),
+                                                                  "execution_profile": args.get("execution_profile"),
+                                                                  "gpu_uuid": gpu["uuid"]},
+                                             "gpu_ordinal": gpu["ordinal"], "runner_environment": environment_for(run)}))
+        os.chmod(metadata_path, 0o600)
+        state["attempts"][attempt_id] = {"attempt_id": attempt_id, "run_id": run["run_id"], "grid_id": grid_id,
+                                         "gpu_key": key, "pid": None, "started_at": datetime.now(timezone.utc).isoformat(),
+                                         "pid_start_time": None,
+                                         "requested_power_w": requested_power, "observed_power_w": gpu.get("power_cap_w"),
+                                         "log_path": str(log_path), "state": "accepted"}
+        _write_state(state)  # Record acceptance before spawning; a crash in this window blocks relaunch.
+        try:
+            process = subprocess.Popen([sys.executable, str(ROOT / "instra_runner_child.py"), str(metadata_path)],
+                                       cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as error:
+            state["attempts"][attempt_id]["state"] = "failed"
+            (STATE_DIR / f"attempt-{attempt_id}.exit").write_text("127\n")
+            _write_state(state)
+            raise RuntimeError(f"Runner child unavailable: {error}") from error
+        state["attempts"][attempt_id].update(pid=process.pid, pid_start_time=_pid_start_time(process.pid), state="running")
+        _write_state(state)
+        return _attempt_status(state["attempts"][attempt_id])
+    if name in {"runner_status", "runner_stop"}:
+        _validate_args(args, {"attempt_id", "grid_id", "grace_seconds"} if name == "runner_stop" else {"attempt_id"})
+        run = state.get("attempts", {}).get(args.get("attempt_id"))
+        if run is None:
+            raise KeyError("Unknown attempt")
+        if name == "runner_stop":
+            if run["grid_id"] != args.get("grid_id"):
+                raise PermissionError("Attempt belongs to another Grid")
+            grace = args.get("grace_seconds", 10)
+            if type(grace) is not int or not 0 <= grace <= 300:
+                raise ValueError("Invalid stop grace period")
+            if _attempt_status(run)["state"] == "running":
+                run["stop_requested"] = True
+                _write_state(state)
+                try:
+                    os.killpg(run["pid"], signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                def force_if_still_running():
+                    if _attempt_status(run)["state"] == "running":
+                        try:
+                            os.killpg(run["pid"], signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                if grace == 0:
+                    force_if_still_running()
+                else:
+                    timer = threading.Timer(grace, force_if_still_running)
+                    timer.daemon = True
+                    timer.start()
+        return _attempt_status(run)
+    raise ValueError("Unknown Runner operation")
+# ^^^ THOG
+
+
 def _operation(name, args):
     with _lock:
         state = _read_state()
+        if name.startswith("runner_"):
+            return _runner_operation(state, name, args)                                                                                                      # <<< THOG route only named Runner operations through the Node Agent
         if name == "discover":
             _validate_args(args, set())
             return _discover(state)
@@ -280,6 +501,7 @@ def request(name, args=None, timeout=30):
 def _serve_connection(connection):
     with connection:
         try:
+            connection.settimeout(30)                                                                                                                       # <<< THOG bound abandoned socket readers so long-lived agents do not accumulate blocked threads
             with connection.makefile("rb") as stream:
                 raw = stream.readline(MAX_MESSAGE + 1)
             if len(raw) > MAX_MESSAGE or not raw.endswith(b"\n"):
