@@ -137,6 +137,38 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse({run["run_id"] for run in first["runs"]} & {run["run_id"] for run in one["runs"]})
         self.assertEqual(first["runs"][0]["pairing_id"], first["runs"][1]["pairing_id"])
 
+    def test_mixed_presets_use_all_dense_layers_and_largest_depth_layer(self):
+        recipe = {"label": "layer comparison", "parameters": {
+            "--geometry-preset": ["dense", "depth"], "--n-layer": [2, 4, 8],
+            "DEPTH.order": [1, 2], "--max-iters": 2, "--warmup-iters": 0,
+            "--n-embd": 64, "--n-head": 4, "--batch-size": 1, "--block-size": 32}}
+        trials = expand(recipe, stable_preview=True)
+        self.assertEqual(len(trials), 5)
+        self.assertEqual({run["parameters"]["--n-layer"] for run in trials if
+                          run["parameters"]["--geometry-preset"] == "dense"}, {2, 4, 8})
+        self.assertEqual({(run["parameters"]["--n-layer"], run["parameters"]["DEPTH.order"])
+                          for run in trials if run["parameters"]["--geometry-preset"] == "depth"},
+                         {(8, 1), (8, 2)})
+        depth_only = {**recipe, "parameters": {**recipe["parameters"], "--geometry-preset": "depth"}}
+        self.assertEqual(len(expand(depth_only)), 6)
+        self.assertEqual([run["run_id"] for run in trials],
+                         [run["run_id"] for run in expand(recipe, stable_preview=True)])
+
+    def test_grid_rename_preserves_run_identity_and_updates_manifest(self):
+        saved = self.service.save_recipe(None, self.recipe)
+        grid = self.service.launch(saved["recipe_id"])
+        renamed = self.service.rename_grid(grid["grid_id"], "New grid name")
+        self.assertEqual(renamed["label"], "New grid name")
+        self.assertEqual([run["run_id"] for run in renamed["runs"]],
+                         [run["run_id"] for run in grid["runs"]])
+        self.assertEqual(self.service.snapshot()["grids"][0]["label"], "New grid name")
+        self.assertEqual(json.loads(self.service.file(grid["grid_id"], "manifest").read_text())["label"], "New grid name")
+        self.assertIn("RENAME", self.service.file(grid["grid_id"], "log").read_text().upper())
+        self.assertEqual(self.service.file(grid["grid_id"], "classic").name,
+                         f"{grid['grid_tag']}_grid_bash_runner_script.sh")
+        with self.assertRaisesRegex(ValueError, "printable"):
+            self.service.rename_grid(grid["grid_id"], "bad\nname")
+
     def test_stop_can_proceed_during_slow_gpu_preflight(self):
         recipe={"label":"live", "parameters":{"--max-iters":2,"--warmup-iters":0,
             "--n-layer":2,"--n-embd":64,"--n-head":4,"--batch-size":1,"--block-size":32}}

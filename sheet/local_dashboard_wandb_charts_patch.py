@@ -685,8 +685,9 @@ def install(dashboard_module: Any) -> None:
                 live.refresh(catalog, state, dashboard_module)
                 scanner = scanner_catalog.scanner_for(state)
                 common = {
-                    "available": scanner is not None or live.path is not None,
-                    "source": str(scanner.path.resolve()) if scanner else str(live.path or ""),
+                    "available": scanner is not None or live.path is not None or bool(live.values["train"]),
+                    "source": str(scanner.path.resolve()) if scanner else str(live.path or
+                        (state.database_path if live.values["train"] else "")),
                     "record_count": scanner.record_count if scanner else 0,
                     "catching_up": scanner.catching_up if scanner else False,
                     "error": scanner.error if scanner else "",

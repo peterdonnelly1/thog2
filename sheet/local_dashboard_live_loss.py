@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +40,18 @@ class LiveLossReader:
         # vvv THOG provisional live-tail timestamps bridge W&B history buffering on all Instra time axes
         self.wall_times: dict[str, dict[int, float]] = {"train": {}, "val": {}}
         self.first_wall_time: float | None = None
+        self.local_loss_cursor = -1
+        self.last_log_probe = 0.0
         # ^^^ THOG
 
     def refresh(self, catalog: Any, state: Any, dashboard: Any) -> None:
         with self.lock:
-            path = self.path if self.path and self.path.is_file() else _resolve_train_log(catalog, state, dashboard)
+            path = self.path if self.path and self.path.is_file() else None
+            if path is None and time.monotonic() - self.last_log_probe >= 5.0:
+                self.last_log_probe = time.monotonic()
+                path = _resolve_train_log(catalog, state, dashboard)
             if path is None:
+                self._refresh_local_losses(state)
                 return
             stat = path.stat()
             identity = (stat.st_dev, stat.st_ino)
@@ -56,6 +63,7 @@ class LiveLossReader:
                 # vvv THOG a rotated/restarted train.log starts a fresh provisional timing origin
                 self.wall_times = {"train": {}, "val": {}}
                 self.first_wall_time = None
+                self.local_loss_cursor = -1
                 # ^^^ THOG
                 self.revision += 1
             self.path, self.identity = path, identity
@@ -137,6 +145,28 @@ class LiveLossReader:
                         if step in kept_steps
                     }
                     # ^^^ THOG
+            self._refresh_local_losses(state)
+
+    def _refresh_local_losses(self, state: Any) -> None:
+        # Exact local optimizer metrics are available even if W&B is disabled,
+        # its history is buffered, or train.log cannot be resolved.
+        reader = getattr(state, "reader", None)
+        if reader is None or not hasattr(reader, "training_losses"):
+            return
+        for step, value, wall_time in reader.training_losses(after=max(-1, self.local_loss_cursor - 1)):
+            self.local_loss_cursor = max(self.local_loss_cursor, step)
+            if self.values["train"].get(step) == value:
+                continue
+            self.values["train"][step] = value
+            self.wall_times["train"][step] = wall_time
+            self.first_wall_time = wall_time if self.first_wall_time is None else min(self.first_wall_time, wall_time)
+            self.revision += 1
+        if len(self.values["train"]) > 3200:
+            keep = set(sorted(self.values["train"])[-3200:])
+            for field in (self.values["train"], self.wall_times["train"]):
+                for step in list(field):
+                    if step not in keep:
+                        del field[step]
 
     def summaries(self, groups: list[dict[str, Any]], scanner: Any) -> list[dict[str, Any]]:
         # No repeated scans or chart serialization during the one-second discovery poll.

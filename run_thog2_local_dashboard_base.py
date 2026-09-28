@@ -264,9 +264,9 @@ class RunDashboardState:
             and local_run_id == artifact_name
             and self.database_path.parent.name == artifact_name
         )
-        latest_loss = self._latest_logged_loss()
+        latest_loss = self.reader.latest_recorded_loss()
         if latest_loss is None:
-            latest_loss = self.reader.latest_recorded_loss()
+            latest_loss = self._latest_logged_loss()
         return {
             **status,
             "run_name": artifact_name,

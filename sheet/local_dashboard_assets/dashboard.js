@@ -341,15 +341,6 @@ function append_run_row(body, run) {
   name.title = run.artifact_name;
   name.addEventListener("click", () => select_run(run_id, {manual: true}));
   name_cell.append(colour, name);
-  // vvv THOG expose Runner identity without changing legacy and manual rows
-  if (run.runner_grid_tag) {
-    const grid_identity = document.createElement("small");
-    grid_identity.textContent = ` ${run.runner_grid_tag} · ${String(run.runner_run_id || "").slice(0, 8)}`;
-    grid_identity.title = `Runner run ${run.runner_run_id}`;
-    grid_identity.className = "runner-grid-identity";
-    name_cell.append(grid_identity);
-  }
-  // ^^^ THOG
   row.appendChild(name_cell);
 
   const wandb_cell = document.createElement("td");

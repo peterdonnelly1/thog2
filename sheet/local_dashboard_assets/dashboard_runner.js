@@ -17,6 +17,8 @@
   let snapshot = null, network = null, tab = "recipes", chosen = null, category = "Frequently Used";
   let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
   let current_run_metrics = new Map();
+  let required_notice_seen = false, message_timer = null;
+  const clear_message = () => { clearTimeout(message_timer); message.textContent = ""; };
   const add = (parent, tag, value, class_name) => {
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = String(value ?? "—");
@@ -35,19 +37,26 @@
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
       return value;
+    } catch (error) {
+      if (error.name === "AbortError") throw new Error("Runner request timed out. Check Backend status and retry.");
+      throw error;
     } finally { clearTimeout(timeout); }
   }
   async function action(name, values) {
-    const quiet = ["delete_recipe","preview","repeat_preview"].includes(name);
+    const quiet = ["delete_recipe","preview","repeat_preview","rename_grid"].includes(name);
+    clear_message();
+    if (name === "save" || name === "preview" || name === "launch") required_notice_seen = true;
     message.textContent = name === "stop" ? "attempting to stop grid..." : quiet ? "" : `${name}…`;
     try {
       const result = await request("/api/runner/action", {method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:name, ...values})});
       message.textContent = name === "stop" ? "Stop requested; waiting for running attempts to finish..." : quiet ? "" : `${name} complete`;
+      if (message.textContent) message_timer = setTimeout(clear_message, 10000);
       if (!["preview","repeat_preview"].includes(name)) await refresh(true);
       return result;
     } catch (error) {
       message.textContent = error.message;
+      message_timer = setTimeout(clear_message, 18000);
       if (tab === "recipes" && by_id("runner_validation")) by_id("runner_validation").textContent = error.message;
       throw error;
     }
@@ -103,14 +112,17 @@
     const notice = by_id("runner_required_fields");
     if (notice) {
       notice.replaceChildren();
-      add(notice,"strong",errors.length ? `${errors.length} input issue${errors.length === 1 ? "" : "s"}; see details beside Search.` :
-        "Required inputs complete. Host and GPU placement is checked again during Preview.");
+      if (errors.length) add(notice,"strong",`${errors.length} input issue${errors.length === 1 ? "" : "s"}; see details beside Search.`);
+      else if (!required_notice_seen) {
+        add(notice,"span","Required inputs complete. Host and GPU placement is checked again during Preview.");
+        required_notice_seen = true;
+      }
     }
     const validation = by_id("runner_validation");
     if (validation) validation.textContent = errors.join("; ");
     return !errors.length;
   }
-  function edit(key, value) { draft = current_recipe(); draft.parameters[key] = value; dirty = true; check_recipe(); }
+  function edit(key, value) { clear_message(); draft = current_recipe(); draft.parameters[key] = value; dirty = true; check_recipe(); }
   function parse_value(key, raw, spec) {
     if (spec.kind === "list") return raw.split("\n").filter(Boolean);
     const scalar = value => spec.type === "int" || spec.type === "float" ? Number(value) :
@@ -320,7 +332,8 @@
     const link=add(links,"a","Download Runner Script");
     link.href=script_url+"&download=1";link.download="";
     const classic=add(links,"a","Export Equivalent Old-school THOG script");
-    classic.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=classic&download=1`;classic.download="";
+    classic.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=classic&download=1`;
+    classic.download=`${grid.grid_tag}_grid_bash_runner_script.sh`;
     const manifest=add(links,"a",tab==="files"?"Download Resolved Manifest (JSON)":"View Resolved Manifest (JSON)");
     manifest.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=manifest${tab==="files"?"&download=1":""}`;
     if(tab==="files")manifest.download="";else{manifest.target="_blank";manifest.rel="noopener";}
@@ -331,7 +344,14 @@
       .catch(error=>{viewer.textContent=`Script unavailable: ${error.message}`;});
   }
   function render_grid(grid) {
-    detail.replaceChildren();add(detail,"h2",`${grid.grid_tag} · ${grid.label}`);
+    detail.replaceChildren();
+    const heading = add(detail,"div",undefined,"runner-grid-heading");
+    add(heading,"h2",`${grid.grid_tag} · ${grid.label}`);
+    button(heading,"Rename Grid",async()=>{
+      const label=prompt(`New name for ${grid.grid_tag}`,grid.label);
+      if(label===null || label.trim()===grid.label)return;
+      try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
+    });
     const state=add(detail,"p",undefined);
     add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
     add(state,"span",` · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
@@ -421,6 +441,7 @@
       const add_row=add(list,"div",undefined,"runner-recipe-add-row");
       button(add_row,"Add Grid Recipe",()=>{
         if(dirty && !confirm("Discard unsaved Recipe edits and start a new Recipe?"))return;
+        clear_message();required_notice_seen=true;
         draft_id=null;draft=null;chosen=null;dirty=false;render_editor();
       }).classList.add("runner-add-recipe");
       add(add_row,"p","","runner-required-fields").id="runner_required_fields";
@@ -482,12 +503,13 @@
       if(newest && newest!==last_seen_grid)last_history_grid=newest;
       last_seen_grid=newest;
       if(repaint||tab!=="recipes"||!dirty)render();
-    } catch(error){message.textContent=error.message;}
+    } catch(error){message.textContent=error.message;clearTimeout(message_timer);message_timer=setTimeout(clear_message,18000);}
     finally{polling=false;}
   }
   by_id("runner_nav").addEventListener("click",()=>{visible=true;refresh(true);});
   for(const id of ["runs_nav","workspace_nav","networks_nav","settings_nav"])by_id(id)?.addEventListener("click",()=>{visible=false;});
   for(const control of by_id("runner_tabs").querySelectorAll("button"))control.addEventListener("click",()=>{
+    clear_message();required_notice_seen=true;
     tab=control.dataset.runnerTab;chosen=tab==="history"?last_history_grid:null;render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);

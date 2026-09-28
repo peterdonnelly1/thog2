@@ -82,6 +82,17 @@ def test_viewer_catalog_waits_when_started_before_training(tmp_path: Path) -> No
     assert before["recommended_run_id"] is None
 
 
+def test_runs_and_runner_loss_uses_latest_local_optimizer_value(tmp_path: Path) -> None:
+    path = tmp_path / "artifact" / "run-id" / "charts.sqlite3"
+    store = LocalChartStore(path, run_name="artifact", run_id="run-id", config={})
+    store.append_training_loss(1, 8.5)
+    store.append_training_loss(2, 6.25)
+    # An earlier console line can remain the newest line while log transfer lags.
+    (path.parent.parent / "train.log").write_text("T 1 loss=8.5\n")
+    assert dashboard.RunDashboardState(path).status()["last_loss"] == 6.25
+    store.close()
+
+
 def test_wandb_run_id_separates_repeated_artifact_names(
     monkeypatch,
     tmp_path: Path,

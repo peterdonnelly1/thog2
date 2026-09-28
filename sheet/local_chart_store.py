@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 CHART_DESTINATIONS = ("wandb", "local", "none")
 LOCAL_CHART_DATABASE_NAME = "charts.sqlite3"
-LOCAL_CHART_SCHEMA_VERSION = 5                                                                                                                             # <<< THOG premat snapshots add a bounded third chart stream
+LOCAL_CHART_SCHEMA_VERSION = 6  # Local optimizer losses are stored independently of W&B and train.log.
 LOCAL_CHART_ACTIVE_STATES = frozenset(("preparing", "recording", "monitoring", "running"))
 LOCAL_CHART_TERMINAL_STATES = frozenset(("finished", "stopped"))
 
@@ -256,6 +256,11 @@ class LocalChartStore:
                 tokens_per_second REAL NOT NULL,
                 wall_time REAL,
                 process_time_seconds REAL
+            );
+            CREATE TABLE IF NOT EXISTS training_losses (
+                optimizer_update INTEGER PRIMARY KEY,
+                loss REAL NOT NULL,
+                wall_time REAL NOT NULL
             );
             """
         )
@@ -587,6 +592,20 @@ class LocalChartStore:
         self._touch()
         self._has_processing_throughput_records = True
         self.connection.commit()
+
+    def append_training_loss(self, optimizer_update: int, loss: float, *, commit: bool = True) -> None:
+        value = _safe_runtime_metric(loss)
+        if value is None:
+            return
+        update = int(optimizer_update)
+        self.connection.execute(
+            "INSERT OR REPLACE INTO training_losses(optimizer_update, loss, wall_time) VALUES (?, ?, ?)",
+            (update, value, time.time()),
+        )
+        self._latest_observed_update = max(self._latest_observed_update, update)
+        self._touch()
+        if commit:
+            self.connection.commit()
     # ^^^ THOG
 
     def update_premat_aggregate(
@@ -735,9 +754,16 @@ class LocalChartReader:
         return {str(row["key"]): str(row["value"]) for row in rows}
 
     def latest_recorded_loss(self) -> Optional[float]:
-        """Read the last loss saved with a layer-count probe, if available."""
+        """Read the latest training loss, including runs without layer probes."""
         connection = self._connection()
         try:
+            row = connection.execute(
+                "SELECT loss FROM training_losses ORDER BY optimizer_update DESC LIMIT 1"
+            ).fetchone() if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_losses'"
+            ).fetchone() else None
+            if row is not None:
+                return float(row["loss"])
             row = connection.execute(
                 "SELECT payload FROM heatmap_records ORDER BY optimizer_update DESC LIMIT 1"
             ).fetchone()
@@ -750,6 +776,22 @@ class LocalChartReader:
             return None
         number = float(value)
         return number if math.isfinite(number) else None
+
+    def training_losses(self, limit: int = 3200, *, after: int = -1) -> list[tuple[int, float, float]]:
+        connection = self._connection()
+        try:
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_losses'"
+            ).fetchone():
+                return []
+            rows = connection.execute(
+                "SELECT optimizer_update, loss, wall_time FROM training_losses "
+                "WHERE optimizer_update > ? ORDER BY optimizer_update DESC LIMIT ?", (after, limit),
+            ).fetchall()
+            return [(int(row["optimizer_update"]), float(row["loss"]), float(row["wall_time"]))
+                    for row in reversed(rows)]
+        finally:
+            connection.close()
 
     def status(self) -> Dict[str, Any]:
         connection = self._connection()

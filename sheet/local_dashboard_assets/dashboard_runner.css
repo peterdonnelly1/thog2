@@ -56,6 +56,8 @@
 .runner-status-waiting { color:#aa6410; }
 .runner-state-legend { font-size:.88rem; }
 .runner-script-links { display:flex; gap:1.5rem; flex-wrap:wrap; margin:.8rem 0; }
+.runner-grid-heading { display:flex; align-items:center; gap:.8rem; }
+.runner-grid-heading h2 { margin-right:.4rem; }
 .runner-event-log { max-height:60vh; overflow:auto; white-space:pre-wrap; }
 .runner-preview { margin-top:2rem; padding-top:1rem; border-top:1px solid #e3e6e9; }
 .runner-preview h3 { margin:1.2rem 0; }
@@ -70,6 +72,5 @@
 @media (max-width:760px) {.runner-layout { grid-template-columns:1fr; }}
 body.instra-runner-grid-frame .icon-rail, body.instra-runner-grid-frame .topbar { display:none; }
 body.instra-runner-grid-frame .workspace { inset:0; }
-.runs-table td.name-column .runner-grid-identity { display:block; padding-left:27px; color:#69717d; font-size:10px; }
 .runs-table td.name-column .run-link { display:inline-block; width:calc(100% - 27px); max-width:none; padding:3px 0 0; }
 /* ^^^ THOG */

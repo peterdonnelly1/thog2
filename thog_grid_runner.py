@@ -136,9 +136,14 @@ def expand(recipe, *, stable_preview=False):
     trials = []
     seen = set()
     seed = json.dumps(recipe, sort_keys=True, separators=(",", ":")) if stable_preview else ""
+    presets = choices.get("--geometry-preset", [])
+    mixed_presets = "dense" in presets and any(preset != "dense" for preset in presets)
+    max_layers = max(choices.get("--n-layer", [0]))
     for selected in itertools.product(*(choices[key] for key in keys)):
         values = {**fixed, **dict(zip(keys, selected))}
         dense = values.get("--geometry-preset") == "dense" or values.get("--model-type") == "dense"
+        if mixed_presets and not dense and values.get("--n-layer", max_layers) != max_layers:
+            continue
         if dense:
             # A depth sweep contributes one dense reference, regardless of how many
             # DEPTH.order choices accompany the other (compact) trials.

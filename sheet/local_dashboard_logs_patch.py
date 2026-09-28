@@ -54,6 +54,15 @@ def _matching_train_logs(catalog: Any, state: Any) -> tuple[Path, ...]:
 
 
 def _resolve_train_log(catalog: Any, state: Any, dashboard_module: Any) -> Optional[Path]:
+    database_path = getattr(state, "database_path", None)
+    if database_path is not None:
+        directory = Path(database_path).parent
+        candidates = [directory / "train.log"]
+        if directory.parent != Path(catalog.root):
+            candidates.append(directory.parent / "train.log")
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
     candidates = _matching_train_logs(catalog, state)
     if not candidates:
         return None

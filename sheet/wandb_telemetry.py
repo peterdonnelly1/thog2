@@ -649,8 +649,16 @@ class WandbTelemetry:
         # profiler capture flag.
         if event == "optimizer_progress":
             tokens_per_second = progress_tokens_per_second(payload)
+            local_store = (ensure_local_chart_store(self)
+                           if payload.get("training_loss") is not None or tokens_per_second is not None else None)
+            if payload.get("training_loss") is not None:
+                local_store.append_training_loss(
+                    int(payload.get("completed_updates", 0)),
+                    payload["training_loss"],
+                    commit=tokens_per_second is None,
+                )
             if tokens_per_second is not None:
-                ensure_local_chart_store(self).append_processing_throughput(
+                local_store.append_processing_throughput(
                     int(payload.get("completed_updates", 0)),
                     tokens_per_second,
                 )

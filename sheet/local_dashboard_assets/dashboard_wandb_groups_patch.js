@@ -411,8 +411,12 @@ window.addEventListener("load", () => {
       const section = group_section(group.name);
       const grid = section?.querySelector(".local-metric-grid");
       if (!section || !grid) return;
-
-      const wanted = new Set((group.charts || []).map(chart => chart.id));
+      // The native Train throughput plot already lives in this grid. The
+      // recorded throughput history must not displace the loss plot.
+      const charts = (group.charts || []).filter(chart => !(group.name === "train" &&
+        document.getElementById("training_throughput_card") &&
+        /(?:token.*(?:sec|throughput)|throughput)/i.test(`${chart.id} ${chart.title}`)));
+      const wanted = new Set(charts.map(chart => chart.id));
       for (const card of [...grid.querySelectorAll(".local-metric-card")]) {
         if (!wanted.has(card.dataset.metricChartId)) {
           const mount = card.querySelector(".plot-mount");
@@ -425,13 +429,27 @@ window.addEventListener("load", () => {
         }
       }
 
-      for (const chart of group.charts || []) {
+      const render_jobs = [];
+      for (const chart of charts) {
         let card = [...grid.querySelectorAll(".local-metric-card")].find(candidate => candidate.dataset.metricChartId === chart.id);
         if (!card) {
           card = make_metric_card(group.name, chart);
           grid.appendChild(card);
         }
-        await render_metric_chart(card, chart);
+        render_jobs.push(() => render_metric_chart(card, chart));
+      }
+      // Drawing a dozen Memory or System plots serially adds all individual
+      // Plotly startup times. Keep a small bound to preserve UI responsiveness.
+      for (let start = 0; start < render_jobs.length; start += 3) {
+        await Promise.all(render_jobs.slice(start, start + 3).map(render => render()));
+      }
+      if (group.name === "train" && app.workspace_mode === true && !app.instra_loss_autofocused &&
+          !app.maximized_chart && charts.some(chart => chart.id === "train/loss")) {
+        const loss = [...grid.querySelectorAll(".local-metric-card")].find(card => card.dataset.metricChartId === "train/loss");
+        if (loss) {
+          app.instra_loss_autofocused = true;
+          toggle_maximized_chart(loss.dataset.chart);
+        }
       }
       rendered_revisions.set(group.name, Number(group.revision || 0));
       apply_saved_panel_sizes();

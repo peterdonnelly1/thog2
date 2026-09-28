@@ -136,4 +136,27 @@ def test_absent_log_is_optional(tmp_path):
     reader.refresh(SimpleNamespace(root=tmp_path), state, SimpleNamespace())
     assert reader.summaries([], None) == []
     assert reader.merge({"name": "system", "charts": [], "revision": 0})["charts"] == []
+
+
+def test_loss_chart_works_with_only_local_optimizer_metrics(tmp_path):
+    from sheet.local_chart_store import LocalChartStore, LocalChartReader
+
+    store = LocalChartStore(tmp_path / "artifact" / "charts.sqlite3", run_name="artifact", config={})
+    store.append_training_loss(1, 7.12)
+    store.append_training_loss(2, 6.34)
+    store.append_processing_throughput(2, 1200)
+    state = SimpleNamespace(status=lambda: {"artifact_name": "artifact"}, reader=LocalChartReader(store.path))
+    reader = LiveLossReader()
+    catalog = SimpleNamespace(root=tmp_path)
+    reader.refresh(catalog, state, SimpleNamespace())
+    assert state.reader.latest_recorded_loss() == 6.34
+    assert reader.summaries([], None)[0]["chart_count"] == 1
+    chart = reader.merge({"name": "train", "charts": [], "revision": 0})["charts"][0]
+    assert chart["id"] == "train/loss"
+    assert chart["series"][0]["x"] == [1, 2]
+    assert chart["series"][0]["y"] == [7.12, 6.34]
+    revision = reader.revision
+    reader.refresh(catalog, state, SimpleNamespace())
+    assert reader.revision == revision
+    store.close()
 # ^^^ THOG

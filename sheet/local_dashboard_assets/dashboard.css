@@ -75,6 +75,7 @@ button { color: inherit; }
 }
 .rail-item.selected { color: #008da9; background: #e3f5f8; }
 .rail-symbol { width:43px; height:43px; display:block; color:#515c66; flex:none; }
+.rail-symbol.workspace-icon { width:55px; height:55px; margin:-6px; }
 .runs-icon path { fill:none; stroke-width:7; stroke-linecap:round; }
 .settings-icon { font-size: 39px; line-height: 40px; }
 
@@ -136,6 +137,7 @@ h1 { margin: 0; font-size: 17px; line-height: 1.25; font-weight: 680; }
 .runs-table tbody tr:hover { background: #f6f5fc; }
 .runs-table tbody tr.current-run { background: #efedfb; box-shadow: inset 3px 0 0 var(--run-colour, var(--accent)); }
 .runs-table tbody tr.run-hidden { opacity: .48; }
+.runs-table tbody tr.run-hidden.current-run { opacity: 1; }
 .runs-table tbody tr.group-row td { height: 31px; color: #616974; background: #f8f8fa; font-size: 11px; font-weight: 650; }
 .check-column { width: 34px; text-align: center !important; }
 .visibility-column { width: 34px; text-align: center !important; }

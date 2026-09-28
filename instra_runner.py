@@ -169,6 +169,23 @@ class RunnerService:
             _write(state)
         return {"deleted": recipe_id}
 
+    def rename_grid(self, grid_id, label):
+        self._require_controller()
+        if not isinstance(label, str) or not 1 <= len(label.strip()) <= 120 or any(ord(c) < 32 for c in label):
+            raise ValueError("Grid name must contain 1–120 printable characters")
+        with self.lock:
+            state = _read()
+            grid = next((item for item in state["grids"] if item["grid_id"] == grid_id), None)
+            if grid is None:
+                raise KeyError("Unknown Grid")
+            grid["label"] = label.strip()
+            _write(state)
+            manifest = GRID_SCRIPTS / grid["grid_tag"] / "manifest.json"
+            if manifest.exists():
+                _write_grid_file(manifest, grid)
+            _grid_event(grid, "rename", f"Grid renamed to {grid['label']}")
+            return grid
+
     def _pool(self, recipe, trial_count=None):
         hosts = self.network.list_hosts()
         master = hosts["master_id"] == hosts["local_id"]
@@ -313,7 +330,7 @@ class RunnerService:
                 (directory / ".runner-created").write_text(grid_id)
                 script.write_text(script_for(runs))
                 script.chmod(0o700)
-                classic = directory / "classic.sh"
+                classic = directory / f"{tag}_grid_bash_runner_script.sh"
                 classic.write_text(classic_script_for(runs))
                 classic.chmod(0o700)
                 _write_grid_file(directory / "manifest.json", grid)
@@ -335,7 +352,7 @@ class RunnerService:
         if grid is None:
             raise KeyError("Unknown Grid")
         paths = {"script": GRID_SCRIPTS / (grid["grid_tag"] + ".sh"),
-                 "classic": GRID_SCRIPTS / grid["grid_tag"] / "classic.sh",
+                 "classic": GRID_SCRIPTS / grid["grid_tag"] / f"{grid['grid_tag']}_grid_bash_runner_script.sh",
                  "manifest": GRID_SCRIPTS / grid["grid_tag"] / "manifest.json",
                  "placement": GRID_SCRIPTS / grid["grid_tag"] / "placement.json",
                  "status": GRID_SCRIPTS / grid["grid_tag"] / "status.json",
