@@ -364,9 +364,11 @@ def _runner_operation(state, name, args):
             grace = args.get("grace_seconds", 10)
             if type(grace) is not int or not 0 <= grace <= 300:
                 raise ValueError("Invalid stop grace period")
-            if _attempt_status(run)["state"] == "running":
+            observed_state = _attempt_status(run)["state"]
+            if observed_state in {"running", "unknown"}:
                 run["stop_requested"] = True
                 _write_state(state)
+            if observed_state == "running":
                 try:
                     os.killpg(run["pid"], signal.SIGKILL if grace == 0 else signal.SIGINT)
                 except ProcessLookupError:

@@ -1334,6 +1334,8 @@ def _runner_do_post(self):
             result = _runner_service.launch(payload["recipe_id"], confirm_large=payload.get("confirm_large") is True)
         elif action == "stop":
             result = _runner_service.stop_grid(payload["grid_id"], force=payload.get("force") is True)
+        elif action == "kill_flush":
+            result = _runner_service.kill_and_flush(payload["grid_id"])
         elif action == "retry_run":
             result = _runner_service.retry_run(payload["grid_id"], payload["run_id"])
         elif action == "fail_grid":

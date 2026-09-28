@@ -21,8 +21,11 @@ class Element {
   replaceChildren() { this.children.length = 0; }
   addEventListener(name, callback) { this.events[name] = callback; }
   querySelectorAll(selector) { return selector === "button" ? this.children : []; }
-  querySelector(selector) { return selector === ".runner-event-log" ?
-    this.children.find(child => child.className === "runner-event-log") : null; }
+  querySelector(selector) {
+    const matches = child => selector.startsWith(".") ?
+      String(child.className || "").split(" ").includes(selector.slice(1)) : child.tagName === selector;
+    return this.children.find(matches) || this.children.map(child => child.querySelector(selector)).find(Boolean) || null;
+  }
   setAttribute(name, value) { this[name] = value; }
   click() { return this.events.click?.(); }
 }
@@ -70,6 +73,9 @@ async function main() {
   assert.equal(JSON.parse(rename.options.body).recipe_id,"latest","Recipe rename must preserve its ID");
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,1,"finished Grids must disappear from Progress");
+  const active_row=roots.runner_list.children[0];
+  assert.equal(active_row.children[1].textContent,"Kill and Flush");
+  assert.match(active_row.children[1].title,/Last resort/);
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
   switch_tab("history");
   assert.ok(roots.runner_list.children[0].textContent.startsWith("G-00002"));
@@ -91,13 +97,53 @@ async function main() {
   const frame = roots.runner_multiview_panel.children.find(child => child.tagName === "iframe");
   assert.equal(frame.src,"/?runner_grid_tag=G-00002");
   assert.equal(roots.runner_multiview_panel.hidden,false);
+  const selector=roots.runner_multiview_panel.querySelector("select");
+  assert.equal(selector.value,"grid-1");
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
     "Runner polling must keep the chart frame mounted");
-  switch_tab("progress");
-  switch_tab("multiview");
+  const other={...active,grid_id:"grid-2",grid_tag:"G-00003",label:"GPU 1",runs:[{
+    ...run("second-gpu","running","2026-09-27T21:30:00Z"),gpu:{ordinal:1,model:"GPU",gpu_key:"GPU-1"}
+  }]};
+  snapshot.grids.push(other);
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(roots.runner_multiview_panel.querySelector("select").children.length,2);
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
+    "another Grid arriving must not reload the selected charts");
+  selector.value="grid-2";selector.events.change();
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
+    "/?runner_grid_tag=G-00003");
+  other.state="completed";
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(roots.runner_multiview_panel.querySelector(".runner-empty-state").textContent,/selected Grid has finished/);
+  const finished_selector=roots.runner_multiview_panel.querySelector("select");
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(roots.runner_multiview_panel.querySelector("select"),finished_selector,
+    "polling a finished selection must not repeatedly rebuild the view");
+  other.state="running";
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  switch_tab("progress");
+  assert.equal(roots.runner_list.children.length,2,"both active Grids must remain selectable");
+  assert.equal(roots.runner_detail.children[0].children[0].textContent,"G-00003 · GPU 1");
+  await roots.runner_list.children[0].children[1].click();
+  const flush=requests.find(entry=>entry.url==="/api/runner/action" &&
+    JSON.parse(entry.options.body).action==="kill_flush");
+  assert.equal(JSON.parse(flush.options.body).grid_id,"grid-2");
+  switch_tab("multiview");
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
+    "/?runner_grid_tag=G-00003");
+  assert.notEqual(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
+    "switching to another Grid must show that Grid's charts");
+  switch_tab("progress");
+  roots.runner_list.children[1].children[0].click();
+  switch_tab("multiview");
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
+    "/?runner_grid_tag=G-00002",
     "switching views must not reload a running Grid's charts");
   const html = fs.readFileSync("sheet/local_dashboard_assets/index.html","utf8");
   assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="current_scripts"/);

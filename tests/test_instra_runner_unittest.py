@@ -428,6 +428,141 @@ class RunnerTests(unittest.TestCase):
         self.service.save_recipe(saved["recipe_id"], changed)
         self.assertEqual(self.service.snapshot()["grids"][0]["recipe"]["parameters"]["--max-iters"], 2)
 
+    def test_two_grids_run_concurrently_on_disjoint_gpus(self):
+        one=self.service.save_recipe(None,{**self.recipe,"label":"GPU 0", "gpu_pool":[gpu(0)["gpu_id"]]})
+        two=self.service.save_recipe(None,{**self.recipe,"label":"GPU 1", "gpu_pool":[gpu(1)["gpu_id"]]})
+        first=self.service.launch(one["recipe_id"])
+        second=self.service.launch(two["recipe_id"])
+        self.service._refresh()
+        grids={grid["grid_id"]:grid for grid in self.service.snapshot()["grids"]}
+        self.assertEqual(grids[first["grid_id"]]["state"],"running")
+        self.assertEqual(grids[second["grid_id"]]["state"],"running")
+        self.assertEqual(self.fake.reservations["GPU-0"],first["grid_id"])
+        self.assertEqual(self.fake.reservations["GPU-1"],second["grid_id"])
+        self.assertTrue(any(run["state"]=="running" for run in grids[first["grid_id"]]["runs"]))
+        self.assertTrue(any(run["state"]=="running" for run in grids[second["grid_id"]]["runs"]))
+
+    def test_kill_flush_releases_only_its_gpu_and_retains_history(self):
+        first_recipe=self.service.save_recipe(None,{**self.recipe,"label":"GPU 0", "gpu_pool":[gpu(0)["gpu_id"]]})
+        second_recipe=self.service.save_recipe(None,{**self.recipe,"label":"GPU 1", "gpu_pool":[gpu(1)["gpu_id"]]})
+        first=self.service.launch(first_recipe["recipe_id"])
+        second=self.service.launch(second_recipe["recipe_id"])
+        self.service._refresh()
+        initial=self.service.snapshot()["grids"]
+        running=next(run for run in initial[0]["runs"] if run["state"]=="running")
+        prior=self.fake.runner_call
+        stop_calls=[]
+        def stop_target(host_id,operation,args=None):
+            if operation=="runner_stop":
+                stop_calls.append(args)
+                self.fake.attempts[args["attempt_id"]]["state"]="failed"
+                return self.fake.attempts[args["attempt_id"]]
+            return prior(host_id,operation,args)
+        self.fake.runner_call=stop_target
+        self.service.kill_and_flush(first["grid_id"])
+        self.assertEqual(self.service.snapshot()["grids"][0]["state"],"flushing")
+        self.service._refresh()
+        current=self.service.snapshot()
+        self.assertEqual(current["grids"][0]["state"],"cancelled")
+        self.assertEqual(current["grids"][1]["state"],"running")
+        self.assertEqual(stop_calls[0]["attempt_id"],running["attempts"][-1]["attempt_id"])
+        self.assertEqual(stop_calls[0]["grace_seconds"],0)
+        self.assertNotIn("GPU-0",self.fake.reservations)
+        self.assertEqual(self.fake.reservations["GPU-1"],second["grid_id"])
+        self.assertEqual(len(current["recipes"]),2)
+        self.assertTrue(self.service.file(first["grid_id"],"log").is_file())
+        self.assertTrue(self.service.file(first["grid_id"],"manifest").is_file())
+
+    def test_kill_flush_aborted_dispatch_recovers_gpu_without_hiding_history(self):
+        saved=self.service.save_recipe(None,{**self.recipe,"gpu_pool":[gpu(0)["gpu_id"]]})
+        grid=self.service.launch(saved["recipe_id"])
+        previous=self.fake.runner_call
+        def lost_launch(host_id,operation,args=None):
+            if operation=="runner_launch":
+                raise OSError("launch acknowledgement lost")
+            return previous(host_id,operation,args)
+        self.fake.runner_call=lost_launch
+        self.service._refresh()
+        self.assertEqual(self.service.snapshot()["grids"][0]["state"],"blocked")
+        self.assertIn("GPU-0",self.fake.reservations)
+        self.service.kill_and_flush(grid["grid_id"])
+        self.service._refresh()
+        current=self.service.snapshot()["grids"][0]
+        self.assertEqual(current["state"],"cancelled")
+        self.assertTrue(current["flushed_at"])
+        self.assertNotIn("GPU-0",self.fake.reservations)
+        self.assertTrue(self.service.file(grid["grid_id"],"log").is_file())
+        self.fake.runner_call=previous
+        next_grid=self.service.launch(saved["recipe_id"])
+        self.service._refresh()
+        self.assertEqual(next(item for item in self.service.snapshot()["grids"] if
+                              item["grid_id"]==next_grid["grid_id"])["state"],"running")
+
+    def test_kill_flush_blocked_preflight_without_an_attempt(self):
+        saved=self.service.save_recipe(None,{**self.recipe,"gpu_pool":[gpu(0)["gpu_id"]]})
+        grid=self.service.launch(saved["recipe_id"])
+        prior=self.fake.runner_call
+        def no_cuda(host_id,operation,args=None):
+            if operation=="runner_preflight":
+                raise RuntimeError("CUDA unavailable")
+            return prior(host_id,operation,args)
+        self.fake.runner_call=no_cuda
+        self.service._refresh()
+        before=self.service.snapshot()["grids"][0]
+        self.assertTrue(all(not run["attempts"] for run in before["runs"]))
+        self.service.kill_and_flush(grid["grid_id"])
+        self.service._refresh()
+        after=self.service.snapshot()["grids"][0]
+        self.assertEqual(after["state"],"cancelled")
+        self.assertEqual(self.fake.reservations,{})
+        self.assertEqual(after["recipe_id"],saved["recipe_id"])
+
+    def test_kill_flush_keeps_uncertain_attempt_until_agent_is_reachable(self):
+        saved=self.service.save_recipe(None,{**self.recipe,"gpu_pool":[gpu(0)["gpu_id"]]})
+        grid=self.service.launch(saved["recipe_id"])
+        self.service._refresh()
+        original=self.fake.runner_call
+        def unreachable(host_id,operation,args=None):
+            if operation=="runner_reconcile":
+                raise OSError("host unavailable")
+            return original(host_id,operation,args)
+        self.fake.runner_call=unreachable
+        self.service.kill_and_flush(grid["grid_id"])
+        self.service._refresh()
+        self.assertEqual(self.service.snapshot()["grids"][0]["state"],"flushing")
+        self.assertIn("GPU-0",self.fake.reservations)
+        self.fake.runner_call=original
+
+    def test_terminal_grid_retries_a_failed_gpu_release_after_restart(self):
+        recipe={**self.recipe,"gpu_pool":[gpu(0)["gpu_id"]],
+                "parameters":{**self.recipe["parameters"],"--n-layer":2,"DEPTH.order":1}}
+        saved=self.service.save_recipe(None,recipe)
+        grid=self.service.launch(saved["recipe_id"])
+        self.service._refresh()
+        attempt=self.service.snapshot()["grids"][0]["runs"][0]["attempts"][-1]["attempt_id"]
+        self.fake.attempts[attempt]["state"]="completed"
+        original=self.fake.runner_call
+        failures=[1]
+        def flaky_release(host_id,operation,args=None):
+            if operation=="runner_release" and failures[0]:
+                failures[0]-=1
+                raise OSError("release reply unavailable")
+            return original(host_id,operation,args)
+        self.fake.runner_call=flaky_release
+        self.service._refresh()
+        terminal=self.service.snapshot()["grids"][0]
+        self.assertEqual(terminal["state"],"completed")
+        self.assertIn("GPU-0",self.fake.reservations)
+        self.service.close()
+        replacement=runner.RunnerService(self.fake,start_worker=False)
+        self.addCleanup(replacement.close)
+        replacement._refresh()
+        repaired=replacement.snapshot()["grids"][0]
+        self.assertTrue(repaired["runs"][0]["released"])
+        self.assertNotIn("GPU-0",self.fake.reservations)
+        self.assertEqual(repaired["state"],"completed")
+        self.assertIn("Recovered release",replacement.file(grid["grid_id"],"log").read_text())
+
     def test_restart_reconciles_without_duplicate_dispatch_and_unknown_blocks(self):
         saved = self.service.save_recipe(None, {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]]})
         grid = self.service.launch(saved["recipe_id"])
@@ -508,6 +643,24 @@ class NodeReservationTests(unittest.TestCase):
         self.assertTrue(agent._operation("runner_release", {"grid_id": first, "gpu_key": "GPU-0"})["released"])
         with self.assertRaisesRegex(ValueError, "power cap"):
             agent._operation("runner_reserve", {**args,"power_cap_w":700})
+
+    def test_force_stop_clears_unknown_attempt_only_after_process_group_is_gone(self):
+        grid_id, attempt_id = uuid.uuid4().hex, uuid.uuid4().hex
+        agent._operation("runner_reserve", {"grid_id":grid_id,"gpu_key":"GPU-0",
+                                            "required_mib":2048,"headroom_mib":512})
+        state=agent._read_state()
+        state["attempts"]={attempt_id:{"attempt_id":attempt_id,"grid_id":grid_id,
+            "run_id":uuid.uuid4().hex,"gpu_key":"GPU-0","pid":9876543,
+            "pid_start_time":"former-process","started_at":runner.now(),"state":"running"}}
+        agent._write_state(state)
+        with patch.object(agent,"_running",return_value=False), patch.object(agent.os,"killpg",return_value=None):
+            self.assertEqual(agent._operation("runner_stop",{"grid_id":grid_id,
+                "attempt_id":attempt_id,"grace_seconds":0})["state"],"unknown")
+            with self.assertRaisesRegex(RuntimeError,"still owns"):
+                agent._operation("runner_release",{"grid_id":grid_id,"gpu_key":"GPU-0"})
+        with patch.object(agent,"_running",return_value=False), patch.object(agent.os,"killpg",side_effect=ProcessLookupError):
+            self.assertEqual(agent._operation("runner_status",{"attempt_id":attempt_id})["state"],"cancelled")
+            self.assertTrue(agent._operation("runner_release",{"grid_id":grid_id,"gpu_key":"GPU-0"})["released"])
 
     def test_attempt_identity_survives_reconcile_and_release_waits(self):
         grid_id, attempt_id, run_id = uuid.uuid4().hex, uuid.uuid4().hex, uuid.uuid4().hex

@@ -46,11 +46,13 @@
     const quiet = ["delete_recipe","preview","repeat_preview","rename_grid"].includes(name);
     clear_message();
     if (name === "save" || name === "preview" || name === "launch") required_notice_seen = true;
-    message.textContent = name === "stop" ? "attempting to stop grid..." : quiet ? "" : `${name}…`;
+    message.textContent = name === "stop" ? "attempting to stop grid..." : name === "kill_flush" ?
+      "Force stop requested; checking attempts and GPU reservations..." : quiet ? "" : `${name}…`;
     try {
       const result = await request("/api/runner/action", {method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:name, ...values})});
-      message.textContent = name === "stop" ? "Stop requested; waiting for running attempts to finish..." : quiet ? "" : `${name} complete`;
+      message.textContent = name === "stop" ? "Stop requested; waiting for running attempts to finish..." :
+        name === "kill_flush" ? "Kill and Flush started; Grid stays in Progress until GPUs are released." : quiet ? "" : `${name} complete`;
       if (message.textContent) message_timer = setTimeout(clear_message, 10000);
       if (!["preview","repeat_preview"].includes(name)) await refresh(true);
       return result;
@@ -356,7 +358,7 @@
     add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
     add(state,"span",` · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
     if(["progress","current_scripts"].includes(tab)) add(detail,"p",
-      "Possible states are: queued, dispatching, running, blocked, stopping, unknown, completed, failed, cancelled.","runner-state-legend");
+      "Possible states are: queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
     if(tab==="progress") {
       const controls=add(detail,"div",undefined,"runner-actions");
       button(controls,"Stop Grid",async()=>{if(!confirm(`Stop ${grid.grid_tag} and its running attempts?`))return;
@@ -430,6 +432,30 @@
       if(at_bottom)viewer.scrollTop=viewer.scrollHeight;
     }catch(error){if(detail.querySelector(".runner-event-log")===viewer)viewer.textContent=`Grid event log unavailable: ${error.message}`;}
   }
+  function show_multiview_selector(grids, selected_id) {
+    let control=multiview.querySelector(".runner-multiview-selector");
+    if(!control) {
+      control=add(multiview,"label","Active Grid · ","runner-multiview-selector");
+      const select=add(control,"select");
+      select.setAttribute("aria-label","Choose an active Grid for Multiview");
+      select.addEventListener("change",()=>{chosen=select.value;render();});
+    }
+    const select=control.querySelector("select");
+    const signature=grids.map(grid=>`${grid.grid_id}|${grid.label}|${grid.state}`).join(";");
+    if(control.dataset.options!==signature) {
+      select.replaceChildren();
+      if(!grids.some(grid=>grid.grid_id===selected_id)) {
+        const placeholder=add(select,"option","Select an active Grid");placeholder.value="";
+      }
+      for(const grid of [...grids].reverse()) {
+        const locations=[...new Set(grid.runs.map(run=>`${run.host_label} GPU ${run.gpu.ordinal}`))].join(", ");
+        const option=add(select,"option",`${grid.grid_tag} · ${grid.label} · ${grid.state} · ${locations}`);
+        option.value=grid.grid_id;
+      }
+      control.dataset.options=signature;
+    }
+    select.value=grids.some(grid=>grid.grid_id===selected_id)?selected_id:"";
+  }
   function render() {
     if (!snapshot || !visible) return;
     current_run_metrics=new Map((typeof app!=="undefined"&&app.runs||[]).filter(item=>item.runner_run_id)
@@ -477,31 +503,54 @@
         const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1).slice(0,110)}` : ""}` : "";
         const blocked=grid.runs.find(run=>run.state==="blocked" && run.blocking_reason);
         const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
-        const entry=button(list,`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
+        const row=tab==="progress"?add(list,"div",undefined,"runner-active-grid-row"):list;
+        const entry=button(row,tab==="progress"?`${grid.grid_tag} · ${grid.label} · ${grid.state}`:
+          `${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
         ()=>{chosen=grid.grid_id;if(tab==="history")last_history_grid=chosen;render();});
+        entry.title=`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`;
         entry.classList.toggle("active",chosen===grid.grid_id);
         entry.classList.add(`runner-status-${grid.state}`);
+        if(tab==="progress") {
+          const cleanup=button(row,grid.flush_requested?"Retry Flush":"Kill and Flush",async()=>{
+            if(!confirm(`Kill and Flush ${grid.grid_tag}? This force-kills active training without a graceful checkpoint, cancels queued runs and releases its GPUs when verified. Recipe, History, logs and files remain.`))return;
+            chosen=grid.grid_id;
+            try{await action("kill_flush",{grid_id:grid.grid_id});}catch(_){/* Error shown above. */}
+          });
+          cleanup.classList.add("runner-kill-flush");
+          cleanup.title="Last resort. Force-stop this Grid; retain its Recipe and History.";
+        }
       }
-      const grid=grids.find(item=>item.grid_id===chosen)||grids.find(item=>item.grid_id===last_history_grid && tab==="history")||grids.at(-1);
+      const finished_selection=tab==="multiview" && chosen && !grids.some(item=>item.grid_id===chosen) &&
+        snapshot.grids.some(item=>item.grid_id===chosen);
+      const grid=finished_selection?null:grids.find(item=>item.grid_id===chosen)||
+        grids.find(item=>item.grid_id===last_history_grid && tab==="history")||grids.at(-1);
       if(grid){
         chosen=grid.grid_id;
         if(tab==="history")last_history_grid=chosen;
         if(tab==="multiview"){
           if(multiview.dataset.gridMultiview!==grid.grid_id){
             multiview.replaceChildren();multiview.dataset.gridMultiview=grid.grid_id;
+            show_multiview_selector(grids,grid.grid_id);
             add(multiview,"h2",`${grid.grid_tag} · ${grid.label} · Multiview`);
             const frame=add(multiview,"iframe",undefined,"runner-multiview-frame");
             frame.title=`Multiview for ${grid.grid_tag}`;
             frame.src=`/?runner_grid_tag=${encodeURIComponent(grid.grid_tag)}`;
             frame.addEventListener("load",()=>setTimeout(()=>frame.contentDocument?.getElementById("workspace_nav")?.click(),50));
-          }
+          }else show_multiview_selector(grids,grid.grid_id);
         }else if(tab==="log" && detail.querySelector(".runner-event-log")?.dataset.gridId===grid.grid_id){
           update_event_log();
         }else render_grid(grid);
       }else{detail.replaceChildren();
-        if(tab==="multiview")multiview.replaceChildren();
-        add(tab==="multiview"?multiview:detail,"p",
-          ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view","runner-empty-state");}
+        const empty_text=finished_selection?"The selected Grid has finished. Select another active Grid or inspect it in History.":
+          ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view";
+        if(tab==="multiview"){
+          const empty_key=finished_selection?`finished:${chosen}`:"empty";
+          if(multiview.dataset.gridMultiview!==empty_key){multiview.replaceChildren();multiview.dataset.gridMultiview=empty_key;}
+          if(grids.length)show_multiview_selector(grids,null);
+          const note=multiview.querySelector(".runner-empty-state");
+          if(note)note.textContent=empty_text;
+          else add(multiview,"p",empty_text,"runner-empty-state");
+        }else add(detail,"p",empty_text,"runner-empty-state");}
     }
     view.classList.toggle("runner-full-width",tab==="multiview");
     multiview.hidden=tab!=="multiview";
@@ -523,7 +572,10 @@
   for(const id of ["runs_nav","workspace_nav","networks_nav","settings_nav"])by_id(id)?.addEventListener("click",()=>{visible=false;});
   for(const control of by_id("runner_tabs").querySelectorAll("button"))control.addEventListener("click",()=>{
     clear_message();required_notice_seen=true;
-    tab=control.dataset.runnerTab;chosen=tab==="history"?last_history_grid:null;render();
+    const was_active=["progress","current_scripts","multiview"].includes(tab);
+    tab=control.dataset.runnerTab;
+    chosen=tab==="history"?last_history_grid:["progress","current_scripts","multiview"].includes(tab) && was_active?chosen:null;
+    render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
   window.instra_runner_test_hooks = Object.freeze({recipe_problems});

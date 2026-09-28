@@ -97,6 +97,7 @@ class RunnerService:
             self.controller = False
         self.reconciled = False
         self._last_activity = None
+        self._release_retry_at = {}
         self._lease_release_scheduled = False
         if self.controller:
             self._clean_uncommitted_files()
@@ -426,6 +427,30 @@ class RunnerService:
             _write(state)
             return grid
 
+    def kill_and_flush(self, grid_id):
+        """Request a force stop while retaining the Recipe, logs and Grid history."""
+        self._require_controller()
+        with self.lock:
+            state = _read()
+            grid = next((item for item in state["grids"] if item["grid_id"] == grid_id), None)
+            if grid is None:
+                raise KeyError("Unknown Grid")
+            if grid["state"] in TERMINAL:
+                return grid
+            grid["flush_requested"] = True
+            grid.setdefault("flush_started_at", now())
+            grid["state"] = "flushing"
+            for run in grid["runs"]:
+                if run["state"] in {"queued", "blocked"}:
+                    run.update(state="cancelled", blocking_reason="Killed and flushed by user")
+                elif run["state"] in {"running", "dispatching", "unknown"}:
+                    run["stop_requested"] = True
+                    if run["attempts"]:
+                        run["attempts"][-1].pop("force_stop_sent", None)
+            _grid_event(grid, "flush", "Force stop requested; awaiting verified attempt termination and GPU release")
+            _write(state)
+            return grid
+
     def retry_run(self, grid_id, run_id):
         self._require_controller()
         with self.lock:
@@ -494,7 +519,12 @@ class RunnerService:
         with self.lock:
             state = _read()
             active = [grid for grid in state["grids"] if grid["state"] not in TERMINAL]
-            hosts = {run["host_id"] for grid in active for run in grid["runs"]}
+            stranded = [grid for grid in state["grids"] if grid["state"] in TERMINAL and
+                        any(not run.get("released") for run in grid["runs"])]
+            active_hosts = {run["host_id"] for grid in active for run in grid["runs"]}
+            stranded_hosts = {run["host_id"] for grid in stranded for run in grid["runs"] if not run.get("released")}
+            hosts = active_hosts | {host_id for host_id in stranded_hosts
+                                    if self._release_retry_at.get(host_id, 0) <= time.time()}
             snapshots = {}
             before_requests = _read()
             self.lock.release()
@@ -504,6 +534,8 @@ class RunnerService:
                         snapshots[host_id] = self.network.runner_call(host_id, "runner_reconcile")
                     except (network.NetworkError, OSError) as error:
                         snapshots[host_id] = {"error": str(error)}
+                        if host_id in stranded_hosts and host_id not in active_hosts:
+                            self._release_retry_at[host_id] = time.time() + 30
             finally:
                 self.lock.acquire()
             if _read() != before_requests:
@@ -532,12 +564,28 @@ class RunnerService:
                     latest = run["attempts"][-1]
                     remote = snapshot.get("attempts", {}).get(latest["attempt_id"])
                     if remote is None:
-                        run["state"] = "unknown"
-                        uncertain_gpus.add((run["host_id"], run["gpu"]["gpu_key"]))
-                        run["blocking_reason"] = snapshot.get("error", "Attempt absent from Node Agent; manual reconciliation required")
+                        gpu = next((item for item in snapshot.get("gpus", [])
+                                    if item["gpu_key"] == run["gpu"]["gpu_key"]), None)
+                        if grid.get("flush_requested") and "error" not in snapshot and gpu is not None and not gpu.get("compute_pids"):
+                            run.update(state="cancelled", blocking_reason="")
+                            latest["state"] = "cancelled"
+                            _grid_event(grid, "flush", f"Attempt {latest['attempt_id']} absent from Node Agent; GPU idle")
+                        else:
+                            run["state"] = "unknown"
+                            uncertain_gpus.add((run["host_id"], run["gpu"]["gpu_key"]))
+                            run["blocking_reason"] = snapshot.get("error", "Attempt absent from Node Agent; manual reconciliation required")
                     else:
+                        stop_error = None
+                        if grid.get("flush_requested") and remote["state"] in {"running", "unknown"} and not latest.get("force_stop_sent"):
+                            try:
+                                remote = self.network.runner_call(run["host_id"], "runner_stop", {
+                                    "grid_id": grid["grid_id"], "attempt_id": latest["attempt_id"], "grace_seconds": 0})
+                                latest["force_stop_sent"] = True
+                            except (network.NetworkError, RuntimeError, OSError, KeyError) as error:
+                                stop_error = str(error)
                         run["state"] = "cancelled" if run.get("stop_requested") and remote["state"] in TERMINAL else remote["state"]
-                        run["blocking_reason"] = "" if remote["state"] != "unknown" else "Node Agent outcome uncertain"
+                        run["blocking_reason"] = (f"Force stop pending: {stop_error}" if stop_error else
+                                                  "Node Agent outcome uncertain; GPU remains reserved" if remote["state"] == "unknown" else "")
                         latest.update({key: remote.get(key) for key in ("pid", "exit_code", "log_path", "requested_power_w", "observed_power_w", "finished_at")})
                         latest["state"] = remote["state"]
                         if remote["state"] == "failed" and "failure_excerpt" not in latest:
@@ -624,15 +672,30 @@ class RunnerService:
                         if not any(other["host_id"] == run["host_id"] and other["gpu"]["gpu_key"] == run["gpu"]["gpu_key"]
                                    and other["state"] not in TERMINAL for other in grid["runs"]):
                             try:
-                                self.network.runner_call(run["host_id"], "runner_release", {"grid_id": grid["grid_id"],
-                                                                                           "gpu_key": run["gpu"]["gpu_key"]})
+                                snapshot = snapshots.get(run["host_id"], {})
+                                if "error" in snapshot or "reservations" not in snapshot:
+                                    continue
+                                owner = snapshot["reservations"].get(run["gpu"]["gpu_key"])
+                                owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
+                                if owner_id == grid["grid_id"]:
+                                    self.network.runner_call(run["host_id"], "runner_release", {
+                                        "grid_id": grid["grid_id"], "gpu_key": run["gpu"]["gpu_key"]})
+                                    snapshot["reservations"].pop(run["gpu"]["gpu_key"], None)
                                 for other in grid["runs"]:
                                     if (other["state"] in TERMINAL and other["host_id"] == run["host_id"] and
                                             other["gpu"]["gpu_key"] == run["gpu"]["gpu_key"]):
                                         other["released"] = True
-                            except (network.NetworkError, RuntimeError):
+                            except (network.NetworkError, RuntimeError, OSError):
                                 pass
-                if all(run["state"] in TERMINAL for run in grid["runs"]):
+                if grid.get("flush_requested"):
+                    if all(run["state"] in TERMINAL and run.get("released") for run in grid["runs"]):
+                        grid["state"] = "cancelled"
+                        if not grid.get("flushed_at"):
+                            grid["flushed_at"] = now()
+                            _grid_event(grid, "flush", "Attempts stopped and GPU reservations released")
+                    else:
+                        grid["state"] = "flushing"
+                elif all(run["state"] in TERMINAL for run in grid["runs"]):
                     grid["state"] = "failed" if grid.get("user_failed") or any(run["state"] == "failed" for run in grid["runs"]) else (
                         "cancelled" if any(run["state"] == "cancelled" for run in grid["runs"]) else "completed")
                 elif any(run["state"] == "unknown" for run in grid["runs"]):
@@ -663,6 +726,29 @@ class RunnerService:
                     old_status = None
                 if old_status != status:
                     _write_grid_file(status_path, status)
+            for grid in stranded:
+                for run in grid["runs"]:
+                    if run.get("released") or run["state"] not in TERMINAL:
+                        continue
+                    snapshot = snapshots.get(run["host_id"], {})
+                    if "error" in snapshot or "reservations" not in snapshot:
+                        continue
+                    key = run["gpu"]["gpu_key"]
+                    owner = snapshot["reservations"].get(key)
+                    owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
+                    if owner_id == grid["grid_id"]:
+                        try:
+                            self.network.runner_call(run["host_id"], "runner_release", {"grid_id": grid["grid_id"],
+                                                                                       "gpu_key": key})
+                        except (network.NetworkError, RuntimeError, OSError):
+                            self._release_retry_at[run["host_id"]] = time.time() + 30
+                            continue
+                        snapshot["reservations"].pop(key, None)
+                    for other in grid["runs"]:
+                        if other["host_id"] == run["host_id"] and other["gpu"]["gpu_key"] == key:
+                            other["released"] = True
+                    changed = True
+                    _grid_event(grid, "reservation", f"Recovered release of {run['host_label']} GPU {run['gpu']['ordinal']}")
             if changed:
                 _write(state)
             activity = (any(g["state"] not in TERMINAL for g in state["grids"]),

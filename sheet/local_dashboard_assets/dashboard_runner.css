@@ -13,6 +13,9 @@
 .runner-recipe-add-row { width:100%; display:flex; align-items:center; gap:1.7rem; margin-bottom:1.1rem; }
 #runner_list .runner-recipe-add-row .runner-add-recipe { margin:0; flex:none; }
 .runner-recipe-row { display:flex; width:100%; gap:.6rem; align-items:stretch; }
+.runner-active-grid-row { display:flex; width:100%; min-width:0; gap:.45rem; align-items:stretch; }
+#runner_list .runner-active-grid-row > button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#runner_list .runner-active-grid-row > .runner-kill-flush { flex:0 0 auto; width:auto; padding:.3rem .5rem; color:#9a322c; font-size:.78rem; white-space:nowrap; }
 #runner_list .runner-recipe-row button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-recipe-row button:nth-child(2) { flex:0 0 auto; width:auto; white-space:nowrap; font-size:.82rem; }
 #runner_list .runner-recipe-row .runner-recipe-delete { width:auto; flex:none; color:#9a322c; }
@@ -55,6 +58,9 @@
 .runner-status-running, .runner-status-completed { color:#147348; }
 .runner-status-failed, .runner-status-blocked, .runner-status-unknown, .runner-status-cancelled { color:#ad302b; }
 .runner-status-waiting { color:#aa6410; }
+.runner-status-flushing { color:#aa6410; }
+.runner-multiview-selector { display:flex; align-items:center; gap:.8rem; margin:.2rem 0 1rem; }
+.runner-multiview-selector select { max-width:min(48rem,80vw); min-width:18rem; }
 .runner-state-legend { font-size:.88rem; }
 .runner-script-links { display:flex; gap:1.5rem; flex-wrap:wrap; margin:.8rem 0; }
 .runner-grid-heading { display:flex; align-items:center; gap:.8rem; }
