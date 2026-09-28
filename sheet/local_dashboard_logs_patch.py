@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
+import re
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -11,6 +14,26 @@ from urllib.parse import parse_qs, urlparse
 _DEFAULT_INITIAL_BYTES = 1024 * 1024
 _MAXIMUM_BYTES = 2 * 1024 * 1024
 _HASH_TRUNCATION_PREFIX = "__h_"
+
+
+def _runner_attempt_log(state: Any, metadata: Optional[dict[str, str]] = None) -> Optional[Path]:
+    """Locate a local Runner console log by its validated attempt identity."""
+    if metadata is None:
+        reader = getattr(state, "reader", None)
+        if reader is None:
+            return None
+        metadata = reader.metadata()
+    try:
+        configuration = json.loads(metadata.get("config_json", "{}"))
+    except (OSError, ValueError, KeyError):
+        return None
+    runner = configuration.get("runner") if isinstance(configuration, dict) else None
+    attempt_id = runner.get("attempt_id") if isinstance(runner, dict) else None
+    if not isinstance(attempt_id, str) or not re.fullmatch(r"[a-f0-9]{32}", attempt_id):
+        return None
+    state_dir = Path(os.environ.get("INSTRA_STATE_DIR", Path.home() / ".local/state/instra"))
+    path = state_dir / f"attempt-{attempt_id}.log"
+    return path if path.is_file() and not path.is_symlink() else None
 
 
 def _timestamped_artifact_suffix(directory_name: str) -> str:
@@ -63,6 +86,9 @@ def _resolve_train_log(catalog: Any, state: Any, dashboard_module: Any) -> Optio
         for candidate in candidates:
             if candidate.is_file():
                 return candidate
+    attempt_log = _runner_attempt_log(state)
+    if attempt_log is not None:
+        return attempt_log
     candidates = _matching_train_logs(catalog, state)
     if not candidates:
         return None

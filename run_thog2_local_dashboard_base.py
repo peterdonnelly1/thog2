@@ -181,8 +181,13 @@ class RunDashboardState:
             "depth": {},
         }
 
-    def _latest_logged_loss(self) -> Optional[float]:
+    def _latest_logged_loss(self, metadata: Optional[Dict[str, str]] = None) -> Optional[float]:
         log_path = self.database_path.parent.parent / "train.log"
+        if not log_path.is_file():
+            from sheet.local_dashboard_logs_patch import _runner_attempt_log
+            log_path = _runner_attempt_log(self, metadata)
+            if log_path is None:
+                return None
         try:
             stat_result = log_path.stat()
             signature = (stat_result.st_mtime_ns, stat_result.st_size)
@@ -266,7 +271,7 @@ class RunDashboardState:
         )
         latest_loss = self.reader.latest_recorded_loss()
         if latest_loss is None:
-            latest_loss = self._latest_logged_loss()
+            latest_loss = self._latest_logged_loss(metadata)
         return {
             **status,
             "run_name": artifact_name,

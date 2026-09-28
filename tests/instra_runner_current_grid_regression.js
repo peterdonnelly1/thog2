@@ -121,6 +121,30 @@ async function main() {
   assert.equal(resets,0,"switching a Multiview row must preserve chart mounts");
   assert.equal(refreshes,1);
   assert.equal(select_context.window.location.pathname,"/runs/new");
+  const repair = fs.readFileSync("sheet/local_dashboard_assets/dashboard_sep21_instra_repairs.js","utf8");
+  const count_start = repair.indexOf("    function place_training_throughput() {");
+  const count_end = repair.indexOf("    // vvv THOG in Runs view",count_start);
+  let has_loss = false;
+  const count = {textContent:""};
+  const card = {classList:{add(){}},dataset:{},parentElement:null,
+    querySelector:()=>({textContent:""})};
+  const grid = {appendChild(node){node.parentElement=this;},
+    querySelector:selector=>selector.includes("train/loss") && has_loss ? {id:"train/loss"} : null};
+  const train = {querySelector:selector=>selector.includes("count") ? count : grid};
+  const count_context = {document:{querySelector:()=>train},
+    by_id:id=>({training_chart_group:{hidden:false},training_throughput_card:card})[id] || null,
+    standardize_throughput_plot(){},layout_train_charts(){}};
+  vm.runInNewContext(repair.slice(count_start,count_end) + "\nplace_training_throughput();",count_context);
+  assert.equal(count.textContent,"1","Train must not claim a missing loss chart exists");
+  has_loss=true;
+  count_context.place_training_throughput();
+  assert.equal(count.textContent,"2","Train must count its recovered loss and throughput charts");
+  const startup=fs.readFileSync("sheet/local_dashboard_assets/dashboard_sep07_fixes_and_enhancements.js","utf8");
+  assert.match(startup,/startup_collapsed = \{[^}]*processing: true/s,
+    "Processing must start collapsed so throughput does not displace the initial Loss view");
+  const metrics=fs.readFileSync("sheet/local_dashboard_assets/dashboard_wandb_groups_patch.js","utf8");
+  assert.match(metrics,/grid\.querySelectorAll\("\.local-metric-card"\)\.length/,
+    "group discovery must count charts actually drawn, not hardcode two");
   console.log("PASS Runner ordering, retained History/Log, active scoped Multiview, grey icons and maximized chart selection");
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

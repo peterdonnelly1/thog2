@@ -159,4 +159,35 @@ def test_loss_chart_works_with_only_local_optimizer_metrics(tmp_path):
     reader.refresh(catalog, state, SimpleNamespace())
     assert reader.revision == revision
     store.close()
+
+
+def test_runner_attempt_log_restores_existing_run_loss_chart(tmp_path, monkeypatch):
+    from sheet.local_chart_store import LocalChartStore, LocalChartReader
+    from sheet.local_dashboard_logs_patch import _resolve_train_log
+
+    attempt_id = "a" * 32
+    state_directory = tmp_path / "instra-state"
+    state_directory.mkdir()
+    monkeypatch.setenv("INSTRA_STATE_DIR", str(state_directory))
+    attempt_log = state_directory / f"attempt-{attempt_id}.log"
+    attempt_log.write_text("Runner launching\nT 10 loss=7.1234\nT 20 loss=6.9876\n")
+    store = LocalChartStore(tmp_path / "artifact" / "run-id" / "charts.sqlite3",
+                            run_name="artifact", run_id="run-id",
+                            config={"runner": {"attempt_id": attempt_id}})
+    state = SimpleNamespace(status=lambda: {"artifact_name": "artifact"},
+                            database_path=store.path, reader=LocalChartReader(store.path))
+    catalog = SimpleNamespace(root=tmp_path)
+    dashboard = SimpleNamespace(_modified_time=lambda path: 0)
+    assert _resolve_train_log(catalog, state, dashboard) == attempt_log
+    reader = LiveLossReader()
+    reader.refresh(catalog, state, dashboard)
+    chart = reader.merge({"name": "train", "charts": [], "revision": 0})["charts"][0]
+    assert chart["id"] == "train/loss"
+    assert chart["series"][0]["x"] == [10, 20]
+    assert chart["series"][0]["y"] == [7.1234, 6.9876]
+    with attempt_log.open("a") as handle:
+        handle.write("T 30 loss=6.5432\n")
+    reader.refresh(catalog, state, dashboard)
+    assert reader.merge({"name": "train", "charts": [], "revision": 0})["charts"][0]["series"][0]["y"][-1] == 6.5432
+    store.close()
 # ^^^ THOG

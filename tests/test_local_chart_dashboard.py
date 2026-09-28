@@ -93,6 +93,21 @@ def test_runs_and_runner_loss_uses_latest_local_optimizer_value(tmp_path: Path) 
     store.close()
 
 
+def test_runs_and_runner_loss_falls_back_to_attempt_log(monkeypatch, tmp_path: Path) -> None:
+    attempt_id = "c" * 32
+    state_directory = tmp_path / "instra-state"
+    state_directory.mkdir()
+    monkeypatch.setenv("INSTRA_STATE_DIR", str(state_directory))
+    (state_directory / f"attempt-{attempt_id}.log").write_text(
+        "T 10 loss=7.2\nT 20 loss=6.75\n"
+    )
+    path = tmp_path / "artifact" / "run-id" / "charts.sqlite3"
+    store = LocalChartStore(path, run_name="artifact", run_id="run-id",
+                            config={"runner": {"attempt_id": attempt_id}})
+    assert dashboard.RunDashboardState(path).status()["last_loss"] == 6.75
+    store.close()
+
+
 def test_wandb_run_id_separates_repeated_artifact_names(
     monkeypatch,
     tmp_path: Path,

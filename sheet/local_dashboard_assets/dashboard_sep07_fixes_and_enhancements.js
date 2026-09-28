@@ -565,6 +565,7 @@ window.addEventListener("load", () => {
     const startup_collapsed = {
       train: false,
       val: true,
+      processing: true,
       memory: true,
       system: true,
       depth: true,
@@ -574,8 +575,8 @@ window.addEventListener("load", () => {
       optimizer_scaling: true,
     };
     save_json("thog2_local_metric_group_collapsed_v2", {
-      runs: {train: false, val: true, memory: true, system: true},
-      workspace: {train: false, val: true, memory: true, system: true},
+      runs: {train: false, val: true, processing: true, memory: true, system: true},
+      workspace: {train: false, val: true, processing: true, memory: true, system: true},
     });
     let selected_latest = false;
     let requested_workspace = false;

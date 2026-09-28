@@ -162,7 +162,7 @@ window.addEventListener("load", () => {
       name.textContent = summary.name;
       const count = document.createElement("span");
       count.className = "group-count local-metric-group-count";
-      count.textContent = summary.name === "train" ? "2" : String(summary.chart_count || 0);
+      count.textContent = String(summary.chart_count || 0);
       button.append(name, count);
       header.appendChild(button);
 
@@ -190,8 +190,11 @@ window.addEventListener("load", () => {
     const update_group_section = summary => {
       let section = group_section(summary.name);
       if (!section) section = make_group_section(summary);
+      const grid = section.querySelector(".local-metric-grid");
       section.querySelector(".local-metric-group-count").textContent = summary.name === "train"
-        ? "2" : String(summary.chart_count || 0);
+        ? String(grid.querySelectorAll(".local-metric-card").length
+            + Number(Boolean(grid.querySelector("#training_throughput_card"))))
+        : String(summary.chart_count || 0);
       let message = section.querySelector(".local-metric-empty");
       if (!message) {
         message = document.createElement("p");
@@ -442,6 +445,12 @@ window.addEventListener("load", () => {
       // Plotly startup times. Keep a small bound to preserve UI responsiveness.
       for (let start = 0; start < render_jobs.length; start += 3) {
         await Promise.all(render_jobs.slice(start, start + 3).map(render => render()));
+      }
+      if (group.name === "train") {
+        section.querySelector(".local-metric-group-count").textContent = String(
+          grid.querySelectorAll(".local-metric-card").length
+          + Number(Boolean(grid.querySelector("#training_throughput_card")))
+        );
       }
       if (group.name === "train" && app.workspace_mode === true && !app.instra_loss_autofocused &&
           !app.maximized_chart && charts.some(chart => chart.id === "train/loss")) {
