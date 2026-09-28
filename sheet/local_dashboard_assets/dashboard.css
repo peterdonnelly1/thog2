@@ -2,7 +2,7 @@
 :root {
   color-scheme: light;
   --topbar-height: 48px;
-  --rail-width: 58px;
+  --rail-width: 87px;
   --runs-width: 46vw;
   --divider-width: 9px;
   --border: #d9dce1;
@@ -59,7 +59,7 @@ button { color: inherit; }
 
 .rail-item {
   width: calc(100% - 8px);
-  min-height: 58px;
+  min-height: 87px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -70,13 +70,13 @@ button { color: inherit; }
   border: 0;
   border-radius: 7px;
   background: transparent;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 .rail-item.selected { color: #008da9; background: #e3f5f8; }
-.rail-symbol { width:26px; height:26px; display:block; color:#515c66; flex:none; }
+.rail-symbol { width:43px; height:43px; display:block; color:#515c66; flex:none; }
 .runs-icon path { fill:none; stroke-width:7; stroke-linecap:round; }
-.settings-icon { font-size: 23px; line-height: 20px; }
+.settings-icon { font-size: 39px; line-height: 40px; }
 
 .workspace {
   position: fixed;
@@ -439,7 +439,7 @@ body.resizing-chart, body.resizing-chart * { user-select: none !important; }
 }
 
 @media (max-width: 620px) {
-  :root { --rail-width: 48px; }
+  :root { --rail-width: 68px; }
   .breadcrumbs span:not(:last-child), .rail-item > span:last-child, .topbar-state { display: none; }
   .workspace { grid-template-columns: minmax(210px, 56vw) var(--divider-width) minmax(0, 1fr); }
   .wandb-link { display: none; }

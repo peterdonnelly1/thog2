@@ -124,7 +124,7 @@ def validate_recipe(recipe):
     return choices
 
 
-def expand(recipe):
+def expand(recipe, *, stable_preview=False):
     choices = validate_recipe(recipe)
     keys = [key for key in choices if CATALOGUE[key]["kind"] == "dimension"]
     count = len(recipe.get("profilers", ["none"]))
@@ -134,8 +134,15 @@ def expand(recipe):
             raise ValueError(f"Grid exceeds {MAX_RUNS} runs")
     fixed = {key: value for key, value in choices.items() if key not in keys}
     trials = []
+    seen = set()
+    seed = json.dumps(recipe, sort_keys=True, separators=(",", ":")) if stable_preview else ""
     for selected in itertools.product(*(choices[key] for key in keys)):
         values = {**fixed, **dict(zip(keys, selected))}
+        dense = values.get("--geometry-preset") == "dense" or values.get("--model-type") == "dense"
+        if dense:
+            # A depth sweep contributes one dense reference, regardless of how many
+            # DEPTH.order choices accompany the other (compact) trials.
+            values.pop("DEPTH.order", None)
         for name in ("--max-iters", "--batch-size", "--block-size", "--n-layer", "--n-head", "--n-embd",
                      "--gradient-accumulation-steps", "--checkpoint-segment-size"):
             if name in values and int(values[name]) < 1:
@@ -146,15 +153,20 @@ def expand(recipe):
             raise ValueError("--warmup-iters must be less than --max-iters")
         if "DEPTH.order" in values and values["DEPTH.order"] > int(values.get("--n-layer", 72)):
             raise ValueError("DEPTH.order must not exceed --n-layer")
-        if "DEPTH.order" in values and (values.get("--model-type") == "dense" or values.get("--geometry-preset") == "dense"):
-            raise ValueError("DEPTH.order requires a compact DEPTH model")
         if "DEPTH.order" in values and any(entry.startswith("DEPTH.order=") for entry in values.get("--option", [])):
             raise ValueError("DEPTH.order cannot also appear in --option")
         if values.get("--learning-rate") is not None and values.get("--min-lr") is not None and float(values["--min-lr"]) > float(values["--learning-rate"]):
             raise ValueError("--min-lr must not exceed --learning-rate")
-        pairing_id = uuid.uuid4().hex if len(recipe.get("profilers", ["none"])) == 2 else None
+        identity = json.dumps(values, sort_keys=True, separators=(",", ":"))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        pairing_id = (uuid.uuid5(uuid.NAMESPACE_URL, f"thog2-preview-pair:{seed}:{identity}").hex
+                      if stable_preview else uuid.uuid4().hex) if len(recipe.get("profilers", ["none"])) == 2 else None
         for profiler in recipe.get("profilers", ["none"]):
-            trials.append({"run_id": uuid.uuid4().hex, "pairing_id": pairing_id,
+            run_id = (uuid.uuid5(uuid.NAMESPACE_URL, f"thog2-preview-run:{seed}:{identity}:{profiler}").hex
+                      if stable_preview else uuid.uuid4().hex)
+            trials.append({"run_id": run_id, "pairing_id": pairing_id,
                            "profiler": profiler, "parameters": values.copy()})
     return trials
 

@@ -34,8 +34,8 @@ assert.match(recipe_problems({...recipe,gpu_pool:["missing"]}, hosts).join(" "),
 assert.match(recipe_problems({...recipe,parameters:{...parameters,"--n-head":""}}, hosts).join(" "), /--n-head is required/);
 assert.match(recipe_problems({...recipe,parameters:{...parameters,"--max-iters":NaN}}, hosts).join(" "), /valid numbers/);
 assert.match(recipe_problems({...recipe,parameters:{...parameters,"DEPTH.order":""}}, hosts).join(" "), /DEPTH.order is required/);
-assert.match(runner,/if \(\["failed","blocked"\]\.includes\(run.state\)\) row.open = true/,
-  "failed and blocked run diagnostics must open without an extra click");
+assert.match(runner,/tab === "history" && \["failed","blocked"\]\.includes\(run.state\)/,
+  "failed and blocked History diagnostics open without extra clicks, while Progress details stay collapsed");
 assert.match(runner,/blocked: \$\{blocked\.blocking_reason\.slice\(0,110\)\}/,
   "Progress Grid list must show the current blocking reason");
 assert.match(runner,/Unable to retrieve attempt log: \$\{error\.message\}/,

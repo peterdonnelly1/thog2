@@ -5,8 +5,9 @@
   const view = by_id("runner_view");
   if (!view) return;
   const list = by_id("runner_list"), detail = by_id("runner_detail"), message = by_id("runner_message");
+  const multiview = by_id("runner_multiview_panel");
   const categories = ["GPT-2 Hyperparameters", "Run Control Parameters", "Geometry", "Premat", "NSIGHT",
-    "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps"];
+    "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation", "Resume and Fork"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
@@ -15,6 +16,7 @@
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
   let snapshot = null, network = null, tab = "recipes", chosen = null, category = "Frequently Used";
   let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
+  let current_run_metrics = new Map();
   const add = (parent, tag, value, class_name) => {
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = String(value ?? "—");
@@ -36,11 +38,14 @@
     } finally { clearTimeout(timeout); }
   }
   async function action(name, values) {
-    message.textContent = `${name}…`;
+    const quiet = ["delete_recipe","preview","repeat_preview"].includes(name);
+    message.textContent = name === "stop" ? "attempting to stop grid..." : quiet ? "" : `${name}…`;
     try {
       const result = await request("/api/runner/action", {method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:name, ...values})});
-      message.textContent = `${name} complete`; await refresh(true); return result;
+      message.textContent = name === "stop" ? "Stop requested; waiting for running attempts to finish..." : quiet ? "" : `${name} complete`;
+      if (!["preview","repeat_preview"].includes(name)) await refresh(true);
+      return result;
     } catch (error) {
       message.textContent = error.message;
       if (tab === "recipes" && by_id("runner_validation")) by_id("runner_validation").textContent = error.message;
@@ -61,7 +66,8 @@
       if (parameters[key] === undefined || parameters[key] === null || parameters[key] === "" ||
           Array.isArray(parameters[key]) && !parameters[key].length) errors.push(`${key} is required`);
     }
-    if (parameters["--geometry-preset"] !== "dense" && parameters["--model-type"] !== "dense" &&
+    const presets = Array.isArray(parameters["--geometry-preset"]) ? parameters["--geometry-preset"] : [parameters["--geometry-preset"]];
+    if (presets.some(preset=>preset !== "dense") && parameters["--model-type"] !== "dense" &&
         (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === "")) {
       errors.push("DEPTH.order is required for a DEPTH Recipe");
     }
@@ -113,7 +119,8 @@
   }
   function show_fields(container, keys, include_profiler=false) {
     const grid = add(container,"div",undefined,"runner-fields");
-    const columns = window.innerWidth < 800 ? 1 : category === "Frequently Used" && !by_id("runner_parameter_search")?.value ? 2 : 1;
+    const columns = window.innerWidth < 800 ? 1 : !by_id("runner_parameter_search")?.value &&
+      ["Frequently Used","GPT-2 Hyperparameters","Run Control Parameters","Geometry"].includes(category) ? 2 : 1;
     grid.style.setProperty("--runner-columns",String(columns));
     grid.style.setProperty("--runner-rows",String(Math.max(1,Math.ceil((keys.length + (include_profiler ? 1 : 0))/columns))));
     if (include_profiler) {
@@ -157,7 +164,7 @@
   function render_editor() {
     detail.replaceChildren();
     const recipe = current_recipe();
-    add(detail,"h2", draft_id ? `Edit Recipe · ${recipe.label}` : "Add Grid Recipe");
+    add(detail,"h2",draft_id ? `Grid Recipe · ${recipe.label}` : "Grid Recipe");
     const label = add(detail,"label","Recipe label");
     const label_input = add(label,"input"); label_input.value = recipe.label;
     label_input.addEventListener("change", () => { draft = current_recipe(); draft.label = label_input.value; dirty = true;check_recipe(); });
@@ -174,10 +181,13 @@
         const panel = by_id("runner_preview");
         panel.replaceChildren();
         add(panel,"h3",`Total Runs in Grid: ${preview.total_runs} · physical executions: ${preview.runs.length}`);
-        add(panel,"p", preview.estimated_duration.seconds === null ? preview.estimated_duration.explanation :
-          `Estimate ${preview.estimated_duration.seconds}s (${preview.estimated_duration.interval_seconds.join("–")}s), ${preview.estimated_duration.confidence}, ${preview.estimated_duration.exemplars} exemplars`);
-        for(const place of preview.gpu_pool)add(panel,"p",`${place.host_label} GPU ${place.gpu.ordinal} · free ${place.gpu.free_mib??"unknown"} MiB · reservation ${place.reservation_owner?.grid_id||"none"}`);
-        for (const run of preview.runs) render_run(panel,run);
+        add(panel,"p", preview.estimated_duration.seconds === null ?
+          `Estimated Time to complete this grid: ${preview.estimated_duration.explanation}` :
+          `Estimated Time to complete this grid: ${preview.estimated_duration.seconds}s (${preview.estimated_duration.interval_seconds.join("–")}s), ${preview.estimated_duration.confidence} confidence, ${preview.estimated_duration.exemplars} exemplars`,"runner-preview-estimate");
+        const placement=add(panel,"div",undefined,"runner-preview-placement");
+        for(const place of preview.gpu_pool)add(placement,"p",`Host: ${place.host_label} GPU: ${place.gpu.ordinal} currently free VRAM: ${place.gpu.free_mib??"unknown"}MiB reservation: ${place.reservation_owner?.grid_id||"none"}`);
+        run_headings(panel);
+        for (const run of preview.runs) render_run(panel,run,true);
       } catch (_) { /* The error is displayed above. */ }
     });
     button(controls,"Launch",async () => {
@@ -229,8 +239,10 @@
     const validation=add(search_row,"p","","runner-validation");validation.id="runner_validation";
     const categories_row=add(detail,"nav",undefined,"runner-categories");
     const fields=add(detail,"div");
+    const preview_panel=add(detail,"section",undefined,"runner-preview");preview_panel.id="runner_preview";
     function show_category(query="") {
       fields.replaceChildren();categories_row.replaceChildren();
+      preview_panel.hidden=category!=="Frequently Used"||Boolean(query);
       for (const name of ["Frequently Used",...categories]) button(categories_row,name,()=>{category=name;show_category(search.value);})
         .classList.toggle("active",category===name);
       const keys=(query?Object.keys(snapshot.catalogue).filter(key => key.toLowerCase().includes(query.toLowerCase()) ||
@@ -242,20 +254,27 @@
       show_fields(fields,keys,category==="NSIGHT" && !query);
     }
     search.addEventListener("input",()=>show_category(search.value));show_category();
-    add(detail,"section",undefined).id="runner_preview";
     check_recipe();
   }
-  function render_run(parent,run) {
+  function run_headings(parent) {
+    const headings=add(parent,"div",undefined,"runner-run-headings");
+    for(const name of ["Run ID","State","Step","Loss","Host","GPU","Profiling"])add(headings,"strong",name);
+  }
+  function render_run(parent,run,preview=false) {
     const row=add(parent,"details",undefined,"runner-run");
-    if (["failed","blocked"].includes(run.state)) row.open = true;
+    if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
+    const observed=current_run_metrics.get(run.run_id);
+    add(summary,"span",preview?"—":observed?.maximum_update??"—");
+    add(summary,"span",preview?"—":observed?.last_loss??"—");
     add(summary,"span",run.host_label);
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
     profiler.title="Profiling mode: none, NSYS or NCU";
-    add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power requested ${run.requested_power_w??"default"} W`);
+    const power=run.requested_power_w==null?`default (=${run.attempts?.at(-1)?.observed_power_w??run.gpu.power_cap_w??"unknown"}W)`:`${run.requested_power_w}W`;
+    add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power requested ${power}`);
     if (run.pairing_id) add(row,"p",`Paired profiler runs: ${run.pairing_id}`);
     if (run.blocking_reason) add(row,"p",run.blocking_reason);
     if (run.attempts?.length) {
@@ -365,23 +384,36 @@
       const path=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=log`;
       const download=add(detail,"a","Download Grid event log");download.href=path+"&download=1";download.download="";
       const viewer=add(detail,"pre","Loading Grid events…","runner-event-log");
-      fetch(path).then(async response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.text();})
-        .then(source=>{if(chosen===grid.grid_id && tab==="log")viewer.textContent=source.trim().split("\n").filter(Boolean)
-          .map(line=>{try{const event=JSON.parse(line);return `${event.time}  ${event.event.toUpperCase()}  ${event.detail}`;}
-            catch(_){return line;}}).join("\n")||"No events yet";})
-        .catch(error=>{viewer.textContent=`Grid event log unavailable: ${error.message}`;});
+      viewer.dataset.gridId=grid.grid_id;
+      update_event_log();
     }
-    if(tab==="history") {
-      const headings=add(detail,"div",undefined,"runner-run-headings");
-      for(const name of ["Run ID","State","Host","GPU","Profiling"])add(headings,"strong",name);
-    }
+    if(tab==="history" || tab==="progress") run_headings(detail);
     for (const run of (tab==="history"?grid.runs.map((item,index)=>({item,index})).sort((a,b)=>
       String(b.item.attempts?.at(-1)?.started_at||grid.created_at).localeCompare(
         String(a.item.attempts?.at(-1)?.started_at||grid.created_at)) || b.index-a.index).map(entry=>entry.item):grid.runs))
       if(!["files","current_scripts","log","multiview"].includes(tab))render_run(detail,run);
   }
+  async function update_event_log() {
+    const viewer=detail.querySelector(".runner-event-log");
+    if(tab!=="log" || !viewer || viewer.dataset.gridId!==chosen)return;
+    const grid_id=viewer.dataset.gridId;
+    try {
+      const path=`/api/runner/file?grid_id=${encodeURIComponent(grid_id)}&name=log`;
+      const response=await fetch(path,{cache:"no-store"});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const source=await response.text();
+      if(tab!=="log" || chosen!==grid_id || detail.querySelector(".runner-event-log")!==viewer)return;
+      const at_bottom=viewer.scrollTop+viewer.clientHeight>=viewer.scrollHeight-24;
+      viewer.textContent=source.trim().split("\n").filter(Boolean)
+          .map(line=>{try{const event=JSON.parse(line);return `${event.time}  ${event.event.toUpperCase()}  ${event.detail}`;}
+            catch(_){return line;}}).join("\n")||"No events yet";
+      if(at_bottom)viewer.scrollTop=viewer.scrollHeight;
+    }catch(error){if(detail.querySelector(".runner-event-log")===viewer)viewer.textContent=`Grid event log unavailable: ${error.message}`;}
+  }
   function render() {
     if (!snapshot || !visible) return;
+    current_run_metrics=new Map((typeof app!=="undefined"&&app.runs||[]).filter(item=>item.runner_run_id)
+      .map(item=>[item.runner_run_id,item]));
     for (const control of by_id("runner_tabs").querySelectorAll("button"))control.classList.toggle("active",control.dataset.runnerTab===tab);
     list.replaceChildren();
     const grids=snapshot.grids.filter(grid=>!["progress","current_scripts","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
@@ -421,19 +453,24 @@
         chosen=grid.grid_id;
         if(tab==="history")last_history_grid=chosen;
         if(tab==="multiview"){
-          if(detail.dataset.gridMultiview!==grid.grid_id){
-            detail.replaceChildren();detail.dataset.gridMultiview=grid.grid_id;
-            add(detail,"h2",`${grid.grid_tag} · ${grid.label} · Multiview`);
-            const frame=add(detail,"iframe",undefined,"runner-multiview-frame");
+          if(multiview.dataset.gridMultiview!==grid.grid_id){
+            multiview.replaceChildren();multiview.dataset.gridMultiview=grid.grid_id;
+            add(multiview,"h2",`${grid.grid_tag} · ${grid.label} · Multiview`);
+            const frame=add(multiview,"iframe",undefined,"runner-multiview-frame");
             frame.title=`Multiview for ${grid.grid_tag}`;
             frame.src=`/?runner_grid_tag=${encodeURIComponent(grid.grid_tag)}`;
             frame.addEventListener("load",()=>setTimeout(()=>frame.contentDocument?.getElementById("workspace_nav")?.click(),50));
           }
-        }else{delete detail.dataset.gridMultiview;render_grid(grid);}
-      }else{delete detail.dataset.gridMultiview;detail.replaceChildren();add(detail,"p",
-        ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view");}
+        }else if(tab==="log" && detail.querySelector(".runner-event-log")?.dataset.gridId===grid.grid_id){
+          update_event_log();
+        }else render_grid(grid);
+      }else{detail.replaceChildren();
+        if(tab==="multiview")multiview.replaceChildren();
+        add(tab==="multiview"?multiview:detail,"p",
+          ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view","runner-empty-state");}
     }
     view.classList.toggle("runner-full-width",tab==="multiview");
+    multiview.hidden=tab!=="multiview";
   }
   async function refresh(repaint=false) {
     if(!visible || polling)return;

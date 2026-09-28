@@ -47,6 +47,7 @@ window.addEventListener("load", () => {
     };
 
     const group_is_collapsed = name => {
+      if (name === "train" && /(?:\?|&)runner_grid_tag=/.test(window.location?.search || "")) return false;
       const settings = group_collapsed_settings();
       return settings.has(name) ? settings.get(name) : true;
     };

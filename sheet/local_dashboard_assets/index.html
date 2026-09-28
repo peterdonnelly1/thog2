@@ -32,13 +32,13 @@
 
   <nav class="icon-rail" aria-label="Instrumentation sections">
     <!-- vvv THOG expose the distributed Runner and Networks sections in the common navigation rail -->
-    <button class="rail-item" id="runner_nav" type="button" title="Runner"><svg class="rail-symbol runner-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M35 4 38 10 44 11 49 7 54 12 51 18 54 24 61 26 61 34 54 36 51 42 54 48 49 53 43 50 37 53 35 60 27 60 25 53 19 50 13 53 8 48 11 42 8 36 2 34 2 26 8 24 11 18 8 12 13 7 19 11 25 10 27 4Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/><circle cx="31" cy="32" r="14" fill="none" stroke="currentColor" stroke-width="3.5"/><path d="m27 23 12 9-12 9Z" fill="currentColor"/></svg><span>Runner</span></button>
+    <button class="rail-item" id="runner_nav" type="button" title="Runner"><svg class="rail-symbol runner-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M34 3 37 9 43 10 48 6 53 11 50 17 53 23 60 25 60 33 53 35 50 41 53 47 48 52 42 49 36 52 34 59 26 59 24 52 18 49 12 52 7 47 10 41 7 35 1 33 1 25 7 23 10 17 7 11 12 6 18 10 24 9 26 3Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/><circle cx="30" cy="30" r="16" fill="white" stroke="currentColor" stroke-width="3"/><path d="M25 19 43 30 25 41Z" fill="#515c66" stroke="#515c66" stroke-width="2" stroke-linejoin="round"/><path d="M39 58V44a3 3 0 0 1 6 0v6l2-4a3 3 0 0 1 5 3l-5 11H36l-6-10a3 3 0 0 1 5-3Z" fill="white" stroke="#515c66" stroke-width="2.4" stroke-linejoin="round"/></svg><span>Runner</span></button>
     <button class="rail-item" id="workspace_nav" type="button" title="Workspace">
       <svg class="rail-symbol workspace-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M7 7v50h50" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="round"/><path d="M9 13 C17 36 25 43 56 45" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="round"/><path d="M9 23 C17 40 27 48 56 50" fill="none" stroke="#777f86" stroke-width="3.5" stroke-linecap="round"/><path d="M9 33 C19 46 29 53 56 55" fill="none" stroke="#a0a5aa" stroke-width="3.5" stroke-linecap="round"/></svg>
       <span>Multiview</span>
     </button>
     <button class="rail-item selected" id="runs_nav" type="button" title="Runs">
-      <svg class="rail-symbol runs-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M9 10h47" stroke="#454e57"/><path d="M9 24h47" stroke="#5f6972"/><path d="M9 38h47" stroke="#7e868d"/><path d="M9 52h47" stroke="#a0a6ab"/></svg>
+      <svg class="rail-symbol runs-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M9 10h34" stroke="#454e57"/><path d="M9 24h48" stroke="#888f95"/><path d="M9 38h25" stroke="#626b74"/><path d="M9 52h41" stroke="#adb2b7"/></svg>
       <span>Runs</span>
     </button>
     <button class="rail-item" id="networks_nav" type="button" title="Networks"><svg class="network-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M14 10h36M14 10 7 36m7-26 15 25M50 10 29 35m21-25 6 27M7 36l22-1m-22 1 33 20M29 35l27 2m-27-2 11 21m16-19L40 56" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><g fill="currentColor"><circle cx="14" cy="10" r="6"/><circle cx="50" cy="10" r="6"/><circle cx="7" cy="36" r="6"/><circle cx="29" cy="35" r="6"/><circle cx="56" cy="37" r="6"/><circle cx="40" cy="56" r="6"/></g></svg><span>Networks</span></button>
@@ -80,6 +80,7 @@
     </nav></header>
     <p id="runner_message" role="status" aria-live="polite"></p>
     <div class="runner-layout"><aside id="runner_list" aria-label="Runner selection"></aside><article id="runner_detail"></article></div>
+    <div id="runner_multiview_panel" class="runner-multiview-panel" hidden></div>
     <!-- ^^^ THOG -->
   </section>
   <dialog id="network_add_dialog" class="network-add-dialog">
@@ -159,7 +160,7 @@
               <th class="numeric-column probe-end-column" title="Last retained layer-count heatmap probe step">P_e</th>
               <th class="numeric-column curve-start-column" title="First retained weight-curve capture step">C_s</th>
               <th class="numeric-column curve-end-column" title="Last retained weight-curve capture step">C_e</th>
-              <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">Logged</th>
+              <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">step</th>
               <th class="numeric-column duration-column" title="Elapsed run time">t</th>
               <th class="numeric-column loss-column" title="Most recent recorded loss">l</th>
               <th>Updated</th>

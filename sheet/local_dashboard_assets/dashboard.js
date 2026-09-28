@@ -323,6 +323,7 @@ function append_run_row(body, run) {
   row.appendChild(visibility_cell);
 
   const name_cell = document.createElement("td");
+  name_cell.className = "name-column";
   const colour = document.createElement("button");
   colour.type = "button";
   colour.className = "colour-dot";
@@ -345,6 +346,7 @@ function append_run_row(body, run) {
     const grid_identity = document.createElement("small");
     grid_identity.textContent = ` ${run.runner_grid_tag} · ${String(run.runner_run_id || "").slice(0, 8)}`;
     grid_identity.title = `Runner run ${run.runner_run_id}`;
+    grid_identity.className = "runner-grid-identity";
     name_cell.append(grid_identity);
   }
   // ^^^ THOG

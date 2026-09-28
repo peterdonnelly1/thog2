@@ -310,6 +310,44 @@
     "kind": "fixed",
     "type": "flag"
   },
+  "--fork": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "fork an existing run/checkpoint into a new training lineage",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--fork-learning-rate": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "initial learning rate of a fork",
+    "kind": "fixed",
+    "type": "float"
+  },
+  "--fork-lr-mode": {
+    "category": "Resume and Fork",
+    "choices": [
+      "restart_cosine"
+    ],
+    "default": null,
+    "help": "fork learning-rate schedule: restart_cosine",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--fork-min-lr": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "minimum learning rate of a fork",
+    "kind": "fixed",
+    "type": "float"
+  },
+  "--fork-rewarm-iters": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "warmup steps for a fork",
+    "kind": "fixed",
+    "type": "int"
+  },
   "--geometry-preset": {
     "category": "Geometry",
     "default": null,
@@ -440,25 +478,25 @@
     "type": "int"
   },
   "--initialise-from-dense-snapshot": {
-    "category": "Run Control Parameters",
+    "category": "Resume and Fork",
     "default": null,
     "help": "initialise THOG from a saved dense snapshot",
     "kind": "fixed",
     "type": "string"
   },
   "--instrumentation__delta_loss_v_layer_heatmap": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "choices": [
       "log",
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
+    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
   "--instrumentation__delta_loss_v_layer_heatmap__destination": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "choices": [
       "wandb",
       "local",
@@ -470,28 +508,28 @@
     "type": "string"
   },
   "--instrumentation__delta_loss_v_layer_heatmap_abs_limit": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": 0.05,
     "help": "fixed symmetric colour limit; default 0.05",
     "kind": "dimension",
     "type": "float"
   },
   "--instrumentation__delta_loss_v_layer_heatmap_log_every_n_probes": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": 250,
     "help": "W&B-only sparse upload cadence; default 250 probes",
     "kind": "dimension",
     "type": "int"
   },
   "--instrumentation__depth_weight_curves__destination": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": null,
     "help": "six THOG curves or DENSE cross-marker charts; default local",
     "kind": "dimension",
     "type": "string"
   },
   "--instrumentation__optimizer_histories__full_matrix_every_n_steps": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": 0,
     "help": "full optimizer matrix capture; 0 disables",
     "kind": "dimension",
@@ -568,7 +606,7 @@
     "type": "string"
   },
   "--materialisation-profiling": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "choices": [
       "true",
       "false"
@@ -754,7 +792,7 @@
   },
   "--no-wandb": {
     "alias_for": "--wandb",
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": null,
     "help": "direct W&B enablement",
     "kind": "manual",
@@ -1277,7 +1315,7 @@
     "type": "string"
   },
   "--reset-optimizer": {
-    "category": "Run Control Parameters",
+    "category": "Resume and Fork",
     "default": null,
     "help": "explicit fork only: reset histories and bias-correction counters",
     "kind": "fixed",
@@ -1315,11 +1353,26 @@
     "short": "-R",
     "type": "string"
   },
+  "--resume": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "resume from an existing run/checkpoint by selector",
+    "kind": "fixed",
+    "type": "string"
+  },
+  "--resume-from": {
+    "category": "Resume and Fork",
+    "default": null,
+    "help": "path to a checkpoint for resume or fork",
+    "kind": "fixed",
+    "type": "string"
+  },
   "--run-mode": {
     "category": "Run Control Parameters",
     "choices": [
       "fresh",
-      "resume"
+      "resume",
+      "fork"
     ],
     "default": "fresh",
     "help": "fresh | resume | fork",
@@ -1343,7 +1396,7 @@
     "type": "string"
   },
   "--save-dense-initialisation-snapshot": {
-    "category": "Run Control Parameters",
+    "category": "Resume and Fork",
     "default": null,
     "help": "save a dense initialisation snapshot for a later THOG run",
     "kind": "fixed",
@@ -1398,21 +1451,21 @@
   },
   "--wandb": {
     "boolean_optional": true,
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": true,
     "help": "direct W&B enablement",
     "kind": "fixed",
     "type": "flag"
   },
   "--wandb-entity": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": null,
     "help": "W&B entity",
     "kind": "fixed",
     "type": "string"
   },
   "--wandb-mode": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "choices": [
       "online",
       "offline",
@@ -1424,14 +1477,14 @@
     "type": "string"
   },
   "--wandb-project": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": "thog",
     "help": "W&B project",
     "kind": "fixed",
     "type": "string"
   },
   "--wandb-root": {
-    "category": "Run Control Parameters",
+    "category": "Instrumentation",
     "default": "wandb",
     "help": "local W&B root",
     "kind": "fixed",

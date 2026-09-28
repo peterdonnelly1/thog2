@@ -163,6 +163,10 @@ window.addEventListener("load", () => {
         const id = run_identifier(entry.run);
         const colour = colour_for_run(id);
         for (const chart of group.charts || []) {
+          // The Runner frame already provides the native throughput card. The
+          // history metric with the same meaning must not replace its loss chart.
+          if (group_name === "train" && /(?:\?|&)runner_grid_tag=/.test(window.location?.search || "") &&
+              /(?:token.*(?:sec|throughput)|throughput)/i.test(`${chart.id} ${chart.title}`)) continue;
           let merged = charts.get(chart.id);
           if (!merged) {
             merged = {

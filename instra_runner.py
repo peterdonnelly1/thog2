@@ -169,7 +169,7 @@ class RunnerService:
             _write(state)
         return {"deleted": recipe_id}
 
-    def _pool(self, recipe):
+    def _pool(self, recipe, trial_count=None):
         hosts = self.network.list_hosts()
         master = hosts["master_id"] == hosts["local_id"]
         allowed = set(recipe.get("host_ids", []))
@@ -209,11 +209,11 @@ class RunnerService:
             raise ValueError("A configured GPU power cap targets an unavailable GPU")
         if not pool:
             raise ValueError("No discovered execution-enabled GPU is eligible")
-        return pool[:1] if len(recipe.get("profilers", ["none"])) == 1 and len(expand(recipe)) == 1 and not requested else pool
+        return pool[:1] if len(recipe.get("profilers", ["none"])) == 1 and (trial_count if trial_count is not None else len(expand(recipe))) == 1 and not requested else pool
 
     def preview(self, recipe, *, source=None, tight=False):
-        trials = expand(recipe)
-        pool = self._pool(recipe)
+        trials = expand(recipe, stable_preview=True)
+        pool = self._pool(recipe, len(trials))
         ready = [place for place in pool if not place.get("reservation_owner") or
                  (source and (place["reservation_owner"].get("grid_id") if isinstance(place["reservation_owner"], dict)
                               else place["reservation_owner"]) == source["grid_id"])]
@@ -297,7 +297,10 @@ class RunnerService:
             tag = f"G-{number:05d}"
             state["next_tag"] = number + 1
             grid_id = uuid.uuid4().hex
-            runs = [{**run, "grid_tag": tag, "grid_id": grid_id, "recipe_id": recipe_id} for run in plan["runs"]]
+            pair_ids = {}
+            runs = [{**run, "run_id": uuid.uuid4().hex,
+                     "pairing_id": pair_ids.setdefault(run["pairing_id"], uuid.uuid4().hex) if run["pairing_id"] else None,
+                     "grid_tag": tag, "grid_id": grid_id, "recipe_id": recipe_id} for run in plan["runs"]]
             grid = {"grid_id": grid_id, "grid_tag": tag, "recipe_id": recipe_id, "label": recipe["label"],
                     "recipe": recipe, "source_grid_id": source_grid_id, "repeat_mode": repeat_mode,
                     "created_at": now(), "state": "queued", "runs": runs, "gpu_pool": plan["gpu_pool"],
@@ -476,11 +479,18 @@ class RunnerService:
             active = [grid for grid in state["grids"] if grid["state"] not in TERMINAL]
             hosts = {run["host_id"] for grid in active for run in grid["runs"]}
             snapshots = {}
-            for host_id in hosts:
-                try:
-                    snapshots[host_id] = self.network.runner_call(host_id, "runner_reconcile")
-                except (network.NetworkError, OSError) as error:
-                    snapshots[host_id] = {"error": str(error)}
+            before_requests = _read()
+            self.lock.release()
+            try:
+                for host_id in hosts:
+                    try:
+                        snapshots[host_id] = self.network.runner_call(host_id, "runner_reconcile")
+                    except (network.NetworkError, OSError) as error:
+                        snapshots[host_id] = {"error": str(error)}
+            finally:
+                self.lock.acquire()
+            if _read() != before_requests:
+                return  # A user action changed the Grid while remote hosts were responding.
             self.reconciled = True
             changed = False
             # A 3,200-run Grid must not monopolize the controller while CUDA or
@@ -491,6 +501,8 @@ class RunnerService:
             busy_gpus = {(run["host_id"], run["gpu"]["gpu_key"])
                          for grid in active for run in grid["runs"]
                          if run["state"] in {"running", "dispatching", "unknown"}}
+            uncertain_gpus = {(run["host_id"], run["gpu"]["gpu_key"])
+                              for grid in active for run in grid["runs"] if run["state"] == "unknown"}
             for grid in active:
                 previous_grid = json.dumps(grid, sort_keys=True)
                 previous_state = grid["state"]
@@ -504,6 +516,7 @@ class RunnerService:
                     remote = snapshot.get("attempts", {}).get(latest["attempt_id"])
                     if remote is None:
                         run["state"] = "unknown"
+                        uncertain_gpus.add((run["host_id"], run["gpu"]["gpu_key"]))
                         run["blocking_reason"] = snapshot.get("error", "Attempt absent from Node Agent; manual reconciliation required")
                     else:
                         run["state"] = "cancelled" if run.get("stop_requested") and remote["state"] in TERMINAL else remote["state"]
@@ -531,7 +544,10 @@ class RunnerService:
                         run.update(state="blocked", blocking_reason=snapshot["error"])
                         continue
                     if (host_id, key) in busy_gpus:
-                        run.update(state="blocked", blocking_reason="GPU has a running or uncertain managed attempt")
+                        if (host_id, key) in uncertain_gpus:
+                            run.update(state="blocked", blocking_reason="GPU has an uncertain managed attempt")
+                        else:
+                            run.update(state="queued", blocking_reason="Waiting for a run on this GPU to finish")
                         continue
                     if (host_id, key) in failed_gpu_preflights:
                         run.update(state="blocked", blocking_reason=failed_gpu_preflights[(host_id, key)],
@@ -544,8 +560,21 @@ class RunnerService:
                         metadata = {field: run[field] for field in ("run_id", "grid_tag", "pairing_id", "profiler", "parameters", "dtype", "attention_backend")}
                         metadata["gpu_uuid"] = run["gpu"].get("uuid")
                         preflight_budget -= 1
-                        self.network.runner_call(host_id, "runner_preflight", {"run": metadata, "gpu_key": key,
-                                                                                "host_label": run["host_label"]})
+                        before_preflight = _read()
+                        preflight_error = None
+                        self.lock.release()
+                        try:
+                            try:
+                                self.network.runner_call(host_id, "runner_preflight", {"run": metadata, "gpu_key": key,
+                                                                                        "host_label": run["host_label"]})
+                            except (network.NetworkError, RuntimeError, ValueError, OSError) as error:
+                                preflight_error = error
+                        finally:
+                            self.lock.acquire()
+                        if _read() != before_preflight:
+                            return  # Stop/Save/Launch won the race; reconcile the new state next poll.
+                        if preflight_error is not None:
+                            raise preflight_error
                         self.network.runner_call(host_id, "runner_reserve", {"grid_id": grid["grid_id"], "gpu_key": key,
                                                                                "required_mib": run["required_mib"], "headroom_mib": headroom,
                                                                                "power_cap_w": run.get("requested_power_w")})
@@ -567,6 +596,7 @@ class RunnerService:
                     except (network.NetworkError, RuntimeError, ValueError, OSError) as error:
                         if run["attempts"] and run["state"] == "dispatching":
                             run.update(state="unknown", blocking_reason=f"Dispatch outcome uncertain: {error}")
+                            uncertain_gpus.add((host_id, key))
                         else:
                             run.update(state="blocked", blocking_reason=str(error))
                             run["next_retry_at"] = time.time() + 15

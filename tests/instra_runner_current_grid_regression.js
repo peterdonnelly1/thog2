@@ -15,12 +15,14 @@ class Element {
   replaceChildren() { this.children.length = 0; }
   addEventListener(name, callback) { this.events[name] = callback; }
   querySelectorAll(selector) { return selector === "button" ? this.children : []; }
+  querySelector(selector) { return selector === ".runner-event-log" ?
+    this.children.find(child => child.className === "runner-event-log") : null; }
   setAttribute(name, value) { this[name] = value; }
   click() { return this.events.click?.(); }
 }
 
 async function main() {
-  const roots = Object.fromEntries(["runner_view","runner_list","runner_detail","runner_message","runner_tabs",
+  const roots = Object.fromEntries(["runner_view","runner_list","runner_detail","runner_multiview_panel","runner_message","runner_tabs",
     "runner_nav","runs_nav","workspace_nav","networks_nav","settings_nav"].map(id => [id,new Element()]));
   for (const name of ["recipes","progress","multiview","current_scripts","history","log","files"]) {
     const tab = new Element("button"); tab.dataset.runnerTab = name; roots.runner_tabs.append(tab);
@@ -40,10 +42,11 @@ async function main() {
     grids:[finished,active],catalogue:{},common:[]};
   const network = {hosts:[]};
   const requests = [];
+  let log_events = '{"time":"2026-09-27T21:00:00Z","event":"launch"}\n';
   const fetch = async (url, options) => {
     requests.push({url,options});
     const data = url === "/api/runner" ? snapshot : url === "/api/network" ? network : {};
-    return {ok:true,json:async()=>data,text:async()=>'{"time":"2026-09-27T21:00:00Z","event":"launch"}\n'};
+    return {ok:true,json:async()=>data,text:async()=>log_events};
   };
   const context = {window:{innerWidth:1200}, document, fetch, AbortController, URLSearchParams,
     setInterval() {},setTimeout:()=>1,clearTimeout() {},Date,JSON,Number,String,
@@ -62,21 +65,33 @@ async function main() {
   const summaries = roots.runner_detail.children.filter(child => child.tagName === "details");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
-  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Host","GPU","Profiling"]);
+  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Step","Loss","Host","GPU","Profiling"]);
   switch_tab("log");
   await new Promise(resolve => setImmediate(resolve));
-  assert.ok(roots.runner_detail.children.some(child => child.className === "runner-event-log" && child.textContent.includes("LAUNCH")));
-  switch_tab("multiview");
-  const frame = roots.runner_detail.children.find(child => child.tagName === "iframe");
-  assert.equal(frame.src,"/?runner_grid_tag=G-00002");
+  const log_viewer = roots.runner_detail.querySelector(".runner-event-log");
+  assert.ok(log_viewer.textContent.includes("LAUNCH"));
+  log_events += '{"time":"2026-09-27T21:00:01Z","event":"run","detail":"started"}\n';
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(roots.runner_detail.children.find(child => child.tagName === "iframe"),frame,
+  assert.equal(roots.runner_detail.querySelector(".runner-event-log"),log_viewer,
+    "live log polling must keep the viewer mounted and its scroll position");
+  assert.ok(log_viewer.textContent.includes("RUN  started"),"new Grid events must appear without changing tabs");
+  switch_tab("multiview");
+  const frame = roots.runner_multiview_panel.children.find(child => child.tagName === "iframe");
+  assert.equal(frame.src,"/?runner_grid_tag=G-00002");
+  assert.equal(roots.runner_multiview_panel.hidden,false);
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
     "Runner polling must keep the chart frame mounted");
+  switch_tab("progress");
+  switch_tab("multiview");
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
+    "switching views must not reload a running Grid's charts");
   const html = fs.readFileSync("sheet/local_dashboard_assets/index.html","utf8");
   assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="current_scripts"/);
   assert.match(html,/data-runner-tab="history"[^]*data-runner-tab="log"/);
-  assert.equal((html.match(/<path d="M9 \d+h47" stroke="#[0-9a-f]+"\/>/g)||[]).length,4);
+  assert.equal((html.match(/<path d="M9 \d+h\d+" stroke="#[0-9a-f]+"\/>/g)||[]).length,4);
   assert.equal((html.match(/<path d="M9 \d+ C\d+ \d+ \d+ \d+ 56 \d+"/g)||[]).length,3);
 
   const base = fs.readFileSync("sheet/local_dashboard_assets/dashboard.js","utf8");

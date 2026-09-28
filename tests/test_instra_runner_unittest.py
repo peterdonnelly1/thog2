@@ -1,11 +1,14 @@
 # vvv THOG exercise Grid expansion, reservations, identity, recovery and standalone export without a GPU
 """Runner and Node Agent regression tests; no training runtime required."""
 
+import ast
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+import re
 from unittest.mock import patch
 import uuid
 from types import SimpleNamespace
@@ -14,6 +17,28 @@ import instra_network as network
 import instra_node_agent as agent
 import instra_runner as runner
 from thog_grid_runner import classic_script_for, command_for, expand, script_for, validate_recipe
+
+
+class ArtifactNamingTests(unittest.TestCase):
+    def test_grid_tag_precedes_host_without_changing_classic_names(self):
+        # Isolate the actual run_descriptor method; this host has no torch and
+        # cannot import sheet.run_config's GPU-dependent package initialization.
+        source = (Path(__file__).resolve().parents[1] / "sheet" / "run_config.py").read_text()
+        configuration = next(node for node in ast.parse(source).body
+                             if isinstance(node, ast.ClassDef) and node.name == "OwtRunConfig")
+        descriptor = next(node for node in configuration.body
+                          if isinstance(node, ast.FunctionDef) and node.name == "run_descriptor")
+        namespace = {"json": json, "os": os, "re": re,
+                     "normalize_component": lambda value: value}
+        exec(compile(ast.Module(body=[descriptor], type_ignores=[]), "run_config.py", "exec"), namespace)
+        subject = SimpleNamespace(host_label="scruffy", experiment_prefix="trial_G-00012_abc_NONE",
+                                  run_start_label="260928-1030", compact_artifact_fragment=lambda:None)
+        with patch.dict(os.environ, {"THOG2_RUNNER_METADATA": json.dumps({"grid_tag":"G-00012"})}):
+            self.assertEqual(namespace["run_descriptor"](subject),
+                             "260928-1030_G-00012_scruffy_trial_abc_NONE___DENSE")
+        with patch.dict(os.environ, {"THOG2_RUNNER_METADATA": ""}):
+            self.assertEqual(namespace["run_descriptor"](subject),
+                             "260928-1030_scruffy_trial_G-00012_abc_NONE___DENSE")
 
 
 def gpu(number):
@@ -95,6 +120,63 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(runs[0]["parameters"]["--option"], ["MLP_UP.order=2", "MLP_DOWN.order=2"])
         self.assertNotIn("--o-depth", command_for({**runs[0], "grid_tag": "G-00001"}, gpu(0)))
         self.assertIn("DEPTH.order=1", command_for({**runs[0], "grid_tag": "G-00001"}, gpu(0)))
+
+    def test_stable_preview_ids_mixed_dense_and_depth_unique_launches(self):
+        recipe={"label":"dense plus compact", "parameters":{"--geometry-preset":["dense","depth"],
+            "DEPTH.order":[1,2],"--max-iters":2,"--warmup-iters":0,"--n-layer":2,"--n-embd":64,
+            "--n-head":4,"--batch-size":1,"--block-size":32},"profilers":["nsys","ncu"]}
+        one=self.service.preview(recipe)
+        two=self.service.preview(recipe)
+        self.assertEqual([run["run_id"] for run in one["runs"]],[run["run_id"] for run in two["runs"]])
+        self.assertEqual(one["total_runs"],6)  # One dense reference; two DEPTH orders, each paired.
+        self.assertEqual(sum("DEPTH.order" not in run["parameters"] for run in one["runs"]),2)
+        saved=self.service.save_recipe(None,recipe)
+        first=self.service.launch(saved["recipe_id"])
+        second=self.service.launch(saved["recipe_id"])
+        self.assertFalse({run["run_id"] for run in first["runs"]} & {run["run_id"] for run in second["runs"]})
+        self.assertFalse({run["run_id"] for run in first["runs"]} & {run["run_id"] for run in one["runs"]})
+        self.assertEqual(first["runs"][0]["pairing_id"], first["runs"][1]["pairing_id"])
+
+    def test_stop_can_proceed_during_slow_gpu_preflight(self):
+        recipe={"label":"live", "parameters":{"--max-iters":2,"--warmup-iters":0,
+            "--n-layer":2,"--n-embd":64,"--n-head":4,"--batch-size":1,"--block-size":32}}
+        saved=self.service.save_recipe(None,recipe)
+        grid=self.service.launch(saved["recipe_id"])
+        entered=threading.Event(); release=threading.Event()
+        previous=self.fake.runner_call
+        def slow_preflight(host_id,operation,args=None):
+            if operation=="runner_preflight":
+                entered.set()
+                self.assertTrue(release.wait(5),"preflight did not release in test")
+            return previous(host_id,operation,args)
+        self.fake.runner_call=slow_preflight
+        worker=threading.Thread(target=self.service._refresh,daemon=True)
+        worker.start()
+        self.assertTrue(entered.wait(2))
+        try:
+            self.service.stop_grid(grid["grid_id"])
+            self.assertEqual(self.service.snapshot()["grids"][0]["state"],"stopping")
+        finally:
+            release.set();worker.join(timeout=3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.service.snapshot()["grids"][0]["runs"][0]["state"],"cancelled")
+
+    def test_node_agent_status_does_not_wait_for_gpu_preflight(self):
+        entered=threading.Event(); release=threading.Event()
+        def operation(_state,name,_args):
+            if name=="runner_preflight":
+                entered.set()
+                self.assertTrue(release.wait(5))
+            return {"operation":name}
+        with patch.object(agent,"_read_state",return_value={}),patch.object(agent,"_runner_operation",side_effect=operation):
+            worker=threading.Thread(target=lambda:agent._operation("runner_preflight",{}),daemon=True)
+            worker.start()
+            self.assertTrue(entered.wait(2))
+            try:
+                self.assertEqual(agent._operation("runner_reconcile",{}),{"operation":"runner_reconcile"})
+            finally:
+                release.set();worker.join(timeout=3)
+            self.assertFalse(worker.is_alive())
 
     def test_plastic_subordinate_controls_enable_plastic_without_a_ui_master_switch(self):
         base = {"run_id": uuid.uuid4().hex, "grid_tag": "G-00001", "profiler": "none", "parameters": {}}

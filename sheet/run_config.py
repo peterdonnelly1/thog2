@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 import math
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -1095,6 +1098,19 @@ class OwtRunConfig:
     def run_descriptor(self) -> str:
         geometry_fragment = self.compact_artifact_fragment() or "DENSE"
         host = normalize_component(self.host_label)
+        # Runner's Grid tag belongs between the timestamp and host. The classic
+        # CLI preserves its existing artifact names when no Runner metadata exists.
+        try:
+            runner_tag = json.loads(os.environ.get("THOG2_RUNNER_METADATA", "{}" )).get("grid_tag")
+        except (ValueError, TypeError, AttributeError):
+            runner_tag = None
+        if isinstance(runner_tag, str) and re.fullmatch(r"G-[0-9]{5,}", runner_tag) and self.run_start_label:
+            prefix = self.experiment_prefix
+            marker = f"{runner_tag}_"
+            if marker in prefix:
+                before, after = prefix.split(marker, 1)
+                prefix = f"{before.rstrip('_')}_{after}" if before.strip("_") else after
+            return f"{self.run_start_label}_{runner_tag}_{host}_{prefix}___{geometry_fragment}"
         # body = f"{host}_{self.experiment_prefix}_{geometry_fragment}"                                                                                    # <<< THOG preserved one-space descriptor separator
         body = f"{host}_{self.experiment_prefix}___{geometry_fragment}"                                                                                    # <<< THOG three descriptor spaces after RUN_NAME
         return f"{self.run_start_label}_{body}" if self.run_start_label else body                                                                          # <<< THOG descriptor v2 places host immediately after timestamp when present

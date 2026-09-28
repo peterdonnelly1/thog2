@@ -36,7 +36,7 @@
 .network-detail .network-healthy { color:#18733d; font-weight:normal; }
 .network-detail .network-unhealthy { color:#b02f3b; font-weight:normal; }
 .network-detail .network-discovering, #network_host_state.network-discovering { color:#b56a10; font-weight:normal; }
-.network-rail-icon { width:26px; height:26px; display:block; color:#515c66; }
+.network-rail-icon { width:43px; height:43px; display:block; color:#515c66; }
 /* vvv THOG keep the Monitoring interval beside its label inside Networks host details */
 .network-detail input[type="number"] { width:78px; margin-left:8px; }
 /* ^^^ THOG */

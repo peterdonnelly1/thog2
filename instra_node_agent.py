@@ -389,6 +389,10 @@ def _runner_operation(state, name, args):
 
 
 def _operation(name, args):
+    # Parameter/CUDA preflight may spend twenty seconds in a child process.
+    # It is read-only: never serialize discovery, status or stop behind it.
+    if name == "runner_preflight":
+        return _runner_operation(_read_state(), name, args)
     with _lock:
         state = _read_state()
         if name.startswith("runner_"):
