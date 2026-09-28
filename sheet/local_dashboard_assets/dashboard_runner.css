@@ -13,8 +13,8 @@
 .runner-recipe-add-row { width:100%; display:flex; align-items:center; gap:1.7rem; margin-bottom:1.1rem; }
 #runner_list .runner-recipe-add-row .runner-add-recipe { margin:0; flex:none; }
 .runner-recipe-row { display:flex; width:100%; gap:.6rem; align-items:stretch; }
-#runner_list .runner-recipe-row button:first-child { flex:0 1 55%; width:55%; min-width:0; }
-#runner_list .runner-recipe-row button:nth-child(2) { flex:none; white-space:nowrap; font-size:.82rem; }
+#runner_list .runner-recipe-row button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#runner_list .runner-recipe-row button:nth-child(2) { flex:0 0 auto; width:auto; white-space:nowrap; font-size:.82rem; }
 #runner_list .runner-recipe-row .runner-recipe-delete { width:auto; flex:none; color:#9a322c; }
 #runner_list button.active { outline:2px solid #5792cc; }
 #runner_detail { min-width:0; overflow:auto; }

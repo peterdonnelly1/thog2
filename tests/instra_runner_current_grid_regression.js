@@ -3,6 +3,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+const runner_css = fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.css", "utf8");
+assert.match(runner_css, /#runner_list \.runner-recipe-row button:nth-child\(2\)\s*\{[^}]*width:auto/,
+  "Rename Grid must override the general full-width list-button rule");
+assert.match(runner_css, /#runner_list \.runner-recipe-row button:first-child\s*\{[^}]*flex:1 1 0/,
+  "Recipe names must receive the remaining row width");
+
 class Element {
   constructor(tag = "div") {
     this.tagName = tag; this.children = []; this.events = {}; this.dataset = {}; this.style = {setProperty() {}};

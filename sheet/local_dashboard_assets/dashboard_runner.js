@@ -447,8 +447,10 @@
       add(add_row,"p","","runner-required-fields").id="runner_required_fields";
       for(const saved of [...snapshot.recipes].sort((a,b)=>String(b.created_at||b.updated_at||"").localeCompare(String(a.created_at||a.updated_at||"")))) {
         const row=add(list,"div",undefined,"runner-recipe-row");
-        button(row,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
-          draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();}).classList.toggle("active",chosen===saved.recipe_id);
+        const recipe_button=button(row,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
+          draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();});
+        recipe_button.title=saved.recipe.label;
+        recipe_button.classList.toggle("active",chosen===saved.recipe_id);
         const rename=button(row,"Rename Grid",async()=>{
           const label=prompt(`New name for Grid Recipe ${saved.recipe.label}`,saved.recipe.label);
           if(label===null || label.trim()===saved.recipe.label)return;
