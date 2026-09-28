@@ -1324,6 +1324,8 @@ def _runner_do_post(self):
         action = payload.get("action")
         if action == "save":
             result = _runner_service.save_recipe(payload.get("recipe_id"), payload["recipe"])
+        elif action == "delete_recipe":
+            result = _runner_service.delete_recipe(payload["recipe_id"])
         elif action == "preview":
             result = _runner_service.preview(payload["recipe"])
         elif action == "launch":

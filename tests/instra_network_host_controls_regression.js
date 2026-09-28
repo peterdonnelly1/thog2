@@ -154,6 +154,20 @@ async function main() {
   assert.equal(password.value, "");
   assert.equal(password.type, "password");
   assert.equal(auth_dialog.open, false);
+  hosts[1].state = "authentication required";
+  document.activeElement = null;
+  element("networks_nav").click();
+  await new Promise(resolve => setImmediate(resolve));
+  element("network_host_list").children[1].children[0].click();
+  assert.deepEqual(element("network_host_actions").children.map(child => child.textContent),
+    ["Refresh discovery", "Authenticate"]);
+  element("network_host_actions").children[1].click();
+  assert.equal(auth_dialog.open, true);
+  password.value = "fresh-secret";
+  element("network_auth_form").onsubmit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.at(-1).action, "discover");
+  assert.equal(calls.at(-1).args.password, "fresh-secret");
   console.log("PASS Networks discovery, list-row removal, master guard and masked SSH retry");
 }
 

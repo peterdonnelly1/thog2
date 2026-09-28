@@ -181,6 +181,11 @@
     const host_actions = element("network_host_actions");
     host_actions.replaceChildren();
     button(host_actions, "Refresh discovery", () => run_action("discover", host.thog_host_id).catch(() => {}));
+    if (!host.local && host.state === "authentication required")
+      button(host_actions, "Authenticate", async () => {
+        const password = await request_password(host);
+        if (password) run_action("discover", host.thog_host_id, {password}).catch(() => {});
+      });
     // ^^^ THOG
     for (const tab of element("network_tabs").querySelectorAll("button")) tab.classList.toggle("active", tab.dataset.networkTab === selected_tab);
     const stale = host.state !== "available" ? " (stale)" : "";

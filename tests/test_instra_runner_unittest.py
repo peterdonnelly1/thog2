@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import instra_network as network
 import instra_node_agent as agent
 import instra_runner as runner
-from thog_grid_runner import command_for, expand, script_for, validate_recipe
+from thog_grid_runner import classic_script_for, command_for, expand, script_for, validate_recipe
 
 
 def gpu(number):
@@ -116,6 +116,64 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("CUDA_VISIBLE_DEVICES=0", script)
         self.assertIn("--no-activation-checkpointing", command_for({**run,"parameters":{"--activation-checkpointing":False}}, gpu(0)))
 
+    def test_classic_script_preserves_wrapper_options_and_escapes_values(self):
+        run = {"run_id": uuid.uuid4().hex, "pairing_id": None, "grid_tag": "G-00001", "profiler": "none",
+               "host_label": "test", "parameters": {"--max-iters": 3, "--batch-size": 2, "--geometry-preset": "depth",
+               "--learning-rate": .0009, "--min-lr": .00009, "DEPTH.order": 2,
+               "--data-dir": "data/folder with 'quotes'"}, "gpu": gpu(0)}
+        script = classic_script_for([run])
+        self.assertIn('cd "$(dirname "${BASH_SOURCE[0]}")/../.."', script)
+        self.assertIn(" ./train_OWT.sh -g ", script)
+        self.assertIn("-n 3 -b 2 -p depth -c 90 -f 9", script)
+        self.assertIn("--select-depth --option DEPTH.order=2", script)
+        self.assertIn("'data/folder with '\"'\"'quotes'\"'\"''", script)
+        self.assertIn("CUDA_VISIBLE_DEVICES=0", script)
+
+    def test_large_grid_confirmation_deleted_recipe_history_and_event_log(self):
+        recipe = {**self.recipe, "parameters": {"--max-iters": 2,
+                       "--n-layer": list(range(11, 22)), "--warmup-iters": 0, "--n-embd": 64,
+                       "--n-head": 4, "--batch-size": list(range(1, 11)), "--block-size": 32}, "max_parallel": 1000}
+        saved = self.service.save_recipe(None, recipe)
+        with self.assertRaisesRegex(ValueError, "110 runs"):
+            self.service.launch(saved["recipe_id"])
+        grid = self.service.launch(saved["recipe_id"], confirm_large=True)
+        self.assertEqual(len(grid["runs"]), 110)
+        self.assertEqual(len(self.service.file(grid["grid_id"], "log").read_text().splitlines()), 1)
+        self.assertTrue(self.service.file(grid["grid_id"], "classic").read_text().startswith("#!/usr/bin/env bash"))
+        with self.assertRaisesRegex(ValueError, "active Grids"):
+            self.service.delete_recipe(saved["recipe_id"])
+        self.service.stop_grid(grid["grid_id"])
+        self.service._refresh()
+        self.assertEqual(self.service.delete_recipe(saved["recipe_id"]), {"deleted": saved["recipe_id"]})
+        self.assertEqual(self.service.snapshot()["grids"][0]["grid_id"], grid["grid_id"])
+        events = [json.loads(line) for line in self.service.file(grid["grid_id"], "log").read_text().splitlines()]
+        self.assertEqual(events[0]["event"], "launch")
+        self.assertTrue(any(event["event"] == "stop" for event in events))
+        self.assertTrue(all(event.get("time") for event in events))
+        self.service.file(grid["grid_id"], "classic").unlink()
+        self.service.file(grid["grid_id"], "log").unlink()
+        self.assertIn("./train_OWT.sh", self.service.file(grid["grid_id"], "classic").read_text())
+        historical=json.loads(self.service.file(grid["grid_id"], "log").read_text())
+        self.assertEqual(historical["event"], "historical")
+
+    def test_large_grid_cuda_failure_does_not_preflight_every_queued_run(self):
+        recipe={"label":"CUDA failure", "parameters":{"--max-iters":2,"--warmup-iters":0,
+                "--n-layer":list(range(2,22)),"--n-embd":64,"--n-head":4,
+                "--batch-size":1,"--block-size":32},"gpu_pool":[gpu(0)["gpu_id"]]}
+        saved=self.service.save_recipe(None,recipe)
+        self.service.launch(saved["recipe_id"])
+        calls=[]
+        previous=self.fake.runner_call
+        def cuda_failure(host_id,operation,args=None):
+            if operation=="runner_preflight":
+                calls.append(args["gpu_key"])
+                raise RuntimeError("CUDA initialization failed")
+            return previous(host_id,operation,args)
+        self.fake.runner_call=cuda_failure
+        self.service._refresh()
+        self.assertEqual(len(calls),1)
+        self.assertTrue(all(run["state"]=="blocked" for run in self.service.snapshot()["grids"][0]["runs"]))
+
     def test_cross_parameter_validation_and_repeat_snapshot(self):
         with self.assertRaisesRegex(ValueError, "divisible"):
             expand({"label":"bad", "parameters":{"--n-embd":64,"--n-head":3}})
@@ -144,8 +202,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(current["runs"][0]["state"],"completed")
         # Remaining attempts may be running or queued. Simulate acknowledgement of named stop.
         prior=self.fake.runner_call
+        grace_periods=[]
         def with_stop(host_id,operation,args=None):
             if operation=="runner_stop":
+                grace_periods.append(args["grace_seconds"])
                 self.fake.attempts[args["attempt_id"]]["state"]="failed"
                 return self.fake.attempts[args["attempt_id"]]
             return prior(host_id,operation,args)
@@ -155,6 +215,22 @@ class RunnerTests(unittest.TestCase):
         result=self.service.snapshot()["grids"][0]
         self.assertEqual(result["runs"][0]["state"],"completed")
         self.assertTrue(all(run["state"] in {"completed","cancelled"} for run in result["runs"]))
+        self.assertTrue(all(seconds == 120 for seconds in grace_periods))
+
+    def test_running_attempt_receives_graceful_stop_period(self):
+        saved=self.service.save_recipe(None,{**self.recipe,"gpu_pool":[gpu(0)["gpu_id"]]})
+        grid=self.service.launch(saved["recipe_id"])
+        self.service._refresh()
+        periods=[]
+        previous=self.fake.runner_call
+        def capture(host_id,operation,args=None):
+            if operation=="runner_stop":
+                periods.append(args["grace_seconds"])
+                return {"state":"running"}
+            return previous(host_id,operation,args)
+        self.fake.runner_call=capture
+        self.service.stop_grid(grid["grid_id"])
+        self.assertEqual(periods,[120])
 
     def test_retry_preserves_run_identity_and_records_new_attempt(self):
         one={"label":"one","parameters":{"--max-iters":2,"--warmup-iters":0,"--n-embd":8,"--n-head":2,

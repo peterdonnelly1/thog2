@@ -368,7 +368,7 @@ def _runner_operation(state, name, args):
                 run["stop_requested"] = True
                 _write_state(state)
                 try:
-                    os.killpg(run["pid"], signal.SIGTERM)
+                    os.killpg(run["pid"], signal.SIGKILL if grace == 0 else signal.SIGINT)
                 except ProcessLookupError:
                     pass
                 def force_if_still_running():

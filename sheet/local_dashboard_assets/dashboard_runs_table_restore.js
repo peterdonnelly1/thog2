@@ -113,7 +113,7 @@ window.addEventListener("load", () => {
       },
       optimizer: {label: "OPT", title: "optimizer (momentum suffix when used)", numeric: false, value: optimizer_text},
       gb: {
-        label: "GB", title: "peak process GPU memory allocated so far (GiB)", numeric: true,
+        label: "GB Pk", title: "peak process GPU memory allocated so far (GiB)", numeric: true,
         value: run => configured_value(run, "gpu_peak_memory_allocated_gb"),
       },
       layers: {label: "L", title: "layers", numeric: true, value: run => configured_value(run, "n_layer")},
@@ -285,9 +285,9 @@ window.addEventListener("load", () => {
         const key = header.dataset.instraColumnKey;
         if (!key) continue;
         if (key === "name") {
-          header.style.setProperty("width", "auto", "important");
-          header.style.setProperty("min-width", "0", "important");
-          header.style.setProperty("max-width", "none", "important");
+          header.style.setProperty("width", `${name_width}px`, "important");
+          header.style.setProperty("min-width", `${name_width}px`, "important");
+          header.style.setProperty("max-width", `${name_width}px`, "important");
           continue;
         }
         const width = widths[key];
@@ -404,7 +404,9 @@ window.addEventListener("load", () => {
         font-variant-numeric:tabular-nums; text-align:left !important; text-transform:none !important;
       }
       .runs-table .name-column {
-        position:relative; width:auto !important; min-width:0 !important; max-width:none !important;
+        position:relative; width:var(--instra-run-name-width,390px) !important;
+        min-width:var(--instra-run-name-width,390px) !important;
+        max-width:var(--instra-run-name-width,390px) !important;
       }
       .run-name-column-resizer {
         position:absolute; z-index:5; top:0; right:-4px; bottom:0;

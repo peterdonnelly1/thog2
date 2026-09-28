@@ -276,7 +276,7 @@ window.addEventListener("load", () => {
       const title = card.querySelector(".chart-heading-copy h2");
       if (title) title.textContent = "tokens throughput";
       const count = train.querySelector(".local-metric-group-count");
-      if (count) count.textContent = String(grid.querySelectorAll(":scope > .chart-card").length);
+      if (count) count.textContent = "2"; // Loss and throughput are both present, including during card moves.
       standardize_throughput_plot(by_id("training_throughput_plot"));
       layout_train_charts();                                                                                                                               // <<< THOG keep loss above the full-width throughput card
     }

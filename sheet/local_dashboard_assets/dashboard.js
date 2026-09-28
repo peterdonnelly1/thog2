@@ -497,13 +497,17 @@ async function refresh_catalog() {
   const deadline = setTimeout(() => abort.abort(), 45000);
   try {
     const catalog = await fetch_json("/api/runs", {signal: abort.signal});
-    app.runs = catalog.runs;
+    const runner_grid_tag = new URLSearchParams(window.location.search).get("runner_grid_tag");
+    app.runs = runner_grid_tag ? catalog.runs.filter(run => run.runner_grid_tag === runner_grid_tag) : catalog.runs;
     app.requested_run = catalog.requested_run;
-    app.recommended_run_id = catalog.recommended_run_id;
+    app.recommended_run_id = runner_grid_tag
+      ? app.runs.find(run => run_identifier(run) === catalog.recommended_run_id)?.dashboard_run_id ||
+        (app.runs[0] && run_identifier(app.runs[0])) || null
+      : catalog.recommended_run_id;
     app.root = catalog.root;
     const watch_text = catalog.waiting
       ? `Waiting · ${catalog.root}`
-      : `${catalog.runs.length} run${catalog.runs.length === 1 ? "" : "s"} · ${catalog.root}`;
+      : `${app.runs.length} run${app.runs.length === 1 ? "" : "s"} · ${catalog.root}`;
     by_id("watch_status").textContent = watch_text;
     by_id("topbar_state").textContent = watch_text;
 
@@ -1611,7 +1615,7 @@ function select_run(run_id, options = {}) {
   const manual = options.manual === true;
   app.manual_selection = manual;
   if (app.current_run_id !== run_id) {
-    restore_maximized_chart();
+    if (!app.workspace_mode) restore_maximized_chart();
     app.file_request_serial += 1;
     app.current_run_id = run_id;
     app.current_status = app.runs.find(run => run_identifier(run) === run_id) || null;
@@ -1621,10 +1625,10 @@ function select_run(run_id, options = {}) {
     app.file_payload = null;
     app.file_loading = false;
     by_id("file_search").value = "";
-    reset_run_charts();
+    if (!app.workspace_mode) reset_run_charts();
   }
-  const route = `/runs/${encodeURIComponent(run_id)}`;
-  if (window.location.pathname !== route) {
+  const route = `/runs/${encodeURIComponent(run_id)}${window.location.search}`;
+  if (window.location.pathname + window.location.search !== route) {
     if (options.replace_history) history.replaceState({}, "", route);
     else history.pushState({}, "", route);
   }
@@ -2628,6 +2632,8 @@ function bind_events() {
 }
 
 async function start() {
+  if (new URLSearchParams(window.location.search).has("runner_grid_tag"))
+    document.body.classList.add("instra-runner-grid-frame");
   migrate_panel_layout();
   ensure_depth_cards();
   install_universal_chart_settings();

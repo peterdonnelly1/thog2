@@ -14,7 +14,7 @@ import uuid
 
 import instra_network as network
 from instra_duration_estimator import estimate
-from thog_grid_runner import CATALOGUE, COMMON, expand, script_for, validate_recipe
+from thog_grid_runner import CATALOGUE, COMMON, classic_script_for, expand, script_for, validate_recipe
 
 TERMINAL = {"completed", "failed", "cancelled"}
 STATE_DIR = network.STATE_DIR
@@ -53,6 +53,13 @@ def _write_grid_file(path, value):
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+
+
+def _grid_event(grid, event, detail):
+    path = GRID_SCRIPTS / grid["grid_tag"] / "events.jsonl"
+    record = {"time": now(), "grid_id": grid["grid_id"], "event": event, "detail": detail}
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _memory_peak(parameters):
@@ -144,9 +151,23 @@ class RunnerService:
             if recipe_id is not None and recipe_id not in state["recipes"]:
                 raise KeyError("Unknown Recipe")
             recipe_id = recipe_id or uuid.uuid4().hex
-            state["recipes"][recipe_id] = {"recipe_id": recipe_id, "recipe": recipe, "updated_at": now()}
+            created_at = state["recipes"].get(recipe_id, {}).get("created_at", now())
+            state["recipes"][recipe_id] = {"recipe_id": recipe_id, "recipe": recipe,
+                                            "created_at": created_at, "updated_at": now()}
             _write(state)
             return state["recipes"][recipe_id]
+
+    def delete_recipe(self, recipe_id):
+        self._require_controller()
+        with self.lock:
+            state = _read()
+            if recipe_id not in state["recipes"]:
+                raise KeyError("Unknown Recipe")
+            if any(grid["recipe_id"] == recipe_id and grid["state"] not in TERMINAL for grid in state["grids"]):
+                raise ValueError("Stop active Grids using this Recipe before deleting it")
+            del state["recipes"][recipe_id]
+            _write(state)
+        return {"deleted": recipe_id}
 
     def _pool(self, recipe):
         hosts = self.network.list_hosts()
@@ -221,7 +242,7 @@ class RunnerService:
                             "attempts": [], "blocking_reason": "Awaiting GPU reservation"})
         history = _read()["grids"]
         return {"runs": planned, "total_runs": len(planned), "gpu_pool": pool,
-                "estimated_duration": estimate(planned, history, recipe.get("max_parallel", 1))}
+                "estimated_duration": estimate(planned, history, len(pool))}
 
     def _repeat_recipe(self, source, mode):
         if mode not in {"loose", "tight"}:
@@ -259,7 +280,7 @@ class RunnerService:
         with self.lock:
             state = _read()
             saved = state["recipes"].get(recipe_id)
-            if saved is None:
+            if saved is None and source_grid_id is None:
                 raise KeyError("Unknown Recipe")
             source = next((grid for grid in state["grids"] if grid["grid_id"] == source_grid_id), None) if source_grid_id else None
             if source_grid_id and source is None:
@@ -268,8 +289,8 @@ class RunnerService:
                 raise ValueError("Invalid repeat mode")
             recipe = self._repeat_recipe(source, repeat_mode) if source else json.loads(json.dumps(saved["recipe"]))
             plan = self.preview(recipe, source=source, tight=repeat_mode == "tight")
-            if plan["total_runs"] > 32 and not confirm_large:
-                raise ValueError(f"Confirm {plan['total_runs']} runs and their estimated duration before launch")
+            if plan["total_runs"] > 100 and not confirm_large:
+                raise ValueError(f"These values will take the size of the grid to {plan['total_runs']:,} runs. Confirm before launch")
             number = state["next_tag"]
             if number > 99999:
                 raise RuntimeError("Five-digit Grid tags exhausted")
@@ -289,9 +310,13 @@ class RunnerService:
                 (directory / ".runner-created").write_text(grid_id)
                 script.write_text(script_for(runs))
                 script.chmod(0o700)
+                classic = directory / "classic.sh"
+                classic.write_text(classic_script_for(runs))
+                classic.chmod(0o700)
                 _write_grid_file(directory / "manifest.json", grid)
                 _write_grid_file(directory / "placement.json", plan["gpu_pool"])
                 _write_grid_file(directory / "status.json", {"state": "queued", "created_at": grid["created_at"]})
+                _grid_event(grid, "launch", f"{len(runs)} runs queued from Recipe {recipe_id}")
                 state["grids"].append(grid)
                 _write(state)
             except Exception:
@@ -307,12 +332,28 @@ class RunnerService:
         if grid is None:
             raise KeyError("Unknown Grid")
         paths = {"script": GRID_SCRIPTS / (grid["grid_tag"] + ".sh"),
+                 "classic": GRID_SCRIPTS / grid["grid_tag"] / "classic.sh",
                  "manifest": GRID_SCRIPTS / grid["grid_tag"] / "manifest.json",
                  "placement": GRID_SCRIPTS / grid["grid_tag"] / "placement.json",
                  "status": GRID_SCRIPTS / grid["grid_tag"] / "status.json",
-                 "conversion": GRID_SCRIPTS / grid["grid_tag"] / "conversion.json"}
+                 "conversion": GRID_SCRIPTS / grid["grid_tag"] / "conversion.json",
+                 "log": GRID_SCRIPTS / grid["grid_tag"] / "events.jsonl"}
         if name not in paths:
             raise KeyError("Unknown Grid file")
+        # Older Grids predate both exports. Reconstruct their immutable resolved
+        # commands and mark the event log as historical when opened for the first time.
+        if name in {"classic", "log"} and not paths[name].exists():
+            with self.lock:
+                path = paths[name]
+                if not path.exists():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    if name == "classic":
+                        path.write_text(classic_script_for(grid["runs"]))
+                        path.chmod(0o700)
+                    else:
+                        with path.open("x", encoding="utf-8") as stream:
+                            stream.write(json.dumps({"time": grid["created_at"], "grid_id": grid_id,
+                                "event": "historical", "detail": "Grid created before event logging was enabled; earlier events unavailable"}) + "\n")
         return paths[name]
 
     def attempt_log(self, grid_id, run_id, attempt_id):
@@ -352,13 +393,14 @@ class RunnerService:
                 elif run["state"] in {"running", "dispatching"}:
                     run["stop_requested"] = True
             grid["state"] = "stopping"
+            _grid_event(grid, "stop", "Force stop requested" if force else "Graceful Ctrl-C stop requested")
             _write(state)
             for run in grid["runs"]:
                 if not run.get("stop_requested") or not run["attempts"]:
                     continue
                 try:
                     self.network.runner_call(run["host_id"], "runner_stop", {"grid_id": grid_id,
-                              "attempt_id": run["attempts"][-1]["attempt_id"], "grace_seconds": 0 if force else 10})
+                              "attempt_id": run["attempts"][-1]["attempt_id"], "grace_seconds": 0 if force else 120})
                 except (network.NetworkError, RuntimeError, OSError) as error:
                     run.update(state="unknown", blocking_reason=f"Stop outcome uncertain: {error}")
             _write(state)
@@ -378,6 +420,7 @@ class RunnerService:
             run.pop("released", None)
             run.pop("next_retry_at", None)
             grid["state"] = "queued"
+            _grid_event(grid, "retry", f"Run {run_id} queued for a new attempt")
             _write(state)
             return grid
 
@@ -414,6 +457,7 @@ class RunnerService:
             grid["repeat_mode"] = "loose"
             grid["conversion"] = {"time": now(), "from": "tight", "to": "loose", "moved_assignments": len(previous)}
             _write_grid_file(GRID_SCRIPTS / grid["grid_tag"] / "conversion.json", grid["conversion"])
+            _grid_event(grid, "placement", f"Tight to Loose; moved {len(previous)} queued assignments")
             _write(state)
             for host_id, gpu_key in set(previous):
                 if any(run["host_id"] == host_id and run["gpu"]["gpu_key"] == gpu_key and run["state"] not in TERMINAL
@@ -439,8 +483,19 @@ class RunnerService:
                     snapshots[host_id] = {"error": str(error)}
             self.reconciled = True
             changed = False
+            # A 3,200-run Grid must not monopolize the controller while CUDA or
+            # argument preflights fail. This is a per-poll dispatch budget, not
+            # a limit on how many runs may be active across polling cycles.
+            preflight_budget = 8
+            failed_gpu_preflights = {}
+            busy_gpus = {(run["host_id"], run["gpu"]["gpu_key"])
+                         for grid in active for run in grid["runs"]
+                         if run["state"] in {"running", "dispatching", "unknown"}}
             for grid in active:
                 previous_grid = json.dumps(grid, sort_keys=True)
+                previous_state = grid["state"]
+                previous_runs = {run["run_id"]: (run["state"], run.get("blocking_reason", ""), len(run["attempts"]))
+                                 for run in grid["runs"]}
                 for run in grid["runs"]:
                     if run["state"] not in {"running", "dispatching", "unknown"}:
                         continue
@@ -465,9 +520,8 @@ class RunnerService:
                         if remote["state"] in TERMINAL and not run.get("duration_seconds"):
                             finished = datetime.fromisoformat(remote["finished_at"]).timestamp() if remote.get("finished_at") else time.time()
                             run["duration_seconds"] = max(0, finished - datetime.fromisoformat(latest["started_at"]).timestamp())
-                running = sum(run["state"] in {"running", "dispatching"} for run in grid["runs"])
                 for run in grid["runs"]:
-                    if run["state"] not in {"queued", "blocked"} or running >= grid["recipe"].get("max_parallel", 1):
+                    if run["state"] not in {"queued", "blocked"}:
                         continue
                     if run.get("next_retry_at", 0) > time.time():
                         continue
@@ -476,14 +530,20 @@ class RunnerService:
                     if "error" in snapshot:
                         run.update(state="blocked", blocking_reason=snapshot["error"])
                         continue
-                    if any(other["state"] in {"running", "dispatching", "unknown"} and other["host_id"] == host_id and
-                           other["gpu"]["gpu_key"] == key for other_grid in active for other in other_grid["runs"]):
+                    if (host_id, key) in busy_gpus:
                         run.update(state="blocked", blocking_reason="GPU has a running or uncertain managed attempt")
+                        continue
+                    if (host_id, key) in failed_gpu_preflights:
+                        run.update(state="blocked", blocking_reason=failed_gpu_preflights[(host_id, key)],
+                                   next_retry_at=time.time() + 15)
+                        continue
+                    if preflight_budget <= 0:
                         continue
                     try:
                         headroom = grid["recipe"].get("headroom_mib", 512)
                         metadata = {field: run[field] for field in ("run_id", "grid_tag", "pairing_id", "profiler", "parameters", "dtype", "attention_backend")}
                         metadata["gpu_uuid"] = run["gpu"].get("uuid")
+                        preflight_budget -= 1
                         self.network.runner_call(host_id, "runner_preflight", {"run": metadata, "gpu_key": key,
                                                                                 "host_label": run["host_label"]})
                         self.network.runner_call(host_id, "runner_reserve", {"grid_id": grid["grid_id"], "gpu_key": key,
@@ -503,13 +563,15 @@ class RunnerService:
                         latest.update({"pid": result.get("pid"), "log_path": result.get("log_path"), "state": result["state"],
                                        "requested_power_w": result.get("requested_power_w"), "observed_power_w": result.get("observed_power_w")})
                         run["state"] = result["state"]
-                        running += 1
+                        busy_gpus.add((host_id, key))
                     except (network.NetworkError, RuntimeError, ValueError, OSError) as error:
                         if run["attempts"] and run["state"] == "dispatching":
                             run.update(state="unknown", blocking_reason=f"Dispatch outcome uncertain: {error}")
                         else:
                             run.update(state="blocked", blocking_reason=str(error))
                             run["next_retry_at"] = time.time() + 15
+                            if "cuda" in str(error).lower() or "preflight unavailable" in str(error).lower():
+                                failed_gpu_preflights[(host_id, key)] = str(error)
                 for run in grid["runs"]:
                     if run["state"] in TERMINAL and not run.get("released"):
                         if not any(other["host_id"] == run["host_id"] and other["gpu"]["gpu_key"] == run["gpu"]["gpu_key"]
@@ -532,6 +594,17 @@ class RunnerService:
                     grid["state"] = "stopping"
                 else:
                     grid["state"] = "running" if any(run["state"] == "running" for run in grid["runs"]) else "queued"
+                for run in grid["runs"]:
+                    old_state, old_reason, old_attempts = previous_runs[run["run_id"]]
+                    reason = run.get("blocking_reason", "")
+                    if (run["state"], reason, len(run["attempts"])) != (old_state, old_reason, old_attempts):
+                        last = run["attempts"][-1] if run["attempts"] else {}
+                        detail = (f"{run['run_id'][:8]} {run['host_label']} GPU {run['gpu']['ordinal']} "
+                                  f"{old_state} -> {run['state']}; attempts={len(run['attempts'])}; "
+                                  f"exit={last.get('exit_code', 'pending')}; {reason[:240]}")
+                        _grid_event(grid, "run", detail)
+                if grid["state"] != previous_state:
+                    _grid_event(grid, "grid", f"{previous_state} -> {grid['state']}")
                 directory = GRID_SCRIPTS / grid["grid_tag"]
                 changed |= json.dumps(grid, sort_keys=True) != previous_grid
                 status_path = directory / "status.json"

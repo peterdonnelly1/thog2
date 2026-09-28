@@ -74,8 +74,8 @@ button { color: inherit; }
   cursor: pointer;
 }
 .rail-item.selected { color: #008da9; background: #e3f5f8; }
-.runs-icon { width: 22px; height: 18px; display: grid; gap: 3px; }
-.runs-icon i { display: block; border: 1.5px solid currentColor; border-radius: 2px; }
+.rail-symbol { width:26px; height:26px; display:block; color:#515c66; flex:none; }
+.runs-icon path { fill:none; stroke-width:7; stroke-linecap:round; }
 .settings-icon { font-size: 23px; line-height: 20px; }
 
 .workspace {

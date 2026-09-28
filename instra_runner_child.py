@@ -22,6 +22,9 @@ def main():
             process.terminate()
 
     signal.signal(signal.SIGTERM, stop)
+    # The training child handles Ctrl-C and writes its checkpoint. The supervisor
+    # remains alive to record the child's exit when the whole group gets SIGINT.
+    signal.signal(signal.SIGINT, lambda _signal, _frame: None)
     with open(config["log_path"], "ab", buffering=0) as output:
         try:
             process = subprocess.Popen(config["argv"], cwd=config["cwd"], env=environment,

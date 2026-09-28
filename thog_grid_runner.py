@@ -108,8 +108,8 @@ def validate_recipe(recipe):
                                 any(not isinstance(v, str) or not re.fullmatch(r"[\w.:-]{1,150}", v) for v in recipe[field])):
             raise ValueError(f"Invalid {field}")
     parallel = recipe.get("max_parallel", 1)
-    if type(parallel) is not int or not 1 <= parallel <= 64:
-        raise ValueError("max_parallel must be 1–64")
+    if type(parallel) is not int or parallel < 1:
+        raise ValueError("max_parallel must be a positive integer")
     modes = recipe.get("profilers", ["none"])
     if not isinstance(modes, list) or not modes or len(modes) > 2 or len(set(modes)) != len(modes) or set(modes) - {"none", "nsys", "ncu"}:
         raise ValueError("profilers must be none or the NSYS/NCU pair")
@@ -226,6 +226,61 @@ def script_for(runs):
         environment = {**environment_for(run), "THOG2_RUNNER_METADATA": json.dumps(metadata, separators=(',', ':')),
                        "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"])}
         lines.append(" ".join(f"{key}={shlex.quote(value)}" for key, value in environment.items()) + " " + shlex.join(args))
+    return "\n".join(lines) + "\n"
+
+
+def classic_script_for(runs):
+    """Export resolved runs through the established train_OWT.sh front end."""
+    inverse = {name: flag for flag, name in SHORT_OPTIONS.items()}
+    inverse.update({"--dtype": "-T", "--attention-backend": "-K", "--geometry-preset": "-p"})
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "${BASH_SOURCE[0]}")/../.."',
+             "# Equivalent legacy-wrapper invocations; check host paths and GPU ordinals before replay."]
+    for run in runs:
+        gpu = run["gpu"]
+        resolved = command_for(run, gpu, host_label=run.get("host_label"))[3:]
+        label = f"{run['grid_tag']}_{run['run_id'][:12]}_{run['profiler'].upper()}"
+        flags = ["-g", label]
+        forwarded = []
+        index = 0
+        while index < len(resolved):
+            name = resolved[index]
+            value = resolved[index + 1] if index + 1 < len(resolved) else None
+            if name == "--run-name":
+                index += 2
+                continue
+            if name == "--model-type":
+                if value == "dense": flags += ["-p", "dense"]
+                index += 2
+                continue
+            if name == "--experiment-prefix":
+                if value != label: forwarded += [name, value]
+                index += 2
+                continue
+            if name in {"--learning-rate", "--min-lr"}:
+                code = float(value) * 100000
+                if abs(round(code) - code) < 1e-8:
+                    flags += ["-c" if name == "--learning-rate" else "-f", str(round(code))]
+                else:
+                    forwarded += [name, value]
+                index += 2
+                continue
+            if name in inverse:
+                flags += [inverse[name], value]
+                index += 2
+                continue
+            forwarded.append(name)
+            if value is not None and not value.startswith("--"):
+                forwarded.append(value)
+                index += 2
+            else:
+                index += 1
+        environment = {**environment_for(run), "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"]),
+                       "THOG2_HOST_LABEL": run.get("host_label", "local")}
+        lines.append(f"# {run.get('host_label', 'local')} GPU {gpu['ordinal']} · {run['run_id']} · {run['profiler']}")
+        if run.get("requested_power_w") is not None:
+            lines.append(f"nvidia-smi -i {int(gpu['ordinal'])} -pl {int(run['requested_power_w'])}")
+        lines.append(" ".join(f"{key}={shlex.quote(value)}" for key, value in environment.items()) +
+                     " ./train_OWT.sh " + shlex.join([*flags, *forwarded]))
     return "\n".join(lines) + "\n"
 
 

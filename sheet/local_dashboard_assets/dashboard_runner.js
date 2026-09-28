@@ -5,7 +5,7 @@
   const view = by_id("runner_view");
   if (!view) return;
   const list = by_id("runner_list"), detail = by_id("runner_detail"), message = by_id("runner_message");
-  const categories = ["Run Control Parameters", "GPT-2 Hyperparameters", "Geometry", "Premat", "NSIGHT",
+  const categories = ["GPT-2 Hyperparameters", "Run Control Parameters", "Geometry", "Premat", "NSIGHT",
     "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
@@ -14,7 +14,7 @@
     "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
   let snapshot = null, network = null, tab = "recipes", chosen = null, category = "Frequently Used";
-  let draft = null, draft_id = null, dirty = false, visible = false, polling = false;
+  let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
   const add = (parent, tag, value, class_name) => {
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = String(value ?? "—");
@@ -41,13 +41,17 @@
       const result = await request("/api/runner/action", {method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:name, ...values})});
       message.textContent = `${name} complete`; await refresh(true); return result;
-    } catch (error) { message.textContent = error.message; throw error; }
+    } catch (error) {
+      message.textContent = error.message;
+      if (tab === "recipes" && by_id("runner_validation")) by_id("runner_validation").textContent = error.message;
+      throw error;
+    }
   }
   function current_recipe() {
     return draft || {label:"New Grid Recipe", parameters:{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
       "--n-layer":16,"DEPTH.order":12,"--n-embd":1024,"--n-head":16,"--block-size":1024,
       "--gradient-accumulation-steps":6,"--checkpoint-segment-size":4,"--optimizer":"adamw",
-      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0}, max_parallel:1, profilers:["none"]};
+      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0}, profilers:["none"]};
   }
   function recipe_problems(recipe, hosts) {
     const errors = [];
@@ -61,8 +65,6 @@
         (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === "")) {
       errors.push("DEPTH.order is required for a DEPTH Recipe");
     }
-    if (!Number.isInteger(Number(recipe.max_parallel)) || Number(recipe.max_parallel) < 1 || Number(recipe.max_parallel) > 64)
-      errors.push("Maximum simultaneous runs must be between 1 and 64");
     if (!Array.isArray(recipe.profilers) || !recipe.profilers.length) errors.push("Profiling mode is required");
     const eligible = (hosts || []).filter(host => host.local || host.execution_enabled)
       .flatMap(host => (host.last_discovered?.execution_profiles?.length ? host.last_discovered.gpus || [] : [])
@@ -77,21 +79,29 @@
           ["--geometry-preset", "--optimizer"].includes(key) === false && !Number.isFinite(Number(value))))
         errors.push(`${key} must contain valid numbers`);
     }
+    const scalar = key => Number(parameters[key]);
+    if (Number.isFinite(scalar("--n-embd")) && Number.isFinite(scalar("--n-head")) &&
+        scalar("--n-head") > 0 && scalar("--n-embd") % scalar("--n-head") !== 0)
+      errors.push("--n-embd must be divisible by --n-head");
+    if (Number.isFinite(scalar("--warmup-iters")) && Number.isFinite(scalar("--max-iters")) &&
+        scalar("--warmup-iters") >= scalar("--max-iters")) errors.push("--warmup-iters must be less than --max-iters");
+    if (parameters["DEPTH.order"] !== undefined && scalar("DEPTH.order") > scalar("--n-layer"))
+      errors.push("DEPTH.order must not exceed --n-layer");
+    if (parameters["--min-lr"] !== undefined && scalar("--min-lr") > scalar("--learning-rate"))
+      errors.push("--min-lr must not exceed --learning-rate");
     return errors;
   }
   function check_recipe() {
     const errors = recipe_problems(current_recipe(), network?.hosts);
+    for (const field of detail.querySelectorAll('input[aria-invalid="true"]')) errors.push(`${field.dataset.runnerField} has invalid syntax`);
     const notice = by_id("runner_required_fields");
     if (notice) {
       notice.replaceChildren();
-      add(notice,"strong",errors.length ? `Complete ${errors.length} required item${errors.length === 1 ? "" : "s"} before saving, previewing or launching:` :
-        "Required inputs complete. Placement is checked again during Preview.");
-      if (errors.length) {
-        const items = add(notice,"ul");
-        for (const error of errors) add(items,"li",error);
-      }
+      add(notice,"strong",errors.length ? `${errors.length} input issue${errors.length === 1 ? "" : "s"}; see details beside Search.` :
+        "Required inputs complete. Host and GPU placement is checked again during Preview.");
     }
-    if (errors.length) message.textContent = errors.join("; ");
+    const validation = by_id("runner_validation");
+    if (validation) validation.textContent = errors.join("; ");
     return !errors.length;
   }
   function edit(key, value) { draft = current_recipe(); draft.parameters[key] = value; dirty = true; check_recipe(); }
@@ -103,7 +113,7 @@
   }
   function show_fields(container, keys, include_profiler=false) {
     const grid = add(container,"div",undefined,"runner-fields");
-    const columns = window.innerWidth < 800 ? 1 : window.innerWidth < 1300 ? 2 : category === "Frequently Used" && !by_id("runner_parameter_search")?.value ? 5 : 3;
+    const columns = window.innerWidth < 800 ? 1 : category === "Frequently Used" && !by_id("runner_parameter_search")?.value ? 2 : 1;
     grid.style.setProperty("--runner-columns",String(columns));
     grid.style.setProperty("--runner-rows",String(Math.max(1,Math.ceil((keys.length + (include_profiler ? 1 : 0))/columns))));
     if (include_profiler) {
@@ -122,12 +132,23 @@
       const label = add(grid,"label",`${key}${spec.short ? ` (${spec.short})` : ""}`);
       label.title = spec.help;
       const field = add(label,"input");
+      field.dataset.runnerField = key;
       field.title=spec.help;
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
         String(current_recipe().parameters[key] ?? "");
       field.placeholder = spec.kind === "dimension" ? "One or comma-separated choices" : spec.kind === "list" ? "One item per line" :
         spec.type === "flag" ? "true or false" : String(spec.default ?? "");
+      field.addEventListener("input", () => {
+        const parts = spec.kind === "dimension" ? field.value.split(",").map(part=>part.trim()) : [field.value.trim()];
+        const invalid = Boolean(field.value.trim()) && parts.some(part =>
+          spec.type === "int" ? !/^[+-]?\d+$/.test(part) :
+          spec.type === "float" ? !Number.isFinite(Number(part)) :
+          spec.type === "flag" ? !["true","false"].includes(part) : false);
+        field.setAttribute("aria-invalid",String(invalid));
+        check_recipe();
+      });
       field.addEventListener("change", () => {
+        if (field.getAttribute("aria-invalid") === "true") return;
         if (field.value === "") { draft=current_recipe();delete draft.parameters[key];dirty=true;check_recipe(); }
         else edit(key, parse_value(key, field.value, spec));
       });
@@ -140,7 +161,6 @@
     const label = add(detail,"label","Recipe label");
     const label_input = add(label,"input"); label_input.value = recipe.label;
     label_input.addEventListener("change", () => { draft = current_recipe(); draft.label = label_input.value; dirty = true;check_recipe(); });
-    add(detail,"div",undefined,"runner-required-fields").id="runner_required_fields";
     const controls = add(detail,"div",undefined,"runner-actions");
     button(controls,"Save",async () => {
       if (!check_recipe()) return;
@@ -167,22 +187,20 @@
         const preview = await action("preview",{recipe:current_recipe()});
         const names = preview.gpu_pool.map(item => `${item.host_label} GPU ${item.gpu.ordinal}`).join(", ");
         if (!confirm(`Launch ${preview.total_runs} THOG runs on ${names}?`)) return;
-        await action("launch",{recipe_id:draft_id,confirm_large:true}); tab="progress"; render();
+        if (preview.total_runs > 100 && !confirm(`These values will take the size of the grid to ${preview.total_runs.toLocaleString()} runs. Proceed?`)) return;
+        const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
+        last_history_grid=launched.grid_id;tab="progress"; render();
       } catch (_) { /* The error is displayed above. */ }
     });
-    const selectors = add(detail,"div",undefined,"runner-fields");
-    const max_label=add(selectors,"label","Maximum simultaneous runs");
-    const parallel=add(max_label,"input"); parallel.type="number"; parallel.min="1"; parallel.max="64";
-    parallel.value=recipe.max_parallel||1;
-    parallel.addEventListener("change",()=>{draft=current_recipe();draft.max_parallel=Number(parallel.value);dirty=true;check_recipe();});
-    max_label.title="Maximum number of Grid runs that may execute at once";
-    parallel.title=max_label.title;
     const eligible=(network?.hosts||[]).filter(host=>(host.local||host.execution_enabled) &&
       host.last_discovered?.execution_profiles?.length)
       .flatMap(host=>(host.last_discovered?.gpus||[]).map(gpu=>({host,gpu})));
-    const placement=add(detail,"p",`GPU placement: ${recipe.gpu_pool?.length ? `${recipe.gpu_pool.length} selected GPU${recipe.gpu_pool.length===1?"":"s"}` : `Automatic (default) · ${eligible.length} discovered GPU${eligible.length===1?"":"s"}`}` ,"runner-placement-status");
+    const placement_text = selected => selected.length ? selected.map(id => {
+      const choice=eligible.find(({host,gpu})=>(gpu.gpu_id||`${host.thog_host_id}.gpu.${gpu.gpu_key}`)===id);
+      return choice ? `${choice.host.display_name} GPU ${choice.gpu.ordinal} (${choice.gpu.model}, ${choice.gpu.memory_mib??"?"} MiB)` : id;
+    }).join("; ") : `Automatic (default) from ${eligible.length} discovered GPU${eligible.length===1?"":"s"}`;
+    const placement=add(detail,"p",`GPU placement: ${placement_text(recipe.gpu_pool||[])}` ,"runner-placement-status");
     const pool = add(detail,"details",undefined,"runner-gpu-pool");
-    const placement_text = selected => selected.length ? `${selected.length} selected` : `Automatic (default) from ${eligible.length} discovered GPU${eligible.length===1?"":"s"}`;
     add(pool,"summary",`Eligible hosts and GPUs · ${placement_text(recipe.gpu_pool||[])}`);
     add(pool,"p","Select GPUs to restrict placement. With none selected, Runner chooses from eligible hosts.","runner-gpu-note");
     for (const host of network?.hosts || []) {
@@ -205,8 +223,10 @@
           if(cap.value)draft.power_caps[gpu_id]=Number(cap.value);else delete draft.power_caps[gpu_id];dirty=true;});
       }
     }
-    const search=add(detail,"input",undefined,"runner-parameter-search");search.id="runner_parameter_search";
+    const search_row=add(detail,"div",undefined,"runner-search-row");
+    const search=add(search_row,"input",undefined,"runner-parameter-search");search.id="runner_parameter_search";
     search.placeholder="Search fields across all parameter tabs";
+    const validation=add(search_row,"p","","runner-validation");validation.id="runner_validation";
     const categories_row=add(detail,"nav",undefined,"runner-categories");
     const fields=add(detail,"div");
     function show_category(query="") {
@@ -228,7 +248,13 @@
   function render_run(parent,run) {
     const row=add(parent,"details",undefined,"runner-run");
     if (["failed","blocked"].includes(run.state)) row.open = true;
-    add(row,"summary",`${run.run_id.slice(0,8)} · ${run.state} · ${run.host_label} GPU ${run.gpu.ordinal} · ${run.profiler.toUpperCase()}`);
+    const summary=add(row,"summary",undefined,"runner-run-identity");
+    add(summary,"span",run.run_id.slice(0,8));
+    add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
+    add(summary,"span",run.host_label);
+    add(summary,"span",`GPU ${run.gpu.ordinal}`);
+    const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
+    profiler.title="Profiling mode: none, NSYS or NCU";
     add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power requested ${run.requested_power_w??"default"} W`);
     if (run.pairing_id) add(row,"p",`Paired profiler runs: ${run.pairing_id}`);
     if (run.blocking_reason) add(row,"p",run.blocking_reason);
@@ -271,12 +297,15 @@
   }
   function render_script(parent,grid) {
     const script_url=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=script`;
-    const link=add(parent,"a",`Download ${grid.grid_tag} Bash script`);
+    const links=add(parent,"div",undefined,"runner-script-links");
+    const link=add(links,"a","Download Runner Script");
     link.href=script_url+"&download=1";link.download="";
-    const manifest=add(parent,"a","View resolved manifest");
-    manifest.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=manifest`;
-    manifest.target="_blank";manifest.rel="noopener";
-    add(parent,"p","The Bash export calls the existing Python training entry point for every resolved run. There is no separate generated Python script.");
+    const classic=add(links,"a","Export Equivalent Old-school THOG script");
+    classic.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=classic&download=1`;classic.download="";
+    const manifest=add(links,"a",tab==="files"?"Download Resolved Manifest (JSON)":"View Resolved Manifest (JSON)");
+    manifest.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=manifest${tab==="files"?"&download=1":""}`;
+    if(tab==="files")manifest.download="";else{manifest.target="_blank";manifest.rel="noopener";}
+    add(parent,"p","Runner Script calls the Python entry point; the old-school export uses train_OWT.sh. Check host paths and GPU ordinals on replay.");
     const viewer=add(parent,"pre","Loading script…","runner-script-viewer");
     fetch(script_url).then(async response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.text();})
       .then(source=>{if(chosen===grid.grid_id && ["files","current_scripts"].includes(tab))viewer.textContent=source;})
@@ -284,7 +313,11 @@
   }
   function render_grid(grid) {
     detail.replaceChildren();add(detail,"h2",`${grid.grid_tag} · ${grid.label}`);
-    add(detail,"p",`State ${grid.state} · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
+    const state=add(detail,"p",undefined);
+    add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
+    add(state,"span",` · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
+    if(["progress","current_scripts"].includes(tab)) add(detail,"p",
+      "Possible states are: queued, dispatching, running, blocked, stopping, unknown, completed, failed, cancelled.","runner-state-legend");
     if(tab==="progress") {
       const controls=add(detail,"div",undefined,"runner-actions");
       button(controls,"Stop Grid",async()=>{if(!confirm(`Stop ${grid.grid_tag} and its running attempts?`))return;
@@ -313,33 +346,62 @@
           const differences=proposed.changes.slice(0,8).map(item=>`${item.prior_run_id.slice(0,8)}: ${JSON.stringify(item.changes)}`).join("\n");
           const estimate=proposed.estimated_duration.seconds===null?"insufficient history":`${proposed.estimated_duration.seconds}s`;
           if(!confirm(`Repeat ${grid.grid_tag} (${mode})?\nRecipe: ${proposed.recipe.label}\nRuns: ${proposed.total_runs}; executions: ${proposed.physical_executions}\nPlacement: ${places}\nEstimate: ${estimate}\nChanges: ${differences||"none"}${proposed.changes.length>8?"\nMore changes appear in the resolved preview":""}`))return;
-          await action("repeat",{grid_id:grid.grid_id,mode,confirm_large:true});tab="progress";render();
+          if(proposed.total_runs>100 && !confirm(`These values will take the size of the grid to ${proposed.total_runs.toLocaleString()} runs. Proceed?`))return;
+          const repeated=await action("repeat",{grid_id:grid.grid_id,mode,confirm_large:proposed.total_runs>100});
+          last_history_grid=repeated.grid_id;tab="progress";render();
         }
         catch (_) { /* Error shown above. */ }
       });
     }
     if (tab==="files" || tab==="current_scripts") {
-      if (tab==="files") for (const name of ["manifest","placement","status",...(grid.conversion?["conversion"]:[])]) {
+      if (tab==="files") for (const name of ["placement","status",...(grid.conversion?["conversion"]:[]),"log"]) {
         const path=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=${name}`;
         const link=add(detail,"a",`Download ${name}`);link.href=path+"&download=1";link.download="";
         detail.append(document.createElement("br"));
       }
       render_script(detail,grid);
     }
-    for (const run of grid.runs) if(!["files","current_scripts"].includes(tab))render_run(detail,run);
+    if(tab==="log") {
+      const path=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=log`;
+      const download=add(detail,"a","Download Grid event log");download.href=path+"&download=1";download.download="";
+      const viewer=add(detail,"pre","Loading Grid events…","runner-event-log");
+      fetch(path).then(async response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.text();})
+        .then(source=>{if(chosen===grid.grid_id && tab==="log")viewer.textContent=source.trim().split("\n").filter(Boolean)
+          .map(line=>{try{const event=JSON.parse(line);return `${event.time}  ${event.event.toUpperCase()}  ${event.detail}`;}
+            catch(_){return line;}}).join("\n")||"No events yet";})
+        .catch(error=>{viewer.textContent=`Grid event log unavailable: ${error.message}`;});
+    }
+    if(tab==="history") {
+      const headings=add(detail,"div",undefined,"runner-run-headings");
+      for(const name of ["Run ID","State","Host","GPU","Profiling"])add(headings,"strong",name);
+    }
+    for (const run of (tab==="history"?grid.runs.map((item,index)=>({item,index})).sort((a,b)=>
+      String(b.item.attempts?.at(-1)?.started_at||grid.created_at).localeCompare(
+        String(a.item.attempts?.at(-1)?.started_at||grid.created_at)) || b.index-a.index).map(entry=>entry.item):grid.runs))
+      if(!["files","current_scripts","log","multiview"].includes(tab))render_run(detail,run);
   }
   function render() {
     if (!snapshot || !visible) return;
     for (const control of by_id("runner_tabs").querySelectorAll("button"))control.classList.toggle("active",control.dataset.runnerTab===tab);
     list.replaceChildren();
-    const grids=snapshot.grids.filter(grid=>!["progress","current_scripts"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
+    const grids=snapshot.grids.filter(grid=>!["progress","current_scripts","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
     if(tab==="recipes") {
-      button(list,"Add Grid Recipe",()=>{
+      const add_row=add(list,"div",undefined,"runner-recipe-add-row");
+      button(add_row,"Add Grid Recipe",()=>{
         if(dirty && !confirm("Discard unsaved Recipe edits and start a new Recipe?"))return;
         draft_id=null;draft=null;chosen=null;dirty=false;render_editor();
       }).classList.add("runner-add-recipe");
-      for(const saved of snapshot.recipes)button(list,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
-        draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();}).classList.toggle("active",chosen===saved.recipe_id);
+      add(add_row,"p","","runner-required-fields").id="runner_required_fields";
+      for(const saved of [...snapshot.recipes].sort((a,b)=>String(b.created_at||b.updated_at||"").localeCompare(String(a.created_at||a.updated_at||"")))) {
+        const row=add(list,"div",undefined,"runner-recipe-row");
+        button(row,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
+          draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();}).classList.toggle("active",chosen===saved.recipe_id);
+        button(row,"Delete",async()=>{
+          if(!confirm(`Delete Recipe ${saved.recipe.label}? Its Grid history will remain available.`))return;
+          try{await action("delete_recipe",{recipe_id:saved.recipe_id});if(chosen===saved.recipe_id){chosen=null;draft_id=null;draft=null;dirty=false;}render();}
+          catch(_){/* Error shown above. */}
+        }).classList.add("runner-recipe-delete");
+      }
       if(chosen && !snapshot.recipes.some(item=>item.recipe_id===chosen))chosen=null;
       if(!dirty || !detail.querySelector("input:focus"))render_editor();
     } else {
@@ -349,13 +411,29 @@
         const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1).slice(0,110)}` : ""}` : "";
         const blocked=grid.runs.find(run=>run.state==="blocked" && run.blocking_reason);
         const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
-        button(list,`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
-        ()=>{chosen=grid.grid_id;render();}).classList.toggle("active",chosen===grid.grid_id);
+        const entry=button(list,`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
+        ()=>{chosen=grid.grid_id;if(tab==="history")last_history_grid=chosen;render();});
+        entry.classList.toggle("active",chosen===grid.grid_id);
+        entry.classList.add(`runner-status-${grid.state}`);
       }
-      const grid=grids.find(item=>item.grid_id===chosen)||grids.at(-1);
-      if(grid){chosen=grid.grid_id;render_grid(grid);}else{detail.replaceChildren();add(detail,"p",
-        ["progress","current_scripts"].includes(tab)?"No Grids are currently active":"No Grids in this view");}
+      const grid=grids.find(item=>item.grid_id===chosen)||grids.find(item=>item.grid_id===last_history_grid && tab==="history")||grids.at(-1);
+      if(grid){
+        chosen=grid.grid_id;
+        if(tab==="history")last_history_grid=chosen;
+        if(tab==="multiview"){
+          if(detail.dataset.gridMultiview!==grid.grid_id){
+            detail.replaceChildren();detail.dataset.gridMultiview=grid.grid_id;
+            add(detail,"h2",`${grid.grid_tag} · ${grid.label} · Multiview`);
+            const frame=add(detail,"iframe",undefined,"runner-multiview-frame");
+            frame.title=`Multiview for ${grid.grid_tag}`;
+            frame.src=`/?runner_grid_tag=${encodeURIComponent(grid.grid_tag)}`;
+            frame.addEventListener("load",()=>setTimeout(()=>frame.contentDocument?.getElementById("workspace_nav")?.click(),50));
+          }
+        }else{delete detail.dataset.gridMultiview;render_grid(grid);}
+      }else{delete detail.dataset.gridMultiview;detail.replaceChildren();add(detail,"p",
+        ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view");}
     }
+    view.classList.toggle("runner-full-width",tab==="multiview");
   }
   async function refresh(repaint=false) {
     if(!visible || polling)return;
@@ -363,6 +441,9 @@
     try {
       const [next,hosts]=await Promise.all([request("/api/runner"),request("/api/network")]);
       snapshot=next;network=hosts;
+      const newest=next.grids.at(-1)?.grid_id||null;
+      if(newest && newest!==last_seen_grid)last_history_grid=newest;
+      last_seen_grid=newest;
       if(repaint||tab!=="recipes"||!dirty)render();
     } catch(error){message.textContent=error.message;}
     finally{polling=false;}
@@ -370,7 +451,7 @@
   by_id("runner_nav").addEventListener("click",()=>{visible=true;refresh(true);});
   for(const id of ["runs_nav","workspace_nav","networks_nav","settings_nav"])by_id(id)?.addEventListener("click",()=>{visible=false;});
   for(const control of by_id("runner_tabs").querySelectorAll("button"))control.addEventListener("click",()=>{
-    tab=control.dataset.runnerTab;chosen=null;render();
+    tab=control.dataset.runnerTab;chosen=tab==="history"?last_history_grid:null;render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
   window.instra_runner_test_hooks = Object.freeze({recipe_problems});

@@ -161,7 +161,7 @@ window.addEventListener("load", () => {
       name.textContent = summary.name;
       const count = document.createElement("span");
       count.className = "group-count local-metric-group-count";
-      count.textContent = String(summary.chart_count || 0);
+      count.textContent = summary.name === "train" ? "2" : String(summary.chart_count || 0);
       button.append(name, count);
       header.appendChild(button);
 
@@ -189,7 +189,8 @@ window.addEventListener("load", () => {
     const update_group_section = summary => {
       let section = group_section(summary.name);
       if (!section) section = make_group_section(summary);
-      section.querySelector(".local-metric-group-count").textContent = String(summary.chart_count || 0);
+      section.querySelector(".local-metric-group-count").textContent = summary.name === "train"
+        ? "2" : String(summary.chart_count || 0);
       let message = section.querySelector(".local-metric-empty");
       if (!message) {
         message = document.createElement("p");
@@ -197,7 +198,7 @@ window.addEventListener("load", () => {
         section.querySelector(".local-metric-grid").appendChild(message);
       }
       message.textContent = summary.reason || "No system metrics have been recorded for this run yet.";
-      message.hidden = Number(summary.chart_count || 0) > 0;
+      message.hidden = summary.name === "train" || Number(summary.chart_count || 0) > 0;
       group_revisions.set(summary.name, Number(summary.revision || 0));
       return section;
     };
