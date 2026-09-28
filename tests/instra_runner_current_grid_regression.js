@@ -50,13 +50,18 @@ async function main() {
   };
   const context = {window:{innerWidth:1200}, document, fetch, AbortController, URLSearchParams,
     setInterval() {},setTimeout:()=>1,clearTimeout() {},Date,JSON,Number,String,
-    confirm:()=>true};
+    confirm:()=>true,prompt:()=>"Renamed Recipe"};
   vm.runInNewContext(fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.js","utf8"),context);
   const switch_tab = name => roots.runner_tabs.children.find(tab => tab.dataset.runnerTab === name).click();
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
-  assert.equal(roots.runner_list.children[1].children[1].textContent,"Delete");
+  assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename Grid");
+  assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");
+  await roots.runner_list.children[1].children[1].click();
+  const rename = requests.find(entry => entry.url === "/api/runner/action" &&
+    JSON.parse(entry.options.body).recipe?.label === "Renamed Recipe");
+  assert.equal(JSON.parse(rename.options.body).recipe_id,"latest","Recipe rename must preserve its ID");
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,1,"finished Grids must disappear from Progress");
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");

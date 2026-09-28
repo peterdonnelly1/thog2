@@ -449,6 +449,17 @@
         const row=add(list,"div",undefined,"runner-recipe-row");
         button(row,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
           draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();}).classList.toggle("active",chosen===saved.recipe_id);
+        const rename=button(row,"Rename Grid",async()=>{
+          const label=prompt(`New name for Grid Recipe ${saved.recipe.label}`,saved.recipe.label);
+          if(label===null || label.trim()===saved.recipe.label)return;
+          if(!label.trim()){message.textContent="Grid Recipe name cannot be blank";return;}
+          try{
+            await action("save",{recipe_id:saved.recipe_id,recipe:{...saved.recipe,label:label.trim()}});
+            if(draft_id===saved.recipe_id && !dirty && draft)draft.label=label.trim();
+            render();
+          }catch(_){/* Error shown above. */}
+        });
+        rename.title="Rename this saved Grid Recipe. To rename a launched Grid, open it in History or Progress.";
         button(row,"Delete",async()=>{
           if(!confirm(`Delete Recipe ${saved.recipe.label}? Its Grid history will remain available.`))return;
           try{await action("delete_recipe",{recipe_id:saved.recipe_id});if(chosen===saved.recipe_id){chosen=null;draft_id=null;draft=null;dirty=false;}render();}
