@@ -481,7 +481,7 @@ def test_dashboard_uses_persistent_split_workspace_and_clean_plot_nodes() -> Non
     assert "text-transform: none !important;" in stylesheet
     assert "run.heatmap_minimum_update" in javascript
     assert "run.depth_minimum_update" in javascript
-    assert ">Logged</th>" in html
+    assert ">step</th>" in html
     assert "mount.replaceChildren();" in javascript
     assert "Plotly.newPlot" in javascript
     assert "transpose_heatmap" in javascript
