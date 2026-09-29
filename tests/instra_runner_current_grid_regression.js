@@ -145,6 +145,14 @@ async function main() {
   assert.equal(roots.runner_multiview_panel.querySelector("select").children.length,2);
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
     "/?runner_grid_tag=G-00003", "automatic selection follows the newest running Grid");
+  other.state="completed";
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
+    "/?runner_grid_tag=G-00002", "an automatically selected finished Grid yields to a running Grid");
+  other.state="running";
+  roots.runner_nav.click();
+  await new Promise(resolve => setImmediate(resolve));
   const new_selector=roots.runner_multiview_panel.querySelector("select");
   new_selector.value="grid-2";new_selector.events.change();
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,

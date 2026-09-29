@@ -523,7 +523,7 @@
       control=add(multiview,"label","Active Grid · ","runner-multiview-selector");
       const select=add(control,"select");
       select.setAttribute("aria-label","Choose an active Grid for Multiview");
-      select.addEventListener("change",()=>{chosen=select.value;render();});
+      select.addEventListener("change",()=>{chosen=select.value;manual_grid_selection=Boolean(chosen);render();});
     }
     const select=control.querySelector("select");
     const signature=grids.map(grid=>`${grid.grid_id}|${grid.label}|${grid.state}`).join(";");
@@ -625,7 +625,7 @@
           cleanup.title="Last resort. Force-stop this Grid; retain its Recipe and History.";
         }
       }
-      const finished_selection=tab==="multiview" && chosen && !grids.some(item=>item.grid_id===chosen) &&
+      const finished_selection=tab==="multiview" && manual_grid_selection && chosen && !grids.some(item=>item.grid_id===chosen) &&
         snapshot.grids.some(item=>item.grid_id===chosen);
       const latest_running=[...grids].reverse().find(item=>item.state==="running"||item.runs.some(run=>run.state==="running"));
       const chosen_grid=grids.find(item=>item.grid_id===chosen);
