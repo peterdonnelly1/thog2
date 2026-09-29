@@ -353,6 +353,8 @@ window.addEventListener("load", () => {
         if (first) select_run(run_identifier(first), {manual: false, replace_history: true});
       }
       app.workspace_mode = true;
+      if (app.maximized_chart) restore_maximized_chart();
+      app.instra_loss_autofocused = false;
       document.body.classList.add("instra-workspace-mode");
       by_id("workspace_nav")?.classList.add("selected");
       by_id("runs_nav")?.classList.remove("selected");

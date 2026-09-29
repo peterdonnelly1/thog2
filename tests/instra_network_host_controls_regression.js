@@ -131,7 +131,7 @@ async function main() {
   assert.match(element("network_message").textContent, /Release Runner Master/);
   element("network_host_list").children[0].children[0].click();
   tabs.children[2].click();
-  const master_check = element("network_detail").children[1].children[0].children[0];
+  const master_check = element("network_detail").children[2].children[0].children[0];
   assert.equal(master_check.checked, true);
   assert.equal(element("network_detail").children[0].children[0].children[1].textContent,
     " Enable other thog hosts to execute runs on scruffy");

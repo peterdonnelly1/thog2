@@ -74,12 +74,13 @@ async function main() {
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,1,"finished Grids must disappear from Progress");
   const active_row=roots.runner_list.children[0];
-  assert.equal(active_row.children[1].textContent,"Kill and Flush");
-  assert.match(active_row.children[1].title,/Last resort/);
+  assert.equal(active_row.children[1].textContent,"Rename Grid");
+  assert.equal(active_row.children[2].textContent,"Kill and Flush");
+  assert.match(active_row.children[2].title,/Last resort/);
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
   switch_tab("history");
   assert.ok(roots.runner_list.children[0].textContent.startsWith("G-00002"));
-  const summaries = roots.runner_detail.children.filter(child => child.tagName === "details");
+  const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
   assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Step","Loss","Host","GPU","Profiling"]);
@@ -130,7 +131,7 @@ async function main() {
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,2,"both active Grids must remain selectable");
   assert.equal(roots.runner_detail.children[0].children[0].textContent,"G-00003 · GPU 1");
-  await roots.runner_list.children[0].children[1].click();
+  await roots.runner_list.children[0].children[2].click();
   const flush=requests.find(entry=>entry.url==="/api/runner/action" &&
     JSON.parse(entry.options.body).action==="kill_flush");
   assert.equal(JSON.parse(flush.options.body).grid_id,"grid-2");
@@ -149,7 +150,8 @@ async function main() {
   assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="current_scripts"/);
   assert.match(html,/data-runner-tab="history"[^]*data-runner-tab="log"/);
   assert.equal((html.match(/<path d="M9 \d+h\d+" stroke="#[0-9a-f]+"\/>/g)||[]).length,4);
-  assert.equal((html.match(/<path d="M9 \d+ C\d+ \d+ \d+ \d+ 56 \d+"/g)||[]).length,3);
+  assert.match(html, /M7 5V57H59/);
+  assert.equal((html.match(/M11 \d+ C\d+ \d+ \d+ \d+ 56 \d+/g)||[]).length,3);
 
   const base = fs.readFileSync("sheet/local_dashboard_assets/dashboard.js","utf8");
   const begin = base.indexOf("function select_run(run_id, options = {})");

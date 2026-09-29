@@ -16,7 +16,7 @@
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
   let snapshot = null, network = null, tab = "recipes", chosen = null, category = "Frequently Used";
   let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
-  let current_run_metrics = new Map();
+  let current_run_metrics = new Map(), metrics_loading = false;
   let required_notice_seen = false, message_timer = null;
   const clear_message = () => { clearTimeout(message_timer); message.textContent = ""; };
   const add = (parent, tag, value, class_name) => {
@@ -210,7 +210,8 @@
       try {
         const preview = await action("preview",{recipe:current_recipe()});
         const names = preview.gpu_pool.map(item => `${item.host_label} GPU ${item.gpu.ordinal}`).join(", ");
-        if (!confirm(`Launch ${preview.total_runs} THOG runs on ${names}?`)) return;
+        const power=preview.runs.map(run=>`${run.host_label} GPU ${run.gpu.ordinal}: current ${run.current_power_w??"unknown"} W; default ${run.default_power_w??"unknown"} W; requested ${run.requested_power_w??"default"} W`).filter((value,index,self)=>self.indexOf(value)===index).join("\n");
+        if (!confirm(`Launch ${preview.total_runs} THOG runs on ${names}?\n\nGPU power limits:\n${power}`)) return;
         if (preview.total_runs > 100 && !confirm(`These values will take the size of the grid to ${preview.total_runs.toLocaleString()} runs. Proceed?`)) return;
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
         last_history_grid=launched.grid_id;tab="progress"; render();
@@ -240,7 +241,7 @@
           placement.textContent=`GPU placement: ${draft.gpu_pool.length ? placement_text(draft.gpu_pool) : placement_text([])}`;check_recipe();});
         add(line,"span",`${host.display_name} · GPU ${gpu.ordinal} · ${gpu.model} · ${gpu.memory_mib??"?"} MiB`);
         const watts=add(line,"label","Power cap (W)");
-        watts.title="Blank keeps this GPU's current power policy";
+        watts.title="Blank resets this GPU to its NVIDIA-reported default before training";
         const cap=add(watts,"input");cap.type="number";cap.min="50";cap.max="600";cap.value=recipe.power_caps?.[gpu_id]??"";
         cap.title=watts.title;
         cap.addEventListener("change",()=>{draft=current_recipe();draft.power_caps=draft.power_caps||{};
@@ -276,6 +277,8 @@
   }
   function render_run(parent,run,preview=false) {
     const row=add(parent,"details",undefined,"runner-run");
+    row.dataset.runId=run.run_id;
+    if (!preview && detail.dataset.gridId===run.grid_id && detail.dataset.openRunIds?.split(",").includes(run.run_id)) row.open=true;
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
@@ -287,8 +290,7 @@
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
     profiler.title="Profiling mode: none, NSYS or NCU";
-    const power=run.requested_power_w==null?`default (=${run.attempts?.at(-1)?.observed_power_w??run.gpu.power_cap_w??"unknown"}W)`:`${run.requested_power_w}W`;
-    add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power requested ${power}`);
+    add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power current ${run.current_power_w??"unknown"} W, default ${run.default_power_w??"unknown"} W, requested ${run.requested_power_w??"default"} W, observed ${run.attempts?.at(-1)?.observed_power_w??"pending"} W`);
     if (run.pairing_id) add(row,"p",`Paired profiler runs: ${run.pairing_id}`);
     if (run.blocking_reason) add(row,"p",run.blocking_reason);
     if (run.attempts?.length) {
@@ -346,7 +348,12 @@
       .catch(error=>{viewer.textContent=`Script unavailable: ${error.message}`;});
   }
   function render_grid(grid) {
+    const previous_grid=detail.dataset.gridId;
+    const configuration_open=previous_grid===grid.grid_id && detail.querySelector(".runner-grid-configuration")?.open;
+    const open_runs=previous_grid===grid.grid_id ? [...detail.querySelectorAll(".runner-run[open]")].map(row=>row.dataset.runId) : [];
     detail.replaceChildren();
+    detail.dataset.gridId=grid.grid_id;
+    detail.dataset.openRunIds=open_runs.join(",");
     const heading = add(detail,"div",undefined,"runner-grid-heading");
     add(heading,"h2",`${grid.grid_tag} · ${grid.label}`);
     button(heading,"Rename Grid",async()=>{
@@ -357,6 +364,34 @@
     const state=add(detail,"p",undefined);
     add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
     add(state,"span",` · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
+    if(tab==="progress" || tab==="history") {
+      // vvv THOG retain launched facts separately from readbacks and execution changes
+      const configuration=add(detail,"details",undefined,"runner-grid-configuration");
+      configuration.open=Boolean(configuration_open);
+      add(configuration,"summary","Grid Configuration");
+      add(configuration,"h3","Recipe as launched");
+      add(configuration,"pre",JSON.stringify(grid.launch_configuration?.recipe||grid.recipe,null,2));
+      add(configuration,"h3","Resolved runs and launch-time placement");
+      for(const run of grid.runs) {
+        const launched=grid.launch_configuration?.runs?.find(item=>item.run_id===run.run_id)||run;
+        const record=add(configuration,"details");
+        add(record,"summary",`${run.run_id.slice(0,8)} · ${run.host_label} GPU ${run.gpu.ordinal} · ${run.profiler}`);
+        add(record,"pre",JSON.stringify(launched,null,2));
+        add(record,"h4","Runtime observations and changes");
+        add(record,"pre",JSON.stringify({current_host_id:run.host_id,current_gpu:run.gpu,
+          state:run.state,blocking_reason:run.blocking_reason||null,
+          attempts:run.attempts,released:run.released??false,duration_seconds:run.duration_seconds??null,
+          last_release_error:run.last_release_error??null},null,2));
+      }
+      if(grid.conversion)add(configuration,"pre",JSON.stringify({placement_change:grid.conversion},null,2));
+      const manifest=add(configuration,"a","View JSON manifest");
+      manifest.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=manifest`;
+      manifest.target="_blank";manifest.rel="noopener";
+      const events=add(configuration,"a"," · View dated Grid events");
+      events.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=log`;
+      events.target="_blank";events.rel="noopener";
+      // ^^^ THOG
+    }
     if(["progress","current_scripts"].includes(tab)) add(detail,"p",
       "Possible states are: queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
     if(tab==="progress") {
@@ -458,8 +493,6 @@
   }
   function render() {
     if (!snapshot || !visible) return;
-    current_run_metrics=new Map((typeof app!=="undefined"&&app.runs||[]).filter(item=>item.runner_run_id)
-      .map(item=>[item.runner_run_id,item]));
     for (const control of by_id("runner_tabs").querySelectorAll("button"))control.classList.toggle("active",control.dataset.runnerTab===tab);
     list.replaceChildren();
     const grids=snapshot.grids.filter(grid=>!["progress","current_scripts","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
@@ -511,6 +544,11 @@
         entry.classList.toggle("active",chosen===grid.grid_id);
         entry.classList.add(`runner-status-${grid.state}`);
         if(tab==="progress") {
+          button(row,"Rename Grid",async()=>{
+            const label=prompt(`New name for ${grid.grid_tag}`,grid.label);
+            if(label===null || label.trim()===grid.label)return;
+            try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
+          }).classList.add("runner-rename-grid");
           const cleanup=button(row,grid.flush_requested?"Retry Flush":"Kill and Flush",async()=>{
             if(!confirm(`Kill and Flush ${grid.grid_tag}? This force-kills active training without a graceful checkpoint, cancels queued runs and releases its GPUs when verified. Recipe, History, logs and files remain.`))return;
             chosen=grid.grid_id;
@@ -565,6 +603,14 @@
       if(newest && newest!==last_seen_grid)last_history_grid=newest;
       last_seen_grid=newest;
       if(repaint||tab!=="recipes"||!dirty)render();
+      if(!metrics_loading) {
+        metrics_loading=true;
+        request("/api/runs").then(run_catalogue=>{
+          current_run_metrics=new Map((run_catalogue.runs||[]).filter(item=>item.runner_run_id)
+            .map(item=>[item.runner_run_id,item]));
+          if(visible && (tab==="history" || tab==="progress"))render();
+        }).catch(()=>{}).finally(()=>{metrics_loading=false;});
+      }
     } catch(error){message.textContent=error.message;clearTimeout(message_timer);message_timer=setTimeout(clear_message,18000);}
     finally{polling=false;}
   }

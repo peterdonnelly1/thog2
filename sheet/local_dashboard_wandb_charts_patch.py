@@ -154,6 +154,8 @@ def _memory_value_in_gb(
 
 def _history_chart_identity(metric_name: str) -> tuple[str, str, str, str]:
     group = _group_name(metric_name)
+    if metric_name.strip("/.").lower() in {"train.loss", "train_loss", "training_loss"}:
+        return "train", "train/loss", "Loss", "train/loss"
     if _MEMORY_NAME_PATTERN.search(metric_name):
         group = "memory"                                                                                                                                    # <<< THOG custom process allocator history belongs in memory, not system/GPU
     title = metric_name.split("/", 1)[1] if "/" in metric_name else metric_name

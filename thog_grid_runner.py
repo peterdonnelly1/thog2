@@ -230,6 +230,11 @@ def environment_for(run):
 def script_for(runs):
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", "cd \"$(dirname \"${BASH_SOURCE[0]}\")/..\"",
              "# THOG Runner: deterministic resolved local commands; verify paths and GPU ordinals on replay."]
+    power_helper = "/usr/local/libexec/instra-power-control"
+    restore = "; ".join(f"sudo -n {power_helper} {shlex.quote(uuid)} default" for uuid in
+                        dict.fromkeys(run["gpu"].get("uuid") for run in runs) if uuid)
+    if restore:
+        lines.append(f"trap {shlex.quote(restore)} EXIT")
     for run in runs:
         gpu = run["gpu"]
         args = command_for(run, gpu, host_label=run.get("host_label"))
@@ -238,8 +243,8 @@ def script_for(runs):
                     "pairing_id": run["pairing_id"], "recipe_id": run.get("recipe_id"), "profiler": run["profiler"],
                     "gpu_uuid": gpu.get("uuid"), "thog_host_id": run.get("host_id"),
                     "execution_profile": run.get("execution_profile")}
-        if run.get("requested_power_w") is not None:
-            lines.append(f"nvidia-smi -i {int(gpu['ordinal'])} -pl {int(run['requested_power_w'])}")
+        lines.append(f"sudo -n {power_helper} {shlex.quote(gpu['uuid'])} "
+                     f"{int(run['requested_power_w']) if run.get('requested_power_w') is not None else 'default'}")
         environment = {**environment_for(run), "THOG2_RUNNER_METADATA": json.dumps(metadata, separators=(',', ':')),
                        "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"])}
         lines.append(" ".join(f"{key}={shlex.quote(value)}" for key, value in environment.items()) + " " + shlex.join(args))
@@ -252,6 +257,11 @@ def classic_script_for(runs):
     inverse.update({"--dtype": "-T", "--attention-backend": "-K", "--geometry-preset": "-p"})
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "${BASH_SOURCE[0]}")/../.."',
              "# Equivalent legacy-wrapper invocations; check host paths and GPU ordinals before replay."]
+    power_helper = "/usr/local/libexec/instra-power-control"
+    restore = "; ".join(f"sudo -n {power_helper} {shlex.quote(uuid)} default" for uuid in
+                        dict.fromkeys(run["gpu"].get("uuid") for run in runs) if uuid)
+    if restore:
+        lines.append(f"trap {shlex.quote(restore)} EXIT")
     for run in runs:
         gpu = run["gpu"]
         resolved = command_for(run, gpu, host_label=run.get("host_label"))[3:]
@@ -294,8 +304,8 @@ def classic_script_for(runs):
         environment = {**environment_for(run), "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"]),
                        "THOG2_HOST_LABEL": run.get("host_label", "local")}
         lines.append(f"# {run.get('host_label', 'local')} GPU {gpu['ordinal']} · {run['run_id']} · {run['profiler']}")
-        if run.get("requested_power_w") is not None:
-            lines.append(f"nvidia-smi -i {int(gpu['ordinal'])} -pl {int(run['requested_power_w'])}")
+        lines.append(f"sudo -n {power_helper} {shlex.quote(gpu['uuid'])} "
+                     f"{int(run['requested_power_w']) if run.get('requested_power_w') is not None else 'default'}")
         lines.append(" ".join(f"{key}={shlex.quote(value)}" for key, value in environment.items()) +
                      " ./train_OWT.sh " + shlex.join([*flags, *forwarded]))
     return "\n".join(lines) + "\n"

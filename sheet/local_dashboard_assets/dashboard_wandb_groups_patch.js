@@ -47,8 +47,8 @@ window.addEventListener("load", () => {
     };
 
     const group_is_collapsed = name => {
-      if (name === "train" && /(?:\?|&)runner_grid_tag=/.test(window.location?.search || "")) return false;
       const settings = group_collapsed_settings();
+      if (name === "train" && (app.workspace_mode === true || workspace_api() || /(?:\?|&)runner_grid_tag=/.test(window.location?.search || ""))) return false;
       return settings.has(name) ? settings.get(name) : true;
     };
     const save_group_collapsed = (name, collapsed) => {
@@ -520,12 +520,13 @@ window.addEventListener("load", () => {
           summaries.push({name: "system", chart_count: 0, revision: 0, reason});
         }
         sync_group_order(summaries);
-        for (const summary of summaries) {
+        const opened = summaries.filter(summary => {
           const section = group_section(summary.name);
-          if (section && !section.classList.contains("collapsed")) {
-            await refresh_group_data(summary.name);
-          }
-        }
+          return section && !section.classList.contains("collapsed");
+        });
+        // vvv THOG let Train render while large Memory/System groups load independently
+        await Promise.all(opened.map(summary => refresh_group_data(summary.name)));
+        // ^^^ THOG
         restore_metric_navigation();
       } catch (error) {
         show_toast(`Local W&B charts failed: ${error.message}`);

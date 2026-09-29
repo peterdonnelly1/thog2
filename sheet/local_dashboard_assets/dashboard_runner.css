@@ -16,6 +16,7 @@
 .runner-active-grid-row { display:flex; width:100%; min-width:0; gap:.45rem; align-items:stretch; }
 #runner_list .runner-active-grid-row > button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-active-grid-row > .runner-kill-flush { flex:0 0 auto; width:auto; padding:.3rem .5rem; color:#9a322c; font-size:.78rem; white-space:nowrap; }
+#runner_list .runner-active-grid-row > .runner-rename-grid { flex:0 0 auto; width:auto; padding:.3rem .5rem; font-size:.78rem; white-space:nowrap; }
 #runner_list .runner-recipe-row button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-recipe-row button:nth-child(2) { flex:0 0 auto; width:auto; white-space:nowrap; font-size:.82rem; }
 #runner_list .runner-recipe-row .runner-recipe-delete { width:auto; flex:none; color:#9a322c; }
@@ -75,7 +76,10 @@
 .runner-empty-state { margin:.8rem 0; }
 .runner-multiview-frame { display:block; width:100%; height:calc(100vh - 15rem); min-height:34rem; border:1px solid #c8cdd2; }
 .runner-run pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-#runner_message { min-height:1.3rem; color:#ad5707; font-weight:700; }
+.runner-grid-configuration { margin:1rem 0; padding:.7rem; border:1px solid #cbd6e0; border-radius:6px; }
+.runner-grid-configuration > summary { cursor:pointer; font-weight:600; }
+.runner-grid-configuration pre { max-height:28rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+#runner_message { min-height:1.3rem; color:#ad5707; font-weight:400; }
 @media (max-width:760px) {.runner-layout { grid-template-columns:1fr; }}
 body.instra-runner-grid-frame .icon-rail, body.instra-runner-grid-frame .topbar { display:none; }
 body.instra-runner-grid-frame .workspace { inset:0; }

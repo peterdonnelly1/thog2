@@ -44,7 +44,7 @@ assert.match(repair, /#training_throughput_card \{ order:1/);
 
 // The Processing group in Runs view requires real capture/timing/resource data;
 // ordinary train throughput alone remains in the train group.
-assert.match(repair, /app\.workspace_mode !== true/);
+assert.match(repair, /if \(group\) \{/);
 assert.match(repair, /processing_view\.trace_available[\s\S]*processing_view\.timing_available/);
 assert.match(repair, /group\.hidden = !\(processing_view\.charts_tab_visible && capture_available\)/);
 

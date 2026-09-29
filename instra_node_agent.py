@@ -24,6 +24,7 @@ AGENT_STATE = STATE_DIR / "node.json"
 BOOTSTRAP_DIR = Path.home() / ".local/state/instra"
 AGENT_ENTRY = BOOTSTRAP_DIR / "agent-request"
 MAX_MESSAGE = 1024 * 1024
+POWER_HELPER = "/usr/local/libexec/instra-power-control"
 _lock = threading.RLock()
 
 
@@ -68,21 +69,23 @@ def _pid_start_time(pid):
 
 
 def _gpu_information():
-    command = ["nvidia-smi", "--query-gpu=index,uuid,name,memory.total,driver_version,memory.free,compute_cap,power.limit", "--format=csv,noheader,nounits"]
+    command = ["nvidia-smi", "--query-gpu=index,uuid,name,memory.total,driver_version,memory.free,compute_cap,power.limit,power.default_limit", "--format=csv,noheader,nounits"]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=8, check=True)
     except (OSError, subprocess.SubprocessError):
         return []
     gpus = []
     for line in result.stdout.splitlines():
-        fields = [field.strip() for field in line.split(",", 7)]
-        if len(fields) != 8 or not fields[0].isdigit():
+        fields = [field.strip() for field in line.split(",", 8)]
+        if len(fields) != 9 or not fields[0].isdigit():
             continue
-        ordinal, uuid, model, memory, driver, free, compute_cap, power = fields
+        ordinal, uuid, model, memory, driver, free, compute_cap, power, default_power = fields
         gpus.append({"gpu_key": uuid if uuid.startswith("GPU-") else f"ordinal-{ordinal}", "uuid": uuid if uuid.startswith("GPU-") else None,
                      "ordinal": int(ordinal), "model": model, "memory_mib": int(memory) if memory.isdigit() else None,
                      "free_mib": int(free) if free.isdigit() else None, "compute_cap": compute_cap,
-                     "power_cap_w": float(power) if re.fullmatch(r"\d+(?:\.\d+)?", power) else None, "driver": driver})
+                     "power_cap_w": float(power) if re.fullmatch(r"\d+(?:\.\d+)?", power) else None,
+                     "default_power_w": float(default_power) if re.fullmatch(r"\d+(?:\.\d+)?", default_power) else None,
+                     "driver": driver})
     try:
         occupied = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,gpu_uuid", "--format=csv,noheader,nounits"],
                                   capture_output=True, text=True, timeout=8, check=True)
@@ -132,12 +135,54 @@ def _discover(state):
             "thog": {"root": str(ROOT), "version": _version(ROOT), "train_OWT_sh": (ROOT / "train_OWT.sh").is_file(),
                      "run_thog2_owt_py": (ROOT / "run_thog2_owt.py").is_file()},
             "instra_logs_root": str(logs_root), "wandb_root": str(wandb_root), "execution_profiles": [profile],
-            "cuda_version": _cuda_version(), "gpus": _gpu_information()}
+            "cuda_version": _cuda_version(), "gpus": _gpu_information(), "power_control": _power_capability()}
 
 
 def _validate_args(args, fields):
     if not isinstance(args, dict) or set(args) - fields:
         raise ValueError("invalid operation arguments")
+
+
+# vvv THOG verify persistent root-owned power capability and preserve NVIDIA errors
+def _power_capability():
+    helper = Path(POWER_HELPER)
+    try:
+        if helper.is_symlink():
+            raise PermissionError("Power helper must not be a symlink")
+        directory = helper.parent.stat()
+        if directory.st_uid != 0 or directory.st_mode & 0o022:
+            raise PermissionError("Power helper directory must be root-owned and not writable by other users")
+        stat = helper.stat()
+        if stat.st_uid != 0 or stat.st_mode & 0o022 or not stat.st_mode & 0o111:
+            raise PermissionError("Helper must be root-owned, executable and not group/world writable")
+        checked = subprocess.run(["sudo", "-n", POWER_HELPER, "--check"], capture_output=True, text=True, timeout=12)
+        if checked.returncode:
+            raise PermissionError((checked.stderr or checked.stdout).strip() or "passwordless helper invocation denied")
+        return {"ready": True, "helper": POWER_HELPER}
+    except (OSError, subprocess.SubprocessError, PermissionError) as error:
+        return {"ready": False, "helper": POWER_HELPER, "error": str(error)}
+
+
+def _set_gpu_power(gpu, requested):
+    capability = _power_capability()
+    if not capability["ready"]:
+        raise RuntimeError(f"GPU power control unavailable: {capability['error']}")
+    if not gpu.get("uuid"):
+        raise RuntimeError("GPU power control requires a stable GPU UUID")
+    target = "default" if requested is None else str(requested)
+    try:
+        result = subprocess.run(["sudo", "-n", POWER_HELPER, gpu["uuid"], target],
+                                capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"GPU {gpu['gpu_key']} power request {target}: {error}") from error
+    if result.returncode:
+        raise RuntimeError(f"GPU {gpu['gpu_key']} power request {target}: "
+                           f"{(result.stderr or result.stdout).strip() or f'exit {result.returncode}'}")
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise RuntimeError(f"GPU {gpu['gpu_key']} power control returned invalid readback: {result.stdout[:200]}") from error
+# ^^^ THOG
 
 
 # vvv THOG durable GPU reservations and attempt reconciliation owned by the local Node Agent
@@ -199,7 +244,7 @@ def _runner_operation(state, name, args):
     from thog_grid_runner import command_for, environment_for, validate_recipe
     if name == "runner_capabilities":
         _validate_args(args, set())
-        return {"protocol": 2, "cuda_preflight": True}
+        return {"protocol": 2, "cuda_preflight": True, "power_control": _power_capability()}
     if name == "runner_log":
         _validate_args(args, {"attempt_id", "max_bytes"})
         attempt_id = args.get("attempt_id")
@@ -270,7 +315,9 @@ def _runner_operation(state, name, args):
                                                  and run["grid_id"] == grid_id for run in state.get("attempts", {}).values()):
             raise RuntimeError(f"GPU {key} has a THOG training process outside this Grid")
         state["reservations"][key] = {"grid_id": grid_id, "gpu_key": key, "required_mib": required,
-                                        "headroom_mib": headroom, "ordinal": gpu["ordinal"], "requested_power_w": cap}
+                                        "headroom_mib": headroom, "ordinal": gpu["ordinal"], "requested_power_w": cap,
+                                        "default_power_w": gpu.get("default_power_w"),
+                                        "power_applied": bool(owner and owner.get("power_applied"))}
         _write_state(state)
         return {"reservation": state["reservations"][key], "gpu": gpu}
     if name == "runner_release":
@@ -281,9 +328,16 @@ def _runner_operation(state, name, args):
         if any(run["grid_id"] == args.get("grid_id") and run["gpu_key"] == args.get("gpu_key")
                and _attempt_status(run)["state"] in {"running", "unknown"} for run in state.get("attempts", {}).values()):
             raise RuntimeError("Running or uncertain attempt still owns this GPU")
+        if owner and owner.get("power_applied"):
+            gpu = next((item for item in _gpu_information() if item["gpu_key"] == args.get("gpu_key")), None)
+            if gpu is None:
+                raise RuntimeError("GPU unavailable; cannot verify power restoration")
+            restored = _set_gpu_power(gpu, None)
+        else:
+            restored = None
         state.get("reservations", {}).pop(args.get("gpu_key"), None)
         _write_state(state)
-        return {"released": True}
+        return {"released": True, "power_restoration": restored}
     if name == "runner_launch":
         _validate_args(args, {"grid_id", "attempt_id", "run", "gpu_key", "host_label", "thog_host_id", "execution_profile", "recipe_id"})
         attempt_id = args.get("attempt_id")
@@ -314,13 +368,10 @@ def _runner_operation(state, name, args):
                for other in state["attempts"].values()):
             raise RuntimeError("A managed attempt is already on this GPU")
         requested_power = reservation.get("requested_power_w")
-        if requested_power is not None:
-            try:
-                subprocess.run(["nvidia-smi", "-i", str(gpu["ordinal"]), "-pl", str(requested_power)],
-                               check=True, capture_output=True, timeout=8)
-            except (OSError, subprocess.SubprocessError) as error:
-                raise RuntimeError(f"GPU {key} power cap {requested_power} W could not be applied") from error
-            gpu = next((item for item in _gpu_information() if item["gpu_key"] == key), gpu)
+        power_result = _set_gpu_power(gpu, requested_power)
+        reservation["power_applied"] = True
+        _write_state(state)
+        gpu = next((item for item in _gpu_information() if item["gpu_key"] == key), gpu)
         command = command_for(run, gpu, python=sys.executable, host_label=args.get("host_label"))
         log_path = STATE_DIR / f"attempt-{attempt_id}.log"
         metadata_path = STATE_DIR / f"attempt-{attempt_id}.json"
@@ -338,7 +389,8 @@ def _runner_operation(state, name, args):
         state["attempts"][attempt_id] = {"attempt_id": attempt_id, "run_id": run["run_id"], "grid_id": grid_id,
                                          "gpu_key": key, "pid": None, "started_at": datetime.now(timezone.utc).isoformat(),
                                          "pid_start_time": None,
-                                         "requested_power_w": requested_power, "observed_power_w": gpu.get("power_cap_w"),
+                                         "requested_power_w": requested_power, "default_power_w": power_result["after"]["default_w"],
+                                         "observed_power_w": power_result["after"]["current_w"], "power_control": power_result,
                                          "log_path": str(log_path), "state": "accepted"}
         _write_state(state)  # Record acceptance before spawning; a crash in this window blocks relaunch.
         try:

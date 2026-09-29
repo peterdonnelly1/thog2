@@ -2,6 +2,7 @@
 """Runner and Node Agent regression tests; no training runtime required."""
 
 import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,32 @@ class FakeNetwork:
         self.activity = (active, queue_nonempty)
 
 
+class TwoHostNetwork(FakeNetwork):
+    def __init__(self):
+        super().__init__()
+        remote_gpu = {**gpu(1), "gpu_id": "thog_host.remote.gpu.GPU-1"}
+        self.host_state = {self.local_id: (self.gpus[:1], {}, {}),
+                           "thog_host.remote": ([remote_gpu], {}, {})}
+
+    def list_hosts(self):
+        hosts = []
+        for host_id, (gpus, _reservations, _attempts) in self.host_state.items():
+            hosts.append({"thog_host_id": host_id, "display_name": host_id, "local": host_id == self.local_id,
+                          "execution_enabled": True, "last_discovered": {"gpus": gpus,
+                          "execution_profiles": [{"execution_profile_id": f"{host_id}.execution_profile.current"}]}})
+        return {"local_id": self.local_id, "master_id": self.local_id, "release_pending": False, "hosts": hosts}
+
+    def runner_call(self, host_id, operation, args=None):
+        gpus, reservations, attempts = self.host_state[host_id]
+        self.gpus, self.reservations, self.attempts = gpus, reservations, attempts
+        original_id = self.local_id
+        try:
+            self.local_id = host_id
+            return super().runner_call(host_id, operation, args)
+        finally:
+            self.local_id = original_id
+
+
 class RunnerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -154,6 +181,84 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([run["run_id"] for run in trials],
                          [run["run_id"] for run in expand(recipe, stable_preview=True)])
 
+    def test_definite_power_rejection_does_not_create_unknown_or_dispatch_another_attempt(self):
+        recipe = {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]], "power_caps": {gpu(0)["gpu_id"]: 280}}
+        saved = self.service.save_recipe(None, recipe)
+        grid = self.service.launch(saved["recipe_id"])
+        original = self.fake.runner_call
+        def deny_power(host_id, operation, args=None):
+            if operation == "runner_launch":
+                raise network.NetworkError("operation", "nvidia-smi: insufficient permissions for 280 W")
+            return original(host_id, operation, args)
+        self.fake.runner_call = deny_power
+        self.service._refresh()
+        runs = self.service.snapshot()["grids"][0]["runs"]
+        self.assertEqual(sum(len(run["attempts"]) for run in runs), 1)
+        self.assertEqual(runs[0]["state"], "blocked")
+        self.assertEqual(runs[0]["attempts"][0]["state"], "failed")
+        self.assertIn("insufficient permissions", runs[0]["blocking_reason"])
+        self.assertFalse(any(run["state"] == "unknown" for run in runs))
+        self.assertEqual(self.fake.reservations, {})
+        self.assertIn("280 W", self.service.file(grid["grid_id"], "log").read_text())
+
+    def test_both_exported_scripts_reset_blank_caps_and_restore_default(self):
+        selected = {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]],
+                    "power_caps": {gpu(0)["gpu_id"]: 280}}
+        saved = self.service.save_recipe(None, selected)
+        grid = self.service.launch(saved["recipe_id"])
+        for kind in ("script", "classic"):
+            path = self.service.file(grid["grid_id"], kind)
+            source = path.read_text()
+            self.assertIn("instra-power-control GPU-0 280", source)
+            self.assertIn("instra-power-control GPU-0 default", source)
+            import subprocess
+            subprocess.run(["bash", "-n", str(path)], check=True)
+        blank = self.service.save_recipe(None, {**selected, "power_caps": {}})
+        blank_grid = self.service.launch(blank["recipe_id"])
+        self.assertIn("instra-power-control GPU-0 default",
+                      self.service.file(blank_grid["grid_id"], "classic").read_text())
+
+    def test_lost_acknowledgement_recovers_after_two_idle_observations(self):
+        recipe = {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]]}
+        saved = self.service.save_recipe(None, recipe)
+        self.service.launch(saved["recipe_id"])
+        original = self.fake.runner_call
+        def lost(host_id, operation, args=None):
+            if operation == "runner_launch":
+                raise OSError("SSH acknowledgement lost")
+            return original(host_id, operation, args)
+        self.fake.runner_call = lost
+        self.service._refresh()
+        self.assertEqual(self.service.snapshot()["grids"][0]["runs"][0]["state"], "unknown")
+        self.service._refresh()
+        self.assertEqual(self.service.snapshot()["grids"][0]["runs"][0]["state"], "unknown")
+        self.service._refresh()
+        self.assertEqual(self.service.snapshot()["grids"][0]["runs"][0]["state"], "blocked")
+        self.assertEqual(self.fake.reservations, {})
+
+    def test_two_hosts_disjoint_grids_and_queued_remote_run(self):
+        self.fake = TwoHostNetwork()
+        self.service.network = self.fake
+        def recipe_for(gpu_id):
+            return {**self.recipe, "gpu_pool": [gpu_id], "parameters": {**self.recipe["parameters"],
+                "--n-layer": 2, "DEPTH.order": 1}}
+        local = self.service.launch(self.service.save_recipe(None, recipe_for(gpu(0)["gpu_id"]))["recipe_id"])
+        remote_id = "thog_host.remote.gpu.GPU-1"
+        remote_recipe = self.service.save_recipe(None, recipe_for(remote_id))
+        first = self.service.launch(remote_recipe["recipe_id"])
+        second = self.service.launch(remote_recipe["recipe_id"])
+        self.service._refresh()
+        grids = {grid["grid_id"]: grid for grid in self.service.snapshot()["grids"]}
+        self.assertEqual(grids[local["grid_id"]]["state"], "running")
+        self.assertEqual(grids[first["grid_id"]]["state"], "running")
+        self.assertEqual(grids[second["grid_id"]]["runs"][0]["state"], "queued")
+        remote_attempt = grids[first["grid_id"]]["runs"][0]["attempts"][0]["attempt_id"]
+        self.fake.host_state["thog_host.remote"][2][remote_attempt]["state"] = "completed"
+        self.service._refresh()
+        self.service._refresh()
+        grids = {grid["grid_id"]: grid for grid in self.service.snapshot()["grids"]}
+        self.assertEqual(grids[second["grid_id"]]["state"], "running")
+
     def test_grid_rename_preserves_run_identity_and_updates_manifest(self):
         saved = self.service.save_recipe(None, self.recipe)
         grid = self.service.launch(saved["recipe_id"])
@@ -168,6 +273,17 @@ class RunnerTests(unittest.TestCase):
                          f"{grid['grid_tag']}_grid_bash_runner_script.sh")
         with self.assertRaisesRegex(ValueError, "printable"):
             self.service.rename_grid(grid["grid_id"], "bad\nname")
+
+    def test_launch_snapshot_survives_runtime_placement_change(self):
+        saved = self.service.save_recipe(None, self.recipe)
+        grid = self.service.launch(saved["recipe_id"])
+        launch = grid["launch_configuration"]
+        self.assertEqual(launch["recipe"], self.recipe)
+        self.assertEqual(launch["runs"][0]["host_id"], grid["runs"][0]["host_id"])
+        grid["runs"][0]["gpu"]["ordinal"] = 99
+        grid["recipe"]["label"] = "Changed after launch"
+        self.assertNotEqual(launch["runs"][0]["gpu"]["ordinal"], 99)
+        self.assertEqual(launch["recipe"]["label"], "small")
 
     def test_stop_can_proceed_during_slow_gpu_preflight(self):
         recipe={"label":"live", "parameters":{"--max-iters":2,"--warmup-iters":0,
@@ -627,6 +743,11 @@ class NodeReservationTests(unittest.TestCase):
             patcher = patch.object(agent, attribute, value); patcher.start(); self.addCleanup(patcher.stop)
         patcher = patch.object(agent, "_gpu_information", return_value=[gpu(0), gpu(1)])
         patcher.start(); self.addCleanup(patcher.stop)
+        patcher = patch.object(agent, "_set_gpu_power", side_effect=lambda selected, requested: {
+            "before": {"current_w": 280.0, "default_w": 250.0},
+            "after": {"current_w": float(requested or 250), "default_w": 250.0},
+            "target_w": float(requested or 250), "changed": True})
+        patcher.start(); self.addCleanup(patcher.stop)
 
     def test_atomic_owner_memory_idempotence_and_release(self):
         self.assertEqual(agent._operation("runner_capabilities", {})["cuda_preflight"], True)
@@ -643,6 +764,41 @@ class NodeReservationTests(unittest.TestCase):
         self.assertTrue(agent._operation("runner_release", {"grid_id": first, "gpu_key": "GPU-0"})["released"])
         with self.assertRaisesRegex(ValueError, "power cap"):
             agent._operation("runner_reserve", {**args,"power_cap_w":700})
+
+    def test_power_permission_failure_exposes_helper_error_and_can_release(self):
+        grid_id = uuid.uuid4().hex
+        agent._operation("runner_reserve", {"grid_id":grid_id,"gpu_key":"GPU-0",
+                                            "required_mib":2048,"headroom_mib":512,"power_cap_w":280})
+        run = {"run_id":uuid.uuid4().hex,"grid_tag":"G-00009","pairing_id":None,"profiler":"none",
+               "parameters":{"--max-iters":2,"--warmup-iters":0},"dtype":"bfloat16",
+               "attention_backend":"sdpa","gpu_uuid":"GPU-0"}
+        with patch.object(agent,"_set_gpu_power",side_effect=RuntimeError("sudo: a password is required")):
+            with self.assertRaisesRegex(RuntimeError,"password is required"):
+                agent._operation("runner_launch", {"grid_id":grid_id,"attempt_id":uuid.uuid4().hex,
+                    "run":run,"gpu_key":"GPU-0","host_label":"test","thog_host_id":"thog_host.test",
+                    "execution_profile":"current"})
+        self.assertEqual(agent._operation("runner_reconcile",{})["attempts"],{})
+        self.assertTrue(agent._operation("runner_release",{"grid_id":grid_id,"gpu_key":"GPU-0"})["released"])
+
+    def test_installed_power_helper_validates_range_and_readback(self):
+        path = Path(__file__).resolve().parents[1] / "scripts" / "instra_power_control.py"
+        spec = importlib.util.spec_from_file_location("instra_power_control_test",path)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        before = {"uuid":"GPU-12345678","current_w":280.0,"default_w":250.0,
+                  "minimum_w":200.0,"maximum_w":300.0}
+        after = {**before,"current_w":250.0}
+        with (patch.object(helper,"query",side_effect=[before,after]),
+              patch.object(helper.subprocess,"run") as write,
+              patch.object(helper.sys,"argv",["power","GPU-12345678","default"])):
+            write.return_value.returncode = 0
+            with patch("builtins.print") as printed: helper.main()
+            self.assertEqual(json.loads(printed.call_args.args[0])["after"]["current_w"],250.0)
+            self.assertEqual(write.call_args.args[0][-2:],["-pl","250"])
+        with (patch.object(helper,"query",return_value=before),
+              patch.object(helper.sys,"argv",["power","GPU-12345678","350"])):
+            with self.assertRaisesRegex(ValueError,"outside GPU range"):
+                helper.main()
 
     def test_force_stop_clears_unknown_attempt_only_after_process_group_is_gone(self):
         grid_id, attempt_id = uuid.uuid4().hex, uuid.uuid4().hex

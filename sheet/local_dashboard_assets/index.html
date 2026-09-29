@@ -32,9 +32,9 @@
 
   <nav class="icon-rail" aria-label="Instrumentation sections">
     <!-- vvv THOG expose the distributed Runner and Networks sections in the common navigation rail -->
-    <button class="rail-item" id="runner_nav" type="button" title="Runner"><svg class="rail-symbol runner-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M34 3 37 9 43 10 48 6 53 11 50 17 53 23 60 25 60 33 53 35 50 41 53 47 48 52 42 49 36 52 34 59 26 59 24 52 18 49 12 52 7 47 10 41 7 35 1 33 1 25 7 23 10 17 7 11 12 6 18 10 24 9 26 3Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/><circle cx="30" cy="30" r="16" fill="white" stroke="currentColor" stroke-width="3"/><path d="M25 19 43 30 25 41Z" fill="#515c66" stroke="#515c66" stroke-width="2" stroke-linejoin="round"/><path d="M31 53V40a3.6 3.6 0 0 1 7.2 0v7.5l1.5-4a3.4 3.4 0 0 1 6.1.4l1.6-2.5a3.2 3.2 0 0 1 5.6 1.7l1.2-1.3a3.2 3.2 0 0 1 5.2 3.6l-6 14H35l-11-11a3.4 3.4 0 0 1 4.7-4.9L31 46Z" fill="white" stroke="#515c66" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>Runner</span></button>
+    <button class="rail-item" id="runner_nav" type="button" title="Runner"><svg class="rail-symbol runner-rail-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 3 36 8 42 8 47 5 52 10 49 16 53 21 60 23V31L53 34 50 40 53 46 48 51 42 48 36 51 33 57H25L22 51 16 48 10 51 5 46 8 40 5 34 1 31V23L8 21 11 16 8 10 13 5 19 8 25 8 28 3Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><circle cx="30" cy="29" r="15" fill="white" stroke="currentColor" stroke-width="3"/><path d="M25 20 40 29 25 38Z" fill="#515c66"/><path d="M24 62 22 55 17 49a3 3 0 0 1 4-4l8 7V38a3 3 0 0 1 6 0v9l2-4a3 3 0 0 1 5 1l2-2a3 3 0 0 1 5 2l2-1a3 3 0 0 1 5 3l-5 16Z" fill="white" stroke="#344351" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M29 61v-7m6-7v5m7-8v7m7-7v7" fill="none" stroke="#344351" stroke-width="2"/></svg><span>Runner</span></button>
     <button class="rail-item" id="workspace_nav" type="button" title="Workspace">
-      <svg class="rail-symbol workspace-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M7 7v50h50" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="round"/><path d="M9 13 C17 36 25 43 56 45" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="round"/><path d="M9 23 C17 40 27 48 56 50" fill="none" stroke="#777f86" stroke-width="3.5" stroke-linecap="round"/><path d="M9 33 C19 46 29 53 56 55" fill="none" stroke="#a0a5aa" stroke-width="3.5" stroke-linecap="round"/></svg>
+      <svg class="rail-symbol workspace-icon" viewBox="0 0 64 64" aria-hidden="true"><path d="M7 5V57H59" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="square" stroke-linejoin="miter"/><path d="M11 12 C19 31 30 38 56 43" fill="none" stroke="#515c66" stroke-width="3.5" stroke-linecap="round"/><path d="M11 21 C20 36 32 42 56 48" fill="none" stroke="#777f86" stroke-width="3.5" stroke-linecap="round"/><path d="M11 30 C22 40 34 46 56 52" fill="none" stroke="#a0a5aa" stroke-width="3.5" stroke-linecap="round"/></svg>
       <span>Multiview</span>
     </button>
     <button class="rail-item selected" id="runs_nav" type="button" title="Runs">
@@ -604,7 +604,7 @@
   </div>
 
   <div class="settings-overlay" id="settings_overlay" hidden role="dialog" aria-modal="true" aria-labelledby="settings_title">
-    <section class="settings-dialog">
+    <section class="settings-dialog global-settings-window">
       <header>
         <div>
           <h2 id="settings_title">instra settings</h2>
@@ -613,12 +613,15 @@
         <button id="close_settings" type="button" aria-label="Close settings">×</button>
       </header>
       <div class="settings-content">
-        <label for="timeout_minutes">Mark a run as timed out after no model heartbeat for</label>
-        <div class="timeout-control">
-          <input id="timeout_minutes" type="number" min="1" max="10080" step="1" value="15">
-          <span>minutes</span>
-        </div>
-        <p>This changes a stale active state to <strong>timed out</strong>. A later heartbeat restores its live state.</p>
+        <section class="global-settings-section"><h3>Run monitoring</h3>
+          <label for="timeout_minutes">Mark a run as timed out after no model heartbeat for</label>
+          <div class="timeout-control"><input id="timeout_minutes" type="number" min="1" max="10080" step="1" value="15"><span>minutes</span></div>
+          <p>A later heartbeat restores its live state.</p>
+        </section>
+        <section class="global-settings-section"><h3>Multiview</h3>
+          <label><input id="grid_eye_grouping" type="checkbox" checked> Show or hide every member of a Grid when its eye is clicked</label>
+          <p>Switch off to control each run independently.</p>
+        </section>
       </div>
       <footer>
         <button id="cancel_settings" type="button">Cancel</button>

@@ -286,7 +286,7 @@ window.addEventListener("load", () => {
     processing_sync_visibility = function(...args) {
       const result = processing_sync_visibility_before_sep21.apply(this, args);
       const group = by_id("processing_chart_group");
-      if (group && app.workspace_mode !== true) {
+      if (group) {
         const capture_available = Boolean(
           processing_view.trace_available
           || processing_view.resource_available

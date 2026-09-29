@@ -236,6 +236,19 @@
       button(detail, "Manually refresh run data now", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
     } else if (selected_tab === "profiles") {
       toggle(detail, host, "execution_enabled", `Enable other thog hosts to execute runs on ${host.display_name}`);
+      // vvv THOG one-time host administration is explicit and discovery verifies it after restarts
+      const power = discovery.power_control || {};
+      const power_card = append(detail, "section", undefined, "network-card");
+      append(power_card, "h3", "GPU power control");
+      append(power_card, "p", power.ready ? "Ready: root-owned helper and passwordless restricted invocation verified." :
+        `Setup required on ${host.display_name}: ${power.error || "capability not yet discovered"}`,
+        power.ready ? "network-healthy" : "network-unhealthy");
+      const setup = `cd ${discovery.thog?.root || "<THOG installation>"} && sudo bash scripts/install_instra_power_control.sh`;
+      const command = append(power_card, "code", setup);
+      command.title = "Run once in a terminal on this executing host, then Refresh discovery";
+      button(power_card, "Copy host setup command", () => navigator.clipboard.writeText(setup));
+      append(power_card, "p", "Run once on this host as its SSH/Instra user. The helper survives reboots and Instra restarts; training stays unprivileged.", "network-muted");
+      // ^^^ THOG
       const master_row = append(detail, "div", undefined, "toggles");
       const master_label = append(master_row, "label");
       const master_check = append(master_label, "input");

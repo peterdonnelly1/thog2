@@ -315,7 +315,12 @@ function append_run_row(body, run) {
   eye.title = is_visible(run_id) ? "Hide run" : "Show run";
   eye.setAttribute("aria-label", eye.title);
   eye.addEventListener("click", () => {
-    app.visibility[run_id] = !is_visible(run_id);
+    const next_visible = !is_visible(run_id);
+    const group_members = app.workspace_mode && run.runner_grid_tag &&
+      localStorage.getItem("thog2_grid_eye_grouping") !== "false"
+      ? app.runs.filter(candidate => candidate.runner_grid_tag === run.runner_grid_tag)
+      : [run];
+    for (const member of group_members) app.visibility[run_identifier(member)] = next_visible;
     save_json("thog2_local_run_visibility", app.visibility);
     render_runs();
   });
@@ -1297,7 +1302,6 @@ function render_run_heading() {
   const subtitle = by_id("run_subtitle");
   subtitle.replaceChildren();
   const values = [
-    {text: run.wandb_run_id ? `W&B ID ${run.wandb_run_id}` : `Local ID ${run.local_run_id}`, class_name: "identity"},
     {text: format_run_state(display_run_state(run))},
     {text: run.producing_host ? `host ${run.producing_host}` : (run.host_label ? `host ${run.host_label}` : "")},                              // <<< THOG identify producing host rather than a W&B label
     {text: run.remote_copy && run.acquisition_state !== "current" ? `stale${run.acquisition_error ? `: ${run.acquisition_error}` : ""} · last acquired ${run.acquired_at ? new Date(run.acquired_at).toLocaleString() : "never"}` : "", class_name: "stale-warning"}, // <<< THOG distinguish stale acquired copies
@@ -2251,6 +2255,7 @@ function open_settings() {
   close_colour_picker();
   close_chart_settings();
   by_id("timeout_minutes").value = String(app.timeout_minutes);
+  by_id("grid_eye_grouping").checked = localStorage.getItem("thog2_grid_eye_grouping") !== "false";
   by_id("settings_overlay").hidden = false;
   by_id("settings_nav").classList.add("selected");
   by_id("runs_nav").classList.remove("selected");
@@ -2271,6 +2276,7 @@ function save_settings() {
   }
   app.timeout_minutes = Math.round(value);
   localStorage.setItem("thog2_local_timeout_minutes", String(app.timeout_minutes));
+  localStorage.setItem("thog2_grid_eye_grouping", String(by_id("grid_eye_grouping").checked));
   reset_pagination();
   render_run_heading();
   close_settings();

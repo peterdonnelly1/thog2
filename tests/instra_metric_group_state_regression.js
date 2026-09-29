@@ -92,7 +92,7 @@ assert.equal(groups.group_is_collapsed("system"), false, "system did not stay op
 
 app.workspace_mode = true;
 assert.equal(groups.context_key(), "workspace:R1|R2");
-assert.equal(groups.group_is_collapsed("train"), true, "train auto-opened on entering Workspace");
+assert.equal(groups.group_is_collapsed("train"), false, "train must open on entering Multiview");
 assert.equal(groups.group_is_collapsed("system"), true, "system auto-opened on entering Workspace");
 groups.set_group_collapsed("train", false);
 assert.equal(groups.group_is_collapsed("train"), false, "explicit train opening was not retained");
