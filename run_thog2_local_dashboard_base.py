@@ -182,7 +182,9 @@ class RunDashboardState:
         }
 
     def _latest_logged_loss(self, metadata: Optional[Dict[str, str]] = None) -> Optional[float]:
-        log_path = self.database_path.parent.parent / "train.log"
+        log_path = self.database_path.parent / "train.log"
+        if not log_path.is_file():
+            log_path = self.database_path.parent.parent / "train.log"
         if not log_path.is_file():
             from sheet.local_dashboard_logs_patch import _runner_attempt_log
             log_path = _runner_attempt_log(self, metadata)
@@ -199,6 +201,7 @@ class RunDashboardState:
                 lines = source.read().decode("utf-8", "replace").splitlines()
             result = None
             for line in reversed(lines):
+                line = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
                 if not re.match(r"^\s*T\s+\d+\s", line):
                     continue
                 match = re.search(r"(?<![\w/])loss\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", line)

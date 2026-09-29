@@ -4,6 +4,7 @@
 import ast
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -40,6 +41,22 @@ class ArtifactNamingTests(unittest.TestCase):
         with patch.dict(os.environ, {"THOG2_RUNNER_METADATA": ""}):
             self.assertEqual(namespace["run_descriptor"](subject),
                              "260928-1030_scruffy_trial_G-00012_abc_NONE___DENSE")
+
+    def test_catalogue_loss_reads_adjacent_ansi_coloured_train_log(self):
+        source = (Path(__file__).resolve().parents[1] / "run_thog2_local_dashboard_base.py").read_text()
+        dashboard = next(node for node in ast.parse(source).body
+                         if isinstance(node, ast.ClassDef) and node.name == "RunDashboardState")
+        method = next(node for node in dashboard.body
+                      if isinstance(node, ast.FunctionDef) and node.name == "_latest_logged_loss")
+        namespace = {"Optional": __import__("typing").Optional, "Dict": __import__("typing").Dict,
+                     "re": re, "math": math}
+        exec(compile(ast.Module(body=[method], type_ignores=[]), "run_thog2_local_dashboard_base.py", "exec"), namespace)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "artifact"
+            root.mkdir()
+            (root / "train.log").write_text("\x1b[32mT 10 loss=4.21\x1b[0m\n\x1b[32mT 20 loss=3.75\x1b[0m\n")
+            subject = SimpleNamespace(database_path=root / "charts.sqlite3", lock=threading.RLock(), loss_log_cache=None)
+            self.assertEqual(namespace["_latest_logged_loss"](subject), 3.75)
 
 
 def gpu(number):
