@@ -75,9 +75,9 @@ button { color: inherit; }
 }
 .rail-item.selected { color: #008da9; background: #e3f5f8; }
 .rail-symbol { width:43px; height:43px; display:block; color:#515c66; flex:none; }
-.rail-symbol.workspace-icon { width:66px; height:66px; margin:-8px; }
+.rail-symbol.workspace-icon { width:59px; height:59px; margin:-5px; }
 .runs-icon path { fill:none; stroke-width:7; stroke-linecap:round; }
-.settings-icon { font-size: 39px; line-height: 40px; }
+.settings-icon { font-size: 39px; line-height: 40px; color:#515c66; }
 
 .workspace {
   position: fixed;

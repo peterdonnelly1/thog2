@@ -90,6 +90,10 @@ def test_runs_and_runner_loss_uses_latest_local_optimizer_value(tmp_path: Path) 
     # An earlier console line can remain the newest line while log transfer lags.
     (path.parent.parent / "train.log").write_text("T 1 loss=8.5\n")
     assert dashboard.RunDashboardState(path).status()["last_loss"] == 6.25
+    store.append_training_loss(3, 7.125)
+    status = dashboard.RunDashboardState(path).status()
+    assert status["last_loss"] == 7.125
+    assert status["best_loss"] == 6.25
     store.close()
 
 
@@ -105,6 +109,7 @@ def test_runs_and_runner_loss_falls_back_to_attempt_log(monkeypatch, tmp_path: P
     store = LocalChartStore(path, run_name="artifact", run_id="run-id",
                             config={"runner": {"attempt_id": attempt_id}})
     assert dashboard.RunDashboardState(path).status()["last_loss"] == 6.75
+    assert dashboard.RunDashboardState(path).status()["best_loss"] is None
     store.close()
 
 

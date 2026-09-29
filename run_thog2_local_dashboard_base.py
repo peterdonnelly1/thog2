@@ -174,6 +174,7 @@ class RunDashboardState:
         self.reader = LocalChartReader(self.database_path)
         self.lock = threading.Lock()
         self.loss_log_cache = None
+        self.best_loss_cache = None                                                                                                                          # <<< THOG avoid repeating the minimum query when the run has no new data
         self.cached_revision: Optional[Tuple[Any, ...]] = None
         self.cached_figures: Dict[str, Any] = {
             "heatmap": None,
@@ -275,6 +276,12 @@ class RunDashboardState:
         latest_loss = self.reader.latest_recorded_loss()
         if latest_loss is None:
             latest_loss = self._latest_logged_loss(metadata)
+        with self.lock:
+            cached_best = self.best_loss_cache if self.best_loss_cache and self.best_loss_cache[0] == data_updated_at else None
+        best_loss = cached_best[1] if cached_best else self.reader.best_recorded_loss()
+        if cached_best is None:
+            with self.lock:
+                self.best_loss_cache = (data_updated_at, best_loss)
         return {
             **status,
             "run_name": artifact_name,
@@ -316,6 +323,7 @@ class RunDashboardState:
             # ^^^ THOG
             "maximum_update": maximum_update,
             "last_loss": latest_loss,
+            "best_loss": best_loss,                                                                                                                        # <<< THOG Runner displays the minimum stored optimizer loss without scanning plot history
             "chart_maximum_update": chart_maximum_update,
             "database_bytes": int(self.database_path.stat().st_size),
             "run_directory": str(self.database_path.parent.resolve()),

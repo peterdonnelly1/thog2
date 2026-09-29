@@ -84,6 +84,25 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(network._host_key("dreedle"), "dreedle")
         self.assertTrue(network._host_key("dreedle.lab").startswith("dreedle_lab_"))
 
+    def test_local_host_alias_is_rejected_before_ssh_setup(self):
+        with self.assertRaisesRegex(network.NetworkError, "no need to add"):
+            self.service._execute("prepare_host", None, address="localhost", ssh_user="", ssh_port=22)
+        with patch.object(network, "_local_address", return_value=True):
+            with self.assertRaisesRegex(network.NetworkError, "no need to add"):
+                self.service._execute("add", None, address="192.168.1.2", ssh_user="", ssh_port=22)
+
+    def test_remove_participant_releases_its_claim_without_releasing_master(self):
+        remote = self.service._new_host("dreedle", "peter", 22)
+        with network._locked_config() as config:
+            config["hosts"][remote["thog_host_id"]] = remote
+            config["master_id"] = self.service.local_id
+        with patch.object(self.service, "_agent_request", return_value={}) as request, \
+             patch.object(network, "_close_master"):
+            self.service.remove(remote["thog_host_id"])
+        request.assert_called_once_with(remote, "release_master", {"master_id": self.service.local_id})
+        self.assertEqual(self.service.list_hosts()["master_id"], self.service.local_id)
+        self.assertNotIn(remote["thog_host_id"], network._read_config()["hosts"])
+
     def test_disabling_local_host_stops_scheduled_discovery(self):
         disabled = self.service.update_host(self.service.local_id, monitoring_enabled=False, execution_enabled=False)
         self.assertEqual(disabled["state"], "disabled")
@@ -403,7 +422,7 @@ class NetworkTests(unittest.TestCase):
         host = self.service._new_host("dreedle", "peter", 22)
         response = SimpleNamespace(stdout=json.dumps({"ok": False, "category": "agent availability",
                                                        "error": "local socket unavailable"}), stderr="", returncode=1)
-        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response):
+        with patch.object(network, "_ensure_master"), patch.object(network.subprocess, "run", return_value=response):
             with self.assertRaises(network.NetworkError) as failure:
                 network._ssh_request(host, "discover", {})
         self.assertEqual(failure.exception.category, "agent availability")
@@ -415,7 +434,7 @@ class NetworkTests(unittest.TestCase):
                   "debug1: Authentication succeeded (publickey).\n"
                   "sh: ~/.local/state/instra/agent-request: No such file or directory\n")
         response = SimpleNamespace(stdout="", stderr=stderr, returncode=127)
-        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response):
+        with patch.object(network, "_ensure_master"), patch.object(network.subprocess, "run", return_value=response):
             with self.assertRaises(network.NetworkError) as failure:
                 network._ssh_request(host, "discover", {})
         self.assertEqual(failure.exception.category, "agent availability")
@@ -423,7 +442,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(failure.exception.host_id, host["thog_host_id"])
 
         denied = SimpleNamespace(stdout="", stderr="Permission denied (publickey,password).", returncode=255)
-        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=denied):
+        with patch.object(network, "_ensure_master"), patch.object(network.subprocess, "run", return_value=denied):
             with self.assertRaises(network.NetworkError) as failure:
                 network._ssh_request(host, "discover", {})
         self.assertEqual(failure.exception.category, "authentication")
@@ -433,11 +452,11 @@ class NetworkTests(unittest.TestCase):
     def test_remote_agent_command_uses_installed_entry_not_checkout_path(self):
         host = self.service._new_host("dreedle", "peter", 22)
         response = SimpleNamespace(stdout='{"ok":true,"result":{}}', stderr="", returncode=0)
-        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response) as run:
+        with patch.object(network, "_ensure_master"), patch.object(network.subprocess, "run", return_value=response) as run:
             network._ssh_request(host, "state", {})
         self.assertEqual(run.call_args.args[0][-1], "~/.local/state/instra/agent-request")
         self.assertEqual(run.call_args.kwargs["timeout"], 35)
-        with patch.object(network, "_verify_identity"), patch.object(network.subprocess, "run", return_value=response) as run:
+        with patch.object(network, "_ensure_master"), patch.object(network.subprocess, "run", return_value=response) as run:
             network._ssh_request(host, "runner_preflight", {})
         self.assertEqual(run.call_args.kwargs["timeout"], 85)
 
@@ -472,25 +491,62 @@ class NetworkTests(unittest.TestCase):
         self.assertIn((remote_id, "release_master", "once-only"), calls)
         self.assertNotIn("once-only", network.CONFIG_PATH.read_text() + network.LOG_PATH.read_text())
 
-    def test_sftp_one_attempt_password_is_removed_after_failure(self):
+    def test_shared_master_password_is_removed_after_failure(self):
         remote = self.service._new_host("dreedle", "peter", 22)
         remote["monitoring_enabled"] = True
         remote["last_discovered"] = {"instra_logs_root": "/logs", "wandb_root": "/wandb"}
         with network._locked_config() as config:
             config["hosts"][remote["thog_host_id"]] = remote
         seen = []
-        def failed_sftp(command, **kwargs):
-            seen.append((command, kwargs["env"]["INSTRA_SSH_PASSWORD"], kwargs["env"]["SSH_ASKPASS"]))
+        def failed_master(command, **kwargs):
+            password_path = Path(kwargs["env"]["INSTRA_SSH_PASSWORD_FILE"])
+            seen.append((command, password_path, kwargs["env"]["SSH_ASKPASS"]))
+            self.assertEqual(password_path.read_text(), "once-only")
             self.assertTrue(Path(kwargs["env"]["SSH_ASKPASS"]).is_file())
-            return SimpleNamespace(returncode=1, stderr="Permission denied (publickey,password)")
-        with patch.object(network, "_is_known", return_value=True), patch.object(network.subprocess, "run", side_effect=failed_sftp):
+            return SimpleNamespace(returncode=255, stderr="Permission denied (publickey,password)")
+        with patch.object(network, "_is_known", return_value=True), patch.object(network.subprocess, "run", side_effect=failed_master):
             with self.assertRaises(network.NetworkError) as failure:
                 self.service.acquire_file(remote["thog_host_id"], "logs", "run/file", self.state_dir / "copy", password="once-only")
         self.assertEqual(failure.exception.category, "authentication")
         self.assertIn("BatchMode=no", seen[0][0])
-        self.assertEqual(seen[0][1], "once-only")
+        self.assertNotIn("BatchMode=yes", seen[0][0])
+        self.assertFalse(seen[0][1].exists())
         self.assertFalse(Path(seen[0][2]).exists())
         self.assertNotIn("once-only", network.CONFIG_PATH.read_text())
+
+    def test_password_master_is_reused_and_lost_session_requires_reconnect(self):
+        host = self.service._new_host("dreedle", "peter", 22)
+        host["authentication_mode"] = "password"
+        with patch.object(network, "_verify_identity"), patch.object(network, "_master_alive", side_effect=[False, True, True, False]), \
+             patch.object(network.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="")) as run:
+            network._ensure_master(host, "once-only")
+            network._ensure_master(host)
+            with self.assertRaises(network.NetworkError) as failure:
+                network._ensure_master(host)
+        self.assertEqual(failure.exception.category, "reconnect required")
+        self.assertEqual(sum("-M" in call.args[0] for call in run.call_args_list), 1)
+
+    def test_password_session_loss_pauses_background_discovery(self):
+        remote = self.service._new_host("dreedle", "peter", 22)
+        remote.update(authentication_mode="password", monitoring_enabled=True, state="available")
+        with network._locked_config() as config:
+            config["hosts"][remote["thog_host_id"]] = remote
+            config["hosts"][self.service.local_id]["monitoring_enabled"] = False
+        class OnePass:
+            checks = 0
+            def is_set(self):
+                self.checks += 1
+                return self.checks > 1
+            def wait(self, _interval):
+                pass
+            def set(self):
+                self.checks = 2
+        self.service.stop_event = OnePass()
+        with patch.object(network, "_master_alive", return_value=False), patch.object(self.service, "submit") as submit:
+            self.service._retry_loop()
+            submit.assert_not_called()
+        self.assertEqual(self.service._host(remote["thog_host_id"])["state"], "reconnect required")
+        self.assertEqual(self.service._host(remote["thog_host_id"])["last_discovered"], None)
 
     def test_manual_discovery_accepts_one_attempt_password_without_saving_it(self):
         host = self.service._new_host("dreedle", "peter", 22)

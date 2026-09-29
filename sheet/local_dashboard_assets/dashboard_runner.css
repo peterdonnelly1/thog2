@@ -4,6 +4,7 @@
 #runner_tabs { display:flex; gap:.5rem; }
 #runner_tabs button.active { border-color:#5b9ded; color:#80bafa; }
 .runner-layout { display:grid; grid-template-columns:minmax(15rem,24%) minmax(20rem,1fr); gap:1.3rem; min-height:30rem; }
+.runner-history .runner-layout { grid-template-columns:minmax(28rem,40%) minmax(20rem,1fr); }
 #runner_list { border-right:1px solid #d5dae0; padding-right:1.25rem; }
 .runner-full-width .runner-layout { display:none; }
 #runner_list { display:flex; flex-direction:column; align-items:flex-start; gap:.5rem; }
@@ -17,6 +18,9 @@
 #runner_list .runner-active-grid-row > button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-active-grid-row > .runner-kill-flush { flex:0 0 auto; width:auto; padding:.3rem .5rem; color:#9a322c; font-size:.78rem; white-space:nowrap; }
 #runner_list .runner-active-grid-row > .runner-rename-grid { flex:0 0 auto; width:auto; padding:.3rem .5rem; font-size:.78rem; white-space:nowrap; }
+.runner-history-grid-row { display:grid; width:100%; grid-template-columns:minmax(10rem,1.3fr) minmax(5rem,.5fr) minmax(10rem,1fr); gap:.6rem; align-items:center; }
+#runner_list .runner-history-grid-row > button:first-child { min-width:0; width:100%; }
+.runner-history-error { min-width:0; text-align:left; overflow-wrap:anywhere; color:#9a322c; }
 #runner_list .runner-recipe-row button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-recipe-row button:nth-child(2) { flex:0 0 auto; width:auto; white-space:nowrap; font-size:.82rem; }
 #runner_list .runner-recipe-row .runner-recipe-delete { width:auto; flex:none; color:#9a322c; }
@@ -33,7 +37,7 @@
 .runner-placement-status { margin:.9rem 0 .2rem; font-weight:650; color:#1c5578; }
 .runner-required-fields { max-width:48rem; margin:.7rem 0; padding:.6rem .8rem; border:1px solid #d8dee7; border-radius:6px; }
 .runner-recipe-add-row .runner-required-fields { margin:0; padding:.35rem; font-size:.86rem; border:0; }
-.runner-search-row { display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap; }
+.runner-search-row { display:flex; align-items:center; gap:1.5rem; flex-wrap:wrap; margin-top:2rem; padding-top:1rem; border-top:1px solid #d5dae0; }
 .runner-validation { color:#b85113; font-weight:700; margin:.4rem 0; flex:1; }
 .runner-validation:empty { display:none; }
 #runner_detail input:focus, #runner_detail select:focus { border-color:#222; outline:1px solid #222; }
@@ -54,7 +58,7 @@
 .runner-categories button.active { outline:2px solid #5792cc; }
 .runner-run { padding:.75rem; border-top:1px solid #68778a; overflow-wrap:anywhere; }
 .runner-run summary { cursor:pointer; }
-.runner-run-identity, .runner-run-headings { display:grid; grid-template-columns:minmax(5rem,1fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(6rem,1fr) minmax(5rem,.8fr) minmax(7rem,1fr); gap:.65rem; align-items:center; }
+.runner-run-identity, .runner-run-headings { display:grid; grid-template-columns:minmax(5rem,1fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(4rem,.65fr) minmax(6rem,1fr) minmax(5rem,.8fr) minmax(7rem,1fr); gap:.65rem; align-items:center; }
 .runner-run-headings { padding:.4rem .75rem; border-bottom:1px solid #68778a; }
 .runner-status-running, .runner-status-completed { color:#147348; }
 .runner-status-failed, .runner-status-blocked, .runner-status-unknown, .runner-status-cancelled { color:#ad302b; }
@@ -80,7 +84,7 @@
 .runner-grid-configuration > summary { cursor:pointer; font-weight:600; }
 .runner-grid-configuration pre { max-height:28rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
 #runner_message { min-height:1.3rem; color:#ad5707; font-weight:400; }
-@media (max-width:760px) {.runner-layout { grid-template-columns:1fr; }}
+@media (max-width:760px) {.runner-layout, .runner-history .runner-layout { grid-template-columns:1fr; }}
 body.instra-runner-grid-frame .icon-rail, body.instra-runner-grid-frame .topbar { display:none; }
 body.instra-runner-grid-frame .workspace { inset:0; }
 .runs-table td.name-column .run-link { display:inline-block; width:calc(100% - 27px); max-width:none; padding:3px 0 0; }

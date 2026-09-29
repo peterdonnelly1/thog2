@@ -30,6 +30,8 @@ LOCK_PATH = STATE_DIR / "network.lock"
 LOG_PATH = STATE_DIR / "events.jsonl"
 KNOWN_HOSTS = STATE_DIR / "known_hosts"
 _SSH_ERROR = "SSH transport"
+_master_locks = {}
+_master_locks_guard = threading.Lock()
 
 
 class NetworkError(Exception):
@@ -131,6 +133,89 @@ def _ssh_target(host):
     return f"{host['ssh_user']}@{host['address']}" if host.get("ssh_user") else host["address"]
 
 
+def _master_path(host):
+    # A short, stable path avoids OpenSSH's Unix socket length limit.
+    digest = hashlib.sha256(f"{host['thog_host_id']}:{host['ssh_user']}:{host['ssh_port']}".encode()).hexdigest()[:24]
+    return STATE_DIR / f"ssh-{digest}.sock"
+
+
+def _master_lock(host):
+    path = _master_path(host)
+    with _master_locks_guard:
+        return _master_locks.setdefault(path, threading.Lock())
+
+
+def _ssh_options(host, *, batch_mode=True):
+    return ["-o", "StrictHostKeyChecking=yes", "-o",
+            f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
+            "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2",
+            "-o", "BatchMode=yes" if batch_mode else "BatchMode=no",
+            "-o", f"ControlPath={_master_path(host)}", "-p", str(host["ssh_port"])]
+
+
+def _master_alive(host):
+    if not _master_path(host).exists():
+        return False
+    try:
+        result = subprocess.run(["ssh", *_ssh_options(host), "-O", "check", "--", _ssh_target(host)],
+                                capture_output=True, timeout=8)
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _ensure_master(host, password=None, accepted_fingerprint=None):
+    _verify_identity(host, accepted_fingerprint)
+    with _master_lock(host):
+        if _master_alive(host):
+            return
+        if host.get("authentication_mode") == "password" and password is None:
+            raise NetworkError("reconnect required", "SSH connection closed; reconnect this host in Networks", host["thog_host_id"])
+        _master_path(host).unlink(missing_ok=True)
+        command = ["ssh", "-M", "-N", "-f", *_ssh_options(host, batch_mode=password is None),
+                   "-o", "ControlPersist=yes", "--", _ssh_target(host)]
+        try:
+            with _ssh_askpass(password) as environment:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=30,
+                                        env=environment, start_new_session=password is not None)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise NetworkError(_SSH_ERROR, "Could not open the shared SSH connection", host["thog_host_id"]) from error
+        if result.returncode or not _master_alive(host):
+            stderr = result.stderr.lower()
+            if "host key verification" in stderr or "remote host identification has changed" in stderr:
+                raise NetworkError("host key", "SSH host identity verification failed", host["thog_host_id"])
+            if "permission denied" in stderr or "authentication failed" in stderr:
+                raise NetworkError("authentication", "SSH authentication failed", host["thog_host_id"])
+            raise NetworkError(_SSH_ERROR, "Could not open the shared SSH connection", host["thog_host_id"])
+
+
+def _close_master(host):
+    with _master_lock(host):
+        if _master_alive(host):
+            try:
+                subprocess.run(["ssh", *_ssh_options(host), "-O", "exit", "--", _ssh_target(host)],
+                               capture_output=True, timeout=8)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        _master_path(host).unlink(missing_ok=True)
+
+
+def _local_address(address):
+    if address.lower().rstrip(".") in {"localhost", socket.gethostname().lower().rstrip("."),
+                                      socket.getfqdn().lower().rstrip(".")}:
+        return True
+    try:
+        local = {item[4][0] for name in (socket.gethostname(), "localhost")
+                 for item in socket.getaddrinfo(name, None)}
+        interfaces = subprocess.run(["ip", "-j", "address", "show"], capture_output=True, text=True, timeout=4)
+        if interfaces.returncode == 0:
+            local.update(entry["local"] for interface in json.loads(interfaces.stdout)
+                         for entry in interface.get("addr_info", []) if "local" in entry)
+        return bool(local.intersection(item[4][0] for item in socket.getaddrinfo(address, None)))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def _known_host_token(host):
     return host["address"] if host["ssh_port"] == 22 else f"[{host['address']}]:{host['ssh_port']}"
 
@@ -209,33 +294,36 @@ def _ssh_askpass(password):
         raise NetworkError("authentication", "Invalid SSH password")
     environment = os.environ.copy()
     askpass_file = None
+    password_file = None
     if password is not None:
+        with tempfile.NamedTemporaryFile(mode="w", prefix="instra-password-", delete=False) as stream:
+            stream.write(password)
+            password_file = stream.name
+        os.chmod(password_file, 0o600)
         with tempfile.NamedTemporaryFile(mode="w", prefix="instra-askpass-", delete=False) as stream:
-            stream.write('#!/bin/sh\nprintf "%s\\n" "$INSTRA_SSH_PASSWORD"\n')
+            stream.write('#!/bin/sh\ncat -- "$INSTRA_SSH_PASSWORD_FILE"\n')
             askpass_file = stream.name
         os.chmod(askpass_file, 0o700)
-        environment.update(SSH_ASKPASS=askpass_file, SSH_ASKPASS_REQUIRE="force", INSTRA_SSH_PASSWORD=password, DISPLAY="instra:0")
+        environment.update(SSH_ASKPASS=askpass_file, SSH_ASKPASS_REQUIRE="force",
+                           INSTRA_SSH_PASSWORD_FILE=password_file, DISPLAY="instra:0")
     try:
         yield environment
     finally:
         if askpass_file:
             Path(askpass_file).unlink(missing_ok=True)
-        environment.pop("INSTRA_SSH_PASSWORD", None)
+        if password_file:
+            Path(password_file).unlink(missing_ok=True)
+        environment.pop("INSTRA_SSH_PASSWORD_FILE", None)
 
 
 def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None):
-    _verify_identity(host, accepted_fingerprint)
-    ssh_options = ["-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
-                   "-o", "ConnectTimeout=8", "-p", str(host["ssh_port"])]
-    ssh_options += ["-o", "BatchMode=no" if password is not None else "BatchMode=yes"]
+    _ensure_master(host, password, accepted_fingerprint)
     # The remote command is fixed and never interpolates user inputs.
     remote_command = "~/.local/state/instra/agent-request"
-    command = ["ssh", "-v", *ssh_options, "--", _ssh_target(host), remote_command]
+    command = ["ssh", "-v", * _ssh_options(host), "-o", "ControlMaster=auto", "--", _ssh_target(host), remote_command]
     try:
-        with _ssh_askpass(password) as environment:
-            result = subprocess.run(command, input=json.dumps({"operation": operation, "args": args}), capture_output=True,
-                                    text=True, timeout=85 if operation == "runner_preflight" else 35,
-                                    env=environment, start_new_session=password is not None)
+        result = subprocess.run(command, input=json.dumps({"operation": operation, "args": args}), capture_output=True,
+                                text=True, timeout=85 if operation == "runner_preflight" else 35)
     except subprocess.TimeoutExpired as error:
         raise NetworkError(_SSH_ERROR, "SSH connection or agent request timed out") from error
     except OSError as error:
@@ -251,6 +339,8 @@ def _ssh_request(host, operation, args, password=None, accepted_fingerprint=None
         if "host key verification" in stderr or "remote host identification has changed" in stderr:
             raise NetworkError("host key", "SSH host identity verification failed", host["thog_host_id"])
         if "permission denied" in stderr or "authentication failed" in stderr:
+            if host.get("authentication_mode") == "password" and password is None:
+                raise NetworkError("reconnect required", "SSH connection closed; reconnect this host in Networks", host["thog_host_id"])
             raise NetworkError("authentication", "SSH authentication failed", host["thog_host_id"])
         # ^^^ THOG
         if result.returncode == 255:
@@ -304,9 +394,15 @@ class NetworkService:
             except RuntimeError as error:
                 raise NetworkError("operation", str(error)[:200]) from error
         try:
-            return _ssh_request(host, operation, args or {}, password, accepted_fingerprint)
+            result = _ssh_request(host, operation, args or {}, password, accepted_fingerprint)
+            if password is not None:
+                self._record(host["thog_host_id"], authentication_mode="password")
+            return result
         except NetworkError as error:
             error.host_id = host["thog_host_id"]
+            if error.category == "reconnect required":
+                self._record(host["thog_host_id"], state="reconnect required",
+                             latest_error={"category": error.category, "message": str(error), "time": _now()})
             raise
 
     def _record(self, host_id, **changes):
@@ -334,6 +430,11 @@ class NetworkService:
             for host_id, host in config["hosts"].items():
                 if host["monitoring_enabled"] or host["execution_enabled"]:
                     if host["state"] != "discovering":
+                        if not host["local"] and host.get("authentication_mode") == "password" and not _master_alive(host):
+                            if host["state"] != "reconnect required":
+                                self._record(host_id, state="reconnect required",
+                                             latest_error={"category": "reconnect required", "message": "SSH connection closed; reconnect this host in Networks", "time": _now()})
+                            continue
                         self.submit("discover", host_id)
             self.stop_event.wait(max(1, int(config.get("retry_interval", 30))))
 
@@ -386,8 +487,9 @@ class NetworkService:
                     previous = host.get("latest_error") or {}
                     log_failure = previous.get("category") != error.category or previous.get("message") != str(error)
                     state = "disabled" if not host["monitoring_enabled"] and not host["execution_enabled"] else (
+                        "reconnect required" if error.category == "reconnect required" else (
                         "authentication required" if error.category in {"authentication", "host key"} else (
-                            "unavailable" if error.category in {"agent availability", "operation"} else "disconnected"))
+                            "unavailable" if error.category in {"agent availability", "operation"} else "disconnected")))
                     self._record(host_id, state=state, latest_error={"category": error.category, "message": str(error), "time": _now()})
                 if log_failure:
                     _event(action, host_id, error.category, str(error))
@@ -464,21 +566,17 @@ class NetworkService:
             else:
                 # SFTP needs only SSH authentication and the previously reported roots;
                 # acquisition remains possible while the node agent is unavailable.
-                if not _is_known(host):
-                    raise NetworkError("host key", "Host key is not accepted")
+                _ensure_master(host, password)
                 def quoted(path):
                     if "\n" in path or "\r" in path or "\0" in path:
                         raise NetworkError("validation", "Invalid run file name")
                     return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
                 batch = f"get {quoted(source)} {quoted(str(temporary))}\n"
-                command = ["sftp", "-b", "-", "-o", "StrictHostKeyChecking=yes",
-                           "-o", f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
-                           "-o", "ConnectTimeout=8", "-o", "BatchMode=no" if password is not None else "BatchMode=yes",
+                ssh_options = _ssh_options(host)
+                command = ["sftp", "-b", "-", *ssh_options[:-2], "-o", "ControlMaster=auto",
                            "-P", str(host["ssh_port"]), "--", _ssh_target(host)]
                 try:
-                    with _ssh_askpass(password) as environment:
-                        result = subprocess.run(command, input=batch, text=True, capture_output=True, timeout=120,
-                                                env=environment, start_new_session=password is not None)
+                    result = subprocess.run(command, input=batch, text=True, capture_output=True, timeout=120)
                 except (OSError, subprocess.SubprocessError) as error:
                     raise NetworkError(_SSH_ERROR, "SFTP acquisition failed") from error
                 if result.returncode:
@@ -510,17 +608,14 @@ class NetworkService:
             if (not isinstance(relative_path, str) or relative_path.startswith("/") or "\\" in relative_path
                     or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
                 raise NetworkError("validation", "Invalid monitoring source path", host_id)
-        if not _is_known(host):
-            raise NetworkError("host key", "Host key is not accepted", host_id)
+        _ensure_master(host)
         return host, str(PurePosixPath(root) / relative_path)
 
     def monitor_files(self, host_id, root_kind, relative_directory=""):
         """List readable regular files without following links or requiring a running node agent."""
         host, source = self._monitor_source(host_id, root_kind, relative_directory)
         remote_command = "find " + shlex.quote(source) + " -type d ! -readable -prune -o -type f -readable -printf '%P\\0%s\\0%T@\\0'"
-        command = ["ssh", "-p", str(host["ssh_port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                   "-o", "StrictHostKeyChecking=yes", "-o",
-                   f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}",
+        command = ["ssh", * _ssh_options(host), "-o", "ControlMaster=auto",
                    "--", _ssh_target(host), remote_command]
         try:
             result = subprocess.run(command, capture_output=True, timeout=60)
@@ -541,9 +636,7 @@ class NetworkService:
         host, source = self._monitor_source(host_id, root_kind, relative_path)
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        ssh_options = ["ssh", "-p", str(host["ssh_port"]), "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                       "-o", "StrictHostKeyChecking=yes", "-o",
-                       f"UserKnownHostsFile={KNOWN_HOSTS} {Path.home() / '.ssh/known_hosts'}"]
+        ssh_options = ["ssh", * _ssh_options(host), "-o", "ControlMaster=auto"]
         ssh_wrapper = None
         try:
             if database:
@@ -681,6 +774,8 @@ class NetworkService:
             raise NetworkError("validation", "Invalid SSH username")
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise NetworkError("validation", "SSH port must be between 1 and 65535")
+        if _local_address(address):
+            raise NetworkError("validation", "This is the local host; there is no need to add it")
         return self._new_host(address, ssh_user, port)
 
     def update_host(self, host_id, monitoring_enabled=None, execution_enabled=None, display_name=None):
@@ -794,14 +889,23 @@ class NetworkService:
         host = self._host(host_id)
         if host["local"]:
             raise NetworkError("validation", "The local host cannot be removed")
+        import instra_runner
+        if any(run["host_id"] == host_id and (run["state"] not in instra_runner.TERMINAL or not run.get("released"))
+               for grid in instra_runner._read()["grids"] for run in grid["runs"]):
+            raise NetworkError("authority", "This host has unfinished Grid work or GPU releases; finish it before removing the host")
         if _read_config()["master_id"]:
-            raise NetworkError("authority", "Release Runner Master before removing a participating host")
+            # Detach this participant's claim while retaining the local Master and other hosts.
+            self._agent_request(host, "release_master", {"master_id": self.local_id})
         with _locked_config() as config:
             config["hosts"].pop(host_id, None)
+        _close_master(host)
         _event("remove", host_id, "success", "Host configuration removed")
         return {"removed": host_id}
 
     def close(self):
         self.stop_event.set()
         self.executor.shutdown(wait=False, cancel_futures=True)
+        for host in _read_config()["hosts"].values():
+            if not host["local"]:
+                _close_master(host)
 # ^^^ THOG

@@ -84,12 +84,12 @@ async function main() {
   vm.runInNewContext(source, context);
   element("networks_nav").click();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(element("network_host_actions").children.map(child => child.textContent), ["Refresh discovery"]);
+  assert.deepEqual(element("network_host_actions").children.map(child => child.textContent), ["Refresh Discovery"]);
 
   element("network_host_list").children[1].children[0].click();
   tabs.children[1].click();
   assert.equal(element("network_detail").children[0].children[0].children[1].textContent,
-    " Enable other thog hosts to monitor runs on dreedle");
+    " Monitor runs from dreedle in this Instra");
   assert.equal(element("network_detail").children.at(-1).textContent, "Manually refresh run data now");
   const interval = element("network_detail").children[2].children[0];
   interval.value = "17";
@@ -109,9 +109,9 @@ async function main() {
   assert.equal(element("network_host_state").classList.contains("network-discovering"), true);
   hosts[1].state = "available";
   const actions = element("network_host_actions").children;
-  assert.deepEqual(actions.map(child => child.textContent), ["Refresh discovery"]);
-  const remove_button = element("network_host_list").children[1].children[1];
-  assert.equal(remove_button.textContent, "Remove");
+  assert.deepEqual(actions.map(child => child.textContent), ["Refresh Discovery", "Authenticate", "Remove Host"]);
+  const remove_button = actions[2];
+  assert.equal(remove_button.textContent, "Remove Host");
   assert.equal(element("network_host_list").children[0].children.length, 1);
   actions[0].click();
   remove_button.click();
@@ -124,18 +124,19 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   element("network_host_list").children[1].children[0].click();
   tabs.children[0].click();
-  assert.equal(element("network_host_list").children[1].children[1].disabled, false);
+  assert.equal(element("network_host_actions").children[2].disabled, false);
   const prior_calls = calls.length;
-  element("network_host_list").children[1].children[1].click();
-  assert.equal(calls.length, prior_calls);
-  assert.match(element("network_message").textContent, /Release Runner Master/);
+  element("network_host_actions").children[2].click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.length, prior_calls + 1);
+  assert.equal(calls.at(-1).action, "remove");
   element("network_host_list").children[0].children[0].click();
   tabs.children[2].click();
   const master_check = element("network_detail").children[2].children[0].children[0];
   assert.equal(master_check.checked, true);
   assert.equal(element("network_detail").children[0].children[0].children[1].textContent,
-    " Enable other thog hosts to execute runs on scruffy");
-  assert.equal(element("network_host_actions").children[0].textContent, "Refresh discovery");
+    " Allow this Instra's Runner Master to execute runs on scruffy");
+  assert.equal(element("network_host_actions").children[0].textContent, "Refresh Discovery");
   fail_auth = true;
   element("network_host_actions").children[0].click();
   await new Promise(resolve => setImmediate(resolve));
@@ -160,7 +161,7 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   element("network_host_list").children[1].children[0].click();
   assert.deepEqual(element("network_host_actions").children.map(child => child.textContent),
-    ["Refresh discovery", "Authenticate"]);
+    ["Refresh Discovery", "Authenticate", "Remove Host"]);
   element("network_host_actions").children[1].click();
   assert.equal(auth_dialog.open, true);
   password.value = "fresh-secret";
@@ -168,7 +169,12 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.at(-1).action, "discover");
   assert.equal(calls.at(-1).args.password, "fresh-secret");
-  console.log("PASS Networks discovery, list-row removal, master guard and masked SSH retry");
+  hosts[1].state = "reconnect required";
+  element("networks_nav").click();
+  await new Promise(resolve => setImmediate(resolve));
+  element("network_host_list").children[1].children[0].click();
+  assert.equal(element("network_host_actions").children[1].textContent, "Reconnect");
+  console.log("PASS Networks discovery, host removal with Master, local-only Master and masked SSH reconnect");
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

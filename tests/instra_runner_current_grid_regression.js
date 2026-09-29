@@ -28,11 +28,17 @@ class Element {
   }
   setAttribute(name, value) { this[name] = value; }
   click() { return this.events.click?.(); }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  focus() {}
+  select() {}
 }
 
 async function main() {
   const roots = Object.fromEntries(["runner_view","runner_list","runner_detail","runner_multiview_panel","runner_message","runner_tabs",
-    "runner_nav","runs_nav","workspace_nav","networks_nav","settings_nav"].map(id => [id,new Element()]));
+    "runner_nav","runs_nav","workspace_nav","networks_nav","settings_nav","runner_rename_dialog",
+    "runner_rename_form","runner_rename_input","runner_rename_cancel"].map(id => [id,new Element()]));
+  roots.runner_rename_dialog.append(new Element("h2"));
   for (const name of ["recipes","progress","multiview","current_scripts","history","log","files"]) {
     const tab = new Element("button"); tab.dataset.runnerTab = name; roots.runner_tabs.append(tab);
   }
@@ -54,12 +60,13 @@ async function main() {
   let log_events = '{"time":"2026-09-27T21:00:00Z","event":"launch"}\n';
   const fetch = async (url, options) => {
     requests.push({url,options});
-    const data = url === "/api/runner" ? snapshot : url === "/api/network" ? network : {};
+    const data = url === "/api/runner" ? snapshot : url === "/api/network" ? network :
+      url === "/api/runs" ? {runs:[{runner_run_id:"newer",last_loss:3.14159,best_loss:2.71828}]} : {};
     return {ok:true,json:async()=>data,text:async()=>log_events};
   };
   const context = {window:{innerWidth:1200}, document, fetch, AbortController, URLSearchParams,
     setInterval() {},setTimeout:()=>1,clearTimeout() {},Date,JSON,Number,String,
-    confirm:()=>true,prompt:()=>"Renamed Recipe"};
+    confirm:()=>true,prompt:()=>{throw Error("Browser prompt used for renaming");}};
   vm.runInNewContext(fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.js","utf8"),context);
   const switch_tab = name => roots.runner_tabs.children.find(tab => tab.dataset.runnerTab === name).click();
   roots.runner_nav.click();
@@ -67,7 +74,11 @@ async function main() {
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
   assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename Grid");
   assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");
-  await roots.runner_list.children[1].children[1].click();
+  const rename_click = roots.runner_list.children[1].children[1].click();
+  assert.equal(roots.runner_rename_dialog.open,true);
+  roots.runner_rename_input.value="Renamed Recipe";
+  roots.runner_rename_form.onsubmit({preventDefault() {}});
+  await rename_click;
   const rename = requests.find(entry => entry.url === "/api/runner/action" &&
     JSON.parse(entry.options.body).recipe?.label === "Renamed Recipe");
   assert.equal(JSON.parse(rename.options.body).recipe_id,"latest","Recipe rename must preserve its ID");
@@ -79,11 +90,15 @@ async function main() {
   assert.match(active_row.children[2].title,/Last resort/);
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
   switch_tab("history");
-  assert.ok(roots.runner_list.children[0].textContent.startsWith("G-00002"));
+  assert.ok(roots.runner_list.children[0].children[0].textContent.startsWith("G-00002"));
+  assert.equal(roots.runner_list.children[0].children[1].textContent,"running");
+  assert.equal(roots.runner_list.children[0].children[0].textContent,"G-00002 · Live");
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
-  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Step","Loss","Host","GPU","Profiling"]);
+  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Step","Loss","Best loss","Host","GPU","Profiling"]);
+  assert.equal(summaries[0].children[0].children[3].textContent,"3.142");
+  assert.equal(summaries[0].children[0].children[4].textContent,"2.718");
   switch_tab("log");
   await new Promise(resolve => setImmediate(resolve));
   const log_viewer = roots.runner_detail.querySelector(".runner-event-log");

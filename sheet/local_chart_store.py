@@ -262,6 +262,7 @@ class LocalChartStore:
                 loss REAL NOT NULL,
                 wall_time REAL NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS training_losses_loss_idx ON training_losses(loss);
             """
         )
         # vvv THOG Processing throughput time coordinates v1
@@ -776,6 +777,19 @@ class LocalChartReader:
             return None
         number = float(value)
         return number if math.isfinite(number) else None
+
+    def best_recorded_loss(self) -> Optional[float]:
+        """Lowest finite optimizer loss recorded for this run."""
+        connection = self._connection()
+        try:
+            if not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='training_losses'"
+            ).fetchone():
+                return None
+            row = connection.execute("SELECT MIN(loss) AS best_loss FROM training_losses").fetchone()
+            return float(row["best_loss"]) if row and row["best_loss"] is not None else None
+        finally:
+            connection.close()
 
     def training_losses(self, limit: int = 3200, *, after: int = -1) -> list[tuple[int, float, float]]:
         connection = self._connection()

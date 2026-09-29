@@ -68,7 +68,7 @@
     const form = element("network_auth_form");
     const input = element("network_auth_password");
     const cancel = element("network_auth_cancel");
-    element("network_auth_message").textContent = `SSH key or certificate authentication failed for ${host?.ssh_user || "your SSH user"}@${host?.address || "this host"}. Check that Instra can use your existing SSH credential. A password is optional and is sent for this attempt only.`;
+    element("network_auth_message").textContent = `Connect to ${host?.ssh_user || "your SSH user"}@${host?.address || "this host"}. Your password opens a shared SSH connection; it is not saved. Reconnect if that connection closes.`;
     input.value = "";
     input.type = "password";
     element("network_auth_eye").setAttribute("aria-label", "Show password");
@@ -106,11 +106,11 @@
       await refresh();
       return result;
     } catch (error) {
-      // vvv THOG password-only SSH requires a fresh credential for each manual attempt
+      // vvv THOG request a password only when opening or restoring the shared SSH connection
       const auth_host_id = error.failed_host_id || host_id;
       const multi_host_action = ["designate_master", "release_master", "settings"].includes(name);
       const supplied = multi_host_action ? args.passwords?.[auth_host_id] : args.password;
-      if (error.category === "authentication" && auth_host_id && !supplied) {
+      if (["authentication", "reconnect required"].includes(error.category) && auth_host_id && !supplied) {
         const host = snapshot?.hosts.find(item => item.thog_host_id === auth_host_id);
         const password = await request_password(host);
         if (password) {
@@ -139,7 +139,7 @@
     element("network_restart_mode").value = snapshot.restart_mode;
     if (document.activeElement !== element("network_retry_interval")) element("network_retry_interval").value = snapshot.retry_interval;
     for (const host of snapshot.hosts) {
-      // vvv THOG place removal beside its host; selection and deletion are separate buttons
+      // vvv THOG keep selection in the list; actions for the selected host live in its detail header
       const row = append(list, "div", undefined, `network-host-row${host.thog_host_id === selected_id ? " active" : ""}`);
       const select = button(row, "", () => { selected_id = host.thog_host_id; render(); });
       select.className = "network-host-select";
@@ -147,20 +147,6 @@
       append(select, "span", host.thog_host_id);
       append(select, "small", `${host.state} · ${host.last_discovered?.gpus?.length || 0} GPUs · ${host.monitoring_enabled ? "monitoring" : "no monitoring"} / ${host.execution_enabled ? "execution" : "no execution"}`,
         host.state === "discovering" ? "network-discovering" : "");
-      if (!host.local) {
-        const remove_button = button(row, "Remove", () => {
-          if (snapshot.master_id) {
-            message("Release Runner Master in the Execution tab before removing a participating host.");
-            return;
-          }
-          if (confirm(`Remove ${host.display_name} from Instra configuration? Runs and files are retained.`)) {
-            run_action("remove", host.thog_host_id).catch(() => {});
-          }
-        });
-        remove_button.className = "network-host-remove";
-        remove_button.setAttribute("aria-label", `Remove ${host.display_name}`);
-        remove_button.title = snapshot.master_id ? "Release Runner Master in Execution before removing a participating host" : `Remove ${host.display_name}`;
-      }
       // ^^^ THOG
     }
     const host = snapshot.hosts.find(item => item.thog_host_id === selected_id);
@@ -180,12 +166,16 @@
     // vvv THOG expose host discovery above all detail tabs, including Monitoring
     const host_actions = element("network_host_actions");
     host_actions.replaceChildren();
-    button(host_actions, "Refresh discovery", () => run_action("discover", host.thog_host_id).catch(() => {}));
-    if (!host.local && host.state === "authentication required")
-      button(host_actions, "Authenticate", async () => {
+    button(host_actions, "Refresh Discovery", () => run_action("discover", host.thog_host_id).catch(() => {}));
+    if (!host.local)
+      button(host_actions, host.state === "reconnect required" ? "Reconnect" : "Authenticate", async () => {
         const password = await request_password(host);
         if (password) run_action("discover", host.thog_host_id, {password}).catch(() => {});
       });
+    if (!host.local) button(host_actions, "Remove Host", () => {
+      if (confirm(`Remove ${host.display_name} from Instra configuration? Runs and files are retained.`))
+        run_action("remove", host.thog_host_id).catch(() => {});
+    });
     // ^^^ THOG
     for (const tab of element("network_tabs").querySelectorAll("button")) tab.classList.toggle("active", tab.dataset.networkTab === selected_tab);
     const stale = host.state !== "available" ? " (stale)" : "";
@@ -214,7 +204,7 @@
         button(actions, `Restart dashboard on ${host.display_name}`, () => run_action("restart_instra", host.thog_host_id).catch(() => {}));
       }
     } else if (selected_tab === "monitoring") {
-      toggle(detail, host, "monitoring_enabled", `Enable other thog hosts to monitor runs on ${host.display_name}`);
+      toggle(detail, host, "monitoring_enabled", `Monitor runs from ${host.display_name} in this Instra`);
       const data = append(detail, "dl");
       pair(data, "Instra logs root", (discovery.instra_logs_root || "—") + stale);
       pair(data, "W&B root", (discovery.wandb_root || "—") + stale);
@@ -235,7 +225,7 @@
       // ^^^ THOG
       button(detail, "Manually refresh run data now", () => run_action("monitor_refresh", host.thog_host_id).catch(() => {}), !host.monitoring_enabled);
     } else if (selected_tab === "profiles") {
-      toggle(detail, host, "execution_enabled", `Enable other thog hosts to execute runs on ${host.display_name}`);
+      toggle(detail, host, "execution_enabled", `Allow this Instra's Runner Master to execute runs on ${host.display_name}`);
       // vvv THOG one-time host administration is explicit and discovery verifies it after restarts
       const power = discovery.power_control || {};
       const power_card = append(detail, "section", undefined, "network-card");

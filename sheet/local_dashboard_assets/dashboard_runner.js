@@ -19,6 +19,21 @@
   let current_run_metrics = new Map(), metrics_loading = false;
   let required_notice_seen = false, message_timer = null;
   const clear_message = () => { clearTimeout(message_timer); message.textContent = ""; };
+  function rename_dialog(title, current) {
+    const dialog = by_id("runner_rename_dialog"), form = by_id("runner_rename_form"), input = by_id("runner_rename_input");
+    dialog.querySelector("h2").textContent = title;
+    input.value = current;
+    return new Promise(resolve => {
+      const finish = value => {
+        form.onsubmit = null; by_id("runner_rename_cancel").onclick = null; dialog.oncancel = null;
+        dialog.close(); resolve(value);
+      };
+      form.onsubmit = event => { event.preventDefault(); finish(input.value.trim()); };
+      by_id("runner_rename_cancel").onclick = () => finish(null);
+      dialog.oncancel = event => { event.preventDefault(); finish(null); };
+      dialog.showModal(); input.focus(); input.select();
+    });
+  }
   const add = (parent, tag, value, class_name) => {
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = String(value ?? "—");
@@ -273,8 +288,9 @@
   }
   function run_headings(parent) {
     const headings=add(parent,"div",undefined,"runner-run-headings");
-    for(const name of ["Run ID","State","Step","Loss","Host","GPU","Profiling"])add(headings,"strong",name);
+    for(const name of ["Run ID","State","Step","Loss","Best loss","Host","GPU","Profiling"])add(headings,"strong",name);
   }
+  const loss_text = value => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(3);
   function render_run(parent,run,preview=false) {
     const row=add(parent,"details",undefined,"runner-run");
     row.dataset.runId=run.run_id;
@@ -285,7 +301,8 @@
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
     const observed=current_run_metrics.get(run.run_id);
     add(summary,"span",preview?"—":observed?.maximum_update??"—");
-    add(summary,"span",preview?"—":observed?.last_loss??"—");
+    add(summary,"span",preview?"—":loss_text(observed?.last_loss));
+    add(summary,"span",preview?"—":loss_text(observed?.best_loss));
     add(summary,"span",run.host_label);
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
@@ -357,7 +374,7 @@
     const heading = add(detail,"div",undefined,"runner-grid-heading");
     add(heading,"h2",`${grid.grid_tag} · ${grid.label}`);
     button(heading,"Rename Grid",async()=>{
-      const label=prompt(`New name for ${grid.grid_tag}`,grid.label);
+      const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
       if(label===null || label.trim()===grid.label)return;
       try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
     });
@@ -511,7 +528,7 @@
         recipe_button.title=saved.recipe.label;
         recipe_button.classList.toggle("active",chosen===saved.recipe_id);
         const rename=button(row,"Rename Grid",async()=>{
-          const label=prompt(`New name for Grid Recipe ${saved.recipe.label}`,saved.recipe.label);
+          const label=await rename_dialog("Rename Grid Recipe",saved.recipe.label);
           if(label===null || label.trim()===saved.recipe.label)return;
           if(!label.trim()){message.textContent="Grid Recipe name cannot be blank";return;}
           try{
@@ -536,16 +553,21 @@
         const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1).slice(0,110)}` : ""}` : "";
         const blocked=grid.runs.find(run=>run.state==="blocked" && run.blocking_reason);
         const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
-        const row=tab==="progress"?add(list,"div",undefined,"runner-active-grid-row"):list;
+        const row=tab==="progress"?add(list,"div",undefined,"runner-active-grid-row"):
+          tab==="history"?add(list,"div",undefined,"runner-history-grid-row"):list;
         const entry=button(row,tab==="progress"?`${grid.grid_tag} · ${grid.label} · ${grid.state}`:
-          `${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`,
+          `${grid.grid_tag} · ${grid.label}`,
         ()=>{chosen=grid.grid_id;if(tab==="history")last_history_grid=chosen;render();});
         entry.title=`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`;
         entry.classList.toggle("active",chosen===grid.grid_id);
-        entry.classList.add(`runner-status-${grid.state}`);
+        if(tab==="history") {
+          add(row,"span",grid.state,`runner-status runner-status-${grid.state}`);
+          const diagnostic=add(row,"span",[failure,reason].filter(Boolean).join(" · ").replace(/^ · /,""),"runner-history-error");
+          diagnostic.title=diagnostic.textContent;
+        } else entry.classList.add(`runner-status-${grid.state}`);
         if(tab==="progress") {
           button(row,"Rename Grid",async()=>{
-            const label=prompt(`New name for ${grid.grid_tag}`,grid.label);
+            const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
             if(label===null || label.trim()===grid.label)return;
             try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
           }).classList.add("runner-rename-grid");
@@ -591,6 +613,7 @@
         }else add(detail,"p",empty_text,"runner-empty-state");}
     }
     view.classList.toggle("runner-full-width",tab==="multiview");
+    view.classList.toggle("runner-history",tab==="history");
     multiview.hidden=tab!=="multiview";
   }
   async function refresh(repaint=false) {
