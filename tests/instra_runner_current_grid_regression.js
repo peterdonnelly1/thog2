@@ -87,6 +87,10 @@ async function main() {
   assert.equal(default_recipe.power_caps["dreedle-host.gpu.GPU-1"],200);
   context.window.instra_runner_test_hooks.remember_default("--n-layer",24);
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters["--n-layer"],24);
+  context.window.instra_runner_test_hooks.remember_default("power_caps",{"dreedle-host.gpu.GPU-1":180});
+  assert.equal(context.window.instra_runner_test_hooks.current_recipe().power_caps["dreedle-host.gpu.GPU-0"],200);
+  assert.equal(context.window.instra_runner_test_hooks.current_recipe().power_caps["dreedle-host.gpu.GPU-1"],180);
+  assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters.power_caps,undefined);
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
   assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename Grid");
   assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");

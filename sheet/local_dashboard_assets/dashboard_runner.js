@@ -92,11 +92,16 @@
     for (const host of network?.hosts || []) if (/^dreedle$/i.test(host.display_name || ""))
       for (const gpu of host.last_discovered?.gpus || [])
         power_caps[gpu.gpu_id || `${host.thog_host_id}.gpu.${gpu.gpu_key}`] = 200;
-    return {label:"New Grid Recipe", parameters:{...{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
+    for (const [gpu_id,cap] of Object.entries(defaults.power_caps || {})) {
+      if (cap == null) delete power_caps[gpu_id];else power_caps[gpu_id]=cap;
+    }
+    const special = new Set(["profiling_mode","recipe_label","gpu_pool","power_caps"]);
+    return {label:defaults.recipe_label||"New Grid Recipe", parameters:{...{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
       "--n-layer":16,"DEPTH.order":12,"--n-embd":1024,"--n-head":16,"--block-size":1024,
       "--gradient-accumulation-steps":6,"--checkpoint-segment-size":4,"--optimizer":"adamw",
-      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0},...Object.fromEntries(Object.entries(defaults).filter(([key])=>key!=="profiling_mode"))},
-      power_caps, profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]};
+      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0},...Object.fromEntries(Object.entries(defaults).filter(([key])=>!special.has(key)))},
+      power_caps, gpu_pool:defaults.gpu_pool||[],
+      profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]};
   }
   function recipe_problems(recipe, hosts) {
     const errors = [];
@@ -215,8 +220,12 @@
     detail.replaceChildren();
     const recipe = current_recipe();
     add(detail,"h2",draft_id ? `Grid Recipe · ${recipe.label}` : "Grid Recipe");
-    const label = add(detail,"label","Recipe label");
+    const label = add(detail,"label",undefined,"runner-recipe-label");add(label,"span","Recipe label");
     const label_input = add(label,"input"); label_input.value = recipe.label;
+    button(label,"Change default value",()=>{
+      if(!label_input.value.trim())return;
+      remember_default("recipe_label",label_input.value.trim());message.textContent="Recipe label default saved";
+    }).classList.add("runner-change-default");
     label_input.addEventListener("change", () => { draft = current_recipe(); draft.label = label_input.value; dirty = true;check_recipe(); });
     const controls = add(detail,"div",undefined,"runner-actions");
     button(controls,"Save",async () => {
@@ -293,8 +302,17 @@
         cap.title=watts.title;
         cap.addEventListener("change",()=>{draft=current_recipe();draft.power_caps=draft.power_caps||{};
           if(cap.value)draft.power_caps[gpu_id]=Number(cap.value);else delete draft.power_caps[gpu_id];dirty=true;});
+        button(line,"Change default value",()=>{
+          const values=saved_defaults().power_caps||{};
+          values[gpu_id]=cap.value?Number(cap.value):null;
+          remember_default("power_caps",values);message.textContent=`Power default saved for ${host.display_name} GPU ${gpu.ordinal}`;
+        }).classList.add("runner-change-default");
       }
     }
+    button(detail,"Change default value",()=>{
+      remember_default("gpu_pool",[...(current_recipe().gpu_pool||[])]);
+      message.textContent="GPU placement default saved";
+    }).classList.add("runner-gpu-default");
     const search_row=add(detail,"div",undefined,"runner-search-row");
     const search=add(search_row,"input",undefined,"runner-parameter-search");search.id="runner_parameter_search";
     search.placeholder="Search fields across all parameter tabs";
