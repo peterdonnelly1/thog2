@@ -157,9 +157,33 @@ function hash_text(value) {
   return hash >>> 0;
 }
 
+// vvv THOG assign one hue per Grid and cache equally spaced shades for every catalogue refresh
+let grid_palette_source = null;
+let grid_palette = new Map();
 function colour_for_run(run_id) {
+  if (grid_palette_source !== app.runs) {
+    grid_palette_source = app.runs;
+    grid_palette = new Map();
+    const groups = new Map();
+    for (const run of app.runs || []) {
+      if (!run.runner_grid_tag) continue;
+      if (!groups.has(run.runner_grid_tag)) groups.set(run.runner_grid_tag, []);
+      groups.get(run.runner_grid_tag).push(run);
+    }
+    const hues = [207, 145, 270, 28, 184, 337, 82, 245, 13, 166];
+    for (const [tag,members] of groups) {
+      members.sort((left,right)=>String(left.runner_run_id||run_identifier(left)).localeCompare(String(right.runner_run_id||run_identifier(right))));
+      const hue = hues[hash_text(tag) % hues.length];
+      members.forEach((run,index)=>{
+        const lightness = members.length < 2 ? 53 : 72-index*36/(members.length-1);
+        grid_palette.set(run_identifier(run),`hsl(${hue} 56% ${lightness.toFixed(1)}%)`);
+      });
+    }
+  }
+  if (grid_palette.has(String(run_id))) return grid_palette.get(String(run_id));
   return app.colours[run_id] || default_palette[hash_text(run_id) % default_palette.length];
 }
+// ^^^ THOG
 
 function is_visible(run_id) { return app.visibility[run_id] !== false; }
 function run_identifier(run) { return String(run.dashboard_run_id || run.local_run_id || run.wandb_run_id || run.run_name); }
@@ -316,7 +340,7 @@ function append_run_row(body, run) {
   eye.setAttribute("aria-label", eye.title);
   eye.addEventListener("click", () => {
     const next_visible = !is_visible(run_id);
-    const group_members = app.workspace_mode && run.runner_grid_tag &&
+    const group_members = run.runner_grid_tag &&
       localStorage.getItem("thog2_grid_eye_grouping") !== "false"
       ? app.runs.filter(candidate => candidate.runner_grid_tag === run.runner_grid_tag)
       : [run];
@@ -333,7 +357,8 @@ function append_run_row(body, run) {
   colour.type = "button";
   colour.className = "colour-dot";
   colour.style.background = colour_for_run(run_id);
-  colour.title = "Change run colour";
+  colour.title = run.runner_grid_tag ? "Grid shades are assigned together" : "Change run colour";
+  colour.disabled = Boolean(run.runner_grid_tag);
   colour.setAttribute("aria-label", `Change colour for ${run.artifact_name}`);
   colour.addEventListener("click", event => {
     event.stopPropagation();

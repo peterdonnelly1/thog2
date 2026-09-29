@@ -338,7 +338,7 @@ window.addEventListener("load", () => {
         y: Array.isArray(series.y) ? series.y : [],
         name: series.name || chart.title || chart.id,
         customdata: series.point_sources || (series.y || []).map(() => "W&B"),
-        hovertemplate: "%{x}<br>%{y:.6g}<br>%{customdata}<extra>%{fullData.name}</extra>",
+        hovertemplate: "<b>%{fullData.name}</b><br>step: %{x}<br>value: %{y:.6g}<extra></extra>",
         line: {
           width: 2.4,
           color: series.color || default_palette[index % default_palette.length],
@@ -384,6 +384,7 @@ window.addEventListener("load", () => {
       const mount = article.querySelector(".plot-mount");
       if (!mount) return;
       const key = article.dataset.chart;
+      const requested_view = current_view_key();
       app.dynamic_chart_metadata[key] = {
         x_source: chart.x_title || "Step",
         x_label: chart.x_title || "step",
@@ -393,6 +394,7 @@ window.addEventListener("load", () => {
         available_x_axis_modes: chart.available_x_axis_modes || [],
       };
       const figure = metric_figure(article, chart);
+      if (requested_view !== current_view_key()) return;
       const cycle = article.querySelector(".metric-z-cycle");
       if (cycle) {
         cycle.hidden = !workspace_api();
@@ -400,6 +402,7 @@ window.addEventListener("load", () => {
       }
       app.dynamic_chart_figures[key] = figure;
       await render_plot(mount, figure, key);
+      if (requested_view !== current_view_key()) return;
       const detail = article.querySelector(".local-metric-detail");
       if (detail) {
         const count = point_count(chart);
@@ -408,7 +411,8 @@ window.addEventListener("load", () => {
       }
     };
 
-    const render_group_payload = async payload => {
+    const render_group_payload = async (payload, requested_view) => {
+      if (requested_view !== current_view_key()) return;
       const group = payload?.group;
       if (!group || !group.name) return;
       const section = group_section(group.name);
@@ -418,7 +422,8 @@ window.addEventListener("load", () => {
       // recorded throughput history must not displace the loss plot.
       const charts = (group.charts || []).filter(chart => !(group.name === "train" &&
         document.getElementById("training_throughput_card") &&
-        /(?:token.*(?:sec|throughput)|throughput)/i.test(`${chart.id} ${chart.title}`)));
+        /(?:token.*(?:sec|throughput)|throughput)/i.test(`${chart.id} ${chart.title}`)))
+        .sort((left,right)=>group.name==="train" ? Number(right.id==="train/loss")-Number(left.id==="train/loss") : 0);
       const wanted = new Set(charts.map(chart => chart.id));
       for (const card of [...grid.querySelectorAll(".local-metric-card")]) {
         if (!wanted.has(card.dataset.metricChartId)) {
@@ -439,12 +444,13 @@ window.addEventListener("load", () => {
           card = make_metric_card(group.name, chart);
           grid.appendChild(card);
         }
-        render_jobs.push(() => render_metric_chart(card, chart));
+        render_jobs.push(() => requested_view===current_view_key() ? render_metric_chart(card, chart) : Promise.resolve());
       }
       // Drawing a dozen Memory or System plots serially adds all individual
       // Plotly startup times. Keep a small bound to preserve UI responsiveness.
       for (let start = 0; start < render_jobs.length; start += 3) {
         await Promise.all(render_jobs.slice(start, start + 3).map(render => render()));
+        if (requested_view !== current_view_key()) return;
       }
       if (group.name === "train") {
         section.querySelector(".local-metric-group-count").textContent = String(
@@ -482,7 +488,7 @@ window.addEventListener("load", () => {
             );
         if (requested_view !== current_view_key()) return;
         if (payload.available === false) return;
-        await render_group_payload(payload);
+        await render_group_payload(payload, requested_view);
       } catch (error) {
         show_toast(`Chart group ${group_name} failed: ${error.message}`);
       }
@@ -532,6 +538,7 @@ window.addEventListener("load", () => {
         show_toast(`Local W&B charts failed: ${error.message}`);
       } finally {
         poll_in_flight = false;
+        if (requested_run !== current_view_key()) setTimeout(refresh_metric_groups, 0);
       }
     };
 

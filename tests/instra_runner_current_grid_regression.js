@@ -18,6 +18,11 @@ class Element {
       toggle: (name, enabled) => { if (enabled) names.add(name); else names.delete(name); }};
   }
   append(child) { this.children.push(child); return child; }
+  insertBefore(child, sibling) {
+    this.children = this.children.filter(item => item !== child);
+    const index = this.children.indexOf(sibling);
+    this.children.splice(index < 0 ? this.children.length : index, 0, child);
+  }
   replaceChildren() { this.children.length = 0; }
   addEventListener(name, callback) { this.events[name] = callback; }
   querySelectorAll(selector) { return selector === "button" ? this.children : []; }
@@ -55,7 +60,11 @@ async function main() {
   const snapshot = {recipes:[{recipe_id:"old",created_at:"2026-09-26",recipe:{label:"Older",parameters:{}}},
     {recipe_id:"latest",created_at:"2026-09-27",recipe:{label:"Latest",parameters:{}}}],
     grids:[finished,active],catalogue:{},common:[]};
-  const network = {hosts:[]};
+  const network = {hosts:[{thog_host_id:"dreedle-host",display_name:"dreedle",local:true,
+    last_discovered:{execution_profiles:[{profile_key:"current"}],gpus:[
+      {gpu_id:"dreedle-host.gpu.GPU-0",gpu_key:"GPU-0",ordinal:0},
+      {gpu_id:"dreedle-host.gpu.GPU-1",gpu_key:"GPU-1",ordinal:1},
+    ]}}]};
   const requests = [];
   let log_events = '{"time":"2026-09-27T21:00:00Z","event":"launch"}\n';
   const fetch = async (url, options) => {
@@ -64,13 +73,20 @@ async function main() {
       url === "/api/runs" ? {runs:[{runner_run_id:"newer",last_loss:3.14159,best_loss:2.71828}]} : {};
     return {ok:true,json:async()=>data,text:async()=>log_events};
   };
-  const context = {window:{innerWidth:1200}, document, fetch, AbortController, URLSearchParams,
+  const stored=new Map();
+  const localStorage = {getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)};
+  const context = {window:{innerWidth:1200}, document, fetch, AbortController, URLSearchParams,localStorage,
     setInterval() {},setTimeout:()=>1,clearTimeout() {},Date,JSON,Number,String,
     confirm:()=>true,prompt:()=>{throw Error("Browser prompt used for renaming");}};
   vm.runInNewContext(fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.js","utf8"),context);
   const switch_tab = name => roots.runner_tabs.children.find(tab => tab.dataset.runnerTab === name).click();
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
+  const default_recipe=context.window.instra_runner_test_hooks.current_recipe();
+  assert.equal(default_recipe.power_caps["dreedle-host.gpu.GPU-0"],200);
+  assert.equal(default_recipe.power_caps["dreedle-host.gpu.GPU-1"],200);
+  context.window.instra_runner_test_hooks.remember_default("--n-layer",24);
+  assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters["--n-layer"],24);
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
   assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename Grid");
   assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");
@@ -91,7 +107,8 @@ async function main() {
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
   switch_tab("history");
   assert.ok(roots.runner_list.children[0].children[0].textContent.startsWith("G-00002"));
-  assert.equal(roots.runner_list.children[0].children[1].textContent,"running");
+  assert.deepEqual(roots.runner_list.children[0].children.slice(1,3).map(item=>item.textContent),["Rename","Delete"]);
+  assert.equal(roots.runner_list.children[0].children.at(-1).textContent,"running");
   assert.equal(roots.runner_list.children[0].children[0].textContent,"G-00002 · Live");
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
@@ -126,9 +143,10 @@ async function main() {
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(roots.runner_multiview_panel.querySelector("select").children.length,2);
-  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
-    "another Grid arriving must not reload the selected charts");
-  selector.value="grid-2";selector.events.change();
+  assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
+    "/?runner_grid_tag=G-00003", "automatic selection follows the newest running Grid");
+  const new_selector=roots.runner_multiview_panel.querySelector("select");
+  new_selector.value="grid-2";new_selector.events.change();
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
     "/?runner_grid_tag=G-00003");
   other.state="completed";

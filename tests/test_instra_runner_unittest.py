@@ -291,6 +291,24 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "printable"):
             self.service.rename_grid(grid["grid_id"], "bad\nname")
 
+    def test_history_delete_rejects_active_grid_and_keeps_recipe_and_training_files(self):
+        recipe = {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]],
+                  "parameters": {**self.recipe["parameters"], "--n-layer": 2, "DEPTH.order": 1}}
+        saved = self.service.save_recipe(None, recipe)
+        grid = self.service.launch(saved["recipe_id"])
+        with self.assertRaisesRegex(ValueError, "Stop the Grid"):
+            self.service.delete_grid_history(grid["grid_id"])
+        outside = runner.STATE_DIR / "training-output"
+        outside.mkdir()
+        (outside / "checkpoint.pt").write_bytes(b"retained")
+        self.service.stop_grid(grid["grid_id"])
+        self.service._refresh()
+        self.assertEqual(self.service.delete_grid_history(grid["grid_id"]), {"deleted": grid["grid_id"]})
+        self.assertEqual(self.service.snapshot()["grids"], [])
+        self.assertEqual(self.service.snapshot()["recipes"][0]["recipe_id"], saved["recipe_id"])
+        self.assertEqual((outside / "checkpoint.pt").read_bytes(), b"retained")
+        self.assertFalse((runner.GRID_SCRIPTS / grid["grid_tag"]).exists())
+
     def test_launch_snapshot_survives_runtime_placement_change(self):
         saved = self.service.save_recipe(None, self.recipe)
         grid = self.service.launch(saved["recipe_id"])

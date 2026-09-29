@@ -248,7 +248,7 @@ async function processing_render_throughput(payload) {
       y: entry.rows.map(row => Number(row.tokens_per_second)),
       line: {color: colour, width: 2.4},
       marker: {color: colour},
-      hovertemplate: "update %{x}<br>%{y:,.0f} tok/s<extra>%{fullData.name}</extra>",
+      hovertemplate: "<b>%{fullData.name}</b><br>update: %{x}<br>throughput: %{y:,.0f} tok/s<extra></extra>",
     };
   });
   const maximum_points = Math.max(0, ...populated.map(entry => entry.rows.length));

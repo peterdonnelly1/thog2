@@ -6,8 +6,8 @@
   if (!view) return;
   const list = by_id("runner_list"), detail = by_id("runner_detail"), message = by_id("runner_message");
   const multiview = by_id("runner_multiview_panel");
-  const categories = ["GPT-2 Hyperparameters", "Run Control Parameters", "Geometry", "Premat", "NSIGHT",
-    "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation", "Resume and Fork"];
+  const categories = ["GPT-2 Hyperparameters", "Resume and Fork", "Run Control Parameters", "Geometry", "Premat", "NSIGHT",
+    "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
@@ -18,6 +18,13 @@
   let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
   let current_run_metrics = new Map(), metrics_loading = false;
   let required_notice_seen = false, message_timer = null;
+  let manual_grid_selection = false;
+  const saved_defaults = () => { try { return JSON.parse(localStorage.getItem("thog2_runner_field_defaults") || "{}"); }
+    catch (_) { return {}; } };
+  const remember_default = (key, value) => {
+    const values = saved_defaults(); values[key] = value;
+    localStorage.setItem("thog2_runner_field_defaults", JSON.stringify(values));
+  };
   const clear_message = () => { clearTimeout(message_timer); message.textContent = ""; };
   function rename_dialog(title, current) {
     const dialog = by_id("runner_rename_dialog"), form = by_id("runner_rename_form"), input = by_id("runner_rename_input");
@@ -79,10 +86,17 @@
     }
   }
   function current_recipe() {
-    return draft || {label:"New Grid Recipe", parameters:{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
+    if (draft) return draft;
+    const defaults = saved_defaults();
+    const power_caps = {};
+    for (const host of network?.hosts || []) if (/^dreedle$/i.test(host.display_name || ""))
+      for (const gpu of host.last_discovered?.gpus || [])
+        power_caps[gpu.gpu_id || `${host.thog_host_id}.gpu.${gpu.gpu_key}`] = 200;
+    return {label:"New Grid Recipe", parameters:{...{"--max-iters":50,"--batch-size":16,"--geometry-preset":"depth",
       "--n-layer":16,"DEPTH.order":12,"--n-embd":1024,"--n-head":16,"--block-size":1024,
       "--gradient-accumulation-steps":6,"--checkpoint-segment-size":4,"--optimizer":"adamw",
-      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0}, profilers:["none"]};
+      "--learning-rate":.0009,"--min-lr":.00009,"--warmup-iters":0},...Object.fromEntries(Object.entries(defaults).filter(([key])=>key!=="profiling_mode"))},
+      power_caps, profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]};
   }
   function recipe_problems(recipe, hosts) {
     const errors = [];
@@ -153,7 +167,7 @@
     grid.style.setProperty("--runner-columns",String(columns));
     grid.style.setProperty("--runner-rows",String(Math.max(1,Math.ceil((keys.length + (include_profiler ? 1 : 0))/columns))));
     if (include_profiler) {
-      const profile_label=add(grid,"label","Profiling mode");
+      const profile_label=add(grid,"label");add(profile_label,"span","Profiling mode");
       profile_label.title=snapshot.catalogue["--premat_processing_profiler"]?.help || "Select NSYS, NCU or a paired capture";
       const profile=add(profile_label,"select");
       for (const [name,value] of [["None","none"],["NSYS","nsys"],["NCU","ncu"],["NSYS and NCU pair","pair"]]) {
@@ -161,13 +175,20 @@
       }
       profile.value=current_recipe().profilers?.length===2?"pair":current_recipe().profilers?.[0]||"none";
       profile.addEventListener("change",()=>{draft=current_recipe();draft.profilers=profile.value==="pair"?["nsys","ncu"]:[profile.value];dirty=true;});
+      button(profile_label,"Change default value",()=>{remember_default("profiling_mode",profile.value);message.textContent="Profiling default saved";});
     }
     for (const key of keys) {
       const spec = snapshot.catalogue[key];
       if (!spec || spec.ui_hidden || ["manual","automatic"].includes(spec.kind)) continue;
-      const label = add(grid,"label",`${key}${spec.short ? ` (${spec.short})` : ""}`);
+      const label = add(grid,"label");add(label,"span",`${key}${spec.short ? ` (${spec.short})` : ""}`);
       label.title = spec.help;
       const field = add(label,"input");
+      const change_default = button(label,"Change default value",()=>{
+        if (field.getAttribute("aria-invalid") === "true") return;
+        remember_default(key,field.value === "" ? null : parse_value(key,field.value,spec));
+        message.textContent=`Default saved for ${key}`;
+      });
+      change_default.classList.add("runner-change-default");
       field.dataset.runnerField = key;
       field.title=spec.help;
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
@@ -200,7 +221,12 @@
     const controls = add(detail,"div",undefined,"runner-actions");
     button(controls,"Save",async () => {
       if (!check_recipe()) return;
-      try { const saved = await action("save",{recipe_id:draft_id,recipe:current_recipe()}); draft_id=saved.recipe_id; dirty=false; chosen=draft_id; render(); }
+      try {
+        const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
+        const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
+        const saved=await action("save",{recipe_id,recipe:current_recipe()});
+        draft_id=saved.recipe_id;dirty=false;chosen=draft_id;render();
+      }
       catch (_) { /* The error is displayed above. */ }
     });
     button(controls,"Preview",async () => {
@@ -221,15 +247,21 @@
     });
     button(controls,"Launch",async () => {
       if (!check_recipe()) return;
-      if (!draft_id || dirty) { message.textContent="Save the Recipe before launching its snapshot"; return; }
       try {
         const preview = await action("preview",{recipe:current_recipe()});
         const names = preview.gpu_pool.map(item => `${item.host_label} GPU ${item.gpu.ordinal}`).join(", ");
         const power=preview.runs.map(run=>`${run.host_label} GPU ${run.gpu.ordinal}: current ${run.current_power_w??"unknown"} W; default ${run.default_power_w??"unknown"} W; requested ${run.requested_power_w??"default"} W`).filter((value,index,self)=>self.indexOf(value)===index).join("\n");
-        if (!confirm(`Launch ${preview.total_runs} THOG runs on ${names}?\n\nGPU power limits:\n${power}`)) return;
+        const needs_save=!draft_id || dirty;
+        if (!confirm(`${needs_save?"Save and Launch":"Launch"} ${preview.total_runs} THOG runs on ${names}?\n\nGPU power limits:\n${power}`)) return;
         if (preview.total_runs > 100 && !confirm(`These values will take the size of the grid to ${preview.total_runs.toLocaleString()} runs. Proceed?`)) return;
+        if (needs_save) {
+          const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
+          const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
+          const saved=await action("save",{recipe_id,recipe:current_recipe()});
+          draft_id=saved.recipe_id;dirty=false;
+        }
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
-        last_history_grid=launched.grid_id;tab="progress"; render();
+        last_history_grid=launched.grid_id;chosen=launched.grid_id;manual_grid_selection=true;tab="progress";render();
       } catch (_) { /* The error is displayed above. */ }
     });
     const eligible=(network?.hosts||[]).filter(host=>(host.local||host.execution_enabled) &&
@@ -268,6 +300,7 @@
     search.placeholder="Search fields across all parameter tabs";
     const validation=add(search_row,"p","","runner-validation");validation.id="runner_validation";
     const categories_row=add(detail,"nav",undefined,"runner-categories");
+    detail.insertBefore(controls,categories_row);
     const fields=add(detail,"div");
     const preview_panel=add(detail,"section",undefined,"runner-preview");preview_panel.id="runner_preview";
     function show_category(query="") {
@@ -373,7 +406,7 @@
     detail.dataset.openRunIds=open_runs.join(",");
     const heading = add(detail,"div",undefined,"runner-grid-heading");
     add(heading,"h2",`${grid.grid_tag} · ${grid.label}`);
-    button(heading,"Rename Grid",async()=>{
+    if(tab==="progress")button(heading,"Rename Grid",async()=>{
       const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
       if(label===null || label.trim()===grid.label)return;
       try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
@@ -555,15 +588,27 @@
         const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
         const row=tab==="progress"?add(list,"div",undefined,"runner-active-grid-row"):
           tab==="history"?add(list,"div",undefined,"runner-history-grid-row"):list;
-        const entry=button(row,tab==="progress"?`${grid.grid_tag} · ${grid.label} · ${grid.state}`:
+        const locations=[...new Set(grid.runs.map(run=>`${run.host_label} GPU ${run.gpu.ordinal}`))].join(", ");
+        const entry=button(row,tab==="progress"?`${grid.grid_tag} · ${grid.label} · ${locations} · ${grid.state}`:
           `${grid.grid_tag} · ${grid.label}`,
-        ()=>{chosen=grid.grid_id;if(tab==="history")last_history_grid=chosen;render();});
+        ()=>{chosen=grid.grid_id;manual_grid_selection=true;if(tab==="history")last_history_grid=chosen;render();});
         entry.title=`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`;
         entry.classList.toggle("active",chosen===grid.grid_id);
         if(tab==="history") {
-          add(row,"span",grid.state,`runner-status runner-status-${grid.state}`);
+          button(row,"Rename",async()=>{
+            const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
+            if(label===null || label.trim()===grid.label)return;
+            try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
+          }).classList.add("runner-history-rename");
+          const deletion=button(row,"Delete",async()=>{
+            if(!confirm(`Delete History for ${grid.grid_tag}? Its generated Runner scripts will also be removed. Training logs and model artifacts remain.`))return;
+            try{await action("delete_grid_history",{grid_id:grid.grid_id});if(chosen===grid.grid_id)chosen=null;
+              if(last_history_grid===grid.grid_id)last_history_grid=null;render();}catch(_){/* Error shown above. */}
+          });
+          deletion.classList.add("runner-recipe-delete");deletion.disabled=!["completed","failed","cancelled"].includes(grid.state);
           const diagnostic=add(row,"span",[failure,reason].filter(Boolean).join(" · ").replace(/^ · /,""),"runner-history-error");
           diagnostic.title=diagnostic.textContent;
+          add(row,"span",grid.state,`runner-status runner-status-${grid.state}`);
         } else entry.classList.add(`runner-status-${grid.state}`);
         if(tab==="progress") {
           button(row,"Rename Grid",async()=>{
@@ -582,8 +627,11 @@
       }
       const finished_selection=tab==="multiview" && chosen && !grids.some(item=>item.grid_id===chosen) &&
         snapshot.grids.some(item=>item.grid_id===chosen);
-      const grid=finished_selection?null:grids.find(item=>item.grid_id===chosen)||
-        grids.find(item=>item.grid_id===last_history_grid && tab==="history")||grids.at(-1);
+      const latest_running=[...grids].reverse().find(item=>item.state==="running"||item.runs.some(run=>run.state==="running"));
+      const chosen_grid=grids.find(item=>item.grid_id===chosen);
+      const grid=finished_selection?null:(manual_grid_selection?chosen_grid:null)||
+        (tab==="history"?grids.find(item=>item.grid_id===last_history_grid):null)||
+        latest_running||chosen_grid||grids.at(-1);
       if(grid){
         chosen=grid.grid_id;
         if(tab==="history")last_history_grid=chosen;
@@ -623,7 +671,7 @@
       const [next,hosts]=await Promise.all([request("/api/runner"),request("/api/network")]);
       snapshot=next;network=hosts;
       const newest=next.grids.at(-1)?.grid_id||null;
-      if(newest && newest!==last_seen_grid)last_history_grid=newest;
+      if(newest && newest!==last_seen_grid && !last_history_grid)last_history_grid=newest;
       last_seen_grid=newest;
       if(repaint||tab!=="recipes"||!dirty)render();
       if(!metrics_loading) {
@@ -637,16 +685,20 @@
     } catch(error){message.textContent=error.message;clearTimeout(message_timer);message_timer=setTimeout(clear_message,18000);}
     finally{polling=false;}
   }
-  by_id("runner_nav").addEventListener("click",()=>{visible=true;refresh(true);});
+  by_id("runner_nav").addEventListener("click",()=>{
+    if(!visible){manual_grid_selection=false;chosen=null;}
+    visible=true;refresh(true);
+  });
   for(const id of ["runs_nav","workspace_nav","networks_nav","settings_nav"])by_id(id)?.addEventListener("click",()=>{visible=false;});
   for(const control of by_id("runner_tabs").querySelectorAll("button"))control.addEventListener("click",()=>{
     clear_message();required_notice_seen=true;
     const was_active=["progress","current_scripts","multiview"].includes(tab);
     tab=control.dataset.runnerTab;
+    if(!was_active)manual_grid_selection=false;
     chosen=tab==="history"?last_history_grid:["progress","current_scripts","multiview"].includes(tab) && was_active?chosen:null;
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default});
 })();
 // ^^^ THOG

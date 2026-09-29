@@ -1328,6 +1328,8 @@ def _runner_do_post(self):
             result = _runner_service.delete_recipe(payload["recipe_id"])
         elif action == "rename_grid":
             result = _runner_service.rename_grid(payload["grid_id"], payload["label"])
+        elif action == "delete_grid_history":
+            result = _runner_service.delete_grid_history(payload["grid_id"])
         elif action == "preview":
             result = _runner_service.preview(payload["recipe"])
         elif action == "launch":

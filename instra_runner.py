@@ -201,6 +201,28 @@ class RunnerService:
             _grid_event(grid, "rename", f"Grid renamed to {grid['label']}")
             return grid
 
+    # vvv THOG remove only terminal Grid history after reservations and attempts have ended
+    def delete_grid_history(self, grid_id):
+        self._require_controller()
+        with self.lock:
+            state = _read()
+            grid = next((item for item in state["grids"] if item["grid_id"] == grid_id), None)
+            if grid is None:
+                raise KeyError("Unknown Grid")
+            if grid["state"] not in TERMINAL or any(run.get("state") not in TERMINAL for run in grid["runs"]):
+                raise ValueError("Stop the Grid and finish all attempts before deleting its History")
+            state["grids"] = [item for item in state["grids"] if item["grid_id"] != grid_id]
+            _write(state)
+        # The generated script directory belongs to this Grid. Training logs
+        # and model artifacts elsewhere are deliberately not touched.
+        import shutil
+        directory = GRID_SCRIPTS / grid["grid_tag"]
+        if directory.is_dir() and directory.parent == GRID_SCRIPTS:
+            shutil.rmtree(directory)
+        (GRID_SCRIPTS / f"{grid['grid_tag']}.sh").unlink(missing_ok=True)
+        return {"deleted": grid_id}
+    # ^^^ THOG
+
     def _pool(self, recipe, trial_count=None):
         hosts = self.network.list_hosts()
         master = hosts["master_id"] == hosts["local_id"]
