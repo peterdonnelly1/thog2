@@ -119,6 +119,7 @@ const sandbox = {
     restyle:async (mount, update, indices) => { restyles.push({mount, update, indices}); },
     Plots:{resize() {}},
   },
+  app:{workspace_mode:false,current_run_id:"fixture"},
   processing_view:{
     resource_available:true,
     timing_entries:[

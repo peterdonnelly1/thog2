@@ -48,7 +48,7 @@ window.addEventListener("load", () => {
 
     const group_is_collapsed = name => {
       const settings = group_collapsed_settings();
-      if (name === "train" && (app.workspace_mode === true || workspace_api() || /(?:\?|&)runner_grid_tag=/.test(window.location?.search || ""))) return false;
+      if (name === "train" && (app.instra_focus_loss === true || app.workspace_mode === true || workspace_api() || /(?:\?|&)runner_grid_tag=/.test(window.location?.search || ""))) return false;
       return settings.has(name) ? settings.get(name) : true;
     };
     const save_group_collapsed = (name, collapsed) => {
@@ -63,6 +63,14 @@ window.addEventListener("load", () => {
     const group_key = group_name => `local_metric_group_${hash_text(group_name).toString(16)}`;
 
     const clear_metric_groups = () => {
+      const native = by_id("training_throughput_card"), legacy = by_id("training_grid");
+      if (native && legacy && native.parentElement !== legacy) legacy.appendChild(native);
+      for (const id of ["training_throughput_plot","processing_throughput_plot"]) {
+        const mount = by_id(id);
+        if (mount) clear_plot(mount);
+      }
+      delete app.dynamic_chart_figures.training_throughput;
+      delete app.dynamic_chart_figures.processing_throughput;
       if (app.maximized_chart && String(app.maximized_chart).startsWith("local_metric_")) restore_maximized_chart();
       for (const section of metric_group_sections()) {
         for (const mount of section.querySelectorAll(".plot-mount")) {
@@ -444,6 +452,7 @@ window.addEventListener("load", () => {
           card = make_metric_card(group.name, chart);
           grid.appendChild(card);
         }
+        if (chart.id === "train/loss" && grid.firstElementChild !== card) grid.prepend(card);
         render_jobs.push(() => requested_view===current_view_key() ? render_metric_chart(card, chart) : Promise.resolve());
       }
       // Drawing a dozen Memory or System plots serially adds all individual
@@ -458,11 +467,12 @@ window.addEventListener("load", () => {
           + Number(Boolean(grid.querySelector("#training_throughput_card")))
         );
       }
-      if (group.name === "train" && app.workspace_mode === true && !app.instra_loss_autofocused &&
+      if (group.name === "train" && (app.workspace_mode === true || app.instra_focus_loss === true) && !app.instra_loss_autofocused &&
           !app.maximized_chart && charts.some(chart => chart.id === "train/loss")) {
         const loss = [...grid.querySelectorAll(".local-metric-card")].find(card => card.dataset.metricChartId === "train/loss");
         if (loss) {
           app.instra_loss_autofocused = true;
+          app.instra_focus_loss = false;
           toggle_maximized_chart(loss.dataset.chart);
         }
       }
@@ -497,7 +507,8 @@ window.addEventListener("load", () => {
     const refresh_metric_groups = async () => {
       if (!app.current_run_id || poll_in_flight) return;
       // vvv THOG pause chart discovery in a hidden tab; catch up as soon as it is visible
-      if (document.visibilityState === "hidden") return;
+      if (document.visibilityState === "hidden" ||
+          typeof instra_charts_visible === "function" && !instra_charts_visible()) return;
       // ^^^ THOG
       if (by_id("charts_scroll")?.hidden) return;
       poll_in_flight = true;

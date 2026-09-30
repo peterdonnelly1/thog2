@@ -238,6 +238,8 @@ class RunnerService:
             if not host["local"] and (not master or not host["execution_enabled"] or hosts["release_pending"]):
                 continue
             discovery = host.get("last_discovered") or {}
+            if requested and not any(gpu_id.startswith(f"{host_id}.gpu.") for gpu_id in requested):
+                continue
             if not discovery.get("execution_profiles"):
                 continue
             try:
@@ -259,8 +261,8 @@ class RunnerService:
                                  "gpu": gpu, "reservation_owner": current.get("reservations", {}).get(gpu["gpu_key"])})
         if requested - {p["gpu"].get("gpu_id", f"{p['host_id']}.gpu.{p['gpu']['gpu_key']}") for p in pool}:
             raise ValueError("A selected GPU is unavailable or execution is disabled")
-        if set(recipe.get("power_caps", {})) - {p["gpu"].get("gpu_id", f"{p['host_id']}.gpu.{p['gpu']['gpu_key']}") for p in pool}:
-            raise ValueError("A configured GPU power cap targets an unavailable GPU")
+        # Caps are remembered per GPU, but only resolved placements consume them.
+        # Unticked or disabled hosts must not invalidate an otherwise eligible pool.
         if not pool:
             raise ValueError("No discovered execution-enabled GPU is eligible")
         return pool[:1] if len(recipe.get("profilers", ["none"])) == 1 and (trial_count if trial_count is not None else len(expand(recipe))) == 1 and not requested else pool

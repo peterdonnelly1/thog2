@@ -107,37 +107,74 @@
 
     const button = by_id("delete_selected_runs");
     if (button) button.disabled = true;
-    let deleted = 0;
-    const failures = [];
-    for (const run_id of selected) {
-      try {
-        window.processing_pair_unpair_run?.(run_id, {close_both:false, render:false});
-        await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}`, {method:"DELETE"});
-        deleted += 1;
-        app.selected.delete(run_id);
-        delete app.colours[run_id];
-        delete app.visibility[run_id];
-        app.processing_paired_run_ids?.delete?.(run_id);
-        app.processing_auto_opened_run_ids?.delete?.(run_id);
-        if (app.processing_pair_roles) delete app.processing_pair_roles[run_id];
-      } catch (error) {
-        failures.push(`${run_id}: ${error.message}`);
-      }
-    }
-    save_json("thog2_local_run_colours", app.colours);
-    save_json("thog2_local_run_visibility", app.visibility);
-    save_json(
-      "thog2_processing_auto_opened_run_ids",
-      [...(app.processing_auto_opened_run_ids || [])]
-    );
-    await refresh_catalog();
-    update_trash_button();
-    if (failures.length) {
-      show_toast(`Deleted ${deleted}; ${failures.length} failed.`);
-    } else {
-      show_toast(`Deleted instra chart data for ${deleted} run${deleted === 1 ? "" : "s"}.`);
-    }
+    try {
+      await delete_run_batch({run_ids:selected});
+    } catch (error) {
+      show_toast(`Delete failed: ${error.message}`);
+    } finally { update_trash_button(); }
   }
+
+  async function delete_run_batch(payload) {
+    const abort = new AbortController(), deadline = setTimeout(()=>abort.abort(),30000);
+    let result;
+    try {
+      result = await fetch_json("/api/runs", {method:"DELETE", signal:abort.signal,
+        headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    } finally { clearTimeout(deadline); }
+    const deleted = new Set(result.deleted_run_ids || []);
+    for (const run_id of deleted) {
+      window.processing_pair_unpair_run?.(run_id, {close_both:false, render:false});
+      app.selected.delete(run_id);
+      delete app.colours[run_id]; delete app.visibility[run_id];
+      app.processing_paired_run_ids?.delete?.(run_id);
+      app.processing_auto_opened_run_ids?.delete?.(run_id);
+      if (app.processing_pair_roles) delete app.processing_pair_roles[run_id];
+    }
+    app.runs = (app.runs || []).filter(run=>!deleted.has(run_identifier(run)));
+    if (deleted.has(app.current_run_id)) {
+      app.current_run_id=null;app.current_status=null;app.figures=null;app.figure_revision=null;
+      app.manual_selection=false;reset_run_charts();history.replaceState({},"","/runs");
+    }
+    save_json("thog2_local_run_colours",app.colours);
+    save_json("thog2_local_run_visibility",app.visibility);
+    save_json("thog2_processing_auto_opened_run_ids",[...(app.processing_auto_opened_run_ids || [])]);
+    render_runs();
+    const failures=result.errors || [];
+    show_toast(`Deleted ${deleted.size} run${deleted.size===1?"":"s"}.${failures.length ? ` ${failures.length} failed: ${failures.map(item=>item.error).join("; ")}` : ""}`);
+    await refresh_catalog();
+    return result;
+  }
+  function ensure_grid_delete_menu() {
+    const menu=by_id("run_menu");
+    if(!menu || by_id("delete_grid_runs"))return;
+    const button=document.createElement("button");button.id="delete_grid_runs";button.type="button";
+    button.textContent="Delete all runs belonging to this Grid";
+    menu.appendChild(button);
+    button.addEventListener("click",async()=>{
+      const run=run_for_id(app.menu_run_id),tag=run?.runner_grid_tag;
+      if(!tag)return;
+      close_run_menu();
+      try {
+        const state=await fetch_json("/api/runner");
+        const grid=(state.grids || []).find(item=>item.grid_tag===tag);
+        const terminal=value=>["completed","failed","cancelled"].includes(value);
+        if(grid && (!terminal(grid.state) || grid.runs.some(item=>!terminal(item.state)))) {
+          show_toast("Stop the Grid first before deleting all of its runs.");return;
+        }
+        if(!window.confirm(`Delete all Instra chart data belonging to ${tag}? Checkpoints, other logs and W&B runs remain.`))return;
+        await delete_run_batch({grid_tag:tag});
+      }catch(error){show_toast(`Delete failed: ${error.message}`);}
+    });
+  }
+  const open_menu_before_grid_delete = open_run_menu;
+  open_run_menu = function(run_id,anchor) {
+    ensure_grid_delete_menu();
+    const result=open_menu_before_grid_delete(run_id,anchor);
+    const button=by_id("delete_grid_runs");
+    if(button)button.hidden=!run_for_id(run_id)?.runner_grid_tag;
+    return result;
+  };
+  window.__instra_run_deletion = {delete_run_batch};
 
   function ensure_trash_button() {
     const toolbar = document.querySelector(".runs-pane-header .toolbar");

@@ -354,6 +354,7 @@
   }
 
   processing_refresh = function(force = false) {
+    if (!force && typeof instra_charts_visible === "function" && !instra_charts_visible()) return Promise.resolve();
     if (processing_refresh_promise) {
       const current_run_id = String(app.current_run_id || "");
       if (force && (!processing_refresh_in_flight_force || processing_refresh_in_flight_run_id !== current_run_id)) {

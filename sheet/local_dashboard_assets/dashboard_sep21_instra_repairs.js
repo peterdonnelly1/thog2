@@ -242,9 +242,16 @@ window.addEventListener("load", () => {
 
     function standardize_throughput_plot(mount) {
       if (!mount || mount.dataset.plotReady !== "true") return;
+      const layout=mount.layout || {}, title=layout.xaxis?.title;
+      if (title?.text === "steps" && title.standoff === 8 && layout.xaxis?.type === "linear" &&
+          layout.xaxis?.automargin === true && layout.margin?.l === 58 && layout.margin?.r === 18 &&
+          layout.margin?.t === 16 && layout.margin?.b === 48 && layout.legend?.orientation === "v" &&
+          layout.legend?.x === 1 && layout.legend?.y === 1 && layout.legend?.xanchor === "right" &&
+          layout.legend?.yanchor === "top" && layout.legend?.font?.size === 9) return;
+      // A recorded axis title can be a string. Replace it before using object properties.
       Plotly.relayout(mount, {
         "margin.l":58, "margin.r":18, "margin.t":16, "margin.b":48,
-        "xaxis.title.text":"steps", "xaxis.title.standoff":8, "xaxis.type":"linear", "xaxis.automargin":true,
+        "xaxis.title":{...(typeof title === "object" ? title : {}),text:"steps",standoff:8}, "xaxis.type":"linear", "xaxis.automargin":true,
         "legend.orientation":"v", "legend.x":1, "legend.xanchor":"right",
         "legend.y":1, "legend.yanchor":"top", "legend.bgcolor":"rgba(255,255,255,.72)",
         "legend.font.size":9, "font.size":10,

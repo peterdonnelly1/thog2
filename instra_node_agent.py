@@ -164,6 +164,16 @@ def _power_capability():
 
 
 def _set_gpu_power(gpu, requested):
+    # Laptop drivers may expose a default but no configurable power-limit readback.
+    # A blank cap then uses the existing driver policy; do not reject training.
+    if requested is None and gpu.get("power_cap_w") is None:
+        reading = {"uuid": gpu.get("uuid"), "current_w": None,
+                   "default_w": gpu.get("default_power_w")}
+        return {"before": reading, "after": reading, "target_w": reading["default_w"],
+                "changed": False, "supported": False,
+                "reason": "Driver does not expose a configurable GPU power limit; using its default policy"}
+    if requested is not None and "power_cap_w" in gpu and gpu["power_cap_w"] is None:
+        raise RuntimeError("GPU driver does not expose configurable power limits; leave this GPU's power cap blank")
     capability = _power_capability()
     if not capability["ready"]:
         raise RuntimeError(f"GPU power control unavailable: {capability['error']}")
@@ -244,7 +254,8 @@ def _runner_operation(state, name, args):
     from thog_grid_runner import command_for, environment_for, validate_recipe
     if name == "runner_capabilities":
         _validate_args(args, set())
-        return {"protocol": 2, "cuda_preflight": True, "power_control": _power_capability()}
+        return {"protocol": 2, "cuda_preflight": True, "optional_power_readback": True,
+                "power_control": _power_capability()}
     if name == "runner_log":
         _validate_args(args, {"attempt_id", "max_bytes"})
         attempt_id = args.get("attempt_id")

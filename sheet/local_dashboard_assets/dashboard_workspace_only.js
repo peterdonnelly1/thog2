@@ -16,10 +16,7 @@ window.addEventListener("load", () => {
     const run_name = run => String(run?.artifact_name || run?.run_name || run_identifier(run));
     const visible_runs = () => (app.runs || []).filter(run => is_visible(run_identifier(run)));
     const direct_json = async url => {
-      const response = await fetch(url, {cache: "no-store"});
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
-      return value;
+      return fetch_json(url);
     };
     const map_with_concurrency = async (values, limit, operation) => {
       const output = new Array(values.length);
@@ -264,6 +261,8 @@ window.addEventListener("load", () => {
         if (first) select_run(run_identifier(first), {manual: false, replace_history: true});
       }
       app.workspace_mode = true;
+      app.instra_loss_autofocused = false;
+      window.__thog2_metric_groups?.clear?.();
       document.body.classList.add("instra-workspace-mode");
       by_id("workspace_nav")?.classList.add("selected");
       by_id("runs_nav")?.classList.remove("selected");
@@ -272,11 +271,15 @@ window.addEventListener("load", () => {
       last_selection_key = selection_key();
       render_workspace_heading();
       request_workspace_refresh();
+      if (typeof processing_refresh === "function") processing_refresh(true);
     };
 
     const leave_workspace = () => {
       if (!app.workspace_mode) return;
       app.workspace_mode = false;
+      clearTimeout(refresh_timer);
+      app.instra_loss_autofocused = false;
+      app.instra_focus_loss = true;
       document.body.classList.remove("instra-workspace-mode");
       by_id("workspace_nav")?.classList.remove("selected");
       by_id("runs_nav")?.classList.add("selected");
@@ -286,6 +289,7 @@ window.addEventListener("load", () => {
       reset_run_charts();
       render_run_heading();
       refresh_current_run();
+      if (typeof processing_refresh === "function") processing_refresh(true);
     };
 
     by_id("workspace_nav")?.addEventListener("click", enter_workspace);

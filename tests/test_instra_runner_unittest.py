@@ -885,7 +885,7 @@ class NodeReservationTests(unittest.TestCase):
             self.assertTrue(agent._operation("runner_preflight", args)["resolved"])
             check_cuda.assert_called_once()
             self.assertEqual(check_cuda.call_args.args[1]["CUDA_VISIBLE_DEVICES"], "0")
-            with self.assertRaisesRegex((ValueError, RuntimeError), "preflight"):
+            with self.assertRaisesRegex((ValueError, RuntimeError), "preflight|requires one of"):
                 agent._operation("runner_preflight", {**args, "run": {**base, "parameters":
                     {**base["parameters"], "--geometry-preset": "invalid_preset"}}})
             check_cuda.assert_called_once()  # Bad parameters never probe CUDA.

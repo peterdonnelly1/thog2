@@ -36,7 +36,7 @@ assert.match(repair, /#training_chart_group \{ display:none !important/);
 assert.match(repair, /grid\.appendChild\(card\)/);
 assert.match(repair, /title\.textContent = "tokens throughput"/);
 assert.match(repair, /processing_view\.throughput_axis_mode = "step"/);
-assert.match(repair, /"xaxis\.title\.text":"steps"/);
+assert.match(repair, /"xaxis\.title":\{[^\n]*text:"steps"/);
 assert.match(repair, /"legend\.x":1, "legend\.xanchor":"right"/);
 assert.match(repair, /data-metric-group="train"[\s\S]*flex-direction:column !important/);
 assert.match(repair, /instra-train-loss-card \{ order:0/);

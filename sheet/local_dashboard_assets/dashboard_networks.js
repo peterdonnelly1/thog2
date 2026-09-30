@@ -298,6 +298,29 @@
     if (which === "networks") { element("breadcrumb_leaf").textContent = "Networks"; refresh(); }
     if (which === "runner") element("breadcrumb_leaf").textContent = "Runner";
   }
+  // One selection owner after the existing view handlers have completed.
+  function sync_main_navigation() {
+    const selected = element("settings_overlay")?.hidden === false ? "settings_nav" :
+      element("runner_view")?.hidden === false ? "runner_nav" : view.hidden === false ? "networks_nav" :
+      app.workspace_mode === true ? "workspace_nav" : "runs_nav";
+    for (const id of ["runs_nav","workspace_nav","runner_nav","networks_nav","settings_nav"]) {
+      const node=element(id),wanted=id===selected;
+      if(node && node.classList.contains("selected")!==wanted)node.classList.toggle("selected",wanted);
+    }
+  }
+  for(const id of ["runs_nav","workspace_nav","runner_nav","networks_nav","settings_nav","close_settings","cancel_settings","save_settings"])
+    element(id)?.addEventListener("click",()=>queueMicrotask(()=>{
+      sync_main_navigation();
+      if(typeof instra_charts_visible === "function" && instra_charts_visible()) {
+        refresh_current_run();window.__thog2_metric_groups?.refresh?.();
+        if(typeof processing_refresh === "function")processing_refresh(true);
+      }
+    }));
+  if(typeof MutationObserver === "function") {
+    const navigation_observer=new MutationObserver(sync_main_navigation);
+    for(const node of [view,element("runner_view"),element("settings_overlay")])
+      if(node)navigation_observer.observe(node,{attributes:true,attributeFilter:["hidden"]});
+  }
   element("networks_nav").addEventListener("click", () => show("networks"));
   element("runner_nav").addEventListener("click", () => show("runner"));
   for (const id of ["runs_nav", "workspace_nav", "settings_nav"]) element(id)?.addEventListener("click", () => {

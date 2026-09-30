@@ -142,10 +142,14 @@ function route_run_id() {
 }
 
 async function fetch_json(url, options = {}) {
-  const response = await fetch(url, {cache: "no-store", ...options});
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
-  return value;
+  const abort = options.signal ? null : new AbortController();
+  const deadline = abort ? setTimeout(()=>abort.abort(),30000) : null;
+  try {
+    const response = await fetch(url, {cache: "no-store", ...options, signal:options.signal || abort.signal});
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || `${response.status} ${response.statusText}`);
+    return value;
+  } finally { if(deadline!==null)clearTimeout(deadline); }
 }
 
 function hash_text(value) {
@@ -160,6 +164,7 @@ function hash_text(value) {
 // vvv THOG assign one hue per Grid and cache equally spaced shades for every catalogue refresh
 let grid_palette_source = null;
 let grid_palette = new Map();
+let grid_hues = null;
 function colour_for_run(run_id) {
   if (grid_palette_source !== app.runs) {
     grid_palette_source = app.runs;
@@ -170,15 +175,32 @@ function colour_for_run(run_id) {
       if (!groups.has(run.runner_grid_tag)) groups.set(run.runner_grid_tag, []);
       groups.get(run.runner_grid_tag).push(run);
     }
-    const hues = [207, 145, 270, 28, 184, 337, 82, 245, 13, 166];
-    for (const [tag,members] of groups) {
+    if (grid_hues === null) {
+      try { grid_hues = JSON.parse(localStorage.getItem("thog2_grid_hues") || "{}"); }
+      catch (_) { grid_hues = {}; }
+      if (!grid_hues || typeof grid_hues !== "object" || Array.isArray(grid_hues)) grid_hues = {};
+      for (const [tag,hue] of Object.entries(grid_hues)) if (!Number.isFinite(hue) || hue<0 || hue>=360) delete grid_hues[tag];
+    }
+    const distance = (left,right) => Math.min(Math.abs(left-right),360-Math.abs(left-right));
+    for (const [tag,members] of [...groups].sort(([left],[right])=>left.localeCompare(right))) {
       members.sort((left,right)=>String(left.runner_run_id||run_identifier(left)).localeCompare(String(right.runner_run_id||run_identifier(right))));
-      const hue = hues[hash_text(tag) % hues.length];
+      if (!Object.hasOwn(grid_hues,tag)) {
+        const existing = Object.values(grid_hues);
+        let best = 207, separation = -1;
+        for (let offset=0;offset<360;offset++) {
+          const candidate = (207+offset)%360;
+          const nearest = existing.length ? Math.min(...existing.map(hue=>distance(candidate,hue))) : 360;
+          if (nearest>separation) {best=candidate;separation=nearest;}
+        }
+        grid_hues[tag]=best;
+      }
+      const hue = grid_hues[tag];
       members.forEach((run,index)=>{
         const lightness = members.length < 2 ? 53 : 72-index*36/(members.length-1);
         grid_palette.set(run_identifier(run),`hsl(${hue} 56% ${lightness.toFixed(1)}%)`);
       });
     }
+    try { localStorage.setItem("thog2_grid_hues",JSON.stringify(grid_hues)); } catch (_) { /* In-memory colours still work. */ }
   }
   if (grid_palette.has(String(run_id))) return grid_palette.get(String(run_id));
   return app.colours[run_id] || default_palette[hash_text(run_id) % default_palette.length];
@@ -1590,8 +1612,13 @@ async function refresh_files(force = false) {
   }
 }
 
+function instra_charts_visible() {
+  return document.visibilityState !== "hidden" &&
+    !["runner_view","network_view","settings_overlay"].some(id=>by_id(id)?.hidden === false);
+}
+
 async function refresh_current_run() {
-  if (!app.current_run_id || app.refresh_in_flight) return;
+  if (!app.current_run_id || app.refresh_in_flight || !instra_charts_visible()) return;
   app.refresh_in_flight = true;
   const requested_id = app.current_run_id;
   const view_signature = () => JSON.stringify([

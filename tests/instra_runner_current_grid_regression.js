@@ -92,7 +92,7 @@ async function main() {
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().power_caps["dreedle-host.gpu.GPU-1"],180);
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters.power_caps,undefined);
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
-  assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename Grid");
+  assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename");
   assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");
   const rename_click = roots.runner_list.children[1].children[1].click();
   assert.equal(roots.runner_rename_dialog.open,true);
@@ -105,7 +105,7 @@ async function main() {
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,1,"finished Grids must disappear from Progress");
   const active_row=roots.runner_list.children[0];
-  assert.equal(active_row.children[1].textContent,"Rename Grid");
+  assert.equal(active_row.children[1].textContent,"Rename");
   assert.equal(active_row.children[2].textContent,"Kill and Flush");
   assert.match(active_row.children[2].title,/Last resort/);
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
@@ -117,9 +117,9 @@ async function main() {
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
-  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","State","Step","Loss","Best loss","Host","GPU","Profiling"]);
-  assert.equal(summaries[0].children[0].children[3].textContent,"3.142");
-  assert.equal(summaries[0].children[0].children[4].textContent,"2.718");
+  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
+  assert.equal(summaries[0].children[0].children[5].textContent,"3.142");
+  assert.equal(summaries[0].children[0].children[6].textContent,"2.718");
   switch_tab("log");
   await new Promise(resolve => setImmediate(resolve));
   const log_viewer = roots.runner_detail.querySelector(".runner-event-log");

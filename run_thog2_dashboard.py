@@ -203,6 +203,8 @@ def _start_node_agent() -> None:
             capabilities = instra_node_agent.request("runner_capabilities", timeout=1)
             if capabilities.get("protocol") != 2 or not capabilities.get("cuda_preflight"):
                 raise RuntimeError("Unknown Runner operation: CUDA preflight capability missing")
+            if not capabilities.get("optional_power_readback"):
+                raise RuntimeError("Unknown Runner operation: optional GPU power-readback capability missing")
         except RuntimeError as error:
             if not any(text in str(error).lower() for text in ("unknown operation", "unknown runner operation")):
                 raise

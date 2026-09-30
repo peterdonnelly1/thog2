@@ -45,6 +45,12 @@
   },
   "--basis-family": {
     "category": "Geometry",
+    "choices": [
+      "chebyshev",
+      "dct",
+      "haar",
+      "lapped_cosine"
+    ],
     "default": null,
     "help": "chebyshev | dct | haar | lapped_cosine",
     "kind": "dimension",
@@ -350,6 +356,15 @@
   },
   "--geometry-preset": {
     "category": "Geometry",
+    "choices": [
+      "dense",
+      "legacy_sheet_col",
+      "depth",
+      "jpeg_like_v1",
+      "head_aware_block",
+      "mlp_block",
+      "full_block"
+    ],
     "default": null,
     "help": "dense | legacy_sheet_col | depth | jpeg_like_v1 | head_aware_block | mlp_block | full_block",
     "kind": "dimension",
@@ -491,7 +506,7 @@
       "linear"
     ],
     "default": null,
-    "help": "absolute-layer observational Δloss heatmap; absent means disabled",
+    "help": "absolute-layer observational \u0394loss heatmap; absent means disabled",
     "kind": "dimension",
     "type": "string"
   },
@@ -859,6 +874,14 @@
   },
   "--optimizer": {
     "category": "GPT-2 Hyperparameters",
+    "choices": [
+      "adamw",
+      "thogopt",
+      "sgd",
+      "sgd_nesterov",
+      "adafactor",
+      "rmsprop"
+    ],
     "default": null,
     "help": "adamw | thogopt | sgd | sgd_nesterov | adafactor | rmsprop",
     "kind": "dimension",
@@ -974,6 +997,12 @@
   },
   "--plastic__layer_count_objective": {
     "category": "Variable Depth",
+    "choices": [
+      "lowest_loss",
+      "layer_efficiency",
+      "relative_training_wall_time",
+      "memory_budget"
+    ],
     "default": "lowest_loss",
     "help": "lowest_loss | layer_efficiency | relative_training_wall_time | memory_budget",
     "kind": "dimension",
@@ -1023,6 +1052,10 @@
   },
   "--plastic__layer_sampling_initialisation": {
     "category": "Layer Spacing",
+    "choices": [
+      "equidistant",
+      "random"
+    ],
     "default": "equidistant",
     "help": "equidistant | random",
     "kind": "dimension",
@@ -1323,6 +1356,11 @@
   },
   "--residual-init-depth-source": {
     "category": "Geometry",
+    "choices": [
+      "true_layer_depth",
+      "dof_implied_depth",
+      "user_forced_depth"
+    ],
     "default": null,
     "help": "true_layer_depth | dof_implied_depth | user_forced_depth",
     "kind": "dimension",
@@ -1339,6 +1377,10 @@
   },
   "--residual-init-policy": {
     "category": "Geometry",
+    "choices": [
+      "depth_scaled",
+      "unscaled"
+    ],
     "default": null,
     "help": "depth_scaled | unscaled",
     "kind": "dimension",

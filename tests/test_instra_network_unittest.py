@@ -314,7 +314,7 @@ class NetworkTests(unittest.TestCase):
         events = []
         def record_request(operation, *args, **kwargs):
             events.append(operation)
-            return {"protocol": 2, "cuda_preflight": True} if operation == "runner_capabilities" else {}
+            return {"protocol": 2, "cuda_preflight": True, "optional_power_readback": True} if operation == "runner_capabilities" else {}
         with (patch.object(agent, "request", side_effect=record_request),
               patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
               patch.object(subprocess, "Popen") as popen):
@@ -385,6 +385,23 @@ class NetworkTests(unittest.TestCase):
             if operation == "runner_capabilities": raise RuntimeError("unknown operation")
             return {}
         with (patch.object(agent, "request", side_effect=old_cuda_request),
+              patch.object(agent, "_running", return_value=False),
+              patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
+              patch.object(subprocess, "Popen") as popen):
+            upgraded["_start_node_agent"]()
+        self.assertEqual(killed, [(12345, signal.SIGTERM)])
+        self.assertEqual(events, ["state", "runner_reconcile", "runner_log", "runner_capabilities", "state", "entry", "configure"])
+        popen.assert_called_once()
+        # CUDA-capable agents from before the laptop power fix must upgrade as
+        # well; terminate only the verified agent PID, never its training group.
+        killed.clear()
+        events.clear()
+        def old_power_request(operation, *_args, **_kwargs):
+            events.append(operation)
+            if operation == "runner_log": raise RuntimeError("Unknown Runner attempt")
+            if operation == "runner_capabilities": return {"protocol": 2, "cuda_preflight": True}
+            return {}
+        with (patch.object(agent, "request", side_effect=old_power_request),
               patch.object(agent, "_running", return_value=False),
               patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
               patch.object(subprocess, "Popen") as popen):

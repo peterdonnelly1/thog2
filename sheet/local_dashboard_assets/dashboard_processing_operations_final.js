@@ -935,6 +935,8 @@
     const source = by_id("processing_throughput_plot");
     const target = by_id("training_throughput_plot");
     if (!group || !source || !target || source.dataset.plotReady !== "true") return;
+    const view_key = `${Boolean(app.workspace_mode)}:${app.current_run_id}`;
+    if (source.dataset.instraThroughputView && source.dataset.instraThroughputView !== view_key) return;
     const traces = Array.isArray(source.data) ? source.data : [];
     processing_view.training_throughput_available = traces.length > 0;
     group.hidden = !(
@@ -1220,7 +1222,9 @@
 
   const processing_render_throughput_before_training_group = processing_render_throughput;
   processing_render_throughput = async function(payload) {
+    const view_key = `${Boolean(app.workspace_mode)}:${app.current_run_id}`;
     await processing_render_throughput_before_training_group(payload);
+    if (view_key !== `${Boolean(app.workspace_mode)}:${app.current_run_id}`) return;
     await mirror_training_throughput();
   };
 

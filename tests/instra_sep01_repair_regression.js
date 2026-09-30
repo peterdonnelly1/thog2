@@ -33,6 +33,7 @@ async function main() {
       return {view};
     },
     render_run_heading() {},
+    instra_charts_visible: () => true,
     render_figures: async () => { rendered.push(context.app.figures.view); },
     show_toast: message => errors.push(message),
     queueMicrotask: callback => retries.push(callback),

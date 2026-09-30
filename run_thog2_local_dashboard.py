@@ -1367,6 +1367,38 @@ def _handler_for_with_runner(catalog):
     handler = _handler_for_before_runner(catalog)
     old_get = handler.do_GET
     old_post = handler.do_POST
+    old_delete = handler.do_DELETE
+
+    def do_delete(self):
+        if urlparse(self.path).path != "/api/runs":
+            return old_delete(self)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 1 <= length <= 1048576:
+                raise ValueError("Invalid deletion request size")
+            payload = json.loads(self.rfile.read(length))
+            tag = payload.get("grid_tag")
+            if tag is not None:
+                if not isinstance(tag, str) or not re.fullmatch(r"G-[0-9]+", tag):
+                    raise ValueError("Invalid Grid identity")
+                if _runner_service is None:
+                    raise ValueError("Runner unavailable; cannot verify that this Grid has stopped")
+                grid = next((item for item in _runner_service.snapshot()["grids"] if item["grid_tag"] == tag), None)
+                if grid is not None and (grid["state"] not in _instra_runner.TERMINAL or
+                        any(run["state"] not in _instra_runner.TERMINAL for run in grid["runs"])):
+                    raise ValueError("Stop the Grid first before deleting all of its runs")
+                members = [run for run in catalog.runs()["runs"] if run.get("runner_grid_tag") == tag]
+                if any(run.get("remote_copy") for run in members):
+                    raise PermissionError("This Grid includes acquired remote runs; delete them on their producing host")
+                run_ids = [run["dashboard_run_id"] for run in members]
+                result = catalog.delete_runs(run_ids) if run_ids else {"deleted_run_ids": [], "errors": []}
+            else:
+                result = catalog.delete_runs(payload.get("run_ids"))
+            self._send_json(result)
+        except PermissionError as error:
+            self._send_json({"error": str(error)}, status=HTTPStatus.FORBIDDEN)
+        except (ValueError, TypeError, KeyError, OSError) as error:
+            self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
 
     def do_get(self):
         parsed = urlparse(self.path)
@@ -1400,6 +1432,7 @@ def _handler_for_with_runner(catalog):
 
     handler.do_GET = do_get
     handler.do_POST = do_post
+    handler.do_DELETE = do_delete
     return handler
 
 

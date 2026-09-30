@@ -692,6 +692,20 @@ class DashboardCatalog:
             "removed_directory": removed_directory,
         }
 
+    def delete_runs(self, run_names):
+        if (not isinstance(run_names, list) or not 1 <= len(run_names) <= 10000 or
+                any(not isinstance(name, str) or not name for name in run_names)):
+            raise ValueError("run_ids must be a nonempty list of run identities")
+        # Populate the production identity cache once, then delete each database.
+        self.runs()
+        deleted, errors = [], []
+        for name in dict.fromkeys(run_names):
+            try:
+                deleted.append(self.delete_run(name)["deleted_run_id"])
+            except (OSError, KeyError, ValueError, PermissionError) as error:
+                errors.append({"run_id": name, "error": str(error)})
+        return {"deleted_run_ids": deleted, "errors": errors}
+
     def _resolved_local_path(
         self,
         run_name: str,

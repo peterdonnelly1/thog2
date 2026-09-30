@@ -165,15 +165,51 @@
       spec.type === "flag" && ["true","false"].includes(value) ? value === "true" : value;
     return spec.kind === "dimension" ? raw.split(",").map(value => scalar(value.trim())) : scalar(raw);
   }
+  function format_duration(value) {
+    if (value == null || !Number.isFinite(Number(value))) return "unknown";
+    const total = Math.max(0,Math.round(Number(value)));
+    const hours = Math.floor(total/3600), minutes = Math.floor(total%3600/60), seconds = total%60;
+    return [hours ? `${hours}h` : "", hours || minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+  }
+  function history_outcome(grid) {
+    const completed = (grid.runs || []).filter(run=>run.state === "completed").length;
+    return completed && completed === grid.runs.length ? "complete" : completed ? "partial" : "none";
+  }
+  function field_help(spec) {
+    const options = spec.choices?.length ? spec.choices.join(", ") :
+      ["flag","bool_value"].includes(spec.type) ? "true, false" :
+      spec.type === "int" ? "nonnegative whole numbers" : spec.type === "float" ? "finite numbers" :
+      spec.kind === "list" ? "one text value per line" : "text values";
+    return `${spec.help || ""}\nAvailable options: ${options}.${spec.kind === "dimension" ? " Use commas for a sweep." : ""}`;
+  }
+  function invalid_field_value(key, raw, spec) {
+    if (!raw.trim()) return required_parameters.includes(key);
+    const parts = spec.kind === "dimension" ? raw.split(",").map(part=>part.trim()) :
+      spec.kind === "list" ? raw.split("\n") : [raw.trim()];
+    if (parts.some(part=>!part)) return true;
+    if (spec.kind === "dimension" && (parts.length>64 || new Set(parts).size !== parts.length)) return true;
+    return parts.some(part => {
+      if (spec.choices?.length && !spec.choices.some(choice=>String(choice)===part)) return true;
+      if (spec.type === "int") return !/^\+?\d+$/.test(part) || !Number.isSafeInteger(Number(part)) || key === "DEPTH.order" && Number(part)<1;
+      if (spec.type === "float") return !Number.isFinite(Number(part));
+      if (["flag","bool_value"].includes(spec.type)) return !["true","false"].includes(part);
+      return part.includes("\0");
+    });
+  }
+  function premat_enabled(recipe) {
+    const value = recipe.parameters?.["--premat"];
+    return (Array.isArray(value) ? value : [value]).some(option=>option === "enabled" || option === true);
+  }
   function show_fields(container, keys, include_profiler=false) {
     const grid = add(container,"div",undefined,"runner-fields");
+    grid.classList.toggle("runner-premat-enabled",category === "Premat" && premat_enabled(current_recipe()));
     const columns = window.innerWidth < 800 ? 1 : !by_id("runner_parameter_search")?.value &&
       ["Frequently Used","GPT-2 Hyperparameters","Run Control Parameters","Geometry"].includes(category) ? 2 : 1;
     grid.style.setProperty("--runner-columns",String(columns));
     grid.style.setProperty("--runner-rows",String(Math.max(1,Math.ceil((keys.length + (include_profiler ? 1 : 0))/columns))));
     if (include_profiler) {
       const profile_label=add(grid,"label");add(profile_label,"span","Profiling mode");
-      profile_label.title=snapshot.catalogue["--premat_processing_profiler"]?.help || "Select NSYS, NCU or a paired capture";
+      profile_label.title="Available options: none, NSYS, NCU, NSYS and NCU pair";
       const profile=add(profile_label,"select");
       for (const [name,value] of [["None","none"],["NSYS","nsys"],["NCU","ncu"],["NSYS and NCU pair","pair"]]) {
         const option=add(profile,"option",name);option.value=value;
@@ -186,7 +222,7 @@
       const spec = snapshot.catalogue[key];
       if (!spec || spec.ui_hidden || ["manual","automatic"].includes(spec.kind)) continue;
       const label = add(grid,"label");add(label,"span",`${key}${spec.short ? ` (${spec.short})` : ""}`);
-      label.title = spec.help;
+      label.title = field_help(spec);
       const field = add(label,"input");
       const change_default = button(label,"Change default value",()=>{
         if (field.getAttribute("aria-invalid") === "true") return;
@@ -195,18 +231,22 @@
       });
       change_default.classList.add("runner-change-default");
       field.dataset.runnerField = key;
-      field.title=spec.help;
+      field.title=field_help(spec);
       field.value = Array.isArray(current_recipe().parameters[key]) ? current_recipe().parameters[key].join(spec.kind === "list" ? "\n" : ", ") :
         String(current_recipe().parameters[key] ?? "");
+      field.setAttribute("aria-invalid",String(invalid_field_value(key,field.value,spec)));
       field.placeholder = spec.kind === "dimension" ? "One or comma-separated choices" : spec.kind === "list" ? "One item per line" :
         spec.type === "flag" ? "true or false" : String(spec.default ?? "");
       field.addEventListener("input", () => {
-        const parts = spec.kind === "dimension" ? field.value.split(",").map(part=>part.trim()) : [field.value.trim()];
-        const invalid = Boolean(field.value.trim()) && parts.some(part =>
-          spec.type === "int" ? !/^[+-]?\d+$/.test(part) :
-          spec.type === "float" ? !Number.isFinite(Number(part)) :
-          spec.type === "flag" ? !["true","false"].includes(part) : false);
+        const invalid = invalid_field_value(key,field.value,spec);
         field.setAttribute("aria-invalid",String(invalid));
+        if (!invalid) {
+          draft=current_recipe();
+          if (field.value === "") delete draft.parameters[key];
+          else draft.parameters[key]=parse_value(key,field.value,spec);
+          dirty=true;
+          grid.classList.toggle("runner-premat-enabled",category === "Premat" && premat_enabled(draft));
+        }
         check_recipe();
       });
       field.addEventListener("change", () => {
@@ -222,10 +262,13 @@
     add(detail,"h2",draft_id ? `Grid Recipe · ${recipe.label}` : "Grid Recipe");
     const label = add(detail,"label",undefined,"runner-recipe-label");add(label,"span","Recipe label");
     const label_input = add(label,"input"); label_input.value = recipe.label;
-    button(label,"Change default value",()=>{
-      if(!label_input.value.trim())return;
-      remember_default("recipe_label",label_input.value.trim());message.textContent="Recipe label default saved";
-    }).classList.add("runner-change-default");
+    label_input.title="Available options: any label of 1–120 printable characters";
+    label_input.dataset.runnerField="Recipe label";
+    label_input.addEventListener("input",()=>{
+      const value=label_input.value;
+      label_input.setAttribute("aria-invalid",String(!value.trim() || value.trim().length>120 || /[\x00-\x1f]/.test(value)));
+      draft=current_recipe();draft.label=value;dirty=true;check_recipe();
+    });
     label_input.addEventListener("change", () => { draft = current_recipe(); draft.label = label_input.value; dirty = true;check_recipe(); });
     const controls = add(detail,"div",undefined,"runner-actions");
     button(controls,"Save",async () => {
@@ -247,7 +290,7 @@
         add(panel,"h3",`Total Runs in Grid: ${preview.total_runs} · physical executions: ${preview.runs.length}`);
         add(panel,"p", preview.estimated_duration.seconds === null ?
           `Estimated Time to complete this grid: ${preview.estimated_duration.explanation}` :
-          `Estimated Time to complete this grid: ${preview.estimated_duration.seconds}s (${preview.estimated_duration.interval_seconds.join("–")}s), ${preview.estimated_duration.confidence} confidence, ${preview.estimated_duration.exemplars} exemplars`,"runner-preview-estimate");
+          `Estimated Time to complete this grid: ${format_duration(preview.estimated_duration.seconds)} (${preview.estimated_duration.interval_seconds.map(format_duration).join(" – ")}), ${preview.estimated_duration.confidence} confidence, ${preview.estimated_duration.exemplars} exemplars`,"runner-preview-estimate");
         const placement=add(panel,"div",undefined,"runner-preview-placement");
         for(const place of preview.gpu_pool)add(placement,"p",`Host: ${place.host_label} GPU: ${place.gpu.ordinal} currently free VRAM: ${place.gpu.free_mib??"unknown"}MiB reservation: ${place.reservation_owner?.grid_id||"none"}`);
         run_headings(panel);
@@ -290,6 +333,7 @@
         const gpu_id=gpu.gpu_id||`${host.thog_host_id}.gpu.${gpu.gpu_key}`;
         const line=add(pool,"div",undefined,"runner-gpu-row");
         const tick=add(line,"input");tick.type="checkbox";tick.setAttribute("aria-label",`Select ${host.display_name} GPU ${gpu.ordinal}`);
+        tick.title="Available options: selected or unselected. With all GPUs unselected, placement is automatic.";
         tick.checked=(recipe.gpu_pool||[]).includes(gpu_id);
         tick.addEventListener("change",()=>{draft=current_recipe();draft.gpu_pool=draft.gpu_pool||[];
           draft.gpu_pool=tick.checked?[...draft.gpu_pool,gpu_id]:draft.gpu_pool.filter(id=>id!==gpu_id);dirty=true;
@@ -297,10 +341,16 @@
           placement.textContent=`GPU placement: ${draft.gpu_pool.length ? placement_text(draft.gpu_pool) : placement_text([])}`;check_recipe();});
         add(line,"span",`${host.display_name} · GPU ${gpu.ordinal} · ${gpu.model} · ${gpu.memory_mib??"?"} MiB`);
         const watts=add(line,"label","Power cap (W)");
-        watts.title="Blank resets this GPU to its NVIDIA-reported default before training";
+        watts.title="Available options: blank for the GPU default policy, or integer watts from 50 to 600 within this GPU's supported range. An explicit cap requires driver support.";
         const cap=add(watts,"input");cap.type="number";cap.min="50";cap.max="600";cap.value=recipe.power_caps?.[gpu_id]??"";
         cap.title=watts.title;
-        cap.addEventListener("change",()=>{draft=current_recipe();draft.power_caps=draft.power_caps||{};
+        cap.dataset.runnerField=`${host.display_name} GPU ${gpu.ordinal} power cap`;
+        cap.addEventListener("input",()=>{
+          cap.setAttribute("aria-invalid",String(cap.validity.badInput || Boolean(cap.value) && (!Number.isInteger(Number(cap.value)) || Number(cap.value)<50 || Number(cap.value)>600)));
+          check_recipe();
+        });
+        cap.addEventListener("change",()=>{
+          if(cap.getAttribute("aria-invalid")==="true")return;draft=current_recipe();draft.power_caps=draft.power_caps||{};
           if(cap.value)draft.power_caps[gpu_id]=Number(cap.value);else delete draft.power_caps[gpu_id];dirty=true;});
         button(line,"Change default value",()=>{
           const values=saved_defaults().power_caps||{};
@@ -309,16 +359,13 @@
         }).classList.add("runner-change-default");
       }
     }
-    button(detail,"Change default value",()=>{
-      remember_default("gpu_pool",[...(current_recipe().gpu_pool||[])]);
-      message.textContent="GPU placement default saved";
-    }).classList.add("runner-gpu-default");
     const search_row=add(detail,"div",undefined,"runner-search-row");
     const search=add(search_row,"input",undefined,"runner-parameter-search");search.id="runner_parameter_search";
     search.placeholder="Search fields across all parameter tabs";
+    search.title="Available options: parameter names or help text; leave blank to show the selected category";
     const validation=add(search_row,"p","","runner-validation");validation.id="runner_validation";
     const categories_row=add(detail,"nav",undefined,"runner-categories");
-    detail.insertBefore(controls,categories_row);
+    detail.insertBefore(controls,search_row);
     const fields=add(detail,"div");
     const preview_panel=add(detail,"section",undefined,"runner-preview");preview_panel.id="runner_preview";
     function show_category(query="") {
@@ -339,7 +386,7 @@
   }
   function run_headings(parent) {
     const headings=add(parent,"div",undefined,"runner-run-headings");
-    for(const name of ["Run ID","State","Step","Loss","Best loss","Host","GPU","Profiling"])add(headings,"strong",name);
+    for(const name of ["Run ID","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);
   }
   const loss_text = value => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(3);
   function render_run(parent,run,preview=false) {
@@ -349,13 +396,13 @@
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
+    add(summary,"span",run.host_label);
+    add(summary,"span",`GPU ${run.gpu.ordinal}`);
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
     const observed=current_run_metrics.get(run.run_id);
     add(summary,"span",preview?"—":observed?.maximum_update??"—");
     add(summary,"span",preview?"—":loss_text(observed?.last_loss));
     add(summary,"span",preview?"—":loss_text(observed?.best_loss));
-    add(summary,"span",run.host_label);
-    add(summary,"span",`GPU ${run.gpu.ordinal}`);
     const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
     profiler.title="Profiling mode: none, NSYS or NCU";
     add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power current ${run.current_power_w??"unknown"} W, default ${run.default_power_w??"unknown"} W, requested ${run.requested_power_w??"default"} W, observed ${run.attempts?.at(-1)?.observed_power_w??"pending"} W`);
@@ -364,7 +411,7 @@
     if (run.attempts?.length) {
       const started=Date.parse(run.attempts.at(-1).started_at);
       const seconds=run.duration_seconds??Math.max(0,Math.round((Date.now()-started)/1000));
-      add(row,"p",`Elapsed ${seconds}s · attempts ${run.attempts.length}`);
+      add(row,"p",`Elapsed ${format_duration(seconds)} · attempts ${run.attempts.length}`);
     }
     if (run.state==="running"||run.state==="completed"||run.state==="failed") {
       button(row,"Open in Runs",async()=>{
@@ -424,7 +471,7 @@
     detail.dataset.openRunIds=open_runs.join(",");
     const heading = add(detail,"div",undefined,"runner-grid-heading");
     add(heading,"h2",`${grid.grid_tag} · ${grid.label}`);
-    if(tab==="progress")button(heading,"Rename Grid",async()=>{
+    if(tab==="progress")button(heading,"Rename",async()=>{
       const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
       if(label===null || label.trim()===grid.label)return;
       try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
@@ -488,7 +535,7 @@
           const proposed=await action("repeat_preview",{grid_id:grid.grid_id,mode});
           const places=proposed.gpu_pool.map(p=>`${p.host_label} GPU ${p.gpu.ordinal}`).join(", ");
           const differences=proposed.changes.slice(0,8).map(item=>`${item.prior_run_id.slice(0,8)}: ${JSON.stringify(item.changes)}`).join("\n");
-          const estimate=proposed.estimated_duration.seconds===null?"insufficient history":`${proposed.estimated_duration.seconds}s`;
+          const estimate=proposed.estimated_duration.seconds===null?"insufficient history":`${format_duration(proposed.estimated_duration.seconds)}`;
           if(!confirm(`Repeat ${grid.grid_tag} (${mode})?\nRecipe: ${proposed.recipe.label}\nRuns: ${proposed.total_runs}; executions: ${proposed.physical_executions}\nPlacement: ${places}\nEstimate: ${estimate}\nChanges: ${differences||"none"}${proposed.changes.length>8?"\nMore changes appear in the resolved preview":""}`))return;
           if(proposed.total_runs>100 && !confirm(`These values will take the size of the grid to ${proposed.total_runs.toLocaleString()} runs. Proceed?`))return;
           const repeated=await action("repeat",{grid_id:grid.grid_id,mode,confirm_large:proposed.total_runs>100});
@@ -578,7 +625,7 @@
           draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();});
         recipe_button.title=saved.recipe.label;
         recipe_button.classList.toggle("active",chosen===saved.recipe_id);
-        const rename=button(row,"Rename Grid",async()=>{
+        const rename=button(row,"Rename",async()=>{
           const label=await rename_dialog("Rename Grid Recipe",saved.recipe.label);
           if(label===null || label.trim()===saved.recipe.label)return;
           if(!label.trim()){message.textContent="Grid Recipe name cannot be blank";return;}
@@ -613,6 +660,9 @@
         entry.title=`${grid.grid_tag} · ${grid.label} · ${grid.state}${failure}${reason}`;
         entry.classList.toggle("active",chosen===grid.grid_id);
         if(tab==="history") {
+          const outcome = history_outcome(grid);
+          row.dataset.outcome = outcome;
+          entry.classList.add(`runner-outcome-${outcome}`);
           button(row,"Rename",async()=>{
             const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
             if(label===null || label.trim()===grid.label)return;
@@ -626,10 +676,10 @@
           deletion.classList.add("runner-recipe-delete");deletion.disabled=!["completed","failed","cancelled"].includes(grid.state);
           const diagnostic=add(row,"span",[failure,reason].filter(Boolean).join(" · ").replace(/^ · /,""),"runner-history-error");
           diagnostic.title=diagnostic.textContent;
-          add(row,"span",grid.state,`runner-status runner-status-${grid.state}`);
+          add(row,"span",grid.state,`runner-status runner-outcome-${history_outcome(grid)}`);
         } else entry.classList.add(`runner-status-${grid.state}`);
         if(tab==="progress") {
-          button(row,"Rename Grid",async()=>{
+          button(row,"Rename",async()=>{
             const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
             if(label===null || label.trim()===grid.label)return;
             try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
@@ -717,6 +767,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,history_outcome,field_help,invalid_field_value,premat_enabled});
 })();
 // ^^^ THOG

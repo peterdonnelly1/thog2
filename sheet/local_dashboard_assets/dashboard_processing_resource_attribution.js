@@ -1012,12 +1012,15 @@ function processing_gpu_throughput_mode_available(rows, mode) {
 }
 
 async function processing_render_throughput(payload) {
+  const requested_view = `${Boolean(app.workspace_mode)}:${app.current_run_id}`;
+  const serial = processing_view.throughput_render_serial = (processing_view.throughput_render_serial || 0)+1;
   processing_view.throughput_last_payload = payload;
   processing_gpu_ensure_throughput_controls();
   const runs = processing_throughput_workspace_runs();
   const resolved = await Promise.all(runs.map(async run => ({
     run, run_id: String(run_identifier(run)), rows: await processing_throughput_rows_for_run(run, payload),
   })));
+  if (requested_view !== `${Boolean(app.workspace_mode)}:${app.current_run_id}` || serial !== processing_view.throughput_render_serial) return;
   const populated = resolved.filter(entry => entry.rows.length);
   const select = by_id("processing_throughput_x_mode");
   if (select) {
@@ -1051,6 +1054,8 @@ async function processing_render_throughput(payload) {
         : "%{x:.4g}<br>%{y:,.0f} tok/s<extra>%{fullData.name}</extra>",
     });
   }
+  const mount = by_id("processing_throughput_plot");
+  if (mount) mount.dataset.instraThroughputView = requested_view;
   processing_view.training_throughput_available = traces.length > 0;
   const maximum_points = Math.max(0, ...populated.map(entry => entry.rows.length));
   const workspace = app.workspace_mode === true;

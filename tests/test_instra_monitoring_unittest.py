@@ -266,7 +266,8 @@ class MonitoringTests(unittest.TestCase):
         service = instra_network.NetworkService(start_worker=False)
         self.addCleanup(service.close)
         with mock.patch.object(service, "_host", return_value=self.network._host(host_id)):
-            with mock.patch.object(instra_network, "_is_known", return_value=True):
+            with (mock.patch.object(instra_network, "_is_known", return_value=True),
+                  mock.patch.object(instra_network, "_master_alive", return_value=True)):
                 for relative in ("../secret", "/etc/passwd", "run/../../secret", "a\\b"):
                     with self.subTest(relative=relative), self.assertRaises(instra_network.NetworkError):
                         service._monitor_source(host_id, "logs", relative)
@@ -301,7 +302,8 @@ class MonitoringTests(unittest.TestCase):
             captured.append(command)
             return mock.Mock(returncode=0, stdout=b"")
         with mock.patch.object(service, "_host", return_value=self.network._host(host_id)):
-            with mock.patch.object(instra_network, "_is_known", return_value=True):
+            with (mock.patch.object(instra_network, "_is_known", return_value=True),
+                  mock.patch.object(instra_network, "_master_alive", return_value=True)):
                 with mock.patch.object(instra_network.subprocess, "run", side_effect=run):
                     with mock.patch.object(instra_network.shutil, "which", return_value="/usr/bin/sqlite3_rsync"):
                         service.monitor_transfer(host_id, "logs", "run/same_id/charts.sqlite3", self.root / "copy.sqlite3", database=True)
@@ -319,7 +321,8 @@ class MonitoringTests(unittest.TestCase):
         self.addCleanup(service.close)
         destination = self.root / "copy.sqlite3"
         with mock.patch.object(service, "_host", return_value=self.network._host(host_id)):
-            with mock.patch.object(instra_network, "_is_known", return_value=True):
+            with (mock.patch.object(instra_network, "_is_known", return_value=True),
+                  mock.patch.object(instra_network, "_master_alive", return_value=True)):
                 with mock.patch.object(instra_network.shutil, "which", return_value="/usr/local/bin/sqlite3_rsync"):
                     with mock.patch.object(instra_network.subprocess, "run",
                                            return_value=mock.Mock(returncode=127, stderr=b"sh: 1: sqlite3_rsync: not found")):

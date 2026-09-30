@@ -209,13 +209,7 @@
     if (app.workspace_mode === true) return processing_throughput_workspace_runs_before_final_design();
     const selected = typeof current_run === "function" ? current_run() : null;
     if (!selected) return [];
-    const selected_id = String(run_identifier(selected));
-    const runs = (app.runs || []).filter(run => {
-      const run_id = String(run_identifier(run));
-      return run_id === selected_id || (is_visible(run_id) && signatures_match(selected, run));
-    });
-    if (!runs.some(run => String(run_identifier(run)) === selected_id)) runs.unshift(selected);
-    return runs;
+    return [selected];
   };
 
   if (typeof processing_update_timing_pair_assessment === "function") {
