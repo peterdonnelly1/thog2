@@ -14,6 +14,7 @@ async function check_browser(browser_type) {
   page.on("response",response=>{if(response.status()>=400 && failed_responses++<5)console.log("HTTP",response.status(),response.url());});
   page.on("dialog",dialog=>dialog.dismiss());
   await page.addInitScript(()=>{
+    localStorage.setItem("thog2_local_run_visibility",JSON.stringify(Object.fromEntries(Array.from({length:12},(_,index)=>[`fixture_${String(index).padStart(2,"0")}`,true]))));
     let plotly;
     Object.defineProperty(window,"Plotly",{configurable:true,get(){return plotly;},set(value){
       plotly=value;
@@ -46,10 +47,10 @@ async function check_browser(browser_type) {
   assert.match(await optimizer.getAttribute("title"),/Available options:.*adamw/);
   await optimizer.fill("adamw");
   assert.equal(await optimizer.getAttribute("aria-invalid"),"false");
-  const position=await optimizer.evaluate(node=>({field:node.getBoundingClientRect().left,button:node.parentElement.querySelector("button").getBoundingClientRect().right}));
-  assert.ok(position.button<=position.field,JSON.stringify(position));
+  const position=await optimizer.evaluate(node=>({field:node.getBoundingClientRect().right,button:node.parentElement.querySelector("button").getBoundingClientRect().left}));
+  assert.ok(position.button>=position.field,JSON.stringify(position));
   await page.locator(".runner-categories button",{hasText:/^Premat$/}).click();
-  assert.equal(await page.locator(".runner-premat-enabled").count(),1);
+  assert.equal(await page.locator('.runner-categories button.runner-category-enabled',{hasText:/^Premat$/}).count(),1);
   await page.locator('[data-runner-tab="history"]').click();
   for (const [label,outcome] of [["Grid 1","complete"],["Grid 2","partial"],["Grid 3","none"]]) {
     const entry=page.locator(".runner-history-grid-row > button:first-child",{hasText:label});
@@ -69,14 +70,21 @@ async function check_browser(browser_type) {
   await page.waitForFunction(()=>document.querySelector('.chart-card.maximized[data-metric-chart-id="train/loss"]'),{},{timeout:15000});
   assert.equal(await page.evaluate(()=>document.querySelector('.local-metric-grid').firstElementChild.dataset.metricChartId),"train/loss");
   // Deliberately delay Multiview responses and leave while they are pending.
-  await page.route("**/api/chart-group?**",async route=>{await new Promise(resolve=>setTimeout(resolve,200));await route.continue();});
+  const delayed_group=/\/api\/chart-group\?/;
+  await page.route(delayed_group,async route=>{
+    await new Promise(resolve=>setTimeout(resolve,200));
+    try {await route.continue();} catch(error) {
+      if(!/abort|cancel|closed/i.test(error.message))throw error;
+    }
+  });
   for(let cycle=0;cycle<15;cycle++) {
     await page.locator("#workspace_nav").click();
     await page.waitForTimeout(cycle%3===0?250:30);
     await page.locator("#runs_nav").click();
     await page.waitForTimeout(60);
   }
-  await page.unroute("**/api/chart-group?**");
+  await page.waitForTimeout(350); // Let deliberately cancelled interception handlers drain in Firefox.
+  await page.unroute(delayed_group);
   await page.waitForFunction(()=>document.getElementById("training_throughput_plot")?.data?.length===1,{},{timeout:15000});
   assert.equal(await page.evaluate(()=>app.workspace_mode),false);
   assert.equal(await page.evaluate(()=>document.getElementById("training_throughput_plot").data[0].meta.instra_workspace_run_id),"fixture_00");

@@ -121,6 +121,7 @@ if (!app.weight_join_with_line_segments || typeof app.weight_join_with_line_segm
 function by_id(id) { return document.getElementById(id); }
 
 function load_json(key, fallback) {
+  if(key==="thog2_local_run_visibility")key=run_visibility_storage_key();
   try {
     const value = JSON.parse(localStorage.getItem(key));
     return value === null ? fallback : value;
@@ -129,7 +130,14 @@ function load_json(key, fallback) {
   }
 }
 
-function save_json(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+function run_visibility_storage_key() {
+  const tag=new URLSearchParams(window.location.search).get("runner_grid_tag");
+  return tag ? `thog2_local_run_visibility:grid:${tag}` : "thog2_local_run_visibility";
+}
+function save_json(key, value) {
+  if(key==="thog2_local_run_visibility")key=run_visibility_storage_key();
+  localStorage.setItem(key, JSON.stringify(value));
+}
 
 function load_number(key, fallback) {
   const value = Number(localStorage.getItem(key));

@@ -15,14 +15,28 @@ window.addEventListener("load", () => {
     };
     const run_name = run => String(run?.artifact_name || run?.run_name || run_identifier(run));
     const visible_runs = () => (app.runs || []).filter(run => is_visible(run_identifier(run)));
-    const direct_json = async url => {
-      return fetch_json(url);
+    let request_controller = null, request_membership = null;
+    const cancel_pending = () => { request_controller?.abort(); request_controller=null; request_membership=null; };
+    const workspace_request_signal = () => {
+      const membership=visible_runs().map(run=>`${run_identifier(run)}:${colour_for_run(run_identifier(run))}`).sort().join("|");
+      if(!request_controller || membership!==request_membership) {
+        cancel_pending();request_controller=new AbortController();request_membership=membership;
+      }
+      return request_controller.signal;
     };
-    const map_with_concurrency = async (values, limit, operation) => {
+    const direct_json = async (url, signal) => {
+      if(!signal)return fetch_json(url);
+      const abort=new AbortController(), cancel=()=>abort.abort();
+      if(signal.aborted)abort.abort();else signal.addEventListener("abort",cancel,{once:true});
+      const deadline=setTimeout(cancel,30000);
+      try{return await fetch_json(url,{signal:abort.signal});}
+      finally{clearTimeout(deadline);signal.removeEventListener("abort",cancel);}
+    };
+    const map_with_concurrency = async (values, limit, operation, signal) => {
       const output = new Array(values.length);
       let cursor = 0;
       const worker = async () => {
-        while (cursor < values.length) {
+        while (!signal?.aborted && cursor < values.length) {
           const index = cursor++;
           try {
             output[index] = await operation(values[index], index);
@@ -118,10 +132,12 @@ window.addEventListener("load", () => {
     };
 
     const fetch_metric_groups = async () => {
+      const signal=workspace_request_signal();
       const entries = await map_with_concurrency(visible_runs(), 8, async run => ({
         run,
-        payload: await direct_json(`/api/chart-groups?run=${encodeURIComponent(run_identifier(run))}`),
-      }));
+        payload: await direct_json(`/api/chart-groups?run=${encodeURIComponent(run_identifier(run))}`,signal),
+      }),signal);
+      if(signal?.aborted)throw Object.assign(new Error("Obsolete chart selection"),{name:"AbortError"});
       const groups = new Map();
       for (let run_index = 0; run_index < entries.length; run_index += 1) {
         const entry = entries[run_index];
@@ -143,13 +159,7 @@ window.addEventListener("load", () => {
       return left.filter(value => wanted.has(value));
     };
 
-    const fetch_metric_group = async group_name => {
-      const entries = await map_with_concurrency(visible_runs(), 8, async run => ({
-        run,
-        payload: await direct_json(
-          `/api/chart-group?run=${encodeURIComponent(run_identifier(run))}&group=${encodeURIComponent(group_name)}`
-        ),
-      }));
+    const merge_metric_entries = (group_name, entries) => {
       const charts = new Map();
       let revision = 0;
       for (let run_index = 0; run_index < entries.length; run_index += 1) {
@@ -202,6 +212,23 @@ window.addEventListener("load", () => {
       return {available: true, source: "visible Instra runs", group: {name: group_name, revision, charts: [...charts.values()]}};
     };
 
+    const fetch_metric_group = async (group_name, on_progress) => {
+      const signal=workspace_request_signal(), runs=visible_runs(), entries=new Array(runs.length);
+      let last_progress=-Infinity, progress=Promise.resolve();
+      await map_with_concurrency(runs,8,async(run,index)=>{
+        const payload=await direct_json(`/api/chart-group?run=${encodeURIComponent(run_identifier(run))}&group=${encodeURIComponent(group_name)}`,signal);
+        entries[index]={run,payload};
+        if(on_progress && !signal?.aborted && Date.now()-last_progress>=300) {
+          last_progress=Date.now();
+          const snapshot=merge_metric_entries(group_name,entries);
+          progress=progress.then(()=>!signal?.aborted && on_progress(snapshot));
+        }
+      },signal);
+      await progress;
+      if(signal?.aborted)throw Object.assign(new Error("Obsolete chart selection"),{name:"AbortError"});
+      return merge_metric_entries(group_name,entries);
+    };
+
     let refresh_timer = null;
     let last_selection_key = "";
     const selection_key = () => visible_runs().map(run => {
@@ -217,6 +244,7 @@ window.addEventListener("load", () => {
       fetch_depth_payload,
       fetch_metric_groups,
       fetch_metric_group,
+      cancel_pending,
     };
 
     const render_workspace_heading = () => {
@@ -255,6 +283,14 @@ window.addEventListener("load", () => {
     };
 
     const enter_workspace = () => {
+      // An untouched visibility map meant every historical run was selected.
+      // Start with the current Grid; explicit saved eye choices remain authoritative.
+      if(!Object.keys(app.visibility).length && app.runs?.length) {
+        const selected=app.runs.find(run=>run_identifier(run)===app.current_run_id) || app.runs[0];
+        for(const run of app.runs)app.visibility[run_identifier(run)]=selected.runner_grid_tag
+          ? run.runner_grid_tag===selected.runner_grid_tag : run_identifier(run)===run_identifier(selected);
+        save_json("thog2_local_run_visibility",app.visibility);render_runs();
+      }
       const runs = visible_runs();
       if (!app.current_run_id) {
         const first = runs[0] || app.runs?.[0];
@@ -277,6 +313,7 @@ window.addEventListener("load", () => {
     const leave_workspace = () => {
       if (!app.workspace_mode) return;
       app.workspace_mode = false;
+      cancel_pending();
       clearTimeout(refresh_timer);
       app.instra_loss_autofocused = false;
       app.instra_focus_loss = true;

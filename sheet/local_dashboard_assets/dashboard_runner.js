@@ -10,7 +10,10 @@
     "Coarse", "Layer Spacing", "Variable Depth", "Chaos Bumps", "Instrumentation"];
   const main_table_order = ["--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
     "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
-    "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
+    "--learning-rate", "--min-lr", "--max-iters", "--batch-size", "--log-interval", "--eval-iters", "--eval-interval"];
+  const category_first_fields = {"Coarse":["--plastic__coarse_phase"],
+    "Variable Depth":["--plastic__do_learn_layer_count","--no-plastic__do_learn_layer_count"],
+    "Chaos Bumps":["--chaos_bump__sampling__enabled","--no-chaos_bump__sampling__enabled"]};
   const required_parameters = ["--geometry-preset", "--optimizer", "--n-layer", "--warmup-iters", "--block-size",
     "--n-embd", "--n-head", "--gradient-accumulation-steps", "--checkpoint-segment-size",
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
@@ -200,9 +203,36 @@
     const value = recipe.parameters?.["--premat"];
     return (Array.isArray(value) ? value : [value]).some(option=>option === "enabled" || option === true);
   }
+  const enabled_option = value => value === true || value === "true" || value === "enabled";
+  function category_enabled(name, recipe) {
+    if(name === "Premat")return premat_enabled(recipe);
+    if(name === "NSIGHT")return (recipe.profilers || []).some(value=>value !== "none");
+    const key={"Coarse":"--plastic__coarse_phase","Variable Depth":"--plastic__do_learn_layer_count",
+      "Chaos Bumps":"--chaos_bump__sampling__enabled"}[name];
+    if(!key)return false;
+    const options=value=>Array.isArray(value) ? value : [value];
+    const negative=recipe.parameters?.[key.replace(/^--/,"--no-")];
+    return options(recipe.parameters?.[key]).some(enabled_option) &&
+      !(negative !== undefined && options(negative).every(enabled_option));
+  }
+  function update_category_states() {
+    for(const control of detail.querySelectorAll(".runner-categories button"))
+      control.classList.toggle("runner-category-enabled",category_enabled(control.dataset.runnerCategory,current_recipe()));
+  }
+  function categories_for_field(key, catalogue, common) {
+    return [...(common.includes(key) ? ["Frequently Used"] : []),catalogue[key]?.category].filter(Boolean);
+  }
+  function matches_search(key, spec, query) {
+    const normalize=value=>String(value || "").toLowerCase().replace(/[-_\s]/g,"");
+    return normalize(`${key} ${spec.help}`).includes(normalize(query));
+  }
+  function compare_fields(left, right, name) {
+    const order=[...(category_first_fields[name] || []),...main_table_order];
+    const rank=key=>{const index=order.indexOf(key);return index<0 ? 999 : index;};
+    return rank(left)-rank(right) || left.localeCompare(right);
+  }
   function show_fields(container, keys, include_profiler=false) {
     const grid = add(container,"div",undefined,"runner-fields");
-    grid.classList.toggle("runner-premat-enabled",category === "Premat" && premat_enabled(current_recipe()));
     const columns = window.innerWidth < 800 ? 1 : !by_id("runner_parameter_search")?.value &&
       ["Frequently Used","GPT-2 Hyperparameters","Run Control Parameters","Geometry"].includes(category) ? 2 : 1;
     grid.style.setProperty("--runner-columns",String(columns));
@@ -215,13 +245,15 @@
         const option=add(profile,"option",name);option.value=value;
       }
       profile.value=current_recipe().profilers?.length===2?"pair":current_recipe().profilers?.[0]||"none";
-      profile.addEventListener("change",()=>{draft=current_recipe();draft.profilers=profile.value==="pair"?["nsys","ncu"]:[profile.value];dirty=true;});
+      profile.addEventListener("change",()=>{draft=current_recipe();draft.profilers=profile.value==="pair"?["nsys","ncu"]:[profile.value];dirty=true;update_category_states();check_recipe();});
       button(profile_label,"Change default value",()=>{remember_default("profiling_mode",profile.value);message.textContent="Profiling default saved";});
     }
     for (const key of keys) {
       const spec = snapshot.catalogue[key];
       if (!spec || spec.ui_hidden || ["manual","automatic"].includes(spec.kind)) continue;
       const label = add(grid,"label");add(label,"span",`${key}${spec.short ? ` (${spec.short})` : ""}`);
+      if(by_id("runner_parameter_search")?.value)
+        add(label,"small",categories_for_field(key,snapshot.catalogue,snapshot.common).join(" · "),"runner-field-categories");
       label.title = field_help(spec);
       const field = add(label,"input");
       const change_default = button(label,"Change default value",()=>{
@@ -245,7 +277,7 @@
           if (field.value === "") delete draft.parameters[key];
           else draft.parameters[key]=parse_value(key,field.value,spec);
           dirty=true;
-          grid.classList.toggle("runner-premat-enabled",category === "Premat" && premat_enabled(draft));
+          update_category_states();
         }
         check_recipe();
       });
@@ -359,27 +391,37 @@
         }).classList.add("runner-change-default");
       }
     }
-    const search_row=add(detail,"div",undefined,"runner-search-row");
+    const parameter_panel=add(detail,"section",undefined,"runner-parameter-panel");
+    add(parameter_panel,"h3","Run parameters");
+    const search_row=add(parameter_panel,"div",undefined,"runner-search-row");
     const search=add(search_row,"input",undefined,"runner-parameter-search");search.id="runner_parameter_search";
     search.placeholder="Search fields across all parameter tabs";
     search.title="Available options: parameter names or help text; leave blank to show the selected category";
     const validation=add(search_row,"p","","runner-validation");validation.id="runner_validation";
-    const categories_row=add(detail,"nav",undefined,"runner-categories");
-    detail.insertBefore(controls,search_row);
-    const fields=add(detail,"div");
+    const categories_row=add(parameter_panel,"nav",undefined,"runner-categories");
+    const fields=add(parameter_panel,"div");
     const preview_panel=add(detail,"section",undefined,"runner-preview");preview_panel.id="runner_preview";
-    function show_category(query="") {
+    function show_category(query="",filter_category=false) {
       fields.replaceChildren();categories_row.replaceChildren();
       preview_panel.hidden=category!=="Frequently Used"||Boolean(query);
-      for (const name of ["Frequently Used",...categories]) button(categories_row,name,()=>{category=name;show_category(search.value);})
-        .classList.toggle("active",category===name);
-      const keys=(query?Object.keys(snapshot.catalogue).filter(key => key.toLowerCase().includes(query.toLowerCase()) ||
-        snapshot.catalogue[key].help?.toLowerCase().includes(query.toLowerCase())):
+      const matching=Object.keys(snapshot.catalogue).filter(key=>!snapshot.catalogue[key].ui_hidden &&
+        !["manual","automatic"].includes(snapshot.catalogue[key].kind) && matches_search(key,snapshot.catalogue[key],query));
+      const matching_categories=new Set(matching.flatMap(key=>categories_for_field(key,snapshot.catalogue,snapshot.common)));
+      const profiling_match=query && matches_search("profiling mode",{help:"none NSYS NCU NSYS and NCU pair"},query);
+      if(profiling_match)matching_categories.add("NSIGHT");
+      for (const name of ["Frequently Used",...categories]) {
+        if(query && !matching_categories.has(name))continue;
+        const control=button(categories_row,name,()=>{category=name;show_category(search.value,Boolean(search.value));});
+        control.dataset.runnerCategory=name;
+        control.classList.toggle("active",category===name && (!query || filter_category));
+      }
+      const keys=(query?matching.filter(key=>!filter_category || categories_for_field(key,snapshot.catalogue,snapshot.common).includes(category)):
         category==="Frequently Used"?snapshot.common:Object.keys(snapshot.catalogue).filter(key=>snapshot.catalogue[key].category===category))
         .filter(key=>!snapshot.catalogue[key].ui_hidden && !["manual","automatic"].includes(snapshot.catalogue[key].kind))
-        .sort((a,b)=>{const left=main_table_order.indexOf(a),right=main_table_order.indexOf(b);
-          return (left<0?999:left)-(right<0?999:right) || a.localeCompare(b);});
-      show_fields(fields,keys,category==="NSIGHT" && !query);
+        .sort((a,b)=>compare_fields(a,b,category));
+      show_fields(fields,keys,query ? profiling_match && (!filter_category || category==="NSIGHT") : category==="NSIGHT");
+      if(query && !keys.length && !profiling_match)add(fields,"p","No matching fields","runner-search-empty");
+      update_category_states();
     }
     search.addEventListener("input",()=>show_category(search.value));show_category();
     check_recipe();
@@ -767,6 +809,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,history_outcome,field_help,invalid_field_value,premat_enabled});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

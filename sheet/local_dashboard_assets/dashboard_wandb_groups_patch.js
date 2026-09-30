@@ -12,7 +12,7 @@ window.addEventListener("load", () => {
     const group_revisions = new Map();
     const rendered_revisions = new Map();
     const collapsed_by_mode = new Map();
-    let poll_in_flight = false;
+    let poll_view = null;
     let last_run_id = null;
     const front_by_chart = new Map();
     let pending_navigation = null;
@@ -63,6 +63,8 @@ window.addEventListener("load", () => {
     const group_key = group_name => `local_metric_group_${hash_text(group_name).toString(16)}`;
 
     const clear_metric_groups = () => {
+      window.__instra_workspace?.cancel_pending?.();
+      last_run_id=null;poll_view=null;
       const native = by_id("training_throughput_card"), legacy = by_id("training_grid");
       if (native && legacy && native.parentElement !== legacy) legacy.appendChild(native);
       for (const id of ["training_throughput_plot","processing_throughput_plot"]) {
@@ -222,11 +224,26 @@ window.addEventListener("load", () => {
       const wanted = new Set(summaries.map(summary => summary.name));
       for (const section of metric_group_sections()) {
         if (!wanted.has(section.dataset.metricGroup)) {
-          update_group_section({name: section.dataset.metricGroup, chart_count: 0,
-            reason: "No data recorded for this run yet."});
+          if([...section.querySelectorAll(".local-metric-card")].some(card=>card.dataset.chart===app.maximized_chart))
+            restore_maximized_chart();
+          for(const card of section.querySelectorAll(".local-metric-card")) {
+            const mount=card.querySelector(".plot-mount");
+            if(mount?.dataset.plotReady==="true")Plotly.purge(mount);
+            delete app.dynamic_chart_figures[card.dataset.chart];
+            delete app.dynamic_chart_metadata[card.dataset.chart];delete chart_titles[card.dataset.chart];
+          }
+          group_revisions.delete(section.dataset.metricGroup);rendered_revisions.delete(section.dataset.metricGroup);
+          section.remove();
         }
       }
       const ordered_sections = sorted_group_summaries(summaries).map(update_group_section);
+      const train=group_section("train")?.querySelector(".local-metric-grid");
+      if(train && !train.querySelector('[data-metric-chart-id="train/loss"]')) {
+        const loss=make_metric_card("train",{id:"train/loss",title:"Loss",series:[]});
+        loss.classList.add("instra-train-loss-card");
+        loss.querySelector(".local-metric-detail").textContent="Loading loss for the selected runs…";
+        train.prepend(loss);
+      }
       // vvv THOG Processing is an ordinary chart group in the stack: after Val
       // (or Train when Val is unavailable), before Memory/System.  Reparent only
       // when this managed sequence actually changes; moving live Plotly nodes on
@@ -428,13 +445,16 @@ window.addEventListener("load", () => {
       if (!section || !grid) return;
       // The native Train throughput plot already lives in this grid. The
       // recorded throughput history must not displace the loss plot.
-      const charts = (group.charts || []).filter(chart => !(group.name === "train" &&
+      const charts = (group.charts || []).filter(chart => (chart.series || []).some(series=>series.x?.length && series.y?.length))
+        .filter(chart => !(group.name === "train" &&
         document.getElementById("training_throughput_card") &&
         /(?:token.*(?:sec|throughput)|throughput)/i.test(`${chart.id} ${chart.title}`)))
         .sort((left,right)=>group.name==="train" ? Number(right.id==="train/loss")-Number(left.id==="train/loss") : 0);
       const wanted = new Set(charts.map(chart => chart.id));
       for (const card of [...grid.querySelectorAll(".local-metric-card")]) {
         if (!wanted.has(card.dataset.metricChartId)) {
+          if(group.name==="train" && card.dataset.metricChartId==="train/loss")continue;
+          if(card.dataset.chart===app.maximized_chart)restore_maximized_chart();
           const mount = card.querySelector(".plot-mount");
           if (mount?.dataset.plotReady === "true") Plotly.purge(mount);
           const key = card.dataset.chart;
@@ -491,7 +511,7 @@ window.addEventListener("load", () => {
       try {
         const workspace = workspace_api();
         const payload = workspace
-          ? await workspace.fetch_metric_group(group_name)
+          ? await workspace.fetch_metric_group(group_name,group_name==="train" ? partial=>render_group_payload(partial,requested_view) : null)
           : await fetch_json(
               `/api/chart-group?run=${encodeURIComponent(app.current_run_id)}`
               + `&group=${encodeURIComponent(group_name)}`
@@ -500,30 +520,37 @@ window.addEventListener("load", () => {
         if (payload.available === false) return;
         await render_group_payload(payload, requested_view);
       } catch (error) {
-        show_toast(`Chart group ${group_name} failed: ${error.message}`);
+        if(requested_view===current_view_key() && error.name!=="AbortError")show_toast(`Chart group ${group_name} failed: ${error.message}`);
       }
     }
 
     const refresh_metric_groups = async () => {
-      if (!app.current_run_id || poll_in_flight) return;
+      const requested_run = current_view_key();
+      if (!app.current_run_id || poll_view?.view===requested_run) return;
       // vvv THOG pause chart discovery in a hidden tab; catch up as soon as it is visible
       if (document.visibilityState === "hidden" ||
           typeof instra_charts_visible === "function" && !instra_charts_visible()) return;
       // ^^^ THOG
       if (by_id("charts_scroll")?.hidden) return;
-      poll_in_flight = true;
-      const requested_run = current_view_key();
+      const owner={view:requested_run};poll_view=owner;
       try {
-        if (last_run_id !== requested_run) {
+        const changing_view=last_run_id !== requested_run;
+        if (changing_view) {
           invalidate_metric_groups(true);
           last_run_id = requested_run;
         }
         const workspace = workspace_api();
+        let early_train=null;
+        if(workspace && changing_view) {
+          sync_group_order([{name:"train",chart_count:0,revision:0},{name:"val",chart_count:0,revision:0},{name:"system",chart_count:0,revision:0}]);
+          early_train=refresh_group_data("train",true);
+        }
         const payload = workspace
           ? await workspace.fetch_metric_groups()
           : await fetch_json(`/api/chart-groups?run=${encodeURIComponent(app.current_run_id)}`);
         if (requested_run !== current_view_key()) return;
-        const summaries = (payload.groups || []).filter(summary => summary.name !== "depth");
+        const summaries = (payload.groups || []).filter(summary => summary.name !== "depth" &&
+          (summary.name!=="plastic" || Number(summary.chart_count)>0));
         for (const name of ["train", "val"]) {
           if (!summaries.some(summary => summary.name === name)) summaries.push({
             name, chart_count: 0, revision: 0, reason: `Waiting for ${name} data…`,
@@ -542,14 +569,13 @@ window.addEventListener("load", () => {
           return section && !section.classList.contains("collapsed");
         });
         // vvv THOG let Train render while large Memory/System groups load independently
-        await Promise.all(opened.map(summary => refresh_group_data(summary.name)));
+        await Promise.all([...opened.filter(summary=>!early_train || summary.name!=="train").map(summary => refresh_group_data(summary.name)),early_train]);
         // ^^^ THOG
         restore_metric_navigation();
       } catch (error) {
-        show_toast(`Local W&B charts failed: ${error.message}`);
+        if(requested_run===current_view_key() && error.name!=="AbortError")show_toast(`Local W&B charts failed: ${error.message}`);
       } finally {
-        poll_in_flight = false;
-        if (requested_run !== current_view_key()) setTimeout(refresh_metric_groups, 0);
+        if(poll_view===owner)poll_view=null;
       }
     };
 

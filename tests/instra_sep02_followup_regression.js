@@ -56,6 +56,7 @@ const section = (name, top) => ({
   remove() { sections = sections.filter(value => value !== this); mounted.delete(`local_metric_${name}_loss`); },
 });
 const context = vm.createContext({
+  window:{},
   app, console, CSS: {escape: value => value}, chart_titles: {},
   group_revisions: new Map(), rendered_revisions: new Map(),
   by_id: id => id === "charts_scroll" ? viewport : null,
@@ -78,7 +79,7 @@ const context = vm.createContext({
   show_toast: text => { throw new Error(text); },
   setTimeout: callback => timers.push(callback), requestAnimationFrame: callback => frames.push(callback),
 });
-vm.runInContext("let pending_navigation = null; let poll_in_flight = false; let last_run_id = 'a';\n" + source.slice(source.indexOf("    const clear_metric_groups ="), source.indexOf("    const sorted_group_summaries =")) + source.slice(source.indexOf("    const refresh_metric_groups ="), source.indexOf("    const base_local_apply_detail_tab_metric_groups")), context);
+vm.runInContext("let pending_navigation = null; let poll_view = null; let last_run_id = 'a';\n" + source.slice(source.indexOf("    const clear_metric_groups ="), source.indexOf("    const sorted_group_summaries =")) + source.slice(source.indexOf("    const refresh_metric_groups ="), source.indexOf("    const base_local_apply_detail_tab_metric_groups")), context);
 const install_old = () => { sections = [section("train", 80), section("val", 480)]; mounted.set("local_metric_train_loss", {}); };
 (async () => {
   install_old();

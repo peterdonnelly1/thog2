@@ -33,10 +33,14 @@
 #runner_detail input, #runner_detail select { max-width:32rem; }
 .runner-fields { display:grid; grid-template-columns:repeat(var(--runner-columns),minmax(0,1fr));
   grid-template-rows:repeat(var(--runner-rows),max-content); grid-auto-flow:column; gap:.15rem 1.15rem; align-items:start; }
-.runner-fields label { min-width:0; overflow-wrap:anywhere; display:grid !important; grid-template-columns:auto minmax(0,32rem); align-items:center; justify-content:start; }
+.runner-fields label { min-width:0; overflow-wrap:anywhere; display:grid !important; grid-template-columns:minmax(0,32rem) auto; align-items:center; justify-content:start; }
 .runner-fields label > span { grid-column:1 / -1; }
-.runner-fields label > input, .runner-fields label > select { grid-column:2; grid-row:2; }
-.runner-fields label > .runner-change-default, .runner-fields label > button { grid-column:1; grid-row:2; margin-right:.45rem; white-space:nowrap; font-size:.76rem; }
+.runner-fields label > input, .runner-fields label > select { grid-column:1; grid-row:2; }
+.runner-fields label > .runner-change-default, .runner-fields label > button { grid-column:2; grid-row:2; margin-left:.45rem; white-space:nowrap; font-size:.76rem; }
+.runner-field-categories { grid-column:1 / -1; grid-row:3; color:#52667e; font-size:.75rem; }
+.runner-parameter-panel { margin-top:1.3rem; padding:1rem; border:1px solid #c5d1df; border-radius:8px; background:#f6f8fb; }
+.runner-parameter-panel > h3 { margin:0 0 .7rem; color:#344a63; font-size:1rem; }
+.runner-categories button.runner-category-enabled { background:#e4f2ff; border-color:#8cbbdf; color:#214f72; }
 .runner-recipe-label { display:grid !important; grid-template-columns:minmax(0,32rem) auto; align-items:center; justify-content:start; }
 .runner-recipe-label > span { grid-column:1 / -1; }
 .runner-recipe-label > input { grid-column:1; }
@@ -102,5 +106,4 @@ body.instra-runner-grid-frame .workspace { inset:0; }
 .runner-outcome-complete { color:#147348 !important; font-weight:400 !important; }
 .runner-outcome-partial { color:#b35a00 !important; font-weight:400 !important; }
 .runner-outcome-none { color:#ad302b !important; font-weight:400 !important; }
-.runner-premat-enabled { background:#e4f2ff; padding:.5rem; border-radius:4px; }
 /* ^^^ THOG */

@@ -33,11 +33,13 @@ assert.equal(group_members.length,3);
 assert.equal(runs.filter(run=>run.runner_grid_tag==="G-00002" && context.app.visibility[run.dashboard_run_id]===false).length,0);
 assert.match(dashboard,/const group_members = run\.runner_grid_tag &&/,"Grid eye grouping must work in Runs and Multiview");
 
-const start = workspace.indexOf("    const fetch_metric_group = async group_name => {");
+const start = workspace.indexOf("    const merge_metric_entries = (group_name, entries) => {");
 const end = workspace.indexOf("\n\n    let refresh_timer",start);
 assert.ok(start>=0 && end>start);
 let selected = runs.filter(run=>run.runner_grid_tag!=="G-00003");
 const merge_context = {
+  workspace_request_signal:()=>undefined,
+  Date,
   visible_runs:()=>selected,
   map_with_concurrency:async(values,_limit,operation)=>Promise.all(values.map(operation)),
   direct_json:async url=>{

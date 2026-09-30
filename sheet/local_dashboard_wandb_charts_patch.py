@@ -660,6 +660,13 @@ class _ScannerCatalog:
             return scanner
 
 
+def _plastic_charts_enabled(configuration: Mapping[str, Any]) -> bool:
+    """Retain real legacy data when configuration is absent; honour explicit disablement."""
+    keys = ("plastic__enabled", "plastic__coarse_phase", "plastic__do_learn_layer_count")
+    values = [configuration[key] for key in keys if key in configuration]
+    return not values or any(value is True or value in ("true", "enabled") for value in values)
+
+
 def install(dashboard_module: Any) -> None:
     original_handler_for = dashboard_module._handler_for
 
@@ -686,6 +693,7 @@ def install(dashboard_module: Any) -> None:
                     live = live_readers.setdefault(run_name, LiveLossReader())
                 live.refresh(catalog, state, dashboard_module)
                 scanner = scanner_catalog.scanner_for(state)
+                plastic_enabled = _plastic_charts_enabled(state.status().get("configuration") or {})
                 common = {
                     "available": scanner is not None or live.path is not None or bool(live.values["train"]),
                     "source": str(scanner.path.resolve()) if scanner else str(live.path or
@@ -698,13 +706,18 @@ def install(dashboard_module: Any) -> None:
                     common["reason"] = "no local W&B run file found for this run"
                 if parsed.path == "/api/chart-groups":
                     groups = scanner.group_summaries() if scanner else []
+                    if not plastic_enabled:
+                        groups = [item for item in groups if item["name"] != "plastic"]
                     self._send_json({**common, "groups": live.summaries(groups, scanner)})
                     return
                 group = query.get("group", [""])[0]
                 if not group:
                     self._send_json({"error": "group query parameter is required"}, status=dashboard_module.HTTPStatus.BAD_REQUEST)
                     return
-                payload = scanner.group_payload(group) if scanner else {"name": group, "charts": [], "revision": 0}
+                if group == "plastic" and not plastic_enabled:
+                    payload = {"name": group, "charts": [], "revision": 0}
+                else:
+                    payload = scanner.group_payload(group) if scanner else {"name": group, "charts": [], "revision": 0}
                 self._send_json({**common, "group": live.merge(payload)})
             except (FileNotFoundError, KeyError) as error:
                 self._send_json({"error": str(error)}, status=dashboard_module.HTTPStatus.NOT_FOUND)

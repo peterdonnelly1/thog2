@@ -13,7 +13,8 @@ import uuid
 CATALOGUE = json.loads(Path(__file__).with_name("instra_runner_catalogue.json").read_text())
 COMMON = ("--geometry-preset", "--optimizer", "--n-layer", "DEPTH.order", "--warmup-iters",
           "--block-size", "--n-embd", "--n-head", "--gradient-accumulation-steps",
-          "--checkpoint-segment-size", "--learning-rate", "--min-lr", "--max-iters", "--batch-size")
+          "--checkpoint-segment-size", "--learning-rate", "--min-lr", "--max-iters", "--batch-size",
+          "--log-interval", "--eval-iters", "--eval-interval")
 FORBIDDEN = {"--device", "--host-label", "--dtype", "--attention-backend", "--o-depth", "--run-name",
              "--print-resolved-json"}
 WRAPPER_ENV_OPTIONS = {"--depth-materialisation-matmul": "THOG2_DEPTH_MATERIALISATION_MATMUL",
