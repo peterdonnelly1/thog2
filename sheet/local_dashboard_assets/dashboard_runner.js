@@ -22,6 +22,8 @@
   let current_run_metrics = new Map(), metrics_loading = false;
   let required_notice_seen = false, message_timer = null;
   let manual_grid_selection = false;
+  const viewed_files = new Map();
+  let download_request = null, download_serial = 0;
   const saved_defaults = () => { try { return JSON.parse(localStorage.getItem("thog2_runner_field_defaults") || "{}"); }
     catch (_) { return {}; } };
   const remember_default = (key, value) => {
@@ -173,6 +175,36 @@
     const total = Math.max(0,Math.round(Number(value)));
     const hours = Math.floor(total/3600), minutes = Math.floor(total%3600/60), seconds = total%60;
     return [hours ? `${hours}h` : "", hours || minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+  }
+  function grid_elapsed(grid, current_time = Date.now()) {
+    const attempts = (grid.runs || []).flatMap(run => (run.attempts || []).map((attempt,index) => ({...attempt, run, is_latest:index===(run.attempts || []).length-1})));
+    const starts = attempts.map(attempt => Date.parse(attempt.started_at)).filter(Number.isFinite);
+    const start = Date.parse(grid.started_at);
+    const first = Number.isFinite(start) ? start : starts.length ? Math.min(...starts) : null;
+    if (first === null) return 0;
+    let end = Date.parse(grid.finished_at);
+    if (!Number.isFinite(end)) {
+      if (!["completed", "failed", "cancelled"].includes(grid.state)) end = current_time;
+      else {
+        const ends = attempts.filter(attempt => attempt.is_latest).map(attempt => {
+          const finished = Date.parse(attempt.finished_at);
+          if (Number.isFinite(finished)) return finished;
+          if (attempt.is_latest) {
+            const seconds = attempt.run.duration_seconds;
+            if (seconds != null && Number.isFinite(Number(seconds))) return Date.parse(attempt.started_at) + Number(seconds)*1000;
+          }
+          return NaN;
+        });
+        if (!ends.length || ends.some(value => !Number.isFinite(value))) return null;
+        end = Math.max(...ends);
+      }
+    }
+    return Math.max(0, (end-first)/1000);
+  }
+  function estimate_range(grid) {
+    const interval = grid.estimated_duration?.interval_seconds;
+    return Array.isArray(interval) && interval.length === 2 && interval.every(value => value != null && Number.isFinite(Number(value)))
+      ? interval.map(format_duration).join(" – ") : "unknown";
   }
   function history_outcome(grid) {
     const completed = (grid.runs || []).filter(run=>run.state === "completed").length;
@@ -487,28 +519,69 @@
     }
     add(row,"pre",JSON.stringify(run.parameters,null,2));
   }
-  function render_script(parent,grid) {
-    const script_url=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=script`;
-    const links=add(parent,"div",undefined,"runner-script-links");
-    const link=add(links,"a","Download Runner Script");
-    link.href=script_url+"&download=1";link.download="";
-    const classic=add(links,"a","Export Equivalent Old-school THOG script");
-    classic.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=classic&download=1`;
-    classic.download=`${grid.grid_tag}_grid_bash_runner_script.sh`;
-    const manifest=add(links,"a",tab==="files"?"Download Resolved Manifest (JSON)":"View Resolved Manifest (JSON)");
-    manifest.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=manifest${tab==="files"?"&download=1":""}`;
-    if(tab==="files")manifest.download="";else{manifest.target="_blank";manifest.rel="noopener";}
-    add(parent,"p","Runner Script calls the Python entry point; the old-school export uses train_OWT.sh. Check host paths and GPU ordinals on replay.");
-    const viewer=add(parent,"pre","Loading script…","runner-script-viewer");
-    fetch(script_url).then(async response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.text();})
-      .then(source=>{if(chosen===grid.grid_id && ["files","current_scripts"].includes(tab))viewer.textContent=source;})
-      .catch(error=>{viewer.textContent=`Script unavailable: ${error.message}`;});
+  function render_downloads(parent,grid) {
+    const files = [["script", "Runner Script", `${grid.grid_tag}.sh`],
+      ["classic", "Old-school THOG script", `${grid.grid_tag}_grid_bash_runner_script.sh`],
+      ["manifest", "Resolved Manifest (JSON)", `${grid.grid_tag}_manifest.json`],
+      ["placement", "Placement (JSON)", `${grid.grid_tag}_placement.json`],
+      ["status", "Status (JSON)", `${grid.grid_tag}_status.json`],
+      ...(grid.conversion ? [["conversion", "Conversion (JSON)", `${grid.grid_tag}_conversion.json`]] : []),
+      ["log", "Grid event log", `${grid.grid_tag}_events.jsonl`]];
+    const controls=add(parent,"div",undefined,"runner-downloads");
+    const display=add(parent,"p","", "runner-file-displayed");
+    display.setAttribute("role","status");
+    const viewer=add(parent,"pre","","runner-script-viewer");
+    const view_controls=new Map();
+    async function show_file(name) {
+      const record=files.find(file=>file[0]===name);
+      if(!record)return;
+      viewed_files.set(grid.grid_id,name);
+      download_request?.abort();download_request=new AbortController();
+      const serial=++download_serial;
+      for(const [key,control] of view_controls) {control.classList.toggle("active",key===name);control.setAttribute("aria-pressed",String(key===name));}
+      display.textContent=`Displaying: ${record[1]} · ${record[2]}`;
+      viewer.textContent="Loading…";
+      try {
+        const response=await fetch(`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=${name}`,{signal:download_request.signal});
+        if(!response.ok)throw new Error(`HTTP ${response.status}`);
+        const source=await response.text();
+        if(serial===download_serial && detail.querySelector(".runner-script-viewer")===viewer) {
+          viewer.textContent=source || "Empty file";viewer.scrollTop=0;
+        }
+      } catch(error) {
+        if(error.name!=="AbortError" && serial===download_serial && detail.querySelector(".runner-script-viewer")===viewer)
+          viewer.textContent=`${record[1]} unavailable: ${error.message}`;
+      }
+    }
+    for(const [name,label,filename] of files) {
+      const row=add(controls,"div",undefined,"runner-download-row");
+      add(row,"span",label);
+      const control=button(row,"View",()=>show_file(name));
+      control.title=`View ${filename}`;control.setAttribute("aria-label",control.title);
+      view_controls.set(name,control);
+      const link=add(row,"a","Download");
+      link.href=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=${name}&download=1`;
+      link.download=filename;link.title=`Download ${filename}`;
+    }
+    show_file(viewed_files.get(grid.grid_id)||"script");
+  }
+  function update_grid_state(state,grid) {
+    if(!state)return;
+    state.replaceChildren();
+    add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
+    add(state,"span",` · ${grid.runs.filter(run=>run.state==="completed").length}/${grid.runs.length} runs completed · Recipe ${grid.recipe_id} · created ${new Date(grid.created_at).toLocaleString()}`);
   }
   function render_grid(grid) {
     const previous_grid=detail.dataset.gridId;
     const configuration_open=previous_grid===grid.grid_id && detail.querySelector(".runner-grid-configuration")?.open;
     const open_runs=previous_grid===grid.grid_id ? [...detail.querySelectorAll(".runner-run[open]")].map(row=>row.dataset.runId) : [];
+    const download_signature=JSON.stringify([grid.grid_id,grid.label,Boolean(grid.conversion)]);
+    if(tab==="files" && detail.dataset.downloadSignature===download_signature && detail.querySelector(".runner-script-viewer")) {
+      update_grid_state(detail.querySelector(".runner-grid-state"),grid);return;
+    }
+    download_request?.abort();download_serial++;
     detail.replaceChildren();
+    detail.dataset.downloadSignature=tab==="files"?download_signature:"";
     detail.dataset.gridId=grid.grid_id;
     detail.dataset.openRunIds=open_runs.join(",");
     const heading = add(detail,"div",undefined,"runner-grid-heading");
@@ -518,9 +591,8 @@
       if(label===null || label.trim()===grid.label)return;
       try{await action("rename_grid",{grid_id:grid.grid_id,label});render();}catch(_){/* Error shown above. */}
     });
-    const state=add(detail,"p",undefined);
-    add(state,"span","State ");add(state,"span",grid.state,`runner-status runner-status-${grid.state}`);
-    add(state,"span",` · ${grid.runs.length} runs · Recipe ${grid.recipe_id} · started ${new Date(grid.created_at).toLocaleString()}`);
+    const state=add(detail,"p",undefined,"runner-grid-state");
+    update_grid_state(state,grid);
     if(tab==="progress" || tab==="history") {
       // vvv THOG retain launched facts separately from readbacks and execution changes
       const configuration=add(detail,"details",undefined,"runner-grid-configuration");
@@ -549,7 +621,7 @@
       events.target="_blank";events.rel="noopener";
       // ^^^ THOG
     }
-    if(["progress","current_scripts"].includes(tab)) add(detail,"p",
+    if(["progress"].includes(tab)) add(detail,"p",
       "Possible states are: queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
     if(tab==="progress") {
       const controls=add(detail,"div",undefined,"runner-actions");
@@ -586,14 +658,7 @@
         catch (_) { /* Error shown above. */ }
       });
     }
-    if (tab==="files" || tab==="current_scripts") {
-      if (tab==="files") for (const name of ["placement","status",...(grid.conversion?["conversion"]:[]),"log"]) {
-        const path=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=${name}`;
-        const link=add(detail,"a",`Download ${name}`);link.href=path+"&download=1";link.download="";
-        detail.append(document.createElement("br"));
-      }
-      render_script(detail,grid);
-    }
+    if (tab==="files") render_downloads(detail,grid);
     if(tab==="log") {
       const path=`/api/runner/file?grid_id=${encodeURIComponent(grid.grid_id)}&name=log`;
       const download=add(detail,"a","Download Grid event log");download.href=path+"&download=1";download.download="";
@@ -605,7 +670,7 @@
     for (const run of (tab==="history"?grid.runs.map((item,index)=>({item,index})).sort((a,b)=>
       String(b.item.attempts?.at(-1)?.started_at||grid.created_at).localeCompare(
         String(a.item.attempts?.at(-1)?.started_at||grid.created_at)) || b.index-a.index).map(entry=>entry.item):grid.runs))
-      if(!["files","current_scripts","log","multiview"].includes(tab))render_run(detail,run);
+      if(!["files","log","multiview"].includes(tab))render_run(detail,run);
   }
   async function update_event_log() {
     const viewer=detail.querySelector(".runner-event-log");
@@ -652,7 +717,7 @@
     if (!snapshot || !visible) return;
     for (const control of by_id("runner_tabs").querySelectorAll("button"))control.classList.toggle("active",control.dataset.runnerTab===tab);
     list.replaceChildren();
-    const grids=snapshot.grids.filter(grid=>!["progress","current_scripts","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
+    const grids=snapshot.grids.filter(grid=>!["progress","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
     if(tab==="recipes") {
       const add_row=add(list,"div",undefined,"runner-recipe-add-row");
       button(add_row,"Add Grid Recipe",()=>{
@@ -687,12 +752,16 @@
       if(chosen && !snapshot.recipes.some(item=>item.recipe_id===chosen))chosen=null;
       if(!dirty || !detail.querySelector("input:focus"))render_editor();
     } else {
+      if(tab==="history") {
+        const headings=add(list,"div",undefined,"runner-history-headings");
+        for(const title of ["Grid","State","","","T","T_est",""])add(headings,"span",title);
+      }
       for(const grid of [...grids].reverse()){
         const failed=grid.runs.find(run=>run.state==="failed");
         const last=failed?.attempts?.at(-1);
-        const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1).slice(0,110)}` : ""}` : "";
+        const failure=last ? ` · exit ${last.exit_code??"?"}${last.failure_excerpt ? ` · ${last.failure_excerpt.trim().split("\n").at(-1)}` : ""}` : "";
         const blocked=grid.runs.find(run=>run.state==="blocked" && run.blocking_reason);
-        const reason=blocked ? ` · blocked: ${blocked.blocking_reason.slice(0,110)}` : "";
+        const reason=blocked ? ` · blocked: ${blocked.blocking_reason}` : "";
         const row=tab==="progress"?add(list,"div",undefined,"runner-active-grid-row"):
           tab==="history"?add(list,"div",undefined,"runner-history-grid-row"):list;
         const locations=[...new Set(grid.runs.map(run=>`${run.host_label} GPU ${run.gpu.ordinal}`))].join(", ");
@@ -705,6 +774,7 @@
           const outcome = history_outcome(grid);
           row.dataset.outcome = outcome;
           entry.classList.add(`runner-outcome-${outcome}`);
+          add(row,"span",grid.state,`runner-status runner-outcome-${outcome}`);
           button(row,"Rename",async()=>{
             const label=await rename_dialog(`Rename ${grid.grid_tag}`,grid.label);
             if(label===null || label.trim()===grid.label)return;
@@ -716,9 +786,13 @@
               if(last_history_grid===grid.grid_id)last_history_grid=null;render();}catch(_){/* Error shown above. */}
           });
           deletion.classList.add("runner-recipe-delete");deletion.disabled=!["completed","failed","cancelled"].includes(grid.state);
+          const elapsed=add(row,"span",format_duration(grid_elapsed(grid)),"runner-history-time");
+          elapsed.title="Execution wall time from first dispatch to terminal state; excludes initial queue wait";
+          const upfront=add(row,"span",estimate_range(grid),"runner-history-estimate");
+          upfront.title=`Estimate saved at launch · ${grid.estimated_duration?.confidence||"insufficient"} confidence`;
           const diagnostic=add(row,"span",[failure,reason].filter(Boolean).join(" · ").replace(/^ · /,""),"runner-history-error");
           diagnostic.title=diagnostic.textContent;
-          add(row,"span",grid.state,`runner-status runner-outcome-${history_outcome(grid)}`);
+
         } else entry.classList.add(`runner-status-${grid.state}`);
         if(tab==="progress") {
           button(row,"Rename",async()=>{
@@ -760,7 +834,7 @@
         }else render_grid(grid);
       }else{detail.replaceChildren();
         const empty_text=finished_selection?"The selected Grid has finished. Select another active Grid or inspect it in History.":
-          ["progress","current_scripts","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view";
+          ["progress","multiview"].includes(tab)?"No Grids are currently active":"No Grids in this view";
         if(tab==="multiview"){
           const empty_key=finished_selection?`finished:${chosen}`:"empty";
           if(multiview.dataset.gridMultiview!==empty_key){multiview.replaceChildren();multiview.dataset.gridMultiview=empty_key;}
@@ -802,13 +876,13 @@
   for(const id of ["runs_nav","workspace_nav","networks_nav","settings_nav"])by_id(id)?.addEventListener("click",()=>{visible=false;});
   for(const control of by_id("runner_tabs").querySelectorAll("button"))control.addEventListener("click",()=>{
     clear_message();required_notice_seen=true;
-    const was_active=["progress","current_scripts","multiview"].includes(tab);
+    const was_active=["progress","multiview"].includes(tab);
     tab=control.dataset.runnerTab;
     if(!was_active)manual_grid_selection=false;
-    chosen=tab==="history"?last_history_grid:["progress","current_scripts","multiview"].includes(tab) && was_active?chosen:null;
+    chosen=tab==="history"?last_history_grid:["progress","multiview"].includes(tab) && was_active?chosen:null;
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

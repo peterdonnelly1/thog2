@@ -148,7 +148,10 @@
     const menu=by_id("run_menu");
     if(!menu || by_id("delete_grid_runs"))return;
     const button=document.createElement("button");button.id="delete_grid_runs";button.type="button";
-    button.textContent="Delete all runs belonging to this Grid";
+    button.className="danger-action";button.setAttribute("role","menuitem");
+    const icon=by_id("delete_run")?.querySelector("span");
+    if(icon)button.appendChild(icon.cloneNode(true));
+    button.appendChild(document.createTextNode("Delete all runs belonging to this Grid"));
     menu.appendChild(button);
     button.addEventListener("click",async()=>{
       const run=run_for_id(app.menu_run_id),tag=run?.runner_grid_tag;

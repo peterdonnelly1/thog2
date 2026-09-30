@@ -999,11 +999,11 @@ def _handler_for(catalog: DashboardCatalog):
                 status=status,
             )
 
-        def _send_file(self, path: Path, *, download: bool) -> None:
+        def _send_file(self, path: Path, *, download: bool, filename: Optional[str] = None) -> None:                                                       # <<< THOG allow Runner exports to advertise Grid-prefixed filenames
             file_size = path.stat().st_size
             content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             disposition = "attachment" if download else "inline"
-            encoded_name = quote(path.name, safe="")
+            encoded_name = quote(filename or path.name, safe="")                                                                                           # <<< THOG retain original names for other downloads
             self.send_response(int(HTTPStatus.OK))
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(file_size))

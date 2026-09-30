@@ -36,7 +36,7 @@ assert.match(recipe_problems({...recipe,parameters:{...parameters,"--max-iters":
 assert.match(recipe_problems({...recipe,parameters:{...parameters,"DEPTH.order":""}}, hosts).join(" "), /DEPTH.order is required/);
 assert.match(runner,/tab === "history" && \["failed","blocked"\]\.includes\(run.state\)/,
   "failed and blocked History diagnostics open without extra clicks, while Progress details stay collapsed");
-assert.match(runner,/blocked: \$\{blocked\.blocking_reason\.slice\(0,110\)\}/,
+assert.match(runner,/blocked: \$\{blocked\.blocking_reason\}/,
   "Progress Grid list must show the current blocking reason");
 assert.match(runner,/Unable to retrieve attempt log: \$\{error\.message\}/,
   "log retrieval errors must be shown beside the attempt, not only in the toolbar");

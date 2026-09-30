@@ -210,6 +210,7 @@ function colour_for_run(run_id) {
     }
     try { localStorage.setItem("thog2_grid_hues",JSON.stringify(grid_hues)); } catch (_) { /* In-memory colours still work. */ }
   }
+  if (app.colours[run_id]) return app.colours[run_id]; // <<< THOG explicit choices override automatic Grid shades
   if (grid_palette.has(String(run_id))) return grid_palette.get(String(run_id));
   return app.colours[run_id] || default_palette[hash_text(run_id) % default_palette.length];
 }
@@ -370,7 +371,7 @@ function append_run_row(body, run) {
   eye.setAttribute("aria-label", eye.title);
   eye.addEventListener("click", () => {
     const next_visible = !is_visible(run_id);
-    const group_members = run.runner_grid_tag &&
+    const group_members = run.runner_grid_tag && next_visible &&
       localStorage.getItem("thog2_grid_eye_grouping") !== "false"
       ? app.runs.filter(candidate => candidate.runner_grid_tag === run.runner_grid_tag)
       : [run];
@@ -387,8 +388,7 @@ function append_run_row(body, run) {
   colour.type = "button";
   colour.className = "colour-dot";
   colour.style.background = colour_for_run(run_id);
-  colour.title = run.runner_grid_tag ? "Grid shades are assigned together" : "Change run colour";
-  colour.disabled = Boolean(run.runner_grid_tag);
+  colour.title = "Change run colour";
   colour.setAttribute("aria-label", `Change colour for ${run.artifact_name}`);
   colour.addEventListener("click", event => {
     event.stopPropagation();
@@ -2379,6 +2379,18 @@ function hex_to_rgb(hex) {
   return [0, 2, 4].map(index => parseInt(match[1].slice(index, index + 2), 16));
 }
 
+// vvv THOG initialise and reset the picker from automatic HSL Grid shades as well as hex overrides
+function run_colour_rgb(run_id) {
+  const colour=colour_for_run(run_id), rgb=hex_to_rgb(colour);
+  if(rgb)return rgb;
+  const match=/^hsl\(([-\d.]+)\s+([\d.]+)%\s+([\d.]+)%\)$/.exec(colour);
+  if(!match)return [128,128,128];
+  const hue=Number(match[1]), saturation=Number(match[2])/100, lightness=Number(match[3])/100;
+  const value=lightness+saturation*Math.min(lightness,1-lightness);
+  return hsv_to_rgb(hue,value===0?0:2*(1-lightness/value),value);
+}
+// ^^^ THOG
+
 function draw_colour_plane() {
   const canvas = by_id("colour_plane");
   const context = canvas.getContext("2d");
@@ -2461,7 +2473,7 @@ function set_picker_colour(rgb, persist = true) {
 
 function open_colour_picker(run_id, anchor) {
   app.colour_run_id = run_id;
-  set_picker_colour(hex_to_rgb(colour_for_run(run_id)), false);
+  set_picker_colour(run_colour_rgb(run_id), false);
   const popover = by_id("colour_popover");
   popover.hidden = false;
   const anchor_rect = anchor.getBoundingClientRect();
@@ -2655,7 +2667,7 @@ function bind_events() {
     const run_id = app.colour_run_id;
     delete app.colours[run_id];
     save_json("thog2_local_run_colours", app.colours);
-    set_picker_colour(hex_to_rgb(colour_for_run(run_id)), false);
+    set_picker_colour(run_colour_rgb(run_id), false);
     render_runs();
     render_run_heading();
     queue_current_recolour(run_id);

@@ -1409,7 +1409,10 @@ def _handler_for_with_runner(catalog):
             query = parse_qs(parsed.query)
             try:
                 path = _runner_service.file(query.get("grid_id", [""])[0], query.get("name", [""])[0])
-                self._send_file(path, download=query.get("download", ["0"])[0] == "1")
+                # vvv THOG prefix every Runner download while retaining existing stored paths
+                filename = path.name if path.name.startswith("G-") else f"{path.parent.name}_{path.name}"
+                self._send_file(path, download=query.get("download", ["0"])[0] == "1", filename=filename)
+                # ^^^ THOG
             except (KeyError, OSError) as error:
                 self._send_json({"error": str(error)}, status=HTTPStatus.NOT_FOUND)
             return

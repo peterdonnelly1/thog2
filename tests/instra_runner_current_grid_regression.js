@@ -44,7 +44,7 @@ async function main() {
     "runner_nav","runs_nav","workspace_nav","networks_nav","settings_nav","runner_rename_dialog",
     "runner_rename_form","runner_rename_input","runner_rename_cancel"].map(id => [id,new Element()]));
   roots.runner_rename_dialog.append(new Element("h2"));
-  for (const name of ["recipes","progress","multiview","current_scripts","history","log","files"]) {
+  for (const name of ["recipes","progress","multiview","history","log","files"]) {
     const tab = new Element("button"); tab.dataset.runnerTab = name; roots.runner_tabs.append(tab);
   }
   const find = (node, id) => node.id === id ? node : node.children.map(child => find(child,id)).find(Boolean);
@@ -110,10 +110,10 @@ async function main() {
   assert.match(active_row.children[2].title,/Last resort/);
   assert.equal(roots.runner_detail.children[1].children[1].textContent,"running");
   switch_tab("history");
-  assert.ok(roots.runner_list.children[0].children[0].textContent.startsWith("G-00002"));
-  assert.deepEqual(roots.runner_list.children[0].children.slice(1,3).map(item=>item.textContent),["Rename","Delete"]);
-  assert.equal(roots.runner_list.children[0].children.at(-1).textContent,"running");
-  assert.equal(roots.runner_list.children[0].children[0].textContent,"G-00002 · Live");
+  assert.ok(roots.runner_list.children[1].children[0].textContent.startsWith("G-00002"));
+  assert.deepEqual(roots.runner_list.children[1].children.slice(2,4).map(item=>item.textContent),["Rename","Delete"]);
+  assert.equal(roots.runner_list.children[1].children[1].textContent,"running");
+  assert.equal(roots.runner_list.children[1].children[0].textContent,"G-00002 · Live");
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
@@ -192,7 +192,7 @@ async function main() {
     "/?runner_grid_tag=G-00002",
     "switching views must not reload a running Grid's charts");
   const html = fs.readFileSync("sheet/local_dashboard_assets/index.html","utf8");
-  assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="current_scripts"/);
+  assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="history"/);
   assert.match(html,/data-runner-tab="history"[^]*data-runner-tab="log"/);
   assert.equal((html.match(/<path d="M9 \d+h\d+" stroke="#[0-9a-f]+"\/>/g)||[]).length,4);
   assert.match(html, /M7 5V57H59/);

@@ -53,7 +53,29 @@ network={"local_id":"thog_host.scruffy","master_id":None,"release_pending":False
 snapshot={"recipes":[{"recipe_id":"recipe_fixture","recipe":recipe}],"grids":grids,
           "catalogue":instra_runner.CATALOGUE,"common":instra_runner.COMMON,"controller":True,"reconciled":True,
           "local_id":network["local_id"],"master_id":None}
-dashboard._runner_service=SimpleNamespace(snapshot=lambda:snapshot)
+# vvv THOG exercise actual file responses and download headers from isolated exports
+file_paths = {}
+for grid in grids:
+    folder=fixture_root/"grid-scripts"/grid["grid_tag"]
+    folder.mkdir(parents=True,exist_ok=True)
+    grid["started_at"]="2026-09-30T00:01:00+00:00"
+    if grid["state"] in {"completed","failed","cancelled"}:
+        grid["finished_at"]="2026-09-30T00:02:05+00:00"
+    grid["estimated_duration"]={"interval_seconds":[60,120],"seconds":90,"confidence":"high"}
+    if grid["grid_id"]=="grid_0": grid["conversion"]={"from":"tight","to":"loose"}
+    for name,filename in {"script":grid["grid_tag"]+".sh","classic":grid["grid_tag"]+"_grid_bash_runner_script.sh",
+        "manifest":"manifest.json","placement":"placement.json","status":"status.json",
+        "conversion":"conversion.json","log":"events.jsonl"}.items():
+        path=folder/filename
+        path.write_text("#!/bin/bash\n# " + grid["grid_tag"] + " " + name + "\n" if name in {"script","classic"}
+                        else json.dumps({"grid_tag":grid["grid_tag"],"file":name})+"\n")
+        file_paths[(grid["grid_id"],name)]=path
+
+def fixture_file(grid_id,name):
+    return file_paths[(grid_id,name)]
+
+dashboard._runner_service=SimpleNamespace(snapshot=lambda:snapshot,file=fixture_file)
+# ^^^ THOG
 dashboard._network_service=SimpleNamespace(list_hosts=lambda:network)
 catalog=dashboard._base.DashboardCatalog(root=fixture_root)
 base_handler=dashboard._base._handler_for(catalog)

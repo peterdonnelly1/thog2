@@ -515,6 +515,7 @@ class RunnerService:
             run.pop("released", None)
             run.pop("next_retry_at", None)
             grid["state"] = "queued"
+            grid.pop("finished_at", None)  # <<< THOG resume the execution clock on an explicit retry
             _grid_event(grid, "retry", f"Run {run_id} queued for a new attempt")
             _write(state)
             return grid
@@ -717,6 +718,7 @@ class RunnerService:
                         run.pop("released", None)
                         attempt_id = uuid.uuid4().hex
                         latest = {"attempt_id": attempt_id, "started_at": now(), "state": "dispatching"}
+                        grid.setdefault("started_at", latest["started_at"])  # <<< THOG persist the first dispatch clock
                         run["attempts"].append(latest)
                         run.update(state="dispatching", blocking_reason="")
                         _write(state)  # Commit the attempt identity BEFORE sending it to the Node Agent.
@@ -808,6 +810,8 @@ class RunnerService:
                                   f"{old_state} -> {run['state']}; attempts={len(run['attempts'])}; "
                                   f"exit={last.get('exit_code', 'pending')}; {reason[:240]}")
                         _grid_event(grid, "run", detail)
+                if grid["state"] in TERMINAL:
+                    grid.setdefault("finished_at", now())  # <<< THOG freeze elapsed time across reloads and restarts
                 if grid["state"] != previous_state:
                     _grid_event(grid, "grid", f"{previous_state} -> {grid['state']}")
                 directory = GRID_SCRIPTS / grid["grid_tag"]

@@ -75,7 +75,7 @@
     <!-- vvv THOG persistent Grid Recipes, live Progress, History and retained Files -->
     <header class="runner-heading"><h1>Runner</h1><nav id="runner_tabs" aria-label="Runner views">
       <button type="button" data-runner-tab="recipes">Recipes</button><button type="button" data-runner-tab="progress">Progress</button><button type="button" data-runner-tab="multiview">Multiview</button>
-      <button type="button" data-runner-tab="history">History</button><button type="button" data-runner-tab="current_scripts">Scripts</button>
+      <button type="button" data-runner-tab="history">History</button>
       <button type="button" data-runner-tab="files">Downloads</button><button type="button" data-runner-tab="log">Logs</button>
     </nav></header>
     <p id="runner_message" role="status" aria-live="polite"></p>
@@ -170,7 +170,7 @@
               <th class="numeric-column curve-end-column" title="Last retained weight-curve capture step">C_e</th>
               <th class="numeric-column step-column" title="Latest optimizer step represented by any local probe or curve record">step</th>
               <th class="numeric-column duration-column" title="Elapsed run time">t</th>
-              <th class="numeric-column loss-column" title="Most recent recorded loss">l</th>
+              <th class="numeric-column loss-column" title="Most recent recorded loss">loss</th>
               <th>Updated</th>
               <th class="menu-column"><span class="visually-hidden">Run menu</span></th>
             </tr>
@@ -627,7 +627,7 @@
           <p>A later heartbeat restores its live state.</p>
         </section>
         <section class="global-settings-section"><h3>Multiview</h3>
-          <label><input id="grid_eye_grouping" type="checkbox" checked> Show or hide every member of a Grid when its eye is clicked</label>
+          <label><input id="grid_eye_grouping" type="checkbox" checked> Show every member of a Grid when an eye is opened; close eyes individually</label>
           <p>Switch off to control each run independently.</p>
         </section>
       </div>
