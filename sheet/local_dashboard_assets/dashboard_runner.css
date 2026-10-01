@@ -7,9 +7,9 @@
 /* vvv THOG shared full-width History columns leave diagnostics the remaining grey space */
 .runner-history .runner-layout { display:block; }
 .runner-history #runner_list { border-right:0; border-bottom:1px solid #d5dae0; padding:0 .8rem 1rem 0; margin-bottom:1rem; overflow-x:auto; }
-.runner-history-headings, .runner-history-grid-row { --history-columns:minmax(12rem,1fr) 5.5rem 4.5rem 4rem 8rem 15rem minmax(10rem,2fr); }
-.runner-history-headings { display:grid; width:100%; min-width:62rem; grid-template-columns:var(--history-columns); gap:.45rem; font-weight:600; }
-.runner-history-time, .runner-history-estimate { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.runner-history-headings, .runner-history-grid-row { --history-columns:minmax(12rem,1fr) 5.5rem 4.5rem 4rem 6.2rem 6.2rem 8rem 15rem minmax(10rem,2fr); } /* <<< THOG align Grid start/end wall time before T/T_est */
+.runner-history-headings { display:grid; width:100%; min-width:76rem; grid-template-columns:var(--history-columns); gap:.45rem; font-weight:600; }
+.runner-history-time, .runner-history-estimate, .runner-history-wall-time { white-space:nowrap; font-variant-numeric:tabular-nums; }
 /* ^^^ THOG */
 #runner_list { border-right:1px solid #d5dae0; padding-right:1.25rem; }
 .runner-full-width .runner-layout { display:none; }
@@ -24,7 +24,7 @@
 #runner_list .runner-active-grid-row > button:first-child { flex:1 1 0; width:0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #runner_list .runner-active-grid-row > .runner-kill-flush { flex:0 0 auto; width:auto; padding:.3rem .5rem; color:#9a322c; font-size:.78rem; white-space:nowrap; }
 #runner_list .runner-active-grid-row > .runner-rename-grid { flex:0 0 auto; width:auto; padding:.3rem .5rem; font-size:.78rem; white-space:nowrap; }
-.runner-history-grid-row { display:grid; width:100%; min-width:62rem; grid-template-columns:var(--history-columns); gap:.45rem; align-items:center; }
+.runner-history-grid-row { display:grid; width:100%; min-width:76rem; grid-template-columns:var(--history-columns); gap:.45rem; align-items:center; }
 #runner_list .runner-history-grid-row > button:first-child { min-width:0; width:100%; }
 .runner-history-grid-row .runner-status { text-align:left; white-space:nowrap; }
 .runner-history-grid-row .runner-recipe-delete { color:#b3262e; }
@@ -82,7 +82,7 @@
 .runner-categories button.active { outline:2px solid #5792cc; }
 .runner-run { padding:.75rem; border-top:1px solid #68778a; overflow-wrap:anywhere; }
 .runner-run summary { cursor:pointer; }
-.runner-run-identity, .runner-run-headings { display:grid; grid-template-columns:minmax(5rem,1fr) minmax(6rem,1fr) minmax(5rem,.8fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(4rem,.65fr) minmax(7rem,1fr); gap:.65rem; align-items:center; }
+.runner-run-identity, .runner-run-headings { display:grid; grid-template-columns:minmax(5rem,1fr) minmax(5.8rem,.85fr) minmax(5.8rem,.85fr) minmax(6rem,1fr) minmax(5rem,.8fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(4rem,.65fr) minmax(7rem,1fr); gap:.65rem; align-items:center; } /* <<< THOG add aligned run start/end columns */
 .runner-run-headings { padding:.4rem .75rem; border-bottom:1px solid #68778a; }
 .runner-status-running, .runner-status-completed { color:#147348; }
 .runner-status-failed, .runner-status-blocked, .runner-status-unknown, .runner-status-cancelled { color:#ad302b; }
