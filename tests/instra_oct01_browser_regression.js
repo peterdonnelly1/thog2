@@ -4,7 +4,8 @@ const assert=require("node:assert/strict"),fs=require("node:fs");
 const {chromium,firefox}=require("playwright");
 const address=process.env.INSTRA_TEST_URL||"http://127.0.0.1:8765";
 async function check(type) {
-  const browser=await type.launch({headless:true,...(type===chromium && process.env.INSTRA_CHROMIUM_PATH?
+  const browser=await type.launch({headless:true,
+    ...(type===firefox && process.env.INSTRA_TEST_UNSANDBOXED==="1" ? {firefoxUserPrefs:{"security.sandbox.content.level":0,"fission.autostart":false,"dom.ipc.processCount":1}} : {}),...(type===chromium && process.env.INSTRA_CHROMIUM_PATH?
     {executablePath:process.env.INSTRA_CHROMIUM_PATH,args:["--no-sandbox","--disable-dev-shm-usage","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]}:{})});
   const browser_context=await browser.newContext({viewport:{width:1600,height:1100}});
   const page=await browser_context.newPage();
@@ -23,12 +24,12 @@ async function check(type) {
   await page.locator('[data-runner-tab="history"]').click();
   const rows=page.locator(".runner-history-grid-row");
   assert.equal(await rows.count(),4);
-  assert.deepEqual(await page.locator(".runner-history-headings span").allTextContents(),["Grid","State","","","T","T_est",""]);
+  assert.deepEqual(await page.locator(".runner-history-headings span").allTextContents(),["Grid","State","","","start","end","T","T_est",""]);
   const terminal=rows.filter({has:page.locator('button',{hasText:"Grid 1"})});
   assert.equal(await terminal.locator(".runner-history-time").textContent(),"1m 5s");
   assert.equal(await terminal.locator(".runner-history-estimate").textContent(),"1m 0s – 2m 0s");
   const alignment=await rows.evaluateAll(elements=>elements.map(row=>[...row.children].map(child=>child.getBoundingClientRect().left)));
-  for(let column=0;column<7;column++)assert.ok(alignment.every(values=>Math.abs(values[column]-alignment[0][column])<1),`History column ${column} misaligned`);
+  for(let column=0;column<9;column++)assert.ok(alignment.every(values=>Math.abs(values[column]-alignment[0][column])<1),`History column ${column} misaligned`);
   assert.equal(await terminal.evaluate(row=>row.children[1].classList.contains("runner-status")),true);
   assert.equal(await terminal.evaluate(row=>row.children[2].textContent),"Rename");
   assert.equal(await terminal.locator(".runner-recipe-delete").evaluate(node=>getComputedStyle(node).color),"rgb(179, 38, 46)");

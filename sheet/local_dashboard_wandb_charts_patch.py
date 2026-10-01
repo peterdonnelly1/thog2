@@ -579,6 +579,15 @@ class _ScannerCatalog:
         self.paths: Dict[str, Optional[Path]] = {}
         self.scanners: Dict[Path, _WandbRunScanner] = {}
 
+    # vvv THOG bound retained per-run scanners and invalidate deleted acquisitions without retaining old chart values
+    def forget_runs(self, run_ids):
+        with self.lock:
+            for run_id in run_ids:
+                path = self.paths.pop(run_id, None)
+                if path is not None:
+                    self.scanners.pop(path, None)
+    # ^^^ THOG
+
     def _find_path(self, run_id: str, status: Optional[dict[str, Any]] = None) -> Optional[Path]:
         status = status or {}
         cache_key = str(status.get("dashboard_run_id") or run_id) if status.get("remote_copy") else run_id                                            # <<< THOG remote producers may reuse a W&B ID
@@ -636,7 +645,7 @@ class _ScannerCatalog:
         if path is None:
             return None
         with self.lock:
-            scanner = self.scanners.get(path)
+            scanner = self.scanners.pop(path, None)                                                                                                           # <<< THOG reinsert accessed scanners to maintain a bounded least-recently-used cache
             if scanner is None:
                 # vvv THOG recover GPU affinity from current config first and legacy command/host labels second
                 configuration = status.get("configuration") or {}
@@ -662,7 +671,9 @@ class _ScannerCatalog:
                         gpu_index = 0                                                                                                                       # <<< THOG recover the physical index for current single-GPU scruffy history
                 scanner = _WandbRunScanner(path, gpu_index=gpu_index)
                 # ^^^ THOG
-                self.scanners[path] = scanner
+            self.scanners[path] = scanner
+            while len(self.scanners) > 16:
+                self.scanners.pop(next(iter(self.scanners)))
             return scanner
 
 
@@ -680,6 +691,16 @@ def install(dashboard_module: Any) -> None:
         scanner_catalog = _ScannerCatalog(catalog)
         live_readers: dict[str, LiveLossReader] = {}
         live_readers_lock = threading.Lock()
+        # vvv THOG discard chart readers when deletion clears the catalogue; recreated copies start with new reader state
+        def forget_runs(_database_path, run_ids):
+            scanner_catalog.forget_runs(run_ids)
+            with live_readers_lock:
+                for run_id in run_ids:
+                    live_readers.pop(run_id, None)
+        if not hasattr(catalog, "chart_cache_clearers"):
+            catalog.chart_cache_clearers = []
+        catalog.chart_cache_clearers.append(forget_runs)
+        # ^^^ THOG
         handler = original_handler_for(catalog)
         original_do_get = handler.do_GET
 
@@ -696,7 +717,13 @@ def install(dashboard_module: Any) -> None:
             try:
                 state = catalog.state_for_run(run_name)
                 with live_readers_lock:
-                    live = live_readers.setdefault(run_name, LiveLossReader())
+                    live = live_readers.pop(run_name, None)
+                    if live is None or live.dashboard_state is not state:
+                        live = LiveLossReader()
+                        live.dashboard_state = state
+                    live_readers[run_name] = live
+                    while len(live_readers) > 64:
+                        live_readers.pop(next(iter(live_readers)))
                 live.refresh(catalog, state, dashboard_module)
                 scanner = scanner_catalog.scanner_for(state)
                 plastic_enabled = _plastic_charts_enabled(state.status().get("configuration") or {})

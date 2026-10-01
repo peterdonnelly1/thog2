@@ -35,7 +35,10 @@ def _atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
     try:
-        temporary.write_text(json.dumps(value, sort_keys=True))
+        with temporary.open("w") as stream:
+            json.dump(value, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -49,6 +52,19 @@ def _inside(path, root):
         return target.relative_to(PurePosixPath(root)).as_posix()
     except ValueError:
         return None
+
+
+# vvv THOG validate deletion identities before resolving any receiver-side file path
+def _chart_relative(value):
+    return (isinstance(value, str) and bool(value) and not value.startswith("/")
+            and not any(character in value for character in "\\\0\r\n")
+            and all(part not in {"", ".", ".."} for part in value.split("/"))
+            and PurePosixPath(value).name == "charts.sqlite3")
+
+
+def _request_id_valid(value):
+    return isinstance(value, str) and len(value) == 32 and all(character in "0123456789abcdef" for character in value)
+# ^^^ THOG
 
 
 class MonitoringService:
@@ -67,6 +83,7 @@ class MonitoringService:
         self.manifests = {}
         self.pending = set()
         self.active = set()
+        self.sync_locks = {}                                                                                                                                  # <<< THOG serialize each producer's acquisitions, deletion processing and force cleanup
         self.last_checks = {}
         self.host_snapshot = (0.0, {})
         self.deletions_path = self.storage_root / "deletions.json"                                                                                            # <<< THOG durable producer-side deletion requests and receipt state
@@ -184,7 +201,8 @@ class MonitoringService:
             raise PermissionError("refusing distributed deletion outside the configured Instra chart root")
         status = state.status()
         run_id = str(status["dashboard_run_id"])
-        expected = [host["thog_host_id"] for host in self.network.list_hosts()["hosts"] if not host["local"]]
+        expected = sorted({host["thog_host_id"] for host in self.network.list_hosts()["hosts"]
+                           if host["thog_host_id"] != self.network.local_id})
         request_id = uuid.uuid4().hex
         requested_at = _time_now()
         timeout_days = self.deletion_timeout_days()
@@ -194,13 +212,16 @@ class MonitoringService:
             "requested_at": requested_at,
         }
         notice_dir = root / ".instra_deletions" / "notices"
-        _atomic_json(notice_dir / f"{request_id}.json", notice)
         with self.lock:
+            for previous_id, previous in self.deletions.items():
+                if previous.get("database_path") == str(database_path):
+                    return {"deleted_run_id": run_id, "deletion_request_id": previous_id, "pending": True}
             self.deletions[request_id] = {
                 **notice, "database_path": str(database_path), "grid_tag": grid_tag,
                 "expected_hosts": expected, "receipts": {}, "timeout_days": timeout_days,
             }
             self._persist_deletions()
+        _atomic_json(notice_dir / f"{request_id}.json", notice)                                                                                                 # <<< THOG persist intent first; background recovery recreates a missing publication after interruption
         names = {host["thog_host_id"]: host.get("display_name", host["thog_host_id"]) for host in self.network.list_hosts()["hosts"]}
         outstanding = ", ".join(names.get(host_id, host_id) for host_id in expected) or "none"
         instra_network.log_event("Monitoring", "delete_pending", self.network.local_id, "pending",
@@ -212,17 +233,19 @@ class MonitoringService:
         resolved = Path(database_path).resolve()
         with self.catalog.lock:
             state = self.catalog.states.pop(resolved, None)
+            run_ids = [name for name, item in self.catalog.identity_states.items() if item is state]
             if state is not None:
                 self.catalog.identity_states = {name: item for name, item in self.catalog.identity_states.items() if item is not state}
+            self.catalog.wandb_file_cache.clear()
+        for clear_cache in self.catalog.chart_cache_clearers if hasattr(self.catalog, "chart_cache_clearers") else ():
+            clear_cache(resolved, run_ids)
 
     def _delete_chart_files(self, database_path):
         path = Path(database_path)
         for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
-            try:
-                if candidate.is_file() and not candidate.is_symlink():
-                    candidate.unlink()
-            except OSError:
-                pass
+            if candidate.is_symlink():
+                raise PermissionError("Refusing deletion through a symbolic link")
+            candidate.unlink(missing_ok=True)                                                                                                                 # <<< THOG failed cleanup must remain pending and must never produce a successful receipt
         self._clear_catalog_state(path)
 
     def _finalize_deletions(self):
@@ -232,6 +255,10 @@ class MonitoringService:
         with self.lock:
             items = list(self.deletions.items())
         for request_id, item in items:
+            notice = self.catalog.root.resolve() / ".instra_deletions" / "notices" / f"{request_id}.json"
+            if not notice.exists():
+                _atomic_json(notice, {key: item[key] for key in ("schema", "delete", "producer_host_id", "run_id",
+                                                               "source_chart_path", "deletion_request_id", "requested_at")})
             received = dict(item.get("receipts") or {})
             request_receipts = receipts_root / request_id
             if request_receipts.is_dir():
@@ -240,8 +267,12 @@ class MonitoringService:
                         receipt = json.loads(receipt_path.read_text())
                     except (OSError, ValueError):
                         continue
+                    if not isinstance(receipt, dict):
+                        continue
                     host_id = receipt.get("responding_host_id")
-                    if (receipt.get("producer_host_id") == self.network.local_id
+                    if (receipt.get("schema") == 1 and receipt.get("deletion_processed") is True
+                            and receipt.get("source_chart_path") == item.get("source_chart_path")
+                            and receipt.get("producer_host_id") == self.network.local_id
                             and receipt.get("run_id") == item.get("run_id")
                             and receipt.get("deletion_request_id") == request_id
                             and host_id in item.get("expected_hosts", [])):
@@ -255,15 +286,19 @@ class MonitoringService:
             confirmed = expected.issubset(received)
             with self.lock:
                 if request_id in self.deletions:
-                    self.deletions[request_id]["receipts"] = received
-                    self._persist_deletions()
+                    if self.deletions[request_id].get("receipts") != received:
+                        self.deletions[request_id]["receipts"] = received
+                        self._persist_deletions()
             if not confirmed and not timed_out:
                 continue
-            self._delete_chart_files(item.get("database_path", ""))
-            notice = self.catalog.root.resolve() / ".instra_deletions" / "notices" / f"{request_id}.json"
-            notice.unlink(missing_ok=True)
-            if request_receipts.exists():
-                shutil.rmtree(request_receipts, ignore_errors=True)
+            try:
+                self._delete_chart_files(item["database_path"])
+                notice.unlink(missing_ok=True)
+                if request_receipts.exists():
+                    shutil.rmtree(request_receipts)
+            except OSError as error:
+                instra_network.log_event("Monitoring", "delete_cleanup", self.network.local_id, "retry", str(error)[:200])
+                continue
             with self.lock:
                 self.deletions.pop(request_id, None)
                 self._persist_deletions()
@@ -275,71 +310,85 @@ class MonitoringService:
         return completed
 
     def _remove_cached_remote_run(self, host_id, relative, manifest):
-        record = manifest.get("runs", {}).pop(relative, None)
+        if not _chart_relative(relative):
+            raise ValueError("Invalid source chart path")
+        record = manifest.get("runs", {}).get(relative)
         database = self._host_root(host_id) / "logs" / relative
+        if _inside(database.resolve(), (self._host_root(host_id) / "logs").resolve()) is None:
+            raise PermissionError("Refusing cached-run deletion outside the acquisition root")
         self._delete_chart_files(database)
         if record:
+            shared_files = {key for source, other in manifest.get("runs", {}).items() if source != relative
+                            for key in (other.get("files") or {})}                                                                                           # <<< THOG retain cached logs/W&B files still referenced by an unaffected acquired run
             for key in (record.get("files") or {}):
+                if key in shared_files:
+                    continue
                 root_kind, _, file_relative = key.partition("/")
                 if root_kind not in {"logs", "wandb"} or not file_relative:
                     continue
-                try:
-                    path = self._host_root(host_id) / root_kind / file_relative
-                    if path.is_file() and not path.is_symlink():
-                        path.unlink()
-                except OSError:
-                    pass
+                path = self._host_root(host_id) / root_kind / file_relative
+                if _inside(path.resolve(), (self._host_root(host_id) / root_kind).resolve()) is None:
+                    raise PermissionError("Invalid acquired file path")
+                if path.is_file() and not path.is_symlink():
+                    path.unlink()
+        manifest.get("runs", {}).pop(relative, None)
         return record is not None
+
+    def _publish_manifest(self, host_id, manifest):
+        _atomic_json(self._manifest_path(host_id), manifest)                                                                                                   # <<< THOG disk flushes run outside the lock used by Runs and Multiview catalogue reads
+        with self.lock:
+            self.manifests[host_id] = manifest
 
     def _process_deletion_notices(self, host_id, listing, manifest):
         notices = [relative for relative, _size, _modified in listing
                    if PurePosixPath(relative).parts[:2] == (".instra_deletions", "notices")
-                   and relative.endswith(".json")]
-        suppressed = set()
-        current_ids = set()
+                   and len(PurePosixPath(relative).parts) == 3 and relative.endswith(".json")]
+        suppressed, current_ids = set(), set()
         for relative in notices:
             request_id = PurePosixPath(relative).stem
+            if not _request_id_valid(request_id):
+                continue
             current_ids.add(request_id)
             local_receipt = self.receipt_retry_root / host_id / f"{request_id}.json"
-            notice = None
-            if local_receipt.is_file():
-                try:
-                    receipt = json.loads(local_receipt.read_text())
-                    source_path = receipt.get("source_chart_path")
-                    if source_path:
-                        suppressed.add(source_path)
-                    remote_receipt = f".instra_deletions/receipts/{request_id}/{self.network.local_id.replace('.', '_')}.json"
-                    self.network.monitor_upload_receipt(host_id, remote_receipt, receipt)
-                    continue
-                except (OSError, ValueError, instra_network.NetworkError):
-                    pass
             temporary = self.storage_root / "notices" / host_id / f"{request_id}.json"
+            receipt = None
             try:
-                self.network.monitor_transfer(host_id, "logs", relative, temporary)
-                if temporary.stat().st_size > 16384:
-                    raise ValueError("Deletion notice is too large")
-                notice = json.loads(temporary.read_text())
+                temporary.parent.mkdir(parents=True, exist_ok=True)
+                if local_receipt.is_file():
+                    receipt = json.loads(local_receipt.read_text())
+                    if (not isinstance(receipt, dict) or receipt.get("producer_host_id") != host_id
+                            or receipt.get("deletion_request_id") != request_id
+                            or receipt.get("responding_host_id") != self.network.local_id
+                            or receipt.get("deletion_processed") is not True
+                            or not _chart_relative(receipt.get("source_chart_path"))):
+                        receipt = None
+                if receipt is None:
+                    self.network.monitor_transfer(host_id, "logs", relative, temporary)
+                    if temporary.stat().st_size > 16384:
+                        raise ValueError("Deletion notice is too large")
+                    notice = json.loads(temporary.read_text())
+                    if (not isinstance(notice, dict) or notice.get("schema") != 1 or notice.get("delete") is not True
+                            or notice.get("producer_host_id") != host_id
+                            or notice.get("deletion_request_id") != request_id
+                            or not _chart_relative(notice.get("source_chart_path"))
+                            or not isinstance(notice.get("run_id"), str) or not notice["run_id"]):
+                        raise ValueError("Invalid deletion notice")
+                    receipt = {key: notice[key] for key in ("schema", "producer_host_id", "run_id",
+                                                            "source_chart_path", "deletion_request_id")}
+                    receipt.update(responding_host_id=self.network.local_id, processed_at=_time_now(), deletion_processed=True)
+                source_path = receipt["source_chart_path"]
+                suppressed.add(source_path)
+                self._remove_cached_remote_run(host_id, source_path, manifest)
+                self._publish_manifest(host_id, manifest)
+                _atomic_json(local_receipt, receipt)
+                remote_receipt = f".instra_deletions/receipts/{request_id}/{self.network.local_id.replace('.', '_')}.json"
+                self.network.monitor_upload_receipt(host_id, remote_receipt, receipt)
+            except (OSError, ValueError, instra_network.NetworkError) as error:
+                instra_network.log_event("Monitoring", "delete_receipt", host_id, "retry", str(error)[:200])
+                if receipt is None and isinstance(error, (OSError, instra_network.NetworkError)):
+                    raise                                                                                                                                    # <<< THOG an unread deletion notice must pause ordinary acquisition until its source identity is known
             finally:
                 temporary.unlink(missing_ok=True)
-            if (not isinstance(notice, dict) or notice.get("delete") is not True
-                    or notice.get("producer_host_id") != host_id
-                    or notice.get("deletion_request_id") != request_id):
-                continue
-            source_path = notice.get("source_chart_path")
-            run_id = notice.get("run_id")
-            if not isinstance(source_path, str) or not source_path.endswith("charts.sqlite3") or not isinstance(run_id, str):
-                continue
-            suppressed.add(source_path)
-            self._remove_cached_remote_run(host_id, source_path, manifest)
-            receipt = {
-                "schema": 1, "producer_host_id": host_id, "run_id": run_id,
-                "source_chart_path": source_path, "deletion_request_id": request_id,
-                "responding_host_id": self.network.local_id, "processed_at": _time_now(),
-                "deletion_processed": True,
-            }
-            _atomic_json(local_receipt, receipt)
-            remote_receipt = f".instra_deletions/receipts/{request_id}/{self.network.local_id.replace('.', '_')}.json"
-            self.network.monitor_upload_receipt(host_id, remote_receipt, receipt)
         retry_dir = self.receipt_retry_root / host_id
         if retry_dir.is_dir():
             for receipt_path in retry_dir.glob("*.json"):
@@ -356,18 +405,11 @@ class MonitoringService:
         run_id = str(state.status()["dashboard_run_id"])
         with self.lock:
             self.force_delete_requests.setdefault(host_id, set()).add(relative)
-            active = host_id in self.active
-            if not active:
-                manifest = json.loads(json.dumps(self.manifests.get(host_id, {"runs": {}})))
-                self._remove_cached_remote_run(host_id, relative, manifest)
-                self.manifests[host_id] = manifest
-                _atomic_json(self._manifest_path(host_id), manifest)
-                self.force_delete_requests[host_id].discard(relative)
-                if not self.force_delete_requests[host_id]:
-                    self.force_delete_requests.pop(host_id, None)
-            elif self.network._host(host_id).get("monitoring_enabled"):
-                self.pending.add(host_id)
-        return {"queued": active, "run_id": run_id, "producing_host_id": host_id}                                                                                # <<< THOG local force deletion works even with monitoring disabled and still wins any in-flight acquisition
+            self.pending.add(host_id)
+            if host_id not in self.active:
+                self.active.add(host_id)
+                self.executor.submit(self._sync_host, host_id)
+        return {"queued": True, "run_id": run_id, "producing_host_id": host_id}
 
     def _apply_force_delete_requests(self, host_id, manifest):
         with self.lock:
@@ -375,6 +417,7 @@ class MonitoringService:
         for relative in requested:
             self._remove_cached_remote_run(host_id, relative, manifest)
         if requested:
+            self._publish_manifest(host_id, manifest)
             with self.lock:
                 pending = self.force_delete_requests.get(host_id, set())
                 pending.difference_update(requested)
@@ -383,13 +426,18 @@ class MonitoringService:
 
     def _loop(self):
         while not self.stop_event.is_set():
-            self._finalize_deletions()                                                                                                                        # <<< THOG timeout/receipt cleanup is background work and never blocks Runs rendering
+            try:
+                self._finalize_deletions()
+            except (OSError, ValueError, KeyError) as error:
+                instra_network.log_event("Monitoring", "delete_cleanup", self.network.local_id, "retry", str(error)[:200])
             hosts = self.network.list_hosts()["hosts"]
             for host in hosts:
                 host_id = host["thog_host_id"]
-                if host["local"] or not host["monitoring_enabled"] or not all(
+                with self.lock:
+                    force_pending = bool(self.force_delete_requests.get(host_id))
+                if host["local"] or (not force_pending and (not host["monitoring_enabled"] or not all(
                     (host.get("last_discovered") or {}).get(key) for key in ("instra_logs_root", "wandb_root")
-                ):
+                ))):
                     continue
                 with self.lock:
                     due = host_id in self.pending or time.monotonic() - self.last_checks.get(host_id, 0) >= self.interval(host_id)
@@ -492,6 +540,13 @@ class MonitoringService:
             temporary.unlink(missing_ok=True)
 
     def _sync_host(self, host_id):
+        with self.lock:
+            sync_lock = self.sync_locks.setdefault(host_id, threading.Lock())
+        if not sync_lock.acquire(blocking=False):
+            return
+        with self.lock:
+            self.active.add(host_id)
+        manifest = None
         began = time.monotonic()
         changed = 0
         error_category = None
@@ -499,6 +554,13 @@ class MonitoringService:
         try:
             host = self.network._host(host_id)
             discovery = host.get("last_discovered") or {}
+            with self.lock:
+                force_pending = bool(self.force_delete_requests.get(host_id))
+                if force_pending:
+                    manifest = json.loads(json.dumps(self.manifests.get(host_id, {"runs": {}})))
+            if force_pending:
+                self._apply_force_delete_requests(host_id, manifest)                                                                                          # <<< THOG local force deletion never waits for SSH or reacquires the copy during its own cleanup cycle
+                return
             if not host["monitoring_enabled"] or not all(discovery.get(key) for key in ("instra_logs_root", "wandb_root")):
                 return
             self.network.update_monitoring_status(host_id, {"refresh_interval": self.interval(host_id), "activity": "acquiring",
@@ -577,9 +639,7 @@ class MonitoringService:
                         manifest["runs"].pop(relative, None)
                     continue
             self._apply_force_delete_requests(host_id, manifest)                                                                                              # <<< THOG a force-delete requested during acquisition wins before the refreshed manifest is published
-            with self.lock:
-                self.manifests[host_id] = manifest
-                _atomic_json(self._manifest_path(host_id), manifest)
+            self._publish_manifest(host_id, manifest)
             if changed:
                 instra_network.log_event("Monitoring", "acquire", host_id, "success",
                                          f"{changed} acquired files", duration_seconds=time.monotonic()-began)
@@ -588,6 +648,15 @@ class MonitoringService:
             error_message = str(error) if isinstance(error, instra_network.NetworkError) else error_category
         finally:
             try:
+                if manifest is not None:
+                    self._publish_manifest(host_id, manifest)
+                with self.lock:
+                    force_pending = bool(self.force_delete_requests.get(host_id))
+                    cleanup_manifest = json.loads(json.dumps(manifest if manifest is not None else
+                                                             self.manifests.get(host_id, {"runs": {}})))
+                if force_pending:
+                    self._apply_force_delete_requests(host_id, cleanup_manifest)
+                    self._publish_manifest(host_id, cleanup_manifest)
                 previous_status = self.network._host(host_id).get("monitoring_status") or {}
                 success = error_category is None
                 self.network.update_monitoring_status(host_id, {
@@ -600,6 +669,7 @@ class MonitoringService:
             finally:
                 with self.lock:
                     self.active.discard(host_id)
+                sync_lock.release()
 
     def close(self):
         self.stop_event.set()

@@ -38,7 +38,7 @@ class Element {
 let workspace = true;
 const app = {current_run_id: "a", dynamic_chart_figures: {}, dynamic_chart_metadata: {}};
 const metric = vm.createContext({
-  app, chart_titles: {}, front_by_chart: new Map(), workspace_api: () => workspace,
+  app, window: {}, queueMicrotask: callback => callback(), pinned_bold_by_chart: new Map(), chart_titles: {}, front_by_chart: new Map(), workspace_api: () => workspace,
   document: {createElement: () => new Element()},
   chart_size_icon: () => "<svg></svg>",
   chart_key: (group, id) => `local_metric_${group}_${id}`,
@@ -54,14 +54,28 @@ const chart = {id: "loss", title: "Loss", series: ["a", "b", "c"].map(id => ({in
   const cards = ["train", "val"].map(group => metric.make_card(group, chart));
   for (const card of cards) app.dynamic_chart_figures[card.dataset.chart] = metric.figure(card, chart);
   const original = JSON.stringify(app.dynamic_chart_figures);
-  const train_button = cards[0].querySelector(".weight-step-button metric-z-cycle");
-  const val_button = cards[1].querySelector(".weight-step-button metric-z-cycle");
+  const controls_for = card => card.children[0].children.find(child=>child.className==="metric-z-controls").children;
+  const train_controls = controls_for(cards[0]);
+  const train_button = train_controls[2];
+  const val_button = controls_for(cards[1])[2];
+  assert.deepEqual(train_controls.map(button=>button.textContent),["!+","!-","z+","z-"]);
   assert.equal(train_button.hidden, false);
   for (const front of ["a", "b", "c", "a"]) {
     await train_button.handlers.click({stopPropagation() {}});
     assert.equal(cards[0].querySelector(".plot-mount").figure.data.at(-1).meta.instra_workspace_run_id, front);
     assert.equal(metric.prepare_figure(app.dynamic_chart_figures[cards[0].dataset.chart], cards[0].dataset.chart).data.at(-1).meta.instra_workspace_run_id, front, "refresh lost front run");
   }
+  const click = button=>button.handlers.click({stopPropagation(){}});
+  await click(train_controls[0]);
+  await click(train_button);
+  let data = cards[0].querySelector(".plot-mount").figure.data;
+  assert.equal(data.at(-1).meta.instra_workspace_run_id,"b");
+  assert.ok(data.filter(trace=>["a","b"].includes(trace.meta.instra_workspace_run_id)).every(trace=>trace.line.width===4.6));
+  await click(train_controls[3]);
+  await click(train_controls[1]);
+  await click(train_button);
+  data = cards[0].querySelector(".plot-mount").figure.data;
+  assert.equal(data.find(trace=>trace.meta.instra_workspace_run_id==="a").line.width,2.4);
   await val_button.handlers.click({stopPropagation() {}});
   assert.equal(cards[1].querySelector(".plot-mount").figure.data.at(-1).meta.instra_workspace_run_id, "a");
   assert.equal(JSON.stringify(app.dynamic_chart_figures), original, "z changed source data");

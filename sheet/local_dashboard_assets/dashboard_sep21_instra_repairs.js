@@ -31,8 +31,8 @@ window.addEventListener("load", () => {
         display:inline-flex; align-items:center; justify-content:center; padding:0 !important;
       }
       /* vvv THOG distinguish eye-open context, selected run, front curve, and destructive menu grouping. */
-      .runs-table tr.eye-open-run:not(.current-run):not(.front-curve-run) .run-link,
-      .runs-table tr.eye-open-run:not(.current-run):not(.front-curve-run) td { color:#66717b; }
+      .runs-table tr.eye-open-run:not(.current-run) .run-link,
+      .runs-table tr.eye-open-run:not(.current-run) td { color:#66717b; }
       .runs-table tr.current-run .run-link, .runs-table tr.current-run td { color:#27313b; }
       .runs-table tr.front-curve-run { box-shadow:inset 4px 0 0 var(--run-colour); background:rgba(59,78,96,.09); }
       .runs-table tr.front-curve-run .run-link { font-weight:700; }
@@ -221,6 +221,7 @@ window.addEventListener("load", () => {
         ? Math.floor(Date.now() / 30000)
         : 0;
       return JSON.stringify({
+        front_run_id:String(window.instra_front_run_id || ""),                                                                                               // <<< THOG z-order changes invalidate the retained table render signature
         active_tick,
         current:String(app.current_run_id || ""), workspace:Boolean(app.workspace_mode), page:app.current_page,
         page_size:app.page_size, search:by_id("run_search")?.value || "",

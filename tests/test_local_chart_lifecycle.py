@@ -201,7 +201,8 @@ def test_terminal_state_flushes_latest_throttled_model_update(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monotonic_values = iter((10.0, 10.1))
+    # Store construction and final processing-time capture also read this clock.
+    monotonic_values = iter((9.0, 10.0, 10.1, 10.2))
     monkeypatch.setattr(local_store.time, "monotonic", lambda: next(monotonic_values))
     path = tmp_path / "charts.sqlite3"
     store = LocalChartStore(path, run_name="fast-run", config={})

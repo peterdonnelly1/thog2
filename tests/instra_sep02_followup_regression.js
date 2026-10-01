@@ -114,9 +114,9 @@ const install_old = () => { sections = [section("train", 80), section("val", 480
   assert.match(icon_context.chart_size_icon(), /<rect/);
   assert.match(icon_context.chart_size_icon(true), /<path.*<rect/);
   assert.notEqual(icon_context.chart_size_icon(), icon_context.chart_size_icon(true));
-  assert.match(source, /header\.appendChild\(cycle\)/);
-  assert.match(source, /left: 50%; top: 50%; transform: translate\(-50%, -50%\)/);
-  assert.match(source, /maximized > \.chart-card-header > \.metric-z-cycle:not\(\[hidden\]\)/);
+  assert.match(source, /header\.appendChild\(controls\)/);
+  assert.match(source, /left:50%; top:50%; transform:translate\(-50%,-50%\)/);
+  assert.match(source, /maximized > \.chart-card-header > \.metric-z-controls/);
   console.log("instra follow-up percentage/navigation/icons regression: PASS");
 })().catch(error => { console.error(error); process.exitCode = 1; });
 // ^^^ THOG

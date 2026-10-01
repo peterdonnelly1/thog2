@@ -707,21 +707,30 @@ class NetworkService:
     # vvv THOG upload deletion receipts as tightly-scoped JSON files over the existing persistent SSH connection
     def monitor_upload_receipt(self, host_id, relative_path, payload):
         if (not isinstance(relative_path, str) or not relative_path.startswith(".instra_deletions/receipts/")
-                or not relative_path.endswith(".json") or "\\0" in relative_path or "\\r" in relative_path or "\\n" in relative_path
+                or not relative_path.endswith(".json") or any(character in relative_path for character in "\0\r\n\\")
                 or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
             raise NetworkError("validation", "Invalid deletion receipt path", host_id)
         if not isinstance(payload, dict):
             raise NetworkError("validation", "Invalid deletion receipt payload", host_id)
+        parts = PurePosixPath(relative_path).parts
+        if (len(parts) != 4 or len(parts[2]) != 32 or any(character not in "0123456789abcdef" for character in parts[2])
+                or payload.get("deletion_request_id") != parts[2] or payload.get("producer_host_id") != host_id
+                or payload.get("responding_host_id") != self.local_id or payload.get("deletion_processed") is not True
+                or parts[3] != self.local_id.replace(".", "_") + ".json"):
+            raise NetworkError("validation", "Deletion receipt identity does not match its destination", host_id)
         host, target = self._monitor_source(host_id, "logs", relative_path)
         parent = str(PurePosixPath(target).parent)
+        notice = str(PurePosixPath(parent).parent.parent / "notices" / (parts[2] + ".json"))
         temporary = target + f".{uuid.uuid4().hex}.part"
         data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(data) > 16384:
             raise NetworkError("validation", "Deletion receipt is too large", host_id)
         remote_command = (
-            "umask 077; mkdir -p " + shlex.quote(parent)
+            "umask 077; if test -f " + shlex.quote(notice) + " && mkdir -p " + shlex.quote(parent)
             + " && cat > " + shlex.quote(temporary)
+            + " && test -f " + shlex.quote(notice)
             + " && mv -f " + shlex.quote(temporary) + " " + shlex.quote(target)
+            + "; then :; else rm -f " + shlex.quote(temporary) + "; exit 1; fi"
         )
         command = ["ssh", *_ssh_options(host), "-o", "ControlMaster=auto", "--", _ssh_target(host), remote_command]
         try:

@@ -14,6 +14,7 @@ const app = {workspace_mode: true, figures: {depth: {}}, runs: []};
 const render_calls = [];
 const make_element = () => ({
   hidden: false, disabled: false, handlers: {},
+  appendChild(element) { elements.set(element.id,element); return element; },
   setAttribute(name, value) { this[name] = value; },
   addEventListener(name, callback) { this.handlers[name] = callback; },
   insertAdjacentElement(_position, element) { elements.set(element.id, element); },
@@ -41,7 +42,7 @@ for (const chart_name of charts) {
 (async () => {
   context.ensure_z_cycle();
   const button = elements.get("weight_z_cycle");
-  assert.equal(button.textContent, "z");
+  assert.equal(button.textContent, "z+");
   assert.equal(button.hidden, false);
   const original = JSON.stringify(source);
   for (const front of ["a", "b", "c", "a"]) {
@@ -62,6 +63,18 @@ for (const chart_name of charts) {
   assert.equal(elements.get("mlp_up_plot").data.at(-1).meta.instra_workspace_run_id, "b");
   assert.equal(elements.get("weight_z_cycle"), button, "magnification duplicated the control");
   assert.equal(render_calls.length, 30);
+  const reverse = elements.get("weight_z_reverse");
+  await reverse.handlers.click();
+  assert.equal(elements.get("mlp_up_plot").data.at(-1).meta.instra_workspace_run_id, "a");
+  await elements.get("weight_bold_pin").handlers.click();
+  await button.handlers.click();
+  let emphasized = elements.get("mlp_up_plot").data;
+  assert.ok(emphasized.filter(item=>["a","b"].includes(item.meta.instra_workspace_run_id)).every(item=>item.line.width>=3.8));
+  await reverse.handlers.click();
+  await elements.get("weight_bold_unpin").handlers.click();
+  await button.handlers.click();
+  emphasized = elements.get("mlp_up_plot").data;
+  assert.ok(emphasized.filter(item=>item.meta.instra_workspace_run_id==="a").every(item=>item.line.width<3.8));
   app.workspace_mode = false;
   context.ensure_z_cycle();
   assert.equal(button.hidden, true);

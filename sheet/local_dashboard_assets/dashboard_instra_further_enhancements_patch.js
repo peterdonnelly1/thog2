@@ -294,6 +294,7 @@ window.addEventListener("load", () => {
   // Keep the circular draw order independent of table sorting and plot refreshes.
   const workspace_z_order = [];
   let workspace_front_run = null;
+  const workspace_bold_runs = new Set(); // <<< THOG preserve explicit weight-curve emphasis across z cycling
   const sync_workspace_z_order = () => {
     const visible_ids = (window.__instra_workspace?.visible_runs?.() || [])
       .map(run => String(run_identifier(run)));
@@ -308,7 +309,7 @@ window.addEventListener("load", () => {
   const order_workspace_weight_traces = prepared => {
     if (app.workspace_mode !== true || !prepared?.data) return;
     const active = sync_workspace_z_order();
-    if (active.length < 2) return;
+    if (!active.length) return;
     const front_index = active.indexOf(workspace_front_run);
     const rotated = [...active.slice(front_index + 1), ...active.slice(0, front_index + 1)];
     const rank = new Map(rotated.map((identifier, index) => [identifier, index]));
@@ -316,38 +317,71 @@ window.addEventListener("load", () => {
       (rank.get(String(left?.meta?.instra_workspace_run_id || "")) ?? -1)
       - (rank.get(String(right?.meta?.instra_workspace_run_id || "")) ?? -1)
     ));
+    for (const trace of prepared.data) {
+      const run_id = String(trace?.meta?.instra_workspace_run_id || "");
+      if (run_id && !trace.meta?.instra_top_axis_anchor) {
+        trace.line = {...(trace.line || {}), width:(run_id === workspace_front_run || workspace_bold_runs.has(run_id))
+          ? Math.max(3.8, Number(trace.line?.width || 1) * 1.9) : Number(trace.line?.width || 1)};
+      }
+    }
+    if (!window.instra_front_chart || window.instra_front_chart === "weights") {
+      window.instra_front_chart = "weights";
+      window.instra_front_run_id = workspace_front_run;
+    }
   };
 
+  // vvv THOG reverse z cycling and independent pin/unpin controls apply to every overlaid weight chart
   const ensure_z_cycle = () => {
     const overlap = by_id("weight_step_overlapping_range");
-    let button = by_id("weight_z_cycle");
-    if (!button && overlap) {
-      button = document.createElement("button");
-      button.id = "weight_z_cycle";
-      button.type = "button";
-      button.className = "weight-step-button";
-      button.textContent = "z";
-      button.title = "Bring the next Workspace run to the front";
-      button.setAttribute("aria-label", button.title);
-      (by_id("weight_step_gradient") || overlap).insertAdjacentElement("afterend", button);
-      button.addEventListener("click", async () => {
-        const active = sync_workspace_z_order();
-        if (active.length < 2) return;
-        workspace_front_run = active[(active.indexOf(workspace_front_run) + 1) % active.length];
-        const jobs = [];
-        for (const chart_name of weight_chart_names) {
-          const mount = by_id(`${chart_name}_plot`);
-          const figure = app.figures?.depth?.[chart_name];
-          if (mount && figure) jobs.push(render_plot(mount, figure, chart_name));
-        }
-        await Promise.all(jobs);
-      });
+    if (!by_id("weight_z_cycle") && overlap) {
+      const controls = document.createElement("span");
+      controls.id = "weight_z_controls";
+      for (const [id, label, title, action] of [
+        ["weight_bold_pin", "!+", "Keep the current front weight curve bold", "pin"],
+        ["weight_bold_unpin", "!-", "Remove persistent bolding from the current front weight curve", "unpin"],
+        ["weight_z_cycle", "z+", "Bring the next Workspace run to the front", "next"],
+        ["weight_z_reverse", "z-", "Bring the previous Workspace run to the front", "previous"],
+      ]) {
+        const button = document.createElement("button");
+        button.id = id;
+        button.type = "button";
+        button.className = "weight-step-button";
+        button.textContent = label;
+        button.title = title;
+        button.setAttribute("aria-label", title);
+        controls.appendChild(button);
+        button.addEventListener("click", async () => {
+          const active = sync_workspace_z_order();
+          if (!active.length) return;
+          if (action === "next" || action === "previous") {
+            const delta = action === "next" ? 1 : -1;
+            workspace_front_run = active[(active.indexOf(workspace_front_run) + delta + active.length) % active.length];
+          } else if (action === "pin") workspace_bold_runs.add(workspace_front_run);
+          else workspace_bold_runs.delete(workspace_front_run);
+          window.instra_front_chart = "weights";
+          window.instra_front_run_id = workspace_front_run;
+          const jobs = [];
+          for (const chart_name of weight_chart_names) {
+            const mount = by_id(`${chart_name}_plot`);
+            const figure = app.figures?.depth?.[chart_name];
+            if (mount && figure) jobs.push(render_plot(mount, figure, chart_name));
+          }
+          await Promise.all(jobs);
+          if (typeof render_runs === "function") render_runs();
+        });
+      }
+      (by_id("weight_step_gradient") || overlap).insertAdjacentElement("afterend", controls);
     }
-    if (button) {
-      button.hidden = app.workspace_mode !== true;
-      button.disabled = sync_workspace_z_order().length < 2;
+    const active = sync_workspace_z_order();
+    for (const id of ["weight_bold_pin", "weight_bold_unpin", "weight_z_cycle", "weight_z_reverse"]) {
+      const button = by_id(id);
+      if (button) {
+        button.hidden = app.workspace_mode !== true;
+        button.disabled = active.length < (id.startsWith("weight_z") ? 2 : 1);
+      }
     }
   };
+  // ^^^ THOG
 
   const polish_weight_header = () => {
     ensure_step_shortcuts();
@@ -455,7 +489,7 @@ window.addEventListener("load", () => {
             const identifier = trace.meta?.instra_workspace_run_id;
             if (!identifier || trace.meta?.instra_top_axis_anchor) continue;
             trace.line = {...(trace.line || {}), color: colour_for_run(identifier),
-              width: Number(trace.line?.width || 2.4) * (app.workspace_mode && identifier === app.current_run_id ? 1.7 : 1)};
+              width: Number(trace.line?.width || 2.4)}; // <<< THOG front/pinned emphasis is independent of mouse selection
           }
         }
         return prepared;
@@ -465,7 +499,7 @@ window.addEventListener("load", () => {
         if (trace?.meta?.instra_top_axis_anchor === true) continue;
         const mode = String(trace?.mode || "");
         if (mode.includes("lines") || trace.line) {
-          trace.line = {...(trace.line || {}), width: width * (app.workspace_mode && trace.meta?.instra_workspace_run_id === app.current_run_id ? 1.7 : 1)};
+          trace.line = {...(trace.line || {}), width: width};
         }
       }
       order_workspace_weight_traces(prepared);
@@ -589,7 +623,7 @@ window.addEventListener("load", () => {
     .overview-notes-save:disabled { opacity: .5; cursor: default; }
     .colour-swatch[title="#FFFFFF"] { border-color: #9ca3af; }
     #weight_step_initial_values { margin-left: 6px; }
-    #weight_z_cycle { margin-left: 36px; }
+    #weight_z_controls { display:inline-flex; gap:4px; margin-left:12px; }
     #coefficients_chart_group.thog2-tab-maximized-group > .chart-group-header #weights_group_settings_button {
       order: 999 !important; margin-left: auto !important; margin-right: 8px !important;
       display: inline-flex !important; visibility: visible !important;

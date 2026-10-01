@@ -38,3 +38,21 @@ class LongSessionTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 # ^^^ THOG
+
+# vvv THOG repeatedly visited historical runs cannot retain unlimited W&B scanner histories
+class ScannerRetentionTests(unittest.TestCase):
+    def test_scanner_cache_is_bounded_and_deleted_runs_are_forgotten(self):
+        from types import SimpleNamespace
+        from sheet.local_dashboard_wandb_charts_patch import _ScannerCatalog
+        with tempfile.TemporaryDirectory() as directory:
+            scanner_catalog = _ScannerCatalog(SimpleNamespace(root=Path(directory)))
+            scanner_catalog._find_path = lambda run_id, _status: Path(directory) / (run_id + '.wandb')
+            for index in range(40):
+                scanner_catalog.scanner_for(SimpleNamespace(status=lambda index=index: {'wandb_run_id': str(index)}))
+            self.assertEqual(len(scanner_catalog.scanners), 16)
+            recent = Path(directory) / '39.wandb'
+            scanner_catalog.paths['remote:producer:39'] = recent
+            scanner_catalog.forget_runs(['remote:producer:39'])
+            self.assertNotIn(recent, scanner_catalog.scanners)
+            self.assertNotIn('remote:producer:39', scanner_catalog.paths)
+# ^^^ THOG

@@ -176,7 +176,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # vvv THOG replace cached dashboard assets after the scheduling and responsiveness update
     import re
     index_html = re.sub(r'(/assets/[A-Za-z0-9_.-]+)(?:\?[^"\s]*)?(?=")',
-                        r'\1?v=20261001-gpu-queue', index_html)
+                        r'\1?v=20261002-distributed-deletion', index_html)
     # ^^^ THOG
     index_path.write_text(index_html, encoding="utf-8")
 

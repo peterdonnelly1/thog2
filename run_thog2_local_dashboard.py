@@ -1392,6 +1392,8 @@ def _handler_for_with_runner(catalog):
             if not 1 <= length <= 1048576:
                 raise ValueError("Invalid deletion request size")
             payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict):
+                raise ValueError("Deletion request must be a JSON object")
             tag = payload.get("grid_tag")
             if tag is not None:
                 if not isinstance(tag, str) or not re.fullmatch(r"(?:G|[A-Z]{3})-[0-9]+", tag):
@@ -1401,14 +1403,14 @@ def _handler_for_with_runner(catalog):
                 requested_id = payload.get("grid_id")
                 grid = next((item for item in _runner_service.snapshot()["grids"] if item["grid_tag"] == tag
                              and (requested_id is None or item["grid_id"] == requested_id)), None)
-                if requested_id is not None and grid is None:
+                if grid is None:
                     raise PermissionError("This Grid is not managed by this Instra")
                 if grid is not None and (grid["state"] not in _instra_runner.TERMINAL or
                         any(run["state"] not in _instra_runner.TERMINAL for run in grid["runs"])):
                     raise ValueError("Stop the Grid first before deleting all of its runs")
                 members = [run for run in catalog.runs()["runs"] if run.get("runner_grid_tag") == tag
                            and not run.get("remote_copy")
-                           and (not requested_id or not run.get("runner_grid_id") or run["runner_grid_id"] == requested_id)]
+                           and (not run.get("runner_grid_id") or run["runner_grid_id"] == grid["grid_id"])]
                 run_ids = [run["dashboard_run_id"] for run in members]
                 result = catalog.delete_runs(run_ids) if run_ids else {"deleted_run_ids": [], "errors": []}
             else:

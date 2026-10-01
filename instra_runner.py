@@ -40,6 +40,7 @@ def _read():
 
 
 def _write(value):
+    _capture_wall_times(value)                                                                                                                               # <<< THOG persist run/Grid wall-clock boundaries alongside the completed-run duration estimator history
     STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = STATE_PATH.with_name(f".{STATE_PATH.name}.{os.getpid()}.tmp")
     with temporary.open("w") as stream:
@@ -48,6 +49,32 @@ def _write(value):
         os.fsync(stream.fileno())
     os.chmod(temporary, 0o600)
     os.replace(temporary, STATE_PATH)
+
+
+# vvv THOG recover available legacy clocks and keep run ends unknown while queued/running after retry
+def _capture_wall_times(value):
+    for grid in value.get("grids", []):
+        starts, ends = [], []
+        for run in grid.get("runs", []):
+            attempts = run.get("attempts", [])
+            run_starts = [attempt["started_at"] for attempt in attempts if attempt.get("started_at")]
+            if run_starts:
+                run.setdefault("started_at", min(run_starts))
+            if run.get("started_at"):
+                starts.append(run["started_at"])
+            if run.get("state") in TERMINAL and attempts and attempts[-1].get("finished_at"):
+                run["finished_at"] = attempts[-1]["finished_at"]
+            elif run.get("state") not in TERMINAL:
+                run.pop("finished_at", None)
+            if run.get("finished_at"):
+                ends.append(run["finished_at"])
+        if starts:
+            grid.setdefault("started_at", min(starts))
+        if (grid.get("state") in TERMINAL and grid.get("runs")
+                and all(run.get("state") in TERMINAL for run in grid["runs"])
+                and all(run.get("finished_at") or not run.get("attempts") for run in grid["runs"]) and ends):
+            grid.setdefault("finished_at", max(ends))
+# ^^^ THOG
 
 
 def _write_grid_file(path, value):
@@ -120,6 +147,11 @@ class RunnerService:
         self._lease_release_scheduled = False
         if self.controller:
             self._clean_uncommitted_files()
+            persisted = _read()                                                                                                                              # <<< THOG backfill recoverable historical run/Grid clocks once, without inventing missing timestamps
+            previous = json.dumps(persisted, sort_keys=True)
+            _capture_wall_times(persisted)
+            if json.dumps(persisted, sort_keys=True) != previous:
+                _write(persisted)
         if self.controller and start_worker:
             self.worker = threading.Thread(target=self._loop, name="instra-runner-controller", daemon=True)
             self.worker.start()
@@ -535,6 +567,8 @@ class RunnerService:
             run.update(state="queued", blocking_reason="Retry requested")
             run.pop("released", None)
             run.pop("next_retry_at", None)
+            run.pop("finished_at", None)                                                                                                                      # <<< THOG a retry opens a new end clock and must replace the previous attempt's estimator duration
+            run.pop("duration_seconds", None)
             grid["state"] = "queued"
             grid.pop("finished_at", None)  # <<< THOG resume the execution clock on an explicit retry
             _grid_event(grid, "retry", f"Run {run_id} queued for a new attempt")
@@ -812,6 +846,9 @@ class RunnerService:
                                                   "Node Agent outcome uncertain; GPU remains reserved" if remote["state"] == "unknown" else "")
                         latest.update({key: remote.get(key) for key in ("pid", "exit_code", "log_path", "requested_power_w", "default_power_w", "observed_power_w", "power_control", "finished_at")})
                         latest["state"] = remote["state"]
+                        if remote.get("started_at"):
+                            latest.setdefault("dispatched_at", latest["started_at"])
+                            latest["started_at"] = remote["started_at"]
                         if remote["state"] == "failed" and "failure_excerpt" not in latest:
                             try:
                                 excerpt = self._controller_call(state, run["host_id"], "runner_log", {
@@ -895,6 +932,9 @@ class RunnerService:
                         latest.update({"pid": result.get("pid"), "log_path": result.get("log_path"), "state": result["state"],
                                        "requested_power_w": result.get("requested_power_w"), "default_power_w": result.get("default_power_w"),
                                        "observed_power_w": result.get("observed_power_w"), "power_control": result.get("power_control")})
+                        if result.get("started_at"):
+                            latest["dispatched_at"] = latest["started_at"]
+                            latest["started_at"] = result["started_at"]
                         run["state"] = result["state"]
                         busy_gpus.add((host_id, key))
                         _grid_event(grid, "power", _power_detail(run, result, "launch check/write/readback"))

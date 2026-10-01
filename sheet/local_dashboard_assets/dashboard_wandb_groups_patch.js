@@ -285,8 +285,12 @@ window.addEventListener("load", () => {
         const run_id = trace.meta?.instra_workspace_run_id;
         trace.line = {...(trace.line || {}), width:(run_id === front || pinned.has(run_id)) ? 4.6 : 2.4};
       }
-      window.instra_front_run_id = front;
-      queueMicrotask(() => typeof render_runs === "function" && render_runs());
+      if (!window.instra_front_chart || window.instra_front_chart === chart_name) {
+        const changed = window.instra_front_run_id !== front;
+        window.instra_front_chart = chart_name;
+        window.instra_front_run_id = front;
+        if (changed) queueMicrotask(() => typeof render_runs === "function" && render_runs());
+      }
       return figure;
     };
     // ^^^ THOG
@@ -362,8 +366,10 @@ window.addEventListener("load", () => {
               else pinned.delete(current);
               pinned_bold_by_chart.set(key, pinned);
             }
+            window.instra_front_chart = key;
             window.instra_front_run_id = current;
             await render_plot(article.querySelector(".plot-mount"), figure, key);
+            if (typeof render_runs === "function") render_runs();
           });
           controls.appendChild(control);
           return control;

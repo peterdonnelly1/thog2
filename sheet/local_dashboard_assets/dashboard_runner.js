@@ -486,8 +486,10 @@
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
-    add(summary,"span",preview?"—":wall_time(run.started_at || run.attempts?.[0]?.started_at));                                                               // <<< THOG show durable run-level start wall time
-    add(summary,"span",preview?"—":wall_time(run.finished_at || run.attempts?.at(-1)?.finished_at));                                                         // <<< THOG show durable run-level end wall time
+    const run_start = run.started_at || run.attempts?.[0]?.started_at;
+    const run_end = ["completed","failed","cancelled"].includes(run.state) ? run.finished_at || run.attempts?.at(-1)?.finished_at : null;
+    add(summary,"span",preview?"—":wall_time(run_start)).title = preview ? "" : (run_start ? new Date(run_start).toLocaleString() : "Start time unavailable");                                                               // <<< THOG show durable run-level start wall time
+    add(summary,"span",preview?"—":wall_time(run_end)).title = preview ? "" : (run_end ? new Date(run_end).toLocaleString() : "End time unavailable");                                                         // <<< THOG show durable run-level end wall time
     add(summary,"span",run.host_label);
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
@@ -805,8 +807,8 @@
               if(last_history_grid===grid.grid_id)last_history_grid=null;render();}catch(_){/* Error shown above. */}
           });
           deletion.classList.add("runner-recipe-delete");deletion.disabled=!["completed","failed","cancelled"].includes(grid.state);
-          add(row,"span",wall_time(grid.started_at),"runner-history-wall-time");                                                                               // <<< THOG durable Grid first-dispatch wall time
-          add(row,"span",wall_time(grid.finished_at),"runner-history-wall-time");                                                                              // <<< THOG durable Grid terminal wall time
+          add(row,"span",wall_time(grid.started_at),"runner-history-wall-time").title = grid.started_at ? new Date(grid.started_at).toLocaleString() : "Start time unavailable";                                                                               // <<< THOG durable Grid first-dispatch wall time
+          add(row,"span",wall_time(grid.finished_at),"runner-history-wall-time").title = grid.finished_at ? new Date(grid.finished_at).toLocaleString() : "End time unavailable";                                                                              // <<< THOG durable Grid terminal wall time
           const elapsed=add(row,"span",format_duration(grid_elapsed(grid)),"runner-history-time");
           elapsed.title="Execution wall time from first dispatch to terminal state; excludes initial queue wait";
           const upfront=add(row,"span",estimate_range(grid),"runner-history-estimate");

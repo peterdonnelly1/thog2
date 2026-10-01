@@ -2376,11 +2376,12 @@ async function force_delete_local_copy() {
   }
 }
 
-async function refresh_deletion_settings() {
+async function refresh_deletion_settings(update_timeout = true) {
+  clearTimeout(app.deletion_status_timer);
   try {
     const snapshot = await fetch_json("/api/deletions");
     const timeout = Number(snapshot.deletion_confirmation_timeout_days || 7);
-    by_id("deletion_confirmation_timeout_days").value = String(timeout);
+    if (update_timeout) by_id("deletion_confirmation_timeout_days").value = String(timeout);
     const pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
     const container = by_id("deletion_pending_status");
     container.replaceChildren();
@@ -2391,6 +2392,9 @@ async function refresh_deletion_settings() {
       container.appendChild(line);
     }
     if (!pending.length) container.textContent = "No distributed deletions are pending.";
+    if (!by_id("settings_overlay").hidden) {
+      app.deletion_status_timer = setTimeout(() => { if (!by_id("settings_overlay").hidden) void refresh_deletion_settings(false); }, 5000);                                                // <<< THOG refresh outstanding receipts while preserving an edited timeout value
+    }
   } catch (error) {
     by_id("deletion_pending_status").textContent = `Deletion status unavailable: ${error.message}`;
   }
@@ -2411,6 +2415,7 @@ function open_settings() {
 }
 
 function close_settings() {
+  clearTimeout(app.deletion_status_timer);
   by_id("settings_overlay").hidden = true;
   by_id("settings_nav").classList.remove("selected");
   by_id("runs_nav").classList.add("selected");
