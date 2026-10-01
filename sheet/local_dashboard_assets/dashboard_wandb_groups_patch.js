@@ -15,6 +15,7 @@ window.addEventListener("load", () => {
     let poll_view = null;
     let last_run_id = null;
     const front_by_chart = new Map();
+    const pinned_bold_by_chart = new Map();                                                                                                                  // <<< THOG retain explicit !+ curve emphasis independently of z-order
     let pending_navigation = null;
 
     const workspace_api = () => {
@@ -265,17 +266,30 @@ window.addEventListener("load", () => {
       // ^^^ THOG
     };
 
+    // vvv THOG z-order controls make the front curve visually explicit and preserve independently pinned bold curves
     const ordered_metric_figure = (figure, chart_name) => {
       if (!workspace_api() || !figure?.data) return figure;
       const ids = [...new Set(figure.data.map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean))];
-      const front = front_by_chart.get(chart_name);
-      if (!ids.includes(front)) return figure;
+      if (!ids.length) return figure;
+      let front = front_by_chart.get(chart_name);
+      if (!ids.includes(front)) {
+        front = ids.at(-1);
+        front_by_chart.set(chart_name, front);
+      }
       const index = ids.indexOf(front);
       const order = [...ids.slice(index + 1), ...ids.slice(0, index + 1)];
       const rank = new Map(order.map((id, position) => [id, position]));
+      const pinned = pinned_bold_by_chart.get(chart_name) || new Set();
       figure.data.sort((left, right) => (rank.get(left.meta?.instra_workspace_run_id) ?? -1) - (rank.get(right.meta?.instra_workspace_run_id) ?? -1));
+      for (const trace of figure.data) {
+        const run_id = trace.meta?.instra_workspace_run_id;
+        trace.line = {...(trace.line || {}), width:(run_id === front || pinned.has(run_id)) ? 4.6 : 2.4};
+      }
+      window.instra_front_run_id = front;
+      queueMicrotask(() => typeof render_runs === "function" && render_runs());
       return figure;
     };
+    // ^^^ THOG
     const base_prepare_metric_order = prepare_figure;
     prepare_figure = function(figure, chart_name) {
       const prepared = base_prepare_metric_order(figure, chart_name);
@@ -321,23 +335,45 @@ window.addEventListener("load", () => {
       actions.append(chart_settings_button(key, title.textContent), maximize);
       header.append(copy, actions);
       if (["train", "val"].includes(group_name)) {
-        const cycle = document.createElement("button");
-        cycle.type = "button";
-        cycle.className = "weight-step-button metric-z-cycle";
-        cycle.textContent = "z";
-        cycle.title = "Bring the next Workspace run to the front";
-        cycle.setAttribute("aria-label", cycle.title);
-        cycle.hidden = !workspace_api();
-        cycle.addEventListener("click", async event => {
-          event.stopPropagation();
-          const figure = app.dynamic_chart_figures[key];
-          const ids = [...new Set((figure?.data || []).map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean))];
-          if (ids.length < 2) return;
-          const current = ids.includes(front_by_chart.get(key)) ? front_by_chart.get(key) : ids.at(-1);
-          front_by_chart.set(key, ids[(ids.indexOf(current) + 1) % ids.length]);
-          await render_plot(article.querySelector(".plot-mount"), figure, key);
-        });
-        header.appendChild(cycle);
+        // vvv THOG replace one-way z cycling with reverse cycling and explicit persistent bold/unbold controls
+        const controls = document.createElement("div");
+        controls.className = "metric-z-controls";
+        const make_control = (label, title, action) => {
+          const control = document.createElement("button");
+          control.type = "button";
+          control.className = "weight-step-button metric-z-cycle";
+          control.textContent = label;
+          control.title = title;
+          control.setAttribute("aria-label", title);
+          control.hidden = !workspace_api();
+          control.addEventListener("click", async event => {
+            event.stopPropagation();
+            const figure = app.dynamic_chart_figures[key];
+            const ids = [...new Set((figure?.data || []).map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean))];
+            if (!ids.length) return;
+            let current = ids.includes(front_by_chart.get(key)) ? front_by_chart.get(key) : ids.at(-1);
+            if (action === "next" || action === "previous") {
+              const delta = action === "next" ? 1 : -1;
+              current = ids[(ids.indexOf(current) + delta + ids.length) % ids.length];
+              front_by_chart.set(key, current);
+            } else {
+              const pinned = pinned_bold_by_chart.get(key) || new Set();
+              if (action === "pin") pinned.add(current);
+              else pinned.delete(current);
+              pinned_bold_by_chart.set(key, pinned);
+            }
+            window.instra_front_run_id = current;
+            await render_plot(article.querySelector(".plot-mount"), figure, key);
+          });
+          controls.appendChild(control);
+          return control;
+        };
+        make_control("!+", "Keep the current front curve bold when its z-order changes", "pin");
+        make_control("!-", "Remove persistent bolding from the current front curve", "unpin");
+        make_control("z+", "Bring the next Workspace run to the front", "next");
+        make_control("z-", "Bring the previous Workspace run to the front", "previous");
+        header.appendChild(controls);
+        // ^^^ THOG
       }
 
       const shell = document.createElement("div");
@@ -423,10 +459,13 @@ window.addEventListener("load", () => {
       };
       const figure = metric_figure(article, chart);
       if (requested_view !== current_view_key()) return;
-      const cycle = article.querySelector(".metric-z-cycle");
-      if (cycle) {
-        cycle.hidden = !workspace_api();
-        cycle.disabled = new Set(figure.data.map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean)).size < 2;
+      const cycles = article.querySelectorAll(".metric-z-cycle");
+      if (cycles.length) {
+        const count = new Set(figure.data.map(trace => trace.meta?.instra_workspace_run_id).filter(Boolean)).size;
+        for (const cycle of cycles) {
+          cycle.hidden = !workspace_api();
+          cycle.disabled = cycle.textContent.startsWith("z") ? count < 2 : count < 1;
+        }
       }
       app.dynamic_chart_figures[key] = figure;
       await render_plot(mount, figure, key);
@@ -610,9 +649,10 @@ window.addEventListener("load", () => {
     style.textContent = `
       .local-metric-card > .chart-card-header { position: relative; }
       .local-metric-card > .chart-card-header > .chart-heading-copy { max-width: calc(50% - 24px); }
-      .metric-z-cycle { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0; z-index: 5; }
+      .metric-z-controls { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; gap:4px; z-index:5; }
+      .metric-z-cycle { position:static; transform:none; margin:0; min-width:28px; }
       .local-metric-card.maximized > .chart-card-header { position: relative !important; display: flex !important; visibility: visible !important; }
-      .local-metric-card.maximized > .chart-card-header > .metric-z-cycle:not([hidden]) { display: inline-flex !important; visibility: visible !important; opacity: 1 !important; }
+      .local-metric-card.maximized > .chart-card-header > .metric-z-controls { display:flex !important; visibility:visible !important; opacity:1 !important; }
       .metric-z-cycle[hidden] { display: none !important; }
       .local-metric-group { min-height: 35px; }
       .local-metric-group:not(.collapsed) { min-height: 0; }
