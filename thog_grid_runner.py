@@ -21,6 +21,20 @@ WRAPPER_ENV_OPTIONS = {"--depth-materialisation-matmul": "THOG2_DEPTH_MATERIALIS
                        "--materialisation-profiling": "THOG2_MATERIALISATION_PROFILING",
                        "--torch-compile": "THOG2_TORCH_COMPILE"}
 MAX_RUNS = 4096
+# vvv THOG share dense compatibility between Recipe validation, UI and mixed Grid resolution
+DENSE_GEOMETRY_OPTIONS = {"--geometry-preset", "--residual-init-policy", "--residual-init-depth-source",
+                          "--residual-init-depth-value", "--explain-geometry"}
+for _name, _item in CATALOGUE.items():
+    _item["dense_compatible"] = (_item["category"] in {"GPT-2 Hyperparameters", "Run Control Parameters", "Resume and Fork"}
+                                or _name in DENSE_GEOMETRY_OPTIONS or _name.startswith("--wandb")
+                                or _name == "--no-wandb")
+
+
+def dense_only(parameters):
+    presets = parameters.get("--geometry-preset", "depth")
+    presets = presets if isinstance(presets, list) else [presets]
+    return presets == ["dense"] or parameters.get("--model-type") == "dense"
+# ^^^ THOG
 SHORT_OPTIONS = {"-n": "--max-iters", "-b": "--batch-size", "-y": "--optimizer", "-A": "--gradient-accumulation-steps",
                  "-u": "--eval-iters", "-e": "--eval-interval", "-l": "--log-interval", "-w": "--warmup-iters",
                  "-k": "--checkpoint-interval", "-B": "--basis-family", "-v": "--basis-version",
@@ -108,6 +122,10 @@ def validate_recipe(recipe):
         if field in recipe and (not isinstance(recipe[field], list) or
                                 any(not isinstance(v, str) or not re.fullmatch(r"[\w.:-]{1,150}", v) for v in recipe[field])):
             raise ValueError(f"Invalid {field}")
+    if dense_only(parameters):
+        incompatible = [name for name in parameters if not CATALOGUE[name]["dense_compatible"]]
+        if incompatible:
+            raise ValueError("Not applicable to a dense-only Recipe: " + ", ".join(incompatible))
     parallel = recipe.get("max_parallel", 1)
     if type(parallel) is not int or parallel < 1:
         raise ValueError("max_parallel must be a positive integer")
@@ -148,7 +166,7 @@ def expand(recipe, *, stable_preview=False):
         if dense:
             # A depth sweep contributes one dense reference, regardless of how many
             # DEPTH.order choices accompany the other (compact) trials.
-            values.pop("DEPTH.order", None)
+            values = {name: value for name, value in values.items() if CATALOGUE[name]["dense_compatible"]}
         for name in ("--max-iters", "--batch-size", "--block-size", "--n-layer", "--n-head", "--n-embd",
                      "--gradient-accumulation-steps", "--checkpoint-segment-size"):
             if name in values and int(values[name]) < 1:
@@ -241,6 +259,7 @@ def script_for(runs):
         args = command_for(run, gpu, host_label=run.get("host_label"))
         lines.append(f"# {run.get('host_label', 'local')} GPU {gpu['ordinal']} · {run['run_id']} · {run['profiler']}")
         metadata = {"grid_id": run.get("grid_id"), "grid_tag": run["grid_tag"], "run_id": run["run_id"],
+                    "grid_owner_host_id": run.get("grid_owner_host_id"),
                     "pairing_id": run["pairing_id"], "recipe_id": run.get("recipe_id"), "profiler": run["profiler"],
                     "gpu_uuid": gpu.get("uuid"), "thog_host_id": run.get("host_id"),
                     "execution_profile": run.get("execution_profile")}

@@ -17,6 +17,7 @@ import time
 from typing import Any, Mapping, Optional
 from urllib.parse import parse_qs, urlparse
 import zipfile
+from instra_diagnostics import instrument_handler
 
 import run_thog2_local_dashboard_base as _base
 from run_thog2_local_dashboard_base import *  # noqa: F401,F403
@@ -38,6 +39,8 @@ def _run_status_with_configuration(self):
     enriched["command"] = metadata.get("command", configuration.get("command", ""))
     if isinstance(configuration.get("runner"), dict):
         enriched["runner_grid_tag"] = configuration["runner"].get("grid_tag")
+        enriched["runner_grid_id"] = configuration["runner"].get("grid_id")
+        enriched["runner_grid_owner_host_id"] = configuration["runner"].get("grid_owner_host_id")
         enriched["runner_run_id"] = configuration["runner"].get("run_id")
     return enriched
 
@@ -1379,17 +1382,21 @@ def _handler_for_with_runner(catalog):
             payload = json.loads(self.rfile.read(length))
             tag = payload.get("grid_tag")
             if tag is not None:
-                if not isinstance(tag, str) or not re.fullmatch(r"G-[0-9]+", tag):
+                if not isinstance(tag, str) or not re.fullmatch(r"(?:G|[A-Z]{3})-[0-9]+", tag):
                     raise ValueError("Invalid Grid identity")
                 if _runner_service is None:
                     raise ValueError("Runner unavailable; cannot verify that this Grid has stopped")
-                grid = next((item for item in _runner_service.snapshot()["grids"] if item["grid_tag"] == tag), None)
+                requested_id = payload.get("grid_id")
+                grid = next((item for item in _runner_service.snapshot()["grids"] if item["grid_tag"] == tag
+                             and (requested_id is None or item["grid_id"] == requested_id)), None)
+                if requested_id is not None and grid is None:
+                    raise PermissionError("This Grid is not managed by this Instra")
                 if grid is not None and (grid["state"] not in _instra_runner.TERMINAL or
                         any(run["state"] not in _instra_runner.TERMINAL for run in grid["runs"])):
                     raise ValueError("Stop the Grid first before deleting all of its runs")
-                members = [run for run in catalog.runs()["runs"] if run.get("runner_grid_tag") == tag]
-                if any(run.get("remote_copy") for run in members):
-                    raise PermissionError("This Grid includes acquired remote runs; delete them on their producing host")
+                members = [run for run in catalog.runs()["runs"] if run.get("runner_grid_tag") == tag
+                           and not run.get("remote_copy")
+                           and (not requested_id or not run.get("runner_grid_id") or run["runner_grid_id"] == requested_id)]
                 run_ids = [run["dashboard_run_id"] for run in members]
                 result = catalog.delete_runs(run_ids) if run_ids else {"deleted_run_ids": [], "errors": []}
             else:
@@ -1410,7 +1417,7 @@ def _handler_for_with_runner(catalog):
             try:
                 path = _runner_service.file(query.get("grid_id", [""])[0], query.get("name", [""])[0])
                 # vvv THOG prefix every Runner download while retaining existing stored paths
-                filename = path.name if path.name.startswith("G-") else f"{path.parent.name}_{path.name}"
+                filename = path.name if re.match(r"(?:G|[A-Z]{3})-[0-9]+(?:_|\.)", path.name) else f"{path.parent.name}_{path.name}"
                 self._send_file(path, download=query.get("download", ["0"])[0] == "1", filename=filename)
                 # ^^^ THOG
             except (KeyError, OSError) as error:
@@ -1436,7 +1443,7 @@ def _handler_for_with_runner(catalog):
     handler.do_GET = do_get
     handler.do_POST = do_post
     handler.do_DELETE = do_delete
-    return handler
+    return instrument_handler(handler, _instra_network.STATE_DIR)
 
 
 _base._handler_for = _handler_for_with_runner

@@ -41,6 +41,11 @@ class ArtifactNamingTests(unittest.TestCase):
         with patch.dict(os.environ, {"THOG2_RUNNER_METADATA": ""}):
             self.assertEqual(namespace["run_descriptor"](subject),
                              "260928-1030_scruffy_trial_G-00012_abc_NONE___DENSE")
+        for tag in ("SCR-00012", "DRE-00012"):
+            subject.experiment_prefix = f"trial_{tag}_abc_NONE"
+            with patch.dict(os.environ, {"THOG2_RUNNER_METADATA": json.dumps({"grid_tag": tag})}):
+                self.assertEqual(namespace["run_descriptor"](subject),
+                                 f"260928-1030_{tag}_scruffy_trial_abc_NONE___DENSE")
 
     def test_catalogue_loss_reads_adjacent_ansi_coloured_train_log(self):
         source = (Path(__file__).resolve().parents[1] / "run_thog2_local_dashboard_base.py").read_text()
@@ -74,6 +79,7 @@ class FakeNetwork:
         self.attempts = {}
         self.activity = None
         self.release_calls = 0
+        self.waiting_grids = {}
 
     def list_hosts(self):
         return {"local_id": self.local_id, "master_id": None, "release_pending": False,
@@ -85,7 +91,14 @@ class FakeNetwork:
         if host_id != self.local_id:
             raise ValueError("Unexpected remote host")
         if operation == "runner_reconcile":
-            return {"attempts": self.attempts.copy(), "reservations": self.reservations.copy(), "gpus": self.gpus}
+            return {"attempts": self.attempts.copy(), "reservations": self.reservations.copy(), "gpus": self.gpus,
+                    "waiting_grids": {key: queue.copy() for (host, key), queue in self.waiting_grids.items()
+                                      if host == host_id}, "protocol": 3}
+        if operation == "runner_queue":
+            queue = self.waiting_grids.setdefault((host_id, args["gpu_key"]), [])
+            if not any(item["grid_id"] == args["grid_id"] for item in queue):
+                queue.append(dict(args))
+            return {"waiting_grids": queue.copy(), "reservation": self.reservations.get(args["gpu_key"])}
         if operation == "runner_preflight":
             return {"resolved": True}
         if operation == "runner_log":
@@ -94,6 +107,9 @@ class FakeNetwork:
             key, owner = args["gpu_key"], self.reservations.get(args["gpu_key"])
             if owner and owner != args["grid_id"]:
                 raise RuntimeError("GPU reserved by another Grid")
+            queue = self.waiting_grids.get((host_id, key), [])
+            if not owner and queue and queue[0]["grid_id"] != args["grid_id"]:
+                raise RuntimeError("Waiting for earlier Grid")
             self.reservations[key] = args["grid_id"]
             return {"reservation": {"grid_id": args["grid_id"]}}
         if operation == "runner_launch":
@@ -104,7 +120,10 @@ class FakeNetwork:
             return self.attempts[attempt_id]
         if operation == "runner_release":
             self.release_calls += 1
-            self.reservations.pop(args["gpu_key"], None)
+            if self.reservations.get(args["gpu_key"]) == args["grid_id"]:
+                self.reservations.pop(args["gpu_key"], None)
+            queue = self.waiting_grids.get((host_id, args["gpu_key"]), [])
+            queue[:] = [item for item in queue if item["grid_id"] != args["grid_id"]]
             return {"released": True}
         raise ValueError(operation)
 
@@ -495,6 +514,7 @@ class RunnerTests(unittest.TestCase):
             return previous(host_id,operation,args)
         self.fake.runner_call=capture
         self.service.stop_grid(grid["grid_id"])
+        self.service._refresh()
         self.assertEqual(periods,[120])
 
     def test_retry_preserves_run_identity_and_records_new_attempt(self):
@@ -556,6 +576,8 @@ class RunnerTests(unittest.TestCase):
         self.service.convert_to_loose(repeated["grid_id"])
         after=next(grid for grid in self.service.snapshot()["grids"] if grid["grid_id"]==repeated["grid_id"])
         self.assertEqual(after["repeat_mode"],"loose")
+        self.assertEqual(after["queue_mode"],"dynamic")
+        self.assertTrue(all(not run["placement_fixed"] for run in after["runs"] if run["state"]=="queued"))
         self.assertEqual(after["conversion"]["moved_assignments"],3)
         self.assertTrue(all(run["gpu"]["gpu_key"]=="GPU-1" for run in after["runs"] if run["state"]=="queued"))
         self.assertEqual(next(run for run in after["runs"] if run["state"]=="running")["run_id"],running[0]["run_id"])
@@ -572,9 +594,9 @@ class RunnerTests(unittest.TestCase):
         self.fake.reservations["GPU-0"] = "other-grid"
         self.service._refresh()
         current = self.service.snapshot()["grids"][0]
-        self.assertEqual(current["runs"][0]["state"], "blocked")
-        self.assertEqual(current["runs"][1]["state"], "running")
-        self.assertIn("another Grid", current["runs"][0]["blocking_reason"])
+        self.assertEqual(current["runs"][0]["state"], "running")
+        self.assertEqual(current["runs"][0]["gpu"]["gpu_key"], "GPU-1")
+        self.assertEqual(sum(run["state"] == "running" for run in current["runs"]), 1)
         changed = {**self.recipe, "label": "edited", "parameters": {**self.recipe["parameters"], "--max-iters": 99}}
         self.service.save_recipe(saved["recipe_id"], changed)
         self.assertEqual(self.service.snapshot()["grids"][0]["recipe"]["parameters"]["--max-iters"], 2)
@@ -712,7 +734,7 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(repaired["runs"][0]["released"])
         self.assertNotIn("GPU-0",self.fake.reservations)
         self.assertEqual(repaired["state"],"completed")
-        self.assertIn("Recovered release",replacement.file(grid["grid_id"],"log").read_text())
+        self.assertIn("Released",replacement.file(grid["grid_id"],"log").read_text())
 
     def test_restart_reconciles_without_duplicate_dispatch_and_unknown_blocks(self):
         saved = self.service.save_recipe(None, {**self.recipe, "gpu_pool": [gpu(0)["gpu_id"]]})
@@ -750,7 +772,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_preflight_failure_blocks_without_reservation_or_attempt_and_backs_off(self):
         saved = self.service.save_recipe(None, {"label": "bad model", "parameters": {"--max-iters": 2,
-                  "--warmup-iters": 0}})
+                  "--warmup-iters": 0, "--n-layer": 2, "--n-embd": 64, "--n-head": 4}})
         self.service.launch(saved["recipe_id"])
         original = self.fake.runner_call
         calls = []

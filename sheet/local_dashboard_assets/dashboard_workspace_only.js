@@ -288,7 +288,7 @@ window.addEventListener("load", () => {
       if(!Object.keys(app.visibility).length && app.runs?.length) {
         const selected=app.runs.find(run=>run_identifier(run)===app.current_run_id) || app.runs[0];
         for(const run of app.runs)app.visibility[run_identifier(run)]=selected.runner_grid_tag
-          ? run.runner_grid_tag===selected.runner_grid_tag : run_identifier(run)===run_identifier(selected);
+          ? grid_identity(run)===grid_identity(selected) : run_identifier(run)===run_identifier(selected);
         save_json("thog2_local_run_visibility",app.visibility);render_runs();
       }
       const runs = visible_runs();

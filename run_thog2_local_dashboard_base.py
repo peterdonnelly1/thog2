@@ -504,6 +504,7 @@ class DashboardCatalog:
         self.wandb_api_factory = wandb_api_factory
         self.lock = threading.Lock()
         self.states: Dict[Path, RunDashboardState] = {}
+        self.identity_states: Dict[str, RunDashboardState] = {}                                                                                               # <<< THOG direct canonical-ID lookups avoid rescanning every database for each chart request and batch deletion
         self.wandb_file_cache: Dict[str, Tuple[float, Tuple[Dict[str, Any], ...]]] = {}
 
     def _candidate_paths(self) -> Tuple[Path, ...]:
@@ -552,10 +553,13 @@ class DashboardCatalog:
         runs = []
         for path in self._candidate_paths():
             try:
-                status = self._state_for_path(path).status()
+                state = self._state_for_path(path)
+                status = state.status()
             except (OSError, sqlite3.DatabaseError, ValueError, json.JSONDecodeError):
                 continue
             runs.append(status)
+            with self.lock:
+                self.identity_states[str(status["dashboard_run_id"])] = state
         runs.sort(
             key=lambda run: (str(run["created_at"]), str(run["updated_at"])),
             reverse=True,
@@ -600,6 +604,10 @@ class DashboardCatalog:
         return str(preferred["dashboard_run_id"])
 
     def state_for_run(self, run_name: str) -> RunDashboardState:
+        with self.lock:
+            cached = self.identity_states.get(run_name)
+        if cached is not None and cached.database_path.is_file():
+            return cached
         artifact_matches = []
         dashboard_matches = []
         exact_matches = []
@@ -686,6 +694,7 @@ class DashboardCatalog:
                 pass
         with self.lock:
             self.states.pop(database_path, None)
+            self.identity_states = {name: item for name, item in self.identity_states.items() if item is not state}
         return {
             "deleted_run_id": status["dashboard_run_id"],
             "deleted_files": deleted,

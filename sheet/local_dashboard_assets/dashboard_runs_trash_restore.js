@@ -155,17 +155,18 @@
     menu.appendChild(button);
     button.addEventListener("click",async()=>{
       const run=run_for_id(app.menu_run_id),tag=run?.runner_grid_tag;
-      if(!tag)return;
+      if(!tag || run.remote_copy)return;
       close_run_menu();
       try {
         const state=await fetch_json("/api/runner");
-        const grid=(state.grids || []).find(item=>item.grid_tag===tag);
+        const grid=(state.grids || []).find(item=>item.grid_tag===tag &&
+          (!run.runner_grid_id || item.grid_id===run.runner_grid_id));
         const terminal=value=>["completed","failed","cancelled"].includes(value);
         if(grid && (!terminal(grid.state) || grid.runs.some(item=>!terminal(item.state)))) {
           show_toast("Stop the Grid first before deleting all of its runs.");return;
         }
         if(!window.confirm(`Delete all Instra chart data belonging to ${tag}? Checkpoints, other logs and W&B runs remain.`))return;
-        await delete_run_batch({grid_tag:tag});
+        await delete_run_batch({grid_tag:tag,...(grid ? {grid_id:grid.grid_id} : {})});
       }catch(error){show_toast(`Delete failed: ${error.message}`);}
     });
   }
@@ -174,7 +175,7 @@
     ensure_grid_delete_menu();
     const result=open_menu_before_grid_delete(run_id,anchor);
     const button=by_id("delete_grid_runs");
-    if(button)button.hidden=!run_for_id(run_id)?.runner_grid_tag;
+    if(button)button.hidden=!run_for_id(run_id)?.runner_grid_tag || run_for_id(run_id)?.remote_copy===true;
     return result;
   };
   window.__instra_run_deletion = {delete_run_batch};

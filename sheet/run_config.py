@@ -1104,7 +1104,8 @@ class OwtRunConfig:
             runner_tag = json.loads(os.environ.get("THOG2_RUNNER_METADATA", "{}" )).get("grid_tag")
         except (ValueError, TypeError, AttributeError):
             runner_tag = None
-        if isinstance(runner_tag, str) and re.fullmatch(r"G-[0-9]{5,}", runner_tag) and self.run_start_label:
+        # if isinstance(runner_tag, str) and re.fullmatch(r"G-[0-9]{5,}", runner_tag) and self.run_start_label:
+        if isinstance(runner_tag, str) and re.fullmatch(r"(?:G|[A-Z]{3})-[0-9]{5,}", runner_tag) and self.run_start_label:                                    # <<< THOG accept permanent host prefixes while retaining legacy Grid artifact names
             prefix = self.experiment_prefix
             marker = f"{runner_tag}_"
             if marker in prefix:

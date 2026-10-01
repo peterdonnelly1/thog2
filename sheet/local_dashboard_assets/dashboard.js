@@ -131,7 +131,8 @@ function load_json(key, fallback) {
 }
 
 function run_visibility_storage_key() {
-  const tag=new URLSearchParams(window.location.search).get("runner_grid_tag");
+  const query=new URLSearchParams(window.location.search);
+  const tag=query.get("runner_grid_id") || [query.get("runner_grid_host"),query.get("runner_grid_tag")].filter(Boolean).join(":");
   return tag ? `thog2_local_run_visibility:grid:${tag}` : "thog2_local_run_visibility";
 }
 function save_json(key, value) {
@@ -169,6 +170,14 @@ function hash_text(value) {
   return hash >>> 0;
 }
 
+// vvv THOG use durable Grid UUIDs and producer-qualified legacy tags throughout Runs and Multiview
+function grid_identity(run) {
+  if (!run?.runner_grid_tag) return null;
+  if (run.runner_grid_id) return `id:${run.runner_grid_id}`;
+  return `${run.runner_grid_owner_host_id || run.thog_host_id || run.host_label || "local"}:${run.runner_grid_tag}`;
+}
+// ^^^ THOG
+
 // vvv THOG assign one hue per Grid and cache equally spaced shades for every catalogue refresh
 let grid_palette_source = null;
 let grid_palette = new Map();
@@ -180,8 +189,9 @@ function colour_for_run(run_id) {
     const groups = new Map();
     for (const run of app.runs || []) {
       if (!run.runner_grid_tag) continue;
-      if (!groups.has(run.runner_grid_tag)) groups.set(run.runner_grid_tag, []);
-      groups.get(run.runner_grid_tag).push(run);
+      const grid_key = grid_identity(run);
+      if (!groups.has(grid_key)) groups.set(grid_key, []);
+      groups.get(grid_key).push(run);
     }
     if (grid_hues === null) {
       try { grid_hues = JSON.parse(localStorage.getItem("thog2_grid_hues") || "{}"); }
@@ -373,7 +383,7 @@ function append_run_row(body, run) {
     const next_visible = !is_visible(run_id);
     const group_members = run.runner_grid_tag && next_visible &&
       localStorage.getItem("thog2_grid_eye_grouping") !== "false"
-      ? app.runs.filter(candidate => candidate.runner_grid_tag === run.runner_grid_tag)
+      ? app.runs.filter(candidate => grid_identity(candidate) === grid_identity(run))
       : [run];
     for (const member of group_members) app.visibility[run_identifier(member)] = next_visible;
     save_json("thog2_local_run_visibility", app.visibility);
@@ -551,7 +561,12 @@ async function refresh_catalog() {
   try {
     const catalog = await fetch_json("/api/runs", {signal: abort.signal});
     const runner_grid_tag = new URLSearchParams(window.location.search).get("runner_grid_tag");
-    app.runs = runner_grid_tag ? catalog.runs.filter(run => run.runner_grid_tag === runner_grid_tag) : catalog.runs;
+    const grid_id = new URLSearchParams(window.location.search).get("runner_grid_id");
+    const grid_host = new URLSearchParams(window.location.search).get("runner_grid_host");
+    app.runs = runner_grid_tag ? catalog.runs.filter(run => run.runner_grid_tag === runner_grid_tag &&
+      (!grid_id || run.runner_grid_id === grid_id || !run.runner_grid_id &&
+        (!grid_host || (run.thog_host_id || run.host_label) === grid_host)) &&
+      (grid_id || !grid_host || (run.thog_host_id || run.host_label) === grid_host)) : catalog.runs;
     app.requested_run = catalog.requested_run;
     app.recommended_run_id = runner_grid_tag
       ? app.runs.find(run => run_identifier(run) === catalog.recommended_run_id)?.dashboard_run_id ||

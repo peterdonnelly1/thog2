@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from instra_grid_identity import choose_prefix
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parent
@@ -129,7 +130,7 @@ def _discover(state):
     wandb_root = Path(os.environ.get("WANDB_DIR", ROOT / "wandb")).expanduser().resolve()
     profile = {"profile_key": "current", "python": sys.executable, "location": str(Path(sys.executable).resolve().parent),
                "thog_entry": str(ROOT / "run_thog2_owt.py"), "shell_entry": str(ROOT / "train_OWT.sh")}
-    return {"hostname": hostname, "resolved_ip": ip_address, "os": sys.platform, "observed_at": datetime.now(timezone.utc).isoformat(),
+    return {"hostname": hostname, "grid_prefix": state.get("grid_prefix"), "resolved_ip": ip_address, "os": sys.platform, "observed_at": datetime.now(timezone.utc).isoformat(),
             "instra": {"root": str(ROOT), "version": _version(ROOT), "launch_command": state.get("launch_command"),
                        "running": _running(state.get("backend_pid")), "pid": state.get("backend_pid")},
             "thog": {"root": str(ROOT), "version": _version(ROOT), "train_OWT_sh": (ROOT / "train_OWT.sh").is_file(),
@@ -254,7 +255,7 @@ def _runner_operation(state, name, args):
     from thog_grid_runner import command_for, environment_for, validate_recipe
     if name == "runner_capabilities":
         _validate_args(args, set())
-        return {"protocol": 2, "cuda_preflight": True, "optional_power_readback": True,
+        return {"protocol": 3, "cuda_preflight": True, "local_gpu_queue": True, "optional_power_readback": True,
                 "power_control": _power_capability()}
     if name == "runner_log":
         _validate_args(args, {"attempt_id", "max_bytes"})
@@ -302,7 +303,28 @@ def _runner_operation(state, name, args):
     if name == "runner_reconcile":
         _validate_args(args, set())
         return {"attempts": {key: _attempt_status(value) for key, value in state.get("attempts", {}).items()},
-                "reservations": state.get("reservations", {}), "gpus": _gpu_information()}
+                "reservations": state.get("reservations", {}), "waiting_grids": state.get("waiting_grids", {}),
+                "protocol": 3, "gpus": _gpu_information()}
+    if name == "runner_queue":
+        _validate_args(args, {"grid_id", "gpu_key", "required_mib", "headroom_mib", "power_cap_w"})
+        grid_id, key = args.get("grid_id"), args.get("gpu_key")
+        if not isinstance(grid_id, str) or not re.fullmatch(r"[a-f0-9]{32}", grid_id) or not isinstance(key, str):
+            raise ValueError("Invalid waiting Grid identity")
+        if any(type(args.get(field)) is not int or not 0 <= args[field] <= 131072 for field in ("required_mib", "headroom_mib")):
+            raise ValueError("Invalid waiting Grid memory requirements")
+        cap = args.get("power_cap_w")
+        if cap is not None and (type(cap) is not int or not 50 <= cap <= 600):
+            raise ValueError("Invalid GPU power cap")
+        queue = state.setdefault("waiting_grids", {}).setdefault(key, [])
+        old = next((item for item in queue if item["grid_id"] == grid_id), None)
+        request = {**args, "enqueued_at": old["enqueued_at"] if old else datetime.now(timezone.utc).isoformat()}
+        if old != request:
+            if old:
+                old.update(request)
+            else:
+                queue.append(request)
+            _write_state(state)
+        return {"waiting_grids": queue, "reservation": state.get("reservations", {}).get(key)}
     if name == "runner_reserve":
         _validate_args(args, {"grid_id", "gpu_key", "required_mib", "headroom_mib", "power_cap_w"})
         grid_id, key = args.get("grid_id"), args.get("gpu_key")
@@ -320,6 +342,14 @@ def _runner_operation(state, name, args):
         owner = state.setdefault("reservations", {}).get(key)
         if owner and owner["grid_id"] != grid_id:
             raise RuntimeError(f"GPU reserved by {owner['grid_id']}")
+        # vvv THOG first locally eligible waiter acquires a free GPU; ownership survives between runs
+        if not owner:
+            queue = state.get("waiting_grids", {}).get(key, [])
+            first = next((item for item in queue if gpu.get("free_mib") is not None and
+                          gpu["free_mib"] >= item["required_mib"] + item["headroom_mib"]), None)
+            if first and first["grid_id"] != grid_id:
+                raise RuntimeError(f"GPU waiting for earlier eligible Grid {first['grid_id']}")
+        # ^^^ THOG
         if gpu["free_mib"] is None or gpu["free_mib"] < required + headroom:
             raise RuntimeError(f"GPU {key} free {gpu['free_mib']} MiB; needs {required}+{headroom} MiB")
         if _known_thog_compute_pids(gpu) and not any(run["gpu_key"] == key and _attempt_status(run)["state"] == "running"
@@ -335,6 +365,11 @@ def _runner_operation(state, name, args):
         _validate_args(args, {"grid_id", "gpu_key"})
         owner = state.get("reservations", {}).get(args.get("gpu_key"))
         if owner and owner["grid_id"] != args.get("grid_id"):
+            queue = state.get("waiting_grids", {}).get(args.get("gpu_key"), [])
+            if any(item["grid_id"] == args.get("grid_id") for item in queue):
+                queue[:] = [item for item in queue if item["grid_id"] != args["grid_id"]]
+                _write_state(state)
+                return {"released": True, "waiting_removed": True}
             raise PermissionError("Reservation belongs to a different Grid")
         if any(run["grid_id"] == args.get("grid_id") and run["gpu_key"] == args.get("gpu_key")
                and _attempt_status(run)["state"] in {"running", "unknown"} for run in state.get("attempts", {}).values()):
@@ -347,10 +382,12 @@ def _runner_operation(state, name, args):
         else:
             restored = None
         state.get("reservations", {}).pop(args.get("gpu_key"), None)
+        queue = state.get("waiting_grids", {}).get(args.get("gpu_key"), [])
+        queue[:] = [item for item in queue if item["grid_id"] != args.get("grid_id")]
         _write_state(state)
         return {"released": True, "power_restoration": restored}
     if name == "runner_launch":
-        _validate_args(args, {"grid_id", "attempt_id", "run", "gpu_key", "host_label", "thog_host_id", "execution_profile", "recipe_id"})
+        _validate_args(args, {"grid_id", "attempt_id", "run", "gpu_key", "host_label", "thog_host_id", "execution_profile", "recipe_id", "grid_owner_host_id"})
         attempt_id = args.get("attempt_id")
         if not isinstance(attempt_id, str) or not re.fullmatch(r"[a-f0-9]{32}", attempt_id):
             raise ValueError("Invalid attempt identity")
@@ -389,6 +426,7 @@ def _runner_operation(state, name, args):
         metadata_path.write_text(json.dumps({"argv": command, "cwd": str(ROOT), "log_path": str(log_path),
                                              "exit_path": str(STATE_DIR / f"attempt-{attempt_id}.exit"),
                                              "runner_metadata": {"grid_id": grid_id, "grid_tag": run["grid_tag"],
+                                                                  "grid_owner_host_id": args.get("grid_owner_host_id"),
                                                                   "recipe_id": args.get("recipe_id"),
                                                                   "run_id": run["run_id"], "pairing_id": run["pairing_id"],
                                                                   "attempt_id": attempt_id, "profiler": run["profiler"],
@@ -456,12 +494,34 @@ def _runner_operation(state, name, args):
 def _operation(name, args):
     # Parameter/CUDA preflight may spend twenty seconds in a child process.
     # It is read-only: never serialize discovery, status or stop behind it.
-    if name == "runner_preflight":
+    if name in {"runner_preflight", "runner_reconcile", "runner_log", "runner_capabilities", "discover", "state"}:
+        if name == "discover":
+            _validate_args(args, set())
+            return _discover(_read_state())
+        if name == "state":
+            _validate_args(args, set())
+            state = _read_state()
+            return {"instra_running": _running(state.get("backend_pid")), "instra_pid": state.get("backend_pid"),
+                    "intentional_stop": bool(state.get("intentional_stop")), "master_id": state.get("master_id"),
+                    "gpus": _gpu_information(), "last_auto_restart": state.get("last_auto_restart"),
+                    "runs": {key: {**run, "running": _running(run.get("pid"))} for key, run in state.get("runs", {}).items()}}
         return _runner_operation(_read_state(), name, args)
     with _lock:
         state = _read_state()
         if name.startswith("runner_"):
             return _runner_operation(state, name, args)                                                                                                      # <<< THOG route only named Runner operations through the Node Agent
+        if name == "grid_identity":
+            _validate_args(args, {"occupied", "preferred"})
+            occupied = args.get("occupied", [])
+            if not isinstance(occupied, list) or any(not isinstance(value, str) or not re.fullmatch(r"[A-Z]{3}", value) for value in occupied):
+                raise ValueError("Invalid occupied Grid prefixes")
+            previous = state.get("grid_prefix")
+            prefix = choose_prefix(socket.gethostname(), occupied,
+                                   previous if previous and previous not in occupied else args.get("preferred"))
+            if state.get("grid_prefix") != prefix:
+                state["grid_prefix"] = prefix
+                _write_state(state)
+            return {"grid_prefix": prefix}
         if name == "discover":
             _validate_args(args, set())
             return _discover(state)

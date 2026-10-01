@@ -11,6 +11,7 @@ from pathlib import Path
 import threading
 import time
 import uuid
+from instra_grid_identity import choose_prefix
 
 import instra_network as network
 from instra_duration_estimator import estimate
@@ -21,6 +22,10 @@ STATE_DIR = network.STATE_DIR
 STATE_PATH = STATE_DIR / "runner.json"
 LEASE_PATH = STATE_DIR / "runner-controller.lock"
 GRID_SCRIPTS = Path(__file__).resolve().parent / "grid-scripts"
+
+
+class ControllerStateChanged(Exception):
+    """A concurrent user action won while the controller was doing remote work."""
 
 
 def now():
@@ -141,7 +146,7 @@ class RunnerService:
         if not GRID_SCRIPTS.is_dir():
             return
         committed = {grid["grid_tag"] for grid in _read()["grids"]}
-        for marker in GRID_SCRIPTS.glob("G-*/.runner-created"):
+        for marker in GRID_SCRIPTS.glob("*/.runner-created"):
             directory = marker.parent
             if directory.name in committed:
                 continue
@@ -154,6 +159,9 @@ class RunnerService:
         # Atomic replace makes this read safe without waiting for network I/O in the controller.
         state = _read()
         hosts = self.network.list_hosts()
+        grids = {grid["grid_id"]: grid for grid in state["grids"]}
+        for saved in state["recipes"].values():
+            saved["state"] = grids.get(saved.get("last_grid_id"), {}).get("state", saved.get("state", "ready"))
         return {"recipes": list(state["recipes"].values()), "grids": state["grids"],
                 "catalogue": CATALOGUE, "common": COMMON, "controller": self.controller,
                 "reconciled": self.reconciled, "local_id": hosts["local_id"], "master_id": hosts["master_id"]}
@@ -168,7 +176,7 @@ class RunnerService:
             recipe_id = recipe_id or uuid.uuid4().hex
             created_at = state["recipes"].get(recipe_id, {}).get("created_at", now())
             state["recipes"][recipe_id] = {"recipe_id": recipe_id, "recipe": recipe,
-                                            "created_at": created_at, "updated_at": now()}
+                                            "created_at": created_at, "updated_at": now(), "state": "ready"}
             _write(state)
             return state["recipes"][recipe_id]
 
@@ -211,6 +219,9 @@ class RunnerService:
                 raise KeyError("Unknown Grid")
             if grid["state"] not in TERMINAL or any(run.get("state") not in TERMINAL for run in grid["runs"]):
                 raise ValueError("Stop the Grid and finish all attempts before deleting its History")
+            if any(not run.get("released") for run in grid["runs"]) or (grid.get("queue_mode") == "dynamic" and
+                    len(grid.get("released_gpu_ids", [])) < len(grid["gpu_pool"])):
+                raise ValueError("GPU release is still pending; retain History until reconciliation finishes")
             state["grids"] = [item for item in state["grids"] if item["grid_id"] != grid_id]
             _write(state)
         # The generated script directory belongs to this Grid. Training logs
@@ -225,7 +236,6 @@ class RunnerService:
 
     def _pool(self, recipe, trial_count=None):
         hosts = self.network.list_hosts()
-        master = hosts["master_id"] == hosts["local_id"]
         allowed = set(recipe.get("host_ids", []))
         requested = set(recipe.get("gpu_pool", []))
         if requested and len(requested) != len(recipe.get("gpu_pool", [])):
@@ -235,7 +245,7 @@ class RunnerService:
             host_id = host["thog_host_id"]
             if allowed and host_id not in allowed:
                 continue
-            if not host["local"] and (not master or not host["execution_enabled"] or hosts["release_pending"]):
+            if not host["local"] and not host["execution_enabled"]:
                 continue
             discovery = host.get("last_discovered") or {}
             if requested and not any(gpu_id.startswith(f"{host_id}.gpu.") for gpu_id in requested):
@@ -296,8 +306,9 @@ class RunnerService:
                             "requested_power_w": recipe.get("power_caps", {}).get(gpu_id),
                             "power_request_source": f"recipe.power_caps[{gpu_id}]" if gpu_id in recipe.get("power_caps", {}) else "blank/default",
                             "default_power_w": gpu.get("default_power_w"), "current_power_w": gpu.get("power_cap_w"),
-                            "required_mib": _memory_peak(trial["parameters"]), "state": "queued",
-                            "attempts": [], "blocking_reason": "Awaiting GPU reservation",
+                            "required_mib": _memory_peak(trial["parameters"]), "state": "ready",
+                            "attempts": [], "blocking_reason": "Ready; placement is provisional until Launch",
+                            "placement_fixed": bool(tight), "placement_status": "proposed",
                             "execution_environment": {**environment_for(trial), "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"])}})
         history = _read()["grids"]
         return {"runs": planned, "total_runs": len(planned), "gpu_pool": pool,
@@ -347,22 +358,36 @@ class RunnerService:
             if repeat_mode not in (None, "loose", "tight"):
                 raise ValueError("Invalid repeat mode")
             recipe = self._repeat_recipe(source, repeat_mode) if source else json.loads(json.dumps(saved["recipe"]))
-            plan = self.preview(recipe, source=source, tight=repeat_mode == "tight")
+            self.lock.release()
+            try:
+                plan = self.preview(recipe, source=source, tight=repeat_mode == "tight")
+            finally:
+                self.lock.acquire()
+            current = _read()
+            if not source and current["recipes"].get(recipe_id) != saved:
+                raise ValueError("Recipe changed during validation; launch the saved version again")
+            state = current
             if plan["total_runs"] > 100 and not confirm_large:
                 raise ValueError(f"These values will take the size of the grid to {plan['total_runs']:,} runs. Confirm before launch")
             number = state["next_tag"]
             if number > 99999:
                 raise RuntimeError("Five-digit Grid tags exhausted")
-            tag = f"G-{number:05d}"
+            if hasattr(self.network, "grid_prefix"):
+                prefix = self.network.grid_prefix()
+            else:
+                prefix = state.setdefault("grid_prefix", choose_prefix(self.network.local_id.removeprefix("thog_host.")))
+            tag = f"{prefix}-{number:05d}"
             state["next_tag"] = number + 1
             grid_id = uuid.uuid4().hex
             pair_ids = {}
             runs = [{**run, "run_id": uuid.uuid4().hex,
                      "pairing_id": pair_ids.setdefault(run["pairing_id"], uuid.uuid4().hex) if run["pairing_id"] else None,
-                     "grid_tag": tag, "grid_id": grid_id, "recipe_id": recipe_id} for run in plan["runs"]]
+                     "grid_tag": tag, "grid_id": grid_id, "recipe_id": recipe_id, "state": "queued",
+                     "grid_owner_host_id": self.network.local_id} for run in plan["runs"]]
             grid = {"grid_id": grid_id, "grid_tag": tag, "recipe_id": recipe_id, "label": recipe["label"],
                     "recipe": recipe, "source_grid_id": source_grid_id, "repeat_mode": repeat_mode,
-                    "created_at": now(), "state": "queued", "runs": runs, "gpu_pool": plan["gpu_pool"],
+                    "created_at": now(), "launched_at": now(), "state": "queued", "runs": runs, "gpu_pool": plan["gpu_pool"],
+                    "grid_owner_host_id": self.network.local_id, "queue_mode": "dynamic",
                     "estimated_duration": plan["estimated_duration"],
                     "launch_configuration": json.loads(json.dumps({"recipe": recipe,
                         "runs": [{key: run.get(key) for key in ("run_id", "parameters", "host_id", "host_label",
@@ -389,6 +414,8 @@ class RunnerService:
                                         f"({r.get('power_request_source')})"
                                         for r in runs[:20]))
                 state["grids"].append(grid)
+                if not source:
+                    state["recipes"][recipe_id].update(state="queued", last_grid_id=grid_id)
                 _write(state)
             except Exception:
                 import shutil
@@ -461,20 +488,14 @@ class RunnerService:
             for run in grid["runs"]:
                 if run["state"] in {"queued", "blocked"}:
                     run.update(state="cancelled", blocking_reason="Stopped by user")
-                elif run["state"] in {"running", "dispatching"}:
+                elif run["state"] in {"running", "dispatching", "unknown"}:
                     run["stop_requested"] = True
+                    run["force_stop_requested"] = bool(force)
             grid["state"] = "stopping"
             _grid_event(grid, "stop", "Force stop requested" if force else "Graceful Ctrl-C stop requested")
             _write(state)
-            for run in grid["runs"]:
-                if not run.get("stop_requested") or not run["attempts"]:
-                    continue
-                try:
-                    self.network.runner_call(run["host_id"], "runner_stop", {"grid_id": grid_id,
-                              "attempt_id": run["attempts"][-1]["attempt_id"], "grace_seconds": 0 if force else 120})
-                except (network.NetworkError, RuntimeError, OSError) as error:
-                    run.update(state="unknown", blocking_reason=f"Stop outcome uncertain: {error}")
-            _write(state)
+            # The controller sends stop requests outside this lock on its next
+            # reconciliation. Slow hosts must not freeze the UI action.
             return grid
 
     def kill_and_flush(self, grid_id):
@@ -539,7 +560,14 @@ class RunnerService:
             if any(run["state"] in {"unknown", "dispatching"} for run in grid["runs"]):
                 raise RuntimeError("Resolve uncertain dispatches before changing placement")
             recipe = self._repeat_recipe(grid, "loose")
-            plan = self.preview(recipe, source=grid)
+            before_preview = json.loads(json.dumps(state))
+            self.lock.release()
+            try:
+                plan = self.preview(recipe, source=grid)
+            finally:
+                self.lock.acquire()
+            if _read() != before_preview:
+                raise RuntimeError("Grid changed during placement validation; retry conversion")
             previous = []
             for run, proposed in zip(grid["runs"], plan["runs"]):
                 if run["state"] not in {"queued", "blocked"}:
@@ -547,10 +575,13 @@ class RunnerService:
                 previous.append((run["host_id"], run["gpu"]["gpu_key"]))
                 for key in ("host_id", "host_label", "execution_profile", "gpu", "dtype", "attention_backend", "requested_power_w", "power_request_source", "default_power_w", "current_power_w", "required_mib", "execution_environment"):
                     run[key] = proposed[key]
-                run.update(state="queued", blocking_reason="Loose placement confirmed")
+                run.update(state="queued", blocking_reason="Loose placement confirmed", placement_fixed=False,
+                           placement_status="proposed")
                 run.pop("next_retry_at", None)
             grid["recipe"] = recipe
             grid["repeat_mode"] = "loose"
+            grid["queue_mode"] = "dynamic"
+            grid["gpu_pool"] = plan["gpu_pool"]
             grid["conversion"] = {"time": now(), "from": "tight", "to": "loose", "moved_assignments": len(previous)}
             _write_grid_file(GRID_SCRIPTS / grid["grid_tag"] / "conversion.json", grid["conversion"])
             _grid_event(grid, "placement", f"Tight to Loose; moved {len(previous)} queued assignments")
@@ -560,10 +591,133 @@ class RunnerService:
                        for run in grid["runs"]):
                     continue
                 try:
-                    self.network.runner_call(host_id, "runner_release", {"grid_id": grid_id, "gpu_key": gpu_key})
+                    self._controller_call(state, host_id, "runner_release", {"grid_id": grid_id, "gpu_key": gpu_key})
                 except (network.NetworkError, RuntimeError, OSError):
                     pass  # The owner record remains until reconciliation permits release.
             return grid
+
+    # vvv THOG persist decisions before I/O, yield the controller lock and reject stale writeback
+    def _controller_call(self, state, host_id, operation, args=None):
+        if _read() != state:
+            _write(state)
+        committed = json.loads(json.dumps(state))
+        self.lock.release()
+        error = None
+        try:
+            try:
+                result = self.network.runner_call(host_id, operation, args)
+            except Exception as caught:
+                error = caught
+        finally:
+            self.lock.acquire()
+        if _read() != committed:
+            raise ControllerStateChanged()
+        if error is not None:
+            raise error
+        return result
+
+    @staticmethod
+    def _compatible(grid, run, place):
+        if run.get("placement_fixed") and (run["host_id"], run["gpu"]["gpu_key"]) != (place["host_id"], place["gpu"]["gpu_key"]):
+            return False
+        capacity = place["gpu"].get("memory_mib")
+        return capacity is None or capacity >= run["required_mib"] + grid["recipe"].get("headroom_mib", 512)
+
+    def _dynamic_candidates(self, state, grid, snapshots, busy_gpus, excluded_gpus=()):
+        selected = set()
+        if grid.get("queue_mode") != "dynamic":
+            return None
+        pending = [run for run in grid["runs"] if run["state"] in {"queued", "blocked"}]
+        for run in pending:
+            if not any(self._compatible(grid, run, place) for place in grid["gpu_pool"]):
+                run.update(state="blocked", blocking_reason="No selected GPU has sufficient estimated capacity for this run")
+        for place in grid["gpu_pool"]:
+            host_id, key = place["host_id"], place["gpu"]["gpu_key"]
+            gpu_id = place["gpu"].get("gpu_id", f"{host_id}.gpu.{key}")
+            if (host_id, key) in excluded_gpus or grid.get("gpu_retry_at", {}).get(gpu_id, 0) > time.time():
+                continue
+            snapshot = snapshots.get(host_id, {})
+            if "error" in snapshot:
+                continue
+            if snapshot.get("protocol", 3) < 3:
+                for run in pending:
+                    run.update(state="blocked", blocking_reason=f"Restart the updated Node Agent on {place['host_label']} to enable local GPU queues")
+                continue
+            compatible = [run for run in pending if run["run_id"] not in selected and self._compatible(grid, run, place)]
+            if not compatible:
+                continue
+            # Register every selected eligible GPU even while it is busy. Node
+            # Agents retain order; updating memory requirements never requeues.
+            gpu_id = place["gpu"].get("gpu_id", f"{host_id}.gpu.{key}")
+            request = {"grid_id": grid["grid_id"], "gpu_key": key,
+                       "required_mib": min(run["required_mib"] for run in compatible),
+                       "headroom_mib": grid["recipe"].get("headroom_mib", 512),
+                       "power_cap_w": grid["recipe"].get("power_caps", {}).get(gpu_id)}
+            try:
+                queued = self._controller_call(state, host_id, "runner_queue", request)
+                snapshot.setdefault("waiting_grids", {})[key] = queued.get("waiting_grids", [])
+                owner = queued.get("reservation")
+                owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
+                if owner_id and owner_id != grid["grid_id"] or (host_id, key) in busy_gpus:
+                    continue
+                live = next((gpu for gpu in snapshot.get("gpus", []) if gpu["gpu_key"] == key), place["gpu"])
+                available = [run for run in compatible if run.get("next_retry_at", 0) <= time.time() and
+                             live.get("free_mib") is not None and live["free_mib"] >= run["required_mib"] + request["headroom_mib"]]
+                if not available:
+                    continue
+                run = available[0]
+                reserved = self._controller_call(state, host_id, "runner_reserve", {**request, "required_mib": run["required_mib"]})
+                snapshot.setdefault("reservations", {})[key] = reserved.get("reservation", {"grid_id": grid["grid_id"]})
+                dtype, backend = _dtype_backend(place["gpu"])
+                run.update(host_id=host_id, host_label=place["host_label"], gpu=place["gpu"],
+                           execution_profile=place["execution_profile"], dtype=dtype, attention_backend=backend,
+                           requested_power_w=request["power_cap_w"], default_power_w=live.get("default_power_w"),
+                           current_power_w=live.get("power_cap_w"), placement_status="assigned",
+                           power_request_source=f"recipe.power_caps[{gpu_id}]" if request["power_cap_w"] is not None else "blank/default",
+                           execution_environment={**environment_for(run), "CUDA_VISIBLE_DEVICES": str(place["gpu"]["ordinal"])})
+                selected.add(run["run_id"])
+            except (network.NetworkError, RuntimeError, ValueError, OSError) as error:
+                for run in compatible:
+                    run["blocking_reason"] = str(error)
+        return selected
+
+    def _release_dynamic_gpus(self, state, grid, snapshots):
+        if grid.get("queue_mode") != "dynamic":
+            return
+        pending = [run for run in grid["runs"] if run["state"] in {"queued", "blocked"}]
+        released_places = grid.setdefault("released_gpu_ids", [])
+        for place in grid["gpu_pool"]:
+            host_id, key = place["host_id"], place["gpu"]["gpu_key"]
+            gpu_id = place["gpu"].get("gpu_id", f"{host_id}.gpu.{key}")
+            if any(self._compatible(grid, run, place) for run in pending):
+                if gpu_id in released_places:
+                    released_places.remove(gpu_id)
+                continue
+            if any(run["host_id"] == host_id and run["gpu"]["gpu_key"] == key and
+                   run["state"] in {"running", "dispatching", "unknown"} for run in grid["runs"]):
+                continue
+            snapshot = snapshots.get(host_id, {})
+            if "error" in snapshot or "reservations" not in snapshot:
+                continue
+            owner = snapshot["reservations"].get(key)
+            owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
+            queued = any(item["grid_id"] == grid["grid_id"] for item in snapshot.get("waiting_grids", {}).get(key, []))
+            if gpu_id not in released_places or owner_id == grid["grid_id"] or queued:
+                try:
+                    if owner_id == grid["grid_id"] or queued:
+                        self._controller_call(state, host_id, "runner_release", {"grid_id": grid["grid_id"], "gpu_key": key})
+                        _grid_event(grid, "reservation", f"Released {place['host_label']} GPU {place['gpu']['ordinal']}; no compatible pending runs")
+                        if owner_id == grid["grid_id"]:
+                            snapshot["reservations"].pop(key, None)
+                    if gpu_id not in released_places:
+                        released_places.append(gpu_id)
+                except (network.NetworkError, RuntimeError, OSError) as error:
+                    grid["release_error"] = str(error)
+                    continue
+            for run in grid["runs"]:
+                if run["host_id"] == host_id and run["gpu"]["gpu_key"] == key and run["state"] in TERMINAL:
+                    run["released"] = True
+    # ^^^ THOG
 
     def _refresh(self):
         self._require_controller()
@@ -571,9 +725,12 @@ class RunnerService:
             state = _read()
             active = [grid for grid in state["grids"] if grid["state"] not in TERMINAL]
             stranded = [grid for grid in state["grids"] if grid["state"] in TERMINAL and
-                        any(not run.get("released") for run in grid["runs"])]
+                        (any(not run.get("released") for run in grid["runs"]) or
+                         grid.get("queue_mode") == "dynamic" and len(grid.get("released_gpu_ids", [])) < len(grid["gpu_pool"]))]
             active_hosts = {run["host_id"] for grid in active for run in grid["runs"]}
+            active_hosts |= {place["host_id"] for grid in active for place in grid.get("gpu_pool", [])}
             stranded_hosts = {run["host_id"] for grid in stranded for run in grid["runs"] if not run.get("released")}
+            stranded_hosts |= {place["host_id"] for grid in stranded for place in grid.get("gpu_pool", [])}
             hosts = active_hosts | {host_id for host_id in stranded_hosts
                                     if self._release_retry_at.get(host_id, 0) <= time.time()}
             snapshots = {}
@@ -628,10 +785,11 @@ class RunnerService:
                             _grid_event(grid, "reconcile", f"{run['run_id'][:8]} attempt {latest['attempt_id']} absent; GPU idle; "
                                         "launch did not take effect")
                             try:
-                                released = self.network.runner_call(run["host_id"], "runner_release", {
+                                released = self._controller_call(state, run["host_id"], "runner_release", {
                                     "grid_id": grid["grid_id"], "gpu_key": run["gpu"]["gpu_key"]})
                                 _grid_event(grid, "power", _power_detail(run, released, "restoration"))
                                 snapshot.get("reservations", {}).pop(run["gpu"]["gpu_key"], None)
+                                failed_gpu_preflights[(run["host_id"], run["gpu"]["gpu_key"])] = "Recovered absent attempt; retry placement on the next poll"
                             except (network.NetworkError, RuntimeError, OSError) as release_error:
                                 run["blocking_reason"] += f"; release/restoration pending: {release_error}"
                         else:
@@ -640,11 +798,13 @@ class RunnerService:
                             run["blocking_reason"] = snapshot.get("error", "Attempt absent; waiting for a second idle GPU observation")
                     else:
                         stop_error = None
-                        if grid.get("flush_requested") and remote["state"] in {"running", "unknown"} and not latest.get("force_stop_sent"):
+                        force_stop = bool(grid.get("flush_requested") or run.get("force_stop_requested"))
+                        stop_key = "force_stop_sent" if force_stop else "stop_sent"
+                        if run.get("stop_requested") and remote["state"] in {"running", "unknown"} and not latest.get(stop_key):
                             try:
-                                remote = self.network.runner_call(run["host_id"], "runner_stop", {
-                                    "grid_id": grid["grid_id"], "attempt_id": latest["attempt_id"], "grace_seconds": 0})
-                                latest["force_stop_sent"] = True
+                                remote = self._controller_call(state, run["host_id"], "runner_stop", {
+                                    "grid_id": grid["grid_id"], "attempt_id": latest["attempt_id"], "grace_seconds": 0 if force_stop else 120})
+                                latest[stop_key] = True
                             except (network.NetworkError, RuntimeError, OSError, KeyError) as error:
                                 stop_error = str(error)
                         run["state"] = "cancelled" if run.get("stop_requested") and remote["state"] in TERMINAL else remote["state"]
@@ -654,7 +814,7 @@ class RunnerService:
                         latest["state"] = remote["state"]
                         if remote["state"] == "failed" and "failure_excerpt" not in latest:
                             try:
-                                excerpt = self.network.runner_call(run["host_id"], "runner_log", {
+                                excerpt = self._controller_call(state, run["host_id"], "runner_log", {
                                     "attempt_id": latest["attempt_id"], "max_bytes": 4096})["text"]
                                 latest["failure_excerpt"] = excerpt[-4096:]
                             except (network.NetworkError, RuntimeError, OSError, KeyError) as error:
@@ -662,8 +822,13 @@ class RunnerService:
                         if remote["state"] in TERMINAL and not run.get("duration_seconds"):
                             finished = datetime.fromisoformat(remote["finished_at"]).timestamp() if remote.get("finished_at") else time.time()
                             run["duration_seconds"] = max(0, finished - datetime.fromisoformat(latest["started_at"]).timestamp())
+                busy_gpus = {(run["host_id"], run["gpu"]["gpu_key"]) for item in active for run in item["runs"]
+                             if run["state"] in {"running", "dispatching", "unknown"}}
+                dynamic_candidates = self._dynamic_candidates(state, grid, snapshots, busy_gpus, failed_gpu_preflights)
                 for run in grid["runs"]:
                     if run["state"] not in {"queued", "blocked"}:
+                        continue
+                    if dynamic_candidates is not None and run["run_id"] not in dynamic_candidates:
                         continue
                     if run.get("next_retry_at", 0) > time.time():
                         continue
@@ -711,7 +876,7 @@ class RunnerService:
                             return  # Stop/Save/Launch won the race; reconcile the new state next poll.
                         if preflight_error is not None:
                             raise preflight_error
-                        self.network.runner_call(host_id, "runner_reserve", {"grid_id": grid["grid_id"], "gpu_key": key,
+                        self._controller_call(state, host_id, "runner_reserve", {"grid_id": grid["grid_id"], "gpu_key": key,
                                                                                "required_mib": run["required_mib"], "headroom_mib": headroom,
                                                                                "power_cap_w": run.get("requested_power_w")})
                         run.pop("next_retry_at", None)
@@ -722,10 +887,11 @@ class RunnerService:
                         run["attempts"].append(latest)
                         run.update(state="dispatching", blocking_reason="")
                         _write(state)  # Commit the attempt identity BEFORE sending it to the Node Agent.
-                        result = self.network.runner_call(host_id, "runner_launch", {"grid_id": grid["grid_id"],
+                        result = self._controller_call(state, host_id, "runner_launch", {"grid_id": grid["grid_id"],
                                                 "attempt_id": attempt_id, "gpu_key": key, "run": metadata,
                                                 "host_label": run["host_label"], "thog_host_id": host_id,
-                                                "execution_profile": run["execution_profile"], "recipe_id": grid["recipe_id"]})
+                                                "execution_profile": run["execution_profile"], "recipe_id": grid["recipe_id"],
+                                                "grid_owner_host_id": grid.get("grid_owner_host_id", self.network.local_id)})
                         latest.update({"pid": result.get("pid"), "log_path": result.get("log_path"), "state": result["state"],
                                        "requested_power_w": result.get("requested_power_w"), "default_power_w": result.get("default_power_w"),
                                        "observed_power_w": result.get("observed_power_w"), "power_control": result.get("power_control")})
@@ -745,7 +911,7 @@ class RunnerService:
                                 failed_gpu_preflights[(host_id, key)] = run["blocking_reason"]
                                 _grid_event(grid, "launch_error", f"{run['run_id'][:8]} {host_id} GPU {key}: {error}")
                                 try:
-                                    released = self.network.runner_call(host_id, "runner_release", {
+                                    released = self._controller_call(state, host_id, "runner_release", {
                                         "grid_id": grid["grid_id"], "gpu_key": key})
                                     _grid_event(grid, "power", _power_detail(run, released, "restoration"))
                                 except (network.NetworkError, RuntimeError, OSError) as release_error:
@@ -760,8 +926,23 @@ class RunnerService:
                             run["next_retry_at"] = time.time() + 15
                             if "cuda" in str(error).lower() or "preflight unavailable" in str(error).lower():
                                 failed_gpu_preflights[(host_id, key)] = str(error)
+                                gpu_id = run["gpu"].get("gpu_id", f"{host_id}.gpu.{key}")
+                                grid.setdefault("gpu_retry_at", {})[gpu_id] = time.time() + 15
+                                place = {"host_id": host_id, "gpu": run["gpu"]}
+                                for pending in grid["runs"]:
+                                    if pending["state"] in {"queued", "blocked"} and self._compatible(grid, pending, place):
+                                        pending.update(state="blocked", blocking_reason=str(error))
+                            if grid.get("queue_mode") == "dynamic":
+                                try:
+                                    self._controller_call(state, host_id, "runner_release", {"grid_id": grid["grid_id"], "gpu_key": key})
+                                    snapshot.get("reservations", {}).pop(key, None)
+                                except (network.NetworkError, RuntimeError, OSError) as release_error:
+                                    run["blocking_reason"] += f"; release pending: {release_error}"
+                self._release_dynamic_gpus(state, grid, snapshots)
                 for run in grid["runs"]:
                     if run["state"] in TERMINAL and not run.get("released"):
+                        if grid.get("queue_mode") == "dynamic":
+                            continue
                         if not any(other["host_id"] == run["host_id"] and other["gpu"]["gpu_key"] == run["gpu"]["gpu_key"]
                                    and other["state"] not in TERMINAL for other in grid["runs"]):
                             try:
@@ -771,7 +952,7 @@ class RunnerService:
                                 owner = snapshot["reservations"].get(run["gpu"]["gpu_key"])
                                 owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
                                 if owner_id == grid["grid_id"]:
-                                    released = self.network.runner_call(run["host_id"], "runner_release", {
+                                    released = self._controller_call(state, run["host_id"], "runner_release", {
                                         "grid_id": grid["grid_id"], "gpu_key": run["gpu"]["gpu_key"]})
                                     _grid_event(grid, "power", _power_detail(run, released, "restoration"))
                                     snapshot["reservations"].pop(run["gpu"]["gpu_key"], None)
@@ -828,6 +1009,9 @@ class RunnerService:
                 if json.dumps(grid, sort_keys=True) != previous_grid:
                     _write_grid_file(directory / "manifest.json", grid)
             for grid in stranded:
+                before_release = json.dumps(grid, sort_keys=True)
+                self._release_dynamic_gpus(state, grid, snapshots)
+                changed |= before_release != json.dumps(grid, sort_keys=True)
                 for run in grid["runs"]:
                     if run.get("released") or run["state"] not in TERMINAL:
                         continue
@@ -839,7 +1023,7 @@ class RunnerService:
                     owner_id = owner.get("grid_id") if isinstance(owner, dict) else owner
                     if owner_id == grid["grid_id"]:
                         try:
-                            released = self.network.runner_call(run["host_id"], "runner_release", {"grid_id": grid["grid_id"],
+                            released = self._controller_call(state, run["host_id"], "runner_release", {"grid_id": grid["grid_id"],
                                                                                                      "gpu_key": key})
                             _grid_event(grid, "power", _power_detail(run, released, "restoration"))
                         except (network.NetworkError, RuntimeError, OSError) as release_error:
@@ -861,13 +1045,19 @@ class RunnerService:
             activity = (any(g["state"] not in TERMINAL for g in state["grids"]),
                         any(r["state"] in {"queued", "blocked", "unknown"} for g in active for r in g["runs"]))
             if activity != self._last_activity or (not any(activity) and self.network.list_hosts().get("release_pending")):
-                self.network.set_grid_activity(*activity)
-                self._last_activity = activity
+                self.lock.release()
+                try:
+                    self.network.set_grid_activity(*activity)
+                finally:
+                    self.lock.acquire()
+                self._last_activity = activity if _read() == state else None
 
     def _loop(self):
         while not self.stop_event.is_set():
             try:
                 self._refresh()
+            except ControllerStateChanged:
+                continue
             except Exception as error:
                 network.log_event("Runner", "reconcile", self.network.local_id, "error", type(error).__name__)
             self.stop_event.wait(3)

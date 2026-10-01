@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const runner_css = fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.css", "utf8");
-assert.match(runner_css, /#runner_list \.runner-recipe-row button:nth-child\(2\)\s*\{[^}]*width:auto/,
+assert.match(runner_css, /#runner_list \.runner-recipe-row button:not\(:first-child\)\s*\{[^}]*width:auto/,
   "Rename Grid must override the general full-width list-button rule");
 assert.match(runner_css, /#runner_list \.runner-recipe-row button:first-child\s*\{[^}]*flex:1 1 0/,
   "Recipe names must receive the remaining row width");
@@ -92,9 +92,10 @@ async function main() {
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().power_caps["dreedle-host.gpu.GPU-1"],180);
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters.power_caps,undefined);
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
-  assert.equal(roots.runner_list.children[1].children[1].textContent,"Rename");
-  assert.equal(roots.runner_list.children[1].children[2].textContent,"Delete");
-  const rename_click = roots.runner_list.children[1].children[1].click();
+  assert.equal(roots.runner_list.children[1].children[1].textContent,"ready");
+  assert.equal(roots.runner_list.children[1].children[2].textContent,"Rename");
+  assert.equal(roots.runner_list.children[1].children[3].textContent,"Delete");
+  const rename_click = roots.runner_list.children[1].children[2].click();
   assert.equal(roots.runner_rename_dialog.open,true);
   roots.runner_rename_input.value="Renamed Recipe";
   roots.runner_rename_form.onsubmit({preventDefault() {}});
@@ -132,7 +133,7 @@ async function main() {
   assert.ok(log_viewer.textContent.includes("RUN  started"),"new Grid events must appear without changing tabs");
   switch_tab("multiview");
   const frame = roots.runner_multiview_panel.children.find(child => child.tagName === "iframe");
-  assert.equal(frame.src,"/?runner_grid_tag=G-00002");
+  assert.equal(frame.src,"/?runner_grid_tag=G-00002&runner_grid_id=grid-1&runner_grid_host=");
   assert.equal(roots.runner_multiview_panel.hidden,false);
   const selector=roots.runner_multiview_panel.querySelector("select");
   assert.equal(selector.value,"grid-1");
@@ -148,19 +149,19 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(roots.runner_multiview_panel.querySelector("select").children.length,2);
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
-    "/?runner_grid_tag=G-00003", "automatic selection follows the newest running Grid");
+    "/?runner_grid_tag=G-00003&runner_grid_id=grid-2&runner_grid_host=", "automatic selection follows the newest running Grid");
   other.state="completed";
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
-    "/?runner_grid_tag=G-00002", "an automatically selected finished Grid yields to a running Grid");
+    "/?runner_grid_tag=G-00002&runner_grid_id=grid-1&runner_grid_host=", "an automatically selected finished Grid yields to a running Grid");
   other.state="running";
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
   const new_selector=roots.runner_multiview_panel.querySelector("select");
   new_selector.value="grid-2";new_selector.events.change();
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
-    "/?runner_grid_tag=G-00003");
+    "/?runner_grid_tag=G-00003&runner_grid_id=grid-2&runner_grid_host=");
   other.state="completed";
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
@@ -182,14 +183,14 @@ async function main() {
   assert.equal(JSON.parse(flush.options.body).grid_id,"grid-2");
   switch_tab("multiview");
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
-    "/?runner_grid_tag=G-00003");
+    "/?runner_grid_tag=G-00003&runner_grid_id=grid-2&runner_grid_host=");
   assert.notEqual(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe"),frame,
     "switching to another Grid must show that Grid's charts");
   switch_tab("progress");
   roots.runner_list.children[1].children[0].click();
   switch_tab("multiview");
   assert.equal(roots.runner_multiview_panel.children.find(child => child.tagName === "iframe").src,
-    "/?runner_grid_tag=G-00002",
+    "/?runner_grid_tag=G-00002&runner_grid_id=grid-1&runner_grid_host=",
     "switching views must not reload a running Grid's charts");
   const html = fs.readFileSync("sheet/local_dashboard_assets/index.html","utf8");
   assert.match(html,/data-runner-tab="progress"[^]*data-runner-tab="multiview"[^]*data-runner-tab="history"/);

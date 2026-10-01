@@ -23,6 +23,7 @@ import time
 import uuid
 
 import instra_node_agent as agent
+from instra_grid_identity import choose_prefix
 
 STATE_DIR = agent.STATE_DIR
 CONFIG_PATH = STATE_DIR / "network.json"
@@ -364,6 +365,15 @@ class NetworkService:
         self.local_id = f"thog_host.{_host_key(socket.gethostname())}"
         with _locked_config() as config:
             config["hosts"].setdefault(self.local_id, self._new_host(socket.gethostname(), "local", 22, True))
+            # vvv THOG existing hosts keep first claim on their prefix before a new host is added
+            registry = config.setdefault("grid_prefixes", {})
+            for host_id, host in config["hosts"].items():
+                if host_id not in registry:
+                    discovery = host.get("last_discovered") or {}
+                    registry[host_id] = choose_prefix(discovery.get("hostname") or host["address"],
+                                                      registry.values(), discovery.get("grid_prefix"))
+                host["grid_prefix"] = registry[host_id]
+            # ^^^ THOG
         self.logs_root = logs_root
         if start_worker:
             threading.Thread(target=self._retry_loop, name="instra-network-retry", daemon=True).start()
@@ -410,9 +420,31 @@ class NetworkService:
             if host_id in config["hosts"]:
                 config["hosts"][host_id].update(changes)
 
-    def _identify_discovery(self, host_id, discovery):
+    def grid_prefix(self, host_id=None, hostname=None, observed=None):
+        host_id = host_id or self.local_id
+        with _locked_config() as config:
+            registry = config.setdefault("grid_prefixes", {})
+            occupied = [value for key, value in registry.items() if key != host_id]
+            host = config["hosts"].get(host_id, {})
+            prefix = choose_prefix(hostname or host.get("display_name") or host_id.removeprefix("thog_host."),
+                                   occupied, observed or registry.get(host_id))
+            registry[host_id] = prefix
+            if host:
+                host["grid_prefix"] = prefix
+            return prefix
+
+    def _identify_discovery(self, host_id, discovery, new_host=None):
         # vvv THOG the saved host identity, not the remote hostname, owns its execution profiles
         result = dict(discovery)
+        prefix = self.grid_prefix(host_id, discovery.get("hostname"), discovery.get("grid_prefix"))
+        if discovery.get("hostname") and discovery.get("grid_prefix") != prefix:
+            registry = _read_config().get("grid_prefixes", {})
+            identity = self._agent_request(new_host or self._host(host_id), "grid_identity", {
+                "preferred": prefix, "occupied": [value for key, value in registry.items() if key != host_id]})
+            reported = identity.get("grid_prefix", prefix)
+            if reported != prefix:
+                prefix = self.grid_prefix(host_id, discovery.get("hostname"), reported)
+        result["grid_prefix"] = prefix
         result["execution_profiles"] = [
             {**profile, "execution_profile_id": f"{host_id}.execution_profile.{profile['profile_key']}"}
             for profile in discovery.get("execution_profiles", [])
@@ -440,13 +472,13 @@ class NetworkService:
 
     # vvv THOG expose named Runner operations while Network retains SSH and remote authority
     def runner_call(self, host_id, operation, args=None):
-        if operation not in {"runner_preflight", "runner_reserve", "runner_release", "runner_launch", "runner_status", "runner_stop", "runner_reconcile", "runner_log"}:
+        if operation not in {"runner_preflight", "runner_queue", "runner_reserve", "runner_release", "runner_launch", "runner_status", "runner_stop", "runner_reconcile", "runner_log"}:
             raise NetworkError("validation", "Unknown Runner operation", host_id)
         host = self._host(host_id)
         config = _read_config()
         # A pending release must let accepted Grids reconcile, stop, and drain their queue.
-        if not host["local"] and (config["master_id"] != self.local_id or not host["execution_enabled"]):
-            raise NetworkError("authority", "Remote execution requires this Runner Master and an enabled host", host_id)
+        if not host["local"] and not host["execution_enabled"]:
+            raise NetworkError("authority", "Remote execution requires an execution-enabled host", host_id)
         discovery = host.get("last_discovered") or {}
         if not discovery.get("execution_profiles") or not discovery.get("gpus"):
             raise NetworkError("validation", "Host execution profile and GPUs must be discovered", host_id)
@@ -701,7 +733,7 @@ class NetworkService:
             resolved_ip = _direct_route(host)
             if not isinstance(discovery, dict) or not discovery.get("instra_logs_root") or not discovery.get("wandb_root"):
                 raise NetworkError("operation", "Discovery did not report both monitoring source roots")
-            discovery = self._identify_discovery(host_id, discovery)
+            discovery = self._identify_discovery(host_id, discovery, host)
             master_id = _read_config()["master_id"]
             if master_id:
                 self._agent_request(host, "claim_master", {"master_id": master_id}, password=args.get("password"))

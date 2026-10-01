@@ -21,6 +21,7 @@ from sheet.local_dashboard_live_loss import LiveLossReader
 
 
 _MAX_POINTS_PER_SERIES = 1600
+_MAX_RETAINED_POINTS_PER_SERIES = 12800                                                                                                                       # <<< THOG bound scanner RAM throughout multi-hour sessions; source W&B history remains intact
 _SCAN_TIME_BUDGET_SECONDS = 0.22
 _X_AXIS_MODE_ORDER = ("step", "relative_wall", "relative_process", "wall_time")
 _GPU_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
@@ -307,6 +308,11 @@ class _WandbRunScanner:
             relative_process_seconds,
             wall_time_epoch_seconds,
         ))
+        # vvv THOG compact older plot samples while preserving endpoints and a recent full-resolution window
+        if len(points) > _MAX_RETAINED_POINTS_PER_SERIES:
+            recent_count = _MAX_RETAINED_POINTS_PER_SERIES // 4
+            points[:] = _downsample_points(points[:-recent_count], _MAX_RETAINED_POINTS_PER_SERIES // 2) + points[-recent_count:]
+        # ^^^ THOG
         self.chart_titles[group][chart_id] = title
         self.x_titles[group][chart_id] = x_title
         self.default_x_axis_modes[group][chart_id] = default_x_axis_mode

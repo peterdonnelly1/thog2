@@ -20,6 +20,17 @@ import instra_node_agent as agent
 
 
 class NetworkTests(unittest.TestCase):
+    def test_host_prefix_collision_is_permanent_after_restart_and_removal(self):
+        self.assertEqual(self.service.grid_prefix("thog_host.scruffy", "scruffy"), "SCR")
+        collision = self.service.grid_prefix("thog_host.scrubber", "scrubber")
+        self.assertRegex(collision, r"^[A-Z]{3}$")
+        self.assertNotEqual(collision, "SCR")
+        self.assertEqual(self.service.grid_prefix("thog_host.dreedle", "dreedle"), "DRE")
+        restarted = network.NetworkService(start_worker=False)
+        self.addCleanup(restarted.close)
+        self.assertEqual(restarted.grid_prefix("thog_host.scrubber", "renamed"), collision)
+        self.assertEqual(restarted.grid_prefix("thog_host.scruffy", "scruffy"), "SCR")
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -314,7 +325,7 @@ class NetworkTests(unittest.TestCase):
         events = []
         def record_request(operation, *args, **kwargs):
             events.append(operation)
-            return {"protocol": 2, "cuda_preflight": True, "optional_power_readback": True} if operation == "runner_capabilities" else {}
+            return {"protocol": 3, "local_gpu_queue": True, "cuda_preflight": True, "optional_power_readback": True} if operation == "runner_capabilities" else {}
         with (patch.object(agent, "request", side_effect=record_request),
               patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
               patch.object(subprocess, "Popen") as popen):

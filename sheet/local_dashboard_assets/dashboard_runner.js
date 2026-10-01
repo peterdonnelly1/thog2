@@ -108,7 +108,7 @@
       power_caps, gpu_pool:defaults.gpu_pool||[],
       profilers:defaults.profiling_mode==="pair"?["nsys","ncu"]:[defaults.profiling_mode||"none"]};
   }
-  function recipe_problems(recipe, hosts) {
+  function recipe_problems(recipe, hosts, require_gpu=true) {
     const errors = [];
     if (!String(recipe.label || "").trim()) errors.push("Recipe label is required");
     const parameters = recipe.parameters || {};
@@ -117,6 +117,9 @@
           Array.isArray(parameters[key]) && !parameters[key].length) errors.push(`${key} is required`);
     }
     const presets = Array.isArray(parameters["--geometry-preset"]) ? parameters["--geometry-preset"] : [parameters["--geometry-preset"]];
+    if (presets.length===1 && presets[0]==="dense" || parameters["--model-type"]==="dense")
+      for (const key of Object.keys(parameters)) if (snapshot?.catalogue[key]?.dense_compatible===false)
+        errors.push(`${key} is not applicable to a dense-only Recipe`);
     if (presets.some(preset=>preset !== "dense") && parameters["--model-type"] !== "dense" &&
         (parameters["DEPTH.order"] === undefined || parameters["DEPTH.order"] === "")) {
       errors.push("DEPTH.order is required for a DEPTH Recipe");
@@ -125,9 +128,9 @@
     const eligible = (hosts || []).filter(host => host.local || host.execution_enabled)
       .flatMap(host => (host.last_discovered?.execution_profiles?.length ? host.last_discovered.gpus || [] : [])
         .map(gpu => gpu.gpu_id || `${host.thog_host_id}.gpu.${gpu.gpu_key}`));
-    if (!eligible.length) errors.push("No discovered host with an execution profile and GPU is eligible; check Networks");
+    if (require_gpu && !eligible.length) errors.push("No discovered host with an execution profile and GPU is eligible; check Networks");
     for (const gpu_id of recipe.gpu_pool || []) {
-      if (!eligible.includes(gpu_id)) errors.push(`Selected GPU ${gpu_id} is no longer eligible`);
+      if (require_gpu && !eligible.includes(gpu_id)) errors.push(`Selected GPU ${gpu_id} is no longer eligible`);
     }
     for (const key of required_parameters) {
       const values = Array.isArray(parameters[key]) ? parameters[key] : [parameters[key]];
@@ -147,8 +150,16 @@
       errors.push("--min-lr must not exceed --learning-rate");
     return errors;
   }
-  function check_recipe() {
-    const errors = recipe_problems(current_recipe(), network?.hosts);
+  function check_recipe(require_gpu=true) {
+    const errors = recipe_problems(current_recipe(), network?.hosts, require_gpu);
+    const presets=current_recipe().parameters?.["--geometry-preset"];
+    const dense_only=(Array.isArray(presets) ? presets.length===1 && presets[0]==="dense" : presets==="dense") ||
+      current_recipe().parameters?.["--model-type"]==="dense";
+    for (const field of detail.querySelectorAll("input[data-runner-field]")) {
+      const key=field.dataset.runnerField,spec=snapshot?.catalogue[key];
+      if (spec) field.setAttribute("aria-invalid",String(Boolean(invalid_field_value(key,field.value,spec) ||
+        dense_only && spec.dense_compatible===false && field.value.trim())));
+    }
     for (const field of detail.querySelectorAll('input[aria-invalid="true"]')) errors.push(`${field.dataset.runnerField} has invalid syntax`);
     const notice = by_id("runner_required_fields");
     if (notice) {
@@ -336,7 +347,7 @@
     label_input.addEventListener("change", () => { draft = current_recipe(); draft.label = label_input.value; dirty = true;check_recipe(); });
     const controls = add(detail,"div",undefined,"runner-actions");
     button(controls,"Save",async () => {
-      if (!check_recipe()) return;
+      if (!check_recipe(false)) return;
       try {
         const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
         const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
@@ -622,7 +633,7 @@
       // ^^^ THOG
     }
     if(["progress"].includes(tab)) add(detail,"p",
-      "Possible states are: queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
+      "Possible states are: ready, queued, dispatching, running, blocked, stopping, flushing, unknown, completed, failed, cancelled.","runner-state-legend");
     if(tab==="progress") {
       const controls=add(detail,"div",undefined,"runner-actions");
       button(controls,"Stop Grid",async()=>{if(!confirm(`Stop ${grid.grid_tag} and its running attempts?`))return;
@@ -732,6 +743,7 @@
           draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();});
         recipe_button.title=saved.recipe.label;
         recipe_button.classList.toggle("active",chosen===saved.recipe_id);
+        add(row,"span",saved.state || "ready","runner-status");
         const rename=button(row,"Rename",async()=>{
           const label=await rename_dialog("Rename Grid Recipe",saved.recipe.label);
           if(label===null || label.trim()===saved.recipe.label)return;
@@ -826,7 +838,7 @@
             add(multiview,"h2",`${grid.grid_tag} · ${grid.label} · Multiview`);
             const frame=add(multiview,"iframe",undefined,"runner-multiview-frame");
             frame.title=`Multiview for ${grid.grid_tag}`;
-            frame.src=`/?runner_grid_tag=${encodeURIComponent(grid.grid_tag)}`;
+            frame.src=`/?runner_grid_tag=${encodeURIComponent(grid.grid_tag)}&runner_grid_id=${encodeURIComponent(grid.grid_id)}&runner_grid_host=${encodeURIComponent(grid.grid_owner_host_id || snapshot.local_id || "")}`;
             frame.addEventListener("load",()=>setTimeout(()=>frame.contentDocument?.getElementById("workspace_nav")?.click(),50));
           }else show_multiview_selector(grids,grid.grid_id);
         }else if(tab==="log" && detail.querySelector(".runner-event-log")?.dataset.gridId===grid.grid_id){

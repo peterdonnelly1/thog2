@@ -357,13 +357,16 @@ window.addEventListener("load", () => {
       const traces = (chart.series || []).map((series, index) => ({
         type: "scatter",
         mode: series.x?.length === 1 ? "lines+markers" : "lines",
-        meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id},
+        meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id,
+          instra_run_name: (app.runs || []).find(run=>run_identifier(run)===(series.instra_workspace_run_id || app.current_run_id))?.artifact_name ||
+            (app.runs || []).find(run=>run_identifier(run)===(series.instra_workspace_run_id || app.current_run_id))?.run_name ||
+            series.instra_workspace_run_id || app.current_run_id},
         x: Array.isArray(series.x) ? series.x : [],
         thog2_x_variants: series.x_variants || {},
         y: Array.isArray(series.y) ? series.y : [],
         name: series.name || chart.title || chart.id,
         customdata: series.point_sources || (series.y || []).map(() => "W&B"),
-        hovertemplate: "<b>%{fullData.name}</b><br>step: %{x}<br>value: %{y:.6g}<extra></extra>",
+        hovertemplate: "<b>%{meta.instra_run_name}</b><br>step: %{x}<br>value: %{y:.6g}<extra></extra>",
         line: {
           width: 2.4,
           color: series.color || default_palette[index % default_palette.length],

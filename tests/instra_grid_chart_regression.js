@@ -62,7 +62,7 @@ vm.runInContext(workspace.slice(start,end)+"\nthis.merge_group=fetch_metric_grou
   selected=runs.filter(run=>run.runner_grid_tag==="G-00002");
   result=await merge_context.merge_group("train");
   assert.equal(result.group.charts[0].series.length,3,"de-eyeing one Grid removes only its curves");
-  assert.match(groups,/<b>%\{fullData\.name\}<\/b><br>step: %\{x\}<br>value: %\{y:\.6g\}<extra><\/extra>/);
+  assert.match(groups,/<b>%\{meta\.instra_run_name\}<\/b><br>step: %\{x\}<br>value: %\{y:\.6g\}<extra><\/extra>/);
   console.log("PASS Grid shades, independent eyes and multi-Grid loss merge");
 })().catch(error=>{console.error(error);process.exitCode=1;});
 // ^^^ THOG

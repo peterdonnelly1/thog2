@@ -180,7 +180,7 @@ window.addEventListener("load", () => {
     ]);
     const widths = Object.freeze({
       select:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
-      preset:64, optimizer:70, gb:52, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
+      preset:64, optimizer:70, gb:68, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
       context:64, d_model:64, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
       curve_start:50, curve_end:64, capture_period:50, updated:92, menu:36,

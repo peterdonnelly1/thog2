@@ -173,6 +173,11 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
             index_html = index_html.replace("</head>", f"{script_tag}</head>", 1)
     index_html = index_html.replace("</head>", '  <script src="/assets/dashboard_networks.js" defer></script>\n</head>', 1)                     # <<< THOG load Networks after the established dashboard owners
     index_html = index_html.replace("</head>", '  <script src="/assets/dashboard_runner.js" defer></script>\n</head>', 1)                       # <<< THOG install Runner interactions after Networks navigation
+    # vvv THOG replace cached dashboard assets after the scheduling and responsiveness update
+    import re
+    index_html = re.sub(r'(/assets/[A-Za-z0-9_.-]+)(?:\?[^"\s]*)?(?=")',
+                        r'\1?v=20261001-gpu-queue', index_html)
+    # ^^^ THOG
     index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
@@ -201,8 +206,8 @@ def _start_node_agent() -> None:
                 if "Unknown Runner attempt" not in str(error):
                     raise
             capabilities = instra_node_agent.request("runner_capabilities", timeout=1)
-            if capabilities.get("protocol") != 2 or not capabilities.get("cuda_preflight"):
-                raise RuntimeError("Unknown Runner operation: CUDA preflight capability missing")
+            if capabilities.get("protocol") != 3 or not capabilities.get("cuda_preflight") or not capabilities.get("local_gpu_queue"):
+                raise RuntimeError("Unknown Runner operation: local GPU queue or CUDA preflight capability missing")
             if not capabilities.get("optional_power_readback"):
                 raise RuntimeError("Unknown Runner operation: optional GPU power-readback capability missing")
         except RuntimeError as error:
