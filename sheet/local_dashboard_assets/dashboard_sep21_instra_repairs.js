@@ -30,6 +30,16 @@ window.addEventListener("load", () => {
         flex:0 0 30px; width:30px; height:28px; align-self:center; margin-left:-8px; margin-right:auto;
         display:inline-flex; align-items:center; justify-content:center; padding:0 !important;
       }
+      /* vvv THOG distinguish eye-open context, selected run, front curve, and destructive menu grouping. */
+      .runs-table tr.eye-open-run:not(.current-run):not(.front-curve-run) .run-link,
+      .runs-table tr.eye-open-run:not(.current-run):not(.front-curve-run) td { color:#66717b; }
+      .runs-table tr.current-run .run-link, .runs-table tr.current-run td { color:#27313b; }
+      .runs-table tr.front-curve-run { box-shadow:inset 4px 0 0 var(--run-colour); background:rgba(59,78,96,.09); }
+      .runs-table tr.front-curve-run .run-link { font-weight:700; }
+      .run-menu-delete-separator { margin-top:7px !important; margin-bottom:7px !important; }
+      .deletion-pending-status { margin-top:8px; font-size:11px; color:#59636d; }
+      .deletion-pending-status p { margin:3px 0; }
+      /* ^^^ THOG */
       #training_chart_group { display:none !important; }
       #training_throughput_card {
         width:auto; max-width:none; min-width:300px; height:365px; flex:1 1 calc(33.333% - 10px);
