@@ -353,10 +353,21 @@ class MonitoringService:
         if origin is None:
             raise PermissionError("Force delete local copy applies only to acquired remote runs")
         host_id, relative, _record, _manifest = origin
+        run_id = str(state.status()["dashboard_run_id"])
         with self.lock:
             self.force_delete_requests.setdefault(host_id, set()).add(relative)
-            self.pending.add(host_id)
-        return {"queued": True, "run_id": str(state.status()["dashboard_run_id"]), "producing_host_id": host_id}
+            active = host_id in self.active
+            if not active:
+                manifest = json.loads(json.dumps(self.manifests.get(host_id, {"runs": {}})))
+                self._remove_cached_remote_run(host_id, relative, manifest)
+                self.manifests[host_id] = manifest
+                _atomic_json(self._manifest_path(host_id), manifest)
+                self.force_delete_requests[host_id].discard(relative)
+                if not self.force_delete_requests[host_id]:
+                    self.force_delete_requests.pop(host_id, None)
+            elif self.network._host(host_id).get("monitoring_enabled"):
+                self.pending.add(host_id)
+        return {"queued": active, "run_id": run_id, "producing_host_id": host_id}                                                                                # <<< THOG local force deletion works even with monitoring disabled and still wins any in-flight acquisition
 
     def _apply_force_delete_requests(self, host_id, manifest):
         with self.lock:
@@ -505,6 +516,9 @@ class MonitoringService:
             # vvv THOG index each local-log file to its run once; the old nested full-list scan became quadratic as monitored history grew
             database_parents = {str(PurePosixPath(relative).parent): relative for relative in databases}
             files_by_database = {relative: [] for relative in databases}
+            train_log_to_databases = {}
+            for parent_text, database in database_parents.items():
+                train_log_to_databases.setdefault(str(PurePosixPath(parent_text).parent / "train.log"), []).append(database)
             for file_relative, stats in files.items():
                 path_parts = PurePosixPath(file_relative)
                 for parent in path_parts.parents:
@@ -512,9 +526,8 @@ class MonitoringService:
                     if database is not None:
                         files_by_database[database].append((file_relative, stats))
                         break
-                for parent_text, database in database_parents.items():
-                    if file_relative == str(PurePosixPath(parent_text).parent / "train.log"):
-                        files_by_database[database].append((file_relative, stats))
+                for database in train_log_to_databases.get(file_relative, ()):
+                    files_by_database[database].append((file_relative, stats))
             # ^^^ THOG
             for missing in set(manifest["runs"]) - set(databases):
                 manifest["runs"][missing]["error"] = "source unavailable"                                                                                # <<< THOG retain acquired results while marking a vanished source stale
