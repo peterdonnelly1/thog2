@@ -432,12 +432,17 @@
     <button id="reset_colour" class="reset-colour" type="button">↶ Reset colour</button>
   </div>
 
+  <!-- vvv THOG distinguish authoritative deletion from disposable acquired-copy deletion and separate run/Grid destructive actions -->
   <div class="run-menu" id="run_menu" hidden role="menu" aria-label="Run actions">
     <button id="copy_run_name" type="button" role="menuitem"><span aria-hidden="true">⧉</span>Copy run name</button>
     <button id="copy_run_path" type="button" role="menuitem"><span aria-hidden="true">/</span>Copy run path</button>
     <div class="run-menu-separator"></div>
     <button id="delete_run" class="danger-action" type="button" role="menuitem"><span aria-hidden="true">⌫</span>Delete run…</button>
+    <div id="delete_grid_separator" class="run-menu-separator run-menu-delete-separator"></div>
+    <button id="delete_grid_runs" class="danger-action" type="button" role="menuitem"><span aria-hidden="true">⌫</span>Delete all runs belonging to this Grid…</button>
+    <button id="force_delete_local_copy" class="danger-action" type="button" role="menuitem"><span aria-hidden="true">⌫</span>Force delete local copy…</button>
   </div>
+  <!-- ^^^ THOG -->
 
   <div class="settings-overlay chart-settings-overlay" id="chart_settings_overlay" hidden role="dialog" aria-modal="true" aria-labelledby="chart_settings_title">
     <section class="settings-dialog chart-settings-dialog">
@@ -626,6 +631,14 @@
           <div class="timeout-control"><input id="timeout_minutes" type="number" min="1" max="10080" step="1" value="15"><span>minutes</span></div>
           <p>A later heartbeat restores its live state.</p>
         </section>
+        <!-- vvv THOG configure deletion confirmation retention globally; each request captures the value at deletion time -->
+        <section class="global-settings-section"><h3>Distributed deletion</h3>
+          <label for="deletion_confirmation_timeout_days">Deletion confirmation timeout</label>
+          <div class="timeout-control"><input id="deletion_confirmation_timeout_days" type="number" min="1" max="365" step="1" value="7"><span>days</span></div>
+          <p>Pending producer chart data is finally removed when every listed host confirms, or when this captured timeout expires.</p>
+          <div id="deletion_pending_status" class="deletion-pending-status"></div>
+        </section>
+        <!-- ^^^ THOG -->
         <section class="global-settings-section"><h3>Multiview</h3>
           <label><input id="grid_eye_grouping" type="checkbox" checked> Show every member of a Grid when an eye is opened; close eyes individually</label>
           <p>Switch off to control each run independently.</p>
