@@ -356,7 +356,9 @@ function append_run_row(body, run) {
   row.dataset.runId = run_id;
   row.style.setProperty("--run-colour", colour_for_run(run_id));
   row.classList.toggle("run-hidden", !is_visible(run_id));
+  row.classList.toggle("eye-open-run", is_visible(run_id));                                                                                                  // <<< THOG visually distinguish eye-open context runs from the mouse-selected run
   row.classList.toggle("current-run", run_id === app.current_run_id);
+  row.classList.toggle("front-curve-run", String(window.instra_front_run_id || "") === run_id);                                                              // <<< THOG highlight the run whose curve is currently front-most
 
   const check_cell = document.createElement("td");
   check_cell.className = "check-column";
@@ -1919,11 +1921,17 @@ function open_run_menu(run_id, anchor) {
   app.menu_run_id = run_id;
   document.querySelectorAll(".run-menu-button").forEach(button => button.setAttribute("aria-expanded", "false"));
   anchor.setAttribute("aria-expanded", "true");
+  const run = run_for_id(run_id);
+  const has_local_grid = Boolean(run?.runner_grid_tag && !run?.remote_copy);
+  by_id("delete_run").hidden = Boolean(run?.remote_copy);
+  by_id("delete_grid_runs").hidden = !has_local_grid;
+  by_id("delete_grid_separator").hidden = !has_local_grid;
+  by_id("force_delete_local_copy").hidden = !run?.remote_copy;
   const menu = by_id("run_menu");
   menu.hidden = false;
   const anchor_rect = anchor.getBoundingClientRect();
-  const menu_width = 204;
-  const menu_height = 130;
+  const menu_width = Math.max(250, menu.scrollWidth);
+  const menu_height = Math.max(130, menu.scrollHeight);
   menu.style.left = `${Math.max(8, Math.min(anchor_rect.right - menu_width, window.innerWidth - menu_width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(anchor_rect.bottom + 4, window.innerHeight - menu_height - 8))}px`;
 }
@@ -1957,7 +1965,7 @@ async function copy_text(value, description) {
 async function delete_menu_run() {
   const run = run_for_id(app.menu_run_id);
   if (!run) return;
-  if (run.remote_copy) { close_run_menu(); show_toast("Acquired remote runs cannot be deleted here."); return; }                                     // <<< THOG prevent ambiguous deletion of disposable acquired data
+  if (run.remote_copy) { close_run_menu(); show_toast("Use Force delete local copy for an acquired remote run."); return; }                           // <<< THOG reserve authoritative deletion for the producing Instra
   const run_id = run_identifier(run);
   const state = display_run_state(run);
   const active_warning = is_active_run_state(run.run_state) && state !== "timed_out"
@@ -2325,12 +2333,77 @@ function reset_chart_settings() {
   schedule_chart_settings_preview();
 }
 
+// vvv THOG destructive Grid/local-copy actions share the existing Runs menu without changing producer authority
+async function delete_grid_menu_runs() {
+  const run = run_for_id(app.menu_run_id);
+  if (!run?.runner_grid_tag || run.remote_copy) return;
+  const key = grid_identity(run);
+  const members = app.runs.filter(candidate => !candidate.remote_copy && grid_identity(candidate) === key);
+  if (!members.length) return;
+  const confirmed = window.confirm(
+    `Delete all (${members.length}) runs belonging to ${run.runner_grid_tag}? Checkpoints, other logs and W&B runs remain.`
+  );
+  if (!confirmed) return;
+  close_run_menu();
+  try {
+    const response = await fetch_json("/api/runs", {
+      method:"DELETE",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({grid_tag:run.runner_grid_tag, grid_id:run.runner_grid_id || null}),
+    });
+    if (response.errors?.length) show_toast(`Deletion started with ${response.errors.length} error(s).`);
+    await refresh_catalog();
+  } catch (error) {
+    show_toast(`Grid deletion failed: ${error.message}`);
+  }
+}
+
+async function force_delete_local_copy() {
+  const run = run_for_id(app.menu_run_id);
+  if (!run?.remote_copy) return;
+  const confirmed = window.confirm("This deletes only this Instra’s local copy. The authoritative run on the producing host is unaffected. If that run still exists, monitoring will download it again.");
+  if (!confirmed) return;
+  const run_id = run_identifier(run);
+  close_run_menu();
+  try {
+    await fetch_json(`/api/run?run=${encodeURIComponent(run_id)}&force_local=1`, {method:"DELETE"});
+    delete app.visibility[run_id];
+    save_json("thog2_local_run_visibility", app.visibility);
+    if (app.current_run_id === run_id) app.current_run_id = null;
+    await refresh_catalog();
+  } catch (error) {
+    show_toast(`Local copy deletion failed: ${error.message}`);
+  }
+}
+
+async function refresh_deletion_settings() {
+  try {
+    const snapshot = await fetch_json("/api/deletions");
+    const timeout = Number(snapshot.deletion_confirmation_timeout_days || 7);
+    by_id("deletion_confirmation_timeout_days").value = String(timeout);
+    const pending = Array.isArray(snapshot.pending) ? snapshot.pending : [];
+    const container = by_id("deletion_pending_status");
+    container.replaceChildren();
+    for (const item of pending) {
+      const line = document.createElement("p");
+      const outstanding = item.outstanding_hosts?.length ? item.outstanding_hosts.join(", ") : "confirmation complete; cleanup pending";
+      line.textContent = `${item.run_id || "run"}: waiting on ${outstanding}`;
+      container.appendChild(line);
+    }
+    if (!pending.length) container.textContent = "No distributed deletions are pending.";
+  } catch (error) {
+    by_id("deletion_pending_status").textContent = `Deletion status unavailable: ${error.message}`;
+  }
+}
+// ^^^ THOG
+
 function open_settings() {
   close_run_menu();
   close_colour_picker();
   close_chart_settings();
   by_id("timeout_minutes").value = String(app.timeout_minutes);
   by_id("grid_eye_grouping").checked = localStorage.getItem("thog2_grid_eye_grouping") !== "false";
+  void refresh_deletion_settings();                                                                                                                           // <<< THOG show the persisted global timeout and outstanding host names while the settings window is open
   by_id("settings_overlay").hidden = false;
   by_id("settings_nav").classList.add("selected");
   by_id("runs_nav").classList.remove("selected");
@@ -2343,10 +2416,24 @@ function close_settings() {
   by_id("runs_nav").classList.add("selected");
 }
 
-function save_settings() {
+async function save_settings() {
   const value = Number(by_id("timeout_minutes").value);
   if (!Number.isFinite(value) || value < 1 || value > 10080) {
     show_toast("Run timeout must be between 1 and 10,080 minutes.");
+    return;
+  }
+  const deletion_days = Number(by_id("deletion_confirmation_timeout_days").value);
+  if (!Number.isInteger(deletion_days) || deletion_days < 1 || deletion_days > 365) {
+    show_toast("Deletion confirmation timeout must be between 1 and 365 days.");
+    return;
+  }
+  try {
+    await fetch_json("/api/deletion/action", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"settings", timeout_days:deletion_days}),
+    });
+  } catch (error) {
+    show_toast(`Deletion timeout was not saved: ${error.message}`);
     return;
   }
   app.timeout_minutes = Math.round(value);
@@ -2645,6 +2732,8 @@ function bind_events() {
     copy_text(run.run_directory, "Run path");
   });
   by_id("delete_run").addEventListener("click", delete_menu_run);
+  by_id("delete_grid_runs").addEventListener("click", delete_grid_menu_runs);                                                                                  // <<< THOG authoritative Grid deletion uses the durable producer/Grid identity
+  by_id("force_delete_local_copy").addEventListener("click", force_delete_local_copy);                                                                         // <<< THOG disposable acquired copies can be removed without suppressing future acquisition
   by_id("toggle_runs").addEventListener("click", () => toggle_runs_pane());
   by_id("toggle_runs_top").addEventListener("click", () => toggle_runs_pane());
   by_id("workspace_divider").addEventListener("pointerdown", start_runs_pane_resize);
