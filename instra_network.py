@@ -704,6 +704,35 @@ class NetworkService:
                 ssh_wrapper.unlink(missing_ok=True)
     # ^^^ THOG
 
+    # vvv THOG upload deletion receipts as tightly-scoped JSON files over the existing persistent SSH connection
+    def monitor_upload_receipt(self, host_id, relative_path, payload):
+        if (not isinstance(relative_path, str) or not relative_path.startswith(".instra_deletions/receipts/")
+                or not relative_path.endswith(".json") or "\\0" in relative_path or "\\r" in relative_path or "\\n" in relative_path
+                or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
+            raise NetworkError("validation", "Invalid deletion receipt path", host_id)
+        if not isinstance(payload, dict):
+            raise NetworkError("validation", "Invalid deletion receipt payload", host_id)
+        host, target = self._monitor_source(host_id, "logs", relative_path)
+        parent = str(PurePosixPath(target).parent)
+        temporary = target + f".{uuid.uuid4().hex}.part"
+        data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(data) > 16384:
+            raise NetworkError("validation", "Deletion receipt is too large", host_id)
+        remote_command = (
+            "umask 077; mkdir -p " + shlex.quote(parent)
+            + " && cat > " + shlex.quote(temporary)
+            + " && mv -f " + shlex.quote(temporary) + " " + shlex.quote(target)
+        )
+        command = ["ssh", *_ssh_options(host), "-o", "ControlMaster=auto", "--", _ssh_target(host), remote_command]
+        try:
+            result = subprocess.run(command, input=data, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise NetworkError("transfer", "Deletion receipt upload failed or timed out", host_id) from error
+        if result.returncode:
+            raise NetworkError("transfer", "Deletion receipt upload failed", host_id)
+        return {"uploaded": relative_path}
+    # ^^^ THOG
+
     def _execute(self, action, host_id, **args):
         if action == "update":
             return self.update_host(host_id, **args)
