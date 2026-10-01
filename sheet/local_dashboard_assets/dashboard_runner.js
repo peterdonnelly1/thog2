@@ -469,9 +469,14 @@
     search.addEventListener("input",()=>show_category(search.value));show_category();
     check_recipe();
   }
+  function wall_time(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "—";
+  }
   function run_headings(parent) {
     const headings=add(parent,"div",undefined,"runner-run-headings");
-    for(const name of ["Run ID","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);
+    for(const name of ["Run ID","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);                           // <<< THOG expose vertically aligned per-run wall-clock boundaries in Progress and History
   }
   const loss_text = value => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(3);
   function render_run(parent,run,preview=false) {
@@ -481,6 +486,8 @@
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
+    add(summary,"span",preview?"—":wall_time(run.started_at || run.attempts?.[0]?.started_at));                                                               // <<< THOG show durable run-level start wall time
+    add(summary,"span",preview?"—":wall_time(run.finished_at || run.attempts?.at(-1)?.finished_at));                                                         // <<< THOG show durable run-level end wall time
     add(summary,"span",run.host_label);
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
@@ -766,7 +773,7 @@
     } else {
       if(tab==="history") {
         const headings=add(list,"div",undefined,"runner-history-headings");
-        for(const title of ["Grid","State","","","T","T_est",""])add(headings,"span",title);
+        for(const title of ["Grid","State","","","start","end","T","T_est",""])add(headings,"span",title);                                                   // <<< THOG align Grid wall-clock start/end immediately before elapsed and estimated duration
       }
       for(const grid of [...grids].reverse()){
         const failed=grid.runs.find(run=>run.state==="failed");
@@ -798,6 +805,8 @@
               if(last_history_grid===grid.grid_id)last_history_grid=null;render();}catch(_){/* Error shown above. */}
           });
           deletion.classList.add("runner-recipe-delete");deletion.disabled=!["completed","failed","cancelled"].includes(grid.state);
+          add(row,"span",wall_time(grid.started_at),"runner-history-wall-time");                                                                               // <<< THOG durable Grid first-dispatch wall time
+          add(row,"span",wall_time(grid.finished_at),"runner-history-wall-time");                                                                              // <<< THOG durable Grid terminal wall time
           const elapsed=add(row,"span",format_duration(grid_elapsed(grid)),"runner-history-time");
           elapsed.title="Execution wall time from first dispatch to terminal state; excludes initial queue wait";
           const upfront=add(row,"span",estimate_range(grid),"runner-history-estimate");
