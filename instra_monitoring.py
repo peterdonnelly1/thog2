@@ -22,6 +22,8 @@ DEFAULT_INTERVAL = 5
 MIN_INTERVAL = 2
 MAX_INTERVAL = 300
 TERMINAL_STATES = {"finished", "stopped", "crashed"}
+DEFAULT_DELETION_TIMEOUT_DAYS = 7                                                                                                                            # <<< THOG retain producer chart data while distributed deletion confirmations are outstanding
+DELETION_SETTING_KEY = "__deletion_confirmation_timeout_days__"                                                                                              # <<< THOG persist the global deletion timeout beside Monitoring settings
 _active_service = None
 
 
@@ -67,6 +69,14 @@ class MonitoringService:
         self.active = set()
         self.last_checks = {}
         self.host_snapshot = (0.0, {})
+        self.deletions_path = self.storage_root / "deletions.json"                                                                                            # <<< THOG durable producer-side deletion requests and receipt state
+        try:
+            loaded_deletions = json.loads(self.deletions_path.read_text())
+            self.deletions = loaded_deletions if isinstance(loaded_deletions, dict) else {}
+        except (OSError, ValueError):
+            self.deletions = {}
+        self.force_delete_requests = {}                                                                                                                       # <<< THOG serialize local-force cleanup with in-flight acquisitions without persistent suppression
+        self.receipt_retry_root = self.storage_root / "deletion_receipts"                                                                                     # <<< THOG durable receiver receipts survive restart and failed uploads
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="instra-monitor")
         self._load_manifests()
@@ -120,8 +130,249 @@ class MonitoringService:
             self.pending.add(host_id)
         return {"requested": host_id, "refresh_interval": self.interval(host_id)}
 
+    # vvv THOG distributed deletion state, timeout capture, idempotent receiver cleanup and producer finalization
+    def deletion_timeout_days(self):
+        with self.lock:
+            value = self.settings.get(DELETION_SETTING_KEY, DEFAULT_DELETION_TIMEOUT_DAYS)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = DEFAULT_DELETION_TIMEOUT_DAYS
+        return max(1, min(365, value))
+
+    def set_deletion_timeout_days(self, days):
+        if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+            raise ValueError("Deletion confirmation timeout must be between 1 and 365 days")
+        with self.lock:
+            self.settings[DELETION_SETTING_KEY] = days
+            _atomic_json(self.settings_path, self.settings)
+        return {"deletion_confirmation_timeout_days": days}
+
+    def _persist_deletions(self):
+        _atomic_json(self.deletions_path, self.deletions)
+
+    def _pending_database_paths(self):
+        with self.lock:
+            return {str(item.get("database_path")) for item in self.deletions.values() if item.get("database_path")}
+
+    def deletion_snapshot(self):
+        hosts = {item["thog_host_id"]: item.get("display_name", item["thog_host_id"])
+                 for item in self.network.list_hosts()["hosts"]}
+        with self.lock:
+            pending = []
+            for request_id, item in self.deletions.items():
+                expected = list(item.get("expected_hosts", []))
+                received = set((item.get("receipts") or {}).keys())
+                pending.append({
+                    "request_id": request_id,
+                    "run_id": item.get("run_id"),
+                    "grid_tag": item.get("grid_tag"),
+                    "requested_at": item.get("requested_at"),
+                    "timeout_days": item.get("timeout_days"),
+                    "outstanding_hosts": [hosts.get(host_id, host_id) for host_id in expected if host_id not in received],
+                })
+        return {"deletion_confirmation_timeout_days": self.deletion_timeout_days(), "pending": pending}
+
+    def begin_authoritative_delete(self, run_name, grid_tag=None):
+        state = self.catalog.state_for_run(run_name)
+        database_path = state.database_path.resolve()
+        if self.origin(database_path) is not None:
+            raise PermissionError("Acquired remote runs require Force delete local copy")
+        root = self.catalog.root.resolve()
+        relative = _inside(database_path, root)
+        if relative is None or database_path.name != "charts.sqlite3":
+            raise PermissionError("refusing distributed deletion outside the configured Instra chart root")
+        status = state.status()
+        run_id = str(status["dashboard_run_id"])
+        expected = [host["thog_host_id"] for host in self.network.list_hosts()["hosts"] if not host["local"]]
+        request_id = uuid.uuid4().hex
+        requested_at = _time_now()
+        timeout_days = self.deletion_timeout_days()
+        notice = {
+            "schema": 1, "delete": True, "producer_host_id": self.network.local_id,
+            "run_id": run_id, "source_chart_path": relative, "deletion_request_id": request_id,
+            "requested_at": requested_at,
+        }
+        notice_dir = root / ".instra_deletions" / "notices"
+        _atomic_json(notice_dir / f"{request_id}.json", notice)
+        with self.lock:
+            self.deletions[request_id] = {
+                **notice, "database_path": str(database_path), "grid_tag": grid_tag,
+                "expected_hosts": expected, "receipts": {}, "timeout_days": timeout_days,
+            }
+            self._persist_deletions()
+        names = {host["thog_host_id"]: host.get("display_name", host["thog_host_id"]) for host in self.network.list_hosts()["hosts"]}
+        outstanding = ", ".join(names.get(host_id, host_id) for host_id in expected) or "none"
+        instra_network.log_event("Monitoring", "delete_pending", self.network.local_id, "pending",
+                                 f"{run_id}: awaiting deletion confirmation from {outstanding}")
+        return {"deleted_run_id": run_id, "deletion_request_id": request_id, "pending": True,
+                "outstanding_hosts": [names.get(host_id, host_id) for host_id in expected]}
+
+    def _clear_catalog_state(self, database_path):
+        resolved = Path(database_path).resolve()
+        with self.catalog.lock:
+            state = self.catalog.states.pop(resolved, None)
+            if state is not None:
+                self.catalog.identity_states = {name: item for name, item in self.catalog.identity_states.items() if item is not state}
+
+    def _delete_chart_files(self, database_path):
+        path = Path(database_path)
+        for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+            try:
+                if candidate.is_file() and not candidate.is_symlink():
+                    candidate.unlink()
+            except OSError:
+                pass
+        self._clear_catalog_state(path)
+
+    def _finalize_deletions(self):
+        now_epoch = time.time()
+        receipts_root = self.catalog.root.resolve() / ".instra_deletions" / "receipts"
+        completed = []
+        with self.lock:
+            items = list(self.deletions.items())
+        for request_id, item in items:
+            received = dict(item.get("receipts") or {})
+            request_receipts = receipts_root / request_id
+            if request_receipts.is_dir():
+                for receipt_path in request_receipts.glob("*.json"):
+                    try:
+                        receipt = json.loads(receipt_path.read_text())
+                    except (OSError, ValueError):
+                        continue
+                    host_id = receipt.get("responding_host_id")
+                    if (receipt.get("producer_host_id") == self.network.local_id
+                            and receipt.get("run_id") == item.get("run_id")
+                            and receipt.get("deletion_request_id") == request_id
+                            and host_id in item.get("expected_hosts", [])):
+                        received[host_id] = receipt.get("processed_at") or _time_now()
+            try:
+                requested_epoch = datetime.fromisoformat(item["requested_at"]).timestamp()
+            except (KeyError, TypeError, ValueError):
+                requested_epoch = now_epoch
+            timed_out = now_epoch - requested_epoch >= int(item.get("timeout_days", DEFAULT_DELETION_TIMEOUT_DAYS)) * 86400
+            expected = set(item.get("expected_hosts", []))
+            confirmed = expected.issubset(received)
+            with self.lock:
+                if request_id in self.deletions:
+                    self.deletions[request_id]["receipts"] = received
+                    self._persist_deletions()
+            if not confirmed and not timed_out:
+                continue
+            self._delete_chart_files(item.get("database_path", ""))
+            notice = self.catalog.root.resolve() / ".instra_deletions" / "notices" / f"{request_id}.json"
+            notice.unlink(missing_ok=True)
+            if request_receipts.exists():
+                shutil.rmtree(request_receipts, ignore_errors=True)
+            with self.lock:
+                self.deletions.pop(request_id, None)
+                self._persist_deletions()
+            outcome = "confirmed" if confirmed else "timeout"
+            message = (f"{item.get('run_id')}: all deletion confirmations received"
+                       if confirmed else f"{item.get('run_id')}: deletion confirmation timeout expired")
+            instra_network.log_event("Monitoring", "delete_complete", self.network.local_id, outcome, message)
+            completed.append(request_id)
+        return completed
+
+    def _remove_cached_remote_run(self, host_id, relative, manifest):
+        record = manifest.get("runs", {}).pop(relative, None)
+        database = self._host_root(host_id) / "logs" / relative
+        self._delete_chart_files(database)
+        if record:
+            for key in (record.get("files") or {}):
+                root_kind, _, file_relative = key.partition("/")
+                if root_kind not in {"logs", "wandb"} or not file_relative:
+                    continue
+                try:
+                    path = self._host_root(host_id) / root_kind / file_relative
+                    if path.is_file() and not path.is_symlink():
+                        path.unlink()
+                except OSError:
+                    pass
+        return record is not None
+
+    def _process_deletion_notices(self, host_id, listing, manifest):
+        notices = [relative for relative, _size, _modified in listing
+                   if PurePosixPath(relative).parts[:2] == (".instra_deletions", "notices")
+                   and relative.endswith(".json")]
+        suppressed = set()
+        current_ids = set()
+        for relative in notices:
+            request_id = PurePosixPath(relative).stem
+            current_ids.add(request_id)
+            local_receipt = self.receipt_retry_root / host_id / f"{request_id}.json"
+            notice = None
+            if local_receipt.is_file():
+                try:
+                    receipt = json.loads(local_receipt.read_text())
+                    source_path = receipt.get("source_chart_path")
+                    if source_path:
+                        suppressed.add(source_path)
+                    remote_receipt = f".instra_deletions/receipts/{request_id}/{self.network.local_id.replace('.', '_')}.json"
+                    self.network.monitor_upload_receipt(host_id, remote_receipt, receipt)
+                    continue
+                except (OSError, ValueError, instra_network.NetworkError):
+                    pass
+            temporary = self.storage_root / "notices" / host_id / f"{request_id}.json"
+            try:
+                self.network.monitor_transfer(host_id, "logs", relative, temporary)
+                if temporary.stat().st_size > 16384:
+                    raise ValueError("Deletion notice is too large")
+                notice = json.loads(temporary.read_text())
+            finally:
+                temporary.unlink(missing_ok=True)
+            if (not isinstance(notice, dict) or notice.get("delete") is not True
+                    or notice.get("producer_host_id") != host_id
+                    or notice.get("deletion_request_id") != request_id):
+                continue
+            source_path = notice.get("source_chart_path")
+            run_id = notice.get("run_id")
+            if not isinstance(source_path, str) or not source_path.endswith("charts.sqlite3") or not isinstance(run_id, str):
+                continue
+            suppressed.add(source_path)
+            self._remove_cached_remote_run(host_id, source_path, manifest)
+            receipt = {
+                "schema": 1, "producer_host_id": host_id, "run_id": run_id,
+                "source_chart_path": source_path, "deletion_request_id": request_id,
+                "responding_host_id": self.network.local_id, "processed_at": _time_now(),
+                "deletion_processed": True,
+            }
+            _atomic_json(local_receipt, receipt)
+            remote_receipt = f".instra_deletions/receipts/{request_id}/{self.network.local_id.replace('.', '_')}.json"
+            self.network.monitor_upload_receipt(host_id, remote_receipt, receipt)
+        retry_dir = self.receipt_retry_root / host_id
+        if retry_dir.is_dir():
+            for receipt_path in retry_dir.glob("*.json"):
+                if receipt_path.stem not in current_ids:
+                    receipt_path.unlink(missing_ok=True)
+        return suppressed
+
+    def force_delete_local_copy(self, run_name):
+        state = self.catalog.state_for_run(run_name)
+        origin = self.origin(state.database_path)
+        if origin is None:
+            raise PermissionError("Force delete local copy applies only to acquired remote runs")
+        host_id, relative, _record, _manifest = origin
+        with self.lock:
+            self.force_delete_requests.setdefault(host_id, set()).add(relative)
+            self.pending.add(host_id)
+        return {"queued": True, "run_id": str(state.status()["dashboard_run_id"]), "producing_host_id": host_id}
+
+    def _apply_force_delete_requests(self, host_id, manifest):
+        with self.lock:
+            requested = set(self.force_delete_requests.get(host_id, set()))
+        for relative in requested:
+            self._remove_cached_remote_run(host_id, relative, manifest)
+        if requested:
+            with self.lock:
+                pending = self.force_delete_requests.get(host_id, set())
+                pending.difference_update(requested)
+                if not pending:
+                    self.force_delete_requests.pop(host_id, None)
+
     def _loop(self):
         while not self.stop_event.is_set():
+            self._finalize_deletions()                                                                                                                        # <<< THOG timeout/receipt cleanup is background work and never blocks Runs rendering
             hosts = self.network.list_hosts()["hosts"]
             for host in hosts:
                 host_id = host["thog_host_id"]
@@ -142,9 +393,12 @@ class MonitoringService:
     def paths(self):
         with self.lock:
             manifests = {key: dict(value.get("runs", {})) for key, value in self.manifests.items()}
+            force_hidden = {(host_id, relative) for host_id, relatives in self.force_delete_requests.items() for relative in relatives}
         paths = []
         for host_id, runs in manifests.items():
             for relative in runs:
+                if (host_id, relative) in force_hidden:
+                    continue
                 try:
                     path = self._host_root(host_id) / "logs" / relative
                     if path.is_file() and path.name == "charts.sqlite3" and not path.is_symlink():
@@ -246,7 +500,22 @@ class MonitoringService:
                     "logs_root": discovery["instra_logs_root"], "wandb_root": discovery["wandb_root"], "runs": {}}
             listing = self.network.monitor_files(host_id, "logs")
             files = {relative: (size, modified) for relative, size, modified in listing}
-            databases = [relative for relative in files if Path(relative).name == "charts.sqlite3"]
+            suppressed = self._process_deletion_notices(host_id, listing, manifest)                                                                            # <<< THOG deletion notices win before any ordinary acquisition can restore a stale copy
+            databases = [relative for relative in files if Path(relative).name == "charts.sqlite3" and relative not in suppressed]
+            # vvv THOG index each local-log file to its run once; the old nested full-list scan became quadratic as monitored history grew
+            database_parents = {str(PurePosixPath(relative).parent): relative for relative in databases}
+            files_by_database = {relative: [] for relative in databases}
+            for file_relative, stats in files.items():
+                path_parts = PurePosixPath(file_relative)
+                for parent in path_parts.parents:
+                    database = database_parents.get(str(parent))
+                    if database is not None:
+                        files_by_database[database].append((file_relative, stats))
+                        break
+                for parent_text, database in database_parents.items():
+                    if file_relative == str(PurePosixPath(parent_text).parent / "train.log"):
+                        files_by_database[database].append((file_relative, stats))
+            # ^^^ THOG
             for missing in set(manifest["runs"]) - set(databases):
                 manifest["runs"][missing]["error"] = "source unavailable"                                                                                # <<< THOG retain acquired results while marking a vanished source stale
                 manifest["runs"][missing]["error_detail"] = "Run database is no longer listed on the producing host"
@@ -262,21 +531,24 @@ class MonitoringService:
                     from sheet.local_chart_store import LocalChartReader
                     metadata = LocalChartReader(path).metadata()
                     record["run_state"] = metadata.get("run_state", "unknown")
-                    parent = Path(relative).parent
-                    for file_relative, (size, modified) in files.items():
-                        is_run_log = Path(file_relative) == parent.parent / "train.log"
-                        if file_relative != relative and (parent in Path(file_relative).parents or is_run_log):
+                    for file_relative, (size, modified) in files_by_database.get(relative, ()):                                                                  # <<< THOG consume the pre-indexed run slice instead of rescanning every remote file per run
+                        if file_relative != relative:
                             if self._sync_ordinary(host_id, "logs", file_relative, size, modified, record):
                                 changed += 1
                     recorded = metadata.get("wandb_run_directory", "")
                     wandb_relative = _inside(recorded, Path(discovery["wandb_root"])) if recorded else None
                     if wandb_relative is not None:
                         wandb_run = str(Path(wandb_relative).parent) if Path(wandb_relative).name == "files" else wandb_relative
-                        if wandb_run != ".":
+                        # vvv THOG completed runs stop issuing one remote W&B find per five-second poll; live runs remain fresh
+                        poll_wandb = record.get("run_state") not in TERMINAL_STATES or not record.get("wandb_complete")
+                        if wandb_run != "." and poll_wandb:
                             for filename, size, modified in self.network.monitor_files(host_id, "wandb", wandb_run):
                                 file_relative = str(Path(wandb_run) / filename)
                                 if self._sync_ordinary(host_id, "wandb", file_relative, size, modified, record):
                                     changed += 1
+                            if record.get("run_state") in TERMINAL_STATES:
+                                record["wandb_complete"] = True
+                        # ^^^ THOG
                         record["wandb_relative"] = wandb_relative
                     else:
                         record.pop("wandb_relative", None)                                                                                                   # <<< THOG never retain a mapping after the producer changes its W&B run path
@@ -291,6 +563,7 @@ class MonitoringService:
                     if not (self._host_root(host_id) / "logs" / relative).is_file():
                         manifest["runs"].pop(relative, None)
                     continue
+            self._apply_force_delete_requests(host_id, manifest)                                                                                              # <<< THOG a force-delete requested during acquisition wins before the refreshed manifest is published
             with self.lock:
                 self.manifests[host_id] = manifest
                 _atomic_json(self._manifest_path(host_id), manifest)
@@ -340,7 +613,9 @@ def install(dashboard_module, network):
         self.monitoring = MonitoringService(network, self)
 
     def paths(self):
-        return original_paths(self) + self.monitoring.paths()
+        hidden = self.monitoring._pending_database_paths()                                                                                                    # <<< THOG deletion-pending producer runs disappear immediately while chart files remain until confirmations/timeout
+        local_paths = tuple(path for path in original_paths(self) if str(path.resolve()) not in hidden)
+        return local_paths + self.monitoring.paths()
 
     def state(self, path):
         result = original_state(self, path)
@@ -399,8 +674,9 @@ def install(dashboard_module, network):
 
     def guard_run(self, run_name):
         if self.monitoring.origin(self.state_for_run(run_name).database_path) is not None:
-            raise PermissionError("Acquired remote runs cannot be deleted here")
-        return original_delete_run(self, run_name)
+            raise PermissionError("Acquired remote runs require Force delete local copy")
+        status = self.state_for_run(run_name).status()
+        return self.monitoring.begin_authoritative_delete(run_name, grid_tag=status.get("runner_grid_tag"))                                                     # <<< THOG authoritative deletion enters receipt-backed pending state instead of immediately destroying chart data
 
     def guard_file(self, run_name, relative_path):
         if self.monitoring.origin(self.state_for_run(run_name).database_path) is not None:
@@ -470,5 +746,8 @@ def install(dashboard_module, network):
     catalog_type.delete_local_file = guard_file
     catalog_type.remote_wandb_path = remote_wandb_path
     catalog_type.wandb_files = wandb_files
+    catalog_type.force_delete_local_copy = lambda self, run_name: self.monitoring.force_delete_local_copy(run_name)                                           # <<< THOG explicit disposable-cache action without producer suppression
+    catalog_type.deletion_snapshot = lambda self: self.monitoring.deletion_snapshot()                                                                         # <<< THOG expose pending/outstanding deletion state to the UI
+    catalog_type.set_deletion_timeout_days = lambda self, days: self.monitoring.set_deletion_timeout_days(days)                                               # <<< THOG persist the global timeout used by future deletion requests
     state_type.status = status
 # ^^^ THOG
