@@ -1373,7 +1373,19 @@ def _handler_for_with_runner(catalog):
     old_delete = handler.do_DELETE
 
     def do_delete(self):
-        if urlparse(self.path).path != "/api/runs":
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/run" and parse_qs(parsed.query).get("force_local", ["0"])[0] == "1":
+            try:
+                run_name = parse_qs(parsed.query).get("run", [""])[0]
+                if not run_name:
+                    raise ValueError("Missing run identity")
+                self._send_json(catalog.force_delete_local_copy(run_name))                                                                                    # <<< THOG discard only this Instra's acquired copy; producer authority is untouched
+            except PermissionError as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.FORBIDDEN)
+            except (ValueError, TypeError, KeyError, OSError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        if parsed.path != "/api/runs":
             return old_delete(self)
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -1409,6 +1421,9 @@ def _handler_for_with_runner(catalog):
 
     def do_get(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/deletions":
+            self._send_json(catalog.deletion_snapshot())                                                                                                      # <<< THOG expose captured timeout and outstanding deletion confirmations
+            return
         if parsed.path == "/api/runner":
             self._send_json(_runner_service.snapshot() if _runner_service else {"error": "Runner unavailable"})
             return
@@ -1435,8 +1450,20 @@ def _handler_for_with_runner(catalog):
         old_get(self)
 
     def do_post(self):
-        if urlparse(self.path).path == "/api/runner/action":
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/runner/action":
             _runner_do_post(self)
+        elif parsed.path == "/api/deletion/action":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= length <= 4096:
+                    raise ValueError("Invalid deletion settings request size")
+                payload = json.loads(self.rfile.read(length))
+                if payload.get("action") != "settings":
+                    raise ValueError("Unknown deletion action")
+                self._send_json(catalog.set_deletion_timeout_days(payload.get("timeout_days")))                                                                # <<< THOG persist the global timeout used only by future deletion requests
+            except (ValueError, TypeError, KeyError, OSError) as error:
+                self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
         else:
             old_post(self)
 
