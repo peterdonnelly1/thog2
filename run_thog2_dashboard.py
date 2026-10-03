@@ -38,9 +38,18 @@ _matched_weight_selection_patch.install_dashboard(_dashboard)
 _local_dashboard_current_weights_performance_patch.install(_dashboard)
 _local_dashboard_weight_step_range_patch.install(_dashboard)
 _local_dashboard_notes_patch.install(_dashboard)                                                                                                                                          # <<< THOG install the notes API/status seam before constructing the dashboard handler
+# vvv THOG cache unchanged run summaries after the existing status enrichment owners are installed
+from sheet.local_dashboard_responsiveness import install as _install_dashboard_responsiveness
+_install_dashboard_responsiveness(_dashboard)
+# ^^^ THOG
 
 from sheet.thogopt_dashboard import install as _install_thogopt_dashboard
 _install_thogopt_dashboard(_dashboard)
+
+# vvv THOG chart downloads use a real Excel 97-2003 workbook without requiring a user package installation
+from sheet.local_dashboard_chart_exports import install as _install_chart_exports
+_install_chart_exports(_dashboard)
+# ^^^ THOG
 
 # vvv THOG Networks POST must precede the matched-weight handler, which returns plain-text 404 for every other POST path
 _handler_for_before_network_post = _dashboard._handler_for
@@ -125,6 +134,8 @@ _ACTIVE_EXTRA_ASSET_NAMES = (
     "dashboard_group_stability_patch.js",
     "dashboard_sep20_integrated_repairs.js",
     "dashboard_sep21_instra_repairs.js",
+    "dashboard_oct03_controls.js",
+    "dashboard_run_logs.js",
 )
 
 
@@ -160,7 +171,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # be copied as well as named in the HTML/allow-list; otherwise every script
     # tag below resolves to a 404 and regular Train/Val/System/Memory charts
     # silently disappear.
-    for asset_name in _EXTRA_ASSET_NAMES:
+    for asset_name in (*_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js"):
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
     for asset_name in ("dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css"):
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
@@ -176,13 +187,13 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # vvv THOG replace cached dashboard assets after the scheduling and responsiveness update
     import re
     index_html = re.sub(r'(/assets/[A-Za-z0-9_.-]+)(?:\?[^"\s]*)?(?=")',
-                        r'\1?v=20261002-distributed-deletion', index_html)
+                        r'\1?v=20261003-stability-controls', index_html)
     # ^^^ THOG
     index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
     _dashboard._ASSET_NAMES = frozenset(
-        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css")
+        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js", "dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css")
     )
     return temporary
 

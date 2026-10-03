@@ -182,6 +182,7 @@ function grid_identity(run) {
 let grid_palette_source = null;
 let grid_palette = new Map();
 let grid_hues = null;
+let grid_tones = load_json("thog2_grid_tones_v1", {}); // <<< THOG persist each Grid's chosen centre independently of manual run overrides
 function colour_for_run(run_id) {
   if (grid_palette_source !== app.runs) {
     grid_palette_source = app.runs;
@@ -212,10 +213,14 @@ function colour_for_run(run_id) {
         }
         grid_hues[tag]=best;
       }
-      const hue = grid_hues[tag];
+      const tone = grid_tones[tag];
+      const hue = Number.isFinite(tone?.hue) ? tone.hue : grid_hues[tag];
+      const saturation = Number.isFinite(tone?.saturation) ? tone.saturation : 56;
+      const centre = Number.isFinite(tone?.lightness) ? tone.lightness : 54;
+      const span = tone ? Math.max(0,Math.min(18,centre,100-centre)) : 18;
       members.forEach((run,index)=>{
-        const lightness = members.length < 2 ? 53 : 72-index*36/(members.length-1);
-        grid_palette.set(run_identifier(run),`hsl(${hue} 56% ${lightness.toFixed(1)}%)`);
+        const lightness = members.length < 2 ? centre : centre+span-index*2*span/(members.length-1);
+        grid_palette.set(run_identifier(run),`hsl(${hue} ${saturation.toFixed(1)}% ${lightness.toFixed(1)}%)`);
       });
     }
     try { localStorage.setItem("thog2_grid_hues",JSON.stringify(grid_hues)); } catch (_) { /* In-memory colours still work. */ }
@@ -1714,7 +1719,18 @@ function select_run(run_id, options = {}) {
 
 function resize_plot_in_card(card) {
   const mount = card.querySelector(".plot-mount");
-  if (mount?.dataset.plotReady === "true") Plotly.Plots.resize(mount);
+  // vvv THOG coalesce resize bursts and skip mounts whose geometry has not changed
+  if (!mount || mount.dataset.plotReady !== "true" || mount._instra_resize_pending) return;
+  mount._instra_resize_pending = true;
+  requestAnimationFrame(() => {
+    mount._instra_resize_pending = false;
+    if (mount.offsetParent === null || mount.dataset.plotReady !== "true") return;
+    const size = `${mount.clientWidth}:${mount.clientHeight}`;
+    if (size === mount._instra_last_resize) return;
+    mount._instra_last_resize = size;
+    Promise.resolve(Plotly.Plots.resize(mount)).catch(() => {});
+  });
+  // ^^^ THOG
 }
 
 function resize_visible_plots() {

@@ -48,9 +48,7 @@ function processing_resize_ready_card(card) {
   if (!card || card.offsetParent === null) return;
   const mount = card.querySelector(".plot-mount");
   if (!mount || mount.dataset.plotReady !== "true") return;
-  requestAnimationFrame(() => {
-    if (card.offsetParent !== null && mount.dataset.plotReady === "true") Plotly.Plots.resize(mount);
-  });
+  resize_plot_in_card(card); // <<< THOG all resize owners share the same geometry guard and animation-frame queue
 }
 
 function processing_install_resize_observers() {

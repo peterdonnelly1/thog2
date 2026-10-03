@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import fcntl
 import json
 import os
+import re                                                                                                                                                    # <<< THOG recognize an existing Copy label before allocating the next immutable Recipe
 from pathlib import Path
 import threading
 import time
@@ -205,8 +206,27 @@ class RunnerService:
             state = _read()
             if recipe_id is not None and recipe_id not in state["recipes"]:
                 raise KeyError("Unknown Recipe")
-            recipe_id = recipe_id or uuid.uuid4().hex
-            created_at = state["recipes"].get(recipe_id, {}).get("created_at", now())
+            # vvv THOG saved Recipes are immutable; an edited same-name save creates a uniquely named copy
+            recipe = json.loads(json.dumps(recipe))
+            previous = state["recipes"].get(recipe_id)
+            if previous and previous["recipe"] == recipe:
+                return previous
+            labels = {item["recipe"]["label"] for item in state["recipes"].values()}
+            if recipe["label"] in labels:
+                base_label = recipe["label"]
+                match = re.fullmatch(r"Copy \(\d+\) of (.+)", base_label)
+                base_label = match[1] if match else base_label
+                number = 1
+                while True:
+                    prefix = f"Copy ({number}) of "
+                    candidate = prefix + base_label[:120 - len(prefix)]
+                    if candidate not in labels:
+                        break
+                    number += 1
+                recipe["label"] = candidate
+            recipe_id = uuid.uuid4().hex
+            created_at = now()
+            # ^^^ THOG
             state["recipes"][recipe_id] = {"recipe_id": recipe_id, "recipe": recipe,
                                             "created_at": created_at, "updated_at": now(), "state": "ready"}
             _write(state)

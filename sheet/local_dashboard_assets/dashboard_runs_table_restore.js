@@ -113,7 +113,7 @@ window.addEventListener("load", () => {
       },
       optimizer: {label: "OPT", title: "optimizer (momentum suffix when used)", numeric: false, value: optimizer_text},
       gb: {
-        label: "GB Pk", title: "peak process GPU memory allocated so far (GiB)", numeric: true,
+        label: "GB pk", title: "peak process GPU memory allocated so far (GiB)", numeric: true,
         value: run => configured_value(run, "gpu_peak_memory_allocated_gb"),
       },
       layers: {label: "L", title: "layers", numeric: true, value: run => configured_value(run, "n_layer")},
@@ -172,11 +172,11 @@ window.addEventListener("load", () => {
     });
 
     const order = Object.freeze([
-      "select", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
+      "menu", "select", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
       "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
-      "updated", "menu",
+      "updated",
     ]);
     const widths = Object.freeze({
       select:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
@@ -216,7 +216,10 @@ window.addEventListener("load", () => {
         "probe_start", "probe_end", "curve_start", "curve_end",
         "steps", "duration", "loss", "updated", "menu",
       ];
+      // vvv THOG never retag already reordered cells by their current position
+      if ([...row.children].some(cell => cell.dataset.instraColumnKey)) return;
       [...row.children].slice(0, keys.length).forEach((cell, index) => tag(cell, keys[index]));
+      // ^^^ THOG
     };
 
     function ensure_generated_headers() {

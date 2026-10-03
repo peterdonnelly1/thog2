@@ -30,7 +30,7 @@ assert.equal(hooks.invalid_field_value("--premat","enabled, enabled",catalogue["
 const dashboard=fs.readFileSync("sheet/local_dashboard_assets/dashboard.js","utf8");
 const storage=new Map();
 const runs=Array.from({length:12},(_,index)=>({dashboard_run_id:`run_${index}`,runner_grid_tag:`G-${String(index).padStart(5,"0")}`}));
-const context={app:{runs,colours:{}},default_palette:[],run_identifier:run=>run.dashboard_run_id,
+const context={load_json:()=>({}),app:{runs,colours:{}},default_palette:[],run_identifier:run=>run.dashboard_run_id,
   localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}};
 vm.createContext(context);
 vm.runInContext(dashboard.slice(dashboard.indexOf("function hash_text("),dashboard.indexOf("function is_visible(")),context);

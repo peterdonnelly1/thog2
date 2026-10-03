@@ -118,9 +118,9 @@ async function main() {
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
-  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
-  assert.equal(summaries[0].children[0].children[7].textContent,"3.142");
-  assert.equal(summaries[0].children[0].children[8].textContent,"2.718");
+  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
+  assert.equal(summaries[0].children[0].children[8].textContent,"3.142");
+  assert.equal(summaries[0].children[0].children[9].textContent,"2.718");
   switch_tab("log");
   await new Promise(resolve => setImmediate(resolve));
   const log_viewer = roots.runner_detail.querySelector(".runner-event-log");

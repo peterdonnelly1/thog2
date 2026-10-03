@@ -742,7 +742,13 @@ class LocalChartReader:
         self.path = Path(path)
 
     def _connection(self) -> sqlite3.Connection:
-        return _open_database(self.path, readonly=True)
+        # vvv THOG a busy acquired copy must not occupy chart HTTP workers for the writer's 30-second deadline
+        # return _open_database(self.path, readonly=True)
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.5)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=500")
+        return connection
+        # ^^^ THOG
 
     def metadata(self) -> Dict[str, str]:
         connection = self._connection()

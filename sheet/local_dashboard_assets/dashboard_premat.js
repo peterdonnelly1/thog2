@@ -1353,7 +1353,14 @@ function premat_sync_tab(premat_selected = null) {
   if (premat_selected === null) {
     premat_selected = Boolean(document.querySelector?.('[data-detail-tab="premat"].active'));
   }
-  by_id("premat_chart_group").hidden = !premat_selected;
+  const enabled = premat_run_enabled();
+  const tab_button = document.querySelector('[data-detail-tab="premat"]');
+  if (tab_button) tab_button.hidden = !enabled;
+  if (!enabled && premat_selected) {
+    if (typeof local_set_detail_tab === "function") local_set_detail_tab("charts");
+    premat_selected = false;
+  }
+  by_id("premat_chart_group").hidden = !premat_selected || !enabled;
   document.body.classList.toggle("premat-tab-active", Boolean(premat_selected));
   document.querySelectorAll('[data-chart-group]:not(#premat_chart_group):not(#processing_chart_group)').forEach(group => {
     group.hidden = Boolean(premat_selected);
@@ -1370,7 +1377,29 @@ function premat_sync_tab(premat_selected = null) {
 
 window.premat_apply_detail_tab = premat_sync_tab;
 
+// vvv THOG a hidden or disabled Premat view must never accumulate overlapping HTTP requests
+function premat_run_enabled() {
+  const run = typeof current_run === "function" ? current_run() : null;
+  const value = run?.configuration?.premat ?? run?.premat;
+  return value===true || value===1 || ["enabled","enable","true"].includes(String(value || "").toLowerCase());
+}
 async function refresh_premat() {
+  if (premat_view.run_id !== app.current_run_id) {
+    premat_view.request_controller?.abort();
+    premat_view.loading = false;
+    premat_view.run_id = app.current_run_id;
+    premat_reset();
+    premat_sync_tab();
+  }
+  if (document.visibilityState === "hidden" || !premat_run_enabled() ||
+      !document.querySelector('[data-detail-tab="premat"].active') || premat_view.loading) return;
+  const controller = new AbortController();
+  premat_view.request_controller = controller;
+  premat_view.loading = true;
+  try { return await refresh_premat_payload(controller.signal); }
+  finally { if (premat_view.request_controller === controller) { premat_view.loading = false; premat_view.request_controller = null; } }
+}
+async function refresh_premat_payload(signal) {
   const run_id = app.current_run_id;
   if (!run_id) {
     premat_view.run_id = null;
@@ -1386,7 +1415,7 @@ async function refresh_premat() {
   const serial = ++premat_view.request_serial;
   try {
     const after = premat_view.latest_received_update;
-    const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}&after=${after}`);
+    const payload = await fetch_json(`/api/premat?run=${encodeURIComponent(run_id)}&after=${after}`, {signal});
     if (serial !== premat_view.request_serial || run_id !== app.current_run_id) return;
     if (payload?.latest) {
       premat_receive_snapshot(payload.latest);
@@ -1400,6 +1429,7 @@ async function refresh_premat() {
 }
 
 window.premat_refresh = refresh_premat;
+// ^^^ THOG
 
 window.addEventListener("DOMContentLoaded", () => {
   const duration = by_id("premat_state_duration");
@@ -1470,4 +1500,3 @@ if (typeof module !== "undefined" && module.exports) {
   };
 }
 // ^^^ THOG
-

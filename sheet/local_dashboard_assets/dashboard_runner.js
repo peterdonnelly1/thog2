@@ -352,10 +352,16 @@
         const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
         const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
         const saved=await action("save",{recipe_id,recipe:current_recipe()});
-        draft_id=saved.recipe_id;dirty=false;chosen=draft_id;render();
+        draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;render();
       }
       catch (_) { /* The error is displayed above. */ }
     });
+    // vvv THOG reset only the unsaved editor draft, using the user's saved field defaults
+    button(controls,"Reset",() => {
+      draft=null;draft_id=null;chosen=null;dirty=false;required_notice_seen=false;
+      clear_message();render();
+    }).title="Reset unsaved configuration to defaults";
+    // ^^^ THOG
     button(controls,"Preview",async () => {
       if (!check_recipe()) return;
       try {
@@ -385,7 +391,7 @@
           const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
           const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
           const saved=await action("save",{recipe_id,recipe:current_recipe()});
-          draft_id=saved.recipe_id;dirty=false;
+          draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;
         }
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
         last_history_grid=launched.grid_id;chosen=launched.grid_id;manual_grid_selection=true;tab="progress";render();
@@ -472,11 +478,15 @@
   function wall_time(value) {
     if (!value) return "—";
     const date = new Date(value);
-    return Number.isFinite(date.getTime()) ? date.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "—";
+    // vvv THOG local YY-MM-DD HH:mm:ss is explicit and independent of locale AM/PM preferences
+    if (!Number.isFinite(date.getTime())) return "—";
+    const two = number => String(number).padStart(2,"0");
+    return `${two(date.getFullYear()%100)}-${two(date.getMonth()+1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+    // ^^^ THOG
   }
   function run_headings(parent) {
     const headings=add(parent,"div",undefined,"runner-run-headings");
-    for(const name of ["Run ID","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);                           // <<< THOG expose vertically aligned per-run wall-clock boundaries in Progress and History
+    for(const name of ["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);                           // <<< THOG expose vertically aligned per-run wall-clock boundaries in Progress and History
   }
   const loss_text = value => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(3);
   function render_run(parent,run,preview=false) {
@@ -486,6 +496,7 @@
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
+    add(summary,"span",run.parameters?.["--geometry-preset"] || run.parameters?.["--model-type"] || "—"); // <<< THOG show each resolved run's geometry
     const run_start = run.started_at || run.attempts?.[0]?.started_at;
     const run_end = ["completed","failed","cancelled"].includes(run.state) ? run.finished_at || run.attempts?.at(-1)?.finished_at : null;
     add(summary,"span",preview?"—":wall_time(run_start)).title = preview ? "" : (run_start ? new Date(run_start).toLocaleString() : "Start time unavailable");                                                               // <<< THOG show durable run-level start wall time

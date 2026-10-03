@@ -38,7 +38,7 @@ const address=process.env.INSTRA_TEST_URL||"http://127.0.0.1:8765";
     await page.locator("#runs_nav").click();
     await row("fixture_00").locator(".run-menu-button").click();
     assert.equal(await page.locator("#delete_grid_runs").isVisible(),true);
-    const header=page.locator(".runs-table th").filter({hasText:/^GB Pk$/});
+    const header=page.locator(".runs-table th").filter({hasText:/^GB pk$/});
     const dimensions=await header.evaluate(node=>{
       const range=document.createRange();range.selectNodeContents(node);
       return {text:range.getBoundingClientRect().width,cell:node.clientWidth,padding:
@@ -69,7 +69,7 @@ const address=process.env.INSTRA_TEST_URL||"http://127.0.0.1:8765";
     assert.ok((await page.locator(".hoverlayer .hovertext").allTextContents()).some(text=>text.includes(run_name)),run_name);
     await page.screenshot({path:"/tmp/instra-oct01-host-grid-hover.png"});
     assert.deepEqual(errors,[]);
-    console.log("PASS chromium host-isolated eyes/local deletion menu, GB Pk width, dense-only outlines, Ready and rendered run-name hover");
+    console.log("PASS chromium host-isolated eyes/local deletion menu, GB pk width, dense-only outlines, Ready and rendered run-name hover");
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
 // ^^^ THOG

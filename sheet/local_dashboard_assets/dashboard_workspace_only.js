@@ -220,8 +220,13 @@ window.addEventListener("load", () => {
         entries[index]={run,payload};
         if(on_progress && !signal?.aborted && Date.now()-last_progress>=300) {
           last_progress=Date.now();
+          // vvv THOG one provisional first-result render; render the final merged set once all sources resolve
           const snapshot=merge_metric_entries(group_name,entries);
-          progress=progress.then(()=>!signal?.aborted && on_progress(snapshot));
+          if (last_progress !== Infinity) {
+            last_progress=Infinity;
+            progress=progress.then(()=>!signal?.aborted && on_progress(snapshot));
+          }
+          // ^^^ THOG
         }
       },signal);
       await progress;

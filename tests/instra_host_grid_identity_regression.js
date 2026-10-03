@@ -9,7 +9,7 @@ const runs=[
   {dashboard_run_id:"d1",runner_grid_tag:"G-00021",thog_host_id:"thog_host.dreedle"},
   {dashboard_run_id:"d2",runner_grid_tag:"G-00021",thog_host_id:"thog_host.dreedle"},
 ];
-const stored=new Map(),context={app:{runs,colours:{}},run_identifier:run=>run.dashboard_run_id,default_palette:["#abc"],
+const stored=new Map(),context={load_json:()=>({}),app:{runs,colours:{}},run_identifier:run=>run.dashboard_run_id,default_palette:["#abc"],
   localStorage:{getItem:key=>stored.get(key),setItem:(key,value)=>stored.set(key,value)}};
 vm.createContext(context);vm.runInContext(source.slice(start,end),context);
 assert.notEqual(context.grid_identity(runs[0]),context.grid_identity(runs[2]));

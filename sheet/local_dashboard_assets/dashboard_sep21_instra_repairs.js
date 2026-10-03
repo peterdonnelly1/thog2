@@ -36,7 +36,7 @@ window.addEventListener("load", () => {
       .runs-table tr.current-run .run-link, .runs-table tr.current-run td { color:#27313b; }
       .runs-table tr.front-curve-run { box-shadow:inset 4px 0 0 var(--run-colour); background:rgba(59,78,96,.09); }
       .runs-table tr.front-curve-run .run-link { font-weight:700; }
-      .run-menu-delete-separator { margin-top:7px !important; margin-bottom:7px !important; }
+      .run-menu-delete-separator { height:1px; margin:8px 0 !important; border:0; background:#e0e3e7; }
       .deletion-pending-status { margin-top:8px; font-size:11px; color:#59636d; }
       .deletion-pending-status p { margin:3px 0; }
       /* ^^^ THOG */
@@ -222,7 +222,7 @@ window.addEventListener("load", () => {
         : 0;
       return JSON.stringify({
         front_run_id:String(window.instra_front_run_id || ""),                                                                                               // <<< THOG z-order changes invalidate the retained table render signature
-        active_tick,
+        active_tick, grid_tones,
         current:String(app.current_run_id || ""), workspace:Boolean(app.workspace_mode), page:app.current_page,
         page_size:app.page_size, search:by_id("run_search")?.value || "",
         filter:by_id("state_filter")?.value || "all", sort:by_id("run_sort")?.value || "created",

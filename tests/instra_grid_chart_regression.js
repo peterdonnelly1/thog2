@@ -13,7 +13,7 @@ const runs = ["G-00001", "G-00002", "G-00003"].flatMap((tag, group) =>
     runner_grid_tag:tag, artifact_name:`${tag}_run_${index}`,
   })));
 const take = (source, first, last) => source.slice(source.indexOf(first), source.indexOf(last, source.indexOf(first)));
-const context = {app:{runs, colours:{}, visibility:{}},default_palette:["#aaa"],
+const context = {load_json:()=>({}),app:{runs, colours:{}, visibility:{}},default_palette:["#aaa"],
   run_identifier:run=>run.dashboard_run_id};
 vm.createContext(context);
 vm.runInContext(take(dashboard,"function hash_text(","function is_visible("),context);

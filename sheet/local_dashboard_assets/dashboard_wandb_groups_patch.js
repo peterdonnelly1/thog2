@@ -17,6 +17,7 @@ window.addEventListener("load", () => {
     const front_by_chart = new Map();
     const pinned_bold_by_chart = new Map();                                                                                                                  // <<< THOG retain explicit !+ curve emphasis independently of z-order
     let pending_navigation = null;
+    const group_loads = new Map(); // <<< THOG one owner for a given view/group refresh, including startup's early Train request
 
     const workspace_api = () => {
       const candidate = window.__instra_workspace;
@@ -283,7 +284,7 @@ window.addEventListener("load", () => {
       figure.data.sort((left, right) => (rank.get(left.meta?.instra_workspace_run_id) ?? -1) - (rank.get(right.meta?.instra_workspace_run_id) ?? -1));
       for (const trace of figure.data) {
         const run_id = trace.meta?.instra_workspace_run_id;
-        trace.line = {...(trace.line || {}), width:(run_id === front || pinned.has(run_id)) ? 4.6 : 2.4};
+        trace.line = {...(trace.line || {}), width:(run_id === front || pinned.has(run_id)) ? 3.5 : 2.4};
       }
       if (!window.instra_front_chart || window.instra_front_chart === chart_name) {
         const changed = window.instra_front_run_id !== front;
@@ -397,7 +398,7 @@ window.addEventListener("load", () => {
 
     const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
-        type: "scatter",
+        type: series.x?.length > 1500 ? "scattergl" : "scatter", // <<< THOG large histories use GPU-backed lines instead of thousands of SVG nodes
         mode: series.x?.length === 1 ? "lines+markers" : "lines",
         meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id,
           instra_run_name: (app.runs || []).find(run=>run_identifier(run)===(series.instra_workspace_run_id || app.current_run_id))?.artifact_name ||
@@ -523,6 +524,20 @@ window.addEventListener("load", () => {
         if (chart.id === "train/loss" && grid.firstElementChild !== card) grid.prepend(card);
         render_jobs.push(() => requested_view===current_view_key() ? render_metric_chart(card, chart) : Promise.resolve());
       }
+      if (app.maximized_chart) {
+        const selected = grid.querySelector(`.chart-card[data-chart="${CSS.escape(app.maximized_chart)}"]`);
+        if (selected) render_jobs.splice(0,render_jobs.length, ...charts.filter(chart=>chart.id===selected.dataset.metricChartId)
+          .map(chart=>()=>render_metric_chart(selected,chart)));
+        else render_jobs.length=0;
+        // Retain raw figures for deferred cards and exact curve exports without materialising hidden plots.
+        for (const chart of charts) {
+          const card = [...grid.querySelectorAll(".local-metric-card")].find(item=>item.dataset.metricChartId===chart.id);
+          if (card && card!==selected) {
+            app.dynamic_chart_figures[card.dataset.chart]=metric_figure(card,chart);
+            card.dataset.instraDeferredMetric="true";
+          }
+        }
+      }
       // Drawing a dozen Memory or System plots serially adds all individual
       // Plotly startup times. Keep a small bound to preserve UI responsiveness.
       for (let start = 0; start < render_jobs.length; start += 3) {
@@ -549,7 +564,15 @@ window.addEventListener("load", () => {
       requestAnimationFrame(resize_visible_plots);
     };
 
-    async function refresh_group_data(group_name, force = false) {
+    // vvv THOG share an in-flight group request; obsolete views cannot queue repeated Plotly work
+    function refresh_group_data(group_name, force = false) {
+      const key = `${current_view_key()}\0${group_name}`;
+      if (group_loads.has(key)) return group_loads.get(key);
+      const task = load_group_data(group_name, force).finally(() => group_loads.delete(key));
+      group_loads.set(key,task);
+      return task;
+    }
+    async function load_group_data(group_name, force = false) {
       if (!app.current_run_id) return;
       const section = group_section(group_name);
       if (!section || section.classList.contains("collapsed")) return;
@@ -558,8 +581,9 @@ window.addEventListener("load", () => {
       const requested_view = current_view_key();
       try {
         const workspace = workspace_api();
+        const show_early_loss = group_name === "train" && !section.querySelector('.local-metric-card .plot-mount')?.data?.length;
         const payload = workspace
-          ? await workspace.fetch_metric_group(group_name,group_name==="train" ? partial=>render_group_payload(partial,requested_view) : null)
+          ? await workspace.fetch_metric_group(group_name,show_early_loss ? partial=>render_group_payload(partial,requested_view) : null)
           : await fetch_json(
               `/api/chart-group?run=${encodeURIComponent(app.current_run_id)}`
               + `&group=${encodeURIComponent(group_name)}`

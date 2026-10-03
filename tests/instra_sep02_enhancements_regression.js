@@ -70,7 +70,7 @@ const chart = {id: "loss", title: "Loss", series: ["a", "b", "c"].map(id => ({in
   await click(train_button);
   let data = cards[0].querySelector(".plot-mount").figure.data;
   assert.equal(data.at(-1).meta.instra_workspace_run_id,"b");
-  assert.ok(data.filter(trace=>["a","b"].includes(trace.meta.instra_workspace_run_id)).every(trace=>trace.line.width===4.6));
+  assert.ok(data.filter(trace=>["a","b"].includes(trace.meta.instra_workspace_run_id)).every(trace=>trace.line.width===3.5));
   await click(train_controls[3]);
   await click(train_controls[1]);
   await click(train_button);

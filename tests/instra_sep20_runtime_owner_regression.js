@@ -25,6 +25,8 @@ assert.deepEqual(active_assets, [
   "dashboard_group_stability_patch.js",
   "dashboard_sep20_integrated_repairs.js",
   "dashboard_sep21_instra_repairs.js",
+  "dashboard_oct03_controls.js",
+  "dashboard_run_logs.js",
 ]);
 
 for (const obsolete_owner of [

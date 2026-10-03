@@ -210,6 +210,7 @@ class _WandbRunScanner:
         self.path = Path(path)
         self.gpu_index = gpu_index                                                                                                                           # <<< THOG suppress device-wide curves from GPUs not assigned to this run
         self.lock = threading.Lock()
+        self.retired = False                                                                                                                                # <<< THOG evicted scanners cannot reopen files or continue background work
         self.store: Any = None
         self.record_class: Any = None
         self.good_offset = 0
@@ -482,6 +483,8 @@ class _WandbRunScanner:
 
     def refresh(self) -> None:
         with self.lock:
+            if self.retired:
+                return
             try:
                 if self.store is None:
                     self._open()
@@ -513,6 +516,15 @@ class _WandbRunScanner:
             except Exception as error:
                 self.error = str(error)
                 self.catching_up = False
+
+    def close(self) -> None:
+        """Retire background work and release the W&B file, retaining in-flight payload data."""
+        with self.lock:
+            self.retired = True
+            self.catching_up = False
+            if self.store is not None and getattr(self.store, "_fp", None) is not None:
+                self.store._fp.close()
+            self.store = None
 
     def group_summaries(self) -> list[dict[str, Any]]:
         self.refresh()
@@ -578,14 +590,54 @@ class _ScannerCatalog:
         self.lock = threading.Lock()
         self.paths: Dict[str, Optional[Path]] = {}
         self.scanners: Dict[Path, _WandbRunScanner] = {}
+        self.discovery = {}                                                                                                                                # <<< THOG immutable chart discovery must not churn the sixteen-reader history cache
+
+    def _discovery_key(self, state, live_revision):
+        status = state.status()
+        run_id = str(status.get("wandb_run_id") or "").strip()
+        path = self._find_path(run_id, status) if run_id else None
+        if path is None:
+            return None
+        from sheet.local_dashboard_responsiveness import file_signature
+        database_path = state.database_path
+        return (str(database_path), path, file_signature(path), file_signature(database_path),
+                file_signature(Path(str(database_path) + "-wal")), live_revision)
+
+    def cached_discovery(self, state, live_revision):
+        key = self._discovery_key(state, live_revision)
+        with self.lock:
+            cached = self.discovery.get(key[0]) if key else None
+            if cached and cached[0] == key:
+                return dict(cached[1]), [dict(group) for group in cached[2]]
+        return None
+
+    def remember_discovery(self, state, live_revision, common, groups, expected_key=None):
+        if common["catching_up"] or common["error"]:
+            return
+        key = self._discovery_key(state, live_revision)
+        if key is None or expected_key is not None and key != expected_key:
+            return
+        with self.lock:
+            self.discovery.pop(key[0], None)
+            self.discovery[key[0]] = (key, dict(common), [dict(group) for group in groups])
+            while len(self.discovery) > 256:
+                self.discovery.pop(next(iter(self.discovery)))
 
     # vvv THOG bound retained per-run scanners and invalidate deleted acquisitions without retaining old chart values
     def forget_runs(self, run_ids):
+        retired = []
         with self.lock:
             for run_id in run_ids:
                 path = self.paths.pop(run_id, None)
                 if path is not None:
-                    self.scanners.pop(path, None)
+                    for key, cached in list(self.discovery.items()):
+                        if cached[0][1] == path:
+                            self.discovery.pop(key, None)
+                    scanner = self.scanners.pop(path, None)
+                    if scanner is not None:
+                        retired.append(scanner)
+        for scanner in retired:
+            scanner.close()
     # ^^^ THOG
 
     def _find_path(self, run_id: str, status: Optional[dict[str, Any]] = None) -> Optional[Path]:
@@ -644,6 +696,7 @@ class _ScannerCatalog:
         path = self._find_path(run_id, status)
         if path is None:
             return None
+        retired = []
         with self.lock:
             scanner = self.scanners.pop(path, None)                                                                                                           # <<< THOG reinsert accessed scanners to maintain a bounded least-recently-used cache
             if scanner is None:
@@ -673,8 +726,10 @@ class _ScannerCatalog:
                 # ^^^ THOG
             self.scanners[path] = scanner
             while len(self.scanners) > 16:
-                self.scanners.pop(next(iter(self.scanners)))
-            return scanner
+                retired.append(self.scanners.pop(next(iter(self.scanners))))
+        for previous in retired:
+            previous.close()
+        return scanner
 
 
 def _plastic_charts_enabled(configuration: Mapping[str, Any]) -> bool:
@@ -725,6 +780,14 @@ def install(dashboard_module: Any) -> None:
                     while len(live_readers) > 64:
                         live_readers.pop(next(iter(live_readers)))
                 live.refresh(catalog, state, dashboard_module)
+                discovery_key = None
+                if parsed.path == "/api/chart-groups" and hasattr(scanner_catalog, "cached_discovery"):
+                    cached = scanner_catalog.cached_discovery(state, live.revision)
+                    if cached is not None:
+                        common, groups = cached
+                        self._send_json({**common, "groups": groups})
+                        return
+                    discovery_key = scanner_catalog._discovery_key(state, live.revision)
                 scanner = scanner_catalog.scanner_for(state)
                 plastic_enabled = _plastic_charts_enabled(state.status().get("configuration") or {})
                 common = {
@@ -741,7 +804,11 @@ def install(dashboard_module: Any) -> None:
                     groups = scanner.group_summaries() if scanner else []
                     if not plastic_enabled:
                         groups = [item for item in groups if item["name"] != "plastic"]
-                    self._send_json({**common, "groups": live.summaries(groups, scanner)})
+                    groups = live.summaries(groups, scanner)
+                    if scanner is not None and hasattr(scanner_catalog, "remember_discovery"):
+                        common.update(record_count=scanner.record_count, catching_up=scanner.catching_up, error=scanner.error)
+                        scanner_catalog.remember_discovery(state, live.revision, common, groups, discovery_key)
+                    self._send_json({**common, "groups": groups})
                     return
                 group = query.get("group", [""])[0]
                 if not group:
