@@ -4,7 +4,8 @@ const assert=require("node:assert/strict"),fs=require("node:fs");
 const {chromium,firefox}=require("playwright");
 const address=process.env.INSTRA_TEST_URL||"http://127.0.0.1:8765";
 async function check(type) {
-  const browser=await type.launch({headless:true,...(type===chromium && process.env.INSTRA_CHROMIUM_PATH ?
+  const browser=await type.launch({headless:true,timeout:30000,...(type===firefox && process.env.INSTRA_FIREFOX_TEST_NO_SANDBOX ?
+    {env:{...process.env,MOZ_DISABLE_CONTENT_SANDBOX:"1"}} : {}),...(type===chromium && process.env.INSTRA_CHROMIUM_PATH ?
     {executablePath:process.env.INSTRA_CHROMIUM_PATH,args:["--no-sandbox","--disable-dev-shm-usage","--no-zygote","--use-gl=angle","--use-angle=swiftshader","--enable-unsafe-swiftshader"]}: {})});
   const context=await browser.newContext({viewport:{width:1600,height:1100},acceptDownloads:true,timezoneId:"UTC"});
   const page=await context.newPage(),errors=[];
@@ -107,8 +108,8 @@ async function check(type) {
   await page.evaluate(()=>{for(const run of app.runs)app.visibility[run_identifier(run)]=["fixture_00","fixture_01"].includes(run_identifier(run));save_json("thog2_local_run_visibility",app.visibility);render_runs();});
   await page.locator("#workspace_nav").click();
   await page.waitForFunction(()=>document.querySelector('[data-metric-chart-id="train/loss"] .plot-mount')?.data?.length===2);
-  await page.waitForFunction(()=>document.getElementById("training_throughput_plot")?.data?.length===2);
   await page.evaluate(()=>restore_maximized_chart());await page.waitForTimeout(250);
+  await page.waitForFunction(()=>document.getElementById("training_throughput_plot")?.data?.length===2);
   const started=Date.now();await page.locator('[data-metric-chart-id="train/loss"] .maximize-button').click();
   await page.waitForFunction(()=>document.querySelector('[data-metric-chart-id="train/loss"]').classList.contains("maximized"));
   await page.waitForTimeout(250);const latency=Date.now()-started;assert.ok(latency<2000,`two-curve maximize took ${latency}ms`);
@@ -135,15 +136,20 @@ async function check(type) {
   console.log("PASS",type.name(),`two-curve maximize ${latency}ms, visible-curve JSON/BIFF8 downloads and tokens throughput`);
 
   // Use the live Plotly Processing renderer to check viewport fit and zoom reset across navigation.
-  await page.locator("#runs_nav").click();await page.evaluate(()=>{
+  await page.locator("#runs_nav").click();await page.evaluate(async()=>{
     processing_view.available=true;processing_view.trace_available=true;processing_view.charts_tab_visible=true;processing_sync_visibility();
-    processing_plot("processing_timeline_plot",[{type:"scatter",x:[0,10,20,30],y:[1,2,3,4]}],{xaxis:{range:[0,30]},yaxis:{autorange:true}});
+    // Rendering now waits for visibility; maximise this synthetic capture before checking its live axes.
+    toggle_maximized_chart("processing_timeline");
+    await processing_plot("processing_timeline_plot",[{type:"scatter",x:[0,10,20,30],y:[1,2,3,4]}],{xaxis:{range:[0,30]},yaxis:{autorange:true}});
   });await page.waitForTimeout(400);
   await page.evaluate(async()=>{const mount=document.getElementById("processing_timeline_plot");mount._processing_layer_zoom_range=[5,10];mount._processing_layer_zoom_run_id=app.current_run_id;await Plotly.relayout(mount,{"xaxis.range":[5,10],"xaxis.autorange":false});});
   await page.locator('[data-detail-tab="overview"]').click();
   assert.equal(await page.evaluate(()=>document.getElementById("processing_timeline_plot")._processing_layer_zoom_range),null);
   await page.locator('[data-detail-tab="charts"]').click();
-  await page.evaluate(async()=>{await processing_plot("processing_timeline_plot",[{type:"scatter",x:[0,10,20,30],y:[1,2,3,4]}],{xaxis:{range:[0,30]},yaxis:{autorange:true}});});
+  await page.evaluate(async()=>{
+    processing_view.available=true;processing_view.trace_available=true;processing_view.charts_tab_visible=true;processing_sync_visibility();
+    await processing_plot("processing_timeline_plot",[{type:"scatter",x:[0,10,20,30],y:[1,2,3,4]}],{xaxis:{range:[0,30]},yaxis:{autorange:true}});
+  });
   assert.deepEqual(await page.evaluate(()=>document.getElementById("processing_timeline_plot")._fullLayout.xaxis.range),[0,30]);
   await page.evaluate(()=>{processing_view.available=true;processing_view.trace_available=true;processing_view.charts_tab_visible=true;processing_sync_visibility();by_id("processing_contention_card").hidden=false;toggle_maximized_chart("processing_contention");});
   await page.waitForTimeout(350);

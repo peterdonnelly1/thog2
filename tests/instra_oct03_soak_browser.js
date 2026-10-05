@@ -12,6 +12,8 @@ const duration=Number(process.env.INSTRA_SOAK_SECONDS||180);
     await page.addInitScript(()=>{
       localStorage.setItem("thog2_local_run_visibility",JSON.stringify(Object.fromEntries(Array.from({length:12},(_,i)=>[`fixture_${String(i).padStart(2,"0")}`,true]))));
       window.soak_stats={draws:{},resizes:0,max_pause_ms:0,previous:performance.now(),pauses:[]};
+      soak_stats.long_tasks=[];
+      new PerformanceObserver(list=>{for(const task of list.getEntries())if(task.duration>500)soak_stats.long_tasks.push({start:task.startTime,duration:task.duration});}).observe({entryTypes:["longtask"]});
       setInterval(()=>{const now=performance.now(),gap=now-soak_stats.previous;soak_stats.max_pause_ms=Math.max(soak_stats.max_pause_ms,gap);soak_stats.previous=now;if(gap>1000)soak_stats.pauses.push({time:Date.now(),gap,visibility:document.visibilityState});},100);
       let value;Object.defineProperty(window,"Plotly",{configurable:true,get:()=>value,set:next=>{
         value=next;
@@ -51,7 +53,7 @@ const duration=Number(process.env.INSTRA_SOAK_SECONDS||180);
     const stats=await page.evaluate(()=>({...soak_stats,curves:document.querySelector('[data-metric-chart-id="train/loss"] .plot-mount').data.length}));
     await client.send("HeapProfiler.collectGarbage");const retained=(await client.send("Runtime.getHeapUsage")).usedSize;
     clearInterval(host_clock);
-    console.log("SOAK CLOCKS",JSON.stringify({browser:stats.pauses,host:host_pauses}));
+    console.log("SOAK CLOCKS",JSON.stringify({browser:stats.pauses,host:host_pauses,long_tasks:stats.long_tasks}));
     assert.equal(stats.curves,12);assert.equal(stats.draws["train/accuracy"]||0,initial_hidden,"hidden chart was repeatedly rendered");
     assert.ok(stats.draws["train/loss"]>30,JSON.stringify(stats));
     assert.ok(stats.max_pause_ms<5000,`main-thread pause ${stats.max_pause_ms}ms`);

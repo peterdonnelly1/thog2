@@ -59,6 +59,7 @@ let fetches = 0, finish;
 const catalogue = {runs:[], waiting:true, requested_run:null, recommended_run_id:null, root:"/logs"};
 const fields = {watch_status:{}, topbar_state:{}};
 const poll = {app:{runs:[], catalog_refresh_in_flight:false, current_run_id:null},
+  document:{visibilityState:"visible"},
   fetch_json:() => { fetches++; return new Promise(resolve => { finish = resolve; }); },
   by_id:id => fields[id], render_runs() {}, render_run_heading() {}, render_empty_state() {},
   AbortController, setTimeout:() => 1, clearTimeout() {}};
@@ -73,5 +74,8 @@ vm.runInNewContext(between(base, "async function refresh_catalog()", "function c
   assert.equal(fetches, 2, "poller did not resume after a completed request");
   finish(catalogue);
   await next;
+  poll.document.visibilityState="hidden";
+  await poll.refresh_catalog();
+  assert.equal(fetches,2,"background tab continued polling");
   console.log("PASS ordinal heading sorting and bounded catalogue polling");
 })().catch(error => { console.error(error); process.exitCode = 1; });

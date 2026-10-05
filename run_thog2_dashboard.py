@@ -41,6 +41,8 @@ _local_dashboard_notes_patch.install(_dashboard)                                
 # vvv THOG cache unchanged run summaries after the existing status enrichment owners are installed
 from sheet.local_dashboard_responsiveness import install as _install_dashboard_responsiveness
 _install_dashboard_responsiveness(_dashboard)
+from sheet.local_dashboard_demand import install as _install_dashboard_demand
+_install_dashboard_demand(_dashboard)
 # ^^^ THOG
 
 from sheet.thogopt_dashboard import install as _install_thogopt_dashboard
@@ -136,6 +138,7 @@ _ACTIVE_EXTRA_ASSET_NAMES = (
     "dashboard_sep21_instra_repairs.js",
     "dashboard_oct03_controls.js",
     "dashboard_run_logs.js",
+    "dashboard_demand_runtime.js",
 )
 
 
@@ -171,7 +174,7 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # be copied as well as named in the HTML/allow-list; otherwise every script
     # tag below resolves to a 404 and regular Train/Val/System/Memory charts
     # silently disappear.
-    for asset_name in (*_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js"):
+    for asset_name in (*_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js", "dashboard_demand_runtime.js"):
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
     for asset_name in ("dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css"):
         shutil.copy2(canonical_asset_root / asset_name, runtime_root / asset_name)
@@ -187,13 +190,13 @@ def _prepare_runtime_assets() -> tempfile.TemporaryDirectory[str]:
     # vvv THOG replace cached dashboard assets after the scheduling and responsiveness update
     import re
     index_html = re.sub(r'(/assets/[A-Za-z0-9_.-]+)(?:\?[^"\s]*)?(?=")',
-                        r'\1?v=20261003-stability-controls', index_html)
+                        r'\1?v=20261005-demand-runtime', index_html)
     # ^^^ THOG
     index_path.write_text(index_html, encoding="utf-8")
 
     _dashboard._ASSET_ROOT = runtime_root
     _dashboard._ASSET_NAMES = frozenset(
-        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js", "dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css")
+        (*_dashboard._ASSET_NAMES, *_EXTRA_ASSET_NAMES, "dashboard_oct03_controls.js", "dashboard_run_logs.js", "dashboard_demand_runtime.js", "dashboard_networks.js", "dashboard_networks.css", "dashboard_runner.js", "dashboard_runner.css")
     )
     return temporary
 

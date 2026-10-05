@@ -54,7 +54,8 @@ const merge_context = {
   intersect_modes:(left,right)=>left===null?[...right]:left.filter(value=>right.includes(value)),
 };
 vm.createContext(merge_context);
-vm.runInContext(workspace.slice(start,end)+"\nthis.merge_group=fetch_metric_group;",merge_context);
+const cache_start=workspace.indexOf("    const metric_revisions="),cache_end=workspace.indexOf("    const cancel_pending",cache_start);
+vm.runInContext(workspace.slice(cache_start,cache_end)+workspace.slice(start,end)+"\nthis.merge_group=fetch_metric_group;",merge_context);
 (async()=>{
   let result=await merge_context.merge_group("train");
   assert.equal(result.group.charts[0].series.length,6,"two eye-selected Grids must show six loss curves");

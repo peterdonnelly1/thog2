@@ -561,6 +561,7 @@ function should_follow_recommendation(recommended) {
 }
 
 async function refresh_catalog() {
+  if (document.visibilityState === "hidden") return;
   if (app.catalog_refresh_in_flight) return;
   app.catalog_refresh_in_flight = true;
   const abort = new AbortController();

@@ -398,7 +398,7 @@ window.addEventListener("load", () => {
 
     const metric_figure = (article, chart) => {
       const traces = (chart.series || []).map((series, index) => ({
-        type: series.x?.length > 1500 ? "scattergl" : "scatter", // <<< THOG large histories use GPU-backed lines instead of thousands of SVG nodes
+        type: "scatter", // <<< THOG bounded 2D histories avoid repeated WebGL driver stalls and lost-context tab failures
         mode: series.x?.length === 1 ? "lines+markers" : "lines",
         meta: {instra_workspace_run_id: series.instra_workspace_run_id || app.current_run_id,
           instra_run_name: (app.runs || []).find(run=>run_identifier(run)===(series.instra_workspace_run_id || app.current_run_id))?.artifact_name ||
@@ -576,6 +576,9 @@ window.addEventListener("load", () => {
       if (!app.current_run_id) return;
       const section = group_section(group_name);
       if (!section || section.classList.contains("collapsed")) return;
+      // vvv THOG keep unrelated groups dormant while one chart owns the viewport
+      if(app.maximized_chart && !section.querySelector(`.chart-card[data-chart="${CSS.escape(app.maximized_chart)}"]`))return;
+      // ^^^ THOG
       const revision = Number(group_revisions.get(group_name) || 0);
       if (!force && rendered_revisions.get(group_name) === revision) return;
       const requested_view = current_view_key();

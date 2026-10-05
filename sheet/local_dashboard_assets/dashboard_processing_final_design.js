@@ -340,7 +340,11 @@
     enforce_titles();
     const group = by_id("processing_chart_group");
     if (group && typeof MutationObserver === "function") {
-      const observer = new MutationObserver(() => enforce_titles());
+      // vvv THOG ignore Plotly's internal mutations when reconciling chart headings
+      const observer = new MutationObserver(records => {
+        if(records.some(record=>!(record.target.nodeType===1 ? record.target : record.target.parentElement)?.closest(".plot-mount")))enforce_titles();
+      });
+      // ^^^ THOG
       observer.observe(group, {childList:true, subtree:true, characterData:true});
     }
   });

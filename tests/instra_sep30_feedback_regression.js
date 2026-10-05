@@ -47,7 +47,8 @@ const context={Date,Promise,visible_runs:()=>selected,workspace_request_signal:(
   run_identifier:run=>run.id,run_name:run=>run.id,colour_for_run:()=>"blue",clone:value=>JSON.parse(JSON.stringify(value)),
   intersect_modes:(left,right)=>left===null?[...right]:left.filter(value=>right.includes(value)),
   direct_json:async url=>url.includes("run_2&")?new Promise(resolve=>{complete_last=()=>resolve(payload());}):payload()};
-vm.createContext(context);vm.runInContext(workspace.slice(map_start,map_end)+workspace.slice(start,end)+"\nthis.fetch_group=fetch_metric_group;",context);
+const cache_start=workspace.indexOf("    const metric_revisions="),cache_end=workspace.indexOf("    const cancel_pending",cache_start);
+vm.createContext(context);vm.runInContext(workspace.slice(cache_start,cache_end)+workspace.slice(map_start,map_end)+workspace.slice(start,end)+"\nthis.fetch_group=fetch_metric_group;",context);
 (async()=>{
   const partial=[];
   const pending=context.fetch_group("train",value=>partial.push(value.group.charts[0]?.series.length));

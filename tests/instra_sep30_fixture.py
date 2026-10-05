@@ -35,6 +35,8 @@ for index in range(12):
         store.append_training_loss(step,5-step/10-index/100)
         store.append_processing_throughput(optimizer_update=step,tokens_per_second=10000+index*100+step)
     store.close()
+    if index == 0:
+        (fixture_root/run_id/"train.log").write_text("\x1b[32mCLI oldest\x1b[0m\nCLI newest\n")
     runs.append({"run_id":run_id,"grid_id":f"grid_{index//4}","state":"completed","host_label":"scruffy",
                  "host_id":"thog_host.scruffy","gpu":gpu,"profiler":"none","parameters":parameters,
                  "execution_profile":"current","dtype":"bfloat16","attention_backend":"flash2",

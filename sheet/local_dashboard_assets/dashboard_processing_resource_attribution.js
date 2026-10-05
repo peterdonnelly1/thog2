@@ -1134,7 +1134,11 @@ window.addEventListener("load", () => {
   processing_gpu_ensure_throughput_controls();
   const group = by_id("processing_chart_group");
   if (group && typeof MutationObserver === "function") {
-    const observer = new MutationObserver(() => processing_gpu_replace_display_nomat(group));
+    // vvv THOG Plotly owns its SVG text; formatting static labels must not walk every plotted point on each redraw
+    const observer = new MutationObserver(records => {
+      if(records.some(record=>!(record.target.nodeType===1 ? record.target : record.target.parentElement)?.closest(".plot-mount")))processing_gpu_replace_display_nomat(group);
+    });
+    // ^^^ THOG
     observer.observe(group, {childList: true, subtree: true, characterData: true});
   }
 });

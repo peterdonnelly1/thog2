@@ -16,6 +16,16 @@ window.addEventListener("load", () => {
     const run_name = run => String(run?.artifact_name || run?.run_name || run_identifier(run));
     const visible_runs = () => (app.runs || []).filter(run => is_visible(run_identifier(run)));
     let request_controller = null, request_membership = null;
+    const metric_revisions=new Map(), metric_payloads=new Map();
+    let metric_payload_bytes=0;
+    const forget_metric_payload=key=>{const previous=metric_payloads.get(key);if(previous)metric_payload_bytes-=previous.size;metric_payloads.delete(key);};
+    const remember_metric_payload=(key,revision,payload)=>{
+      const size=(payload?.group?.charts || []).reduce((total,chart)=>total+(chart.series || []).reduce((sum,series)=>
+        sum+(series.x?.length || 0)*(2+Object.keys(series.x_variants || {}).length)*32+512,0),0);
+      forget_metric_payload(key);
+      if(size<=32*1024*1024){metric_payloads.set(key,{revision:revision ?? payload?.group?.revision,payload,size});metric_payload_bytes+=size;}
+      while(metric_payloads.size>64 || metric_payload_bytes>32*1024*1024)forget_metric_payload(metric_payloads.keys().next().value);
+    };
     const cancel_pending = () => { request_controller?.abort(); request_controller=null; request_membership=null; };
     const workspace_request_signal = () => {
       const membership=visible_runs().map(run=>`${run_identifier(run)}:${colour_for_run(run_identifier(run))}`).sort().join("|");
@@ -122,13 +132,14 @@ window.addEventListener("load", () => {
       };
     };
 
-    const fetch_depth_payload = async request => {
+    const fetch_depth_payload = async (request,signal) => {
       const runs = visible_runs().filter(run => Number(run.depth_snapshot_count || 0) > 0);
       const entries = await map_with_concurrency(runs, 8, async run => ({
         run,
         payload: await request(`/api/figure-family?run=${encodeURIComponent(run_identifier(run))}&family=depth`),
-      }));
-      return merge_depth_payloads(entries.filter(Boolean));
+      }),signal);
+      if(signal?.aborted)throw Object.assign(new Error("Obsolete weight selection"),{name:"AbortError"});
+      return {...merge_depth_payloads(entries.filter(Boolean)),incomplete:entries.some(entry=>!entry)};
     };
 
     const fetch_metric_groups = async () => {
@@ -139,11 +150,15 @@ window.addEventListener("load", () => {
       }),signal);
       if(signal?.aborted)throw Object.assign(new Error("Obsolete chart selection"),{name:"AbortError"});
       const groups = new Map();
+      const retained_ids=new Set(visible_runs().map(run=>String(run_identifier(run))));
+      for(const key of metric_payloads.keys())if(!retained_ids.has(key.split("\0")[0]))forget_metric_payload(key);
+      metric_revisions.clear();
       for (let run_index = 0; run_index < entries.length; run_index += 1) {
         const entry = entries[run_index];
         if (!entry?.payload?.available) continue;
         for (const summary of entry.payload.groups || []) {
           if (summary.name === "depth") continue;
+          metric_revisions.set(`${run_identifier(entry.run)}\0${summary.name}`, Number(summary.revision || 0));
           const current = groups.get(summary.name) || {name: summary.name, chart_count: 0, revision: 0};
           current.chart_count = Math.max(current.chart_count, Number(summary.chart_count || 0));
           current.revision += (run_index + 1) * Number(summary.revision || 0);
@@ -216,7 +231,10 @@ window.addEventListener("load", () => {
       const signal=workspace_request_signal(), runs=visible_runs(), entries=new Array(runs.length);
       let last_progress=-Infinity, progress=Promise.resolve();
       await map_with_concurrency(runs,8,async(run,index)=>{
-        const payload=await direct_json(`/api/chart-group?run=${encodeURIComponent(run_identifier(run))}&group=${encodeURIComponent(group_name)}`,signal);
+        const key=`${run_identifier(run)}\0${group_name}`,revision=metric_revisions.get(key),cached=metric_payloads.get(key);
+        const payload=cached && revision!==undefined && cached.revision===revision ? cached.payload
+          : await direct_json(`/api/chart-group?run=${encodeURIComponent(run_identifier(run))}&group=${encodeURIComponent(group_name)}`,signal);
+        if(!signal?.aborted)remember_metric_payload(key,revision,payload);
         entries[index]={run,payload};
         if(on_progress && !signal?.aborted && Date.now()-last_progress>=300) {
           last_progress=Date.now();
@@ -238,7 +256,9 @@ window.addEventListener("load", () => {
     let last_selection_key = "";
     const selection_key = () => visible_runs().map(run => {
       const id = run_identifier(run);
-      return `${id}:${JSON.stringify(run.revision || [])}:${colour_for_run(id)}`;
+      // vvv THOG data writes update curves in place; only membership and colours change the Workspace view
+      return `${id}:${colour_for_run(id)}`;
+      // ^^^ THOG
     }).sort().join("|");
 
     app.workspace_mode = false;
@@ -250,6 +270,7 @@ window.addEventListener("load", () => {
       fetch_metric_groups,
       fetch_metric_group,
       cancel_pending,
+      map_with_concurrency,
     };
 
     const render_workspace_heading = () => {

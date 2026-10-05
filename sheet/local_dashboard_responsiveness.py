@@ -10,6 +10,10 @@ import threading
 def file_signature(path):
     try:
         stat = Path(path).stat()
+        # Opening a read-only SQLite connection can change an empty WAL's ctime;
+        # an empty WAL carries no updates and must not invalidate immutable results.
+        if str(path).endswith("-wal") and stat.st_size == 0:
+            return None
         return (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
     except OSError:
         return None

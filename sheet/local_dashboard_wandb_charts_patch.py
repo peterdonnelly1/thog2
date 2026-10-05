@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import threading
+import pickle
+import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -22,6 +25,11 @@ from sheet.local_dashboard_live_loss import LiveLossReader
 
 _MAX_POINTS_PER_SERIES = 1600
 _MAX_RETAINED_POINTS_PER_SERIES = 12800                                                                                                                       # <<< THOG bound scanner RAM throughout multi-hour sessions; source W&B history remains intact
+_MAX_RETAINED_POINTS_PER_SCANNER = 64000
+_CHECKPOINT_FIELDS = ("good_offset", "record_count", "history_step", "first_history_timestamp", "first_stats_timestamp",
+                      "first_wall_timestamp", "first_process_runtime", "process_anchor_timestamp", "process_anchor_runtime",
+                      "series", "chart_titles", "x_titles", "default_x_axis_modes", "group_revisions",
+                      "has_custom_gpu_allocator_metrics", "file_identity")
 _SCAN_TIME_BUDGET_SECONDS = 0.22
 _X_AXIS_MODE_ORDER = ("step", "relative_wall", "relative_process", "wall_time")
 _GPU_METRIC_PATTERN = re.compile(r"^(?:system[./])?gpu[./](?P<index>\d+)[./](?P<metric>.+)$", re.IGNORECASE)
@@ -206,11 +214,13 @@ def _downsample_points(
 
 
 class _WandbRunScanner:
-    def __init__(self, path: Path, *, gpu_index: Optional[int] = None) -> None:
+    def __init__(self, path: Path, *, gpu_index: Optional[int] = None, checkpoint=None) -> None:
         self.path = Path(path)
         self.gpu_index = gpu_index                                                                                                                           # <<< THOG suppress device-wide curves from GPUs not assigned to this run
         self.lock = threading.Lock()
         self.retired = False                                                                                                                                # <<< THOG evicted scanners cannot reopen files or continue background work
+        self.file_identity = None
+        self._retained_points = 0
         self.store: Any = None
         self.record_class: Any = None
         self.good_offset = 0
@@ -246,13 +256,31 @@ class _WandbRunScanner:
         self.catching_up = True
         self.has_custom_gpu_allocator_metrics = False                                                                                                       # <<< THOG prefer precise training-process allocator history over native device/process aliases
 
+        # vvv THOG evicted histories resume their saved record cursor instead of replaying a mature W&B file from zero
+        if checkpoint and checkpoint.get("gpu_index") == gpu_index:
+            stat = self.path.stat()
+            if checkpoint.get("file_identity") == (stat.st_dev, stat.st_ino) and checkpoint.get("good_offset", 0) <= stat.st_size:
+                self.__dict__.update({key: checkpoint[key] for key in _CHECKPOINT_FIELDS if key in checkpoint})
+                self.series = defaultdict(lambda: defaultdict(list), {
+                    group: defaultdict(list, values) for group, values in self.series.items()})
+                self._retained_points = sum(len(points) for group in self.series.values() for points in group.values())
+        # ^^^ THOG
+
     def _open(self) -> None:
         from wandb.proto import wandb_internal_pb2
         from wandb.sdk.internal.datastore import DataStore
 
-        self.store = DataStore()
-        self.store.open_for_scan(str(self.path))
+        store = DataStore()
+        store.open_for_scan(str(self.path))
+        stat = os.fstat(store._fp.fileno())
+        identity = (stat.st_dev, stat.st_ino)
+        if self.file_identity is not None and self.file_identity != identity:
+            self._reset()
+        self.store = store
         self.record_class = wandb_internal_pb2.Record
+        if self.file_identity == identity and self.good_offset > int(self.store.get_offset()):
+            self.store.seek(self.good_offset)
+        self.file_identity = identity
         self.good_offset = int(self.store.get_offset())
 
     def _reset(self) -> None:
@@ -263,6 +291,8 @@ class _WandbRunScanner:
             pass
         self.store = None
         self.good_offset = 0
+        self.file_identity = None
+        self._retained_points = 0
         self.record_count = 0
         self.history_step = 0.0
         self.first_history_timestamp = None
@@ -309,10 +339,25 @@ class _WandbRunScanner:
             relative_process_seconds,
             wall_time_epoch_seconds,
         ))
+        self._retained_points += 1
         # vvv THOG compact older plot samples while preserving endpoints and a recent full-resolution window
         if len(points) > _MAX_RETAINED_POINTS_PER_SERIES:
+            previous_count = len(points)
             recent_count = _MAX_RETAINED_POINTS_PER_SERIES // 4
             points[:] = _downsample_points(points[:-recent_count], _MAX_RETAINED_POINTS_PER_SERIES // 2) + points[-recent_count:]
+            self._retained_points += len(points) - previous_count
+        if self._retained_points > _MAX_RETAINED_POINTS_PER_SCANNER:
+            all_series = sorted((values for group_values in self.series.values() for values in group_values.values()), key=len, reverse=True)
+            self._retained_points = sum(map(len, all_series))
+            for values in all_series:
+                if self._retained_points <= 3 * _MAX_RETAINED_POINTS_PER_SCANNER // 4:
+                    break
+                if len(values) < 4:
+                    continue
+                previous_count = len(values)
+                recent_count = min(128, max(1, len(values) // 4))
+                values[:] = _downsample_points(values[:-recent_count], max(2, len(values) // 2)) + values[-recent_count:]
+                self._retained_points += len(values) - previous_count
         # ^^^ THOG
         self.chart_titles[group][chart_id] = title
         self.x_titles[group][chart_id] = x_title
@@ -373,6 +418,7 @@ class _WandbRunScanner:
                         self.has_custom_gpu_allocator_metrics = True
                         for encoded in tuple(self.series.get("memory", {})):
                             if encoded.split("\0", 1)[0].lower().startswith("gpu.process."):
+                                self._retained_points -= len(self.series["memory"][encoded])
                                 del self.series["memory"][encoded]
                         self.group_revisions["memory"] += 1                                                                                                # <<< THOG remove earlier native aliases once authoritative allocator data arrives
                 group, chart_id, title, series_name = _history_chart_identity(flattened_name)
@@ -488,8 +534,8 @@ class _WandbRunScanner:
             try:
                 if self.store is None:
                     self._open()
-                current_size = int(self.path.stat().st_size)
-                if current_size < self.good_offset:
+                current_stat = self.path.stat()
+                if current_stat.st_size < self.good_offset or self.file_identity != (current_stat.st_dev, current_stat.st_ino):
                     self._reset()
                     self._open()
 
@@ -591,6 +637,77 @@ class _ScannerCatalog:
         self.paths: Dict[str, Optional[Path]] = {}
         self.scanners: Dict[Path, _WandbRunScanner] = {}
         self.discovery = {}                                                                                                                                # <<< THOG immutable chart discovery must not churn the sixteen-reader history cache
+        self.payloads = {}
+        self.payload_bytes = 0
+        self.checkpoint_directory = tempfile.TemporaryDirectory(prefix="instra-wandb-cursors-")
+        self.checkpoints = {}
+        self.checkpoint_bytes = 0
+        self.missing_probes = {}
+
+    def _payload_key(self, state, group):
+        status = state.status()
+        run_id = str(status.get("wandb_run_id") or "").strip()
+        path = self._find_path(run_id, status) if run_id else None
+        if path is None:
+            return None
+        from sheet.local_dashboard_responsiveness import file_signature
+        return (str(state.database_path), group, path, file_signature(path), status.get("gpu_index"),
+                _plastic_charts_enabled(status.get("configuration") or {}))
+
+    def cached_payload(self, state, group):
+        key = self._payload_key(state, group)
+        with self.lock:
+            cached = self.payloads.get(key[:2]) if key else None
+            if cached and cached[0] == key:
+                return dict(cached[1]), cached[2]
+        return None
+
+    def remember_payload(self, state, group, common, payload, expected_key):
+        if common["catching_up"] or common["error"] or expected_key is None or self._payload_key(state, group) != expected_key:
+            return
+        size = sum(len(series.get("x", [])) * (2 + len(series.get("x_variants", {}))) * 32 + 1024
+                   for chart in payload.get("charts", []) for series in chart.get("series", []))
+        if size > 32 * 1024 * 1024:
+            return
+        with self.lock:
+            previous = self.payloads.pop(expected_key[:2], None)
+            if previous:
+                self.payload_bytes -= previous[3]
+            self.payloads[expected_key[:2]] = (expected_key, dict(common), payload, size)
+            self.payload_bytes += size
+            while len(self.payloads) > 128 or self.payload_bytes > 32 * 1024 * 1024:
+                old = self.payloads.pop(next(iter(self.payloads)))
+                self.payload_bytes -= old[3]
+
+    def _save_checkpoint(self, scanner):
+        # Serialize only internal parser state into a private, process-local cache. Source files are never modified.
+        import hashlib
+        cache_path = Path(self.checkpoint_directory.name) / hashlib.sha256(str(scanner.path).encode()).hexdigest()
+        with scanner.lock:
+            scanner.retired = True
+            payload = {key: scanner.__dict__[key] for key in _CHECKPOINT_FIELDS}
+            payload["series"] = {group: dict(values) for group, values in scanner.series.items()}
+            payload["gpu_index"] = scanner.gpu_index
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=self.checkpoint_directory.name, delete=False) as stream:
+                    temporary_path = Path(stream.name)
+                    pickle.dump(payload, stream, protocol=pickle.HIGHEST_PROTOCOL)
+                temporary_path.replace(cache_path)
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
+        size = cache_path.stat().st_size
+        with self.lock:
+            previous = self.checkpoints.pop(scanner.path, None)
+            if previous:
+                self.checkpoint_bytes -= previous[1]
+            self.checkpoints[scanner.path] = (cache_path, size)
+            self.checkpoint_bytes += size
+            while len(self.checkpoints) > 256 or self.checkpoint_bytes > 512 * 1024 * 1024:
+                old = self.checkpoints.pop(next(iter(self.checkpoints)))
+                self.checkpoint_bytes -= old[1]
+                old[0].unlink(missing_ok=True)
 
     def _discovery_key(self, state, live_revision):
         status = state.status()
@@ -601,7 +718,8 @@ class _ScannerCatalog:
         from sheet.local_dashboard_responsiveness import file_signature
         database_path = state.database_path
         return (str(database_path), path, file_signature(path), file_signature(database_path),
-                file_signature(Path(str(database_path) + "-wal")), live_revision)
+                file_signature(Path(str(database_path) + "-wal")), live_revision,
+                _plastic_charts_enabled(status.get("configuration") or {}))
 
     def cached_discovery(self, state, live_revision):
         key = self._discovery_key(state, live_revision)
@@ -634,6 +752,14 @@ class _ScannerCatalog:
                         if cached[0][1] == path:
                             self.discovery.pop(key, None)
                     scanner = self.scanners.pop(path, None)
+                    checkpoint = self.checkpoints.pop(path, None)
+                    if checkpoint:
+                        self.checkpoint_bytes -= checkpoint[1]
+                        checkpoint[0].unlink(missing_ok=True)
+                    for key, payload in list(self.payloads.items()):
+                        if payload[0][2] == path:
+                            self.payload_bytes -= payload[3]
+                            self.payloads.pop(key, None)
                     if scanner is not None:
                         retired.append(scanner)
         for scanner in retired:
@@ -646,23 +772,6 @@ class _ScannerCatalog:
         cached = self.paths.get(cache_key)
         if cached is not None and cached.exists():
             return cached
-        if cache_key in self.paths and self.paths[cache_key] is None:
-            # Recheck missing live runs; W&B may create the file after the dashboard starts.
-            pass
-
-        candidates = []
-        recorded_directory = status.get("wandb_run_directory")
-        if recorded_directory:
-            directory = Path(recorded_directory)
-            # W&B run.dir usually ends in /files; accept the run directory too.
-            for parent in (directory, directory.parent):
-                recorded_path = parent / f"run-{run_id}.wandb"
-                if recorded_path.is_file():
-                    self.paths[cache_key] = recorded_path.resolve()
-                    return self.paths[cache_key]
-        if status.get("remote_copy"):
-            self.paths[cache_key] = None                                                                                                                       # <<< THOG a missing acquired copy must not resolve to another producer's local W&B data
-            return None
         project_root = Path(self.catalog.root).resolve().parent
         roots = [Path.cwd() / "wandb", Path.cwd(), project_root / "wandb"]
         configured_root = (status.get("configuration") or {}).get("wandb_root")
@@ -670,6 +779,27 @@ class _ScannerCatalog:
             configured_path = Path(configured_root)
             for anchor in (Path.cwd(), project_root):
                 roots.extend((anchor / configured_path, anchor / configured_path / "wandb"))
+        recorded_directory = status.get("wandb_run_directory")
+        if recorded_directory:
+            directory = Path(recorded_directory)
+            for parent in (directory, directory.parent):
+                recorded_path = parent / f"run-{run_id}.wandb"
+                if recorded_path.is_file():
+                    self.paths[cache_key] = recorded_path.resolve()
+                    return self.paths[cache_key]
+        from sheet.local_dashboard_responsiveness import file_signature
+        directory_signature = tuple(file_signature(root) for root in roots)
+        if cache_key in self.paths and self.paths[cache_key] is None:
+            # Recheck missing live runs without walking the project for every one-second discovery request.
+            previous = self.missing_probes.get(cache_key)
+            if previous and previous[1] == directory_signature and time.monotonic() - previous[0] < 5:
+                return None
+        self.missing_probes[cache_key] = (time.monotonic(), directory_signature)
+
+        candidates = []
+        if status.get("remote_copy"):
+            self.paths[cache_key] = None                                                                                                                       # <<< THOG a missing acquired copy must not resolve to another producer's local W&B data
+            return None
         seen_roots = set()
         for root in roots:
             try:
@@ -722,13 +852,26 @@ class _ScannerCatalog:
                         gpu_index = int(match.group(1))
                     elif re.search(r"(?:^|[_ -])scruffy(?:$|[_ -])", identity_text, re.IGNORECASE):
                         gpu_index = 0                                                                                                                       # <<< THOG recover the physical index for current single-GPU scruffy history
-                scanner = _WandbRunScanner(path, gpu_index=gpu_index)
+                checkpoint = None
+                saved = self.checkpoints.get(path)
+                if saved:
+                    try:
+                        with saved[0].open("rb") as stream:
+                            checkpoint = pickle.load(stream)
+                    except (OSError, EOFError, pickle.UnpicklingError):
+                        pass
+                scanner = _WandbRunScanner(path, gpu_index=gpu_index, checkpoint=checkpoint)
                 # ^^^ THOG
             self.scanners[path] = scanner
             while len(self.scanners) > 16:
                 retired.append(self.scanners.pop(next(iter(self.scanners))))
         for previous in retired:
-            previous.close()
+            try:
+                self._save_checkpoint(previous)
+            except OSError:
+                pass  # Cache failure cannot leave an evicted file open or fail a dashboard request.
+            finally:
+                previous.close()
         return scanner
 
 
@@ -780,6 +923,14 @@ def install(dashboard_module: Any) -> None:
                     while len(live_readers) > 64:
                         live_readers.pop(next(iter(live_readers)))
                 live.refresh(catalog, state, dashboard_module)
+                requested_group = query.get("group", [""])[0]
+                if parsed.path == "/api/chart-group" and requested_group:
+                    cached = scanner_catalog.cached_payload(state, requested_group)
+                    if cached is not None:
+                        common, payload = cached
+                        self._send_json({**common, "group": live.merge(payload)})
+                        return
+                    payload_key = scanner_catalog._payload_key(state, requested_group)
                 discovery_key = None
                 if parsed.path == "/api/chart-groups" and hasattr(scanner_catalog, "cached_discovery"):
                     cached = scanner_catalog.cached_discovery(state, live.revision)
@@ -818,6 +969,9 @@ def install(dashboard_module: Any) -> None:
                     payload = {"name": group, "charts": [], "revision": 0}
                 else:
                     payload = scanner.group_payload(group) if scanner else {"name": group, "charts": [], "revision": 0}
+                if scanner is not None:
+                    common.update(record_count=scanner.record_count, catching_up=scanner.catching_up, error=scanner.error)
+                    scanner_catalog.remember_payload(state, group, common, payload, payload_key)
                 self._send_json({**common, "group": live.merge(payload)})
             except (FileNotFoundError, KeyError) as error:
                 self._send_json({"error": str(error)}, status=dashboard_module.HTTPStatus.NOT_FOUND)
