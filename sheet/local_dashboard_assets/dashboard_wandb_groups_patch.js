@@ -16,6 +16,7 @@ window.addEventListener("load", () => {
     let last_run_id = null;
     const front_by_chart = new Map();
     const pinned_bold_by_chart = new Map();                                                                                                                  // <<< THOG retain explicit !+ curve emphasis independently of z-order
+    const unbolded_by_chart = new Map(); // <<< THOG explicit unbolding overrides automatic front-curve emphasis
     let pending_navigation = null;
     const group_loads = new Map(); // <<< THOG one owner for a given view/group refresh, including startup's early Train request
 
@@ -284,7 +285,8 @@ window.addEventListener("load", () => {
       figure.data.sort((left, right) => (rank.get(left.meta?.instra_workspace_run_id) ?? -1) - (rank.get(right.meta?.instra_workspace_run_id) ?? -1));
       for (const trace of figure.data) {
         const run_id = trace.meta?.instra_workspace_run_id;
-        trace.line = {...(trace.line || {}), width:(run_id === front || pinned.has(run_id)) ? 3.5 : 2.4};
+        const muted=unbolded_by_chart.get(chart_name)?.has(run_id);
+        trace.line = {...(trace.line || {}), width:!muted && (run_id === front || pinned.has(run_id)) ? 3.5 : 2.4};
       }
       if (!window.instra_front_chart || window.instra_front_chart === chart_name) {
         const changed = window.instra_front_run_id !== front;
@@ -363,9 +365,11 @@ window.addEventListener("load", () => {
               front_by_chart.set(key, current);
             } else {
               const pinned = pinned_bold_by_chart.get(key) || new Set();
-              if (action === "pin") pinned.add(current);
-              else pinned.delete(current);
+              const muted = unbolded_by_chart.get(key) || new Set();
+              if (action === "pin") {pinned.add(current);muted.delete(current);}
+              else {pinned.delete(current);muted.add(current);}
               pinned_bold_by_chart.set(key, pinned);
+              unbolded_by_chart.set(key, muted);
             }
             window.instra_front_chart = key;
             window.instra_front_run_id = current;

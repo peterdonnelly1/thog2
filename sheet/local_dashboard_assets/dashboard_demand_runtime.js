@@ -11,6 +11,9 @@
     for(const id of throughput_rows.keys())if(!ids.has(id))throughput_rows.delete(id);
   }
   function chart_visible(mount) {
+    // vvv THOG settings previews are visible independently of maximized cards and the chart viewport
+    if(mount?.id==="chart_settings_preview")return !document.hidden && mount.isConnected && !by_id("chart_settings_overlay")?.hidden;
+    // ^^^ THOG
     if(document.hidden || !instra_charts_visible() || by_id("charts_scroll")?.hidden || !mount?.isConnected)return false;
     const card=mount.closest(".chart-card");
     if(!card || card.hidden || card.offsetParent===null)return false;
@@ -220,7 +223,30 @@
       return prepared;
     };
     const render_plot_before=render_plot, processing_plot_before=processing_plot;
-    render_plot=function(mount,figure,name,...args){return defer_or_draw(mount,()=>render_plot_before(mount,figure,name,...args));};
+    // vvv THOG derive exact one-tenth minor intervals from resolved major ticks, including after zoom
+    function sync_minor_grid(mount) {
+      if(mount._instra_minor_grid_busy || !mount._fullLayout)return;
+      const update={};
+      for(const name of ["xaxis","yaxis"]) {
+        const axis=mount._fullLayout[name],interval=Number(axis?.dtick)/10;
+        if(axis?.minor?.showgrid && Number.isFinite(interval) && interval>0 && mount.layout?.[name]?.minor?.dtick!==interval)
+          update[`${name}.minor.dtick`]=interval;
+      }
+      if(!Object.keys(update).length)return;
+      mount._instra_minor_grid_busy=true;
+      return Plotly.relayout(mount,update).finally(()=>{mount._instra_minor_grid_busy=false;});
+    }
+    render_plot=function(mount,figure,name,...args){return defer_or_draw(mount,async()=>{
+      await render_plot_before(mount,figure,name,...args);
+      if(!/loss/i.test(name+" "+chart_titles[name]) || !mount._fullLayout)return;
+      await sync_minor_grid(mount);
+      if(typeof mount.on==="function") {
+        mount._instra_minor_grid_listener ||= ()=>{void sync_minor_grid(mount)?.catch(error=>console.warn("Minor grid update failed",error));};
+        mount.removeListener?.("plotly_relayout",mount._instra_minor_grid_listener);
+        mount.on("plotly_relayout",mount._instra_minor_grid_listener); // <<< THOG restore the listener after preview purges without duplicates
+      }
+    });};
+    // ^^^ THOG
     processing_plot=function(id,traces,layout){const mount=by_id(id);return defer_or_draw(mount,()=>processing_plot_before(id,traces,layout));};
     render_figures=draw_requested_figures;
     processing_render_throughput=render_throughput;

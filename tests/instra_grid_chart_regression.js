@@ -31,7 +31,8 @@ const group_members = member.runner_grid_tag ? runs.filter(run=>run.runner_grid_
 for (const run of group_members) context.app.visibility[run.dashboard_run_id]=false;
 assert.equal(group_members.length,3);
 assert.equal(runs.filter(run=>run.runner_grid_tag==="G-00002" && context.app.visibility[run.dashboard_run_id]===false).length,0);
-assert.match(dashboard,/const group_members = run\.runner_grid_tag &&/,"Grid eye grouping must work in Runs and Multiview");
+assert.match(dashboard,/grid-visibility-button/,"Grid visibility has a dedicated control in Runs and Multiview");
+assert.match(dashboard,/app\.visibility\[run_id\] = next_visible/,"An eye affects only its run");
 
 const start = workspace.indexOf("    const merge_metric_entries = (group_name, entries) => {");
 const end = workspace.indexOf("\n\n    let refresh_timer",start);

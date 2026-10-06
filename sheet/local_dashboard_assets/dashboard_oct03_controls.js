@@ -1,7 +1,6 @@
 // vvv THOG persistent Grid tones, table gestures, exact visible-curve exports and ephemeral Processing navigation state
 "use strict";
 window.addEventListener("load", () => setTimeout(() => {
-  const trash_svg = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/></svg>';
   const style=document.createElement("style");
   style.textContent=`
     .runs-table th[data-instra-column-key="name"] { position:sticky !important; top:0; z-index:5; }
@@ -11,9 +10,8 @@ window.addEventListener("load", () => setTimeout(() => {
     .runs-table th[data-instra-column-key] { cursor:grab; }
     .runs-table th.column-drag-target { box-shadow:inset 3px 0 #1590a8; }
     .runs-table td.menu-column { white-space:nowrap; }
-    .run-row-trash { width:24px; height:24px; padding:3px; border:0; background:transparent; cursor:pointer; }
-    .run-row-trash, .runs-trash-button, .file-delete-button, .runner-recipe-delete { color:#b3262e !important; }
-    .run-row-trash svg, .runs-trash-button svg, .file-delete-button svg, .runner-recipe-delete svg {
+    .file-delete-button, .runner-recipe-delete { color:#b3262e !important; }
+    .file-delete-button svg, .runner-recipe-delete svg {
       fill:none; stroke:#b3262e !important; width:18px; height:18px; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
     }
     .run-column-resizer { position:absolute; z-index:6; right:0; top:0; bottom:0; width:7px; cursor:col-resize; touch-action:none; }
@@ -33,6 +31,23 @@ window.addEventListener("load", () => setTimeout(() => {
     .processing-card.maximized > .processing-plot-shell, .processing-card.maximized .plot-mount { min-height:0 !important; height:100%; box-sizing:border-box; }
   `;
   document.head.appendChild(style);
+  // vvv THOG Space toggles the focused row checkbox without scrolling or moving run selection
+  document.addEventListener("keydown",event=>{
+    if(![" ","Spacebar"].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey)return;
+    const target=event.target;
+    if(target.closest?.('.settings-overlay:not([hidden]),dialog[open]') || target.isContentEditable)return;
+    let row=target.closest?.(".runs-table tr[data-run-id]");
+    if(!row && target===document.body && app.current_run_id && !app.workspace_mode && !by_id("workspace")?.hidden && instra_charts_visible())
+      row=document.querySelector(`.runs-table tr[data-run-id="${CSS.escape(app.current_run_id)}"]`);
+    if(!row || row.offsetParent===null || target.matches?.('textarea,select,input:not([type="checkbox"]),button:not(.run-link),a'))return;
+    event.preventDefault();event.stopImmediatePropagation();
+    if(event.repeat)return;
+    const checkbox=row.querySelector('.check-column input[type="checkbox"]');
+    if(!checkbox)return;
+    checkbox.checked=!checkbox.checked;checkbox.dispatchEvent(new Event("change",{bubbles:true}));
+    if(target===document.body)row.focus({preventScroll:true});
+  },true);
+  // ^^^ THOG
 
   function rgb_to_hsl(rgb) {
     const [red,green,blue]=rgb.map(value=>value/255),maximum=Math.max(red,green,blue),minimum=Math.min(red,green,blue);
@@ -119,6 +134,11 @@ window.addEventListener("load", () => setTimeout(() => {
     const headers=[...header_row.children].filter(header=>header.dataset.instraColumnKey);
     const defaults=headers.map(header=>header.dataset.instraColumnKey);
     const keys=[...new Set([...layout.order.filter(key=>defaults.includes(key)),...defaults])];
+    // vvv THOG migrate saved layouts without placing the new grid control at the far right
+    if(!layout.order.includes("grid_visibility") && keys.includes("grid_visibility")) {
+      keys.splice(keys.indexOf("grid_visibility"),1);keys.splice(keys.indexOf("visibility"),0,"grid_visibility");
+    }
+    // ^^^ THOG
     for(const row of [header_row,...table.querySelectorAll("tbody tr[data-run-id]")]) {
       const cells=new Map([...row.children].map(cell=>[cell.dataset.instraColumnKey,cell]));
       if(keys.every((key,index)=>row.children[index]===cells.get(key)))continue;
@@ -129,7 +149,7 @@ window.addEventListener("load", () => setTimeout(() => {
     let total=0;
     for(const header of headers) {
       const key=header.dataset.instraColumnKey;
-      if(!default_widths.has(key))default_widths.set(key,key==="menu" ? 65 : Number.parseFloat(header.style.width)||56);
+      if(!default_widths.has(key))default_widths.set(key,key==="menu" ? 36 : Number.parseFloat(header.style.width)||56);
       const stored=Number(layout.widths[key]);
       const width=Number.isFinite(stored) && stored>=28 ? Math.min(2200,stored) : default_widths.get(key);
       for(const property of ["width","min-width","max-width"])header.style.setProperty(property,`${width}px`,"important");
@@ -168,20 +188,29 @@ window.addEventListener("load", () => setTimeout(() => {
       header.addEventListener("dragend",()=>{dragging_key=null;header_row.querySelectorAll(".column-drag-target").forEach(node=>node.classList.remove("column-drag-target"));});
     }
     table.style.setProperty("min-width",`${total}px`,"important");table.style.setProperty("width",`${total}px`,"important");
-    for(const row of table.querySelectorAll("tbody tr[data-run-id]")) {
-      const cell=row.querySelector(".menu-column");if(!cell || cell.querySelector(".run-row-trash"))continue;
-      const run_id=row.dataset.runId,trash=document.createElement("button");trash.type="button";trash.className="run-row-trash";trash.innerHTML=trash_svg;
-      trash.title="Delete this run";trash.setAttribute("aria-label",trash.title);
-      trash.addEventListener("click",event=>{event.stopPropagation();app.menu_run_id=run_id;
-        if(run_for_id(run_id)?.remote_copy)void force_delete_local_copy();else void delete_menu_run();});
-      cell.appendChild(trash);
-    }
+    // vvv THOG use the toolbar bin for checkbox selections; the run menu retains single-run deletion
+    for(const trash of table.querySelectorAll(".run-row-trash"))trash.remove();
+    // ^^^ THOG
   }
   document.querySelector(".runs-table thead")?.addEventListener("click",event=>{
     if(Date.now()<suppress_heading_click_until || event.target.closest(".run-column-resizer")){event.preventDefault();event.stopImmediatePropagation();}
   },true);
   const render_runs_before=render_runs;
-  render_runs=function(...args){const result=render_runs_before.apply(this,args);apply_table_layout();return result;};
+  // vvv THOG catalogue refreshes preserve keyboard focus on the same run and control
+  render_runs=function(...args){
+    const focused=document.activeElement,focused_row=focused?.closest?.(".runs-table tr[data-run-id]");
+    const run_id=focused_row?.dataset.runId;
+    const selector=focused?.matches?.('input[type="checkbox"]') ? '.check-column input' :
+      focused?.matches?.('.run-link') ? '.run-link' : focused?.matches?.('.grid-visibility-button') ? '.grid-visibility-button' :
+      focused?.matches?.('.eye-button') ? '.visibility-column .eye-button' : null;
+    const result=render_runs_before.apply(this,args);apply_table_layout();
+    if(run_id && !focused.isConnected) {
+      const row=document.querySelector(`.runs-table tr[data-run-id="${CSS.escape(run_id)}"]`);
+      (selector ? row?.querySelector(selector) : row)?.focus({preventScroll:true});
+    }
+    return result;
+  };
+  // ^^^ THOG
   by_id("instra_columns_popover")?.addEventListener("change",()=>queueMicrotask(apply_table_layout));
 
   let processing_epoch=0;

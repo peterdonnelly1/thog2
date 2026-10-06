@@ -19,6 +19,7 @@
     "--learning-rate", "--min-lr", "--max-iters", "--batch-size"];
   let snapshot = null, network = null, tab = "recipes", chosen = null, category = "Frequently Used";
   let draft = null, draft_id = null, dirty = false, visible = false, polling = false, last_history_grid = null, last_seen_grid = null;
+  let editing_existing = false;
   let current_run_metrics = new Map(), metrics_loading = false;
   let required_notice_seen = false, message_timer = null;
   let manual_grid_selection = false;
@@ -50,6 +51,7 @@
     const element = document.createElement(tag);
     if (value !== undefined) element.textContent = String(value ?? "—");
     if (class_name) element.className = class_name;
+    if(String(value).trim().toLowerCase()==="dense")element.classList.add("instra-dense-preset");
     parent.append(element);
     return element;
   };
@@ -70,7 +72,7 @@
     } finally { clearTimeout(timeout); }
   }
   async function action(name, values) {
-    const quiet = ["delete_recipe","preview","repeat_preview","rename_grid"].includes(name);
+    const quiet = ["delete_recipe","preview","repeat_preview","rename_grid","rename_recipe"].includes(name);
     clear_message();
     if (name === "save" || name === "preview" || name === "launch") required_notice_seen = true;
     message.textContent = name === "stop" ? "attempting to stop grid..." : name === "kill_flush" ?
@@ -395,15 +397,15 @@
       if (!check_recipe(false)) return;
       try {
         const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
-        const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
-        const saved=await action("save",{recipe_id,recipe:current_recipe()});
+        const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
+        const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
         draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;chosen=draft_id;render();
       }
       catch (_) { /* The error is displayed above. */ }
     });
     // vvv THOG reset only the unsaved editor draft, using the user's saved field defaults
     button(controls,"Reset",() => {
-      draft=null;draft_id=null;chosen=null;dirty=false;required_notice_seen=false;
+      draft=null;draft_id=null;chosen=null;dirty=false;editing_existing=false;required_notice_seen=false;
       clear_message();render();
     }).title="Reset unsaved configuration to defaults";
     // ^^^ THOG
@@ -434,8 +436,8 @@
         if (preview.total_runs > 100 && !confirm(`These values will take the size of the grid to ${preview.total_runs.toLocaleString()} runs. Proceed?`)) return;
         if (needs_save) {
           const prior=snapshot.recipes.find(item=>item.recipe_id===draft_id);
-          const recipe_id=prior && prior.recipe.label===current_recipe().label ? draft_id : null;
-          const saved=await action("save",{recipe_id,recipe:current_recipe()});
+          const recipe_id=editing_existing ? draft_id : prior && prior.recipe.label===current_recipe().label ? draft_id : null;
+          const saved=await action(editing_existing ? "update_recipe" : "save",{recipe_id,recipe:current_recipe()});
           draft_id=saved.recipe_id;draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;
         }
         const launched=await action("launch",{recipe_id:draft_id,confirm_large:preview.total_runs>100});
@@ -530,12 +532,25 @@
     // vvv THOG local YY-MM-DD HH:mm:ss is explicit and independent of locale AM/PM preferences
     if (!Number.isFinite(date.getTime())) return "—";
     const two = number => String(number).padStart(2,"0");
-    return `${two(date.getFullYear()%100)}-${two(date.getMonth()+1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+    return `${two(date.getFullYear()%100)}-${two(date.getMonth()+1)}-${two(date.getDate())}  ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
     // ^^^ THOG
   }
+  // vvv THOG show a per-run finish estimate using live progress, then the launch-time exemplar estimate
+  function estimated_run_end(run,observed,current_time=Date.now()) {
+    if(run.state!=="running")return null;
+    const start=Date.parse(run.attempts?.at(-1)?.started_at || run.started_at || "");
+    if(!Number.isFinite(start))return null;
+    const total=Number(run.parameters?.["--max-iters"]),step=Number(observed?.maximum_update);
+    if((run.attempts?.length || 0)<=1 && Number.isFinite(total) && total>0 && Number.isFinite(step) && step>0 && step<total)
+      return new Date(current_time+(current_time-start)*(total-step)/step).toISOString();
+    const seconds=run.estimated_duration_seconds;
+    return seconds!=null && Number.isFinite(Number(seconds)) && Number(seconds)>0 && start+Number(seconds)*1000>current_time
+      ? new Date(start+Number(seconds)*1000).toISOString() : null;
+  }
+  // ^^^ THOG
   function run_headings(parent) {
     const headings=add(parent,"div",undefined,"runner-run-headings");
-    for(const name of ["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"])add(headings,"strong",name);                           // <<< THOG expose vertically aligned per-run wall-clock boundaries in Progress and History
+    for(const name of ["Run ID","preset","start","end",...(tab==="progress" ? ["est. end"] : []),"Host","GPU","State","Step","Loss","Best loss",...(tab!=="progress" ? ["Profiling"] : [])])add(headings,"strong",name);
   }
   const loss_text = value => value == null || !Number.isFinite(Number(value)) ? "—" : Number(value).toFixed(3);
   function render_run(parent,run,preview=false) {
@@ -545,11 +560,16 @@
     if (tab === "history" && ["failed","blocked"].includes(run.state)) row.open = true;
     const summary=add(row,"summary",undefined,"runner-run-identity");
     add(summary,"span",run.run_id.slice(0,8));
-    add(summary,"span",run.parameters?.["--geometry-preset"] || run.parameters?.["--model-type"] || "—"); // <<< THOG show each resolved run's geometry
+    const preset=add(summary,"span",run.parameters?.["--geometry-preset"] || run.parameters?.["--model-type"] || "—");
+    preset.classList.toggle("instra-dense-preset",preset.textContent.toLowerCase()==="dense");
     const run_start = run.started_at || run.attempts?.[0]?.started_at;
     const run_end = ["completed","failed","cancelled"].includes(run.state) ? run.finished_at || run.attempts?.at(-1)?.finished_at : null;
     add(summary,"span",preview?"—":wall_time(run_start)).title = preview ? "" : (run_start ? new Date(run_start).toLocaleString() : "Start time unavailable");                                                               // <<< THOG show durable run-level start wall time
     add(summary,"span",preview?"—":wall_time(run_end)).title = preview ? "" : (run_end ? new Date(run_end).toLocaleString() : "End time unavailable");                                                         // <<< THOG show durable run-level end wall time
+    if(tab==="progress") {
+      const estimated=preview ? null : estimated_run_end(run,current_run_metrics.get(run.run_id));
+      add(summary,"span",wall_time(estimated),"runner-estimated-end").title=estimated ? "Estimated from current progress or comparable completed runs" : "Estimate unavailable";
+    }
     add(summary,"span",run.host_label);
     add(summary,"span",`GPU ${run.gpu.ordinal}`);
     add(summary,"span",run.state,`runner-status runner-status-${run.state}`);
@@ -557,8 +577,10 @@
     add(summary,"span",preview?"—":observed?.maximum_update??"—");
     add(summary,"span",preview?"—":loss_text(observed?.last_loss));
     add(summary,"span",preview?"—":loss_text(observed?.best_loss));
-    const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
-    profiler.title="Profiling mode: none, NSYS or NCU";
+    if(tab!=="progress") {
+      const profiler=add(summary,"span",run.profiler==="none"?"No profiling":run.profiler.toUpperCase());
+      profiler.title="Profiling mode: none, NSYS or NCU";
+    }
     add(row,"p",`GPU ${run.gpu.model} · ${run.gpu.uuid||run.gpu.gpu_key} · ${run.execution_profile} · ${run.dtype}/${run.attention_backend} · peak ${run.required_mib} MiB · power current ${run.current_power_w??"unknown"} W, default ${run.default_power_w??"unknown"} W, requested ${run.requested_power_w??"default"} W, observed ${run.attempts?.at(-1)?.observed_power_w??"pending"} W`);
     if (run.pairing_id) add(row,"p",`Paired profiler runs: ${run.pairing_id}`);
     if (run.blocking_reason) add(row,"p",run.blocking_reason);
@@ -795,6 +817,8 @@
   }
   function render() {
     if (!snapshot || !visible) return;
+    view.classList.toggle("runner-progress",tab==="progress");
+    view.classList.toggle("runner-recipes",tab==="recipes");
     for (const control of by_id("runner_tabs").querySelectorAll("button"))control.classList.toggle("active",control.dataset.runnerTab===tab);
     list.replaceChildren();
     const grids=snapshot.grids.filter(grid=>!["progress","multiview"].includes(tab)||!["completed","failed","cancelled"].includes(grid.state));
@@ -803,30 +827,38 @@
       button(add_row,"Add Grid Recipe",()=>{
         if(dirty && !confirm("Discard unsaved Recipe edits and start a new Recipe?"))return;
         clear_message();required_notice_seen=true;
-        draft_id=null;draft=null;chosen=null;dirty=false;render_editor();
+        draft_id=null;draft=null;chosen=null;dirty=false;editing_existing=false;render_editor();
       }).classList.add("runner-add-recipe");
       add(add_row,"p","","runner-required-fields").id="runner_required_fields";
       for(const saved of [...snapshot.recipes].sort((a,b)=>String(b.created_at||b.updated_at||"").localeCompare(String(a.created_at||a.updated_at||"")))) {
         const row=add(list,"div",undefined,"runner-recipe-row");
-        const recipe_button=button(row,saved.recipe.label,()=>{draft_id=saved.recipe_id;chosen=draft_id;
+        const recipe_button=button(row,saved.recipe.label,()=>{if(dirty && !confirm("Discard unsaved Recipe edits?"))return;editing_existing=false;draft_id=saved.recipe_id;chosen=draft_id;
           draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();});
         recipe_button.title=saved.recipe.label;
         recipe_button.classList.toggle("active",chosen===saved.recipe_id);
         add(row,"span",saved.state || "ready","runner-status");
+        // vvv THOG explicit Edit selects in-place saving while the name button retains copy saving
+        const edit_button=button(row,"Edit",()=>{
+          if(dirty && !confirm("Discard unsaved Recipe edits?"))return;
+          editing_existing=true;draft_id=saved.recipe_id;chosen=draft_id;
+          draft=JSON.parse(JSON.stringify(saved.recipe));dirty=false;render();
+        });
+        edit_button.classList.add("runner-edit-recipe");edit_button.title="Edit this saved Recipe in place";
+        // ^^^ THOG
         const rename=button(row,"Rename",async()=>{
           const label=await rename_dialog("Rename Grid Recipe",saved.recipe.label);
           if(label===null || label.trim()===saved.recipe.label)return;
           if(!label.trim()){message.textContent="Grid Recipe name cannot be blank";return;}
           try{
-            await action("save",{recipe_id:saved.recipe_id,recipe:{...saved.recipe,label:label.trim()}});
-            if(draft_id===saved.recipe_id && !dirty && draft)draft.label=label.trim();
+            await action("rename_recipe",{recipe_id:saved.recipe_id,label:label.trim()});
+            if(draft_id===saved.recipe_id && draft)draft.label=label.trim();
             render();
           }catch(_){/* Error shown above. */}
         });
         rename.title="Rename this saved Grid Recipe. To rename a launched Grid, open it in History or Progress.";
         button(row,"Delete",async()=>{
           if(!confirm(`Delete Recipe ${saved.recipe.label}? Its Grid history will remain available.`))return;
-          try{await action("delete_recipe",{recipe_id:saved.recipe_id});if(chosen===saved.recipe_id){chosen=null;draft_id=null;draft=null;dirty=false;}render();}
+          try{await action("delete_recipe",{recipe_id:saved.recipe_id});if(chosen===saved.recipe_id){chosen=null;draft_id=null;draft=null;dirty=false;editing_existing=false;}render();}
           catch(_){/* Error shown above. */}
         }).classList.add("runner-recipe-delete");
       }
@@ -966,6 +998,6 @@
     render();
   });
   setInterval(()=>{if(visible && tab!=="recipes")refresh();},5000);
-  window.instra_runner_test_hooks = Object.freeze({recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
+  window.instra_runner_test_hooks = Object.freeze({recipe_problems,apply_width_selection,current_recipe,remember_default,format_duration,grid_elapsed,estimate_range,estimated_run_end,history_outcome,field_help,invalid_field_value,premat_enabled,category_enabled,categories_for_field,matches_search,compare_fields});
 })();
 // ^^^ THOG

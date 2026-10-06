@@ -24,7 +24,7 @@ async function check(type) {
   const alignment=await page.evaluate(()=>({heading:document.querySelector('.runs-table th[data-instra-column-key="name"]').getBoundingClientRect().bottom,
     names:[...document.querySelectorAll('.runs-table td.name-column')].map(node=>node.getBoundingClientRect().top)}));
   assert.ok(alignment.names.every(top=>top>=alignment.heading),JSON.stringify(alignment));
-  assert.equal(await row("fixture_00").locator(".run-row-trash svg").evaluate(node=>getComputedStyle(node).stroke),"rgb(179, 38, 46)");
+  assert.equal(await row("fixture_00").locator(".run-row-trash").count(),0);
 
   // Resize by mouse, reorder by native HTML drag events, then reload to check persistence and row identity.
   const handle=heading("loss").locator(".run-column-resizer"),before_width=(await heading("loss").boundingBox()).width;
@@ -44,7 +44,7 @@ async function check(type) {
   await page.evaluate(()=>{render_runs();render_runs();});
   assert.equal(await heading("name").locator(".run-name-column-resizer").count(),0);
   assert.equal(await row("fixture_00").locator('[data-instra-column-key="name"]').getAttribute("class"),"name-column");
-  console.log("PASS",type.name(),"table alignment, red per-run trash, dragging, resizing and persisted column identity");
+  console.log("PASS",type.name(),"table alignment, toolbar-only trash, dragging, resizing and persisted column identity");
 
   const defaults=await page.evaluate(()=>[0,1,2,3].map(i=>colour_for_run(`fixture_0${i}`)));
   async function colour(id,hex) {await row(id).locator(".colour-dot").click();await page.locator("#colour_hex").fill(hex);await page.locator("#colour_hex").dispatchEvent("change");await page.locator("#runs_nav").click();}
@@ -96,12 +96,12 @@ async function check(type) {
   await page.locator(".runner-actions > button",{hasText:/^Reset$/}).click();
   assert.notEqual(await field.inputValue(),"999");
   await page.locator('[data-runner-tab="history"]').click();
-  assert.ok((await page.locator(".runner-history-wall-time").allTextContents()).filter(text=>text!=="—").every(text=>/^\d{2}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)));
+  assert.ok((await page.locator(".runner-history-wall-time").allTextContents()).filter(text=>text!=="—").every(text=>/^\d{2}-\d{2}-\d{2}  \d{2}:\d{2}:\d{2}$/.test(text)));
   await page.locator(".runner-history-grid-row > button:first-child",{hasText:"Grid 1"}).click();
-  assert.deepEqual((await page.locator(".runner-run-headings strong").allTextContents()).slice(0,4),["Run ID","--geometry-preset","start","end"]);
+  assert.deepEqual((await page.locator(".runner-run-headings strong").allTextContents()).slice(0,4),["Run ID","preset","start","end"]);
   const summary=page.locator(".runner-run > .runner-run-identity").first();
   const values=await summary.locator(":scope > *").allTextContents();
-  assert.equal(values[1],"depth");assert.equal(values[2],"26-10-05 07:07:12");assert.equal(values[3],"26-10-05 19:08:13");
+  assert.equal(values[1],"depth");assert.equal(values[2],"26-10-05  07:07:12");assert.equal(values[3],"26-10-05  19:08:13");
   console.log("PASS",type.name(),"Recipe Reset placement/defaults, 24-hour dated History and geometry column");
 
   await page.locator("#runs_nav").click();

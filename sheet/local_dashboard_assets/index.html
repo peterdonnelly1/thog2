@@ -159,6 +159,7 @@
           <thead>
             <tr>
               <th class="check-column"><input id="select_all" type="checkbox" aria-label="Select all listed runs"></th>
+              <th class="grid-visibility-column" title="Grid visibility" aria-label="Grid visibility"><svg viewBox="0 0 20 16" aria-hidden="true"><path d="M2 2h16v12H2zM7.33 2v12M12.67 2v12M2 6h16M2 10h16"/></svg></th>
               <th class="visibility-column"><span class="eye-icon" aria-hidden="true"></span></th>
               <th class="name-column">Name <span class="listed-pill" id="listed_count">0 listed</span></th>
               <th>W&amp;B ID</th>
@@ -498,8 +499,8 @@
                 </label>
                 <div class="chart-axis-range">
                   <span>Range</span>
-                  <input class="chart-setting-input" id="chart_x_min" type="number" step="any" placeholder="Automatic" aria-label="X minimum">
-                  <input class="chart-setting-input" id="chart_x_max" type="number" step="any" placeholder="Automatic" aria-label="X maximum">
+                  <input class="chart-setting-input" id="chart_x_min" type="number" step="any" placeholder="Auto" aria-label="X minimum">
+                  <input class="chart-setting-input" id="chart_x_max" type="number" step="any" placeholder="Auto" aria-label="X maximum">
                 </div>
                 <label class="chart-editor-field chart-editor-field-wide" for="chart_x_label">
                   <span>Label</span>
@@ -515,8 +516,8 @@
                 </label>
                 <div class="chart-axis-range">
                   <span>Range</span>
-                  <input class="chart-setting-input" id="chart_y_min" type="number" step="any" placeholder="Automatic" aria-label="Y minimum">
-                  <input class="chart-setting-input" id="chart_y_max" type="number" step="any" placeholder="Automatic" aria-label="Y maximum">
+                  <input class="chart-setting-input" id="chart_y_min" type="number" step="any" placeholder="Auto" aria-label="Y minimum">
+                  <input class="chart-setting-input" id="chart_y_max" type="number" step="any" placeholder="Auto" aria-label="Y maximum">
                 </div>
                 <label class="chart-editor-field chart-editor-field-wide" for="chart_y_label">
                   <span>Label</span>
@@ -601,6 +602,10 @@
                   <span><strong>Gridlines</strong><small>Show the major X and Y grid.</small></span>
                   <input class="chart-setting-input" id="chart_show_grid" type="checkbox" checked>
                 </label>
+                <label class="chart-toggle-row" id="chart_minor_grid_row" for="chart_show_minor_grid" hidden>
+                  <span>Minor grid lines (1/10 of major spacing)</span>
+                  <input class="chart-setting-input" id="chart_show_minor_grid" type="checkbox">
+                </label>
               </section>
             </section>
 
@@ -610,6 +615,7 @@
       </div>
       <footer>
         <button class="reset-axis-button" id="reset_chart_settings" type="button">Reset all</button>
+        <button class="reset-axis-button" id="reset_chart_ranges" type="button">Reset ranges to Auto</button>
         <button id="cancel_chart_settings" type="button">Cancel</button>
         <button id="save_chart_settings" class="primary-button" type="button">Apply</button>
       </footer>
@@ -640,8 +646,8 @@
         </section>
         <!-- ^^^ THOG -->
         <section class="global-settings-section"><h3>Multiview</h3>
-          <label><input id="grid_eye_grouping" type="checkbox" checked> Show every member of a Grid when an eye is opened; close eyes individually</label>
-          <p>Switch off to control each run independently.</p>
+          <label hidden><input id="grid_eye_grouping" type="checkbox"> Grid visibility uses the dedicated grid controls</label>
+          <p>Use the grid controls to show or hide all runs in a grid. Each eye controls one run.</p>
         </section>
       </div>
       <footer>

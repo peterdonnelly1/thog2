@@ -222,14 +222,14 @@ window.addEventListener("load", () => {
       },
     });
     const table_column_order = Object.freeze([
-      "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
+      "select", "grid_visibility", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
       "preset", "optimizer", "gb", "layers", "depth_order", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated", "menu",
     ]);                                                                                                                                                    // <<< THOG one semantic order owns both headings and cells
     const table_column_widths = Object.freeze({
-      select: 34, visibility: 34, state: 88, duration: 72, wandb: 0, host: 84, gpu: 42,
+      select: 34, grid_visibility: 34, visibility: 34, state: 88, duration: 72, wandb: 0, host: 84, gpu: 42,
       preset: 64, optimizer: 70, steps: 62, gb: 52, warmup: 42, layers: 42, depth_order: 42,
       parms: 58, equiv: 58, context: 64, d_model: 64, heads: 42, grad_accum: 46,
       activation_checkpointing: 42, learning_rate: 42, min_learning_rate: 42,
@@ -245,6 +245,7 @@ window.addEventListener("load", () => {
       if (!row) return;
       const by_text = text => [...row.children].find(cell => String(cell.textContent || "").trim().toUpperCase() === text);
       tag_column(row.querySelector(".check-column"), "select");
+      tag_column(row.querySelector(".grid-visibility-column"), "grid_visibility");
       tag_column(row.querySelector(".visibility-column"), "visibility");
       tag_column(row.querySelector(".name-column"), "name");
       tag_column(by_text("W&B ID"), "wandb");
@@ -267,7 +268,7 @@ window.addEventListener("load", () => {
       const row = body.lastElementChild;
       if (!row?.matches?.("tr[data-run-id]")) return result;
       const keys = [
-        "select", "visibility", "name", "wandb", "state", "host", "probe_start", "probe_end",
+        "select", "grid_visibility", "visibility", "name", "wandb", "state", "host", "probe_start", "probe_end",
         "curve_start", "curve_end", "steps", "duration", "updated", "menu",
       ];
       [...row.children].forEach((cell, index) => tag_column(cell, keys[index]));

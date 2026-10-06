@@ -44,7 +44,7 @@ def estimate(runs, history, parallelism=1):
     central = max(max(timelines.values()), sum(durations) / max(1, min(parallelism, len(timelines))))
     confidence = "high" if exact == len(runs) and len(exemplars) >= 3 else "low"
     spread = .2 if confidence == "high" else .6
-    return {"seconds": round(central), "interval_seconds": [round(central * (1-spread)), round(central * (1+spread))],
+    return {"seconds": round(central), "run_seconds": durations, "interval_seconds": [round(central * (1-spread)), round(central * (1+spread))],
             "confidence": confidence, "exemplars": len(exemplars),
             "explanation": f"{exact}/{len(runs)} exact matches; nearest runs used for remaining estimates"}
 # ^^^ THOG

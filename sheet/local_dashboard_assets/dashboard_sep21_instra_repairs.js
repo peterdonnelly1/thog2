@@ -25,7 +25,7 @@ window.addEventListener("load", () => {
         width:18px !important; height:18px !important; fill:none; stroke:currentColor;
         stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round;
       }
-      .runs-trash-button:not(:disabled), .file-delete-button:not(:disabled) { color:#7B1F24 !important; }
+      .file-delete-button:not(:disabled) { color:#7B1F24 !important; }
       .file-delete-button {
         flex:0 0 30px; width:30px; height:28px; align-self:center; margin-left:-8px; margin-right:auto;
         display:inline-flex; align-items:center; justify-content:center; padding:0 !important;
@@ -114,7 +114,7 @@ window.addEventListener("load", () => {
 
     const column_storage_key = "thog2_local_hidden_run_columns_v1";
     const column_labels = Object.freeze({
-      select:"select", visibility:"visible", steps:"logged", duration:"t", loss:"loss", state:"state", name:"name",
+      select:"select", grid_visibility:"Grid visible", visibility:"visible", steps:"logged", duration:"t", loss:"loss", state:"state", name:"name",
       wandb:"W&B ID", host:"host", gpu:"GPU", preset:"p", optimizer:"OPT", gb:"GB", layers:"L",
       depth_order:"P", premat:"premat", parms:"PARMS", equiv:"EQUIV", warmup:"w", context:"C",
       d_model:"D", heads:"H", grad_accum:"A", activation_checkpointing:"S", learning_rate:"c",
@@ -228,12 +228,14 @@ window.addEventListener("load", () => {
         filter:by_id("state_filter")?.value || "all", sort:by_id("run_sort")?.value || "created",
         column_sort:app.column_sort_key || null,
         descending:app.sort_descending, grouped:app.group_by_host,
-        selected:[...(app.selected || [])].map(String).sort(), visibility:app.visibility, colours:app.colours,
+        selected:[...(app.selected || [])].map(String).sort(), visibility:app.visibility, grid_visibility:app.grid_visibility, colours:app.colours,
         pairs:[...(app.processing_paired_run_ids || [])].map(String).sort(),
         unmatched:[...(app.processing_unmatched_nsys_run_ids || [])].map(String).sort(),
         runs:(app.runs || []).map(run => [
           String(run_identifier(run)), run.revision || null, run.run_state || null, run.heartbeat_at || null,
           run.updated_at || null, run.maximum_update ?? null, run.chart_maximum_update ?? null, run.last_loss ?? null,
+          run.preset || null, run.configuration?.geometry_preset || null, run.configuration?.model_type || null,
+          run.remote_copy === true, // <<< THOG repaint changed preset emphasis and acquired-copy controls even without a chart revision
           run.configuration?.premat ?? null, run.configuration?.premat_target_matrix ?? null,
         ]),
       });

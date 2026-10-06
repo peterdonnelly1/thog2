@@ -72,14 +72,14 @@ async function check(type) {
     await page.locator("#runner_nav").click();
     await page.locator('[data-runner-tab="history"]').click();
     await page.locator(".runner-history-grid-row > button").filter({hasText:"Grid 1"}).click();
-    assert.deepEqual(await page.locator(".runner-run-headings strong").allTextContents(),["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
+    assert.deepEqual(await page.locator(".runner-run-headings strong").allTextContents(),["Run ID","preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
     const boundaries = await page.locator(".runner-run-identity").evaluateAll(rows=>rows.map(row=>[...row.children].filter((_,index)=>index!==1).slice(0,3).map(node=>({left:node.getBoundingClientRect().left,text:node.textContent,title:node.title}))));
     assert.ok(boundaries.length===4 && boundaries.every(values=>values[1].text!=="—"&&values[2].text!=="—"));
     for(let column=0;column<3;column++)assert.ok(boundaries.every(values=>Math.abs(values[column].left-boundaries[0][column].left)<1));
     assert.ok(boundaries[0][1].title.includes("2026")&&boundaries[0][2].title.includes("2026"));
-    await page.screenshot({path:`/workspace/scratch/67907f56323f/instra-timing-${type.name()}.png`});
+    if(process.env.INSTRA_TEST_SCREENSHOTS)await page.screenshot({path:`${process.env.INSTRA_TEST_SCREENSHOTS}/instra-timing-${type.name()}.png`});
     await page.locator('[data-runner-tab="progress"]').click();
-    assert.deepEqual(await page.locator(".runner-run-headings strong").allTextContents(),["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
+    assert.deepEqual(await page.locator(".runner-run-headings strong").allTextContents(),["Run ID","preset","start","end","est. end","Host","GPU","State","Step","Loss","Best loss"]);
     assert.equal(await page.locator(".runner-run-identity span").nth(3).textContent(),"—");
     await page.locator("#runs_nav").click();
     await page.evaluate(()=>{app.runs.find(run=>run_identifier(run)==="fixture_00").remote_copy=true;render_runs();});
@@ -91,7 +91,7 @@ async function check(type) {
     assert.equal(force.message(),"This deletes only this Instra’s local copy. The authoritative run on the producing host is unaffected. If that run still exists, monitoring will download it again.");
     await force.dismiss();
     await force_click;
-    await page.screenshot({path:`/workspace/scratch/67907f56323f/instra-controls-${type.name()}.png`});
+    if(process.env.INSTRA_TEST_SCREENSHOTS)await page.screenshot({path:`${process.env.INSTRA_TEST_SCREENSHOTS}/instra-controls-${type.name()}.png`});
     assert.deepEqual(errors,[]);
     console.log("PASS",type.name(),"curve controls/bolding/polling, eyes/front rows, deletion messages/spacing, aligned start/end clocks");
   } finally {await browser.close();}

@@ -457,4 +457,11 @@ body.resizing-chart, body.resizing-chart * { user-select: none !important; }
   .file-browser-shell { margin: 7px; }
   .chart-settings-overlay { padding: 5px; }
 }
+/* vvv THOG independent grid/eye controls and square run colours */
+.runs-table .colour-dot { border-radius:0 !important; }
+.runs-table .grid-visibility-column { width:34px; text-align:center; }
+.grid-visibility-column > svg { width:20px; height:16px; fill:none; stroke:#59616b; stroke-width:1.4; }
+.runs-table tr[data-run-id]:focus { outline:1px solid #7f8997; outline-offset:-1px; }
+.instra-dense-preset, .runner-status-dense, .state-badge.dense { font-weight:700 !important; }
+/* ^^^ THOG */
 /* ^^^ THOG */

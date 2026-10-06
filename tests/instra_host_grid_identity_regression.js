@@ -18,6 +18,6 @@ assert.notEqual(context.colour_for_run("s1").match(/^hsl\((\d+)/)[1],context.col
 const shared_uuid="a".repeat(32);
 assert.equal(context.grid_identity({...runs[0],runner_grid_id:shared_uuid}),context.grid_identity({...runs[2],runner_grid_id:shared_uuid}),
   "runs dispatched by the same owning Grid may span hosts");
-assert.match(source,/app\.runs\.filter\(candidate => grid_identity\(candidate\) === grid_identity\(run\)\)/);
+assert.match(source,/app\.runs\.filter\(member=>grid_identity\(member\)===grid_key\)/);
 console.log("PASS host-qualified legacy eyes/colours and shared durable Grid UUIDs");
 // ^^^ THOG

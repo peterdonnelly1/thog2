@@ -1,0 +1,252 @@
+{
+  "browser": "153.0.8010.0",
+  "checks": [
+    "three Plotly charts",
+    "step selection",
+    "residual-site selection",
+    "bounded curves",
+    "correct axis labels",
+    "maximize/restore",
+    "paired Multiview identity and step",
+    "rapid run switching",
+    "legacy run hides width charts",
+    "API pairing metadata",
+    "Runner real Save",
+    "Runner real width-only single Preview with optimizer",
+    "Runner real width-only grid Preview with optimizer",
+    "Runner real joint grid Preview",
+    "Runner width aliases and automatic selection",
+    "WIDTH.order in Frequently Used and Geometry",
+    "Runner HTTP validation error and recovery",
+    "Runner unbounded capture window edit",
+    "visible loss bottom axis in normal, maximized and time-axis views",
+    "visible single loss sample",
+    "loss-only completed-step count",
+    "Runs ANSI progress rows latest first without wrapping",
+    "incremental ANSI styles and partial progress row",
+    "inherited DEPTH.order does not select or multiply WIDTH trials",
+    "explicit DEPTH selector enables joint execution",
+    "Chebyshev rank error and verified lower-order Preview"
+  ],
+  "width_requests": 31,
+  "console_errors": [],
+  "pairing": [
+    {
+      "run": "fixture_01",
+      "step": 1,
+      "D": 8,
+      "r": 3
+    },
+    {
+      "run": "fixture_00",
+      "step": 1,
+      "D": 8,
+      "r": 3
+    }
+  ],
+  "runner_preview_parameters": [
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width"
+      ],
+      "--n-layer": 16,
+      "DEPTH.order": [
+        12
+      ],
+      "--n-embd": 1024,
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        16
+      ],
+      "WIDTH.compressor": "dct",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1
+    },
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width-type-I"
+      ],
+      "--n-layer": 16,
+      "DEPTH.order": [
+        12
+      ],
+      "--n-embd": 1024,
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        16,
+        32,
+        64
+      ],
+      "WIDTH.compressor": "dct",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1
+    },
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width-type-I"
+      ],
+      "--n-layer": 16,
+      "DEPTH.order": [
+        1,
+        2
+      ],
+      "--n-embd": 1024,
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        16,
+        32,
+        64
+      ],
+      "WIDTH.compressor": "dct",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1
+    },
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width-type-I"
+      ],
+      "--n-layer": 16,
+      "DEPTH.order": [
+        1,
+        2
+      ],
+      "--n-embd": 1024,
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        16,
+        32,
+        64
+      ],
+      "WIDTH.compressor": "dct",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1,
+      "--select-depth": [
+        true
+      ]
+    },
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width-type-I"
+      ],
+      "--n-layer": 16,
+      "--n-embd": 1024,
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        16,
+        32,
+        64
+      ],
+      "WIDTH.compressor": "dct",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1,
+      "--select-depth": [
+        false
+      ]
+    },
+    {
+      "--max-iters": 50,
+      "--batch-size": 16,
+      "--geometry-preset": [
+        "width-type-I"
+      ],
+      "--n-layer": 16,
+      "--n-embd": [
+        1024
+      ],
+      "--n-head": 16,
+      "--block-size": 1024,
+      "--gradient-accumulation-steps": 6,
+      "--checkpoint-segment-size": 4,
+      "--optimizer": "adamw",
+      "--learning-rate": 0.0009,
+      "--min-lr": 0.00009,
+      "--warmup-iters": 0,
+      "--select-width": true,
+      "WIDTH.order": [
+        128
+      ],
+      "WIDTH.compressor": "chebyshev",
+      "DEPTH.compressor": "chebyshev",
+      "DEPTH.compressor_version": "auto",
+      "--instrumentation__width_activation_curves__end_step": -1,
+      "--select-depth": [
+        false
+      ]
+    }
+  ],
+  "runner_preview_counts": [
+    1,
+    3,
+    3,
+    6,
+    3,
+    1
+  ],
+  "logs": {
+    "texts": [
+      "T3  061026-2200       30s    0.008h  Δ= 10.0s  tok/s= 10000  toks=     98,304  loss=  7.7000  Δ=  -0.100  lr= 9.000e-04  g/n=   1.000",
+      "T2  061026-2200       20s    0.006h  Δ= 10.0s  tok/s= 10000  toks=     65,536  loss=  7.8000  Δ=  -0.100  lr= 9.000e-04  g/n=   1.000",
+      "T1  061026-2200       10s    0.003h  Δ= 10.0s  tok/s= 10000  toks=     32,768  loss=  7.9000  Δ=  -0.100  lr= 9.000e-04  g/n=   1.000",
+      "  WIDTH: D=8 / r=3; DEPTH disabled",
+      "model parameters and options"
+    ],
+    "white_space": "pre",
+    "coloured": true,
+    "charts_hidden": true
+  }
+}

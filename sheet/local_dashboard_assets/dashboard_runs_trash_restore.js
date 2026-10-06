@@ -26,8 +26,9 @@
         stroke-linecap:round;
         stroke-linejoin:round;
       }
-      .runs-trash-button:not(:disabled) { color:#a12a2a; }
-      .runs-trash-button:disabled { opacity:.38; cursor:default; }
+      .runs-trash-button { color:#a4aab2; }
+      .runs-trash-button.has-selection { color:#343b44; }
+      .runs-trash-button:disabled { cursor:default; }
       .runs-table th.duration-column, .runs-table th.loss-column { text-transform:none !important; }
     `;
     document.head.appendChild(style);
@@ -77,38 +78,52 @@
   queueMicrotask(emit_catalog_ready_once);
 
   function selected_existing_runs() {
-    const ids = new Set((app.runs || []).filter(run => !run.remote_copy).map(run => String(run_identifier(run))));                              // <<< THOG exclude acquired runs from bulk destructive actions
+    const ids = new Set((app.runs || []).map(run => String(run_identifier(run))));
     return [...(app.selected || new Set())].filter(run_id => ids.has(String(run_id)));
   }
+
+  // vvv THOG bulk authority is uniform; never silently delete a subset of mixed selections
+  function selection_mode(selected) {
+    const remote_count=selected.filter(run_id=>run_for_id(run_id)?.remote_copy===true).length;
+    return remote_count===0 ? "local" : remote_count===selected.length ? "remote" : "mixed";
+  }
+  // ^^^ THOG
 
   function update_trash_button() {
     const button = by_id("delete_selected_runs");
     if (!button) return;
     const selected = selected_existing_runs();
-    button.disabled = selected.length === 0;
+    const mode=selection_mode(selected);
+    button.classList.toggle("has-selection",selected.length>0);
+    button.disabled = selected.length === 0 || mode==="mixed";
     button.title = selected.length
-      ? `Delete instra chart data for ${selected.length} selected run${selected.length === 1 ? "" : "s"}`
-      : "Select runs with the checkboxes to delete their instra chart data";
+      ? mode==="mixed" ? "Select only local runs or only remote runs to delete Instra data"
+        : `Delete Instra data for ${selected.length} selected runs${mode==="remote" ? " (force delete local copies)" : ""}`
+      : "Select runs with the checkboxes to delete their Instra data";
     button.setAttribute("aria-label", button.title);
   }
 
   async function delete_selected_runs() {
     const selected = selected_existing_runs();
     if (!selected.length) return;
+    const mode=selection_mode(selected);
+    if(mode==="mixed")return;
     const names = selected
       .map(run_id => (app.runs || []).find(run => String(run_identifier(run)) === String(run_id))?.artifact_name || run_id)
       .slice(0, 5);
     const extra = selected.length > names.length ? `\n…and ${selected.length - names.length} more` : "";
     const confirmed = window.confirm(
-      `Delete instra chart data for ${selected.length} selected run${selected.length === 1 ? "" : "s"}?\n\n`
-      + `${names.join("\n")}${extra}\n\nThis does not delete checkpoints, other logs, or W&B runs.`
+      `Delete Instra data for ${selected.length} selected runs?\n\n`
+      + `${names.join("\n")}${extra}\n\n` + (mode==="remote"
+        ? "This deletes only this Instra’s local copies. The authoritative runs on the producing hosts are unaffected. If those runs still exist, monitoring will download them again."
+        : "This does not delete checkpoints, other logs, or W&B runs.")
     );
     if (!confirmed) return;
 
     const button = by_id("delete_selected_runs");
     if (button) button.disabled = true;
     try {
-      await delete_run_batch({run_ids:selected});
+      await delete_run_batch({run_ids:selected,...(mode==="remote" ? {force_local:true} : {})});
     } catch (error) {
       show_toast(`Delete failed: ${error.message}`);
     } finally { update_trash_button(); }
@@ -121,7 +136,7 @@
       result = await fetch_json("/api/runs", {method:"DELETE", signal:abort.signal,
         headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     } finally { clearTimeout(deadline); }
-    const deleted = new Set(result.deleted_run_ids || []);
+    const deleted = new Set([...(result.deleted_run_ids || []),...(result.queued_run_ids || [])]);
     for (const run_id of deleted) {
       window.processing_pair_unpair_run?.(run_id, {close_both:false, render:false});
       app.selected.delete(run_id);
@@ -140,7 +155,7 @@
     save_json("thog2_processing_auto_opened_run_ids",[...(app.processing_auto_opened_run_ids || [])]);
     render_runs();
     const failures=result.errors || [];
-    show_toast(`Deleted ${deleted.size} run${deleted.size===1?"":"s"}.${failures.length ? ` ${failures.length} failed: ${failures.map(item=>item.error).join("; ")}` : ""}`);
+    show_toast(`${payload.force_local ? "Queued local copy deletion for" : "Deleted"} ${deleted.size} run${deleted.size===1?"":"s"}.${failures.length ? ` ${failures.length} failed: ${failures.map(item=>item.error).join("; ")}` : ""}`);
     await refresh_catalog();
     return result;
   }
@@ -215,9 +230,9 @@
 
   document.addEventListener("change", event => {
     if (event.target.matches?.('.runs-table input[type="checkbox"]')) {
-      queueMicrotask(update_trash_button);
+      update_trash_button();
     }
-  }, true);
+  }); // <<< THOG update after the checkbox handler; native events can checkpoint microtasks between listeners
 
   window.addEventListener("load", () => {
     ensure_trash_button();

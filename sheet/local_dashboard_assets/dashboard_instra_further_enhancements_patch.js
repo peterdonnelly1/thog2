@@ -295,6 +295,7 @@ window.addEventListener("load", () => {
   const workspace_z_order = [];
   let workspace_front_run = null;
   const workspace_bold_runs = new Set(); // <<< THOG preserve explicit weight-curve emphasis across z cycling
+  const workspace_unbolded_runs = new Set(); // <<< THOG explicit unbolding overrides automatic front weight emphasis
   const sync_workspace_z_order = () => {
     const visible_ids = (window.__instra_workspace?.visible_runs?.() || [])
       .map(run => String(run_identifier(run)));
@@ -320,7 +321,7 @@ window.addEventListener("load", () => {
     for (const trace of prepared.data) {
       const run_id = String(trace?.meta?.instra_workspace_run_id || "");
       if (run_id && !trace.meta?.instra_top_axis_anchor) {
-        trace.line = {...(trace.line || {}), width:(run_id === workspace_front_run || workspace_bold_runs.has(run_id))
+        trace.line = {...(trace.line || {}), width:!workspace_unbolded_runs.has(run_id) && (run_id === workspace_front_run || workspace_bold_runs.has(run_id))
           ? Math.max(3.8, Number(trace.line?.width || 1) * 1.9) : Number(trace.line?.width || 1)};
       }
     }
@@ -356,8 +357,8 @@ window.addEventListener("load", () => {
           if (action === "next" || action === "previous") {
             const delta = action === "next" ? 1 : -1;
             workspace_front_run = active[(active.indexOf(workspace_front_run) + delta + active.length) % active.length];
-          } else if (action === "pin") workspace_bold_runs.add(workspace_front_run);
-          else workspace_bold_runs.delete(workspace_front_run);
+          } else if (action === "pin") {workspace_bold_runs.add(workspace_front_run);workspace_unbolded_runs.delete(workspace_front_run);}
+          else {workspace_bold_runs.delete(workspace_front_run);workspace_unbolded_runs.add(workspace_front_run);}
           window.instra_front_chart = "weights";
           window.instra_front_run_id = workspace_front_run;
           const jobs = [];

@@ -66,7 +66,7 @@ def test_feedback_table_layout_and_lockup_guards_are_present() -> None:
     assert order_source is not None
     order = json.loads(f"[{order_source.group(1).rstrip().rstrip(',')}]")
     assert order == [
-        "select", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
+        "select", "grid_visibility", "visibility", "steps", "duration", "state", "name", "wandb", "host", "gpu",
         "preset", "optimizer", "gb", "layers", "depth_order", "parms", "equiv", "warmup",
         "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
         "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",

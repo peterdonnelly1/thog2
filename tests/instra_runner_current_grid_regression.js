@@ -79,6 +79,17 @@ async function main() {
     setInterval() {},setTimeout:()=>1,clearTimeout() {},Date,JSON,Number,String,
     confirm:()=>true,prompt:()=>{throw Error("Browser prompt used for renaming");}};
   vm.runInNewContext(fs.readFileSync("sheet/local_dashboard_assets/dashboard_runner.js","utf8"),context);
+  // vvv THOG finish estimates require evidence and stop appearing for terminal or elapsed runs
+  const estimate=context.window.instra_runner_test_hooks.estimated_run_end;
+  const timed_run={state:"running",started_at:new Date(1000).toISOString(),parameters:{"--max-iters":100}};
+  assert.equal(estimate(timed_run,{maximum_update:20},31000),new Date(151000).toISOString());
+  assert.equal(estimate({...timed_run,state:"completed"},{maximum_update:20},31000),null);
+  assert.equal(estimate({...timed_run,started_at:"invalid"},{maximum_update:20},31000),null);
+  assert.equal(estimate(timed_run,null,31000),null);
+  assert.equal(estimate({...timed_run,estimated_duration_seconds:90},null,31000),new Date(91000).toISOString());
+  assert.equal(estimate({...timed_run,estimated_duration_seconds:10},null,31000),null);
+  assert.equal(estimate({...timed_run,estimated_duration_seconds:90,attempts:[{}, {started_at:timed_run.started_at}]},{maximum_update:20},31000),new Date(91000).toISOString());
+  // ^^^ THOG
   const switch_tab = name => roots.runner_tabs.children.find(tab => tab.dataset.runnerTab === name).click();
   roots.runner_nav.click();
   await new Promise(resolve => setImmediate(resolve));
@@ -93,15 +104,16 @@ async function main() {
   assert.equal(context.window.instra_runner_test_hooks.current_recipe().parameters.power_caps,undefined);
   assert.deepEqual(roots.runner_list.children.slice(1).map(row => row.children[0].textContent),["Latest","Older"]);
   assert.equal(roots.runner_list.children[1].children[1].textContent,"ready");
-  assert.equal(roots.runner_list.children[1].children[2].textContent,"Rename");
-  assert.equal(roots.runner_list.children[1].children[3].textContent,"Delete");
-  const rename_click = roots.runner_list.children[1].children[2].click();
+  assert.equal(roots.runner_list.children[1].children[2].textContent,"Edit");
+  assert.equal(roots.runner_list.children[1].children[3].textContent,"Rename");
+  assert.equal(roots.runner_list.children[1].children[4].textContent,"Delete");
+  const rename_click = roots.runner_list.children[1].children[3].click();
   assert.equal(roots.runner_rename_dialog.open,true);
   roots.runner_rename_input.value="Renamed Recipe";
   roots.runner_rename_form.onsubmit({preventDefault() {}});
   await rename_click;
   const rename = requests.find(entry => entry.url === "/api/runner/action" &&
-    JSON.parse(entry.options.body).recipe?.label === "Renamed Recipe");
+    JSON.parse(entry.options.body).action === "rename_recipe" && JSON.parse(entry.options.body).label === "Renamed Recipe");
   assert.equal(JSON.parse(rename.options.body).recipe_id,"latest","Recipe rename must preserve its ID");
   switch_tab("progress");
   assert.equal(roots.runner_list.children.length,1,"finished Grids must disappear from Progress");
@@ -118,7 +130,7 @@ async function main() {
   const summaries = roots.runner_detail.children.filter(child => child.className === "runner-run");
   assert.equal(summaries[0].children[0].children[0].textContent,"newer", "latest attempt first");
   const header = roots.runner_detail.children.find(child => child.className === "runner-run-headings");
-  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","--geometry-preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
+  assert.deepEqual(header.children.map(child => child.textContent),["Run ID","preset","start","end","Host","GPU","State","Step","Loss","Best loss","Profiling"]);
   assert.equal(summaries[0].children[0].children[8].textContent,"3.142");
   assert.equal(summaries[0].children[0].children[9].textContent,"2.718");
   switch_tab("log");

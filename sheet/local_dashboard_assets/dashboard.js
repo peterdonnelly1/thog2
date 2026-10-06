@@ -80,6 +80,7 @@ const app = {
   initial_route_run_id: route_run_id(),
   colours: load_json("thog2_local_run_colours", {}),
   visibility: load_json("thog2_local_run_visibility", {}),
+  grid_visibility: load_json("thog2_grid_visibility_v1", {}),
   panel_sizes: load_json("thog2_local_panel_sizes", {}),
   axis_ranges: load_json("thog2_local_chart_axis_ranges", {}),
   weight_current_only: load_json(weight_current_only_storage_key, {}),
@@ -231,7 +232,32 @@ function colour_for_run(run_id) {
 }
 // ^^^ THOG
 
-function is_visible(run_id) { return app.visibility[run_id] !== false; }
+// vvv THOG newly acquired grid members inherit the switch without quadratic catalogue lookups
+let grid_visibility_source=null;
+const grid_run_keys=new Map();
+function is_visible(run_id) {
+  if(typeof app.visibility[run_id]==="boolean")return app.visibility[run_id];
+  if(grid_visibility_source!==app.runs) {
+    grid_visibility_source=app.runs;grid_run_keys.clear();
+    for(const run of app.runs)grid_run_keys.set(run_identifier(run),grid_identity(run));
+  }
+  return app.grid_visibility?.[grid_run_keys.get(run_id)]!==false;
+}
+// ^^^ THOG
+// vvv THOG grid switches own cohort activation; eyes retain effective per-run overrides
+function grid_is_visible(run) {
+  const key=grid_identity(run);
+  if(!key)return false;
+  if(typeof app.grid_visibility[key]!=="boolean")
+    app.grid_visibility[key]=app.runs.filter(member=>grid_identity(member)===key).every(member=>is_visible(run_identifier(member)));
+  return app.grid_visibility[key];
+}
+function grid_visibility_icon() {
+  const template=document.createElement("template");
+  template.innerHTML='<svg viewBox="0 0 20 16" aria-hidden="true"><path d="M2 2h16v12H2zM7.33 2v12M12.67 2v12M2 6h16M2 10h16"/></svg>';
+  return template.content.firstElementChild;
+}
+// ^^^ THOG
 function run_identifier(run) { return String(run.dashboard_run_id || run.local_run_id || run.wandb_run_id || run.run_name); }
 function current_run() { return app.runs.find(run => run_identifier(run) === app.current_run_id) || app.current_status; }
 function is_active_run_state(state) { return ["preparing", "recording", "monitoring", "running"].includes(String(state)); }
@@ -359,6 +385,7 @@ function append_run_row(body, run) {
   const run_id = run_identifier(run);
   const row = document.createElement("tr");
   row.dataset.runId = run_id;
+  row.tabIndex = 0;
   row.style.setProperty("--run-colour", colour_for_run(run_id));
   row.classList.toggle("run-hidden", !is_visible(run_id));
   row.classList.toggle("eye-open-run", is_visible(run_id));                                                                                                  // <<< THOG visually distinguish eye-open context runs from the mouse-selected run
@@ -377,6 +404,25 @@ function append_run_row(body, run) {
   check_cell.appendChild(checkbox);
   row.appendChild(check_cell);
 
+  // vvv THOG dedicated grid activation sits immediately before the individual eye
+  const grid_cell=document.createElement("td");grid_cell.className="grid-visibility-column";
+  const grid_key=grid_identity(run);
+  if(grid_key) {
+    const active=grid_is_visible(run),control=document.createElement("button");
+    control.type="button";control.className="eye-button grid-visibility-button";
+    control.classList.toggle("off",!active);control.appendChild(grid_visibility_icon());
+    control.title=active ? "Hide all runs in this Grid" : "Show all runs in this Grid";
+    control.setAttribute("aria-label",control.title);control.setAttribute("aria-pressed",String(active));
+    control.addEventListener("click",()=>{
+      const next=!grid_is_visible(run);app.grid_visibility[grid_key]=next;
+      for(const member of app.runs.filter(member=>grid_identity(member)===grid_key))app.visibility[run_identifier(member)]=next;
+      save_json("thog2_grid_visibility_v1",app.grid_visibility);save_json("thog2_local_run_visibility",app.visibility);render_runs();
+    });
+    grid_cell.appendChild(control);
+  }
+  row.appendChild(grid_cell);
+  // ^^^ THOG
+
   const visibility_cell = document.createElement("td");
   visibility_cell.className = "visibility-column";
   const eye = document.createElement("button");
@@ -388,11 +434,10 @@ function append_run_row(body, run) {
   eye.setAttribute("aria-label", eye.title);
   eye.addEventListener("click", () => {
     const next_visible = !is_visible(run_id);
-    const group_members = run.runner_grid_tag && next_visible &&
-      localStorage.getItem("thog2_grid_eye_grouping") !== "false"
-      ? app.runs.filter(candidate => grid_identity(candidate) === grid_identity(run))
-      : [run];
-    for (const member of group_members) app.visibility[run_identifier(member)] = next_visible;
+    // vvv THOG an eye affects exactly one run, independently of its grid switch
+    app.visibility[run_id] = next_visible;
+    save_json("thog2_grid_visibility_v1",app.grid_visibility);
+    // ^^^ THOG
     save_json("thog2_local_run_visibility", app.visibility);
     render_runs();
   });
@@ -825,6 +870,7 @@ function normalize_chart_settings(chart_name, supplied = null) {
     line_width: 1,
     chart_type: ["lines", "lines_markers", "markers"].includes(stored.chart_type) ? stored.chart_type : "lines",
     show_grid: stored.show_grid !== false,
+    show_minor_grid: stored.show_minor_grid === true,
     x_axis_mode,
   };
   for (const field of ["x_min", "x_max", "y_min", "y_max"]) {
@@ -1133,6 +1179,13 @@ function apply_chart_display_settings(prepared, chart_name, settings) {
   prepared.layout.yaxis.showgrid = settings.show_grid;
   prepared.layout.xaxis.gridcolor = "#e7e9ed";
   prepared.layout.yaxis.gridcolor = "#e7e9ed";
+  // vvv THOG minor loss grids stay independent and much lighter than the major grids
+  if(/loss/i.test(chart_name+" "+chart_titles[chart_name])) {
+    for(const name of ["xaxis","yaxis"])prepared.layout[name].minor={
+      showgrid:settings.show_minor_grid,gridcolor:"#f4f5f7",gridwidth:0.5,ticks:"",
+    };
+  }
+  // ^^^ THOG
   if (chart_name === "heatmap") return;
   // vvv THOG draw the bottom axis independently of the y=0 grid line
   prepared.layout.xaxis.showline = true;
@@ -2089,6 +2142,7 @@ function chart_settings_form_state() {
       ? "lines"
       : (document.querySelector('input[name="chart_type"]:checked')?.value || "lines"),
     show_grid: by_id("chart_show_grid").checked,
+    show_minor_grid: by_id("chart_show_minor_grid").checked,
     heatmap_row_height: chart_name === "heatmap" ? Number(by_id("chart_heatmap_row_height").value) : 12,
     x_axis_mode,
   };
@@ -2134,6 +2188,7 @@ function compact_chart_settings(chart_name, settings) {
     if (settings.chart_type !== "lines") compact.chart_type = settings.chart_type;
   }
   if (!settings.show_grid) compact.show_grid = false;
+  if (settings.show_minor_grid) compact.show_minor_grid = true;
   return compact;
 }
 
@@ -2227,6 +2282,8 @@ function populate_chart_settings_form(chart_name, supplied = null) {
   const chart_type = document.querySelector(`input[name="chart_type"][value="${settings.chart_type}"]`);
   if (chart_type) chart_type.checked = true;
   by_id("chart_show_grid").checked = settings.show_grid;
+  by_id("chart_show_minor_grid").checked = settings.show_minor_grid;
+  by_id("chart_minor_grid_row").hidden = !/loss/i.test(chart_name+" "+chart_titles[chart_name]);
   by_id("chart_heatmap_row_height").value = String(settings.heatmap_row_height || 12);
   sync_chart_setting_outputs();
 }
@@ -2738,6 +2795,12 @@ function bind_events() {
   by_id("cancel_chart_settings").addEventListener("click", close_chart_settings);
   by_id("save_chart_settings").addEventListener("click", save_chart_settings);
   by_id("reset_chart_settings").addEventListener("click", reset_chart_settings);
+  // vvv THOG reset axis limits alone while preserving display and data preferences
+  by_id("reset_chart_ranges").addEventListener("click",()=>{
+    for(const name of ["x_min","x_max","y_min","y_max"])by_id(`chart_${name}`).value="";
+    schedule_chart_settings_preview();
+  });
+  // ^^^ THOG
   document.querySelectorAll("[data-chart-settings-tab]").forEach(button => {
     button.addEventListener("click", () => set_chart_settings_tab(button.dataset.chartSettingsTab));
   });

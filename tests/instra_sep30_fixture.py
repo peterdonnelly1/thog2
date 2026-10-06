@@ -91,7 +91,7 @@ def fixture_file(grid_id,name):
 
 dashboard._runner_service=SimpleNamespace(snapshot=lambda:snapshot,file=fixture_file)
 # vvv THOG width acceptance uses actual Runner Save/Preview resolution with isolated host discovery
-if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1":
+if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1" or os.environ.get("THOG_INSTRA_REAL_RUNNER") == "1":
     instra_runner.STATE_DIR = fixture_root / "runner-state"
     instra_runner.STATE_PATH = instra_runner.STATE_DIR / "runner.json"
     instra_runner.LEASE_PATH = instra_runner.STATE_DIR / "controller.lock"
@@ -104,7 +104,7 @@ if os.environ.get("THOG_WIDTH_REAL_RUNNER") == "1":
         actual = real_runner.snapshot()
         return {**snapshot, "recipes": [*snapshot["recipes"], *actual["recipes"]]}
     dashboard._runner_service=SimpleNamespace(snapshot=runner_snapshot, file=fixture_file,
-        preview=real_runner.preview, save_recipe=real_runner.save_recipe)
+        preview=real_runner.preview, save_recipe=real_runner.save_recipe, rename_recipe=real_runner.rename_recipe)
 # ^^^ THOG
 # ^^^ THOG
 dashboard._network_service=SimpleNamespace(list_hosts=lambda:network)

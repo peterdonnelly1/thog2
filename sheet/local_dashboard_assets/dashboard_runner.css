@@ -88,6 +88,15 @@
 .runner-status-failed, .runner-status-blocked, .runner-status-unknown, .runner-status-cancelled { color:#ad302b; }
 .runner-status-waiting { color:#aa6410; }
 .runner-status-flushing { color:#aa6410; }
+/* vvv THOG preserve recipe name width while making room for Edit; align Progress estimates */
+@media (min-width:900px) {
+  .runner-recipes .runner-layout { grid-template-columns:minmax(19.5rem,calc(24% + 4.5rem)) minmax(20rem,1fr); }
+}
+.runner-progress .runner-run-identity, .runner-progress .runner-run-headings {
+  grid-template-columns:minmax(5rem,1fr) 8.5rem 11.2rem 11.2rem 11.2rem minmax(6rem,1fr) minmax(5rem,.8fr) minmax(5rem,.85fr) minmax(3.5rem,.6fr) minmax(4rem,.65fr) minmax(4rem,.65fr);
+}
+.runner-run-identity > span, .runner-estimated-end, .runner-history-wall-time { white-space:pre; }
+/* ^^^ THOG */
 .runner-multiview-selector { display:flex; align-items:center; gap:.8rem; margin:.2rem 0 1rem; }
 .runner-multiview-selector select { max-width:min(48rem,80vw); min-width:18rem; }
 .runner-state-legend { font-size:.88rem; }

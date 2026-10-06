@@ -172,14 +172,14 @@ window.addEventListener("load", () => {
     });
 
     const order = Object.freeze([
-      "menu", "select", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
+      "menu", "select", "grid_visibility", "visibility", "steps", "duration", "loss", "state", "name", "wandb", "host", "gpu",
       "preset", "optimizer", "gb", "layers", "depth_order", "premat", "parms", "equiv", "warmup",
       "context", "d_model", "heads", "grad_accum", "activation_checkpointing", "learning_rate",
       "min_learning_rate", "probe_start", "probe_end", "curve_start", "curve_end", "capture_period",
       "updated",
     ]);
     const widths = Object.freeze({
-      select:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
+      select:34, grid_visibility:34, visibility:34, steps:62, duration:72, loss:55, state:88, wandb:0, host:84, gpu:42,
       preset:64, optimizer:70, gb:68, layers:42, depth_order:42, premat:76, parms:58, equiv:58, warmup:42,
       context:64, d_model:64, heads:42, grad_accum:46, activation_checkpointing:42,
       learning_rate:42, min_learning_rate:42, probe_start:50, probe_end:50,
@@ -195,6 +195,7 @@ window.addEventListener("load", () => {
       if (!row) return;
       const by_text = text => [...row.children].find(cell => String(cell.textContent || "").trim().toUpperCase() === text);
       tag(row.querySelector(".check-column"), "select");
+      tag(row.querySelector(".grid-visibility-column"), "grid_visibility");
       tag(row.querySelector(".visibility-column"), "visibility");
       tag(row.querySelector(".name-column"), "name");
       tag(by_text("W&B ID"), "wandb");
@@ -212,7 +213,7 @@ window.addEventListener("load", () => {
     };
     const tag_base_row = row => {
       const keys = [
-        "select", "visibility", "name", "wandb", "state", "host",
+        "select", "grid_visibility", "visibility", "name", "wandb", "state", "host",
         "probe_start", "probe_end", "curve_start", "curve_end",
         "steps", "duration", "loss", "updated", "menu",
       ];

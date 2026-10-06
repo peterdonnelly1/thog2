@@ -1327,6 +1327,14 @@ def _runner_do_post(self):
         action = payload.get("action")
         if action == "save":
             result = _runner_service.save_recipe(payload.get("recipe_id"), payload["recipe"])
+        # vvv THOG Edit and Rename are explicit operations on an existing recipe identity
+        elif action == "update_recipe":
+            if not payload.get("recipe_id"):
+                raise ValueError("Edit requires an existing Recipe identity")
+            result = _runner_service.save_recipe(payload["recipe_id"], payload["recipe"], update_existing=True)
+        elif action == "rename_recipe":
+            result = _runner_service.rename_recipe(payload["recipe_id"], payload["label"])
+        # ^^^ THOG
         elif action == "delete_recipe":
             result = _runner_service.delete_recipe(payload["recipe_id"])
         elif action == "rename_grid":
@@ -1400,7 +1408,27 @@ def _handler_for_with_runner(catalog):
             if not isinstance(payload, dict):
                 raise ValueError("Deletion request must be a JSON object")
             tag = payload.get("grid_tag")
-            if tag is not None:
+            # vvv THOG validate every acquired member before queuing a bulk local-copy deletion
+            if payload.get("force_local") is True:
+                run_ids = payload.get("run_ids")
+                if tag is not None or not isinstance(run_ids, list) or not run_ids or len(run_ids) > 1000:
+                    raise ValueError("Force deletion requires 1-1000 explicit remote run identities")
+                if any(not isinstance(run_id, str) or not run_id for run_id in run_ids):
+                    raise ValueError("Invalid remote run identity")
+                run_ids = list(dict.fromkeys(run_ids))
+                known = {run["dashboard_run_id"]: run for run in catalog.runs()["runs"]}
+                if any(run_id not in known or not known[run_id].get("remote_copy") for run_id in run_ids):
+                    raise PermissionError("Force deletion requires every selected run to be a remote copy")
+                queued, errors = [], []
+                for run_id in run_ids:
+                    try:
+                        catalog.force_delete_local_copy(run_id)
+                        queued.append(run_id)
+                    except (PermissionError, ValueError, KeyError, OSError) as error:
+                        errors.append({"run_id": run_id, "error": str(error)})
+                result = {"queued_run_ids": queued, "deleted_run_ids": [], "errors": errors}
+            # ^^^ THOG
+            elif tag is not None:
                 if not isinstance(tag, str) or not re.fullmatch(r"(?:G|[A-Z]{3})-[0-9]+", tag):
                     raise ValueError("Invalid Grid identity")
                 if _runner_service is None:

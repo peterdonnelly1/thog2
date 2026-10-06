@@ -38,7 +38,7 @@ class Element {
 let workspace = true;
 const app = {current_run_id: "a", dynamic_chart_figures: {}, dynamic_chart_metadata: {}};
 const metric = vm.createContext({
-  app, window: {}, queueMicrotask: callback => callback(), pinned_bold_by_chart: new Map(), chart_titles: {}, front_by_chart: new Map(), workspace_api: () => workspace,
+  app, window: {}, queueMicrotask: callback => callback(), pinned_bold_by_chart: new Map(), unbolded_by_chart: new Map(), chart_titles: {}, front_by_chart: new Map(), workspace_api: () => workspace,
   document: {createElement: () => new Element()},
   chart_size_icon: () => "<svg></svg>",
   chart_key: (group, id) => `local_metric_${group}_${id}`,

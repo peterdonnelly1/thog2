@@ -199,17 +199,21 @@ class RunnerService:
                 "catalogue": CATALOGUE, "common": COMMON, "controller": self.controller,
                 "reconciled": self.reconciled, "local_id": hosts["local_id"], "master_id": hosts["master_id"]}
 
-    def save_recipe(self, recipe_id, recipe):
+    def save_recipe(self, recipe_id, recipe, *, update_existing=False):
         self._require_controller()
         validate_recipe(recipe)
         with self.lock:
             state = _read()
             if recipe_id is not None and recipe_id not in state["recipes"]:
                 raise KeyError("Unknown Recipe")
-            # vvv THOG saved Recipes are immutable; an edited same-name save creates a uniquely named copy
+            # vvv THOG explicit Edit updates identity in place; ordinary Save retains numbered-copy behaviour
             recipe = json.loads(json.dumps(recipe))
             previous = state["recipes"].get(recipe_id)
             if previous and previous["recipe"] == recipe:
+                return previous
+            if previous and update_existing:
+                previous.update(recipe=recipe, updated_at=now())
+                _write(state)
                 return previous
             labels = {item["recipe"]["label"] for item in state["recipes"].values()}
             if recipe["label"] in labels:
@@ -231,6 +235,22 @@ class RunnerService:
                                             "created_at": created_at, "updated_at": now(), "state": "ready"}
             _write(state)
             return state["recipes"][recipe_id]
+
+    # vvv THOG renaming changes only the saved recipe name and preserves launched snapshots
+    def rename_recipe(self, recipe_id, label):
+        self._require_controller()
+        if not isinstance(label, str) or not 1 <= len(label.strip()) <= 120 or any(ord(char) < 32 for char in label):
+            raise ValueError("A Grid Recipe label of 1-120 printable characters is required")
+        with self.lock:
+            state = _read()
+            saved = state["recipes"].get(recipe_id)
+            if saved is None:
+                raise KeyError("Unknown Recipe")
+            saved["recipe"]["label"] = label.strip()
+            saved["updated_at"] = now()
+            _write(state)
+            return saved
+    # ^^^ THOG
 
     def delete_recipe(self, recipe_id):
         self._require_controller()
@@ -363,8 +383,13 @@ class RunnerService:
                             "placement_fixed": bool(tight), "placement_status": "proposed",
                             "execution_environment": {**environment_for(trial), "CUDA_VISIBLE_DEVICES": str(gpu["ordinal"])}})
         history = _read()["grids"]
+        # vvv THOG retain the same exemplar estimate per run for the Progress finish-time column
+        duration = estimate(planned, history, len(pool))
+        for run, seconds in zip(planned, duration.get("run_seconds", [])):
+            run["estimated_duration_seconds"] = seconds
+        # ^^^ THOG
         return {"runs": planned, "total_runs": len(planned), "gpu_pool": pool,
-                "estimated_duration": estimate(planned, history, len(pool))}
+                "estimated_duration": duration}
 
     def _repeat_recipe(self, source, mode):
         if mode not in {"loose", "tight"}:

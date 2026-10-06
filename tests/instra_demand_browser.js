@@ -64,7 +64,17 @@ async function check(type) {
     await page.locator("#workspace_nav").click();
     await page.waitForFunction(()=>document.querySelector('[data-metric-chart-id="train/loss"] .plot-mount')?.data?.length===32);
     await page.waitForFunction(()=>String(app.maximized_chart).startsWith("local_metric_"));
-    await page.waitForTimeout(1000);
+    // vvv THOG separate initial requests already in flight from steady-state hidden-chart polling
+    let startup_signature="",stable_since=Date.now();
+    const startup_deadline=Date.now()+20000;
+    while(Date.now()<startup_deadline) {
+      await page.waitForTimeout(250);
+      const signature=JSON.stringify([counts.throughput,counts.weights]);
+      if(signature!==startup_signature){startup_signature=signature;stable_since=Date.now();}
+      else if(Date.now()-stable_since>=2000)break;
+    }
+    assert.ok(Date.now()-stable_since>=2000,"startup chart requests did not settle before the soak");
+    // ^^^ THOG
     const mount=await page.locator('[data-metric-chart-id="train/loss"] .plot-mount').elementHandle();
     await page.evaluate(async()=>{
       const mount=document.querySelector('[data-metric-chart-id="train/loss"] .plot-mount');mount.dataset.demandIdentity="original";

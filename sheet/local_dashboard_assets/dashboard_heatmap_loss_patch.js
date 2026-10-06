@@ -391,7 +391,7 @@ window.addEventListener("load", () => {
     }
 
     const sync_bulk_delete = () => {
-      if (!bulk_delete) return;
+      if (!bulk_delete || bulk_delete.dataset.instraTrashHandler === "true") return; // <<< THOG the current toolbar owns selection state
       const selected_ids = [...app.selected].filter(run_id => (
         app.runs.some(run => run_identifier(run) === run_id)
       ));
@@ -403,6 +403,7 @@ window.addEventListener("load", () => {
     };
 
     bulk_delete?.addEventListener("click", async () => {
+      if (bulk_delete.dataset.instraTrashHandler === "true") return; // <<< THOG prevent a second confirmation and legacy per-run deletes
       const selected_ids = [...app.selected].filter(run_id => (
         app.runs.some(run => run_identifier(run) === run_id)
       ));

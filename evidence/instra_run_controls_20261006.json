@@ -1,0 +1,173 @@
+{
+  "branch": "residuals_compression",
+  "parent": "e8934cec495fd60a0d06059661d95b630733aafc",
+  "python_broad": {
+    "passed": 429,
+    "failed": 8,
+    "passed_subtests": 32,
+    "warnings": 2,
+    "seconds": 88.95
+  },
+  "python_parent_comparison": {
+    "passed": 421,
+    "failed": 8,
+    "passed_subtests": 32,
+    "warnings": 2,
+    "seconds": 83.77
+  },
+  "inherited_failures": [
+    {
+      "test": "test_instra_sep01_enhancements.py::InstraEnhancementTests::test_new_and_legacy_cli_spellings_and_effective_environment",
+      "subtest_failures": 6,
+      "reason": "existing argparse global import-order conflict"
+    },
+    {
+      "test": "test_instra_sep30_feedback.py::test_chart_routes_hide_disabled_plastic_and_preserve_enabled_or_legacy_data",
+      "failures": 1,
+      "reason": "existing chart-route fixture response expectation"
+    },
+    {
+      "test": "test_geometry_registry_phase1.py::GeometryRegistryPhase1Tests::test_registry_console_report_is_complete_and_explicit",
+      "failures": 1,
+      "reason": "existing console wording expectation"
+    }
+  ],
+  "python_focused": {
+    "file": "tests/test_instra_oct07_controls.py",
+    "passed": 9,
+    "failed": 0
+  },
+  "javascript_regression_programs": {
+    "passed": 41,
+    "failed": 0
+  },
+  "new_browser_controls": [
+    {
+      "browser": "chromium",
+      "items": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "page_errors": []
+    },
+    {
+      "browser": "firefox",
+      "items": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "page_errors": []
+    }
+  ],
+  "settings_footer_activation": {
+    "chromium": "native mouse",
+    "firefox": "native Enter; host drops some footer mouse events even on plain HTML"
+  },
+  "prior_browser_regressions": [
+    {
+      "file": "tests/instra_oct03_browser_regression.js",
+      "browsers": [
+        "chromium",
+        "firefox"
+      ],
+      "status": "passed",
+      "delayed_navigation_cycles_per_browser": 30
+    },
+    {
+      "file": "tests/instra_distributed_deletion_browser_regression.js",
+      "browsers": [
+        "chromium",
+        "firefox"
+      ],
+      "status": "passed"
+    },
+    {
+      "file": "tests/test_residual_width_browser.py",
+      "browsers": [
+        "chromium"
+      ],
+      "status": "passed"
+    }
+  ],
+  "live_soak": {
+    "chromium": {
+      "status": "passed",
+      "seconds": 120,
+      "runs": 32,
+      "health_requests": 120,
+      "zoom_preserved": true,
+      "hidden_charts_idle": true,
+      "throughput_raw_points_per_run": 40000,
+      "exports_complete": true,
+      "initial_heap_mib": 20.501327514648438,
+      "retained_heap_mib": 22.168758392333984,
+      "max_pause_ms": 558,
+      "runner_quiescence": "passed",
+      "failed_request_recovery": "passed"
+    },
+    "firefox": {
+      "status": "passed",
+      "seconds": 120,
+      "runs": 32,
+      "health_requests": 120,
+      "zoom_preserved": true,
+      "hidden_charts_idle": true,
+      "throughput_raw_points_per_run": 40000,
+      "exports_complete": true,
+      "max_pause_ms": 834,
+      "runner_quiescence": "passed",
+      "failed_request_recovery": "passed",
+      "draws": {
+        "attn_q_head_N_plot": 1,
+        "attn_k_head_N_plot": 1,
+        "attn_v_head_N_plot": 1,
+        "attn_out_head_N_plot": 1,
+        "mlp_up_plot": 1,
+        "mlp_down_plot": 1,
+        "local_metric_690af5cb_plot": 80
+      }
+    }
+  },
+  "limitations": [
+    "UI fixtures and CPU tests; no remote GPU jobs",
+    "Inherited failures reproduced on the unchanged parent",
+    "Firefox settings footer buttons verified with native keyboard activation"
+  ],
+  "static_checks": [
+    "Python compilation",
+    "JavaScript syntax",
+    "git diff --check"
+  ]
+}
