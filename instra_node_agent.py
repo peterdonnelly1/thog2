@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,21 @@ AGENT_ENTRY = BOOTSTRAP_DIR / "agent-request"
 MAX_MESSAGE = 1024 * 1024
 POWER_HELPER = "/usr/local/libexec/instra-power-control"
 _lock = threading.RLock()
+
+
+# vvv THOG compare the code loaded by the serving agent, not the updated files on disk
+def _runner_runtime_fingerprint(root=ROOT):
+    digest = hashlib.sha256()
+    for name in ("instra_node_agent.py", "thog_grid_runner.py", "instra_runner_catalogue.json", "instra_grid_identity.py"):
+        digest.update(name.encode() + b"\0")
+        digest.update(hashlib.sha256((root / name).read_bytes()).digest())
+    return digest.hexdigest()
+
+
+# An agent survives dashboard restarts. Freeze its code identity at import so a
+# later git pull cannot make cached Runner modules appear current.
+_LOADED_RUNNER_FINGERPRINT = _runner_runtime_fingerprint()
+# ^^^ THOG
 
 
 def _read_state():
@@ -256,6 +272,7 @@ def _runner_operation(state, name, args):
     if name == "runner_capabilities":
         _validate_args(args, set())
         return {"protocol": 3, "cuda_preflight": True, "local_gpu_queue": True, "optional_power_readback": True,
+                "runner_runtime_fingerprint": _LOADED_RUNNER_FINGERPRINT,
                 "power_control": _power_capability()}
     if name == "runner_log":
         _validate_args(args, {"attempt_id", "max_bytes"})

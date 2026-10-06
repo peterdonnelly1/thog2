@@ -229,24 +229,34 @@ def _start_node_agent() -> None:
                 raise RuntimeError("Unknown Runner operation: local GPU queue or CUDA preflight capability missing")
             if not capabilities.get("optional_power_readback"):
                 raise RuntimeError("Unknown Runner operation: optional GPU power-readback capability missing")
+            if capabilities.get("runner_runtime_fingerprint") != instra_node_agent._LOADED_RUNNER_FINGERPRINT:
+                raise RuntimeError("Node Agent code or Runner catalogue changed")
         except RuntimeError as error:
-            if not any(text in str(error).lower() for text in ("unknown operation", "unknown runner operation")):
+            if not any(text in str(error).lower() for text in ("unknown operation", "unknown runner operation",
+                                                               "node agent code or runner catalogue changed")):
                 raise
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
                 peer.settimeout(2)
                 peer.connect(str(instra_node_agent.SOCKET_PATH))
                 pid, uid, _gid = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
-            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+            # A missing /proc entry must not fall through to launching a second
+            # agent while an unverified process still owns the socket.
+            command = b""
+            if uid == os.getuid():
+                try:
+                    command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ")
+                except OSError:
+                    pass
             if uid != os.getuid() or b"instra_node_agent.py" not in command or b"serve" not in command:
-                raise RuntimeError("The existing Node Agent protocol is old; restart its verified process manually") from error
+                raise RuntimeError("The existing Node Agent needs refreshing; restart its verified process manually") from error
             os.kill(pid, signal.SIGTERM)
             for _ in range(60):
                 if not instra_node_agent._running(pid):
                     break
                 time.sleep(.05)
             if instra_node_agent._running(pid):
-                raise RuntimeError("Older Node Agent did not exit for protocol upgrade") from error
-            raise OSError("Node Agent protocol upgraded; start replacement")
+                raise RuntimeError("Older Node Agent did not exit for code or protocol refresh") from error
+            raise OSError("Node Agent refreshed; start replacement")
         # ^^^ THOG
     except OSError:
         instra_node_agent.STATE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)

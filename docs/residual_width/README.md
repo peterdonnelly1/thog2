@@ -37,6 +37,8 @@ The existing `train_OWT.sh` wrapper forwards the same selector, scoped options a
 
 After updating the branch, restart the Instra backend to reload the catalogue, and hard-refresh the browser. Open **Runner → Recipes → Add Grid Recipe**. Use **Geometry** or the parameter search to set these fields:
 
+Update every selected execution host to the same branch and restart Instra on each host. Startup now compares the serving Node Agent's loaded Runner code and catalogue with the updated checkout, replacing a stale agent automatically. Its persisted reservations and already-running child jobs remain intact. A browser refresh alone does not reload the agent. This repairs `Unsupported or automatic Runner option: --select-width` when an older agent survives a code update.
+
 | Field | Width-only smoke setting |
 | --- | --- |
 | `--geometry-preset` | `width` or `width-type-I` |

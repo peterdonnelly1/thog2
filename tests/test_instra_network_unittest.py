@@ -325,7 +325,8 @@ class NetworkTests(unittest.TestCase):
         events = []
         def record_request(operation, *args, **kwargs):
             events.append(operation)
-            return {"protocol": 3, "local_gpu_queue": True, "cuda_preflight": True, "optional_power_readback": True} if operation == "runner_capabilities" else {}
+            return {"protocol": 3, "local_gpu_queue": True, "cuda_preflight": True, "optional_power_readback": True,
+                    "runner_runtime_fingerprint": agent._LOADED_RUNNER_FINGERPRINT} if operation == "runner_capabilities" else {}
         with (patch.object(agent, "request", side_effect=record_request),
               patch.object(agent, "_install_agent_entry", side_effect=lambda: events.append("entry")),
               patch.object(subprocess, "Popen") as popen):
